@@ -79,6 +79,7 @@ type candidate_rejection_disposition =
   | Output_requirement_rejected
   | Input_capacity of input_capacity_disposition
   | Request_preparation_failed
+  | Seats_full
 
 type effect_phase = Generation_receipt.effect_phase =
   | Not_started
@@ -200,6 +201,7 @@ type flow_candidate_step =
 type candidate_rejection_cause =
   | Target_selection_rejected of target_selection_error
   | Request_admission_rejected of admission_error
+  | Passed_over_while_full
 
 type candidate_rejection_receipt =
   { visit : flow_candidate_visit
@@ -235,16 +237,8 @@ type flow_attempt_snapshot =
   ; receipt : generation_receipt_snapshot
   }
 
-type admission_wait_timeout =
-  | Permit_wait_expired
-  | Permit_granted_as_deadline_passed
-
 type flow_advance_failure_snapshot =
   | Flow_advance_candidate_rejected of candidate_rejection_receipt
-  | Flow_advance_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_snapshot
-      ; timeout : admission_wait_timeout
-      }
   | Flow_advance_execution_failed of
       { candidate : flow_attempt_snapshot
       ; cause : execution_error_cause
@@ -330,10 +324,6 @@ type ('accepted, 'rejection) validated_flow_success =
 
 type flow_candidate_failure =
   | Flow_candidate_rejected of candidate_rejection_receipt
-  | Flow_candidate_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_receipt
-      ; timeout : admission_wait_timeout
-      }
   | Flow_candidate_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -374,11 +364,6 @@ type 'callback_error flow_execution_error =
       }
   | Flow_candidates_exhausted of
       { rejection : candidate_rejection_receipt
-      ; evidence : flow_evidence
-      }
-  | Flow_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_receipt
-      ; timeout : admission_wait_timeout
       ; evidence : flow_evidence
       }
   | Flow_exact_execution_failed of
@@ -453,10 +438,6 @@ type ('callback_error, 'uncertainty) flow_step_failure =
   | Flow_step_measurement_terminal_callback_failed of
       flow_measurement_receipt * 'callback_error
   | Flow_step_before_dispatch_callback_failed of flow_attempt_receipt * 'callback_error
-  | Flow_step_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_receipt
-      ; timeout : admission_wait_timeout
-      }
   | Flow_step_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -718,6 +699,7 @@ let candidate_rejection_disposition (receipt : candidate_rejection_receipt) =
   match receipt.cause with
   | Target_selection_rejected cause -> target_selection_error_disposition cause
   | Request_admission_rejected cause -> admission_error_disposition cause
+  | Passed_over_while_full -> Seats_full
 ;;
 
 let refusal_reason = function
@@ -825,6 +807,8 @@ let candidate_rejection_reason (receipt : candidate_rejection_receipt) =
   match receipt.cause with
   | Target_selection_rejected cause -> target_selection_error_reason cause
   | Request_admission_rejected cause -> admission_error_reason cause
+  | Passed_over_while_full ->
+    "every permit of this endpoint was held, and a later candidate's permit was taken"
 ;;
 
 let flow_attempt_evidence (flow : flow_attempt) =
@@ -841,14 +825,6 @@ let flow_attempt_evidence (flow : flow_attempt) =
 
 let flow_advance_failure_snapshot = function
   | Flow_candidate_rejected receipt -> Flow_advance_candidate_rejected receipt
-  | Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ->
-    Flow_advance_before_dispatch_admission_timed_out
-      { candidate =
-          { visit = candidate.visit
-          ; receipt = Generation_receipt.snapshot candidate.receipt
-          }
-      ; timeout
-      }
   | Flow_candidate_execution_failed { candidate; cause } ->
     Flow_advance_execution_failed
       { candidate =
@@ -1079,7 +1055,6 @@ let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
    once by the step that allocated it, and every normalized answer is JSON. *)
 let flow_execution_terminal_kind = function
   | Flow_candidates_exhausted _
-  | Flow_before_dispatch_admission_timed_out _
   | Flow_exact_execution_failed _ ->
     Advanceable_candidates_exhausted
   | Flow_attempt_already_started _
@@ -1171,16 +1146,12 @@ let flow_execution_binding_standing error =
     match advance.failed with
     | Flow_advance_execution_failed { cause; candidate = _; raw_response_sha256 = _ } ->
       execution_cause_is_binding_rest cause
-    | Flow_advance_before_dispatch_admission_timed_out { candidate = _; timeout = _ } ->
-      true
     | Flow_advance_candidate_rejected _ -> false
   in
   match error with
   | Flow_exact_execution_failed { cause; evidence; candidate = _ }
     when execution_cause_is_binding_rest cause.cause
          && List.for_all advance_rests evidence.advances -> Every_binding_resting
-  | Flow_before_dispatch_admission_timed_out { evidence; candidate = _; timeout = _ }
-    when List.for_all advance_rests evidence.advances -> Every_binding_resting
   | Flow_attempt_already_started _
   | Flow_attempt_start_failed _
   | Flow_measurement_start_failed _
@@ -1189,7 +1160,6 @@ let flow_execution_binding_standing error =
   | Flow_before_dispatch_callback_failed _
   | Flow_before_advance_callback_failed _
   | Flow_candidates_exhausted _
-  | Flow_before_dispatch_admission_timed_out _
   | Flow_exact_execution_failed _ -> Not_every_binding_resting
 ;;
 
@@ -1208,6 +1178,141 @@ let record_candidate_rejection (flow : flow_attempt) visit cause measurement =
   rejection
 ;;
 
+(* One step run under the seat its walk took for it: the token-count
+   measurement and the generation share that seat. *)
+let execute_seated_candidate
+      ~net
+      ~clock
+      ~classify_uncertainty
+      ~before_measurement_dispatch
+      ~on_measurement_terminal
+      ~before_dispatch
+      ~reject_measured
+      flow
+      (candidate : flow_candidate_step)
+      (target : selected_target)
+  =
+  let flow_measurement receipt : flow_measurement_receipt =
+    { visit = candidate.visit; receipt }
+  in
+  (match
+     admit_candidate_request
+       ~net
+       ~clock
+       ~on_measurement_receipt:(fun receipt ->
+         let measurement = flow_measurement receipt in
+         publish_measurement flow measurement)
+       ~before_measurement_dispatch:(fun receipt ->
+         before_measurement_dispatch (flow_measurement receipt))
+       ~on_measurement_terminal:(fun receipt ->
+         on_measurement_terminal (flow_measurement receipt))
+       ~target
+       ~messages:flow.messages
+       flow.requirement
+   with
+   | Error (Flow_request_admission_failed (cause, measurement)) ->
+     reject_measured measurement (Request_admission_rejected cause)
+   | Error (Flow_request_measurement_start_failed detail) ->
+     Error
+       (Flow_step_measurement_start_failed
+          (candidate.visit, Measurement_operation_id_generation_failed detail))
+   | Error (Flow_request_before_measurement_dispatch_failed (receipt, cause)) ->
+     Error
+       (Flow_step_before_measurement_dispatch_callback_failed
+          (flow_measurement receipt, cause))
+   | Error (Flow_request_measurement_terminal_callback_failed (receipt, cause)) ->
+     Error
+       (Flow_step_measurement_terminal_callback_failed (flow_measurement receipt, cause))
+   | Ok plan ->
+     let admitted = admitted_flow_candidate candidate.visit plan in
+     Flow_state.record_admission flow.progress (Candidate_admitted admitted);
+     (match start_attempt plan with
+      | Error cause -> Error (Flow_step_attempt_start_failed (candidate.visit, cause))
+      | Ok attempt ->
+        let candidate_receipt : flow_attempt_receipt =
+          { visit = candidate.visit; receipt = attempt_receipt attempt }
+        in
+        let publish () = publish_attempt_snapshot flow candidate_receipt in
+        (* The seat is held around this whole step, and the request's own
+           body deadline starts as it goes out. *)
+        publish ();
+        let result =
+          match before_dispatch candidate_receipt with
+          | Error cause ->
+            Error (Flow_step_before_dispatch_callback_failed (candidate_receipt, cause))
+          | Ok () ->
+            Generation_receipt.start attempt.receipt;
+            publish ();
+            (match execute_once_with_publication ~publish ~net ~clock attempt with
+             | Ok success -> Ok (candidate_receipt, success)
+             | Error cause ->
+               Error (Flow_step_execution_failed { candidate = candidate_receipt; cause }))
+        in
+        let observation = Generation_receipt.snapshot attempt.receipt in
+        let execution_error =
+          match result with
+          | Error (Flow_step_execution_failed { cause; _ }) -> Some cause
+          | Ok _
+          | Error (Flow_step_candidate_rejected _ | Flow_step_attempt_start_failed _
+                  | Flow_step_measurement_start_failed _
+                  | Flow_step_before_measurement_dispatch_callback_failed _
+                  | Flow_step_measurement_terminal_callback_failed _
+                  | Flow_step_before_dispatch_callback_failed _
+                  | Flow_step_unresolved _) -> None
+        in
+        (match classify_uncertainty observation execution_error with
+         | None -> result
+         | Some reason ->
+           publish_attempt_copy flow candidate_receipt observation;
+           Error
+             (Flow_step_unresolved
+                (candidate_receipt, observation, reason, execution_error)))))
+;;
+
+type candidate_seat =
+  | Seated of Provider_admission.seat
+  | Passed_over
+
+(* The seat a step runs under. Between steps a walk holds at most one seat:
+   one a later candidate gave while this one was full. Every candidate before
+   that one is passed over, and a walk never comes back to a candidate it
+   passed, so a held seat belongs to this step or a later one. Only a
+   candidate whose target resolves can give a seat. *)
+let seat_for_candidate
+      (flow : flow_attempt)
+      held
+      (candidate : flow_candidate_step)
+      (target : selected_target)
+  =
+  match !held with
+  | Some (owner, seat) when owner == candidate ->
+    held := None;
+    Seated seat
+  | Some _ -> Passed_over
+  | None ->
+    let rec after = function
+      | [] -> []
+      | (step : flow_candidate_step) :: rest -> if step == candidate then rest else after rest
+    in
+    let later =
+      List.filter_map
+        (fun (step : flow_candidate_step) ->
+           match resolve_target step.admitted_target with
+           | Ok later_target ->
+             Some
+               ( Some step
+               , (selected_target_with_admission_class later_target flow.admission_class)
+                   .config )
+           | Error _ -> None)
+        (after flow.candidates)
+    in
+    (match Provider_admission.take_first_seat (None, target.config) later with
+     | None, seat -> Seated seat
+     | Some owner, seat ->
+       held := Some (owner, seat);
+       Passed_over)
+;;
+
 let execute_flow_candidate
       ~net
       ~clock
@@ -1215,6 +1320,7 @@ let execute_flow_candidate
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
+      ~held
       flow
       (candidate : flow_candidate_step)
   =
@@ -1226,173 +1332,29 @@ let execute_flow_candidate
     let rejection = record_candidate_rejection flow candidate.visit cause measurement in
     Error (Flow_step_candidate_rejected rejection)
   in
+  let reject_measured measurement cause = reject ~measurement cause in
   match resolve_target candidate.admitted_target with
   | Error cause -> reject (Target_selection_rejected cause)
   | Ok target ->
-    (* The flow's class orders both of its permit waits on the endpoint: the
-       token-count measurement and the generation dispatch. *)
+    (* The flow's class orders its wait on every endpoint it queues on. *)
     let target = selected_target_with_admission_class target flow.admission_class in
-    let flow_measurement receipt : flow_measurement_receipt =
-      { visit = candidate.visit; receipt }
-    in
-    (match
-       admit_candidate_request
-         ~net
-         ~clock
-         ~on_measurement_receipt:(fun receipt ->
-           let measurement = flow_measurement receipt in
-           publish_measurement flow measurement)
-         ~before_measurement_dispatch:(fun receipt ->
-           before_measurement_dispatch (flow_measurement receipt))
-         ~on_measurement_terminal:(fun receipt ->
-           on_measurement_terminal (flow_measurement receipt))
-         ~target
-         ~messages:flow.messages
-         flow.requirement
-     with
-     | Error (Flow_request_admission_failed (cause, measurement)) ->
-       reject ~measurement (Request_admission_rejected cause)
-     | Error (Flow_request_measurement_start_failed detail) ->
-       Error
-         (Flow_step_measurement_start_failed
-            (candidate.visit, Measurement_operation_id_generation_failed detail))
-     | Error (Flow_request_before_measurement_dispatch_failed (receipt, cause)) ->
-       Error
-         (Flow_step_before_measurement_dispatch_callback_failed
-            (flow_measurement receipt, cause))
-     | Error (Flow_request_measurement_terminal_callback_failed (receipt, cause)) ->
-       Error
-         (Flow_step_measurement_terminal_callback_failed (flow_measurement receipt, cause))
-     | Ok plan ->
-       let admitted = admitted_flow_candidate candidate.visit plan in
-       Flow_state.record_admission flow.progress (Candidate_admitted admitted);
-       (match start_attempt plan with
-        | Error cause -> Error (Flow_step_attempt_start_failed (candidate.visit, cause))
-        | Ok attempt ->
-          let candidate_receipt : flow_attempt_receipt =
-            { visit = candidate.visit; receipt = attempt_receipt attempt }
-          in
-          let publish () = publish_attempt_snapshot flow candidate_receipt in
-          let run () =
-            match before_dispatch candidate_receipt with
-            | Error cause ->
-              Error
-                (Flow_step_before_dispatch_callback_failed (candidate_receipt, cause))
-            | Ok () ->
-              Generation_receipt.start attempt.receipt;
-              publish ();
-              (match execute_once_with_publication ~publish ~net ~clock attempt with
-               | Ok success -> Ok (candidate_receipt, success)
-               | Error cause ->
-                 Error
-                   (Flow_step_execution_failed
-                      { candidate = candidate_receipt; cause }))
-          in
-          let timeout_failure ~phase stage =
-            (match Generation_receipt.phase attempt.receipt with
-             | Generation_receipt.Not_started ->
-               Generation_receipt.start attempt.receipt
-             | Before_dispatch | Dispatch_started | Response_received | Terminal -> ());
-            publish ();
-            let cause =
-              { call_id = receipt_call_id attempt.receipt
-              ; receipt = attempt.receipt
-              ; cause =
-                  Completion_failed
-                    { error =
-                        Http_client.TimeoutError
-                          { message =
-                              Printf.sprintf
-                                "exact body deadline exceeded %s"
-                                stage
-                          ; phase
-                          }
-                    ; dispatch =
-                        generation_dispatch_fact_of_receipt attempt.receipt
-                    }
-              ; raw_response = None
-              }
-            in
-            Error
-              (Flow_step_execution_failed
-                 { candidate = candidate_receipt; cause })
-          in
-          publish ();
-          let result =
-            match target.config.max_concurrent_requests, target.body_timeout_s with
-            | None, _ -> run ()
-            | Some _, None -> Provider_admission.with_admission ~config:target.config run
-            | Some _, Some timeout_s ->
-              let deadline_at = Eio.Time.now clock +. timeout_s in
-              (match
-                 Provider_admission.with_admission_until
-                   ~clock
-                   ~deadline_at
-                   ~config:target.config
-                   (fun () ->
-                     if Float.compare (deadline_at -. Eio.Time.now clock) 0.0 <= 0
-                     then Error `Permit_granted_as_deadline_passed
-                     else (
-                       match before_dispatch candidate_receipt with
-                       | Error cause ->
-                         Ok
-                           (Error
-                              (Flow_step_before_dispatch_callback_failed
-                                 (candidate_receipt, cause)))
-                       | Ok () ->
-                         Generation_receipt.start attempt.receipt;
-                         publish ();
-                         let remaining = deadline_at -. Eio.Time.now clock in
-                         if Float.compare remaining 0.0 <= 0
-                         then Error `Work_expired
-                         else (
-                           match
-                             Under_deadline.run clock remaining (fun () ->
-                               execute_once_with_publication ~publish ~net ~clock attempt)
-                           with
-                           | Error `Timeout -> Error `Work_expired
-                           | Ok (Ok success) -> Ok (Ok (candidate_receipt, success))
-                           | Ok (Error cause) ->
-                             Ok
-                               (Error
-                                  (Flow_step_execution_failed
-                                     { candidate = candidate_receipt; cause })))))
-               with
-               | Ok (Ok step_result) -> step_result
-               | Error `Permit_wait_expired ->
-                 Error
-                   (Flow_step_before_dispatch_admission_timed_out
-                      { candidate = candidate_receipt; timeout = Permit_wait_expired })
-               | Ok (Error `Permit_granted_as_deadline_passed) ->
-                 Error
-                   (Flow_step_before_dispatch_admission_timed_out
-                      { candidate = candidate_receipt
-                      ; timeout = Permit_granted_as_deadline_passed
-                      })
-               | Ok (Error `Work_expired) ->
-                 timeout_failure ~phase:Http_client.Wall_clock
-                   "during the provider round trip")
-          in
-          let observation = Generation_receipt.snapshot attempt.receipt in
-          let execution_error =
-            match result with
-            | Error (Flow_step_execution_failed { cause; _ }) -> Some cause
-            | Ok _
-            | Error (Flow_step_candidate_rejected _ | Flow_step_attempt_start_failed _
-                    | Flow_step_measurement_start_failed _
-                    | Flow_step_before_measurement_dispatch_callback_failed _
-                    | Flow_step_measurement_terminal_callback_failed _
-                    | Flow_step_before_dispatch_callback_failed _
-                    | Flow_step_before_dispatch_admission_timed_out _
-                    | Flow_step_unresolved _) -> None
-          in
-          (match classify_uncertainty observation execution_error with
-           | None -> result
-           | Some reason ->
-             publish_attempt_copy flow candidate_receipt observation;
-             Error
-               (Flow_step_unresolved
-                  (candidate_receipt, observation, reason, execution_error)))))
+    (match seat_for_candidate flow held candidate target with
+     | Passed_over -> reject Passed_over_while_full
+     | Seated seat ->
+       Fun.protect
+         ~finally:(fun () -> Provider_admission.release_seat seat)
+         (fun () ->
+            execute_seated_candidate
+              ~net
+              ~clock
+              ~classify_uncertainty
+              ~before_measurement_dispatch
+              ~on_measurement_terminal
+              ~before_dispatch
+              ~reject_measured
+              flow
+              candidate
+              target))
 ;;
 
 let responses_uncertainty snapshot (execution_error : execution_error option) =
@@ -1427,8 +1389,6 @@ let responses_uncertainty snapshot (execution_error : execution_error option) =
 
 let advanceable_flow_failure = function
   | Flow_step_candidate_rejected receipt -> Some (Flow_candidate_rejected receipt)
-  | Flow_step_before_dispatch_admission_timed_out { candidate; timeout } ->
-    Some (Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout })
   | Flow_step_execution_failed { candidate; cause } ->
     Some (Flow_candidate_execution_failed { candidate; cause })
   | Flow_step_attempt_start_failed _
@@ -1450,7 +1410,14 @@ let execute_flow_once_internal
       ~validate
       flow
   =
+  (* A seat a later candidate gave is held until the walk reaches it. A walk
+     that ends before then returns it here. *)
+  let held = ref None in
   let outcome =
+    Fun.protect
+      ~finally:(fun () ->
+        Option.iter (fun (_, seat) -> Provider_admission.release_seat seat) !held)
+    @@ fun () ->
     Flow_state.execute_once
       flow.execution
       ~candidates:flow.candidates
@@ -1462,6 +1429,7 @@ let execute_flow_once_internal
            ~before_measurement_dispatch
            ~on_measurement_terminal
            ~before_dispatch
+           ~held
            flow)
       ~validate:(fun _candidate (candidate, success) ->
         let transport_success =
@@ -1517,10 +1485,6 @@ let execute_flow_once_internal
         terminal prior_rejections (Flow_measurement_terminal_callback_failed { measurement; cause; evidence })
       | Flow_step_before_dispatch_callback_failed (candidate, cause) ->
         terminal prior_rejections (Flow_before_dispatch_callback_failed { candidate; cause; evidence })
-      | Flow_step_before_dispatch_admission_timed_out { candidate; timeout } ->
-        terminal
-          prior_rejections
-          (Flow_before_dispatch_admission_timed_out { candidate; timeout; evidence })
       | Flow_step_execution_failed { candidate; cause; _ } ->
         terminal prior_rejections (Flow_exact_execution_failed { candidate; cause; evidence }))
 ;;
@@ -1615,6 +1579,7 @@ let candidate_rejection_disposition_to_string
   | Output_requirement_rejected -> "output requirement rejected"
   | Input_capacity disposition -> input_capacity_disposition_to_string disposition
   | Request_preparation_failed -> "request preparation failed"
+  | Seats_full -> "seats full"
 ;;
 
 (* Provider failure kinds can themselves contain untrusted strings, including
@@ -1720,21 +1685,12 @@ let candidate_rejection_to_string (rejection : candidate_rejection_receipt) =
     (candidate_rejection_reason rejection)
 ;;
 
-let admission_wait_timeout_to_string : admission_wait_timeout -> string = function
-  | Permit_wait_expired -> "permit_wait_expired"
-  | Permit_granted_as_deadline_passed -> "permit_granted_as_deadline_passed"
-;;
-
 let flow_advance_failure_to_string
   : flow_advance_failure_snapshot -> string * string
   = function
   | Flow_advance_candidate_rejected rejection ->
     ( rejection.visit.identity.candidate_id
     , "candidate_rejected cause=" ^ candidate_rejection_reason rejection )
-  | Flow_advance_before_dispatch_admission_timed_out { candidate; timeout } ->
-    ( candidate.visit.identity.candidate_id
-    , "before_dispatch_admission_timed_out cause="
-      ^ admission_wait_timeout_to_string timeout )
   | Flow_advance_execution_failed { candidate; cause; raw_response_sha256 } ->
     let sha =
       match raw_response_sha256 with
@@ -1795,12 +1751,6 @@ let flow_candidate_failure_to_string ~raw_response_to_string
   = function
   | Flow_candidate_rejected rejection ->
     "candidate_rejected " ^ candidate_rejection_to_string rejection
-  | Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ->
-    Printf.sprintf
-      "before_dispatch_admission_timed_out slot=%s call_id=%s cause=%s"
-      candidate.visit.identity.candidate_id
-      (call_id_to_string (receipt_call_id candidate.receipt))
-      (admission_wait_timeout_to_string timeout)
   | Flow_candidate_execution_failed { candidate; cause } ->
     Printf.sprintf
       "execution_failed slot=%s %s"
@@ -1863,14 +1813,6 @@ let flow_execution_error_to_string
          (callback_error_to_string cause))
   | Flow_candidates_exhausted { rejection; evidence } ->
     with_flow evidence ("candidates_exhausted: " ^ candidate_rejection_to_string rejection)
-  | Flow_before_dispatch_admission_timed_out { candidate; timeout; evidence } ->
-    with_flow
-      evidence
-      (Printf.sprintf
-         "before_dispatch_admission_timed_out: slot=%s call_id=%s cause=%s"
-         candidate.visit.identity.candidate_id
-         (call_id_to_string (receipt_call_id candidate.receipt))
-         (admission_wait_timeout_to_string timeout))
   | Flow_exact_execution_failed { candidate; cause; evidence } ->
     with_flow
       evidence

@@ -88,6 +88,8 @@ let execution = function
 let candidate rejection =
   match Exact.candidate_rejection_disposition rejection with
   | Exact.Request_preparation_failed -> Transient
+  (* The slot was busy, not broken: a later slot had a free seat first. *)
+  | Exact.Seats_full -> Transient
   | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected | Exact.Output_requirement_rejected ->
     Configuration_refused
   | Exact.Input_contract_rejected -> Input_refused Invalid_request

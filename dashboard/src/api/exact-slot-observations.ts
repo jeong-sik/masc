@@ -111,7 +111,7 @@ const REFUSALS = ['Request_body_refused', 'Refusal_body_not_received', 'Rate_lim
   'Server_error', 'Auth_failed', 'Authorization_refused', 'Payment_required', 'Invalid_request',
   'Not_found', 'Context_overflow', 'Input_capacity', 'Network_error', 'Connect_failed', 'Timeout']
 const LOCAL_REJECTIONS = ['Runtime_unavailable', 'Runtime_contract', 'Input_contract',
-  'Output_requirement', 'Local_input_capacity', 'Preparation_failed']
+  'Output_requirement', 'Local_input_capacity', 'Preparation_failed', 'Seats_full']
 const NETWORK_KINDS = ['Connection_refused', 'Dns_failure', 'Unreachable', 'Tls_error', 'Network_timeout',
   'Local_resource_exhaustion', 'Connection_reset', 'End_of_file', 'Unknown_network']
 const COMPLETION_CAUSES = ['Http_failure', 'Accept_rejected', 'Provider_terminal', 'Capacity_exhausted',

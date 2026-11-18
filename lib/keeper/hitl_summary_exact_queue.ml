@@ -204,8 +204,7 @@ let before_advance
       ~next:_
   =
   match failed with
-  | Exact_output.Flow_candidate_rejected _
-  | Exact_output.Flow_candidate_before_dispatch_admission_timed_out _ -> Ok ()
+  | Exact_output.Flow_candidate_rejected _ -> Ok ()
   | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
     let identity = exact_identity_of_candidate candidate in
     (match release_exact_attempt queue_ops entry identity with

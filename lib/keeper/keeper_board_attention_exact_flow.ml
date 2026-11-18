@@ -303,9 +303,6 @@ let candidate_visit (visit : Exact_output.flow_candidate_visit) =
 let advance_source_of_failure = function
   | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
     Executed_failure (attempt_provenance candidate)
-  | Exact_output.Flow_candidate_before_dispatch_admission_timed_out
-      { candidate; timeout = _ } ->
-    Predispatch_rejection (candidate_visit candidate.visit)
   | Exact_output.Flow_candidate_rejected rejection ->
     Predispatch_rejection
       (rejection |> Exact_output.candidate_rejection_visit |> candidate_visit)
@@ -349,7 +346,6 @@ let terminal_of_flow_error ~callback_error_to_string error =
       ; detail = detail cause
       }
   | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
-    | Exact_output.Flow_before_dispatch_admission_timed_out { evidence; _ }
     | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
     Providers_exhausted
       { attempts = evidence_provenance evidence

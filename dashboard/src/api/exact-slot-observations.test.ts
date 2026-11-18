@@ -44,6 +44,13 @@ describe('passive exact-slot observations', () => {
     expect(state.state).toBe('unavailable')
     expect(JSON.stringify(state)).not.toContain('secret')
   })
+  it('decodes a slot the walk passed while every seat was held', () => {
+    const state = parseSlotObservations({ state: 'available', observations: [slotObservation({
+      started_at: null, finished_at: null, call_id: null, phase: ['Prepared'], generation_dispatched: false,
+      outcome: ['Admission_rejected', ['Seats_full']] })] })
+    expect(state).toMatchObject({ state: 'available',
+      observations: [{ outcome: { kind: 'admission_rejected', cause: 'Seats_full' } }] })
+  })
   it('decodes a connection that did not open apart from a network failure after sending', () => {
     const failure = (cause: unknown[]) => parseSlotObservations({ state: 'available', observations: [
       slotObservation({ outcome: ['Execution_failed', ['Completion_failed', { sent: false, cause }]] })] })

@@ -74,9 +74,10 @@ type 'callback_error outcome =
 val operation_id_to_string : measurement_operation_id -> string
 val receipt_snapshot : measurement_receipt -> receipt_snapshot
 
+(** The caller holds the endpoint's seat around this call; the measurement
+    takes no permit of its own. *)
 val admit
-  :  admission_config:Provider_config.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
   -> now_unix_s:(unit -> int)
   -> on_measurement_receipt:(measurement_receipt -> unit)

@@ -478,8 +478,7 @@ let resolved_row_in_file ~path ~id =
        | Some (`String event), Some (`String row_id) ->
          String.equal event resolved && String.equal row_id id
        | (None | Some _), (None | Some _) -> false)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
-    | `Tuple _ | `Variant _ -> false
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
   in
   if not (Sys.file_exists path)
   then Ok false

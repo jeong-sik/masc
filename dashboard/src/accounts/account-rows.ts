@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
-import type { RemovalRefusal, RemovalsModel, Removing } from './key-remove'
+import type { RemovalStopped, RemovalsModel, Removing } from './key-remove'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
@@ -125,6 +125,8 @@ function removeLineWords(removing: Removing | undefined, sure: boolean, again: b
   switch (removing?.kind) {
     case undefined: return ''
     case 'sending': return '없애고 있어요…'
+    // On the page only until the list that was asked for comes.
+    case 'removed': return removing.already ? '서버에 이 계정이 없어요.' : '서버가 이 계정을 없앴다고 답했어요.'
     case 'leaving': return sessionEndedWords
     case 'refused':
     case 'unknown':
@@ -132,8 +134,10 @@ function removeLineWords(removing: Removing | undefined, sure: boolean, again: b
   }
 }
 
-/** Why the server did not remove an account, and what the person does next. */
-function removalRefusedWords(code: RemovalRefusal): string {
+/** Why the server did not remove an account, and what the person does
+    next. A refusal with no code of the route is said in the words every
+    part of the console shares (notes.ts, `ProblemNote`). */
+function removalRefusedWords(code: Exclude<RemovalStopped, 'unrecognised'>): string {
   switch (code) {
     case 'account_call_running': return '이 계정으로 호출이 돌고 있어요. 끝난 뒤 다시 없애 주세요.'
     case 'removal_not_recorded': return '서버가 없애기를 기록하지 못했어요. 다시 없애 주세요.'
@@ -141,9 +145,25 @@ function removalRefusedWords(code: RemovalRefusal): string {
     case 'home_not_removed': return '서버가 key 는 지웠고, 계정의 다른 파일을 지우지 못했어요. 다시 없애 주세요.'
     case 'removal_refused': return '내 계정이 지금 쓸 수 있는 상태가 아니라서 없애지 못했어요.'
     case 'not_a_key_account': return '로그인으로 연결한 계정이라 여기서 없앨 수 없어요.'
-    case 'unknown_account': return '서버에 이 계정이 없어요.'
-    case 'unrecognised': return '이 화면이 모르는 까닭으로 없애지 못했어요.'
   }
+}
+
+/** What the page heard of a removal it has no word of the server on. */
+function unheardWords(answer: Extract<Removing, { kind: 'unknown' }>['answer']): string {
+  switch (answer) {
+    case 'none': return '서버의 답을 받지 못했어요. 서버가 계정을 없앴을 수도 있어요.'
+    case 'unreadable': return '서버의 답을 읽지 못했어요. 서버가 계정을 없앴을 수도 있어요.'
+    case 'server_failed': return '서버 쪽이 오류로 답했고, 없애지 않았다고는 말하지 않았어요. 서버가 계정을 없앴을 수도 있어요.'
+  }
+}
+
+/** The alert of a removal the server refused or did not finish. */
+function StoppedNote({ removing }: { readonly removing: Extract<Removing, { kind: 'refused' }> }): VNode {
+  const title = '계정을 없애지 못했어요'
+  if (removing.code === 'unrecognised') {
+    return html`<${ProblemNote} title=${title} failure=${{ problem: { kind: 'refused', status: removing.status, reason: removing.reason }, attempts: removing.attempts }} />`
+  }
+  return html`<${Callout} title=${title} lines=${[removalRefusedWords(removing.code)]} reason=${removing.reason} attempts=${removing.attempts} />`
 }
 
 /** Why a Keeper does not run on an account of the subscription `name` here. */
@@ -389,16 +409,10 @@ function RemoveArea({ accountId, removals, card, again }: {
       ${sure ? html`<button id=${backId} type="button" aria-labelledby=${`${backId} ${card}`} onClick=${back}>취소</button>` : null}
     </p>
     <p id=${line} class="hint" role="status">${removeLineWords(removing, sure, again)}</p>
-    ${removing?.kind === 'refused'
-      ? html`<${Callout} key=${removing.attempts} title="계정을 없애지 못했어요" lines=${[removalRefusedWords(removing.code)]}
-          reason=${removing.reason} attempts=${removing.attempts} />`
-      : null}
+    ${removing?.kind === 'refused' ? html`<${StoppedNote} key=${removing.attempts} removing=${removing} />` : null}
     ${removing?.kind === 'unknown'
       ? html`<${Callout} key=${removing.attempts} title="계정을 없앴는지 알 수 없어요" reason=${null} attempts=${removing.attempts}
-          lines=${[
-            removing.answer === 'none' ? '서버의 답을 받지 못했어요. 서버가 계정을 없앴을 수도 있어요.' : '서버의 답을 읽지 못했어요. 서버가 계정을 없앴을 수도 있어요.',
-            '이 계정이 그대로 보이면 다시 없애 주세요.',
-          ]} />`
+          lines=${[unheardWords(removing.answer), '이 계정이 그대로 보이면 다시 없애 주세요.']} />`
       : null}
   `
 }

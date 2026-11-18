@@ -455,7 +455,7 @@ describe('removing a key account in the panel', () => {
     return view.kind === 'read' ? view.owned.accounts.map((account) => [account.id, account.removal]) : [view.kind]
   }
 
-  it('removes with the token of the newest session, and reads the subscriptions again once the account went', async () => {
+  it('removes with the token of the newest session, and reads the subscriptions again once the server removed the account', async () => {
     const { panel, sent } = start({
       [paths.integrations]: [offered(), offered()],
       [paths.owned]: [ownedKey(), ownedNothing()],
@@ -464,7 +464,7 @@ describe('removing a key account in the panel', () => {
     await panel.load(sessionOf(person, 'first'))
     await panel.load(sessionOf(person, 'second'))
     await panel.removing.remove('acct_key')
-    expect([removeTokens(sent), accountsOf(panel), panel.removing.gone.value]).toEqual([['second'], [], { accountId: 'acct_key', already: false }])
+    expect([removeTokens(sent), accountsOf(panel), panel.removing.removing.value.get('acct_key')]).toEqual([['second'], [], { kind: 'removed', already: false }])
   })
 
   it('shows what a removal that stopped left on the account', async () => {
@@ -475,8 +475,7 @@ describe('removing a key account in the panel', () => {
     })
     await panel.load(sessionOf(person))
     await panel.removing.remove('acct_key')
-    expect([accountsOf(panel), panel.removing.removing.value.get('acct_key')?.kind, panel.removing.gone.value])
-      .toEqual([[['acct_key', 'key_not_removed']], 'refused', null])
+    expect([accountsOf(panel), panel.removing.removing.value.get('acct_key')?.kind]).toEqual([[['acct_key', 'key_not_removed']], 'refused'])
   })
 
   it('forgets the removals of one person once it shows another', async () => {
@@ -492,7 +491,7 @@ describe('removing a key account in the panel', () => {
     call.give(keyRemoved())
     await run
     const ownedReadings = sent.filter((one) => one.path === paths.owned).length
-    expect([panel.removing.removing.value.size, panel.removing.gone.value, kind(panel), ownedReadings]).toEqual([0, null, `read for ${other}`, 2])
+    expect([panel.removing.removing.value.size, kind(panel), ownedReadings]).toEqual([0, `read for ${other}`, 2])
   })
 })
 
@@ -730,8 +729,14 @@ describe('the panel', () => {
 
   /** The panel over a model that answers from lists. */
   const live = (byPath: Readonly<Record<string, readonly Scripted[]>>) => {
-    const { panel } = start(byPath)
-    return { panel, container: render(html`<${SubscriptionsPanel} model=${panel} />`).container }
+    const { panel, sent } = start(byPath)
+    return { panel, sent, container: render(html`<${SubscriptionsPanel} model=${panel} />`).container }
+  }
+
+  /** How many accounts the list the panel shows has, or null while it shows none. */
+  const listed = (panel: SubscriptionsModel): number | null => {
+    const view = panel.view.value
+    return view.kind === 'read' ? view.owned.accounts.length : null
   }
 
   it('puts a new note on the page when a reading fails again', async () => {
@@ -804,6 +809,9 @@ describe('the panel', () => {
     ]).toEqual([1, null, false, true])
   })
 
+  /** What the line of the panel says of the accounts that left its list. */
+  const lineOf = (container: Element): string => [...container.querySelectorAll('section > [role=status]')].map((one) => one.textContent ?? '').join('')
+
   /** Presses the remove button of the key account twice: it asks once more before it removes. */
   const pressRemove = async (container: Element): Promise<HTMLButtonElement> => {
     const button = container.querySelector<HTMLButtonElement>('#remove-acct_key')
@@ -821,12 +829,74 @@ describe('the panel', () => {
       [removePath('acct_key')]: [keyRemoved()],
     })
     await act(() => panel.load(sessionOf(person)))
-    const line = (): string => [...container.querySelectorAll('section > [role=status]')].map((one) => one.textContent ?? '').join('')
-    const before = line()
+    const before = lineOf(container)
     await pressRemove(container)
-    await act(async () => { await vi.waitFor(() => { expect(panel.removing.gone.value).not.toBeNull() }) })
-    expect([before, line() === '', container.querySelectorAll('li.row').length, document.activeElement === container.querySelector('h2')])
+    await act(async () => { await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') }) })
+    expect([before, lineOf(container) === '', container.querySelectorAll('li.row').length, document.activeElement === container.querySelector('h2')])
       .toEqual(['', false, 0, true])
+  })
+
+  it('says an account went only once its card is off the page, however the readings overlap', async () => {
+    const asked = later()
+    const newer = later()
+    const { panel, sent, container } = live({
+      [paths.integrations]: [offered(), offered(), offered()],
+      [paths.owned]: [ownedKey(), asked.answer, newer.answer],
+      [removePath('acct_key')]: [keyRemoved()],
+      [addPath]: ['no answer'],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await pressRemove(container)
+    await act(async () => { await vi.waitFor(() => { expect(sent.filter((one) => one.path === paths.owned).length).toBe(2) }) })
+    // A key whose answer did not come asks for a reading too, which replaces
+    // the one the removal asked for.
+    panel.adding.open()
+    let added: Promise<unknown> = Promise.resolve()
+    await act(async () => {
+      added = panel.adding.add('claude_code', 'made-up-key')
+      await vi.waitFor(() => { expect(panel.adding.view.value).toMatchObject({ kind: 'open', failure: { kind: 'unknown' } }) })
+    })
+    await act(async () => {
+      asked.give(ownedNothing())
+      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
+    })
+    const replaced = [container.querySelectorAll('li.row').length, lineOf(container)]
+    await act(async () => {
+      newer.give(ownedNothing())
+      await added
+    })
+    expect([replaced, container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
+      .toEqual([[1, ''], 0, false, true])
+  })
+
+  it.each([
+    ['no answer came', 'no answer' as const],
+    ['the server could not record its end', json(503, { error: 'The removal could not be recorded.', code: 'removal_not_recorded' })],
+    ['what stands in front of the server failed', new Response('Bad Gateway', { status: 502 })],
+  ])('says what it knows of an account that left the list after %s, with the focus on the heading', async (_name, answer) => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [removePath('acct_key')]: [answer],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await pressRemove(container)
+    await act(async () => { await vi.waitFor(() => { expect(listed(panel)).toBe(0) }) })
+    expect([container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
+      .toEqual([0, false, true])
+  })
+
+  it('moves a focus that was in the card of an account another page removed to the heading', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [addPath]: ['no answer'],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    container.querySelector<HTMLButtonElement>('#remove-acct_key')?.focus()
+    panel.adding.open()
+    await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
+    expect([container.querySelectorAll('li.row').length, lineOf(container), document.activeElement === container.querySelector('h2')]).toEqual([0, '', true])
   })
 
   it('leaves a focus the person moved elsewhere during a removal where it is', async () => {
@@ -843,7 +913,7 @@ describe('the panel', () => {
     elsewhere.focus()
     await act(async () => {
       call.give(keyRemoved())
-      await vi.waitFor(() => { expect(panel.removing.gone.value).not.toBeNull() })
+      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
     })
     const kept = document.activeElement === elsewhere
     elsewhere.remove()

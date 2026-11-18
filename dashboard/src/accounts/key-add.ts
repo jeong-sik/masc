@@ -11,7 +11,7 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { isRecord } from '../lib/type-guards'
-import { bodyOf, csrfHeader, deliver } from './wire'
+import { bodyOf, csrfHeader, deliver, serverFailure } from './wire'
 import type { Send } from './wire'
 
 /** The route that registers a key (lib/server/server_login_http.ml). */
@@ -44,6 +44,10 @@ export type Sent =
   /** An answer came as if all was well, and it names no key account: it is
       not the answer of this route. */
   | { readonly kind: 'unreadable' }
+  /** A failure with no code of this route. It is not the server's word that
+      it stored nothing: what stands in front of the server answers so too,
+      after the server stored the key. */
+  | { readonly kind: 'server_failed' }
 
 /** The account a body says the key was stored for
     (lib/server/server_key_account.ml, `register`), or null. */
@@ -67,10 +71,12 @@ export async function addKey(to: Send, csrfToken: string, integrationId: string,
     return accountId === null ? { kind: 'unreadable' } : { kind: 'stored', accountId }
   }
   const code = isRecord(json) ? json.code : undefined
+  const known = refusalCodes.find((one) => one === code)
+  if (known === undefined && response.status >= serverFailure) return { kind: 'server_failed' }
   return {
     kind: 'refused',
     status: response.status,
-    code: refusalCodes.find((known) => known === code) ?? 'unrecognised',
+    code: known ?? 'unrecognised',
     reason: isRecord(json) ? text(json.error) : null,
     accountId: isRecord(json) ? text(json.provider_account_id) : null,
   }
@@ -80,10 +86,11 @@ export async function addKey(to: Send, csrfToken: string, integrationId: string,
 export type AddFailure =
   /** The server did not store the key. */
   | { readonly kind: 'refused'; readonly status: number; readonly code: AddRefusal; readonly reason: string | null; readonly accountId: string | null; readonly attempts: number }
-  /** No answer the page could read came. The server may have stored the
-      key: the subscriptions are read again, and the person looks at them
-      before they send the key again. */
-  | { readonly kind: 'unknown'; readonly answer: 'none' | 'unreadable'; readonly attempts: number }
+  /** The page has no word of the server on the key: no answer came, or one
+      it could not read, or a failure with no code of this route. The server
+      may have stored the key: the subscriptions are read again, and the
+      person looks at them before they send the key again. */
+  | { readonly kind: 'unknown'; readonly answer: 'none' | 'unreadable' | 'server_failed'; readonly attempts: number }
 
 export type AddView =
   /** No key is being given. `stored` is the account the latest add made, or null. */
@@ -184,7 +191,8 @@ export function createKeyAdds({ send, leave, token, refresh }: KeyAddDeps): KeyA
         return 'dropped'
       case 'unreachable':
       case 'unreadable':
-        view.value = { kind: 'open', failure: { kind: 'unknown', answer: sent.kind === 'unreachable' ? 'none' : 'unreadable', attempts } }
+      case 'server_failed':
+        view.value = { kind: 'open', failure: { kind: 'unknown', answer: sent.kind === 'unreachable' ? 'none' : sent.kind, attempts } }
         await refresh()
         return 'dropped'
       case 'refused':

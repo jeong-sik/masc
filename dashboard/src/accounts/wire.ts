@@ -40,6 +40,10 @@ export type Problem =
   /** No answer came at all. */
   | { readonly kind: 'unreachable' }
 
+/** The first status of an answer that is a failure, not a refusal: the
+    server, or what stands in front of it, did not say that it did nothing. */
+export const serverFailure = 500
+
 export type Answer<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly problem: Problem }

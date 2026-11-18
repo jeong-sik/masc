@@ -12,7 +12,7 @@ import { axe } from 'jest-axe'
 import { AccountList } from './account-rows'
 import { createChecks } from './check'
 import { createRemovals, removeAccount, removePath } from './key-remove'
-import type { Gone, RemovalsModel, Removing } from './key-remove'
+import type { RemovalsModel, Removing } from './key-remove'
 import { csrfHeader } from './wire'
 import type { Integration, Owned, ProviderAccount, Removal, Send } from './wire'
 
@@ -80,9 +80,11 @@ describe('sending a removal', () => {
     ['no answer', 'no answer' as const, { kind: 'unreachable' }],
     ['an answer of another route that says all is well', json(200, { provider_accounts: [] }), { kind: 'unreadable' }],
     ['an answer that says all is well and is not JSON', new Response('<html>sign in</html>', { status: 200 }), { kind: 'unreadable' }],
-    ['a code it does not know', refusedAs(503, 'volume_away'), { kind: 'refused', status: 503, code: 'unrecognised', reason: 'The server said volume_away.' }],
+    ['a refusal with a code it does not know', refusedAs(409, 'volume_away'), { kind: 'refused', status: 409, code: 'unrecognised', reason: 'The server said volume_away.' }],
     ['a refusal with no code', json(403, { error: 'the request carried no token' }), { kind: 'refused', status: 403, code: 'unrecognised', reason: 'the request carried no token' }],
-    ['a refusal that is not JSON', new Response('Bad Gateway', { status: 502 }), { kind: 'refused', status: 502, code: 'unrecognised', reason: null }],
+    ['a failure with a code it does not know', refusedAs(503, 'volume_away'), { kind: 'server_failed' }],
+    ['a failure with no code', json(503, { error: 'the server is starting' }), { kind: 'server_failed' }],
+    ['a failure that is not JSON', new Response('Bad Gateway', { status: 502 }), { kind: 'server_failed' }],
   ])('reads %s', async (_name, answer, asked) => {
     const { send } = answering([answer])
     expect(await removeAccount(send, 'token-1', 'acct_key')).toEqual(asked)
@@ -99,24 +101,23 @@ function removing(answers: readonly Scripted[], token: string | null = 'token-1'
 }
 
 describe('the removal of an account', () => {
-  it('says the account went only once the subscriptions were read again', async () => {
+  it('holds the removal of an account the server removed until the subscriptions were asked for again', async () => {
     const reading = later<undefined>()
     const { send } = answering([removed()])
     const refresh = vi.fn(() => reading.promise)
     const model = createRemovals({ send, leave: vi.fn(), token: () => 'token-1', refresh })
     const run = model.remove('acct_key')
     await vi.waitFor(() => { expect(refresh).toHaveBeenCalledTimes(1) })
-    const during: readonly [Removing | undefined, Gone | null] = [model.removing.value.get('acct_key'), model.gone.value]
+    const during = model.removing.value.get('acct_key')
     reading.give(undefined)
     await run
-    expect([during, model.removing.value.has('acct_key'), model.gone.value])
-      .toEqual([[{ kind: 'sending' }, null], false, { accountId: 'acct_key', already: false }])
+    expect([during, model.removing.value.get('acct_key')]).toEqual([{ kind: 'sending' }, { kind: 'removed', already: false }])
   })
 
   it('takes an account the server does not have as one that went already', async () => {
     const { model, refresh, of } = removing([noSuchAccount()])
     await model.remove('acct_key')
-    expect([of('acct_key'), model.gone.value, refresh.mock.calls.length]).toEqual([undefined, { accountId: 'acct_key', already: true }, 1])
+    expect([of('acct_key'), refresh.mock.calls.length]).toEqual([{ kind: 'removed', already: true }, 1])
   })
 
   it('keeps a removal the server did not start, and reads nothing again', async () => {
@@ -124,10 +125,10 @@ describe('the removal of an account', () => {
     await model.remove('acct_key')
     const first = of('acct_key')
     await model.remove('acct_key')
-    expect([first, of('acct_key'), refresh.mock.calls.length, model.gone.value]).toEqual([
+    expect([first, of('acct_key'), refresh.mock.calls.length]).toEqual([
       { kind: 'refused', status: 409, code: 'account_call_running', reason: 'The server said account_call_running.', attempts: 1 },
       { kind: 'refused', status: 409, code: 'account_call_running', reason: 'The server said account_call_running.', attempts: 2 },
-      0, null,
+      0,
     ])
   })
 
@@ -136,28 +137,37 @@ describe('the removal of an account', () => {
   ])('reads the subscriptions again after a removal that stopped at %s', async (code) => {
     const { model, refresh, of } = removing([refusedAs(503, code)])
     await model.remove('acct_key')
-    expect([of('acct_key')?.kind, refresh.mock.calls.length, model.gone.value]).toEqual(['refused', 1, null])
+    expect([of('acct_key')?.kind, refresh.mock.calls.length]).toEqual(['refused', 1])
   })
 
   it.each([
-    ['not_a_key_account', 400], ['removal_refused', 403], ['volume_away', 503],
+    ['not_a_key_account', 400], ['removal_refused', 403], ['volume_away', 409],
   ])('reads nothing again after the refusal %s', async (code, status) => {
     const { model, refresh, of } = removing([refusedAs(status, code)])
     await model.remove('acct_key')
     expect([of('acct_key')?.kind, refresh.mock.calls.length]).toEqual(['refused', 0])
   })
 
+  it.each([
+    ['with a code it does not know', refusedAs(503, 'volume_away')],
+    ['of what stands in front of the server', new Response('Bad Gateway', { status: 502 })],
+  ])('takes a failure %s as one that may have removed the account', async (_name, answer) => {
+    const { model, refresh, of } = removing([answer])
+    await model.remove('acct_key')
+    expect([of('acct_key'), refresh.mock.calls.length]).toEqual([{ kind: 'unknown', answer: 'server_failed', attempts: 1 }, 1])
+  })
+
   it('reads the subscriptions again when no answer came, for the server may have removed the account', async () => {
     const { model, refresh, of } = removing(['no answer', 'no answer'])
     await model.remove('acct_key')
     await model.remove('acct_key')
-    expect([of('acct_key'), refresh.mock.calls.length, model.gone.value]).toEqual([{ kind: 'unknown', answer: 'none', attempts: 2 }, 2, null])
+    expect([of('acct_key'), refresh.mock.calls.length]).toEqual([{ kind: 'unknown', answer: 'none', attempts: 2 }, 2])
   })
 
   it('takes an answer it cannot read as one that may have removed the account', async () => {
     const { model, refresh, of } = removing([json(200, { provider_accounts: [] })])
     await model.remove('acct_key')
-    expect([of('acct_key'), refresh.mock.calls.length, model.gone.value]).toEqual([{ kind: 'unknown', answer: 'unreadable', attempts: 1 }, 1, null])
+    expect([of('acct_key'), refresh.mock.calls.length]).toEqual([{ kind: 'unknown', answer: 'unreadable', attempts: 1 }, 1])
   })
 
   it('counts the removals that came to nothing in a row, whatever their end', async () => {
@@ -204,8 +214,8 @@ describe('the removal of an account', () => {
     await model.remove('acct_third')
     other.give(removed())
     await first
-    expect([of('acct_key'), of('acct_other'), of('acct_third'), leave.mock.calls.length, sent.length, refresh.mock.calls.length, model.gone.value])
-      .toEqual([{ kind: 'leaving' }, { kind: 'leaving' }, undefined, 1, 2, 0, null])
+    expect([of('acct_key'), of('acct_other'), of('acct_third'), leave.mock.calls.length, sent.length, refresh.mock.calls.length])
+      .toEqual([{ kind: 'leaving' }, { kind: 'leaving' }, undefined, 1, 2, 0])
   })
 
   it('forgets every removal for another person, and an answer that comes later changes nothing', async () => {
@@ -215,10 +225,10 @@ describe('the removal of an account', () => {
     model.reset()
     answer.give(removed())
     await run
-    expect([model.removing.value.size, model.gone.value, refresh.mock.calls.length]).toEqual([0, null, 0])
+    expect([model.removing.value.size, refresh.mock.calls.length]).toEqual([0, 0])
   })
 
-  it('says nothing of an account whose list was read for another person meanwhile', async () => {
+  it('keeps nothing of an account whose list was read for another person meanwhile', async () => {
     const reading = later<undefined>()
     const { send } = answering([removed()])
     const model = createRemovals({ send, leave: vi.fn(), token: () => 'token-1', refresh: () => reading.promise })
@@ -227,7 +237,7 @@ describe('the removal of an account', () => {
     model.reset()
     reading.give(undefined)
     await run
-    expect([model.removing.value.size, model.gone.value]).toEqual([0, null])
+    expect(model.removing.value.size).toBe(0)
   })
 
   it('removes again for the person shown after one whose session ended', async () => {
@@ -254,7 +264,6 @@ const idleChecks = () =>
 /** A model of removals that shows `removing` for the key account and counts what it is asked. */
 const showing = (removing: Removing | undefined) => ({
   removing: signal(new Map(removing === undefined ? [] : [['acct_key', removing]])),
-  gone: signal(null),
   remove: vi.fn(() => Promise.resolve()),
   reset: vi.fn(),
 }) satisfies RemovalsModel
@@ -277,9 +286,11 @@ describe('the remove button of an account', () => {
     ['a removal that runs', { kind: 'sending' }],
     ['a removal the server did not start', { kind: 'refused', status: 409, code: 'account_call_running', reason: 'busy', attempts: 1 }],
     ['a removal that stopped at the key', { kind: 'refused', status: 503, code: 'key_not_removed', reason: 'stayed', attempts: 2 }],
-    ['a removal refused for a reason not known', { kind: 'refused', status: 502, code: 'unrecognised', reason: null, attempts: 1 }],
+    ['a removal refused with no code', { kind: 'refused', status: 403, code: 'unrecognised', reason: null, attempts: 1 }],
     ['a removal with no answer', { kind: 'unknown', answer: 'none', attempts: 1 }],
     ['a removal with an answer it cannot read', { kind: 'unknown', answer: 'unreadable', attempts: 2 }],
+    ['a removal the server failed on with no code', { kind: 'unknown', answer: 'server_failed', attempts: 1 }],
+    ['a removal the server answered, before the list says so', { kind: 'removed', already: false }],
     ['a removal that found no session', { kind: 'leaving' }],
   ]
   const named = (...names: string[]) => steps.map(([name]) => [name, names.includes(name) ? 1 : 0])
@@ -292,15 +303,16 @@ describe('the remove button of an account', () => {
   it('passes the accessibility rules once it asked, and on an account a removal was left on', async () => {
     const asked = card(showing(undefined))
     fireEvent.click(removeButton(asked))
-    const left = card(showing(undefined), owning(keyAccount('home_not_removed')))
     expect(await axe(asked)).toHaveNoViolations()
-    expect(await axe(left)).toHaveNoViolations()
+    // One card of the account at a time: its ids name what its button is labelled by.
+    cleanup()
+    expect(await axe(card(showing(undefined), owning(keyAccount('home_not_removed'))))).toHaveNoViolations()
   })
 
   it('says a removal that came to nothing where a screen reader announces it', () => {
     expect(count('.row [role=alert]')).toEqual(named(
-      'a removal the server did not start', 'a removal that stopped at the key', 'a removal refused for a reason not known',
-      'a removal with no answer', 'a removal with an answer it cannot read',
+      'a removal the server did not start', 'a removal that stopped at the key', 'a removal refused with no code',
+      'a removal with no answer', 'a removal with an answer it cannot read', 'a removal the server failed on with no code',
     ))
   })
 
@@ -349,6 +361,14 @@ describe('the remove button of an account', () => {
     fireEvent.click(removeButton(container))
     fireEvent.click(removeButton(container))
     expect(removals.remove.mock.calls).toEqual([['acct_key']])
+  })
+
+  it('does not hold the button of an account the server said is gone while the list still has it', () => {
+    const removals = showing({ kind: 'removed', already: true })
+    const container = card(removals)
+    fireEvent.click(removeButton(container))
+    fireEvent.click(removeButton(container))
+    expect([removals.remove.mock.calls, removeButton(container).getAttribute('aria-disabled')]).toEqual([[['acct_key']], 'false'])
   })
 
   it('puts a new alert on the page when a removal comes to nothing again', async () => {

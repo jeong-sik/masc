@@ -9,9 +9,9 @@ val status_is_ok : Masc.Keeper_fleet_grade.t -> bool
 (** Whether the fleet header draws in the healthy colour: only [ok] does. *)
 
 val blocker_text : ko:bool -> Masc.Fleet_stream.fleet -> string option
-(** The first reason the fleet scan names, in the words the counts line below
-    uses for the same Keepers. The line below carries the numbers, so this
-    names the reason only. [None] when the scan names no blocker. *)
+(** The first reason the fleet scan names, without a number. A row that also
+    draws the task-owner count takes {!cause_rows} instead, so the phrase and
+    the count are one row. [None] when the scan names no blocker. *)
 
 val interval_text : Masc.Fleet_stream.Proactive_interval.t -> string
 (** The interval in the largest unit that divides it exactly: [1h] for 3600
@@ -45,8 +45,10 @@ val trouble_text : ko:bool -> now:float -> Masc_tui_fleet_stream.trouble -> stri
     ago] while the connection is down. The age is counted from [now], and
     left out when [now] is behind the time it counts from. *)
 
-(** How many task owners the scan found with no fiber that can run a turn. *)
-type owner_count =
+(** How many task owners the scan found with no fiber that can run a turn.
+    Private: only {!owner_count} builds one, so [Exactly 0] and an
+    [At_least] with no unread source cannot be written. *)
+type owner_count = private
   | Exactly of int
       (** The scan read every source, and this many owners, more than zero,
           have no fiber. *)
@@ -58,14 +60,6 @@ type owner_count =
 val owner_count : Masc.Fleet_stream.fleet -> owner_count option
 (** [None] when the count is zero and the scan read everything: there is
     nothing to say. *)
-
-val owner_count_text : ko:bool -> owner_count -> string
-(** [task owner without fiber N], or [N+ (M sources unread)] for a lower
-    bound. The words are the task-owner blocker's phrase. *)
-
-val owner_scan_text : ko:bool -> Masc.Fleet_stream.fleet -> string option
-(** {!owner_count_text} of {!owner_count}. The Keepers screen's counts line
-    draws it under a header that names the blocker without a number. *)
 
 (** One row of a card body that says why the fleet is short of what it is
     configured to run. Each row says its facts and no other row says them. *)
@@ -87,5 +81,26 @@ val cause_rows :
     stands alone. *)
 
 val cause_row_text : ko:bool -> cause_row -> string
-(** The row in the screen language: the blocker's phrase, or
-    {!owner_count_text} for a row that carries the count. *)
+(** The row in the screen language: the blocker's phrase, or for a row that
+    carries the count the task-owner blocker's phrase with it,
+    [task owner without fiber N], or [N+ (M sources unread)] for a lower
+    bound. *)
+
+(** One row that says a fleet reading on screen is an earlier one, and why.
+    A reading is retained while the stream is in trouble or the workspace
+    identity is unconfirmed. *)
+type retained_row =
+  | Stale_with_trouble of Masc_tui_fleet_stream.trouble
+      (** Stale, and the stream trouble that keeps it so: {!trouble_text}. *)
+  | Stale_with_identity_unconfirmed
+      (** Stale because the workspace identity is unconfirmed. *)
+  | Identity_unconfirmed_too
+      (** Under a {!Stale_with_trouble} row: the identity is unconfirmed as
+          well. It does not say "stale" again. *)
+
+val retained_rows :
+  trouble:Masc_tui_fleet_stream.trouble option -> identity_confirmed:bool -> retained_row list
+(** Empty for a current reading. Otherwise the first row says the reading is
+    stale and why, and a second reason has a row of its own. *)
+
+val retained_row_text : ko:bool -> now:float -> retained_row -> string

@@ -106,7 +106,19 @@ let pp_owner_count ppf = function
   | Line.At_least { owners; unread } ->
       Format.fprintf ppf "at least %d (%d sources unread)" owners unread
 
-let owner_count = testable pp_owner_count ( = )
+(* The count is private to the module, so a case says what it expects in a
+   shape of its own and the check reads the module's value into it. *)
+let owner_count =
+  testable
+    (fun ppf -> function
+       | `Exactly owners -> Format.fprintf ppf "exactly %d" owners
+       | `At_least (owners, unread) ->
+           Format.fprintf ppf "at least %d (%d sources unread)" owners unread)
+    ( = )
+
+let shape = function
+  | Line.Exactly owners -> `Exactly owners
+  | Line.At_least { owners; unread } -> `At_least (owners, unread)
 
 (* A zero over a complete scan says nothing; a count over one is exact; any
    unread source makes the count a lower bound, a zero included, since the
@@ -115,11 +127,11 @@ let test_the_owner_count_is_a_lower_bound_while_sources_are_unread () =
   List.iter
     (fun (label, owners, unread, expected) ->
        check (option owner_count) label expected
-         (Line.owner_count (fleet ~owners ~unread)))
+         (Option.map shape (Line.owner_count (fleet ~owners ~unread))))
     [ "nothing found, all read", 0, 0, None
-    ; "found, all read", 5, 0, Some (Line.Exactly 5)
-    ; "found, some unread", 5, 2, Some (Line.At_least { owners = 5; unread = 2 })
-    ; "none found, some unread", 0, 2, Some (Line.At_least { owners = 0; unread = 2 })
+    ; "found, all read", 5, 0, Some (`Exactly 5)
+    ; "found, some unread", 5, 2, Some (`At_least (5, 2))
+    ; "none found, some unread", 0, 2, Some (`At_least (0, 2))
     ]
 
 (* What a cause row says, read from its constructor rather than its words. *)
@@ -149,9 +161,9 @@ let blockers =
        Keeper_fleet_blocker.all
 
 let owner_readings =
-  [ ("no owner count", None)
-  ; ("a count", Some (Line.Exactly 5))
-  ; ("a count with unread sources", Some (Line.At_least { owners = 5; unread = 2 }))
+  [ ("no owner count", Line.owner_count (fleet ~owners:0 ~unread:0))
+  ; ("a count", Line.owner_count (fleet ~owners:5 ~unread:0))
+  ; ("a count with unread sources", Line.owner_count (fleet ~owners:5 ~unread:2))
   ]
 
 (* The capacity card drew the task-owner blocker's phrase and then the same
@@ -214,6 +226,67 @@ let test_only_the_task_owner_blocker_shares_a_row_with_the_count () =
          owner_readings)
     blockers
 
+(* What a retained row says, read from its constructor. *)
+type retained_fact =
+  | Says_stale
+  | Says_trouble
+  | Says_identity_unconfirmed
+
+let retained_fact =
+  testable
+    (fun ppf fact ->
+       Format.pp_print_string ppf
+         (match fact with
+          | Says_stale -> "stale"
+          | Says_trouble -> "trouble"
+          | Says_identity_unconfirmed -> "identity unconfirmed"))
+    ( = )
+
+let facts_of_retained_row = function
+  | Line.Stale_with_trouble _ -> [ Says_stale; Says_trouble ]
+  | Line.Stale_with_identity_unconfirmed -> [ Says_stale; Says_identity_unconfirmed ]
+  | Line.Identity_unconfirmed_too -> [ Says_identity_unconfirmed ]
+
+(* The capacity card said "stale, current capacity unknown" on its first row
+   and the reason, the unconfirmed workspace identity, on a row below the
+   meters: one fact on two rows. For every trouble and identity reading the
+   rows say "stale" once when the reading is retained, never otherwise, and
+   each reason once; and the first row is the one that says "stale". *)
+let test_the_retained_rows_say_stale_once_with_why () =
+  let troubles =
+    [ ("no trouble", None)
+    ; ( "scans failing"
+      , Some
+          (Masc_tui_fleet_stream.Scans_failing
+             { Masc.Fleet_stream.since = 0.; reason = Masc.Fleet_stream.Scan_failed }) )
+    ; ("stream lost", Some (Masc_tui_fleet_stream.Disconnected { since = 0. }))
+    ]
+  in
+  List.iter
+    (fun (trouble_label, trouble) ->
+       List.iter
+         (fun identity_confirmed ->
+            let label =
+              trouble_label ^ if identity_confirmed then ", identity confirmed"
+                else ", identity unconfirmed"
+            in
+            let rows = Line.retained_rows ~trouble ~identity_confirmed in
+            let said = List.concat_map facts_of_retained_row rows in
+            let reasons =
+              Option.to_list (Option.map (fun _ -> Says_trouble) trouble)
+              @ if identity_confirmed then [] else [ Says_identity_unconfirmed ]
+            in
+            let read = if reasons = [] then [] else Says_stale :: reasons in
+            check (list retained_fact) label (List.sort compare read)
+              (List.sort compare said);
+            check bool (label ^ ": the first row says stale") true
+              (match rows with
+               | [] -> reasons = []
+               | (Line.Stale_with_trouble _ | Line.Stale_with_identity_unconfirmed) :: _ -> true
+               | Line.Identity_unconfirmed_too :: _ -> false))
+         [ true; false ])
+    troubles
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -233,6 +306,8 @@ let () =
             test_the_cause_rows_say_each_fact_once
         ; test_case "only the task-owner blocker shares a row with the count" `Quick
             test_only_the_task_owner_blocker_shares_a_row_with_the_count
+        ; test_case "the retained rows say stale once, with why" `Quick
+            test_the_retained_rows_say_stale_once_with_why
         ] )
     ; ( "server words"
       , [ test_case "the server's words are drawn as text" `Quick

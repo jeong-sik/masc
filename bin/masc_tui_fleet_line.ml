@@ -133,8 +133,10 @@ let unreachable_text ~ko ~now ~since =
    growing between events instead of freezing at the age the event had. A
    clock ahead of this one has no age to give, and the tag still says the
    reading is stale. *)
+let stale_word ~ko = say ko "이전 관측" "stale"
+
 let trouble_text ~ko ~now trouble =
-  let stale = say ko "이전 관측" "stale" in
+  let stale = stale_word ~ko in
   match trouble with
   | Masc_tui_fleet_stream.Scans_failing { F.since; reason } ->
       let reason = outage_reason_text ~ko reason in
@@ -184,8 +186,6 @@ let owner_count_text ~ko count =
         Printf.sprintf "%s %d+ (%s unread)" phrase owners
           (Masc_tui_message_layout.count_noun unread "source")
 
-let owner_scan_text ~ko fleet = Option.map (owner_count_text ~ko) (owner_count fleet)
-
 type cause_row =
   | Blocker_alone of Keeper_fleet_blocker.t
   | Blocker_with_owners of owner_count
@@ -217,3 +217,27 @@ let cause_rows ~blocker owners =
 let cause_row_text ~ko = function
   | Blocker_alone blocker -> blocker_phrase ~ko blocker
   | Blocker_with_owners count | Owners_alone count -> owner_count_text ~ko count
+
+type retained_row =
+  | Stale_with_trouble of Masc_tui_fleet_stream.trouble
+  | Stale_with_identity_unconfirmed
+  | Identity_unconfirmed_too
+
+(* A reading is retained while the stream is in trouble or the workspace
+   identity is unconfirmed. The first row says the counts are an earlier
+   reading and why, so no row says "stale" with no reason and then the reason
+   on a row of its own. A second reason takes a row of its own, without
+   saying "stale" again. *)
+let retained_rows ~trouble ~identity_confirmed =
+  match trouble, identity_confirmed with
+  | Some trouble, true -> [ Stale_with_trouble trouble ]
+  | Some trouble, false -> [ Stale_with_trouble trouble; Identity_unconfirmed_too ]
+  | None, false -> [ Stale_with_identity_unconfirmed ]
+  | None, true -> []
+
+let retained_row_text ~ko ~now = function
+  | Stale_with_trouble trouble -> trouble_text ~ko ~now trouble
+  | Stale_with_identity_unconfirmed ->
+      stale_word ~ko ^ " \xc2\xb7 " ^ Masc_tui_words.workspace_identity_unconfirmed ~ko
+  | Identity_unconfirmed_too ->
+      String.capitalize_ascii (Masc_tui_words.workspace_identity_unconfirmed ~ko)

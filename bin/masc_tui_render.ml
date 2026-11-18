@@ -172,8 +172,10 @@ let operator_actions_reading (state : state) =
    place, and the card's body already says why.
 
    The word is the grade alone. The running and bootable counts are the
-   body's first meter, which writes its number beside it (RFC section 5.6),
-   and a narrow edge drops its word first, so the counts belong there. *)
+   body's first meter, which writes its number beside it (RFC section 5.6).
+   A narrow edge gives up its key tag, then shortens its name, then drops the
+   word, and keeps the mark to the end (Masc_tui_card.top_fit): counts inside
+   the word went before the mark did, so they belong to the meter. *)
 let overview_capacity_status (state : state) : Masc_tui_card.status =
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
@@ -201,13 +203,18 @@ let overview_capacity_status (state : state) : Masc_tui_card.status =
       ; word = Masc_tui_fleet_line.status_text ~ko fleet.fs_status
       ; tone }
 
-(* The plain rows drawn when the cards do not fit have no edge, so the status
-   the edge would carry leads them. With no reading the rows under it say
-   why, which the edge's lone mark stands for. *)
+(* The plain rows drawn when the cards do not fit have no edge, so a status
+   that needs a look leads them. A settled fleet spends no row: the plain rows
+   are drawn in spare room, where a meter or the Tool calls row is worth more
+   than "ok". With no reading the rows under it say why, which the edge's lone
+   mark stands for. *)
 let overview_capacity_status_rows (status : Masc_tui_card.status) =
+  let row mark = [ status.tone ^ Masc_tui_value.Mark.glyph mark ^ " " ^ status.word ^ Ansi.reset ] in
   match status.symbol with
-  | Masc_tui_card.Mark mark ->
-      [ status.tone ^ Masc_tui_value.Mark.glyph mark ^ " " ^ status.word ^ Ansi.reset ]
+  | Masc_tui_card.Mark Masc_tui_value.Mark.Settled -> []
+  | Masc_tui_card.Mark
+      (Masc_tui_value.Mark.(Under_way | Waiting | Paused | Caution | Yours | Failed) as mark) ->
+      row mark
   | Masc_tui_card.Unknown _ -> []
 
 let overview_capacity_lines ?(cells = 48) (state : state) =
@@ -233,17 +240,12 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
       let fleet = reading.fleet in
       let identity_confirmed = state.workspace_identity = Workspace_identity_match in
       let retained = Option.is_some trouble || not identity_confirmed in
-      (* The first row says the counts below are an earlier reading, before any
-         of them can be read as the fleet's current state. A trouble row says
-         that and why ([stale · scans failing for 12m]), so it takes the place
-         of the plain note rather than saying "stale" a second time. *)
+      (* The first row says the counts below are an earlier reading and why,
+         before any of them can be read as the fleet's current state. *)
       let scope =
-        match trouble, identity_confirmed with
-        | Some detail, (true | false) ->
-            wrap (warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail))
-        | None, false ->
-            wrap (warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown"))
-        | None, true -> []
+        List.concat_map
+          (fun row -> wrap (warning (Masc_tui_fleet_line.retained_row_text ~ko ~now row)))
+          (Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed)
       in
       let avail =
         max 0 (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
@@ -294,12 +296,10 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
         | Masc_tui_fleet_line.Owners_alone _ -> quiet
       in
       let notes =
-        (if identity_confirmed then []
-         else [warning (String.capitalize_ascii (workspace_identity_unconfirmed ~ko))])
-        @ List.map
-            (fun row -> cause_style row (Masc_tui_fleet_line.cause_row_text ~ko row))
-            (Masc_tui_fleet_line.cause_rows ~blocker:fleet.fs_blocker
-               (Masc_tui_fleet_line.owner_count fleet))
+        List.map
+          (fun row -> cause_style row (Masc_tui_fleet_line.cause_row_text ~ko row))
+          (Masc_tui_fleet_line.cause_rows ~blocker:fleet.fs_blocker
+             (Masc_tui_fleet_line.owner_count fleet))
       in
       scope @ meters @ List.concat_map wrap notes
 

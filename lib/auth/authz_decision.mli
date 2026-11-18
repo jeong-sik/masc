@@ -129,6 +129,13 @@ type resource_defect =
   | Resource_quarantined
   | Resource_purged
 
+(** The defect of a status, and [None] for [Active]. A check outside a turn
+    that reads the same status names its refusal with it. *)
+val resource_defect : Resource_status.t -> resource_defect option
+
+(** [disabled], [blocked], [quarantined], or [purged]. *)
+val resource_defect_to_string : resource_defect -> string
+
 type deny_reason =
   | Authorization_uncertain
   | Principal_inactive of party

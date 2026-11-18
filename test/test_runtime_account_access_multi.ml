@@ -916,6 +916,7 @@ let test_multi_account () =
         let erin = person zone ~base_path ~name:"erin" ~hex:'e' in
         let erin_account = captured erin.home in
         allowed "a turn before the purge of its account" (turn dave ()) dave_account;
+        allowed "the person's own account before its purge" (own dave ()) dave_account;
         (match
            Authz_purge.start
              zone
@@ -932,7 +933,25 @@ let test_multi_account () =
           (denied (function
              | Authz_decision.Provider_account_unavailable Authz_decision.Resource_purged -> true
              | _ -> false));
+        refused
+          "the person's own account once its purge started"
+          (own dave ())
+          dave_account
+          (function
+            | Access.Account_unavailable { provider_account_id; defect = Authz_decision.Resource_purged } ->
+              Provider_account_id.equal provider_account_id dave.account
+            | _ -> false);
+        (* The home is checked before the status: another person learns
+           nothing of the purge from the id of the account. *)
+        refused
+          "the purged account of another person"
+          (own erin ~account:dave.account ())
+          dave_account
+          (function
+            | Access.Not_the_account_home _ -> true
+            | _ -> false);
         allowed "a turn on an account no purge names" (turn erin ()) erin_account;
+        allowed "the own account no purge names" (own erin ()) erin_account;
         (* Bytes another writer added to the log: the next commit finds the
            end moved and stops the log. No decision rests on the state of the
            zone from then on, so no client starts for a person or for a turn

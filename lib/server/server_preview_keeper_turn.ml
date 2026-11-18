@@ -103,6 +103,7 @@ let refusal_error (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.No_operator_keeper _
   | Runtime_account_access.No_membership _
   | Runtime_account_access.Not_a_declared_home
+  | Runtime_account_access.Account_unavailable _
   | Runtime_account_access.Host_account _
   | Runtime_account_access.Off_keeper _
   | Runtime_account_access.Off_runtime _
@@ -111,7 +112,8 @@ let refusal_error (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.Turn_refused Authz_keeper_turn.Not_bootstrapped ->
     (* The preview publishes its access before it listens, a turn is no
        operator call and no turn of an operator Keeper, an admission
-       makes the membership, the runtime declares its home, the preview
+       makes the membership, the runtime declares its home, the status of
+       the account of a turn comes back as a denied turn, the preview
        starts no host client, its access is multi-account and not a single
        user after Off, and the zone opened on a bootstrapped log. *)
     Log.Server.warn "A Keeper turn was refused: %s" text;

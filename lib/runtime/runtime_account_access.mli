@@ -197,7 +197,10 @@ type request =
       }
       (** A person's own account: the check that follows their login and the
           verification they ask for. The log need not link the account yet,
-          because the login checks the account before it links it. *)
+          because the login checks the account before it links it. An
+          account the log links is checked only while it is read: from the
+          start of its purge on, no client starts on its home
+          ({!Authz_state.provider_account_status}). *)
   | Operator_call
       (** A call on the authority of the person who runs the process, not of
           the owner of a Keeper: a probe, a verification run of the operator,
@@ -229,6 +232,15 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Account_unavailable of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; defect : Authz_decision.resource_defect
+      }
+      (** A person's own account that the log links and no longer reads: its
+          purge began. A turn on such an account is a [Turn_refused] with
+          [Provider_account_unavailable] of the same defect. It comes after
+          the check of the home, so it says nothing of an account captured
+          from another home. *)
   | Host_account of host_client
       (** A host client in a multi-account process, which shares no account
           of its host. *)

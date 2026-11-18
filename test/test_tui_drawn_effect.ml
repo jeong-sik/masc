@@ -163,6 +163,139 @@ let test_turns () =
   state.keeper_waiting_error <- Some (T.Request_failed "waiting read failed");
   check drawn "the turn answer carries waiting rows too" T.Drawn_changed (T.keeper_turns_effect state)
 
+(* The cases below apply answers through the same state functions the
+   loop's reader branches call (accept_keeper_turn_observation,
+   accept_keeper_waiting_observation, Keeper_waiting_read), so the identity
+   a 304 keeps is the one those functions keep. *)
+module Decode = Masc.Tui_decode
+
+(* [Sys.opaque_identity] keeps each row a fresh allocation, as a decoded
+   body's rows are; a record of constants would be shared by the compiler. *)
+let turn name : Decode.keeper_turn_row =
+  { ktr_keeper_name = Sys.opaque_identity name; ktr_chat_control_token = None;
+    ktr_state = Decode.Keeper_turn_idle }
+
+let waiting_row name : Decode.keeper_waiting_row =
+  { kwr_keeper_name = Sys.opaque_identity name
+  ; kwr_state = Decode.Keeper_waiting_idle
+  ; kwr_waiting_count = 0
+  ; kwr_since = None
+  ; kwr_due_at = None
+  ; kwr_source_counts = []
+  ; kwr_waiting_heads = [] }
+
+let test_tools_other_keeper () =
+  let state = state () in
+  state.tools_inventory_keeper <- Some "alpha";
+  state.tools_error <- Some (T.Request_failed "HTTP 503");
+  T.note_drawn_reads state;
+  (* The read for the Keeper now selected fails the same way. *)
+  state.tools_inventory_keeper <- Some "beta";
+  state.tools_error <- Some (T.Request_failed "HTTP 503");
+  check drawn "a failure now held for another Keeper" T.Drawn_changed (T.tools_inventory_effect state)
+
+let test_turns_success_moves_observation_time () =
+  let state = state () in
+  let rows = [ turn "alpha" ] in
+  let observed = Decode.Keeper_waiting_observed [ waiting_row "alpha" ] in
+  T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:10.;
+  T.note_drawn_reads state;
+  (* The same decoded rows again, as a 304 hands them back: the answer
+     still stamps a new observation time, which Metrics draws as an age. *)
+  T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:40.;
+  check drawn "a later observation time" T.Drawn_changed (T.keeper_turns_effect state)
+
+let test_turns_repeated_failure () =
+  let state = state () in
+  T.refuse_keeper_turn_observation state (T.Request_failed "HTTP 503");
+  T.note_drawn_reads state;
+  state.keeper_turns_inflight <- true;
+  state.keeper_turns_inflight <- false;
+  T.refuse_keeper_turn_observation state (T.Request_failed "HTTP 503");
+  check drawn "the same failure again" T.Drawn_unchanged (T.keeper_turns_effect state);
+  T.refuse_keeper_turn_observation state (T.Request_failed "HTTP 502");
+  check drawn "a different failure" T.Drawn_changed (T.keeper_turns_effect state)
+
+let test_turns_fresh_rows () =
+  let state = state () in
+  state.keeper_turns <- [ turn "alpha" ];
+  state.keeper_turns_observed_at <- Some 10.;
+  T.note_drawn_reads state;
+  (* A fresh body decodes new rows; the observation time is held still so
+     only the rows differ. *)
+  state.keeper_turns <- [ turn "alpha" ];
+  check drawn "rows from a fresh body" T.Drawn_changed (T.keeper_turns_effect state)
+
+let test_turns_finish_glow () =
+  let state = state () in
+  T.note_drawn_reads state;
+  state.keeper_turn_finishes <- [ ("alpha", 10.) ];
+  check drawn "a turn that just finished" T.Drawn_changed (T.keeper_turns_effect state)
+
+let test_turns_settle_awaited_waiting () =
+  let state = state () in
+  T.note_keeper_waiting_change state T.Waiting_all;
+  T.note_drawn_reads state;
+  (* The turns answer completes the waiting projection the screen waited for. *)
+  state.keeper_waiting_read <- T.Keeper_waiting_read.settle_poll state.keeper_waiting_read ~success:true;
+  check drawn "the wait the frame drew ends" T.Drawn_changed (T.keeper_turns_effect state)
+
+let test_waiting_304_through_merge () =
+  let state = state () in
+  let rows = [ turn "alpha" ] in
+  let observed = Decode.Keeper_waiting_observed [ waiting_row "alpha" ] in
+  T.accept_keeper_waiting_observation state ~rows ~waiting:observed;
+  T.note_drawn_reads state;
+  T.accept_keeper_waiting_observation state ~rows ~waiting:observed;
+  check drawn "the same decoded answer" T.Drawn_unchanged (T.keeper_waiting_effect state);
+  T.accept_keeper_waiting_observation state ~rows
+    ~waiting:(Decode.Keeper_waiting_observed [ waiting_row "alpha" ]);
+  check drawn "a fresh body" T.Drawn_changed (T.keeper_waiting_effect state)
+
+let test_waiting_failure_cleared () =
+  let state = state () in
+  let rows = [ turn "alpha" ] in
+  let held = waiting_row "alpha" in
+  T.accept_keeper_waiting_observation state ~rows ~waiting:(Decode.Keeper_waiting_observed [ held ]);
+  state.keeper_waiting_failure <- Some (Decode.Keeper_waiting_invalid "fleet scan failed");
+  T.note_drawn_reads state;
+  (* Every Keeper on screen is observed again with the rows already held. *)
+  T.accept_keeper_waiting_observation state ~rows ~waiting:(Decode.Keeper_waiting_observed [ held ]);
+  check drawn "the fleet failure the frame drew is gone" T.Drawn_changed (T.keeper_waiting_effect state)
+
+let test_waiting_unverified_resolved () =
+  let state = state () in
+  state.keeper_waiting_unverified <- [ "alpha"; "beta" ];
+  T.note_drawn_reads state;
+  state.keeper_waiting_unverified <- [ "beta" ];
+  check drawn "a Keeper read again" T.Drawn_changed (T.keeper_waiting_effect state)
+
+let test_waiting_read_settles_the_wait () =
+  let state = state () in
+  T.note_keeper_waiting_change state T.Waiting_all;
+  T.note_drawn_reads state;
+  let reading, request = T.Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- reading;
+  (* Starting the read changes nothing the frame drew. *)
+  check drawn "the read starts" T.Drawn_unchanged (T.keeper_waiting_effect state);
+  (match request with
+   | None -> fail "a change pending starts a read"
+   | Some request ->
+       (match T.Keeper_waiting_read.finish state.keeper_waiting_read request ~observed:true ~success:true with
+        | None -> fail "the read in flight settles"
+        | Some (reading, _follow_up) -> state.keeper_waiting_read <- reading));
+  check drawn "the answer ends the drawn wait" T.Drawn_changed (T.keeper_waiting_effect state);
+  T.note_drawn_reads state;
+  let reading, request = T.Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- reading;
+  (match request with
+   | None -> ()
+   | Some request ->
+       (match T.Keeper_waiting_read.finish state.keeper_waiting_read request ~observed:true ~success:true with
+        | None -> ()
+        | Some (reading, _follow_up) -> state.keeper_waiting_read <- reading));
+  check drawn "a read with nothing awaited" T.Drawn_unchanged (T.keeper_waiting_effect state)
+
 let () =
   run "tui_drawn_effect"
     [ ( "tools inventory",
@@ -172,6 +305,19 @@ let () =
           test_case "answer after drawn progress" `Quick test_answer_after_drawn_progress;
           test_case "frame built in between" `Quick test_frame_in_between;
           test_case "fresh body" `Quick test_fresh_body;
-          test_case "skill cursor" `Quick test_skill_cursor ] );
-      ("keeper waiting", [ test_case "waiting answers" `Quick test_waiting ]);
-      ("keeper turns", [ test_case "turn answers" `Quick test_turns ]) ]
+          test_case "skill cursor" `Quick test_skill_cursor;
+          test_case "failure for another Keeper" `Quick test_tools_other_keeper ] );
+      ( "keeper waiting",
+        [ test_case "waiting answers" `Quick test_waiting;
+          test_case "304 through the merge" `Quick test_waiting_304_through_merge;
+          test_case "fleet failure cleared" `Quick test_waiting_failure_cleared;
+          test_case "unverified Keeper resolved" `Quick test_waiting_unverified_resolved;
+          test_case "read settles the wait" `Quick test_waiting_read_settles_the_wait ] );
+      ( "keeper turns",
+        [ test_case "turn answers" `Quick test_turns;
+          test_case "success moves the observation time" `Quick
+            test_turns_success_moves_observation_time;
+          test_case "repeated failure" `Quick test_turns_repeated_failure;
+          test_case "fresh rows" `Quick test_turns_fresh_rows;
+          test_case "finish glow" `Quick test_turns_finish_glow;
+          test_case "awaited waiting settles" `Quick test_turns_settle_awaited_waiting ] ) ]

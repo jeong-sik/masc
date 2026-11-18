@@ -15,11 +15,46 @@ let request_fingerprint (input : Yojson.Safe.t) =
 
 let ( let* ) = Result.bind
 
+(* Store canonicalization normalizes JSON numbers. Keep the queue's exact
+   scalar encoding inside one checked text value instead of changing its hash. *)
+module Exact_input = struct
+  type t = { value : Yojson.Safe.t; text : string }
+
+  let validate input =
+    Lane_addon_json.canonical input
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun _ -> "exact request input has invalid JSON members or numbers")
+
+  let of_text text =
+    let* value =
+      try Ok (Yojson.Safe.from_string text)
+      with Yojson.Json_error _ -> Error "exact request input_json is invalid JSON"
+    in
+    let* () = validate value in
+    let value = canonical_request_json value in
+    let encoded = Yojson.Safe.to_string value in
+    if String.equal text encoded then Ok { value; text }
+    else Error "exact request input JSON text is not canonical"
+
+  let capture input =
+    let* () = validate input in
+    canonical_request_json input |> Yojson.Safe.to_string |> of_text
+
+  let of_json = function
+    | `String text -> of_text text
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+      Error "exact request input_json must be JSON text"
+
+  let to_json input = `String input.text
+  let value input = input.value
+  let equal left right = String.equal left.text right.text
+end
+
 type exact_request =
   { base_path : string
   ; keeper_name : string
   ; operation : string
-  ; input : Yojson.Safe.t
+  ; input : Exact_input.t
   ; input_hash : string
   ; origin : Keeper_approval_origin.t
   ; task_id : string option
@@ -28,7 +63,7 @@ type exact_request =
   ; json : Yojson.Safe.t
   }
 
-let exact_schema = "keeper.approval-exact-request.v1"
+let exact_schema = "keeper.approval-exact-request.v2"
 let optional_text = function None -> `Null | Some value -> `String value
 
 let identity label value =
@@ -62,12 +97,12 @@ let exact_request ~base_path ~keeper_name ~operation ~input ~origin ~task_id ~go
     (Keeper_continuation_channel.to_yojson continuation_channel) in
   let* continuation_channel = exact_nested ~encode:Keeper_continuation_channel.to_yojson
     Keeper_continuation_channel.of_yojson channel_json in
-  let* input = Lane_addon_json.canonical input in
-  let input_hash = request_fingerprint input in
+  let* input = Exact_input.capture input in
+  let input_hash = request_fingerprint (Exact_input.value input) in
   let* json = Lane_addon_json.canonical (`Assoc
     ["schema", `String exact_schema; "base_path", `String base_path;
      "keeper_name", `String keeper_name; "operation", `String operation;
-     "input", input; "input_hash", `String input_hash;
+     "input_json", Exact_input.to_json input; "input_hash", `String input_hash;
      "origin", origin_json;
      "task_id", optional_text task_id; "goal_id", optional_text goal_id;
      "continuation_channel", channel_json]) in
@@ -77,7 +112,7 @@ let exact_request ~base_path ~keeper_name ~operation ~input ~origin ~task_id ~go
 let base_path (request : exact_request) = request.base_path
 let keeper_name (request : exact_request) = request.keeper_name
 let operation (request : exact_request) = request.operation
-let input (request : exact_request) = request.input
+let input (request : exact_request) = Exact_input.value request.input
 let input_hash (request : exact_request) = request.input_hash
 let origin (request : exact_request) = request.origin
 let task_id (request : exact_request) = request.task_id
@@ -109,7 +144,7 @@ let nullable_text values key =
 let exact_request_of_json json =
   let* json = Lane_addon_json.canonical json in
   let* values = fields exact_schema
-    ["schema"; "base_path"; "keeper_name"; "operation"; "input"; "input_hash";
+    ["schema"; "base_path"; "keeper_name"; "operation"; "input_json"; "input_hash";
      "origin"; "task_id"; "goal_id"; "continuation_channel"] json in
   let* schema = text values "schema" in
   let* () = if String.equal schema exact_schema then Ok () else Error "unknown exact request schema" in
@@ -125,8 +160,9 @@ let exact_request_of_json json =
   let* goal_id = nullable_text values "goal_id" in
   let* continuation_channel = exact_nested ~encode:Keeper_continuation_channel.to_yojson
     Keeper_continuation_channel.of_yojson (List.assoc "continuation_channel" values) in
+  let* input = Exact_input.of_json (List.assoc "input_json" values) in
   let* request = exact_request ~base_path ~keeper_name ~operation
-    ~input:(List.assoc "input" values) ~origin ~task_id ~goal_id ~continuation_channel in
+    ~input:(Exact_input.value input) ~origin ~task_id ~goal_id ~continuation_channel in
   if String.equal request.input_hash recorded_hash && Yojson.Safe.equal request.json json
   then Ok request else Error "exact request input hash or canonical identity mismatch"
 
@@ -142,6 +178,6 @@ let matches_entry (request : exact_request) ~base_path ~keeper_name ~operation ~
   && Yojson.Safe.equal
        (Keeper_continuation_channel.to_yojson request.continuation_channel)
        (Keeper_continuation_channel.to_yojson continuation_channel)
-  && (match Lane_addon_json.canonical input with
-      | Ok input -> Yojson.Safe.equal request.input input
+  && (match Exact_input.capture input with
+      | Ok input -> Exact_input.equal request.input input
       | Error _ -> false)

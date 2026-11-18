@@ -24,9 +24,13 @@ let exact ?(base_path="/workspace") ?(input=input) ?(origin=origin 1) () =
 
 let matches ?(base_path="/workspace") ?(keeper_name="fixture") ?(operation="media_read")
     ?(input=input) ?(origin=origin 1) ?(task_id=Some "task-a") ?(goal_id=Some "goal-a")
-    ?(continuation_channel=channel) request =
+    ?(continuation_channel=channel) ?input_hash request =
+  let input_hash = match input_hash with
+    | Some hash -> hash
+    | None -> Fingerprint.request_fingerprint input in
   Fingerprint.matches_entry request ~base_path ~keeper_name ~operation ~input
-    ~input_hash:(Fingerprint.input_hash request) ~origin ~task_id ~goal_id ~continuation_channel
+    ~input_hash
+    ~origin ~task_id ~goal_id ~continuation_channel
 
 let object_fields = function
   | `Assoc fields -> fields
@@ -42,13 +46,28 @@ let test_canonical_input_and_legacy_hash () =
     (String.equal (Fingerprint.request_fingerprint (`Float 1.)) (Fingerprint.request_fingerprint (`Int 1)));
   let request = exact () in
   let integer_request = exact ~input:(`Assoc ["source", `String "original-source"; "count", `Int 1]) () in
-  check bool "new exact identity canonically captures integral values" true
+  check bool "exact identity preserves the queue's float/integer distinction" false
     (Fingerprint.equal_exact_request request integer_request);
-  check string "new hash describes the actual canonical input"
-    (Fingerprint.request_fingerprint (Fingerprint.input request)) (Fingerprint.input_hash request);
+  check string "captured hash equals the actual submitted input hash"
+    (Fingerprint.request_fingerprint input) (Fingerprint.input_hash request);
+  check bool "object member order remains immaterial" true
+    (Fingerprint.equal_exact_request request
+      (exact ~input:(`Assoc ["source", `String "original-source"; "count", `Float 1.]) ()));
   let restored = get (Fingerprint.exact_request_of_json
       (get (Lane_addon_json.canonical (Fingerprint.exact_request_to_json request)))) in
   check bool "exact store-normalized round trip" true (Fingerprint.equal_exact_request request restored);
+  check bool "outer normalization leaves the captured float intact" true
+    (Yojson.Safe.equal (Fingerprint.input restored) input);
+  List.iter (fun input ->
+    let original = exact ~input () in
+    let restored = get (Fingerprint.exact_request_of_json
+      (get (Lane_addon_json.canonical (Fingerprint.exact_request_to_json original)))) in
+    check bool "nested scalars survive the outer canonical envelope" true
+      (Fingerprint.equal_exact_request original restored);
+    check string "restored hash still describes submitted scalars"
+      (Fingerprint.request_fingerprint input) (Fingerprint.input_hash restored))
+    [`List [`Float (-0.); `Float 1.; `Int 1; `Intlit "9223372036854775808"];
+     `Assoc ["nested", `List [`Float 1.; `Assoc ["count", `Int 1]]]];
   check string "workspace alias uses canonical workspace identity" "/workspace"
     (Fingerprint.base_path (exact ~base_path:"/workspace/.masc" ()));
   let make input = Fingerprint.exact_request ~base_path:"/workspace" ~keeper_name:"fixture"
@@ -62,6 +81,8 @@ let test_canonical_input_and_legacy_hash () =
 
 let test_matcher_keeps_logical_origin_and_complete_input () =
   let request = exact () in
+  let integer_request = exact ~input:(`Assoc
+      ["count", `Int 1; "source", `String "original-source"]) () in
   check bool "matching queue fields" true (matches request);
   check bool "physical turn is not a new logical request" true (matches ~origin:(origin 2) request);
   check bool "complete capture still retains physical witness" false
@@ -70,8 +91,14 @@ let test_matcher_keeps_logical_origin_and_complete_input () =
     ["workspace", matches ~base_path:"/other" request;
      "Keeper", matches ~keeper_name:"another" request;
      "operation", matches ~operation:"another" request;
-     "complete input despite equal supplied hash", matches ~input:(`Assoc ["different",`Bool true]) request;
-     "malformed input", matches ~input:(`Assoc ["x",`Float infinity]) request;
+     "complete input despite equal supplied hash",
+       matches ~input:(`Assoc ["different",`Bool true])
+         ~input_hash:(Fingerprint.input_hash request) request;
+     "integer cannot borrow float identity even with the supplied float hash",
+       matches ~input:(Fingerprint.input integer_request)
+         ~input_hash:(Fingerprint.input_hash request) request;
+     "malformed input", matches ~input:(`Assoc ["x",`Float infinity])
+       ~input_hash:(Fingerprint.input_hash request) request;
      "logical origin", matches ~origin:Keeper_approval_origin.unavailable request;
      "task", matches ~task_id:None request;
      "goal", matches ~goal_id:None request;
@@ -90,7 +117,14 @@ let test_strict_exact_codec () =
      "missing field", `Assoc (List.remove_assoc "goal_id" fields);
      "wrong digest", replace "input_hash" (`String digest_b) json;
      "wrong nullable type", replace "task_id" (`Bool false) json;
-     "changed canonical input", replace "input" (`Assoc ["count",`Int 2]) json;
+     "changed complete input", replace "input_json" (`String "{\"count\":2}") json;
+     "changed scalar encoding", replace "input_json"
+       (`String "{\"count\":1,\"source\":\"original-source\"}") json;
+     "input must be text", replace "input_json" (`Assoc []) json;
+     "invalid input JSON", replace "input_json" (`String "{") json;
+     "duplicate input keys", replace "input_json" (`String "{\"same\":1,\"same\":2}") json;
+     "nonfinite input", replace "input_json" (`String "NaN") json;
+     "noncanonical input text", replace "input_json" (`String "{ \"count\":1.0}") json;
      "changed nested origin", replace "origin"
        (`Assoc (("unknown",`Bool true)::object_fields (Keeper_approval_origin.to_yojson (origin 1)))) json;
      "changed nested channel", replace "continuation_channel"

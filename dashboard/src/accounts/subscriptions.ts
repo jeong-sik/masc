@@ -21,6 +21,9 @@ import type { View } from './console'
 import { AccountList } from './account-rows'
 import { ProblemNote, Retry, fell, idTail, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
+import { createKeyAdds } from './key-add'
+import type { KeyAddModel } from './key-add'
+import { KeyArea } from './key-area'
 import { createRemovals } from './key-remove'
 import type { Gone, RemovalsModel } from './key-remove'
 import { checkable, integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
@@ -58,6 +61,8 @@ export interface SubscriptionsModel {
   readonly connecting: ConnectModel
   /** The checks of a model of an account by the person the panel shows. */
   readonly checking: ChecksModel
+  /** The giving of an API key by the person the panel shows. */
+  readonly adding: KeyAddModel
   /** The removals of a key account by the person the panel shows. */
   readonly removing: RemovalsModel
   /** Forgets what was read once the console shows no one signed in: the
@@ -136,6 +141,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   const token = (): string | null => session?.csrfToken ?? null
   const connecting = createConnect({ send, leave, token, refresh })
   const checking = createChecks({ send, leave, token, refresh })
+  const adding = createKeyAdds({ send, leave, token, refresh })
   const removing = createRemovals({ send, leave, token, refresh })
 
   // The methods read the state with peek(): a caller inside an effect does
@@ -148,6 +154,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       person = next.userId
       connecting.reset()
       checking.reset()
+      adding.reset()
       removing.reset()
     }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
@@ -167,7 +174,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     view.value = { kind: 'waiting' }
   }
 
-  return { view, load, retry, connecting, checking, removing, stop }
+  return { view, load, retry, connecting, checking, adding, removing, stop }
 }
 
 /** Reads the subscriptions of each person the console comes to show
@@ -199,10 +206,11 @@ function goneWords(gone: Gone | null): string {
   return gone.already ? `계정 ${idTail(gone.accountId)}은 이미 없는 계정이에요.` : `계정 ${idTail(gone.accountId)}을 없앴어요. 이 서버에 그 key 는 없어요.`
 }
 
-function PanelBody({ view, connecting, checking, removing, onRetry }: {
+function PanelBody({ view, connecting, checking, adding, removing, onRetry }: {
   readonly view: PanelView
   readonly connecting: ConnectModel
   readonly checking: ChecksModel
+  readonly adding: KeyAddModel
   readonly removing: RemovalsModel
   readonly onRetry: () => void
 }): VNode {
@@ -218,13 +226,16 @@ function PanelBody({ view, connecting, checking, removing, onRetry }: {
         <${ProblemNote} key=${view.failure.attempts} title="구독을 불러오지 못했어요" failure=${view.failure} />
         <${Retry} label="다시 시도" next=${view.next} onRetry=${onRetry} />
       `
-    case 'read':
+    case 'read': {
+      const takingKey = view.integrations.filter((integration) => integration.takesKey)
       return html`
         <${Offer} integrations=${view.integrations} />
         ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
+        ${takingKey.length === 0 ? null : html`<${KeyArea} model=${adding} integrations=${takingKey} />`}
         <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} />
         <p class="hint" role="status">${goneWords(removing.gone.value)}</p>
       `
+    }
   }
 }
 
@@ -252,7 +263,7 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     <section aria-labelledby="subscriptions-heading">
       <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
       <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} removing=${model.removing} onRetry=${() => { void model.retry() }} />
+      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} adding=${model.adding} removing=${model.removing} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

@@ -408,7 +408,7 @@ let node_update = function
   | Event.Checkpoint_snapshot value -> Checkpoint_snapshot value
   | Event.Provider_event value -> Provider_event value
   | Event.Provider_request_snapshot value -> Provider_request_snapshot value
-  | Event.Provider_response_snapshot value -> Provider_response_snapshot value
+  | Event.Provider_response_snapshot value -> Provider_response_snapshot value.Execution_provider_response_snapshot.response
   | Event.Output_delta value -> Output_delta value
   | Event.Output_snapshot value -> Output_snapshot value
   | Event.Tool_input_delta value -> Tool_input_delta value
@@ -779,7 +779,7 @@ let tool_invocations t =
   let requested_by (view : Journal.node_view) =
     match view.materialized with
     | Journal.Provider_attempt_state {response=None; _} -> Ok []
-    | Journal.Provider_attempt_state {response=Some response; _} ->
+    | Journal.Provider_attempt_state {response=Some {Execution_provider_response_snapshot.response; admission=_}; _} ->
       Ok (List.filter_map (function
         | Llm_provider.Types.ToolUse use -> Some use.name
         | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _

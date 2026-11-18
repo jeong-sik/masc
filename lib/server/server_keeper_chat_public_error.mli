@@ -2,7 +2,8 @@
     Diagnostic text stays with the caller's typed cause and operator log. *)
 type kind = Keeper_chat_public_error.kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
+  | Owner_unavailable | Owner_stopping
   | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal

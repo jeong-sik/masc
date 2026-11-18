@@ -275,6 +275,42 @@ let test_task_skill_resolution_is_config_mismatch () =
     [ "agent core", route_of_agent_core_error; "masc", route_of_masc_error ]
 ;;
 
+(* #38402: an official-client session refusal is not a configuration
+   mismatch. The route and the lane walk answer from the same per-constructor
+   decision: a task reference this client cannot carry, or a continuation
+   bound to another candidate's runtime, moves to the next candidate and
+   rotates; every other refusal stops the lane and exhausts.
+   The expected pair is written per constructor, without a wildcard. *)
+let test_official_client_session_refusal_route_and_walk () =
+  let module Refusal = Keeper_official_client_session_refusal in
+  let expected = function
+    | Refusal.Task_reference_unsupported | Refusal.Continuation_on_other_runtime ->
+      KFR.Rotate_now { rotate = KFR.Admission }, true
+    | Refusal.Gate_continuation_unresumable
+    | Refusal.Gate_context_frontier_missing
+    | Refusal.Gate_canonical_context_changed
+    | Refusal.Claim_held_by_this_process
+    | Refusal.Task_reference_unbound ->
+      KFR.Exhausted_visible_alive { terminal = KFR.Session_claim_refused }, false
+  in
+  List.iter
+    (fun refusal ->
+       let err = Refusal.core_error refusal in
+       let label = Refusal.code refusal in
+       let expected_route, expected_walk = expected refusal in
+       Alcotest.check route (label ^ " agent core route") expected_route
+         (route_of_agent_core_error err);
+       Alcotest.check route (label ^ " masc route") expected_route
+         (route_of_masc_error err);
+       Alcotest.(check bool) (label ^ " lane walk") expected_walk
+         (Masc.Keeper_turn_driver.For_testing.lane_should_retry
+            ~is_last:false ~allow_retry:true ~allow_accept_no_progress_retry:true err);
+       Alcotest.(check bool) (label ^ " stops on the last candidate") false
+         (Masc.Keeper_turn_driver.For_testing.lane_should_retry
+            ~is_last:true ~allow_retry:true ~allow_accept_no_progress_retry:true err))
+    Refusal.all
+;;
+
 let test_provider_config_judges () =
   match
     route_of_agent_core_error
@@ -1007,6 +1043,8 @@ let () =
         ; Alcotest.test_case "overloaded is provider capacity" `Quick test_api_overloaded_is_provider_capacity
         ; Alcotest.test_case "task skill resolution is config mismatch" `Quick
             test_task_skill_resolution_is_config_mismatch
+        ; Alcotest.test_case "official-client session refusal route and walk" `Quick
+            test_official_client_session_refusal_route_and_walk
         ; Alcotest.test_case
             "server error typed variant"
             `Quick

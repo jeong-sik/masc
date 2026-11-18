@@ -6,6 +6,36 @@ module Codec = Internal.Execution_codec_executor
 module Writer = Internal.Execution_lane_writer
 module Scope = Internal.Execution_agent_scope
 module Event = Internal.Execution_event
+
+(* A durable response whose every tool call was admitted under its registered
+   name, in provider order. *)
+let all_admitted_snapshot (response : Llm_provider.Types.api_response)
+  : Agent_core__.Execution_provider_response_snapshot.t =
+  let count =
+    List.length
+      (List.filter
+         (function
+           | Llm_provider.Types.ToolUse _ -> true
+           | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+         response.content)
+  in
+  { Agent_core__.Execution_provider_response_snapshot.response
+  ; admission =
+      { Agent_core__.Execution_provider_response_snapshot.source_map =
+          { Agent_core.Hooks.admitted_tool_sources =
+              List.init count (fun index ->
+                { Agent_core.Hooks.planned_index = index
+                ; source_tool_use_ordinal = index
+                ; name_resolution = Agent_core.Hooks.Registered_name
+                })
+          ; source_tool_use_count = count
+          }
+      ; unavailable_names = []
+      ; unreadable = []
+      }
+  }
+;;
 module Projection = Agent.Execution_projection
 
 let agent_name = "uncollected-turn"
@@ -209,7 +239,7 @@ let test_retires_open_attempt_with_recorded_response () =
   let journal =
     write_journal fixture (fun root ->
       let provider = open_provider root 0 in
-      scope_value (Scope.record_provider_response provider response))
+      scope_value (Scope.record_provider_response provider (all_admitted_snapshot response)))
   in
   check_retired fixture journal ~checkpoint_turn_count:0
 ;;

@@ -353,7 +353,7 @@ is-default = true
     let approval_gate = {gate with Keeper_tool_approval_gate.pre_tool_use=(fun ~identity_tool_index event ->
       (match event with
        | Agent_core.Hooks.PreToolUse {tool_name=name; _} when String.equal name tool_name -> record root "approval"
-       | PreToolUse _ | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
+       | PreToolUse _ | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | PostToolUse _
        | PostToolUseFailure _ | OnToolError _ | OnError _ | OnStop _ -> ());
       gate.pre_tool_use ~identity_tool_index event)} in
     check bool "the real approval policy remains Auto" true

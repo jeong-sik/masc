@@ -161,7 +161,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
     match
       Native.reconcile_after_dispatch binding (fun () ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ~input_metadata:[] input)
+          ~input_metadata:[] ~execution_capture:(Runtime_agent.execution_capture config) input)
     with
     | Ok _ -> fail "the provider request that never completes answered"
     | Error _ ->
@@ -437,7 +437,8 @@ let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tool
        | Error Keeper_owner.Owner_stopping -> true
        | Ok ()
        | Error (Keeper_owner.Reducer_rejected _ | Keeper_owner.Operation_rejected _
-               | Keeper_owner.Store_unavailable _ | Keeper_owner.Owner_closed) -> false);
+               | Keeper_owner.Store_unavailable _ | Keeper_owner.Store_fenced _
+               | Keeper_owner.Owner_closed) -> false);
     check bool "the next process finds it settled, not requeued for a dead journal" true
       (failed_kind restarted = Some Keeper_chat_operation.Interrupted_by_restart))
 

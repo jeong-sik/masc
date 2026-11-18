@@ -591,7 +591,7 @@ let test_keeper_composite_authority ~auth () =
       Sse.subscribe_external ~id:"composite-external-unscoped"
         ~callback:(fun event -> unscoped := event :: !unscoped) ();
       let start base_path =
-        Keeper_registry.mark_turn_started
+        Keeper_registry.mark_turn_started ~turn_id:1
           ~observation_token:(Keeper_turn_observation_token.fresh ())
           ~base_path ~wake:Keeper_registry.Proactive_tick "alpha" in
       let check_composite session ~presence =

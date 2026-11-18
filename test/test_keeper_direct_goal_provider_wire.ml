@@ -77,7 +77,7 @@ let install_catalog ~sw =
 
 let create_goal config =
   match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Inspect both independent results"
-      ~metric:"independently inspected persisted results" ~target_value:"2/2" () with
+      ~measure:(Goal_measure_fixture.done_when "2/2") ~procedure:"independently inspected persisted results" () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 
@@ -106,7 +106,7 @@ let run_case source () =
   let original = prepare config in
   let goal = match source, goal with
     | Revised, Some goal ->
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~target_value:"3/3" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~measure:(Goal_measure_fixture.done_when "3/3") () with
        | Ok (changed, _, _) -> Some changed
        | Error error -> fail (Goal_store.write_error_to_string error))
     | (Current | Measurement_unavailable | Goal_unavailable | Empty), _ -> goal
@@ -133,7 +133,7 @@ let run_case source () =
       AdjustParams {current_params with extra_system_context = assembled.extra_system_context;
         system_prompt_override = Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override assembled}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let received = ref [] in
   let response = Printf.sprintf
@@ -150,7 +150,8 @@ let run_case source () =
       ~provider_cfg ~system_prompt:base_system_prompt
       ~tools:[] in
   let runtime = {runtime with hooks = Some hooks} in
-  let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime owner_request with
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime
+      ~execution_capture:(Runtime_agent.execution_capture runtime) owner_request |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason = Runtime_agent.Completed _; _} as result) -> result
     | Ok _ -> fail "direct request did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -276,7 +277,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
       AdjustParams {current_params with extra_system_context = issued.extra_system_context;
         system_prompt_override = Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let meta = match Masc_test_deps.meta_of_json_fixture
       (`Assoc ["name", `String "goal-loop-wire"; "trace_id", `String "trace-goal-loop-wire"]) with
@@ -320,7 +321,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
       ~system_prompt:"Read the metric, then record the remaining work as a Task."
       ~tools:[read_tool;create_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      owner_request with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) owner_request |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
     | Ok _ -> fail "tool-loop fixture did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -480,7 +481,7 @@ let test_completion_observation_survives_tool_reply approved () =
       AdjustParams {current_params with extra_system_context=issued.extra_system_context;
         system_prompt_override=Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
   let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "authority-wire";
     "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;
@@ -504,7 +505,7 @@ let test_completion_observation_survives_tool_reply approved () =
   let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:meta.name ~provider_cfg
       ~system_prompt:"BASE_AUTHORITY_WIRE" ~tools:[read_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      "Inspect the next artifact." with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) "Inspect the next artifact." |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
     | Ok _ -> fail "authority fixture did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -598,7 +599,7 @@ let test_goal_under_proof_survives_tool_reply ~current_norms () =
       AdjustParams {current_params with extra_system_context=issued.extra_system_context;
         system_prompt_override=Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
   let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "proof-wire";
     "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;
@@ -625,7 +626,7 @@ let test_goal_under_proof_survives_tool_reply ~current_norms () =
   let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"proof-wire" ~provider_cfg ~system_prompt:"BASE_PROOF_WIRE" ~tools:[read_tool] in
   (match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      "Keep working the linked Tasks." with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) "Keep working the linked Tasks." |> Result.map_error Runtime_agent.run_failure_error with
    | Ok {stop_reason=Runtime_agent.Completed _;_} -> ()
    | Ok _ -> fail "proof fixture did not complete"
    | Error error -> fail (Agent_core.Error.to_string error));

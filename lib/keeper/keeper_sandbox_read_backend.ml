@@ -20,8 +20,14 @@ let host_playground_root ~config ~(meta : keeper_meta) =
 let container_root ~(meta : keeper_meta) =
   Keeper_sandbox.container_root meta.name
 
-let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
-    : (string, string) result =
+(* A backend path and the backend-side root it was admitted under. The root
+   is what the opened file is checked against where the file is opened
+   (#35934): the host decides on a path's spelling, the backend's open
+   follows its symlinks, and only the backend sees what that open reached. *)
+type confined_path = { path : string; root : string }
+
+let confined_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
+    : (confined_path, string) result =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Endpoint_owned ->
     let open Result.Syntax in
@@ -35,7 +41,8 @@ let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(m
        Keeper_remote_path.host_to_remote ~base_path:config.base_path
          ~remote_workspace_root ~keeper:meta.name host_path
      with
-     | Ok _ as in_keeper_tree -> in_keeper_tree
+     | Ok path ->
+       Ok { path; root = Keeper_remote_path.normalize_remote remote_workspace_root }
      | Error refusal ->
        (* Only what the keeper's own tree refused may be a path under the
           endpoint's declared roots (#38593): the endpoint's own name, read as
@@ -43,11 +50,11 @@ let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(m
           root is spelled. *)
        let* declared =
          (match read_authority with
-          | None -> Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path
-          | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_declared_path authority host_path))
+          | None -> Keeper_sandbox_remote_lane.declared_endpoint_match ~config ~meta host_path
+          | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_declared_match authority host_path))
        in
        (match declared with
-        | Some endpoint_path -> Ok endpoint_path
+        | Some { Exec_policy_paths.root; path } -> Ok { path; root }
         | None -> Error refusal))
   | Shared_mount ->
     let host_root = host_playground_root ~config ~meta in
@@ -56,25 +63,32 @@ let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(m
       |> strip_trailing_slashes
     in
     let croot = container_root ~meta in
-    if host_norm = host_root then Ok croot
+    if host_norm = host_root then Ok { path = croot; root = croot }
     else if String.starts_with ~prefix:(host_root ^ "/") host_norm then
       let suffix =
         String.sub host_norm
           (String.length host_root + 1)
           (String.length host_norm - String.length host_root - 1)
       in
-      Ok (Filename.concat croot suffix)
+      Ok { path = Filename.concat croot suffix; root = croot }
     else
       Error
         (Printf.sprintf
            "container_path_of_host: %s is not inside playground %s"
            host_norm host_root)
 
+let container_path_of_host_impl ~read_authority ~config ~meta ~host_path =
+  Result.map (fun confined -> confined.path)
+    (confined_path_of_host_impl ~read_authority ~config ~meta ~host_path)
+
 let container_path_of_host ~config ~meta ~host_path =
   container_path_of_host_impl ~read_authority:None ~config ~meta ~host_path
 
 let container_path_of_host_with_authority ~read_authority ~config ~meta ~host_path =
   container_path_of_host_impl ~read_authority:(Some read_authority) ~config ~meta ~host_path
+
+let confined_path_of_host ~config ~meta ~host_path =
+  confined_path_of_host_impl ~read_authority:None ~config ~meta ~host_path
 
 (* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
    argv to avoid coupling the two surfaces. The trailing
@@ -501,37 +515,174 @@ let read_error_to_string = function
   | Read_failed detail
   | Read_refused detail -> detail
 
+(* HIGH-RISK-UNREVIEWED: sandbox read containment (#35934). A human security
+   review is needed before this is relied on.
+
+   The host admits a path by its spelling ({!confined_path_of_host_impl}),
+   but the file is opened inside the backend, whose open follows every
+   symlink on the way. A link inside the tree that names a file outside it
+   passed the host's check and was opened for real. So the decision is made
+   on the object the open returned, where it was opened: the script opens
+   the path once onto stdin, asks the kernel which file that descriptor is
+   ([/proc/self/fd/0], a Linux guest -- every backend here is one), and
+   refuses it unless it lies under the root. The reader then consumes that
+   same descriptor. Nothing is opened twice, so there is no window between
+   the check and the read for a link to be swapped in.
+
+   The root the opened file is compared with is the root as configured (the
+   container mount target, the endpoint's workspace or declared root), never
+   one resolved in the backend at read time. A keeper that can write the
+   root's parent could replace the root with a symlink to [/]; a root
+   resolved per read would then admit every file. No lane resolves its root
+   once when it is bound, so the configured spelling is the trusted value,
+   and the script refuses with [Root_moved] unless the root still resolves
+   to exactly that spelling. A root configured through a symlink is refused
+   the same way: it has to name its resolved directory.
+
+   The open is [command exec <]: a plain [exec <] that fails makes dash
+   exit 2 before [|| exit] runs. After the open the descriptor must still be
+   a regular file, so a FIFO or device swapped in after the [-f] test is
+   refused instead of read. A FIFO swapped in between that test and the open
+   blocks the open itself until the read timeout ends the run: sh has no
+   non-blocking open.
+
+   The script says why it read nothing with exit codes it chooses; the
+   reader classifies by them, never by stderr. The root, the path and the
+   numbers are positional arguments of [sh], never spliced into the script.
+   [exec <] opens the file before the pipeline, whose status is its last
+   command's, so an unreadable file still ends with its own exit. *)
+type confined_open_refusal =
+  | Path_missing
+  | Not_a_regular_file
+  | Open_failed
+  | Outside_root
+  | Opened_file_unresolved
+  | Root_moved
+
+let confined_open_exit = function
+  | Path_missing -> 3
+  | Not_a_regular_file -> 4
+  | Open_failed -> 5
+  | Outside_root -> 6
+  | Opened_file_unresolved -> 7
+  | Root_moved -> 8
+
+let confined_open_refusals =
+  [ Path_missing; Not_a_regular_file; Open_failed; Outside_root; Opened_file_unresolved; Root_moved ]
+
+let confined_open_refusal_of_exit code =
+  List.find_opt (fun refusal -> confined_open_exit refusal = code) confined_open_refusals
+
+let confined_open_exits = List.map confined_open_exit confined_open_refusals
+
+(* [$1] is the root as configured, [$2] the path. A root of [/] admits every
+   file; any other root admits itself and what lies below it. [cd -P] and
+   [pwd -P] are shell builtins, so resolving the root needs no program. *)
+let confined_open_prelude =
+  Printf.sprintf
+    {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; command exec < "$2" || exit %d; o=$(readlink /proc/self/fd/0) || exit %d; [ -f /proc/self/fd/0 ] || exit %d; r=$(cd -P -- "$1" && pwd -P) || exit %d; [ "$r" = "$1" ] || exit %d; case "$1" in /) ;; *) case "$o" in "$1"|"$1"/*) ;; *) exit %d;; esac;; esac; |}
+    (confined_open_exit Path_missing)
+    (confined_open_exit Not_a_regular_file)
+    (confined_open_exit Open_failed)
+    (confined_open_exit Opened_file_unresolved)
+    (confined_open_exit Not_a_regular_file)
+    (confined_open_exit Opened_file_unresolved)
+    (confined_open_exit Root_moved)
+    (confined_open_exit Outside_root)
+
+type confined_read =
+  | Line_window of { start_line : int; max_bytes : int }
+  | Byte_prefix of { max_bytes : int }
+  | Whole_file
+
 (* A window that starts past line 1 streams from that line, so the byte bound
    applies to the window and not to the file's prefix. Bounding the prefix
-   left every line after the first [max_bytes] unreachable to Read.
+   left every line after the first [max_bytes] unreachable to Read. *)
+let confined_read_argv ~(confined : confined_path) read =
+  let body, operands =
+    match read with
+    | Line_window { start_line; max_bytes } ->
+      ( {|if [ "$3" -le 1 ]; then head -c "$4"; else tail -n +"$3" | head -c "$4"; fi|}
+      , [ string_of_int start_line; string_of_int (max 0 max_bytes) ] )
+    | Byte_prefix { max_bytes } ->
+      ({|head -c "$3"|}, [ string_of_int (max 0 max_bytes) ])
+    | Whole_file -> ({|exec cat|}, [])
+  in
+  [ "sh"; "-c"; confined_open_prelude ^ body; "sh"; confined.root; confined.path ]
+  @ operands
 
-   The script runs where the file is, so it is the one place that can say
-   whether the path the caller named exists and is a file. It says so with
-   exit codes it chooses; the reader classifies by them, never by stderr.
-   The path and numbers are positional arguments of [sh], never spliced into
-   the script. [exec <] opens the file before the pipeline, whose status is
-   its last command's, so an unreadable file still exits non-zero. *)
-let read_window_missing_exit = 3
-let read_window_not_a_file_exit = 4
+let read_error_of_refusal ~profile_label ~host_path = function
+  | Path_missing ->
+    Missing_file
+      (Printf.sprintf
+         "%s_read_failed: path_not_found: %s (no file there; verify the path \
+          before calling Read)"
+         profile_label host_path)
+  | Not_a_regular_file ->
+    Not_a_file
+      (Printf.sprintf
+         "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+          file; to list a directory use Execute with ls, e.g. \
+          argv=['ls','-la','%s'])"
+         profile_label host_path host_path)
+  | Open_failed ->
+    Read_failed
+      (Printf.sprintf "%s_read_failed: open_failed: %s" profile_label host_path)
+  | Outside_root ->
+    Read_refused
+      (Printf.sprintf
+         "%s_read_refused: path_resolves_outside_sandbox: %s (a symlink on the \
+          way leads to a file outside the sandbox root)"
+         profile_label host_path)
+  | Opened_file_unresolved ->
+    Read_failed
+      (Printf.sprintf
+         "%s_read_failed: opened_file_unresolved: %s (the backend could not \
+          resolve the opened file or the sandbox root, so containment was \
+          not proven)"
+         profile_label host_path)
+  | Root_moved ->
+    Read_refused
+      (Printf.sprintf
+         "%s_read_refused: sandbox_root_moved: %s (the sandbox root no longer \
+          resolves to the directory it was configured as; a configured root \
+          must name its resolved directory)"
+         profile_label host_path)
 
-let read_window_argv ~start_line ~max_bytes ~path =
-  [ "sh"
-  ; "-c"
-  ; Printf.sprintf
-      {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; exec < "$2" || exit 1; if [ "$1" -le 1 ]; then head -c "$3"; else tail -n +"$1" | head -c "$3"; fi|}
-      read_window_missing_exit
-      read_window_not_a_file_exit
-  ; "sh"
-  ; string_of_int start_line
-  ; path
-  ; string_of_int (max 0 max_bytes)
-  ]
+(* One run of a confined read, classified. [capture] picks text ([Some n])
+   or exact bytes ([None]). *)
+let run_confined_read ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta)
+    ~host_path ~confined ~read ~capture ~timeout_sec () =
+  let profile_label = Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile in
+  match
+    run_command_with_capture ?read_authority ?turn_sandbox_factory
+      ~ok_exit_codes:(0 :: confined_open_exits)
+      ~config ~meta
+      ~command_argv:(confined_read_argv ~confined read)
+      ~max_bytes:capture ~timeout_sec ()
+  with
+  | Error detail -> Error (Read_failed detail)
+  | Ok (Unix.WEXITED 0, body) -> Ok body
+  | Ok (Unix.WEXITED code, _) ->
+    (match confined_open_refusal_of_exit code with
+     | Some refusal -> Error (read_error_of_refusal ~profile_label ~host_path refusal)
+     (* [ok_exit_codes] admits only 0 and the refusal exits. *)
+     | None ->
+       Error
+         (Read_failed
+            (Printf.sprintf "%s_read_failed: unexpected exit %d for %s"
+               profile_label code host_path)))
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+    Error
+      (Read_failed
+         (Printf.sprintf "%s_read_failed: unexpected status for %s"
+            profile_label host_path))
 
 let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
     ~host_path ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
-  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
+  match confined_path_of_host_impl ~read_authority ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
-  | Ok backend_path ->
+  | Ok confined ->
     let profile_label =
       Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
     in
@@ -552,36 +703,9 @@ let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(
 
          Same shape, and same reason, as the bounded [od -N] chunk read in
          Keeper_browser_upload. *)
-      match
-        run_command_with_status ?read_authority ?turn_sandbox_factory
-          ~ok_exit_codes:[ 0; read_window_missing_exit; read_window_not_a_file_exit ]
-          ~config ~meta
-          ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
-          ~max_bytes ~timeout_sec ()
-      with
-      | Error detail -> Error (Read_failed detail)
-      | Ok (Unix.WEXITED 0, body) -> Ok body
-      | Ok (Unix.WEXITED code, _) when code = read_window_missing_exit ->
-        Error
-          (Missing_file
-             (Printf.sprintf
-                "%s_read_failed: path_not_found: %s (no file there; verify the path \
-                 before calling Read)"
-                profile_label host_path))
-      | Ok (Unix.WEXITED code, _) when code = read_window_not_a_file_exit ->
-        Error
-          (Not_a_file
-             (Printf.sprintf
-                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
-                 file; to list a directory use Execute with ls, e.g. \
-                 argv=['ls','-la','%s'])"
-                profile_label host_path host_path))
-      (* [ok_exit_codes] admits only the codes above. *)
-      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
-        Error
-          (Read_failed
-             (Printf.sprintf "%s_read_failed: unexpected status for %s"
-                profile_label host_path))
+      run_confined_read ?read_authority ?turn_sandbox_factory ~config ~meta ~host_path
+        ~confined ~read:(Line_window { start_line; max_bytes })
+        ~capture:(Some max_bytes) ~timeout_sec ()
     in
     if
       Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
@@ -617,11 +741,12 @@ let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(
                 operation argument (Unix.error_message error)))
 
 let read_complete_file ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
-  let open Result.Syntax in
-  let* path = container_path_of_host_impl ~read_authority ~config ~meta ~host_path in
-  let* _, bytes = run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
-      ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
-  Ok bytes
+  match confined_path_of_host_impl ~read_authority ~config ~meta ~host_path with
+  | Error _ as error -> error
+  | Ok confined ->
+    run_confined_read ?read_authority ?turn_sandbox_factory ~config ~meta ~host_path
+      ~confined ~read:Whole_file ~capture:None ~timeout_sec ()
+    |> Result.map_error read_error_to_string
 
 let read_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta)
     ~host_path ~max_bytes ~timeout_sec () =
@@ -629,61 +754,17 @@ let read_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~(meta : keepe
     Error (Read_failed "Raw prefix byte limit must be positive")
   else
   (* Binary capture must retain exact bytes; limiting its text projection would
-     corrupt media. Bound the producing command instead ([head -c] below) and
-     capture with [max_bytes:None] so remote stays on [Binary_bytes] and the
-     runtimes stay on their output-file capture. [read_file] classifies a
-     missing path with sentinel exit codes from the read script; the raw
-     prefix is the same classification without the line window. There is no
-     host [Unix.stat] pre-check: a docker host path may not exist on this
-     host, and a directory already maps to [Not_a_file] via [! -f], so the
-     sentinels are the single classifier on every profile.
+     corrupt media. Bound the producing command instead ([head -c]) and
+     capture with [None] so remote stays on [Binary_bytes] and the runtimes
+     stay on their output-file capture. There is no host [Unix.stat]
+     pre-check: a docker host path may not exist on this host, and a
+     directory already maps to [Not_a_file] via [! -f], so the refusal exits
+     are the single classifier on every profile.
 
      The frozen Turn_runtime binary capture honours [ok_exit_codes], so the
-     sentinel exits classify as [Missing_file] / [Not_a_file] there too. *)
-  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
+     refusal exits classify there too. *)
+  match confined_path_of_host_impl ~read_authority ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
-  | Ok backend_path ->
-    let profile_label =
-      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
-    in
-    let read_with_sentinels () =
-      let missing_exit = read_window_missing_exit
-      and not_a_file_exit = read_window_not_a_file_exit in
-      match
-        run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
-          ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
-          ~command_argv:
-            [ "sh"
-            ; "-c"
-            ; Printf.sprintf
-                {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec < "$1" || exit 1; head -c "$2"|}
-                missing_exit not_a_file_exit
-            ; "sh"
-            ; backend_path
-            ; string_of_int (max 0 max_bytes)
-            ]
-          ~max_bytes:None ~timeout_sec ()
-      with
-      | Error detail -> Error (Read_failed detail)
-      | Ok (Unix.WEXITED 0, bytes) -> Ok bytes
-      | Ok (Unix.WEXITED code, _) when code = missing_exit ->
-        Error
-          (Missing_file
-             (Printf.sprintf "%s_read_failed: path_not_found: %s" profile_label
-                host_path))
-      | Ok (Unix.WEXITED code, _) when code = not_a_file_exit ->
-        Error
-          (Not_a_file
-             (Printf.sprintf
-                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
-                 file; to list a directory use Execute with ls, e.g. \
-                 argv=['ls','-la','%s'])"
-                profile_label host_path host_path))
-      (* [ok_exit_codes] admits only the codes above. *)
-      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
-        Error
-          (Read_failed
-             (Printf.sprintf "%s_read_failed: unexpected status for %s"
-                profile_label host_path))
-    in
-    read_with_sentinels ()
+  | Ok confined ->
+    run_confined_read ?read_authority ?turn_sandbox_factory ~config ~meta ~host_path
+      ~confined ~read:(Byte_prefix { max_bytes }) ~capture:None ~timeout_sec ()

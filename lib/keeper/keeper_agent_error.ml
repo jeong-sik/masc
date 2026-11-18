@@ -222,6 +222,11 @@ let terminal_reason_code_of_core_error = function
     match Keeper_task_skill_resolution_error.of_core_error err with
     | Some error -> Keeper_task_skill_resolution_error.code error
     | None ->
+    (* An official-client session refusal ends with its own code, not as an
+       internal or configuration error (#38402). *)
+    match Keeper_official_client_session_refusal.of_core_error err with
+    | Some refusal -> Keeper_official_client_session_refusal.code refusal
+    | None ->
       (* Typed carrier first; the string parse survives inside
          classify_masc_internal_error for pre-carrier producers
          (RFC-0371 B12). *)

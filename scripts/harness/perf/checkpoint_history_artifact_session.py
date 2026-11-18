@@ -30,7 +30,7 @@ def metadata():
         'total_turns total_input_tokens total_output_tokens total_tokens total_cost_usd '
         'last_turn_ts last_input_tokens last_output_tokens last_total_tokens last_latency_ms '
         'proactive_count_total last_proactive_ts proactive_visible_count_total '
-        'last_visible_proactive_ts').split()}
+        'last_visible_proactive_ts last_turn_id').split()}
     row.update({key: None for key in (
         'usage_cursor last_usage_resolution message_scope_ack_id '
         'latched_reason current_task_id keeper_id').split()})
@@ -54,7 +54,7 @@ def checkpoint(n):
     value.update(version=11, session_id=TRACE, agent_name=NAME, model='test-model',
                  messages=[], usage=usage, turn_count=n, created_at=(1000000000000+n)/1000.,
                  tools=[], disable_parallel_tool_use=False, cache_system_prompt=False,
-                 context={}, mcp_sessions=[], response_format={'type': 'off'})
+                 context={}, response_format={'type': 'off'})
     return json.dumps(value, sort_keys=True).encode()
 
 

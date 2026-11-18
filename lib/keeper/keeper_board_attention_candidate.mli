@@ -450,7 +450,14 @@ type judgment_delivery_outcome =
           whole store aside as one directory and never leaves a tombstone, so
           this is indistinguishable from any other cause of absence and is
           treated the same: the delivery cannot succeed on a retry of the
-          identical request, because there is no row left to update. *)
+          identical request, because there is no row left to update. Only a
+          fully decoded ledger gives this answer. *)
+  | Candidate_unreadable of { rejected_rows : int }
+      (** The candidate is not among the readable rows, and the ledger holds
+          [rejected_rows] rows the decoder refused. One of them may be this
+          candidate, so its absence is not known. Nothing was written; a
+          caller keeps the delivery pending until a repaired ledger answers
+          the identical request. *)
   | Judgment_conflict of
       { recorded : judgment
       ; offered : judgment
@@ -463,6 +470,10 @@ val judgment_conflict_detail : candidate_id:string -> string
 (** The sentence a caller logs or returns when it reports
     [Judgment_conflict] as a failure. *)
 
+val candidate_unreadable_detail : candidate_id:string -> rejected_rows:int -> string
+(** The sentence a caller logs or returns when it reports
+    [Candidate_unreadable] as a failure. *)
+
 val apply_judgment_and_deliver :
   base_path:string ->
   keeper_name:string ->
@@ -473,7 +484,9 @@ val apply_judgment_and_deliver :
     event delivery. [Delivered] means the candidate is [Consumed].
     [Candidate_absent] is explicit rather than folded into [Error] so a caller
     can settle the partition without delivery instead of retrying an update
-    that structurally cannot land. [Judgment_conflict] is explicit so every
+    that structurally cannot land. [Candidate_unreadable] is explicit so a
+    caller holds that one delivery without settling it and without stopping
+    the deliveries behind it. [Judgment_conflict] is explicit so every
     caller decides what one refused judgment does to the work behind it; a
     retry of the identical request returns it again. The comparison also runs
     under the ledger lock, so a judgment another writer commits between this

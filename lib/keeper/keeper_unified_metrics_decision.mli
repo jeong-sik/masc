@@ -24,6 +24,7 @@ val execution_path_of_string : string -> execution_path option
 val append_decision_record :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  keeper_turn_id:int ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->

@@ -296,7 +296,9 @@ let test_frozen_runtime_media_survives_registry_replacement () =
       let config=Runtime_agent.default_config ~media_store ~name:"direct-frozen-media"
         ~provider_cfg:(Option.get !transformed) ~system_prompt:"Frozen preflight boundary" ~tools:[] in
       let config={config with runtime_id=Some "image.sample";input_runtime=Some runtime} in
-      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config [Agent_core.Types.Text "Inspect the image.";image] with
+      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config
+               ~execution_capture:(Runtime_agent.execution_capture config) [Agent_core.Types.Text "Inspect the image.";image]
+             |> Result.map_error Runtime_agent.run_failure_error with
        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="multimodal_input";_})) -> ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "a frozen false or unknown declaration was widened by the replacement");
@@ -306,7 +308,9 @@ let test_frozen_runtime_media_survives_registry_replacement () =
       let config=Runtime_agent.default_config ~media_store ~name:"id-only-media"
         ~provider_cfg:(Option.get !transformed) ~system_prompt:"Existing ID-only boundary" ~tools:[] in
       let config={config with runtime_id=Some "image.sample"} in
-      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config [Agent_core.Types.Text "Inspect the image.";image] with
+      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config
+               ~execution_capture:(Runtime_agent.execution_capture config) [Agent_core.Types.Text "Inspect the image.";image]
+             |> Result.map_error Runtime_agent.run_failure_error with
        | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="multimodal_input";_})) -> ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "ID-only caller stopped honoring the live runtime declaration");

@@ -1,7 +1,5 @@
 (** TUI HTTP client — Dashboard API wrapper over Masc_http_client. *)
 
-let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
-
 (* A request, a mailbox wait or a loop gap at least this long is written to
    the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
    time. A request that took ten seconds of elapsed and none of CPU was
@@ -389,14 +387,10 @@ let io_domain : Masc_tui_io_domain.t option Atomic.t = Atomic.make None
 let start_io_domain ~sw ~env =
   Atomic.set io_domain (Some (Masc_tui_io_domain.start ~sw ~env))
 
-let io_domain_not_started =
-  "masc-tui: a request was sent before its request domain started (a \
-   bootstrap-order bug)"
-
-let on_io_domain send =
+let on_io_domain ~not_started send =
   match Atomic.get io_domain with
   | Some domain -> Masc_tui_io_domain.run domain send
-  | None -> Error io_domain_not_started
+  | None -> Error not_started
 
 (* What this file uses of the library, and where each call runs. The module
    keeps the library's name, so a call site here names this list: the six
@@ -420,7 +414,7 @@ module Masc_http_client : sig
     url:string ->
     headers:(string * string) list ->
     unit ->
-    (int * string, string) result
+    (int * string, Masc_tui_transport_failure.t) result
 
   val get_response_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -429,7 +423,7 @@ module Masc_http_client : sig
     url:string ->
     headers:(string * string) list ->
     unit ->
-    (response, string) result
+    (response, Masc_tui_transport_failure.t) result
 
   val post_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -438,7 +432,7 @@ module Masc_http_client : sig
     headers:(string * string) list ->
     body:string ->
     unit ->
-    (int * string, string) result
+    (int * string, Masc_tui_transport_failure.t) result
 
   val post_response_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -447,7 +441,7 @@ module Masc_http_client : sig
     headers:(string * string) list ->
     body:string ->
     unit ->
-    (response, string) result
+    (response, Masc_tui_transport_failure.t) result
 
   val patch_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -456,7 +450,7 @@ module Masc_http_client : sig
     headers:(string * string) list ->
     body:string ->
     unit ->
-    (int * string, string) result
+    (int * string, Masc_tui_transport_failure.t) result
 
   val delete_sync :
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -465,7 +459,7 @@ module Masc_http_client : sig
     url:string ->
     headers:(string * string) list ->
     unit ->
-    (int * string, string) result
+    (int * string, Masc_tui_transport_failure.t) result
 
   val post_stream :
     retention:'body Pool.body_retention ->
@@ -476,7 +470,7 @@ module Masc_http_client : sig
     body:string ->
     on_chunk:(string -> unit) ->
     unit ->
-    ('body Pool.stream_outcome, string) result
+    ('body Pool.stream_outcome, Masc_tui_transport_failure.t) result
 
   val get_stream :
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -486,7 +480,7 @@ module Masc_http_client : sig
     ?on_response:(status:int -> headers:(string * string) list -> unit) ->
     on_chunk:(string -> unit) ->
     unit ->
-    (unit Pool.stream_outcome, string) result
+    (unit Pool.stream_outcome, Masc_tui_transport_failure.t) result
 end = struct
   type response = Masc_http_client.response = {
     status : int;
@@ -518,48 +512,61 @@ end = struct
     | Ok (Pool.Streamed { status; _ }) -> Scope.Answered { status; body = "" }
     | Error _ -> Scope.Unanswered
 
+  module Failure = Masc_tui_transport_failure
+
+  let client result =
+    Result.map_error (fun failure -> Failure.Client failure) result
+
+  (* Every buffered call: the library's typed request, on the request
+     domain, with the failure kept as a case for the caller to say. *)
+  let send ?clock ?timeout_sec ?max_body_bytes ~method_ ~url ~headers ?body () =
+    on_io_domain ~not_started:Failure.Request_domain_not_started (fun () ->
+      Masc_http_client.request ?clock ?timeout_sec ?max_body_bytes ~method_ ~url
+        ~headers ?body ()
+      |> client)
+
+  let status_and_body result =
+    Result.map (fun { status; body; headers = _ } -> (status, body)) result
+
   let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
     scoped ~url ~headers ~answer:pair_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.get_sync ?clock ?timeout_sec ?max_body_bytes ~url
-          ~headers ()))
+      send ?clock ?timeout_sec ?max_body_bytes ~method_:`GET ~url ~headers ()
+      |> status_and_body)
 
   let get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
     scoped ~url ~headers ~answer:response_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.get_response_sync ?clock ?timeout_sec ?max_body_bytes
-          ~url ~headers ()))
+      send ?clock ?timeout_sec ?max_body_bytes ~method_:`GET ~url ~headers ())
 
   let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
     scoped ~url ~headers ~answer:pair_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.post_sync ?clock ?timeout_sec ~url ~headers ~body ()))
+      send ?clock ?timeout_sec ~method_:`POST ~url ~headers ~body ()
+      |> status_and_body)
 
   let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
     scoped ~url ~headers ~answer:response_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.post_response_sync ?clock ?timeout_sec ~url ~headers
-          ~body ()))
+      send ?clock ?timeout_sec ~method_:`POST ~url ~headers ~body ())
 
   let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
     scoped ~url ~headers ~answer:pair_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.patch_sync ?clock ?timeout_sec ~url ~headers ~body ()))
+      send ?clock ?timeout_sec ~method_:`PATCH ~url ~headers ~body ()
+      |> status_and_body)
 
   let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
     scoped ~url ~headers ~answer:pair_answer (fun headers ->
-      on_io_domain (fun () ->
-        Masc_http_client.delete_sync ?clock ?timeout_sec ?body ~url ~headers ()))
+      send ?clock ?timeout_sec ~method_:`DELETE ~url ~headers ?body ()
+      |> status_and_body)
 
   let post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
     scoped ~url ~headers ~answer:stream_answer (fun headers ->
-      Masc_http_client.post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers
-        ~body ~on_chunk ())
+      Masc_http_client.request_stream ~retention ~clock ~idle_timeout_sec
+        ~method_:`POST ~url ~headers ~body ~on_chunk ()
+      |> client)
 
   let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
     scoped ~url ~headers ~answer:stream_answer (fun headers ->
-      Masc_http_client.get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response
-        ~on_chunk ())
+      Masc_http_client.request_stream ~retention:Pool.Discard_body ~clock
+        ~idle_timeout_sec ~method_:`GET ~url ~headers ?on_response ~on_chunk ()
+      |> client)
 end
 
 (** Send an HTTP GET request and return the structured status/body pair. *)
@@ -606,7 +613,7 @@ let http_get_with_body_limit ~max_body_bytes ~(host : string) ~(port : int) ~(pa
       ~timeout_sec:(request_timeout_sec ()) ?max_body_bytes ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+  | Error e -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url e)
 
 let http_get = http_get_with_body_limit ~max_body_bytes:None
 
@@ -628,7 +635,7 @@ let fetch_link_preview_body ~(url : string) : (string, string) result =
       Masc_http_client.get_response_sync ?clock:(request_clock ())
         ~timeout_sec:(request_timeout_sec ()) ~url ~headers ()
     with
-    | Error e -> Error (report_err "link preview GET failed" e)
+    | Error failure -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url failure)
     | Ok { Masc_http_client.status; body; _ } ->
         if status >= 200 && status < 300 then Ok body
         else Error (Printf.sprintf "link preview: HTTP %d" status)
@@ -647,7 +654,7 @@ let http_post_request ~timeout_sec ~headers ~(host : string) ~(port : int)
       ?timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
+  | Error e -> Error (Masc_tui_transport_failure.report ~verb:"POST" ~url e)
 
 let http_post_with_timeout ~timeout_sec ~headers ~host ~port ~path ~body =
   http_post_request ~timeout_sec:(Some timeout_sec) ~headers ~host ~port ~path ~body
@@ -749,7 +756,7 @@ let http_get_response_with_body_limit ~timeout_sec ~max_body_bytes ~(host : stri
       ~headers:(headers @ auth_headers ()) ()
   with
   | Ok response -> Ok response
-  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+  | Error e -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url e)
 
 let http_get_response ~host ~port ~path ~headers =
   http_get_response_with_body_limit ~timeout_sec:(Some (request_timeout_sec ()))
@@ -865,8 +872,8 @@ let http_delete ?(body = None) ~(host : string) ~(port : int) ~(path : string) (
   match Masc_http_client.delete_sync ?clock:(request_clock ())
           ~timeout_sec:(request_timeout_sec ()) ?body ~url ~headers:(auth_headers ()) () with
   | Ok answer -> Ok answer
-  | Error detail ->
-      Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
+  | Error failure ->
+      Error (Masc_tui_transport_failure.report ~verb:"DELETE" ~url failure)
 
 (* An inventory read is bound like the issue and revoke beside it: after the
    identity preflight, a server swapped onto the same port answers 409 rather
@@ -940,9 +947,10 @@ let get_json_bound ~credential ~host ~port ~path =
   let url = url_of ~host ~port ~path in
   let response = timed ~verb:"GET" ~path (fun () ->
     Masc_http_client.get_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers ()) in
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers ()
+    |> Result.map_error (Masc_tui_transport_failure.report ~verb:"GET" ~url)) in
   match response with
-  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail)
+  | Error detail -> Error detail
   | Ok (status_code,body) -> decode_json ~allow_empty:false ~status_code ~body
 let lane_broadcast_principal_bound ~credential ~host ~port =
   let ( let* ) = Result.bind in
@@ -957,9 +965,10 @@ let post_json_bound ~credential ~host ~port ~path ~body =
   let url = url_of ~host ~port ~path in
   let response = timed ~verb:"POST" ~path (fun () ->
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()) in
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()
+    |> Result.map_error (Masc_tui_transport_failure.report ~verb:"POST" ~url)) in
   match response with
-  | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+  | Error detail -> Error detail
   | Ok (status_code,body) -> decode_json ~allow_empty:true ~status_code ~body
 
 (** Model discovery, preparation and serial verification own their completion.
@@ -1036,9 +1045,10 @@ let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared 
   let url = url_of ~host ~port ~path in
   let response = timed ~verb:"POST" ~path (fun () ->
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()) in
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()
+    |> Result.map_error (Masc_tui_transport_failure.report ~verb:"POST" ~url)) in
   let* status, json = match response with
-    | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+    | Error detail -> Error detail
     | Ok (409, text) ->
       (match Yojson.Safe.from_string text with
        | json -> Ok (409, json)
@@ -1177,8 +1187,9 @@ let post_keeper_chat ?expected_workspace ?(admission_intent = Masc_tui_keeper_ch
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ()
   with
-  | Error detail ->
-      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
+  | Error failure ->
+      Error (Masc_tui_keeper_chat_projection.Transport_error
+               (Masc_tui_transport_failure.report ~verb:"POST" ~url failure))
   | Ok (status, response_body)
     when not (Masc.Tui_decode.is_success_http_status status) ->
       Error
@@ -1223,8 +1234,9 @@ let post_keeper_chat_streaming ?expected_workspace ?(admission_intent = Masc_tui
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body ~on_chunk ()
   with
-  | Error detail ->
-      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
+  | Error failure ->
+      Error (Masc_tui_keeper_chat_projection.Transport_error
+               (Masc_tui_transport_failure.report ~verb:"POST" ~url failure))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Masc_tui_keeper_chat_projection.Http_error { status; body })
   | Ok (Masc_http_client.Pool.Streamed { body; _ }) ->
@@ -1732,7 +1744,7 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
            (("Accept", "application/json, text/event-stream") :: auth_headers ()))
       ~body ()
   with
-  | Error detail -> Error (report_err "MCP initialize failed" detail)
+  | Error failure -> Error (Masc_tui_transport_failure.report ~verb:"POST" ~url failure)
   | Ok { Masc_http_client.status; body; _ }
     when not (Masc.Tui_decode.is_success_http_status status) ->
       Error (named_refusal "MCP initialize" ~status ~body)
@@ -1877,7 +1889,7 @@ let observe_runtime_events_with_scopes ?play ~machine ~browser ~on_identity ~clo
   | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | exception Retry_observer_without_cursor (requested, detail) ->
       Error (Retry_without_cursor (requested, detail))
-  | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
+  | Error failure -> Error (Transport_failed (Masc_tui_transport_failure.report ~verb:"GET" ~url failure))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
@@ -1936,7 +1948,7 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
       ~on_response:checked_response ~on_chunk ()
   with
   | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
-  | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
+  | Error failure -> Error (Transport_failed (Masc_tui_transport_failure.report ~verb:"GET" ~url failure))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
@@ -2015,9 +2027,10 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
         { status
         ; detail = Printf.sprintf "Execute output stream: HTTP %d (refusal body did not finish in time)" status
         })
-  | `Returned (Error detail) ->
+  | `Returned (Error failure) ->
+      let detail = Masc_tui_transport_failure.report ~verb:"GET" ~url failure in
       (match !refused_status with
-       | None -> Error (Execute_transport_failed (report_err "Execute output stream failed" detail))
+       | None -> Error (Execute_transport_failed detail)
        | Some status ->
            Error (Execute_http_refused
              { status
@@ -3395,8 +3408,8 @@ let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
       ~headers:(("Content-Type", "application/octet-stream") :: auth_headers ())
       ~body:bytes ()
   with
-  | Error detail ->
-      Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+  | Error failure ->
+      Error (Masc_tui_transport_failure.report ~verb:"POST" ~url failure)
   | Ok (status_code, body) -> (
       match decode_json ~allow_empty:false ~status_code:status_code ~body with
       | Error _ as error -> error
@@ -3432,7 +3445,10 @@ let fetch_goal_confirmation ~credential ~expected_instance ~host ~port ~goal_id 
     match request_clock () with
     | None -> Error "Goal confirmation request clock is unavailable"
     | Some clock ->
-      let result = on_io_domain (fun () ->
+      let unanswered detail = Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail in
+      on_io_domain
+        ~not_started:(unanswered Masc_tui_transport_failure.request_domain_not_started)
+        (fun () ->
         let body = Buffer.create 1024 in
         let on_response ~status ~headers =
           match goal_confirmation_header_failure ~expected_instance ~status ~headers with
@@ -3441,13 +3457,12 @@ let fetch_goal_confirmation ~credential ~expected_instance ~host ~port ~goal_id 
         match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
           Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
             ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
-        | Error `Timeout -> Error "Goal confirmation response timed out"
-        | Ok (Error detail) -> Error detail
+        | Error `Timeout -> Error (unanswered "Goal confirmation response timed out")
+        | Ok (Error failure) -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url failure)
         | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
           Ok Masc_http_client.{status; headers; body}
         | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
           Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
-      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
   let convert = function
     | Confirmation_server_changed -> Masc_tui_planning_detail.Server_changed credential.bound_owner
     | Confirmation_status status -> Masc_tui_planning_detail.Read_http_error (credential.bound_owner, status)
@@ -3503,7 +3518,10 @@ let fetch_goal_candle ~credential ~expected_instance ~host ~port ~goal_id =
       (* [get_stream] exposes headers before a body that may never finish.
          Run the short read on the request domain with the same total deadline
          as other GETs, and close the connection when a header refuses it. *)
-      let result = on_io_domain (fun () ->
+      let unanswered detail = Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail in
+      on_io_domain
+        ~not_started:(unanswered Masc_tui_transport_failure.request_domain_not_started)
+        (fun () ->
         let body = Buffer.create 1024 in
         let on_response ~status ~headers =
           match goal_candle_header_failure ~expected_instance ~status ~headers with
@@ -3512,13 +3530,12 @@ let fetch_goal_candle ~credential ~expected_instance ~host ~port ~goal_id =
         match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
           Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
             ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
-        | Error `Timeout -> Error "Candle response timed out"
-        | Ok (Error detail) -> Error detail
+        | Error `Timeout -> Error (unanswered "Candle response timed out")
+        | Ok (Error failure) -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url failure)
         | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
           Ok Masc_http_client.{status; headers; body}
         | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
           Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
-      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
   try
     match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
     | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) ->
@@ -3920,7 +3937,7 @@ let observe_system_log_stream ~clock ~(host : string) ~(port : int) ~(instance :
       ~on_response ~on_chunk ()
   with
   | exception Invalid_stream_response detail -> "log stream: " ^ detail
-  | Error detail -> report_err "Log stream failed" detail
+  | Error failure -> Masc_tui_transport_failure.report ~verb:"GET" ~url failure
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       named_refusal "log stream" ~status ~body
   | Ok (Masc_http_client.Pool.Streamed _) -> "log stream ended"
@@ -4543,7 +4560,7 @@ let post_preset_save ~(host : string) ~(port : int) ~(name : string)
          after_auth_refused ();
          answer
        | Ok answer -> Ok answer
-       | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e))
+       | Error e -> Error (Masc_tui_transport_failure.report ~verb:"POST" ~url e))
   in
   match !withdrawn with
   | Some failure -> Error failure
@@ -4692,7 +4709,7 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
       ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body:"{}" ~on_chunk ()
   with
-  | Error detail -> Error detail
+  | Error failure -> Error (Masc_tui_transport_failure.report ~verb:"POST" ~url failure)
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (named_refusal "github-login" ~status ~body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
@@ -4877,10 +4894,14 @@ let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.se
           | Error detail -> reject detail
           | Ok next -> reading := Ok next; on_event event)
       (Sse_wire.feed decoder chunk) in
+  let url = url_of ~host ~port ~path in
   try match Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url:(url_of ~host ~port ~path)
+      ~url
       ~headers:(json_headers (("Accept","text/event-stream")::auth_headers ())) ~on_chunk () with
-  | Error detail -> (match !reading with Error detail -> Error detail | Ok _ -> Error detail)
+  | Error failure ->
+    (match !reading with
+     | Error detail -> Error detail
+     | Ok _ -> Error (Masc_tui_transport_failure.report ~verb:"GET" ~url failure))
   | Ok (Masc_http_client.Pool.Buffered {status;body;_}) -> Error (refusal ~status_code:status ~body)
   | Ok (Masc_http_client.Pool.Streamed _) ->
     Result.bind !reading Decode.finish_ask_followup_stream

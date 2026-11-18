@@ -118,13 +118,19 @@ let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
    bookkeeping namespace. This does not look at the keeper's tree: callers ask
    it only for a path the tree refused, so a name the tree accepts keeps its
    meaning whatever a declared root's spelling covers. *)
-let declared_path_of_endpoint (endpoint : Exec_ssh_endpoint.t) path =
+let declared_match_of_endpoint (endpoint : Exec_ssh_endpoint.t) path =
   if Filename.is_relative path
   then None
-  else Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path
+  else Exec_policy_paths.extra_root_match ~extra_roots:endpoint.allowed_paths path
 ;;
 
-let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) path =
+let declared_path_of_endpoint endpoint path =
+  Option.map
+    (fun (m : Exec_policy_paths.extra_root_match) -> m.path)
+    (declared_match_of_endpoint endpoint path)
+;;
+
+let declared_endpoint_match ~(config : Workspace.config) ~(meta : keeper_meta) path =
   match meta.sandbox_profile with
   | Docker | Micro_vm -> Ok None
   | Remote_ssh ->
@@ -135,7 +141,13 @@ let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) pa
         Keeper_sandbox_ssh.resolve_endpoint
           ~base_path:config.base_path ~keeper_name:meta.name
       in
-      Ok (declared_path_of_endpoint endpoint path)
+      Ok (declared_match_of_endpoint endpoint path)
+;;
+
+let declared_endpoint_path ~config ~meta path =
+  Result.map
+    (Option.map (fun (m : Exec_policy_paths.extra_root_match) -> m.path))
+    (declared_endpoint_match ~config ~meta path)
 ;;
 
 (* A file tool names a path with [path] and an optional [cwd]. Only an
@@ -268,6 +280,10 @@ let read_authority_route authority =
   | Some declaration ->
     `Assoc ["kind", `String "ssh"; "endpoint", `String (Exec_ssh_endpoint.to_toml declaration)]
   | None -> microvm_endpoint_route authority.endpoint
+
+let read_authority_declared_match authority path = match authority.declaration with
+  | None -> None
+  | Some declaration -> declared_match_of_endpoint declaration path
 
 let read_authority_declared_path authority path = match authority.declaration with
   | None -> None

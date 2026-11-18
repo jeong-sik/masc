@@ -77,7 +77,7 @@ let project ~find_node event =
      | Agent_run _ | Provider_attempt _ | Output_block _ | Tool_invocation _ -> Ok None)
   | Node_updated {node_id;update=Turn_ready tool_names} ->
     turn_progress node_id (fun ~agent_name ~turn -> TurnReady {agent_name;turn;tool_names})
-  | Node_updated {node_id;update=Provider_response_snapshot response} ->
+  | Node_updated {node_id;update=Provider_response_snapshot {Execution_provider_response_snapshot.response;admission=_}} ->
     (match Option.bind response.telemetry (fun telemetry -> telemetry.Llm_provider.Types.provider_kind) with
      | None -> Ok None
      | Some provider_kind ->

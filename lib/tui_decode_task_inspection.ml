@@ -2,8 +2,7 @@ module Verification_ids = Set.Make (String)
 open Result.Syntax
 type detail =
   { task : Masc_domain.task
-  ; canonical_goal_id : string option
-  ; diagnostics : Masc_domain.task_decode_diagnostics }
+  ; canonical_goal_id : string option }
 let validate json = Agent_core.Execution_json.validate ~context:"original Task inspection" json
   |> Result.map_error Agent_core.Execution_json.validation_error_to_string
 let nonblank = function
@@ -21,11 +20,11 @@ let detail ?previous ~task_id json =
     | Some `Null -> Ok None
     | Some json -> nonblank json |> Result.map Option.some
     | None -> Error "Task detail lacks its canonical Goal observation" in
-  let* task,diagnostics = Masc_domain.task_of_yojson_with_diagnostics row in
+  let* task = Masc_domain.task_of_yojson row in
   let task=match previous with
     | Some previous when Masc_domain.equal_task previous.task task -> previous.task
     | Some _ | None -> task in
-  Ok {task;canonical_goal_id;diagnostics}
+  Ok {task;canonical_goal_id}
 let source = function
   | `String "activity-events" -> Ok Tui_decode.Task_activity
   | `String "events" -> Ok Tui_decode.Task_audit

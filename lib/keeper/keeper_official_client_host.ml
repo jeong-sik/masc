@@ -1935,7 +1935,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                    content_blocks=None;abort_turn=None;on_response_sent=None} in
              capture original
            | PostToolUse _ | PostToolUseFailure _ | BeforeTurn _ | BeforeTurnParams _
-           | AfterTurn _ | PreToolUse _ | OnStop _ | OnError _ | OnToolError _ -> ());
+           | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | OnStop _ | OnError _ | OnToolError _ -> ());
           match hooks.post_tool_use with
           | None -> Agent_core.Hooks.Continue
           | Some hook -> hook event in

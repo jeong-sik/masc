@@ -743,7 +743,7 @@ let test_per_candidate_image_projection () =
           (match event with
            | Agent_core.Hooks.PreToolUse {tool_name;_} ->
              if tool_name=image_name then incr read_dispatches
-           | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
+           | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | PostToolUse _
            | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> ());
           Keeper_image_read.admission_hook ~accepts_image_input event)} in
         let options = {Agent_core.Agent.default_options with provider_config=Some provider;

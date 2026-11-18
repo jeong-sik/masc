@@ -6,7 +6,8 @@
 
 type kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
+  | Owner_unavailable | Owner_stopping
   | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
@@ -31,15 +32,16 @@ type pre_acceptance =
           earlier attempt under the same id may still have been admitted. *)
   | Acceptance_unknown
       (** The failure may follow a durable admission. The TUI keeps the
-          operation held and re-POSTs the same id until a stream reports a
-          terminal outcome. *)
+          operation held and reads it back by its id before it acts again. *)
 
 val pre_acceptance : kind -> pre_acceptance
 (** [Owner_unavailable] is [Not_accepted]: the request never reached an
     Owner, because the inventory was not installed or the keeper's Owner was
-    absent or failed to start. [Store_unavailable] stays
-    [Acceptance_unknown]: the Owner may have committed before its store
-    failed. *)
+    absent or failed to start. [Store_fenced] is [Not_accepted]: a fence an
+    earlier fault raised refused the attempt before it touched the store.
+    [Store_unreadable] is [Not_accepted]: a read failed before any write.
+    [Store_commit_unknown] stays [Acceptance_unknown]: the Owner may have
+    committed before its store failed. *)
 
 val of_command_error : Keeper_owner_registry.command_error -> kind
 (** The kind every surface answers a typed Owner command failure with: the

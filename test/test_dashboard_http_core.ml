@@ -11,8 +11,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
        passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
          | Ok value -> value | Error detail -> Alcotest.fail detail);
-       due_date=None;title="Completed funding fixture";metric=Some "completed";
-       target_value=Some "1";linked_task_ids=task_ids}}
+       due_date=None;title="Completed funding fixture";measure=Goal_measure_fixture.done_when "1";
+       procedure="completed";linked_task_ids=task_ids}}
   ; {Candle_event.at;body=Candle_event.Payout_owed
       {goal_id=identity.goal_id;request_id=identity.request_id;
        verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
@@ -2495,7 +2495,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
@@ -2518,7 +2518,7 @@ let test_cached_planning_reads_a_new_goal () =
       check int "planning was read before creation" 0 (List.length (goals ()));
       let goal, _, _ =
         match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
-                ~title:"New Goal" ~metric:"goals" ~target_value:"1" () with
+                ~title:"New Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
         | Ok result -> result
         | Error error -> fail (Goal_store.write_error_to_string error)
       in
@@ -2560,7 +2560,7 @@ let test_a_verification_ledger_write_reaches_the_goal_observer () =
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let goal, _, _ =
         match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
-                ~title:"Ledger Goal" ~metric:"goals" ~target_value:"1" () with
+                ~title:"Ledger Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
         | Ok result -> result
         | Error error -> fail (Goal_store.write_error_to_string error)
       in
@@ -2590,7 +2590,7 @@ let test_cached_planning_reads_new_goal_history () =
       in
       let goal, _, _ =
         match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
-                ~title:"Departed Goal" ~metric:"goals" ~target_value:"1" () with
+                ~title:"Departed Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
         | Ok result -> result
         | Error error -> fail (Goal_store.write_error_to_string error)
       in
@@ -2696,7 +2696,7 @@ let test_goal_source_failure_is_not_empty () =
   check int "fresh tree store is empty" 0
     (tree () |> member "tree" |> to_list |> List.length);
   let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Source availability"
-      ~metric:"visible goals" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"visible goals" () with
     | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let primary = Goal_store.goals_path config in
@@ -2774,7 +2774,7 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
   let get_ok = function Ok value -> value | Error detail -> fail detail in
   let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
       (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Linked source"
-         ~metric:"tasks" ~target_value:"1" ())) in
+         ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"tasks" ())) in
   let created = match Workspace.add_task_with_result ~goal_id:goal.id config
       ~title:"Linked task" ~priority:3 ~description:"evidence" with
     | Ok created -> created
@@ -2825,7 +2825,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   let get_ok = function Ok value -> value | Error detail -> fail detail in
   let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
       (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Measured dashboard Goal"
-         ~metric:"passing cases" ~target_value:"10" ())) in
+         ~measure:(Goal_measure_fixture.done_when "10") ~procedure:"passing cases" ())) in
   let goal_id = goal.Goal_store.id in
   let open Yojson.Safe.Util in
   let find_goal nodes =
@@ -2899,7 +2899,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
   ignore (get_ok (Result.map_error Goal_store.write_error_to_string
     (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id
-       ~title:"Measured dashboard Goal" ~target_value:"20" ())));
+       ~title:"Measured dashboard Goal" ~measure:(Goal_measure_fixture.done_when "20") ())));
   let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
   check string "stale projection preserves the original proof"
     (Yojson.Safe.to_string (member "completion" proven))

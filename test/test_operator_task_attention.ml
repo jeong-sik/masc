@@ -99,8 +99,9 @@ let test_a_holders_cancel_is_not_an_operator_row () =
         (Some stop_reason) reason;
       Alcotest.(check (option string)) "and the producer's handoff"
         (Some producer_handoff_summary)
-        (Option.map (fun (context : D.task_handoff_context) -> context.summary)
-           handoff_context)
+        (match handoff_context with
+         | Some (D.Handoff_decoded context) -> Some context.summary
+         | Some (D.Handoff_unreadable _) | None -> None)
     | _ -> Alcotest.fail "the holder's cancel must end the task")
 
 (* A completion that was submitted and has no verdict is a row. The backlog

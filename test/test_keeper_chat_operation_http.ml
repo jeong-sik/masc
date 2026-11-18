@@ -1038,11 +1038,18 @@ let test_owner_error_has_safe_public_response () =
   let cause = Keeper_owner_registry.Command_rejected (Keeper_owner.Store_unavailable detail) in
   let status,body = Api.For_testing.command_error_response cause in
   check bool "store refusal keeps its HTTP status" true (status=`Service_unavailable);
-  check string "typed store code" "store_unavailable"
+  check string "typed store code" "store_commit_unknown"
     Yojson.Safe.Util.(body |> member "error" |> to_string);
   assert_private_error_absent body;
   check bool "the original typed diagnostic still renders internally" true
-    (error_contains (Keeper_owner_registry.command_error_to_string cause) detail)
+    (error_contains (Keeper_owner_registry.command_error_to_string cause) detail);
+  (* A fence refuses before the store is touched; it says so on the wire. *)
+  let fenced = Keeper_owner_registry.Command_rejected (Keeper_owner.Store_fenced detail) in
+  let status,body = Api.For_testing.command_error_response fenced in
+  check bool "a fenced store keeps its HTTP status" true (status=`Service_unavailable);
+  check string "fenced store code" "store_fenced"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body
 ;;
 
 let test_journal_error_has_safe_public_response () =

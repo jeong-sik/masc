@@ -889,7 +889,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                   ~system_prompt:prompt
                   ~tools
               in
-              (match Runtime_agent.run ~sw ~net ~config prompt with
+              (match
+                 Runtime_agent.run ~sw ~net ~config
+                   ~execution_capture:(Runtime_agent.execution_capture config)
+                   prompt
+                 |> Result.map_error Runtime_agent.run_failure_error
+               with
                | Error
                    ( Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
                    | Agent_core.Error.Api (Agent_core.Retry.Timeout _) ) ->

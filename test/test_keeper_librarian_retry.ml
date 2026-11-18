@@ -805,14 +805,14 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
 
 (* One Librarian round with the keeper acting during its provider turn: seed A
    and B, read [answer] against that snapshot, let the keeper replace the facts
-   with [keeper_facts] and record [keeper_events], then commit the answer and
-   write its Revised events the way the runtime does, from the revisions the
-   commit carried out. *)
+   with [keeper_facts] or supersede one with [keeper_supersede], then commit
+   the answer. The revisions come back as the journal records them: the
+   commit's own row is their only record (#37433). *)
 let librarian_round
       ~name
       ~answer
       ?keeper_facts
-      ?(keeper_events = [])
+      ?keeper_supersede
       ?(inspect = fun ~keepers_dir:_ ~keeper_id:_ -> ())
       ()
   =
@@ -820,9 +820,6 @@ let librarian_round
   Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
     let keeper_id = name in
     let require = function Ok value -> value | Error detail -> fail detail in
-    let no_append_error label errors =
-      check (list string) label [] (List.map Events.append_error_to_string errors)
-    in
     let seeded =
       Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
         ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
@@ -844,8 +841,17 @@ let librarian_round
             |> require
             : Current.t))
       keeper_facts;
-    no_append_error "keeper events written"
-      (Events.append_all ~keepers_dir ~keeper_id keeper_events);
+    Option.iter
+      (fun (superseded_memory_id, successor) ->
+         match
+           Current.supersede_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
+             ~keepers_dir ~keeper_id ~now:150.
+             ~source:{ kind = Current.Explicit_write; trace_id = "trace-keeper" }
+             ~superseded_memory_id successor
+         with
+         | Ok _ -> ()
+         | Error _ -> fail "the keeper's supersede did not commit")
+      keeper_supersede;
     let disposition =
       Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
@@ -854,25 +860,10 @@ let librarian_round
         ()
       |> require
     in
-    no_append_error "librarian events written"
-      (Events.append_all ~keepers_dir ~keeper_id
-         (List.map
-            (fun (revision : Memory.revision) : Events.event ->
-               { recorded_at = 200.
-               ; memory_id = revision.superseded
-               ; trace_id = "trace-selection"
-               ; kind = Events.Revised { superseded_by = revision.superseded_by }
-               })
-            disposition.revisions_applied));
-    let events =
-      match Events.read ~keepers_dir ~keeper_id with
-      | Error error -> fail (Events.file_read_error_to_string error)
-      | Ok rows ->
-        List.map
-          (function
-            | _, Ok event -> event
-            | _, Error error -> fail (Events.read_error_to_string error))
-          rows
+    let revisions =
+      match Current.read_commit_lineage ~keepers_dir ~keeper_id with
+      | Ok lineage -> lineage.Current.revisions
+      | Error detail -> fail detail
     in
     let absorbed_rows =
       match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
@@ -880,7 +871,7 @@ let librarian_round
       | Ok lines -> List.length lines
     in
     inspect ~keepers_dir ~keeper_id;
-    selection, disposition, events, absorbed_rows)
+    selection, disposition, revisions, absorbed_rows)
 ;;
 
 let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
@@ -906,14 +897,13 @@ let journaled_drop_ids ~keepers_dir ~keeper_id =
   | [] | _ :: _ :: _ -> fail "expected exactly one journal line"
 ;;
 
-let successors_of identity (events : Events.event list) =
+let successors_of identity (revisions : Memory.revision list) =
   List.filter_map
-    (fun (event : Events.event) ->
-       match event.kind with
-       | Events.Revised { superseded_by } when String.equal event.memory_id identity ->
-         Some superseded_by
-       | Events.Revised _ | Events.Retrieved _ | Events.Retracted -> None)
-    events
+    (fun (revision : Memory.revision) ->
+       if String.equal revision.superseded identity
+       then Some revision.superseded_by
+       else None)
+    revisions
 ;;
 
 let revision_pairs (revisions : Memory.revision list) =
@@ -933,9 +923,9 @@ let the_one_new_claim (selection : Librarian.selection) =
 let superseding_b = selection_json ~new_claims:[ superseding_claim (`String "m2") () ] ()
 
 (* Control: nothing touches B during the pass, so the answer's successor of B
-   is stored and B gets that one Revised event. *)
+   is stored and B gets that one journal revision link. *)
 let test_a_supersede_of_a_memory_still_current_is_stored () =
-  let selection, disposition, events, _ =
+  let selection, disposition, revisions, _ =
     librarian_round ~name:"supersede-kept" ~answer:superseding_b
       ~inspect:(fun ~keepers_dir ~keeper_id ->
         check (list string) "the journal names B, which the commit dropped"
@@ -948,25 +938,58 @@ let test_a_supersede_of_a_memory_still_current_is_stored () =
   check (list string) "every claim stored" [] (ids disposition.claims_not_applied);
   check (list string) "the revision is carried out"
     [ current_b_id ^ "->" ^ successor ] (revision_pairs disposition.revisions_applied);
-  check (list string) "B has one successor" [ successor ] (successors_of current_b_id events)
+  check (list string) "B has one successor" [ successor ] (successors_of current_b_id revisions)
+;;
+
+(* #37433: a cancellation delivered to the commit callback, after the snapshot
+   is replaced, used to skip the sidecar append that came after the commit and
+   lose the revision. The revision is the commit's own journal row now: the
+   prepared publication carries it, and the lineage read recovers it. *)
+let test_a_revision_survives_a_cancellation_after_the_commit () =
+  let keepers_dir = Filename.temp_dir "librarian-revision-cancel-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
+    let keeper_id = "revision-cancel" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    ignore
+      (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
+         ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
+         ~facts:[ current_a; current_b ] ()
+       |> require
+       : Current.t);
+    let successor = fact ~claim:"B, as the librarian restated it" in
+    let successor_id = Memory.memory_id successor in
+    (match
+       Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable
+         ~on_committed:(fun _ ->
+           raise (Eio.Cancel.Cancelled (Failure "cancelled after the commit")))
+         ~dropped_statements:[ { Memory.memory_id = current_b_id; reason = "restated" } ]
+         ~keepers_dir ~keeper_id ~now:200.
+         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
+         ~absorbed:[]
+         ~revisions:[ { Memory.superseded = current_b_id; superseded_by = successor_id } ]
+         ~new_claims:[ successor ] ()
+     with
+     | Ok _ | Error _ -> fail "the commit callback's cancellation was swallowed"
+     | exception Eio.Cancel.Cancelled _ -> ());
+    let lineage = Current.read_commit_lineage ~keepers_dir ~keeper_id |> require in
+    check (list string) "the journal holds the revision the cut-off commit applied"
+      [ current_b_id ^ "->" ^ successor_id ] (revision_pairs lineage.Current.revisions);
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot ->
+      check (list string) "the snapshot holds the successor, not B"
+        [ current_a_id; successor_id ] (ids snapshot.facts)
+    | None -> fail "the committed snapshot is missing")
 ;;
 
 (* The keeper supersedes B with a successor of its own while the pass runs,
    and the answer supersedes B too. The keeper's successor stands: the answer's
-   is not stored and B keeps the one Revised event the keeper wrote. *)
+   is not stored and B keeps the one revision link the keeper's commit wrote. *)
 let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_stored () =
   let keeper_successor = fact ~claim:"B, as the keeper corrected it" in
   let keeper_successor_id = Memory.memory_id keeper_successor in
-  let selection, disposition, events, _ =
+  let selection, disposition, revisions, _ =
     librarian_round ~name:"supersede-superseded" ~answer:superseding_b
-      ~keeper_facts:[ current_a; keeper_successor ]
-      ~keeper_events:
-        [ { recorded_at = 150.
-          ; memory_id = current_b_id
-          ; trace_id = "trace-keeper"
-          ; kind = Events.Revised { superseded_by = keeper_successor_id }
-          }
-        ]
+      ~keeper_supersede:(current_b_id, keeper_successor)
       ~inspect:(fun ~keepers_dir ~keeper_id ->
         check (list string) "the journal leaves B to the keeper's own revision" []
           (journaled_drop_ids ~keepers_dir ~keeper_id))
@@ -981,22 +1004,15 @@ let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_st
     [ successor ] (ids disposition.claims_not_applied);
   check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
   check (list string) "B has one successor, the keeper's"
-    [ keeper_successor_id ] (successors_of current_b_id events)
+    [ keeper_successor_id ] (successors_of current_b_id revisions)
 ;;
 
 (* The keeper retracts B while the pass runs, and the answer supersedes B. The
-   retraction stands: the successor is not stored and B gets no Revised event. *)
+   retraction stands: the successor is not stored and B gets no revision link. *)
 let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_stored () =
-  let selection, disposition, events, _ =
+  let selection, disposition, revisions, _ =
     librarian_round ~name:"supersede-retracted" ~answer:superseding_b
       ~keeper_facts:[ current_a ]
-      ~keeper_events:
-        [ { recorded_at = 150.
-          ; memory_id = current_b_id
-          ; trace_id = "trace-keeper"
-          ; kind = Events.Retracted
-          }
-        ]
       ~inspect:(fun ~keepers_dir ~keeper_id ->
         check (list string) "the journal leaves B to the keeper's retraction" []
           (journaled_drop_ids ~keepers_dir ~keeper_id))
@@ -1007,7 +1023,7 @@ let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_sto
   check (list string) "the successor is reported as not stored"
     [ successor ] (ids disposition.claims_not_applied);
   check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
-  check (list string) "B has no successor" [] (successors_of current_b_id events)
+  check (list string) "B has no successor" [] (successors_of current_b_id revisions)
 ;;
 
 (* The keeper retracts B while the pass runs, and the answer merges A and B
@@ -1035,7 +1051,7 @@ let test_a_claim_absorbing_a_memory_the_keeper_retracted_during_the_pass_is_not_
 (* The answer's C supersedes A and absorbs B, and the keeper retracts B during
    the pass. C is not stored, so A, which left only for C, stays current. *)
 let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
-  let selection, disposition, events, _ =
+  let selection, disposition, revisions, _ =
     librarian_round ~name:"successor-refused"
       ~answer:
         (selection_json ~dropped:[ dropped_json "m1" ]
@@ -1059,14 +1075,14 @@ let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
     [ current_a_id ^ "->" ^ successor ] (revision_pairs selection.revisions);
   check (list string) "A stays current" [ current_a_id ] (ids disposition.snapshot.facts);
   check (list string) "C is reported as not stored" [ successor ] (ids disposition.claims_not_applied);
-  check (list string) "A has no successor" [] (successors_of current_a_id events)
+  check (list string) "A has no successor" [] (successors_of current_a_id revisions)
 ;;
 
 (* The answer restates A word for word and says it supersedes B, and the
    keeper retracts A during the pass. A is not brought back, so B has no
-   successor in the next snapshot and stays current with no Revised event. *)
+   successor in the next snapshot and stays current with no revision link. *)
 let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current () =
-  let selection, disposition, events, _ =
+  let selection, disposition, revisions, _ =
     librarian_round ~name:"restated-successor-retracted"
       ~answer:(selection_json ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m2") () ] ())
       ~keeper_facts:[ current_b ]
@@ -1080,7 +1096,7 @@ let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
   check (list string) "B stays current and A stays retracted"
     [ current_b_id ] (ids disposition.snapshot.facts);
   check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
-  check (list string) "B has no successor" [] (successors_of current_b_id events)
+  check (list string) "B has no successor" [] (successors_of current_b_id revisions)
 ;;
 
 (* The two arrays stay required even when both are empty: an answer missing a
@@ -1829,7 +1845,7 @@ let test_template_slots_match_supplied_variables () =
 let test_repo_template_carries_goal_criteria () =
   let criterion = Goal_store.Criterion
     { revision = "criterion-audio-1"; title = "Publish a playable audio essay"
-    ; metric = Some "independently reviewed audio essays"; target_value = Some "1" } in
+    ; measure = Goal_measure_fixture.done_when "1"; procedure = "independently reviewed audio essays" } in
   let render context =
     match Runtime.messages_for_librarian ~source_lines:[] { (input ()) with goal_context = context } with
     | Error detail -> failf "Goal context render failed: %s" detail
@@ -1839,7 +1855,7 @@ let test_repo_template_carries_goal_criteria () =
   List.iter (fun text -> check bool ("model receives " ^ text) true
     (String_util.contains_substring rendered text))
     [ "task-audio"; "goal-audio"; "criterion-audio-1"
-    ; "independently reviewed audio essays"; "\"target_value\":\"1\"" ];
+    ; "independently reviewed audio essays"; "\"condition\":\"1\"" ];
   let unavailable = render (Librarian.Task_goals
     { task_id = "task-audio"; criteria = Error "Goal source unreadable" }) in
   check bool "read failure is visible" true
@@ -2094,8 +2110,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
           [ { recorded_at = 1_000_000.
             ; memory_id = Memory.memory_id fact_initial
             ; trace_id = "trace-event-offload"
-            ; kind = Events.Revised
-                { superseded_by = Memory.memory_id (fact ~claim:"Offloaded fact 1 corrected") }
+            ; kind = Events.Retrieved { query = "offloaded fact" }
             }
           ]
         in
@@ -2665,6 +2680,8 @@ let () =
             test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_its_sources
         ; test_case "a supersede of a memory still current is stored" `Quick
             test_a_supersede_of_a_memory_still_current_is_stored
+        ; test_case "a revision survives a cancellation after the commit" `Quick
+            test_a_revision_survives_a_cancellation_after_the_commit
         ; test_case "a supersede of a memory the keeper superseded during the pass is not stored" `Quick
             test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_stored
         ; test_case "a supersede of a memory the keeper retracted during the pass is not stored" `Quick

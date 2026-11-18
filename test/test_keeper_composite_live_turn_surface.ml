@@ -55,7 +55,7 @@ let test_live_turn_surfaces_model_and_tools () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name;
         Keeper_registry.set_turn_selected_runtime ~observation_token:(Some observation_token) ~base_path:base name
           (Some { Keeper_registry.sr_runtime_id = "claude_code.sonnet"; sr_model = Some "claude-sonnet" });
@@ -82,7 +82,7 @@ let test_live_turn_model_null_before_selection () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name)
       ()
   in
@@ -146,7 +146,7 @@ let test_run_state_in_turn_reports_woken_wake () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:
             (Keeper_registry.Woken
                [ Keeper_event_queue.Bootstrap ])
@@ -172,7 +172,7 @@ let test_run_state_in_turn_reports_proactive_tick () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name)
       ()
   in
@@ -195,7 +195,7 @@ let test_run_state_in_turn_reports_chat_request () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Chat_request name;
         Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:2)
       ()
@@ -225,7 +225,7 @@ let test_chat_turn_clears_live_turn_on_finish () =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Chat_request name;
         Keeper_registry.mark_turn_finished ~observation_token ~base_path:base name)
       ()
@@ -249,7 +249,7 @@ let finished_outcome ~name ~selected =
     observed_json ~base ~name
       ~setup:(fun () ->
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+        Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name;
         Keeper_registry.set_turn_selected_runtime
           ~observation_token:(Some observation_token) ~base_path:base name selected;
@@ -386,7 +386,7 @@ let test_late_predecessor_cannot_finish_successor () =
   let a = Masc.Keeper_turn_observation_token.fresh () in
   let b = Masc.Keeper_turn_observation_token.fresh () in
   let start token =
-    Keeper_registry.mark_turn_started ~observation_token:token
+    Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:token
       ~base_path:base ~wake:Keeper_registry.Chat_request name
   in
   let finish token =
@@ -515,7 +515,7 @@ let test_live_turn_survives_non_running_lifecycle () =
      | Ok () -> ()
      | Error _ -> fail "could not set lifecycle fixture");
     let token = Masc.Keeper_turn_observation_token.fresh () in
-    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+    Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:token ~base_path:base
       ~wake:Keeper_registry.Chat_request name;
     Keeper_registry.record_turn_tool_inflight ~observation_token:token ~base_path:base name ~count:2;
     let read () =
@@ -541,7 +541,7 @@ let test_nonlive_lifecycle_overrides_stale_turn () =
     let name = "stale-" ^ Keeper_state_machine.phase_to_string phase in
     ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
     let token = Masc.Keeper_turn_observation_token.fresh () in
-    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+    Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:token ~base_path:base
       ~wake:Keeper_registry.Chat_request name;
     (* Simulate a finish write failure followed by a supervisor phase change. *)
     (match Keeper_registry.update_entry ~base_path:base name (fun entry -> {entry with phase}) with

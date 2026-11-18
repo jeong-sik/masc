@@ -230,9 +230,28 @@ let run_keeper_cycle
          ~now:quota_snapshot_now)
       deferred_runtime_lane
   in
-  (* Decide turn_id at function entry so phase-gate and runtime-routing
-     terminal paths can include it in the receipt and observability stream. *)
-  let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  (* Take the turn number at function entry so phase-gate and runtime-routing
+     terminal paths can include it in the receipt and observability stream.
+     The Owner has spent it before anything below writes under it (#52839). *)
+  match Keeper_turn_allocation.allocate ~config ~keeper_name:meta.name with
+  | Error allocation_error ->
+    let error =
+      Keeper_turn_allocation.to_core_error
+        ~config
+        ~keeper_name:meta.name
+        allocation_error
+    in
+    Error
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
+      ; source_disposition = Follow_failure_route
+      ; deferred_runtime_lane = None
+      }
+  | Ok keeper_turn_id ->
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
     ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
@@ -630,7 +649,8 @@ let run_keeper_cycle
          so the composite observer can surface live in-turn states like
          [`Executing`]. The matching [mark_turn_finished] in the finally
          block clears the field, preventing stale state on idle keepers. *)
-               Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake meta.name;
+               Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake
+                 ~turn_id:keeper_turn_id meta.name;
                (* Refresh from the committed owner projection, then put the
                   TOML back on. The projection is durable keeper JSON, which
                   omits the TOML-owned fields on purpose
@@ -1146,6 +1166,7 @@ let run_keeper_cycle
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
+                    ~keeper_turn_id
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms

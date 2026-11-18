@@ -4,4 +4,4 @@
 (test
  (name test_keeper_microvm_guest_probe)
  (modules test_keeper_microvm_guest_probe)
- (libraries masc_test_deps))
+ (libraries masc_test_deps exec_ssh_protocol))

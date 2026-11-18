@@ -29,7 +29,7 @@ let message ~current reference =
     Ok {(Agent_core.Types.system_msg (Yojson.Safe.to_string payload)) with
       metadata=[marker_key, `String "v1"]}
   | Some _, Some _ | Some _, None | None, _ ->
-    Error "historical task reference is not bound to this operation's original vendor session"
+    Error Keeper_official_client_session_refusal.Task_reference_unbound
 
 let require_preserved ~reference messages = match reference with
   | None -> Ok ()

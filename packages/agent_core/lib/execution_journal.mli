@@ -28,7 +28,7 @@ type materialized =
   | Agent_run_state
   | Agent_turn_state
   | Provider_attempt_state of
-      { response : Llm_provider.Types.api_response option
+      { response : Execution_provider_response_snapshot.t option
       ; request_provenance : Llm_provider.Completion_outcome.request_provenance option
         (** [None] means the attempt has no returned request evidence recorded. *)
       }

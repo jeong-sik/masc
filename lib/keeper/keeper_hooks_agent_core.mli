@@ -204,6 +204,15 @@ type tool_stream_observation =
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
       (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Turn_restored of
+      { turn : int
+      ; response : Agent_core.Types.api_response
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
+      (** A new process restored this turn from the durable execution journal
+          before its tools run. [response] and [tool_source_map] are the
+          journaled admitted response and admission; no streamed block backs
+          them. *)
   | Child_content_observed of
       { attempt : Runtime_native_tasks.attempt
       ; observation : Keeper_claude_task_binding.child_observation }

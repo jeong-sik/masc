@@ -267,7 +267,9 @@ let run
       ~pending_terminal
   =
   let outcome =
-    let* response = Pipeline_execution_scope.provider_response execution in
+    let* { Execution_provider_response_snapshot.response; admission } =
+      Pipeline_execution_scope.provider_response execution
+    in
     let* kind = response_kind response in
     (* The persisted reason owns dispatch, as on the fresh output path.
        ToolUse content in a terminal response does not authorize effects. *)
@@ -283,7 +285,7 @@ let run
          (match Pipeline_execution_scope.provider execution with
           | Some provider ->
             Execution_context.with_provider_attempt provider
-              (fun () -> pending_terminal ~turn response)
+              (fun () -> pending_terminal ~turn ~admission response)
           | None ->
             Error
               (Error.Internal "durable execution resume lost its provider authority"))
@@ -311,7 +313,7 @@ let run
                Execution_context.with_provider_attempt provider (fun () ->
                  let* settled = Pipeline_execution_scope.invocations_settled execution in
                  if not settled
-                 then execute ~response tool_blocks
+                 then execute ~response ~admission tool_blocks
                  else
                    let* persisted =
                      Pipeline_execution_scope.settled_invocations_with_results execution
@@ -322,7 +324,7 @@ let run
                          without opening an invocation. With no persisted result
                          authority, safely re-run admission rather than inventing
                          a result. *)
-                     execute ~response tool_blocks
+                     execute ~response ~admission tool_blocks
                    | persisted ->
                      let invocations =
                        List.map
@@ -338,6 +340,7 @@ let run
                      in
                      settled_before_checkpoint
                        ~response
+                       ~admission
                        ~turn
                        ~invocations
                        ~tool_results

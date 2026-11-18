@@ -91,11 +91,15 @@ type package_source =
 
 ### 3.3 설치가 package 와 이미지를 놓는다 (D3)
 
-`masc exact-addon-setup --base-path <base>` 를 새로 둔다. 두 설치 스크립트가 `browser-lane-setup` 옆에서 부른다.
+`masc exact-addon-setup --base-path <base>` 를 새로 둔다. `scripts/install-local-build.sh` 는 `browser-lane-setup` 다음에 늘 부른다. 릴리스 설치(`scripts/install.sh`)는 `--declared` 로 부른다. workspace 선언이 `package` 로 부르는 것만 설치하므로, Exact Add-on 을 쓰지 않는 workspace 는 이미지를 만들지 않는다(사용자 11-17 결정).
 
 - 실은 package 마다 `<base>/.masc/packages/<id>-<revision>/` 를 쓴다. 폴더가 이미 있고 digest 가 같으면 아무것도 하지 않는다. digest 가 다르면 쓰지 않고 실패로 알린다. 같은 revision 이름에 다른 내용이 있다는 뜻이기 때문이다.
 - 폴더는 한 번 쓰면 바꾸지 않는다. 도는 worker 가 마운트한 폴더가 발밑에서 바뀌지 않는다.
 - 이미지 `masc-lane-<id>:<revision>` 을 실은 파일로 빌드한다. 이미지에 실은 digest 를 label 로 붙이고, 같은 label 의 이미지가 있으면 건너뛴다.
+  - 이미지는 `Dockerfile` 과 공용 모듈 둘(`exact_worker.py`, `protocol.py`)만 담는다. package 자기 파일은 worker 가 폴더를 `/addon` 으로 마운트해 읽고, 그 바이트는 §3.2 의 폴더 확인이 본다. 그래서 label 값은 이 세 파일의 digest(`Lane_addon_carried.image_digest`)이고, label 이름은 `masc.lane.carried.digest` 다.
+- 서버는 `package` 선언의 worker 를 붙일 때 이미지 이름이 가리키는 이미지 ID 를 풀고, 그 ID 의 label 을 읽는다. label 이 자기 digest 와 다르거나 없으면 붙지 않는다. 컨테이너는 그 ID 로 만들므로, 확인한 이미지가 곧 도는 이미지다.
+  - 공용 모듈만 바뀌고 package revision 이 그대로면 두 masc 판이 같은 태그를 쓴다. 새 판의 setup 이 태그를 옮겨도, 옛 서버는 label 이 다른 그 이미지에서 worker 를 띄우지 않는다.
+  - 요구 label 은 선언이 `Lane_addon_types.container` 에 싣는다. manifest 는 싣지 않는다. 요구 label 은 worker 입력이라 의미 revision 에 들어가고, 없을 때는 키를 적지 않으므로 `manifest_path` 선언의 revision 은 그대로다.
 - docker 가 없거나 빌드가 실패하면 그 package 는 실패로 알린다. 서버는 이미지를 찾지 못해 worker 를 띄우지 못하고, 요청은 보내지지 않은 채 기다린다.
 - setup 은 선언 파일을 쓰지 않는다. 선언이 `package = "<id>"` 로 바뀌는 일은 한 번, 운영자가 한다(§6).
 - 선언이 없으면 만들지 않는다. Exact Add-on 은 운영자가 고르는 설정이고, exact lane 연결도 따로 필요하다(`keeper-memory-execution.md`).
@@ -103,7 +107,8 @@ type package_source =
 ### 3.4 규약 판 (D4)
 
 - `exact_outputs` 를 선언한 manifest 는 `[world] exact_protocol = <정수>` 를 적는다.
-- 서버는 상수 하나 `Lane_addon_exact.protocol` 을 갖는다. manifest 를 읽을 때 판이 없거나 다르면 거절한다. 거절 문장은 두 판을 모두 적는다.
+- 서버는 상수 하나 `Lane_addon_types.exact_protocol` 을 갖는다. 규약의 도구 이름(`host_requests_tool`, `host_result_tool`)과 같은 모듈이다. manifest 파서는 이미 이 모듈만 기대므로, Eio 와 provider 를 쓰는 `Lane_addon_exact` 를 끌어오지 않는다. manifest 를 읽을 때 판이 없거나 다르면 거절한다. 거절 문장은 두 판을 모두 적는다.
+- 판이 있는데 `exact_outputs` 가 없는 manifest 도 거절한다. 판은 Exact 규약을 말하는 package 만 적는다.
 - 판은 서버가 읽는 worker 의 답이나 worker 가 읽는 서버의 인자가 바뀔 때 올린다. 지금까지는 `capacity_wait` 삭제(#52731)와 목록의 장 넘김(#52728, #52778)이 그런 변경이다.
 - 실은 package 는 늘 서버와 같은 판이다. 이 검사는 `manifest_path` 로 고정한 package 를 위해 있다.
 - 판을 올리면 판이 없거나 다른 고정 package 는 서버를 올린 순간 붙지 않는다. 그 설치의 요청은 기다린다. 11-17 사건이 「원본이 멈춘다」 대신 「그 설치가 붙지 않고 이유가 보인다」로 바뀐다.
@@ -120,6 +125,7 @@ S(n) 을 n 번째 서버 빌드, C(n) 을 그 빌드가 실은 package 묶음, p
 
 - n: 같은 커밋에서 나오므로 p(S(n)) = p(C(n)) 이다.
 - `package = id` 선언은 S(n) 아래에서 C(n)[id] 로만 풀린다. S(n) 프로세스는 C(n+1) 을 모르고, S(n+1) 프로세스는 C(n) 을 풀지 않는다. 그래서 n 에서 n+1 로 올리는 동안에도 실은 package 선언은 어긋난 짝을 만들지 않는다. 어느 n 에서나 같다.
+- 이미지도 같다. S(n) 은 label 이 C(n) 의 digest 인 이미지에서만 worker 를 띄운다(§3.3). 같은 태그가 C(n+1) 의 이미지로 옮겨 가도 S(n) 은 그 이미지를 쓰지 않는다.
 - `manifest_path` 선언은 p(manifest) = p(S) 일 때만 붙는다(D4). 아니면 붙지 않고, 보내지 않으므로 읽지 못할 답도 없다.
 - 둘을 합치면 도는 짝 (서버, worker) 은 늘 p 가 같다. 11-17 사건의 부류, 곧 서버가 읽지 못하는 답이 오는 일은 생기지 않는다.
 - 남는 것은 멈춤뿐이다. 이미지가 없거나 고정 package 의 판이 다르면 그 설치가 붙지 않는다. 원본은 보내지지 않았으므로 멈춘 원본이 생기지 않는다.
@@ -147,9 +153,9 @@ S(n) 을 n 번째 서버 빌드, C(n) 을 그 빌드가 실은 package 묶음, p
 
 | 층 | 내용 | 닿는 곳 |
 |---|---|---|
-| L0 | D4. `exact_protocol` manifest 키와 서버 상수, 네 manifest 가 판을 적음 | `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, `lane_addon_exact.ml`, 네 `lane.toml` |
+| L0 | D4. `exact_protocol` manifest 키와 서버 상수, `exact_outputs` 를 적은 여섯 manifest(실은 넷과 operator-quiz, operator-lesson)가 판을 적음 | `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, 여섯 `lane.toml` |
 | L1 | D1·D2. 싣기, `package` 선언 키와 `package_source` 합타입, 실은 package 풀기 | `lib/embedded_exact_addons/`, `lib/lane_addon/lane_addon_config.ml` |
-| L2 | D3. `masc exact-addon-setup`, 두 설치 스크립트 | `bin/main_eio.ml`, `lib/exact_addon_setup.ml`, `scripts/install-local-build.sh`, `scripts/install.sh` |
+| L2 | D3. `masc exact-addon-setup`, 두 설치 스크립트, 붙일 때 이미지 label 확인 | `bin/main_eio.ml`, `lib/exact_addon_setup.ml`, `scripts/install-local-build.sh`, `scripts/install.sh`, `lib/lane_addon/lane_addon_worker.ml` |
 | L3 | §3.5. worker 시작 때 기록 판 훑기 | `addons/exact_worker.py` |
 | L4 | 안내서. 선언 예시를 `package = "<id>"` 로, 고정 package 는 판을 맞추라고 | `docs/guides/keeper-memory-execution.md`, 네 README |
 
@@ -167,6 +173,7 @@ S(n) 을 n 번째 서버 빌드, C(n) 을 그 빌드가 실은 package 묶음, p
 ## 9. 열린 질문
 
 - Q1. 이미지 이름. 태그(`masc-lane-<id>:<revision>`)와 digest label 로 충분한가, 아니면 manifest 가 이미지 digest 를 가리켜야 하는가. 엔진은 이미 붙일 때 이미지 정체를 기록한다(`Lane_addon_worker.image_identity`).
+  - 결정(사용자 11-17): 태그와 label 로 한다. 서버가 붙일 때 label 을 본다(§3.3).
 - Q2. 운영 workspace-curator 0.1.3, candle-appraiser 0.1.2 의 상태에 기록 v1 이 남았는가. 남았다면 실은 package 로 옮기기 전에 hard cut 이 필요하다.
 - Q3. `install.sh` 로 받은 릴리스 바이너리의 설치에도 docker 가 있다고 볼 수 있는가.
 - Q4. browser Add-on 도 `package = "browser-ego"` 로 옮길 것인가. 지금은 고정 폴더를 고쳐 쓴다.

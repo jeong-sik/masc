@@ -89,7 +89,8 @@ let run_case ~how root =
     let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Answer once." ~tools:[] in
     let config = {config with execution_store=Some execution_store} in
-    (match Runtime_agent.run ~sw:turn_sw ~net:env#net ~config goal with
+    (match Runtime_agent.run ~sw:turn_sw ~net:env#net ~config
+             ~execution_capture:(Runtime_agent.execution_capture config) goal with
      | Error _ -> ()
      | Ok _ -> fail "the failing host sink did not fail the Core call");
     let checkpoint = Keeper_checkpoint_ref.of_persisted
@@ -243,7 +244,7 @@ let prepare_boot_journal ?(keeper_name=keeper_name) ?(session_id=session_id)
   let message = operation.input |> Option.get |> Keeper_chat_operation_payload.input_of_json
     |> require "aggregate input" |> fun input -> input.message in
   (match Runtime_agent.run ~sw ~net:env#net ~config:{config with execution_store=Some execution_store}
-      ~agent_ref message with
+      ~agent_ref ~execution_capture:(Runtime_agent.execution_capture config) message with
    | Error _ -> ()
    | Ok _ -> fail "the deliberately failed terminal sink unexpectedly succeeded");
   let checkpoint, latest = retain () in

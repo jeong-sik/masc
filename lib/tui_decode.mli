@@ -156,8 +156,8 @@ type planning_goal = {
   pg_phase : Goal_phase.t;
   pg_priority : int;
   pg_due_date : string option;
-  pg_metric : string option;
-  pg_target_value : string option;
+  pg_measure : Goal_measure.t;
+  pg_procedure : string;
   pg_proof : goal_proof;
   pg_criterion_review : goal_criterion_review;
   pg_retry_binding : goal_retry_binding option;
@@ -2338,8 +2338,8 @@ type overview_goal = {
   og_phase : Goal_phase.t;
   og_priority : int;
   og_criterion_revision : string option;
-  og_metric : string option;
-  og_target_value : string option;
+  og_measure : Goal_measure.t;
+  og_procedure : string;
   og_measurement : overview_goal_measurement;
   og_due_date : string option;
   og_task_count : int;
@@ -2729,7 +2729,9 @@ type task_history_event = {
   th_from_status : string option;
   th_to_status : string option;
   th_actor : string option;
-  th_note : string option;  (** handoff_context.summary when present *)
+  th_note : string option;
+      (** handoff_context.summary when present, plus the refusal of a stored
+          handoff the transition replaced because it was unreadable *)
 }
 
 val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) result

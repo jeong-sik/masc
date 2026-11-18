@@ -1030,7 +1030,7 @@ let test_status_message_count_reads_the_head () =
     ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
     ; top_k = None; min_p = None; enable_thinking = None; preserve_thinking = None
     ; response_format = Agent_core.Types.Off; reasoning_effort = None; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []
+    ; context = Agent_core.Context.create_sync (); pending_input = None
     ; working_context = None }
   in
   ignore
@@ -1489,7 +1489,7 @@ let test_status_shows_the_turn_running_now () =
         true
         (json_field "live_turn" (status ()) = Some `Null);
       let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-      Masc.Keeper_registry.mark_turn_started
+      Masc.Keeper_registry.mark_turn_started ~turn_id:1
         ~observation_token
         ~base_path:config.base_path
         ~wake:Masc.Keeper_registry.Proactive_tick
@@ -1824,8 +1824,8 @@ let test_config_snapshot_carries_open_goals_without_a_task () =
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   let goal id title phase metric : Goal_store.goal =
-    { Goal_store.id; criterion_revision = "revision-" ^ id; title; metric = Some metric
-    ; target_value = Some "1"; due_date = None; priority = 3; phase
+    { Goal_store.id; criterion_revision = "revision-" ^ id; title; measure = Goal_measure_fixture.done_when "1"
+    ; procedure = metric; due_date = None; priority = 3; phase
     ; last_review_note = None; last_review_at = None
     ; created_at = "2026-10-22T00:00:00Z"; updated_at = "2026-10-22T00:00:00Z" }
   in

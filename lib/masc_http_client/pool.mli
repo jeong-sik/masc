@@ -36,7 +36,7 @@ type t
     [connect_timeout_seconds]: max wait when establishing a fresh
     connection, shared by DNS resolution, every TCP probe address, and
     Piaf client creation (including TLS). Surfaces as
-    [Error "connect timeout ..."] to the caller.
+    [Error (Connect_failed { failure = Establishment_timeout; _ })].
 
     [connect_failure_cooldown_seconds]: after a connect to a host fails,
     requests to that host fast-fail without opening a socket for this
@@ -83,6 +83,70 @@ val create :
 
 (* ── Request API ───────────────────────────────────────────────── *)
 
+(** The scheme, host and port one pooled connection serves. *)
+type origin = {
+  scheme : string;
+  host   : string;
+  port   : int;
+}
+
+val origin_to_string : origin -> string
+(** ["scheme://host:port"]. *)
+
+(** Why one attempt to establish a client failed. The exceptions are the
+    resolver's and the socket's own; a caller writes them to its log and
+    says the case on a screen. *)
+type connect_failure =
+  | No_addresses  (** The name resolved to no stream address. *)
+  | Dns_failure of exn
+  | Tcp_failure of exn  (** Every resolved address refused or failed TCP. *)
+  | Establishment_timeout
+      (** [connect_timeout_seconds] passed before any address produced a
+          client. *)
+  | Client_failure of string
+      (** TCP connected, then Piaf client creation (TLS included) failed. *)
+
+(** When the pool next tries an origin whose connect just failed. *)
+type retry =
+  | Retry_in of float
+      (** The pool refuses the origin, without a socket, for these seconds. *)
+  | Retry_unblocked
+      (** Nothing holds the origin back: backoff is off or the pool is
+          stopping. *)
+
+(** A request the pool refused before sending it. *)
+type invalid_request =
+  | Negative_body_limit of int
+  | No_resolved_addresses
+
+(** Why a request produced no response. A connect failure stays a case all
+    the way to the caller, with the origin and the retry fact the pool
+    holds, so a caller can say once what happened without parsing text. *)
+type request_error =
+  | Connect_failed of { origin : origin; failure : connect_failure; retry : retry }
+      (** This request tried to connect and [failure] is why it did not. *)
+  | Connect_held_back of
+      { origin : origin; failure : connect_failure; retry_in_seconds : float }
+      (** An earlier request to [origin] failed with [failure]; this one
+          opened no socket and the origin is refused for
+          [retry_in_seconds] more. *)
+  | Timed_out of { after_seconds : float }
+      (** The request window passed before any response finished. *)
+  | Idle_timed_out of { after_seconds : float }
+      (** A streamed response body produced no chunk for [after_seconds]. *)
+  | Body_limit_exceeded of { status : int; limit : int }
+      (** The response to a request with [max_body_bytes] carried more than
+          [limit] bytes; the body was not kept. [status] is the response's. *)
+  | Exchange_failed of string
+      (** The connection was established and the exchange then failed with a
+          protocol or I/O error. The text is Piaf's own message for it, or
+          the exception's when the client scope closed under the read. *)
+  | Invalid_request of invalid_request
+
+val request_error_to_string : request_error -> string
+(** One line for a log, or for a caller whose only use of the failure is to
+    report it as text. *)
+
 (** Typed HTTP response. {!Masc_http_client.response} is this type. *)
 type response = {
   status : int;
@@ -103,7 +167,7 @@ val request :
   ?headers:(string * string) list ->
   ?body:string ->
   unit ->
-  (response, string) result
+  (response, request_error) result
 (** Scoped one-shot request. Acquires a connection from the per-host
     pool (or creates one if the pool is empty / under
     [max_idle_per_host]), issues the request, releases the connection
@@ -129,6 +193,7 @@ val request :
     - timeout when [clock] and [timeout_seconds] are both provided and
       the request has not finished by then; a response that arrived as
       the window passed is the result
+    - [Body_limit_exceeded] when the body is larger than [max_body_bytes]
 
     Notably absent: silent retry. If a reused connection fails, the
     caller sees [Error] with the underlying reason. Caller decides
@@ -203,7 +268,7 @@ val request_streaming :
   ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
-  ('body stream_outcome, string) result
+  ('body stream_outcome, request_error) result
 (** [request_streaming t ~retention ~clock ~idle_timeout_sec ~method_ ~url
     ~on_chunk ()] issues one request and calls [on_chunk] with each body chunk
     as it arrives. [retention] decides whether a successful body is also kept
@@ -218,7 +283,8 @@ val request_streaming :
     error, released under cancellation.
 
     [clock] measures progress and protocol-specific idle periods. Chunk arrival
-    resets the idle timer. An infinite idle window leaves lifetime to the
+    resets the idle timer; a window with no chunk ends the request as
+    [Error (Idle_timed_out _)]. An infinite idle window leaves lifetime to the
     request owner and cancellation, as needed for human-driven login.
 
     [on_chunk] runs on the calling fiber between reads. Work done in it delays
@@ -262,8 +328,8 @@ module For_testing : sig
   val with_request_timeout :
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     timeout_seconds:float ->
-    (unit -> ('a, string) result) ->
-    ('a, string) result
+    (unit -> ('a, request_error) result) ->
+    ('a, request_error) result
 
   (** Drive the real establishment sequence with controlled DNS, TCP and
       client stages, without fabricating a Piaf client. A client whose
@@ -281,7 +347,7 @@ module For_testing : sig
   val evict_expired_entries : t -> float -> unit
 
   module Host_key : sig
-    type t = {
+    type t = origin = {
       scheme : string;
       host   : string;
       port   : int;
@@ -302,7 +368,7 @@ module For_testing : sig
     start_sec:float ->
     idle_timeout_sec:float ->
     Piaf.Body.t ->
-    ('retained * body_progress, string * body_progress) result
+    ('retained * body_progress, request_error * body_progress) result
 
   (** The idle-queue decision, separated from the resource so it can be
       driven with plain values: given (client, last_used) in park order,

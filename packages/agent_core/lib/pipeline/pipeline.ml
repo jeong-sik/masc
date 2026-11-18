@@ -159,10 +159,35 @@ type refused_tool_calls =
   ; unreadable : Llm_provider.Types.unreadable_tool_use list
   }
 
-let no_refused_tool_calls = { unavailable_names = []; unreadable = [] }
-
 let has_refused_tool_calls { unavailable_names; unreadable } =
   unavailable_names <> [] || unreadable <> []
+;;
+
+(* The refusals a turn answers come from its one admission record, whether the
+   turn was just admitted or restored from durable execution after a crash. *)
+let refused_of_admission (admission : Execution_provider_response_snapshot.admission) =
+  { unavailable_names = admission.Execution_provider_response_snapshot.unavailable_names
+  ; unreadable = admission.Execution_provider_response_snapshot.unreadable
+  }
+;;
+
+let after_turn_decision_result decision =
+  match decision with
+  | Hooks.Continue -> Ok ()
+  | Hooks.HookFailed { stage; detail } ->
+    Error
+      (Pipeline_common.hook_failed_core_error
+         ~hook_name:"after_turn"
+         ~stage
+         ~tool_name:None
+         ~tool_use_id:None
+         ~detail)
+  | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision ->
+    Error
+      (Pipeline_common.illegal_hook_decision_core_error
+         ~hook_name:"after_turn"
+         ~stage:Hooks.After_turn
+         ~decision)
 ;;
 
 (* One sentence, one builder. The turn refuses a call in two places -- before
@@ -269,11 +294,13 @@ let stage_collect
            (Agent_tools.build_index (Tool_set.to_list agent.tools))
            response.content
        in
-       let refused =
-         { unavailable_names = admission.Agent_tools.rejected_names
+       let admission_record : Execution_provider_response_snapshot.admission =
+         { Execution_provider_response_snapshot.source_map = admission.Agent_tools.tool_source_map
+         ; unavailable_names = admission.Agent_tools.rejected_names
          ; unreadable = response.unreadable_tool_uses
          }
        in
+       let refused = refused_of_admission admission_record in
        let* response =
          Types.retain_response_content
            ~content:admission.Agent_tools.admitted
@@ -289,7 +316,9 @@ let stage_collect
           response rather than reinterpreting the raw provider blocks with a
           later tool palette. The raw trace above retains the wire blocks. *)
        let* () =
-         Pipeline_execution_scope.record_provider_response execution response
+         Pipeline_execution_scope.record_provider_response
+           execution
+           { Execution_provider_response_snapshot.response; admission = admission_record }
        in
        (match admission.Agent_tools.rejected_names with
         | [] -> ()
@@ -365,23 +394,7 @@ let stage_collect
               ; tool_source_map = Some admission.Agent_tools.tool_source_map
               })
        in
-       let* () =
-         match after_decision with
-         | Hooks.Continue -> Ok ()
-         | Hooks.HookFailed { stage; detail } ->
-           Error
-             (Pipeline_common.hook_failed_core_error
-                ~hook_name:"after_turn"
-                ~stage
-                ~tool_name:None
-                ~tool_use_id:None
-                ~detail)
-         | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> Error
-             (Pipeline_common.illegal_hook_decision_core_error
-                ~hook_name:"after_turn"
-                ~stage:Hooks.After_turn
-                ~decision)
-       in
+       let* () = after_turn_decision_result after_decision in
        let binds_context =
          List.exists (fun (block : Llm_provider.Types.content_block) ->
            match block with
@@ -650,10 +663,16 @@ let stage_execute
                finish After_context_injection)))
 ;;
 
-let replay_settled_before_checkpoint agent =
+let replay_settled_before_checkpoint agent ~response ~admission =
+  let refused = refused_of_admission admission in
   Pipeline_terminal_resume.replay
     ~persist_checkpoint:(persist_turn_checkpoint_for_state agent)
+    ~refusal:
+      (if has_refused_tool_calls refused
+       then Some (admission_refusal_message refused)
+       else None)
     agent
+    ~response
 ;;
 
 (** Map stop_reason to turn_outcome. *)
@@ -911,29 +930,43 @@ let run_turn
     (* Thread [before_tool_execution] (the provider-lease [on_yield] release) as
          the fresh path threads it below; dropping it disabled [yield_on_tool]'s
          release on the resume turn (lease advanced but never released). *)
-    ~execute:(fun ~turn ~response tool_uses ->
-      (* Empty, and not because a resumed turn refused nothing. The checkpoint
-         this path replays holds the ADMITTED response -- the dropped blocks
-         are already out of it -- and the names are not stored anywhere the
-         resume can read. So a turn that crashed after admission and resumed
-         re-runs its tools and says nothing about what it dropped. Carrying the
-         names would mean putting them on the checkpoint, which is a schema
-         cut; tracked separately rather than guessed at here. *)
+    ~execute:(fun ~turn ~response ~admission tool_uses ->
+      (* The process that admitted this response is gone, and with it every
+         host's view of where each admitted ToolUse stood among the provider's
+         calls. The restored admission hands the host that map before any tool
+         runs, through [AfterRestoredTurn] rather than [AfterTurn]: the
+         response's usage was already counted when it was collected. The calls
+         admission refused are answered the way the fresh turn answers them
+         (#30728, #32715). *)
+      let* () =
+        invoke_hook_with_trace
+          agent
+          ?raw_trace_run
+          ~turn
+          ~hook_name:"after_turn"
+          agent.options.hooks.after_turn
+          (Hooks.AfterRestoredTurn
+             { turn
+             ; response
+             ; tool_source_map = admission.Execution_provider_response_snapshot.source_map
+             })
+        |> after_turn_decision_result
+      in
       stage_execute
         ?raw_trace_run
         ?clock
         ?before_tool_execution
         ~turn
-        ~rejected_tool_calls:no_refused_tool_calls
+        ~rejected_tool_calls:(refused_of_admission admission)
         ~response
         agent
         tool_uses)
     ~all_pre_tool_use_blocked:(ToolsExecuted After_tool_results_appended)
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
-    ~pending_terminal:(fun ~turn response ->
+    ~pending_terminal:(fun ~turn ~admission response ->
       stage_output ?raw_trace_run ?clock ?before_tool_execution ~turn
-        ~rejected_tool_calls:no_refused_tool_calls agent response)
+        ~rejected_tool_calls:(refused_of_admission admission) agent response)
     ~terminal:(fun response -> Complete response)
     ~fresh:(fun ~turn ->
       run_new_turn

@@ -3,4 +3,4 @@
  (modules test_candle_appraisal_flow)
  (deps
   (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc_candle masc_candle_store masc_candle_config masc_candle_runtime masc.server mcp_protocol))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc_candle masc_candle_store masc_candle_config masc_candle_runtime masc.server mcp_protocol))

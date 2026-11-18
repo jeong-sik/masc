@@ -793,7 +793,7 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
            ~base_path:config.Workspace_utils_backend_setup.base_path
            keeper_name
            meta);
-      Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
+      Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
         ~base_path:config.Workspace_utils_backend_setup.base_path
         ~wake:Keeper_registry.Proactive_tick
         keeper_name;
@@ -1105,7 +1105,7 @@ let test_nonlive_keeper_has_no_current_execution () =
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
   ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
-  Keeper_registry.mark_turn_started
+  Keeper_registry.mark_turn_started ~turn_id:1
     ~observation_token:(Masc.Keeper_turn_observation_token.fresh ())
     ~base_path ~wake:Keeper_registry.Chat_request keeper_name;
   List.iter (fun phase ->

@@ -100,7 +100,7 @@ let hooks t (original : Agent_core.Hooks.hooks) =
         | Agent_core.Hooks.PostToolUseFailure
             { stage = Agent_core.Hooks.Execution | Agent_core.Hooks.Cancelled_during_execution; _ } -> ()
         | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
-        | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.OnStop _
+        | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.OnStop _
         | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ -> ())
       (fun () -> invoke hook event)
   in
@@ -109,7 +109,7 @@ let hooks t (original : Agent_core.Hooks.hooks) =
       (match event with
        | Agent_core.Hooks.PreToolUse { invocation; _ } -> bind t invocation
        | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
-       | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PostToolUse _
+       | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _
        | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
        | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ -> ());
       invoke original.pre_tool_use event)

@@ -386,7 +386,11 @@ let task_timeline_summary (task : Masc_domain.task) =
         Some ("cancelled by " ^ cancelled_by)
   in
   let handoff =
-    Option.bind task.handoff_context (fun context ->
+    match task.handoff_context with
+    | None -> None
+    | Some (Masc_domain.Handoff_unreadable { reason; raw = _ }) ->
+        Some ("handoff unreadable: " ^ reason)
+    | Some (Masc_domain.Handoff_decoded context) ->
       let summary = String.trim context.summary in
       if String.equal summary "" then None
       else
@@ -394,7 +398,7 @@ let task_timeline_summary (task : Masc_domain.task) =
           (match context.updated_by with
            | Some author when not (String.equal (String.trim author) "") ->
                Printf.sprintf "handoff by %s: %s" (String.trim author) summary
-           | Some _ | None -> "handoff: " ^ summary))
+           | Some _ | None -> "handoff: " ^ summary)
   in
   status :: List.filter_map Fun.id [ actor; handoff ] |> String.concat " · "
 

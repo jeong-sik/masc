@@ -56,30 +56,53 @@ let protect f = try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _ | Eio.Io _ | Yojson.Json_error _) as exn -> Error (Storage_failure (Printexc.to_string exn))
 
+(* One day file's rows, framed as the appenders write them: every row ends in
+   a newline. Bytes after the last newline are an append that never finished,
+   not a row, and the next append to the file cuts them. They never refuse a
+   read. A newline-terminated line that does not decode is a row, so it still
+   fails the read below. *)
+let day_file_rows path =
+  let rows_of = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> ""
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; _ } -> rows in
+  let failed error =
+    Error (Storage_failure (Printf.sprintf "%s: %s" path
+      (Fs_compat.Private_jsonl_rows.error_to_string error))) in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded value
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; _ } -> Ok (rows_of value)
+  | Fs_compat.Private_file_failed error
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } -> failed error
+
+let day_file_paths root =
+  if not (Sys.file_exists root) then [] else
+  let months = Sys.readdir root in
+  Array.sort String.compare months;
+  Array.to_list months |> List.concat_map (fun month ->
+    let directory = Filename.concat root month in
+    if not (Sys.is_directory directory) then [] else
+    let files = Sys.readdir directory in
+    Array.sort Dated_jsonl.Layout.compare_day_files files;
+    Array.to_list files
+    |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+    |> List.map (Filename.concat directory))
+
 (* Read the existing task event journal without an arbitrary history cap. A
    malformed row prevents a new write from guessing whether its identity exists. *)
 let read_events ~config ~run_id = protect (fun () ->
-  let root = events_root config in
-  let rows = ref [] in
-  if Sys.file_exists root then (
-    let months = Sys.readdir root in
-    Array.sort String.compare months;
-    Array.iter (fun month ->
-      let directory = Filename.concat root month in
-      if Sys.is_directory directory then (
-        let files = Sys.readdir directory in
-        Array.sort Dated_jsonl.Layout.compare_day_files files;
-        Array.iter (fun name ->
-          if Filename.check_suffix name ".jsonl" then
-            Fs_compat.load_file_locked (Filename.concat directory name)
-            |> String.split_on_char '\n'
-            |> List.iter (fun line -> if String.trim line <> "" then
-              let json = Yojson.Safe.from_string line in
-              match Event.select_for_run ~run_id json with
-              | Ok None -> ()
-              | Ok (Some event) -> rows := event :: !rows
-              | Error detail -> raise (Yojson.Json_error detail))) files)) months);
-  Ok (List.stable_sort (fun a b -> String.compare (Event.timestamp a) (Event.timestamp b)) (List.rev !rows)))
+  let select rows line =
+    let* rows = rows in
+    if String.trim line = "" then Ok rows else
+    match Event.select_for_run ~run_id (Yojson.Safe.from_string line) with
+    | Ok None -> Ok rows
+    | Ok (Some event) -> Ok (event :: rows)
+    | Error detail -> Error (Storage_failure detail) in
+  let* rows = List.fold_left (fun rows path ->
+      let* rows = rows in
+      let* contents = day_file_rows path in
+      List.fold_left select (Ok rows) (String.split_on_char '\n' contents))
+    (Ok []) (day_file_paths (events_root config)) in
+  Ok (List.stable_sort (fun a b -> String.compare (Event.timestamp a) (Event.timestamp b)) (List.rev rows)))
 
 let read ~config ~run_id =
   Result.map (List.map Event.to_yojson) (read_events ~config ~run_id)

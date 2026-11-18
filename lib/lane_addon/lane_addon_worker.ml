@@ -154,6 +154,23 @@ let read_engine ~clock ~control_timeout_sec ~mgr ~runtime
     read_engine_with ~run runtime
     |> Result.map_error (fun fault -> Engine_fault { runtime; fault })
 
+(* A container that requires an image label starts only from an image that
+   carries it. [image] is the identity the start creates from, so the image
+   checked is the image that runs. *)
+let check_image_label ~run (container : container) image =
+  match container.image_label with
+  | None -> Ok ()
+  | Some required ->
+      let failed = engine_error container.runtime ~operation:"image label" in
+      let* arguments = Engine.image_label_arguments image |> Result.map_error failed in
+      let* raw = run ~operation:"image label" arguments in
+      let* found = Engine.image_label_of_inspect ~name:required.label_key raw |> Result.map_error failed in
+      match found with
+      | Some value when String.equal value required.label_value -> Ok ()
+      | Some _ | None ->
+          Error (failed (Printf.sprintf "image %s has label %s = %s, and this installation requires %s"
+            container.image required.label_key (Option.value found ~default:"(none)") required.label_value))
+
 let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
     ?(docker_command="docker") ?(container_command="container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
@@ -163,9 +180,12 @@ let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
     |> Result.map_error (fun detail -> Invalid_package detail) in
   let runtime = container.runtime in
   let command = command_for runtime ~docker_command ~container_command in
-  let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command
-      ~operation:"image inspect" (Engine.image_arguments runtime container.image) in
-  Engine.image_of_inspect runtime raw |> Result.map_error (engine_error runtime ~operation:"image inspect")
+  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+  let* raw = run ~operation:"image inspect" (Engine.image_arguments runtime container.image) in
+  let* image = Engine.image_of_inspect runtime raw
+    |> Result.map_error (engine_error runtime ~operation:"image inspect") in
+  let* () = check_image_label ~run container image in
+  Ok image
 
 let validate_package (package : package) =
   let* container = Lane_addon_types.container package
@@ -315,6 +335,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let* raw_image = run ~operation:"image inspect" (Engine.image_arguments runtime container.image) in
   let* image = Engine.image_of_inspect runtime raw_image
     |> Result.map_error (engine_error runtime ~operation:"image inspect") in
+  let* () = check_image_label ~run container image in
   let* () = match state_owner with
     | Some owner when not (Lane_addon_worker_state.belongs_to owner ~package_id:package.id) ->
         Error (Invalid_package "persistent state owner names a different package")

@@ -18,6 +18,11 @@ let with_directory f =
     Unix.mkdir packages 0o700;
     Unix.mkdir declarations 0o700;
     f root packages declarations)
+(* [with_directory] keeps the package folders beside the declarations, so a
+   declaration that names a carried package finds it there too. *)
+let packages_beside directory = Filename.concat (Filename.dirname directory) "packages"
+let load_declaration ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path)) ~path
+let load_declarations ~directory = Config.load ~packages:(packages_beside directory) ~directory
 let package ?(title = "Example observer") () =
   Printf.sprintf {|id = "example"
 revision = "1"
@@ -48,7 +53,7 @@ sources = [{source_id = "machine", kind = "msx_capture"}]
 let only_declaration (snapshot : Config.snapshot) = match snapshot.declarations with
   | [declaration] -> declaration
   | values -> failf "expected one declaration, found %d" (List.length values)
-let check_error label path = check bool label true (Result.is_error (Config.load_file ~path))
+let check_error label path = check bool label true (Result.is_error (load_declaration ~path))
 let contains text needle =
   let width = String.length needle in
   let rec at index =
@@ -57,7 +62,7 @@ let contains text needle =
   at 0
 (* For a refusal a guide quotes to operators. The row fails when the wording
    changes, so the guide is changed with it. *)
-let check_refusal label path quoted = match Config.load_file ~path with
+let check_refusal label path quoted = match load_declaration ~path with
   | Ok _ -> failf "%s: the declaration loaded" label
   | Error message ->
       check bool (Printf.sprintf "%s: refused with %S, and the guide quotes %S" label message quoted) true
@@ -74,7 +79,7 @@ labels = ["first", "second"]
 weight = 1.5
 count = 3
 |});
-  let found = unwrap (Config.load_file ~path) in
+  let found = unwrap (load_declaration ~path) in
   check string "package resolves from the declaration directory" (Unix.realpath manifest) found.manifest_path;
   check string "resolved package uses its own directory" (Unix.realpath packages) found.package.directory;
   let open Yojson.Safe.Util in
@@ -92,7 +97,7 @@ let comments_rename_and_key_order () = with_directory (fun _root packages direct
   ignore (install_package packages);
   let path = Filename.concat directory "frames.toml" in
   write path (declaration msx_binding);
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   write path {|# comments and table key order do not restart an installation
 manifest_path = "../packages/lane.toml"
 run_id = "game"
@@ -100,12 +105,12 @@ id = "frames"
 [binding]
 sources = [{kind = "msx_capture", source_id = "machine"}]
 |};
-  let reordered = unwrap (Config.load_file ~path) in
+  let reordered = unwrap (load_declaration ~path) in
   check string "semantic revision ignores comments and field order" initial.revision reordered.revision;
   check bool "source revision tracks exact edited bytes" true (initial.source_revision <> reordered.source_revision);
   let renamed = Filename.concat directory "renamed.toml" in
   Sys.rename path renamed;
-  let snapshot = Config.load ~directory in
+  let snapshot = load_declarations ~directory in
   let found = only_declaration snapshot in
   check string "renaming retains stable identity" initial.id found.id;
   check string "renaming does not change semantic revision" initial.revision found.revision;
@@ -121,15 +126,15 @@ sources = [{source_id = "machine", kind = "msx_capture"}]
 labels = [%s]
 |} order in
   write path (declaration (binding {|"first", "second"|}));
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   write path (declaration (binding {|"second", "first"|}));
-  let reordered = unwrap (Config.load_file ~path) in
+  let reordered = unwrap (load_declaration ~path) in
   check bool "ordered package settings affect revision" true (initial.revision <> reordered.revision);
   write manifest (package ~title:"Changed output description" ());
-  let updated_package = unwrap (Config.load_file ~path) in
+  let updated_package = unwrap (load_declaration ~path) in
   check bool "resolved manifest changes affect revision" true (reordered.revision <> updated_package.revision);
   write path (declaration ~run_id:"another-game" (binding {|"second", "first"|}));
-  let updated_run = unwrap (Config.load_file ~path) in
+  let updated_run = unwrap (load_declaration ~path) in
   check bool "world binding changes affect revision" true (updated_package.revision <> updated_run.revision))
 
 let reject_invalid_values () = with_directory (fun _root packages directory ->
@@ -156,11 +161,11 @@ sources = [{source_id = "machine", kind = "msx_capture"}, {source_id = "machine"
     ["nan"; "inf"; "-inf"; "2026-09-12"; "12:30:00"; "2026-09-12T12:30:00";
      "2026-09-12T12:30:00Z"];
   write path (declaration (msx_binding ^ "setting = \"2026-09-12\"\n"));
-  check bool "an explicit date string remains package data" true (Result.is_ok (Config.load_file ~path));
+  check bool "an explicit date string remains package data" true (Result.is_ok (load_declaration ~path));
   (* #41135 introduced the enabled deployment flag: a valid boolean must be
      accepted, not rejected by the unknown-field guard. *)
   write path (declaration ~extra:"enabled = false" msx_binding);
-  let disabled = unwrap (Config.load_file ~path) in
+  let disabled = unwrap (load_declaration ~path) in
   check bool "enabled flag is accepted" false disabled.enabled)
 
 let invalid_files_remain_visible () = with_directory (fun _root packages directory ->
@@ -172,7 +177,7 @@ let invalid_files_remain_visible () = with_directory (fun _root packages directo
   write malformed "id = [ unfinished";
   write invalid (declaration ~id:"invalid" ~extra:"unexpected = true" msx_binding);
   write (Filename.concat directory "editor.tmp") "unfinished";
-  let snapshot = Config.load ~directory in
+  let snapshot = load_declarations ~directory in
   check bool "schema errors do not conceal directory membership" true snapshot.complete;
   check (list string) "all declared source paths remain visible" [valid; malformed; invalid] snapshot.paths;
   check int "valid independent installation remains available" 1 (List.length snapshot.declarations);
@@ -188,29 +193,29 @@ let duplicates_have_no_winner () = with_directory (fun _root packages directory 
   write first (declaration msx_binding);
   write second (declaration msx_binding);
   write independent (declaration ~id:"independent" msx_binding);
-  let snapshot = Config.load ~directory in
+  let snapshot = load_declarations ~directory in
   check string "only independent configuration survives" "independent" (only_declaration snapshot).id;
   check (list string) "every duplicate source is reported" [first; second]
     (List.map (fun (issue : Config.issue) -> issue.source_path) snapshot.issues);
   check bool "duplicate reports retain identity" true
     (List.for_all (fun (issue : Config.issue) -> issue.id = Some "frames") snapshot.issues);
   write second (declaration ~extra:"unexpected = true" msx_binding);
-  let invalid_duplicate = Config.load ~directory in
+  let invalid_duplicate = load_declarations ~directory in
   check string "invalid duplicate cannot silently elect another winner" "independent"
     (only_declaration invalid_duplicate).id)
 
 let directory_and_read_failures () = with_directory (fun root _packages directory ->
-  let absent = Config.load ~directory:(Filename.concat root "absent") in
+  let absent = load_declarations ~directory:(Filename.concat root "absent") in
   check bool "missing declaration directory is a complete empty configuration" true absent.complete;
   check int "no missing-directory issue" 0 (List.length absent.issues);
   let not_directory = Filename.concat root "file" in
   write not_directory "a file";
-  let unreadable = Config.load ~directory:not_directory in
+  let unreadable = load_declarations ~directory:not_directory in
   check bool "failed listing cannot authorize detachment" false unreadable.complete;
   check int "failed listing has an issue" 1 (List.length unreadable.issues);
   let rejected = Filename.concat directory "not-a-file.toml" in
   Unix.mkdir rejected 0o700;
-  let snapshot = Config.load ~directory in
+  let snapshot = load_declarations ~directory in
   check bool "unreadable declaration prevents deletion inference" false snapshot.complete;
   check (list string) "unreadable declaration retains its path" [rejected] snapshot.paths;
   check int "unreadable declaration is reported" 1 (List.length snapshot.issues))
@@ -219,7 +224,7 @@ let output_ports_are_typed_and_revisioned () = with_directory (fun _root package
   let manifest = install_package packages in
   let path = Filename.concat directory "frames.toml" in
   write path (declaration msx_binding);
-  let install ports = write manifest (package () ^ ports); Config.load_file ~path in
+  let install ports = write manifest (package () ^ ports); load_declaration ~path in
   let initial = unwrap (install {|
 [world.outputs.frames]
 lanes = ["msx/frame", "msx/state"]
@@ -271,7 +276,7 @@ presentation = '''{"description":"Compare reported data","readings":[{"lane_id":
   write manifest (package () ^ "\n" ^ interface);
   let path = Filename.concat directory "quality.toml" in
   write path (declaration (msx_binding ^ "limit = 2\n"));
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check int "package declares one display reading" 1 (List.length initial.package.presentation.readings);
   write path (declaration (msx_binding ^ "limit = 0\n"));
   check_error "invalid package binding rejected before worker install" path;
@@ -282,11 +287,11 @@ let refresh_policy_is_explicit () = with_directory (fun _root packages directory
   let manifest = install_package packages in
   let path = Filename.concat directory "refresh.toml" in
   write path (declaration msx_binding);
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check bool "omitted refresh policy preserves every callback" true
     (initial.package.refresh_policy=Lane_addon_types.Every_hint);
   write manifest (package () ^ "\n[interface]\nrefresh_policy = \"source_changes\"\n");
-  let opted_in = unwrap (Config.load_file ~path) in
+  let opted_in = unwrap (load_declaration ~path) in
   check bool "suppression requires a typed package opt-in" true
     (opted_in.package.refresh_policy=Lane_addon_types.Source_changes);
   check bool "refresh policy changes the applied configuration identity" false
@@ -308,7 +313,7 @@ sources = [{source_id = "page", kind = "browser_document",%s lane = "live", clie
   write path (declaration (page {| installation_id = "",|}));
   check_error "a blank browser installation is refused" path;
   write path (declaration (page {| installation_id = "browser-ego",|}));
-  ignore (unwrap (Config.load_file ~path)))
+  ignore (unwrap (load_declaration ~path)))
 
 
 (* The shipped DOS chain: every package declares the binding contract that
@@ -326,7 +331,7 @@ let shipped_dos_chain_declares_binding_contracts () =
     "docs/examples/lane-addons/dos-statistics.toml", "output-statistics", "dos-statistics";
     "docs/examples/lane-addons/output-statistics.toml", "output-statistics", "output-statistics"] in
   List.iter (fun (relative, addon_id, id) ->
-    let loaded = unwrap (Config.load_file ~path:(repo_file relative)) in
+    let loaded = unwrap (load_declaration ~path:(repo_file relative)) in
     check string ("declaration " ^ relative ^ " names its package") addon_id loaded.package.id;
     check string ("declaration " ^ relative ^ " keeps its id") id loaded.id;
     check bool (addon_id ^ " declares a binding contract") true (Option.is_some loaded.package.binding_schema))
@@ -346,17 +351,17 @@ output_id = "guest"
 selection = "latest_completed"
 |} in
     candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\n" ^ source);
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     candidate ~package:"value-difference" ("[binding]\nunit = \"count\"\n" ^ source);
     check_error "value-difference without the compared field is rejected before install" path;
     candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\nwindow = 3\n" ^ source);
     check_error "value-difference rejects a binding key the package does not read" path;
     candidate ~package:"output-statistics" ("[binding]\n" ^ source);
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     candidate ~package:"output-statistics" "[binding]\nsources = [{source_id = \"game\", kind = \"msx_capture\"}]\n";
     check_error "output-statistics accepts lane_output inputs only" path;
     candidate ~package:"dos-world" "[binding]\nsources = []\n";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     candidate ~package:"dos-world" ("[binding]\n" ^ source);
     check_error "dos-world takes no external source" path)
 
@@ -364,7 +369,7 @@ selection = "latest_completed"
    own manifest, its record grants parse as operator-owned grants, and the
    binding contract refuses a binding without the time zone R is counted in. *)
 let shipped_operator_quiz_declaration_loads () =
-  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
+  let loaded = unwrap (load_declaration ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
   let package = loaded.package in
   check string "the declaration names the package" "operator-quiz" package.id;
   check (list string) "the package declares the author and grade outputs"
@@ -393,11 +398,11 @@ kind = "board"
 visibilities = ["public"]
 |} manifest binding) in
     declaration "timezone = \"Asia/Seoul\"\n";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     declaration "timezone = \"Asia/Seoul\"\n\n[[binding.records]]\nsource_id = \"wiki\"\nkind = \"wiki\"\n\n\
                  [[binding.records]]\nsource_id = \"prs\"\nkind = \"github_pulls\"\nrepository_id = \"masc\"\n";
     check int "the binding also takes wiki and github_pulls grants" 3
-      (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (Config.load_file ~path)).binding)));
+      (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (load_declaration ~path)).binding)));
     (* The binding schema is two alternatives, and the host's validator names
        no member of an alternative: a binding that fits neither is refused
        with this one message, whichever member is wrong (#52319).
@@ -504,12 +509,12 @@ kind = "board"
 visibilities = ["public"]
 |} manifest since output selection more) in
     following "scenes";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     (* The worker takes zero and a fraction of a second, so the host does. *)
     following ~since:"since = 0\n" "scenes";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     following ~since:"since = 1794441600.5\n" "scenes";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     following ~since:"" "scenes";
     check_refusal "a quiz that follows a lesson without since is refused" path unmatched;
     following ~since:"since = \"yesterday\"\n" "scenes";
@@ -564,7 +569,7 @@ visibilities = ["public"]
         (inside && not (starts "# selection = "), kept))
         (false, []) (String.split_on_char '\n' example) in
     write path (String.concat "\n" (List.rev lines));
-    let binding = (unwrap (Config.load_file ~path)).binding in
+    let binding = (unwrap (load_declaration ~path)).binding in
     check bool "the example bound to a lesson keeps its time zone and since" true
       Yojson.Safe.Util.(member "timezone" binding = `String "Asia/Seoul" && member "since" binding <> `Null);
     check int "and reads the lesson's scenes output" 1
@@ -574,7 +579,7 @@ visibilities = ["public"]
    package's own manifest, and the binding contract refuses a binding without
    the time the first lesson reads from. *)
 let shipped_operator_lesson_declaration_loads () =
-  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
+  let loaded = unwrap (load_declaration ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
   let package = loaded.package in
   check string "the declaration names the package" "operator-lesson" package.id;
   check (list string) "the package declares the outline and scene outputs"
@@ -605,7 +610,7 @@ kind = "board"
 visibilities = ["public"]
 |} manifest binding) in
     declaration "since = 1794441600\n";
-    ignore (unwrap (Config.load_file ~path));
+    ignore (unwrap (load_declaration ~path));
     declaration "";
     check_error "a binding without since is refused before install" path;
     declaration "since = \"yesterday\"\n";
@@ -661,7 +666,7 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
       "a dispute without a note", {|{"kind":"dispute","ask_id":"a","question_id":"q1"}|} ];
   (* The shipped dispute row action is offered on the Dispute alternative of
      the schema this worker advertises, and leaves only the note. *)
-  let package = (unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml"))).package in
+  let package = (unwrap (load_declaration ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml"))).package in
   (match package.action_tool, package.presentation.Lane_addon_presentation.actions with
    | Some tool_name, [ action ] ->
        (match Lane_addon_row_action.judge ~tool_name ~tool_schema:schema action with
@@ -682,20 +687,20 @@ let tool_hooks_are_selected_and_revisioned () = with_directory (fun _root packag
   let manifest = install_package packages in
   let path = Filename.concat directory "hooks.toml" in
   write path (declaration msx_binding);
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check bool "old package has no hooks" true (initial.package.tool_hooks = []);
   check bool "no hook key changes old package identity" true
     (Yojson.Safe.Util.member "tool_hooks" (Lane_addon_types.package_to_json initial.package) = `Null);
   write manifest (package () ^ "\n[world.tools]\nexport = [\"machine_step\"]\nhooks = [\"validate_output\"]\n");
-  let default = unwrap (Config.load_file ~path) in
+  let default = unwrap (load_declaration ~path) in
   check bool "package selects output validation" true
     (default.package.tool_hooks = [Lane_addon_types.Validate_output]);
   write path (declaration ~extra:"tool_hooks = []" msx_binding);
-  let off = unwrap (Config.load_file ~path) in
+  let off = unwrap (load_declaration ~path) in
   check bool "installation can turn optional hooks off" true (off.package.tool_hooks = []);
   check bool "hook change replaces the worker identity" true (off.revision <> default.revision);
   write path (declaration ~extra:"tool_hooks = [\"validate_input\"]" msx_binding);
-  let input = unwrap (Config.load_file ~path) in
+  let input = unwrap (load_declaration ~path) in
   check bool "input can be selected independently" true
     (input.package.tool_hooks = [Lane_addon_types.Validate_input]);
   List.iter (fun extra ->
@@ -708,17 +713,17 @@ let model_access_is_explicit_and_revisioned () = with_directory (fun _root packa
   let manifest = install_package packages in
   let path = Filename.concat directory "model.toml" in
   write path (declaration msx_binding);
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check bool "omitted model access grants no sampling" true
     (initial.package.model_access=Lane_addon_types.Model_disabled);
   write manifest (package () ^ "\n[interface]\nmodel_access = \"host_sampling\"\n");
-  let enabled = unwrap (Config.load_file ~path) in
+  let enabled = unwrap (load_declaration ~path) in
   check bool "model access is a typed explicit package requirement" true
     (enabled.package.model_access=Lane_addon_types.Host_sampling);
   check bool "model access changes the applied configuration identity" false
     (initial.revision=enabled.revision);
   write manifest (package () ^ "\n[interface]\nmodel_access = \"disabled\"\n");
-  let disabled = unwrap (Config.load_file ~path) in
+  let disabled = unwrap (load_declaration ~path) in
   check bool "explicitly disabled and omitted have identical semantics" true
     (initial.revision=disabled.revision);
   List.iter (fun value ->
@@ -729,17 +734,17 @@ let operator_asks_are_a_package_declaration () = with_directory (fun _root packa
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in
   write path (declaration msx_binding);
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check bool "a package without the table does not ask" false initial.package.operator_asks;
   check bool "and its package value carries no operator_asks key" true
     (Yojson.Safe.Util.member "operator_asks" (Lane_addon_types.package_to_json initial.package) = `Null);
   write manifest (package () ^ "\n[world.asks]\noperator = true\n");
-  let asking = unwrap (Config.load_file ~path) in
+  let asking = unwrap (load_declaration ~path) in
   check bool "operator = true lets the package ask" true asking.package.operator_asks;
   check bool "and changes the configuration identity" false (initial.revision = asking.revision);
   List.iter (fun table ->
     write manifest (package () ^ "\n[world.asks]\n" ^ table);
-    check bool ("world.asks refuses " ^ table) true (Result.is_error (Config.load_file ~path)))
+    check bool ("world.asks refuses " ^ table) true (Result.is_error (load_declaration ~path)))
     [ "operator = \"yes\"\n"; "operator = true\nkeeper = true\n" ])
 
 (* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1. *)
@@ -749,21 +754,145 @@ let host_request_pages_are_a_package_declaration () = with_directory (fun _root 
   write path (declaration msx_binding);
   let with_world world = write manifest (package () ^ "\n[world]\n" ^ world) in
   with_world "[world.asks]\noperator = true\n";
-  let initial = unwrap (Config.load_file ~path) in
+  let initial = unwrap (load_declaration ~path) in
   check bool "a package without the key answers once" true
     (initial.package.host_request_listing = Lane_addon_types.One_answer);
   check bool "and its package value carries no host_request_pages key" true
     (Yojson.Safe.Util.member "host_request_pages" (Lane_addon_types.package_to_json initial.package) = `Null);
   with_world "host_request_pages = true\n[world.asks]\noperator = true\n";
-  let paged = unwrap (Config.load_file ~path) in
+  let paged = unwrap (load_declaration ~path) in
   check bool "host_request_pages = true answers in pages" true
     (paged.package.host_request_listing = Lane_addon_types.Pages);
   check bool "and changes the configuration identity" false (initial.revision = paged.revision);
   List.iter (fun (label, world) ->
     with_world world;
-    check bool label true (Result.is_error (Config.load_file ~path)))
+    check bool label true (Result.is_error (load_declaration ~path)))
     [ "a value that is not a boolean", "host_request_pages = \"yes\"\n[world.asks]\noperator = true\n"
     ; "pages without a host request", "host_request_pages = true\n" ])
+
+let exact_protocol_is_the_one_this_server_speaks () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "quiz.toml" in
+  write path (declaration msx_binding);
+  write (Filename.concat packages "answer.json")
+    {|{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}|};
+  let with_world world = write manifest (package () ^ "\n[world]\n" ^ world) in
+  let output = "[world.exact_outputs.answer]\nschema = \"answer.json\"\n" in
+  let server = Lane_addon_types.exact_protocol in
+  with_world (Printf.sprintf "exact_protocol = %d\n%s" server output);
+  let declared = unwrap (load_declaration ~path) in
+  check int "a package written for this server's protocol declares its exact output" 1
+    (List.length declared.package.exact_outputs);
+  List.iter (fun (label, world, words) ->
+    with_world world;
+    match load_declaration ~path with
+    | Ok _ -> failf "%s was accepted" label
+    | Error message ->
+        List.iter (fun word -> check bool (label ^ " is refused naming " ^ word) true (contains message word)) words)
+    [ "exact outputs without a protocol", output,
+      [ "world.exact_protocol is missing"; Printf.sprintf "Exact protocol %d" server ]
+    ; "another protocol", Printf.sprintf "exact_protocol = %d\n%s" (server + 1) output,
+      [ Printf.sprintf "world.exact_protocol is %d" (server + 1); Printf.sprintf "Exact protocol %d" server ]
+    ; "a protocol without exact outputs", Printf.sprintf "exact_protocol = %d\n" server,
+      [ "world.exact_protocol requires exact_outputs" ]
+    ; "a protocol that is not an integer", Printf.sprintf "exact_protocol = \"%d\"\n%s" server output,
+      [ "world.exact_protocol requires an integer" ] ])
+
+(* Writes this binary's copy of [id] where a [package = "<name>"]
+   declaration looks for it, and answers that folder. *)
+let place_carried packages id =
+  let folder = unwrap (Lane_addon_carried.folder ~packages id) in
+  List.iter (fun (file : Lane_addon_carried.file) ->
+      let path = Filename.concat folder file.path in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      write path file.contents)
+    (Lane_addon_carried.package_files id);
+  folder
+
+let carried_packages_are_complete_manifests () = with_directory (fun _root packages _directory ->
+  check (list string) "every carried image copies the same two shared modules"
+    ["exact_worker.py"; "protocol.py"]
+    (List.map (fun (file : Lane_addon_carried.file) -> file.path) Lane_addon_carried.shared_files);
+  List.iter (fun id ->
+      let name = Lane_addon_carried.name id in
+      check bool (name ^ " is found by its own name") true (Lane_addon_carried.of_name name = Some id);
+      let revision = unwrap (Lane_addon_carried.revision id) in
+      let folder = place_carried packages id in
+      check string (name ^ " is installed under its name and revision")
+        (Filename.concat packages (name ^ "-" ^ revision)) folder;
+      let manifest = unwrap (Lane_addon_carried.installed_manifest ~packages id
+        |> Result.map_error (Lane_addon_carried.installation_error_to_string id)) in
+      match Lane_addon_manifest.load ~path:manifest with
+      | Error error -> fail (name ^ ": " ^ Lane_addon_manifest.error_to_string error)
+      | Ok package ->
+          check string (name ^ " declares its own id") name package.id;
+          check string (name ^ " declares the revision its folder names") revision package.revision;
+          check bool (name ^ " declares exact outputs") true (package.exact_outputs <> []))
+    Lane_addon_carried.all)
+
+let a_declaration_names_a_carried_package () = with_directory (fun _root packages directory ->
+  let path = Filename.concat directory "librarian.toml" in
+  let declare keys = write path (Printf.sprintf "id = \"librarian\"\nrun_id = \"memory\"\n%s[binding]\nsources = []\n" keys) in
+  let refused label words =
+    match load_declaration ~path with
+    | Ok _ -> failf "%s was accepted" label
+    | Error message ->
+        List.iter (fun word -> check bool (label ^ " is refused naming " ^ word) true (contains message word)) words in
+  let carried = Lane_addon_carried.Keeper_librarian in
+  let folder = unwrap (Lane_addon_carried.folder ~packages carried) in
+  declare "package = \"keeper-librarian\"\n";
+  refused "a carried package that is not installed" ["is not installed"; folder; "masc exact-addon-setup"];
+  ignore (place_carried packages carried);
+  let declaration = unwrap (load_declaration ~path) in
+  check string "the declaration resolves to the installed folder"
+    (Unix.realpath (Filename.concat folder "lane.toml")) declaration.manifest_path;
+  check string "and attaches the carried package" "keeper-librarian" declaration.package.id;
+  check bool "the declaration records that it names the carried package" true
+    (declaration.package_source = Config.Carried carried);
+  declare (Printf.sprintf "manifest_path = %S\n" (Filename.concat folder "lane.toml"));
+  let by_path = unwrap (load_declaration ~path) in
+  check bool "a manifest_path to the same folder records the path" true
+    (by_path.package_source = Config.Manifest_path);
+  check string "and reads the same manifest" declaration.manifest_path by_path.manifest_path;
+  let image_label (d : Config.declaration) = match d.package.execution with
+    | Lane_addon_types.Container container -> container.image_label
+    | Lane_addon_types.Host_process _ -> failf "%s does not run in a container" d.id in
+  check bool "the carried declaration requires this server's image digest" true
+    (image_label declaration = Some { Lane_addon_types.label_key = Lane_addon_carried.image_label;
+                                      label_value = Lane_addon_carried.image_digest carried });
+  check bool "the manifest_path declaration requires no image label" true (image_label by_path = None);
+  let names_image_label (d : Config.declaration) =
+    match Lane_addon_types.execution_package_json d.package with
+    | `Assoc fields -> List.mem_assoc "image_label" fields
+    | _ -> failf "%s package JSON is not an object" d.id in
+  check bool "the carried requirement is a worker input of the revision" true (names_image_label declaration);
+  check bool "a package without it keeps the revision it had" false (names_image_label by_path);
+  check bool "so the two declarations have different revisions" false
+    (String.equal declaration.revision by_path.revision);
+  declare "package = \"keeper-librarian\"\n";
+  let server = Filename.concat folder "server.py" in
+  write server "# another worker\n";
+  refused "a folder whose worker has other bytes" ["server.py has other bytes"; folder];
+  ignore (place_carried packages carried);
+  write (Filename.concat folder "notes.txt") "operator notes";
+  refused "a folder with a file the package does not carry" ["unexpected notes.txt"];
+  Sys.remove (Filename.concat folder "notes.txt");
+  Sys.remove (Filename.concat folder "schemas/durable.json");
+  refused "a folder missing a carried file" ["missing schemas/durable.json"];
+  ignore (place_carried packages carried);
+  Sys.remove server;
+  Unix.symlink (Filename.concat directory "librarian.toml") server;
+  refused "a folder holding a symbolic link" ["server.py is not a regular file or directory"];
+  Sys.remove server;
+  ignore (place_carried packages carried);
+  check bool "the restored folder is accepted again" true (Result.is_ok (load_declaration ~path));
+  List.iter (fun (label, keys, words) -> declare keys; refused label words)
+    [ "both package and manifest_path",
+      "package = \"keeper-librarian\"\nmanifest_path = \"../packages/lane.toml\"\n", ["both package and manifest_path"]
+    ; "neither package nor manifest_path", "", ["requires package or manifest_path"]
+    ; "a package this server does not carry", "package = \"browser-ego\"\n",
+      ["\"browser-ego\" is not one this server carries"; "keeper-librarian"]
+    ; "a package that is not a name", "package = 1\n", ["package requires"] ])
 
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
   let manifest = install_package packages in
@@ -774,8 +903,8 @@ let exact_outputs_are_package_schemas () = with_directory (fun root packages dir
   let author = {|{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}}},"required":["questions"],"additionalProperties":false}|} in
   write (Filename.concat schemas "author.json") author;
   write (Filename.concat schemas "grade.json") {|{"type":"object","properties":{"verdict":{"type":"string","enum":["correct","incorrect"]}},"additionalProperties":false}|};
-  let with_outputs tables = write manifest (package () ^ "\n" ^ tables) in
-  let initial = unwrap (Config.load_file ~path) in
+  let with_outputs tables = write manifest (package () ^ "\n[world]\nexact_protocol = 1\n" ^ tables) in
+  let initial = unwrap (load_declaration ~path) in
   check int "a package without the table declares no exact output" 0
     (List.length initial.package.exact_outputs);
   check bool "and its package value carries no exact_outputs key, so its revision is unchanged" true
@@ -785,7 +914,7 @@ schema = "schemas/grade.json"
 [world.exact_outputs.author]
 schema = "schemas/author.json"
 |};
-  let declared = unwrap (Config.load_file ~path) in
+  let declared = unwrap (load_declaration ~path) in
   check (list string) "outputs are listed in name order" ["author"; "grade"]
     (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) declared.package.exact_outputs);
   check bool "the schema is the file's JSON" true
@@ -793,12 +922,12 @@ schema = "schemas/author.json"
   check bool "declaring exact outputs changes the configuration identity" false
     (initial.revision = declared.revision);
   write (Filename.concat schemas "grade.json") {|{"type":"object","properties":{"verdict":{"type":"string"}},"additionalProperties":false}|};
-  let edited = unwrap (Config.load_file ~path) in
+  let edited = unwrap (load_declaration ~path) in
   check bool "editing a schema file changes the configuration identity" false
     (declared.revision = edited.revision);
   write manifest (package ());
   check string "removing the table returns to the first identity" initial.revision
-    (unwrap (Config.load_file ~path)).revision;
+    (unwrap (load_declaration ~path)).revision;
   write (Filename.concat schemas "text.json") {|{"type":"string"}|};
   write (Filename.concat schemas "pattern.json") {|{"type":"object","patternProperties":{"^a":{"type":"string"}},"additionalProperties":false}|};
   write (Filename.concat schemas "broken.json") {|{"type":"object",|};
@@ -806,7 +935,7 @@ schema = "schemas/author.json"
   Unix.symlink (Filename.concat root "outside.json") (Filename.concat schemas "escape.json");
   List.iter (fun (label, tables) ->
     with_outputs tables;
-    match Config.load_file ~path with
+    match load_declaration ~path with
     | Ok _ -> failf "%s was accepted" label
     | Error message ->
         check bool (label ^ " is refused by the exact_outputs reader") true
@@ -831,6 +960,8 @@ let exact_outputs_are_selected_independently () = with_directory (fun _root pack
   let schema = {|{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}|} in
   write (Filename.concat packages "answer.json") schema;
   write manifest (package () ^ {|
+[world]
+exact_protocol = 1
 [world.tools]
 export = []
 hooks = ["validate_input", "validate_output"]
@@ -842,7 +973,7 @@ schema = "answer.json"
   let path = Filename.concat directory "browser.toml" in
   let install extra =
     write path (declaration ~extra msx_binding);
-    Config.load_file ~path in
+    load_declaration ~path in
   let names (value:Config.declaration) = List.map
       (fun (output:Lane_addon_types.exact_output) -> output.name) value.package.exact_outputs in
   let default = unwrap (install "") in
@@ -881,6 +1012,8 @@ tool_hooks = []|}) in
     [ {|["unknown"]|}; {|["plan", "plan"]|}; {|["plan", 1]|}; {|[""]|};
       {|[" plan"]|}; "true"; {|"plan"|}; "{}" ];
   write manifest (package () ^ {|
+[world]
+exact_protocol = 1
 [world.exact_outputs.plan]
 schema = "answer.json"
 [world.exact_outputs.extract]
@@ -901,7 +1034,7 @@ request_schema = true
 
 let assembled_fusion_declarations () =
   List.iter (fun name ->
-    let loaded = unwrap (Config.load_file ~path:(repo_file
+    let loaded = unwrap (load_declaration ~path:(repo_file
       ("docs/examples/lane-addons/fusion-compute/" ^ name ^ ".toml"))) in
     check string "assembled workers belong to one host run" "assembled-fusion" loaded.run_id;
     let expected = if name="report" then Lane_addon_types.Model_disabled
@@ -981,7 +1114,7 @@ let alternative_probes_do_not_observe_tool_calls () =
           | _ -> None)))
 
 let judge_source_schema_is_enforced () =
-  let loaded = unwrap (Config.load_file ~path:(repo_file
+  let loaded = unwrap (load_declaration ~path:(repo_file
     "docs/examples/lane-addons/fusion-compute/judge.toml")) in
   let schema = Option.get loaded.package.binding_schema in
   let validate value = Lane_addon_action.validate_value ~schema ~name:"binding" value in
@@ -998,9 +1131,9 @@ let judge_source_schema_is_enforced () =
     let path = Filename.concat declarations "role.toml" in
     let declaration role = Printf.sprintf "id = \"role-check\"\nrun_id = \"role-check\"\nmanifest_path = %S\n[binding]\nanalysis_id = \"a\"\nrole = %S\nprompt = \"compare\"\ninstructions = \"judge evidence\"\nmax_tokens = 8\nmodel_route = \"declared\"\n[[binding.sources]]\nsource_id = \"input\"\nkind = \"snapshot_file\"\npath = \"snapshot.json\"\n" loaded.manifest_path role in
     write path (declaration "judge");
-    check bool "Config.load_file rejects unusable judge snapshot declaration" true (Result.is_error (Config.load_file ~path));
+    check bool "load_declaration rejects unusable judge snapshot declaration" true (Result.is_error (load_declaration ~path));
     write path (declaration "panel");
-    check bool "Config.load_file accepts panel snapshot declaration" true (Result.is_ok (Config.load_file ~path)));
+    check bool "load_declaration accepts panel snapshot declaration" true (Result.is_ok (load_declaration ~path)));
   let branch = `Assoc ["type",`String "string"] in
   let union branches = `Assoc ["type",`String "string";"oneOf",`List branches] in
   check bool "oneOf rejects overlapping alternatives" true
@@ -1154,7 +1287,7 @@ max_reply_bytes = 4096
     | Ok _ -> failf "a browser package with %s was accepted" label
     | Error error -> check bool ("a browser package with " ^ label ^ " is refused") true
         (contains (Lane_addon_manifest.error_to_string error) "omit exact_outputs and asks"))
-    [ "an exact output", "[world.exact_outputs.answer]\nschema = \"answer.json\"";
+    [ "an exact output", "[world]\nexact_protocol = 1\n[world.exact_outputs.answer]\nschema = \"answer.json\"";
       "operator asks", "[world.asks]\noperator = true" ];
   List.iter (fun (label, service) -> match load service "" with
     | Ok _ -> failf "%s was accepted" label
@@ -1200,11 +1333,11 @@ let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root pack
   let manifest = install_package packages in
   let path = Filename.concat directory "machine.toml" in
   write path (declaration msx_binding);
-  let original = unwrap (Config.load_file ~path) in
+  let original = unwrap (load_declaration ~path) in
   check (list string) "no implicit exports" [] original.package.exported_tools;
   let install names =
     write manifest (package () ^ "\n[world.tools]\nexport = " ^ names ^ "\n");
-    Config.load_file ~path in
+    load_declaration ~path in
   let exported = unwrap (install {|["masc_msx_step", "masc_msx_load"]|}) in
   check (list string) "declared tools" ["masc_msx_load"; "masc_msx_step"] exported.package.exported_tools;
   check bool "tool membership changes applied revision" true (original.revision <> exported.revision);
@@ -1219,12 +1352,12 @@ let persistent_state_is_explicit_and_revisioned () = with_directory (fun _root p
   let manifest = install_package packages in
   let path = Filename.concat directory "machine.toml" in
   write path (declaration msx_binding);
-  let original = unwrap (Config.load_file ~path) in
+  let original = unwrap (load_declaration ~path) in
   check bool "legacy packages are ephemeral" true
     (original.package.state_storage = Masc.Lane_addon_types.Ephemeral);
   let install state =
     write manifest (package () ^ "\n[world.state]\n" ^ state ^ "\n");
-    Config.load_file ~path in
+    load_declaration ~path in
   let persistent = unwrap (install {|mode = "persistent"|}) in
   check bool "persistent storage is explicit" true
     (persistent.package.state_storage = Masc.Lane_addon_types.Persistent);
@@ -1239,11 +1372,11 @@ let exact_in_flight_count_is_outside_worker_identity () = with_directory (fun _r
   ignore (install_package packages);
   let path = Filename.concat directory "frames.toml" in
   write path (declaration msx_binding);
-  let original = unwrap (Config.load_file ~path) in
+  let original = unwrap (load_declaration ~path) in
   check int "a declaration without the key runs one exact request at a time"
     (Config.one_exact_at_a_time :> int) (original.max_exact_in_flight :> int);
   write path (declaration ~extra:"max_exact_in_flight = 3" msx_binding);
-  let widened = unwrap (Config.load_file ~path) in
+  let widened = unwrap (load_declaration ~path) in
   check int "the declared count is read" 3 (widened.max_exact_in_flight :> int);
   check string "the count is not a worker input" original.revision widened.revision;
   List.iter (fun value ->
@@ -1255,7 +1388,7 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
   let manifest = install_package packages in
   let path = Filename.concat directory "observer.toml" in
   write path (declaration msx_binding);
-  let original = unwrap (Config.load_file ~path) in
+  let original = unwrap (load_declaration ~path) in
   check bool "absence remains unclassified" true (original.package.ui_category=None);
   let module Category = Lane_addon_category in
   let cases = ["memory_judgment",Category.Memory_and_judgment;
@@ -1264,7 +1397,7 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
     "analysis",Category.Analysis] in
   List.iter (fun (wire,expected) ->
     write manifest (Printf.sprintf "ui_category = %S\n%s" wire (package ()));
-    let found = unwrap (Config.load_file ~path) in
+    let found = unwrap (load_declaration ~path) in
     check bool "declared category is typed without using package identity" true
       (found.package.ui_category=Some expected);
     check bool "the package wire retains its original declaration" true
@@ -1282,12 +1415,12 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
   List.iter (fun category ->
     write manifest ("ui_category = " ^ category ^ "\n" ^ package ());
     check bool "invalid declared category is not absence or a guessed role" true
-      (Result.is_error (Config.load_file ~path)))
+      (Result.is_error (load_declaration ~path)))
     ["\"unknown\"";"\"\"";"\"Browser\"";"\" browser\"";"\"browser \"";
      "true";"1";"1.5";"[]";"[\"browser\", \"analysis\"]";"{}";"2026-10-23"];
   write manifest ("ui_category = \"analysis\"\nui_category = \"browser\"\n" ^ package ());
   check bool "duplicate category is rejected before installation" true
-    (Result.is_error (Config.load_file ~path));
+    (Result.is_error (load_declaration ~path));
   List.iter (fun value -> check bool "wire categories reject unsupported JSON" true
     (Result.is_error (Category.of_json value)))
     [`Null;`Bool false;`Int 0;`List [];`Assoc [];`String "unknown"];
@@ -1310,7 +1443,7 @@ contributions=["observe"]
 max_reply_bytes=4096
 |};
   let path=Filename.concat directory "ego.toml" in
-  let load space=Config.load_source ~manifest_scope:Config.Operator_declared ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
+  let load space=Config.load_source ~packages:(packages_beside (Filename.dirname path)) ~manifest_scope:Config.Operator_declared ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
   let workspace=unwrap (load "") and first=unwrap (load "space=\"first Goal\"\n")
   and second=unwrap (load "space=52\n") in
   check bool "Space is retained in declaration binding" true (Yojson.Safe.Util.member "space" second.binding=`Int 52);
@@ -1338,6 +1471,9 @@ let () = run "Lane Add-on declarative composition"
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
      test_case "host request pages are a package declaration" `Quick host_request_pages_are_a_package_declaration;
+     test_case "exact protocol is the one this server speaks" `Quick exact_protocol_is_the_one_this_server_speaks;
+     test_case "carried packages are complete manifests" `Quick carried_packages_are_complete_manifests;
+     test_case "a declaration names a carried package" `Quick a_declaration_names_a_carried_package;
      test_case "exact outputs are selectable independently from tool hooks" `Quick exact_outputs_are_selected_independently;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;

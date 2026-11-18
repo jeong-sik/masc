@@ -182,14 +182,15 @@ let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
       ~task_id:"task-171"
       ~created_by:(Some "alpha")
       ~handoff_context:
-        { D.summary = "sandbox lacks the request-menu service"
-        ; D.reason = Some "cannot verify without the service"
-        ; next_step = None
-        ; failure_mode = None
-        ; evidence_refs = []
-        ; updated_at = None
-        ; updated_by = None
-        }
+        (D.Handoff_decoded
+           { D.summary = "sandbox lacks the request-menu service"
+           ; D.reason = Some "cannot verify without the service"
+           ; next_step = None
+           ; failure_mode = None
+           ; evidence_refs = []
+           ; updated_at = None
+           ; updated_by = None
+           })
       ~status:(cancelled ~by:"beta" ~reason:None);
     let outcome =
       Wake.notify_author

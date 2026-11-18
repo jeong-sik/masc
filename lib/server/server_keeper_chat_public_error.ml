@@ -1,6 +1,7 @@
 type kind = Keeper_chat_public_error.kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
+  | Owner_unavailable | Owner_stopping
   | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
@@ -18,7 +19,9 @@ let status : kind -> Httpun.Status.t = function
   | Not_queued -> `Conflict
   | Idempotency_conflict -> `Conflict
   | Native_call_unsettled -> `Conflict
-  | Store_unavailable -> `Service_unavailable
+  | Store_fenced -> `Service_unavailable
+  | Store_commit_unknown -> `Service_unavailable
+  | Store_unreadable -> `Service_unavailable
   | Owner_unavailable -> `Service_unavailable
   | Owner_stopping -> `Service_unavailable
   | Interrupt_failed -> `Service_unavailable

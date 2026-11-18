@@ -68,7 +68,7 @@ let test_every_source_announces_after_dropping_planning () =
   prime ();
   let goal, _, _ =
     match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
-            ~title:"Announced Goal" ~metric:"goals" ~target_value:"1" () with
+            ~title:"Announced Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
     | Ok result -> result
     | Error error -> fail (Goal_store.write_error_to_string error)
   in

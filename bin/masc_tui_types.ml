@@ -2981,9 +2981,10 @@ type schedule_row = {
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
   sch_last_wake_error: string option;
-  sch_queue_projection_status: string option;
+  sch_queue_projection_status: Schedule_contract_values.queue_projection_status option;
   sch_queue_pending_count: int option;
-  sch_reaction_projection_status: string option;
+  sch_reaction_projection_status:
+    Schedule_contract_values.reaction_projection_status option;
   sch_reaction_latest_at_iso: string option;
   sch_reaction_kind: string option;
   sch_reaction_keeper_name: string option;
@@ -4327,8 +4328,8 @@ type planning_goal = Tui_decode.planning_goal
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
-  pg_metric: string option;
-  pg_target_value: string option;
+  pg_measure: Goal_measure.t;
+  pg_procedure: string;
   pg_proof: Tui_decode.goal_proof;
   pg_criterion_review: Tui_decode.goal_criterion_review;
   pg_retry_binding: Tui_decode.goal_retry_binding option;

@@ -1600,6 +1600,138 @@ let test_recovered_provider_id_reuse_stays_in_distinct_scopes () =
     (A.to_tool_calls t)
 ;;
 
+(* A turn restored from the durable execution journal (#30728). The new
+   process streamed nothing for it, so the journaled admission is the only
+   authority that can seal it. The response holds the two calls admission kept;
+   the provider made three, and the one at place 1 was refused. *)
+let restored_response : Agent_core.Types.api_response =
+  { id = "resp-restored"
+  ; model = "model"
+  ; unreadable_tool_uses = []
+  ; stop_reason = Agent_core.Types.StopToolUse
+  ; content =
+      [ Agent_core.Llm_provider.Types.Text "running"
+      ; Agent_core.Llm_provider.Types.ToolUse { id = "call-a"; name = "read"; input = `Assoc [ "path", `String "a" ] }
+      ; Agent_core.Llm_provider.Types.ToolUse { id = "call-c"; name = "write"; input = `Assoc [] }
+      ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let restored_admission ?(ordinals = [ 0; 2 ]) ?(count = 3) () :
+    Agent_core.Hooks.admitted_tool_source_map =
+  { admitted_tool_sources =
+      List.mapi
+        (fun planned_index source_tool_use_ordinal ->
+           { Agent_core.Hooks.planned_index
+           ; source_tool_use_ordinal
+           ; name_resolution = Agent_core.Hooks.Registered_name
+           })
+        ordinals
+  ; source_tool_use_count = count
+  }
+;;
+
+let restored_rows ?(a = None) ?(c = None) () : Masc.Keeper_chat_store.tool_call list =
+  [ { call_id = "call-a"; execution_id = a; call_name = "read"; args = {|{"path":"a"}|} }
+  ; { call_id = "call-c"; execution_id = c; call_name = "write"; args = "{}" }
+  ]
+;;
+
+let seal_restored ?(turn = 3) ?(tool_source_map = restored_admission ()) t =
+  A.seal_restored_turn t ~turn ~response:restored_response ~tool_source_map
+;;
+
+let test_restored_turn_seals_on_a_fresh_accumulator () =
+  let t = A.create () in
+  (match seal_restored t with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  check bool "the restored scope is sealed" true (A.current_scope_is_sealed t);
+  check (list tool_call) "each admitted call is a row" (restored_rows ()) (A.to_tool_calls t);
+  let exec_a = Ids.Execution_id.of_string "exec-restored-a" in
+  let exec_c = Ids.Execution_id.of_string "exec-restored-c" in
+  (match
+     A.record_execution_id t ~turn:3 ~planned_index:1 ~tool_call_id:"call-c"
+       ~execution_id:exec_c
+   with
+   | Ok occurrence ->
+     check int "the row sits at its provider call place" 2 occurrence.block_index
+   | Error detail -> fail detail);
+  (match
+     A.record_execution_id t ~turn:3 ~planned_index:0 ~tool_call_id:"call-a"
+       ~execution_id:exec_a
+   with
+   | Ok occurrence ->
+     check int "the row sits at its provider call place" 0 occurrence.block_index
+   | Error detail -> fail detail);
+  check (list tool_call) "the executions join the restored rows"
+    (restored_rows ~a:(Some exec_a) ~c:(Some exec_c) ()) (A.to_tool_calls t);
+  (* The next provider call of the resumed run streams into a scope of its own. *)
+  List.iter (A.on_event t)
+    [ message_start "resp-next"
+    ; start ~index:0 ~tool_id:(Some "call-next") ~tool_name:(Some "read")
+    ; json_snapshot ~index:0 "{}"
+    ; stop ~index:0
+    ; message_stop_reason
+    ];
+  seal_turn ~turn:4 t [ 0 ];
+  check int "the streamed turn adds one row" 3 (List.length (A.to_tool_calls t))
+;;
+
+let test_restored_turn_delivered_twice_has_no_new_effect () =
+  let t = A.create () in
+  let seal () =
+    match seal_restored t with
+    | Ok () -> ()
+    | Error detail -> fail detail
+  in
+  seal ();
+  seal ();
+  check (list tool_call) "a second delivery adds no row" (restored_rows ()) (A.to_tool_calls t);
+  (* A later runtime attempt moves the scope; the durable record still owns
+     the turn, so the same delivery stays a no-op. *)
+  start_runtime_attempt t;
+  start_runtime_attempt t;
+  seal ();
+  check (list tool_call) "delivery after the scope moved adds no row" (restored_rows ())
+    (A.to_tool_calls t);
+  (match
+     A.record_execution_id t ~turn:3 ~planned_index:0 ~tool_call_id:"call-a"
+       ~execution_id:(Ids.Execution_id.of_string "exec-after-attempt")
+   with
+   | Ok occurrence -> check int "the restored scope still answers" 0 occurrence.stream_scope
+   | Error detail -> fail detail);
+  match seal_restored ~tool_source_map:(restored_admission ~ordinals:[ 0; 1 ] ()) t with
+  | Ok () -> fail "a different admission for the restored turn must be refused"
+  | Error _ -> ()
+;;
+
+let test_restored_turn_rejects_positions_outside_its_admission () =
+  let refused name tool_source_map =
+    let t = A.create () in
+    match seal_restored t ~tool_source_map with
+    | Ok () -> failf "%s must be refused" name
+    | Error _ ->
+      check (list tool_call) (name ^ " leaves no row") [] (A.to_tool_calls t)
+  in
+  refused "an ordinal at the call count" (restored_admission ~ordinals:[ 0; 3 ] ());
+  refused "a negative ordinal" (restored_admission ~ordinals:[ -1; 2 ] ());
+  refused "a repeated ordinal" (restored_admission ~ordinals:[ 2; 2 ] ());
+  refused "fewer sources than admitted calls" (restored_admission ~ordinals:[ 0 ] ());
+  refused "a negative count" (restored_admission ~count:(-1) ())
+;;
+
+let test_restored_turn_refuses_an_open_stream_scope () =
+  let t = A.create () in
+  List.iter (A.on_event t)
+    [ message_start "resp-open"; start ~index:0 ~tool_id:(Some "call-open") ~tool_name:(Some "read") ];
+  match seal_restored t with
+  | Ok () -> fail "a restored turn must not share a scope with unsealed provider output"
+  | Error _ -> ()
+;;
+
 let () =
   run "Keeper_stream_tool_accum"
     [ ( "accumulation"
@@ -1726,5 +1858,15 @@ let () =
     ; ( "replay integrity"
       , [ test_case "closed tool start is quarantined" `Quick
             test_closed_tool_start_is_quarantined
+        ] )
+    ; ( "restored turn"
+      , [ test_case "seals on a fresh accumulator" `Quick
+            test_restored_turn_seals_on_a_fresh_accumulator
+        ; test_case "a second delivery has no new effect" `Quick
+            test_restored_turn_delivered_twice_has_no_new_effect
+        ; test_case "positions outside the admission are refused" `Quick
+            test_restored_turn_rejects_positions_outside_its_admission
+        ; test_case "an open stream scope is refused" `Quick
+            test_restored_turn_refuses_an_open_stream_scope
         ] )
     ]

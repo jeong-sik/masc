@@ -60,9 +60,9 @@ Grep `rg -l 'Mcp_protocol' lib/` returns nothing outside `lib/protocol/`. The fo
 | `lib/agent/agent.mli:41` | `Mcp.managed` in the public Agent signature |
 | `lib/agent/builder.ml:51`, `builder.mli:60` | `Mcp.managed` in Builder API |
 | `lib/agent/agent_config.ml:366-370, :455` (file removed 2026-07-21, test-only surface cut) | `Mcp.connect_and_load`, `Mcp_http.connect_and_load_managed` — gated by `when cfg.mcp_servers <> []` (dormant by default) |
-| `lib/checkpoint.ml:34, :79` | `Mcp_session.info` in checkpoint record + `Replace_mcp_sessions` codec op |
-| `lib/checkpoint_codec.ml:182, :309, :408, :496` | `Mcp_session.info` round-trip in checkpoint serialization |
-| `lib/checkpoint_types.ml:29, :74` | `Mcp_session.info` in checkpoint record types |
+| `lib/checkpoint.ml:34, :79` (checkpoint field and `Mcp_session` module removed 2026-11-17, checkpoint v19, masc #52875) | `Mcp_session.info` in checkpoint record + `Replace_mcp_sessions` codec op |
+| `lib/checkpoint_codec.ml:182, :309, :408, :496` (checkpoint field and `Mcp_session` module removed 2026-11-17, checkpoint v19, masc #52875) | `Mcp_session.info` round-trip in checkpoint serialization |
+| `lib/checkpoint_types.ml:29, :74` (checkpoint field and `Mcp_session` module removed 2026-11-17, checkpoint v19, masc #52875) | `Mcp_session.info` in checkpoint record types |
 | `lib/contract.ml:293`, `contract.mli:96` | `filter_mcp_clients : ... -> Mcp.managed list -> Mcp.managed list` |
 | `lib/tool_middleware.ml:32` | `Mcp_schema.json_schema_to_params` |
 | `lib/agent_sdk.ml:66-68`, `.mli:39-41` | Public re-export of `Mcp`, `Mcp_http`, `Mcp_session` from the SDK facade |

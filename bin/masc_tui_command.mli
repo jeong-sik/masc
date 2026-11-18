@@ -112,6 +112,10 @@ type t =
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
   | Queue of string
   | Run_next
+  | Reconcile_held
+      (** [/reconcile] — check this Keeper's held request again when its
+          outcome is unverified and no observer stream can announce the
+          change that would end the wait. *)
   | Priority of string option
       (** [/priority [on|off]] or [/autonext [on|off]] — toggle or set
           automatic next-turn promotion for queued user input. *)

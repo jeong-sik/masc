@@ -623,7 +623,7 @@ let goal_verification_run ~run_id ~started_at : Goal_verification.run =
   ; request_id = "proof-request-4"
   ; criterion = Goal_store.Criterion
       { revision = "criterion-4"; title = "Four verified services";
-        metric = Some "verified services"; target_value = Some "4" }
+        measure = Goal_measure_fixture.done_when "4"; procedure = "verified services" }
   ; review_kind = Goal_verification.Proof
   ; authority_actor = verifier_lane_id
   ; started_at
@@ -1092,11 +1092,11 @@ let test_off_lane_keeps_declarations_and_running_observation () =
 let test_slot_history_keeps_original_binding_after_republication () =
   let module E = Agent_core.Exact_output in
   let module O = Masc.Exact_lane_slot_observation in
-  let catalog={|[[providers]]
+  let catalog base_url = Printf.sprintf {|[[providers]]
 id="fixture"
 kind="openai_compat"
 capabilities_base="models_only"
-base_url="https://new.example"
+base_url="%s"
 request_path="/v1/chat/completions"
 auth="none"
 [[models]]
@@ -1110,9 +1110,9 @@ provider_ref="fixture"
 model_id="model"
 connect_timeout_s=30.0
 body_timeout_s=30.0
-|} in
+|} base_url in
   let snapshot=match E.load_resolver_snapshot
-    ~catalog:(E.Full_replacement {source="slot-binding fixture";contents=catalog}) () with
+    ~catalog:(E.Full_replacement {source="slot-binding fixture";contents=catalog "https://new.example"}) () with
     | Ok snapshot -> snapshot | Error _ -> fail "fixture catalog rejected" in
   let admitted=match E.admit_target_ref snapshot "A" with
     | Ok admitted -> admitted | Error _ -> fail "fixture target rejected" in
@@ -1153,10 +1153,19 @@ body_timeout_s=30.0
   let other_owner={run with run_id="other-owner";
     slot_observations=Some (Ok [O.with_owner (Runtime_schema.Addon addon)
       (observation "A" Accepted 1000. 1001.)])} in
+  let current_binding = E.admitted_target_binding admitted in
+  let ignored_snapshot = match E.load_resolver_snapshot
+    ~catalog:(E.Full_replacement {source="duplicate binding fixture";
+      contents=catalog "https://ignored.example"}) () with
+    | Ok value -> value | Error _ -> fail "duplicate fixture catalog rejected" in
+  let ignored_binding = match E.admit_target_ref ignored_snapshot "A" with
+    | Ok value -> E.admitted_target_binding value
+    | Error _ -> fail "duplicate fixture target rejected" in
   let rows=Server_exact_slot_projection.slots_json
     ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian)
-    ~current_http:["A",E.admitted_target_binding admitted]
-    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[other_owner;overlapping;run]
+    ~current_http:["A",current_binding;"A",ignored_binding]
+    ~declared_http:["A";"B";"C";"A"] ~declared_cli:["A";"A"]
+    ~runs:[other_owner;overlapping;run]
     |> Yojson.Safe.Util.to_list in
   let field=Yojson.Safe.Util.member in
   let a=List.hd rows in
@@ -1175,7 +1184,45 @@ body_timeout_s=30.0
     (field "undated_outcomes" a |> Yojson.Safe.Util.to_list |> List.length);
   check bool "no retained observation is explicit" true (field "last_observation" (List.nth rows 2)=`Null);
   check bool "official client never borrows same-name HTTP history" true
-    (field "last_observation" (List.nth rows 3)=`Null)
+    (field "last_observation" (List.nth rows 3)=`Null);
+  check int "duplicate declarations retain one row per transport and slot" 4
+    (List.length rows);
+  let owner = Runtime_schema.Builtin Standalone_lane.Librarian in
+  let cli outcome =
+    O.cli ~slot_id:"H" ~started_at:None ~finished_at:None
+      ~generation_dispatched:false ~outcome |> O.with_owner owner
+  in
+  let accepted = observation "H" Accepted 20. 21. in
+  let first = {run with run_id="a";
+    slot_observations=Some (Ok [accepted; cli (Admission_rejected Preparation_failed)])} in
+  let last = {run with run_id="z";
+    slot_observations=Some (Ok [observation "H" failed 20. 21.; accepted; cli Semantic_rejected])} in
+  let rows = Server_exact_slot_projection.slots_json ~owner ~current_http:[]
+      ~declared_http:["A";"A"] ~declared_cli:["A";"A"]
+      ~runs:[other_owner;first;last]
+    |> Yojson.Safe.Util.to_list in
+  check (list string) "declarations precede first-seen historical keys"
+    ["http:A";"official_client:A";"http:H";"official_client:H"]
+    (List.map (fun row ->
+       (field "transport" row |> Yojson.Safe.Util.to_string) ^ ":" ^
+       (field "slot_id" row |> Yojson.Safe.Util.to_string)) rows);
+  let historical = List.nth rows 2 in
+  check bool "historical-only keys are not declarations" false
+    (field "declared" historical |> Yojson.Safe.Util.to_bool);
+  List.iter (fun name ->
+    let selected = field name historical in
+    check string (name ^ " keeps the run-id tie break") "z"
+      (field "run_id" selected |> Yojson.Safe.Util.to_string);
+    check string (name ^ " keeps the original observation-index tie break")
+      (O.to_yojson accepted |> Yojson.Safe.to_string)
+      (field "observation" selected |> Yojson.Safe.to_string))
+    ["last_observation";"last_attempt";"last_success"];
+  check string "a tied failure remains separate from the later accepted visit" "z"
+    (field "last_failure" historical |> field "run_id" |> Yojson.Safe.Util.to_string);
+  check (list string) "undated observations keep their original run order"
+    ["a";"z"]
+    (field "undated_outcomes" (List.nth rows 3) |> Yojson.Safe.Util.to_list
+     |> List.map (fun row -> field "run_id" row |> Yojson.Safe.Util.to_string))
 ;;
 
 (* The registry keeps [max_completed_retained] completed runs per lane, so a

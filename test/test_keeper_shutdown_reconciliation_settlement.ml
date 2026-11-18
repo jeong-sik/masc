@@ -351,8 +351,8 @@ let check_returned_with_receipt ~config operation task_id =
      | Masc_domain.Todo -> true
      | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false);
   match task.handoff_context with
-  | None -> fail "release receipt missing"
-  | Some handoff ->
+  | Some (Masc_domain.Handoff_unreadable _) | None -> fail "release receipt missing"
+  | Some (Masc_domain.Handoff_decoded handoff) ->
     check (list string) "exact shutdown receipt is recorded once"
       [ receipt_ref operation ] handoff.evidence_refs
 ;;

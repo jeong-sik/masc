@@ -192,8 +192,8 @@ let create_executing_goal ctx ~goal_id =
       ctx.Task.Tool.config
       ~id:goal_id
       ~title:("Goal " ^ goal_id)
-      ~metric:"m"
-      ~target_value:"1"
+      ~measure:(Goal_measure_fixture.done_when "1")
+      ~procedure:"m"
       ()
   with
   | Ok goal -> goal
@@ -642,10 +642,11 @@ let () = test "handle_transition_release_persists_handoff" (fun () ->
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
-      | Some handoff_context ->
+      | Some (Masc_domain.Handoff_decoded handoff_context) ->
           assert (handoff_context.summary = "blocked on integration fixture");
           assert (handoff_context.updated_by = Some "test-agent")
-      | None -> failwith "expected persisted handoff_context")
+      | Some (Masc_domain.Handoff_unreadable _) | None ->
+          failwith "expected persisted handoff_context")
   | _ -> failwith "expected exactly one task"
 )
 
@@ -1196,9 +1197,10 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
-      | Some handoff_context ->
+      | Some (Masc_domain.Handoff_decoded handoff_context) ->
           assert (handoff_context.summary = synthesized_note)
-      | None -> failwith "expected persisted handoff_context")
+      | Some (Masc_domain.Handoff_unreadable _) | None ->
+          failwith "expected persisted handoff_context")
   | _ -> failwith "expected exactly one task"
 )
 
@@ -1231,9 +1233,10 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
-      | Some handoff_context ->
+      | Some (Masc_domain.Handoff_decoded handoff_context) ->
           assert (handoff_context.summary = notes_line)
-      | None -> failwith "expected persisted handoff_context")
+      | Some (Masc_domain.Handoff_unreadable _) | None ->
+          failwith "expected persisted handoff_context")
   | _ -> failwith "expected exactly one task"
 )
 
@@ -1309,7 +1312,7 @@ let () = test "handle_transition_release_without_summary_keeps_the_other_handoff
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
   match Workspace.get_tasks_raw ctx.config with
-  | [ { task_status = Masc_domain.Todo; handoff_context = Some handoff; _ } ] ->
+  | [ { task_status = Masc_domain.Todo; handoff_context = Some (Masc_domain.Handoff_decoded handoff); _ } ] ->
     assert (handoff.next_step = Some "re-check fixture")
   | _ -> failwith "expected the released task back in todo with its handoff"
 )

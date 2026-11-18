@@ -179,16 +179,18 @@ val record_provider_request_provenance
   -> Llm_provider.Completion_outcome.request_provenance
   -> (unit, error) result
 
-(** Materialize the exact provider response once on its owning attempt. *)
+(** Materialize the exact admitted provider response and its tool admission
+    once on its owning attempt. *)
 val record_provider_response
   :  provider_attempt
-  -> Llm_provider.Types.api_response
+  -> Execution_provider_response_snapshot.t
   -> (unit, error) result
 
-(** Read the exact response authority required for restart recovery. *)
+(** Read the exact response and admission authority required for restart
+    recovery. *)
 val provider_response
   :  provider_attempt
-  -> (Llm_provider.Types.api_response, error) result
+  -> (Execution_provider_response_snapshot.t, error) result
 
 (** Atomically open an invocation and materialize the exact ToolUse input. *)
 val open_invocation

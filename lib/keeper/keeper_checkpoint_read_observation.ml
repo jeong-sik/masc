@@ -7,20 +7,26 @@ module Object_store = Keeper_checkpoint_object_store
 module Digests = Map.Make (String)
 open Decode
 
+type observed_files =
+  { session_dir : string
+  ; canonical_path : string
+  ; canonical : Fs_compat.owned_regular_file_snapshot
+  ; session_id : string
+  ; header_objects : Objects.header_objects
+  ; history : Objects.history
+  ; objects : (Objects.digest * Fs_compat.owned_regular_file_snapshot) list
+  }
+
 type t =
   | Written_lineage of
       { canonical_path : string
       ; identity : Summary.canonical_identity
       }
-  | Read_files of
-      { session_dir : string
-      ; canonical_path : string
-      ; canonical : Fs_compat.owned_regular_file_snapshot
-      ; objects : (Objects.digest * Fs_compat.owned_regular_file_snapshot) list
-      }
+  | Read_files of observed_files
 
 type revalidation =
   | Unchanged
+  | Refreshed of t
   | Changed
   | Unavailable of checkpoint_load_error
 
@@ -75,44 +81,83 @@ let load_with ~after_object_read ~session_dir ~session_id =
             Summary.publish_summary_after_parse ~canonical_path
               ~identity_before:(Some identity_before) ~objects:Summary.Objects_seen head;
             Ok (checkpoint, Read_files
-              { session_dir; canonical_path; canonical = snapshot; objects }))
+              { session_dir; canonical_path; canonical = snapshot; objects
+              ; session_id = head.header.session_id
+              ; header_objects = head.header_objects; history = head.history }))
 
 let load = load_with ~after_object_read:(fun _digest -> ())
 
-let revalidate_files ~session_dir ~canonical_path ~canonical ~objects =
-  let ownership_root = Filename.dirname session_dir in
+let revalidate_files ~after_object_read files =
+  let ownership_root = Filename.dirname files.session_dir in
   let read path =
     Fs_compat.load_owned_regular_file_range ~ownership_root ~offset:0 ~max_bytes:0 path in
-  let canonical_state () =
-    match read canonical_path with
-    | Error error -> Unavailable (classify_owned_read_error error)
-    | Ok None -> Unavailable Not_found
+  let canonical_state expected =
+    match read files.canonical_path with
+    | Error error -> Error (classify_owned_read_error error)
+    | Ok None -> Error Not_found
     | Ok (Some observed) ->
-      if Fs_compat.equal_owned_regular_file_snapshot canonical observed.snapshot
-      then Unchanged else Changed
+      Ok (Fs_compat.equal_owned_regular_file_snapshot expected observed.snapshot)
   in
   let rec object_state = function
-    | [] -> Unchanged
+    | [] -> Ok true
     | (digest, snapshot) :: rest ->
-      (match read (Object_store.path ~session_dir digest) with
-       | Error error -> Unavailable (Objects_invalid (Objects.Object_unreadable
+      (match read (Object_store.path ~session_dir:files.session_dir digest) with
+       | Error error -> Error (Objects_invalid (Objects.Object_unreadable
            { digest; detail = Fs_compat.owned_regular_file_read_error_to_string error }))
-       | Ok None -> Unavailable (Objects_invalid (Objects.Object_missing digest))
+       | Ok None -> Error (Objects_invalid (Objects.Object_missing digest))
        | Ok (Some observed) ->
          if Fs_compat.equal_owned_regular_file_snapshot snapshot observed.snapshot
-         then object_state rest else Changed)
+         then object_state rest else Ok false)
   in
-  match canonical_state () with
-  | Changed | Unavailable _ as state -> state
-  | Unchanged ->
-    let state = object_state objects in
+  let check_objects canonical =
+    let state = object_state files.objects in
     (* Do not report an old graph's missing object as the current graph's
        error if another canonical was published during this observation. *)
-    (match canonical_state () with
-     | Unchanged -> state
-     | Changed | Unavailable _ as current -> current)
+    match canonical_state canonical with
+    | Ok true -> state
+    | Ok false | Error _ as current -> current
+  in
+  match canonical_state files.canonical with
+  | Error error -> Unavailable error
+  | Ok true ->
+    (match check_objects files.canonical with
+     | Ok true -> Unchanged
+     | Ok false -> Changed
+     | Error error -> Unavailable error)
+  | Ok false ->
+    (match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root files.canonical_path with
+     | Error error -> Unavailable (classify_owned_read_error error)
+     | Ok None -> Unavailable Not_found
+     | Ok (Some observed) ->
+       let validated = offload_checkpoint_cpu (fun () ->
+         let open Result.Syntax in
+         let* head = Objects.head_of_string observed.content in
+         (* Only digest/position records are compared or retained here.
+            Header JSON and the decoder's Context stay within this call. *)
+         if not (String.equal files.session_id head.header.session_id
+                 && files.header_objects = head.header_objects
+                 && files.history = head.history)
+         then Ok false
+         else
+           let read_object digest =
+             let result = Object_store.read ~session_dir:files.session_dir digest in
+             (match result with
+              | Ok (Some _) -> after_object_read digest
+              | Ok None | Error _ -> ());
+             result
+           in
+           let+ () = Objects.validate_header ~read_object head in
+           true) in
+       match validated with
+       | Error error -> Unavailable (classify_objects_error error)
+       | Ok false -> Changed
+       | Ok true ->
+         match check_objects observed.snapshot with
+         | Ok true -> Refreshed (Read_files { files with canonical = observed.snapshot })
+         | Ok false -> Changed
+         | Error error -> Unavailable error)
 
-let revalidate witness =
+let revalidate_with ~after_object_read witness =
   match protect_read (fun () ->
     Ok (match witness with
       | Written_lineage { canonical_path; identity } ->
@@ -121,11 +166,13 @@ let revalidate witness =
            if Lineage.written_lineage_is_reusable ~canonical_path ~identity
            then Unchanged else Changed
          | Some _ | None -> Changed)
-      | Read_files { session_dir; canonical_path; canonical; objects } ->
-        revalidate_files ~session_dir ~canonical_path ~canonical ~objects)) with
+      | Read_files files -> revalidate_files ~after_object_read files)) with
   | Ok state -> state
   | Error error -> Unavailable error
 
+let revalidate = revalidate_with ~after_object_read:(fun _digest -> ())
+
 module For_testing = struct
   let load_after_object_read = load_with
+  let revalidate_after_object_read = revalidate_with
 end

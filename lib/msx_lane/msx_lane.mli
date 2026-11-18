@@ -81,12 +81,32 @@ type error =
   | Activity_disabled
   | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
-  | Invalid_request of string  (** the caller's arguments *)
+  | Invalid_request of string
+      (** the caller's arguments. A path the caller named that resolves but
+          sits outside the allowed roots, or escapes them through a symlink,
+          is [Invalid_request]: the caller can fix it by naming another
+          path. A comparison that cannot be made falls to the same refusal:
+          when the root a named path is compared against will not resolve
+          (the workspace base, or the configured [MSX_ROMS]), the path reads
+          as outside it.
+          A named path that names nothing at all -- it does not exist, or a
+          non-directory sits in its way -- is [Invalid_request]: the request
+          named it, and nothing is there. A checkpoint whose bytes do not
+          parse as a checkpoint envelope is [Invalid_request] too, and so is
+          a disk image that parses but will not boot -- the bytes were read,
+          so [Unreadable] does not apply. [Unreadable] stays reserved for a
+          path whose lookup is refused (a permission, a loop), or one that
+          resolves inside the allowed roots and then fails to read. Files
+          the lane looks for inside a directory the caller named follow that
+          directory's own contract, not this one -- an absent ROM inside a
+          resolved BIOS directory is [Unreadable] ([read_bios]), because the
+          caller named the directory, not the file. A directory the server
+          itself supplies through the machine's environment is not a caller
+          argument, so its failures are not judged by this contract. *)
   | Effect_unknown of string  (** replacement happened; durable effect is unknown *)
   | Unreadable of string
       (** a file that is there and will not read: a ROM, a cartridge, a
-          checkpoint. A path that does not exist is [Invalid_request] --
-          the caller named it. *)
+          checkpoint. *)
   | Dependency_unavailable of string
       (** something the request needs is not installed, such as the C-BIOS a
           cartridge or disk boots from. Nothing was started; the message names
@@ -155,8 +175,9 @@ type image =
 
 val read_bios : dir:string -> (bios_triple, error) result
 (** Reads [cbios_main_msx2.rom], [cbios_logo_msx2.rom] and [cbios_sub.rom] from
-    [dir]. All three are required: a directory missing one is [Unreadable]
-    naming the first that is absent, never a machine with an empty ROM in it. *)
+    [dir]. All three are required: a directory that resolves and misses one is
+    [Unreadable] naming the first that is absent -- the caller named [dir], not
+    the files inside it -- never a machine with an empty ROM in it. *)
 
 val load : ledger_dir:string -> bios:bios -> image:image -> (loaded, error) result
 (** Creates the workspace machine from [image], replacing any previous one. The

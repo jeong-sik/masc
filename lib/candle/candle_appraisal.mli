@@ -1,7 +1,7 @@
 (** Closed appraisal requests. Only [input] reaches the model; payout identity
     and execution traces are audit metadata, never extra grading evidence. *)
 type identity = { goal_id : string; request_id : string; verification_run_id : string }
-type goal = { title : string; metric : string option; target_value : string option }
+type goal = { title : string; measure : Goal_measure.t; procedure : string }
 type task = { task_id : string; title : string; keeper : string }
 type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }

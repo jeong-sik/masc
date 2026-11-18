@@ -80,7 +80,11 @@ let run_once ?on_event ~sw ~net provider_cfg =
       ~system_prompt:""
       ~tools:[]
   in
-  match Runtime_agent.run_blocks ~sw ~net ~config ?on_event [ Agent_core.Types.Text "hello" ] with
+  match
+    Runtime_agent.run_blocks ~sw ~net ~config ?on_event
+      ~execution_capture:(Runtime_agent.execution_capture config) [ Agent_core.Types.Text "hello" ]
+    |> Result.map_error Runtime_agent.run_failure_error
+  with
   | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed _; _ } -> ()
   | Ok _ -> Alcotest.fail "the run did not complete"
   | Error error -> Alcotest.failf "the run failed: %s" (Agent_core.Error.to_string error)

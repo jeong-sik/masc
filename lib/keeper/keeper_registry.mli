@@ -223,13 +223,14 @@ val replace_heartbeat_failure_reason :
 val set_last_correlation_id : base_path:string -> string -> string -> unit
 
 (** Mark the beginning of a keeper turn. Installs a fresh
-    [current_turn_observation] with [turn_id = usage.total_turns + 1] and
+    [current_turn_observation] with the number the turn took from
+    {!Keeper_turn_allocation.allocate} and
     [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
     Supply a fresh [observation_token] for each attempt and capture it in
     tool-count callbacks and [mark_turn_finished]. *)
 val mark_turn_started :
   observation_token:Keeper_turn_observation_token.t ->
-  base_path:string -> wake:wake_reason -> string -> unit
+  base_path:string -> wake:wake_reason -> turn_id:int -> string -> unit
 
 (* Callback setters below require the attempt token captured at construction.
     [None] denotes a standalone invocation with no registry observation and is

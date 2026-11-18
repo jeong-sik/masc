@@ -174,8 +174,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"; "web_search"; "host_request_pages"])) names
-          then Error "world accepts skills, actions, outputs, tools, state, exact_outputs, asks, web_search and host_request_pages" else Ok fields
+             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "exact_protocol"; "asks"; "web_search"; "host_request_pages"])) names
+          then Error "world accepts skills, actions, outputs, tools, state, exact_outputs, exact_protocol, asks, web_search and host_request_pages" else Ok fields
       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
       | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
@@ -262,6 +262,25 @@ let load ~path =
       | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
     let* exact_outputs = exact_outputs ~directory:(Filename.dirname path) world in
+    (* RFC server-carries-its-exact-worker-packages 3.4: a package that
+       declares exact outputs is attached only when it was written for the
+       protocol this server speaks, so a server never reads an answer it does
+       not know or sends an argument the worker does not know. *)
+    let* () = match List.assoc_opt "exact_protocol" world, exact_outputs with
+      | None, [] -> Ok ()
+      | Some (Otoml.TomlInteger declared), _ :: _ when declared = Lane_addon_types.exact_protocol -> Ok ()
+      | Some (Otoml.TomlInteger declared), _ :: _ ->
+          Error (Printf.sprintf "world.exact_protocol is %d; this server speaks Exact protocol %d"
+            declared Lane_addon_types.exact_protocol)
+      | None, _ :: _ ->
+          Error (Printf.sprintf "world.exact_protocol is missing; this server speaks Exact protocol %d"
+            Lane_addon_types.exact_protocol)
+      | Some (Otoml.TomlInteger _), [] -> Error "world.exact_protocol requires exact_outputs"
+      | Some ( Otoml.TomlString _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ), _ -> Error "world.exact_protocol requires an integer" in
     let* web_search = match List.assoc_opt "web_search" world with
       | None -> Ok false
       | Some (Otoml.TomlBoolean web_search) -> Ok web_search
@@ -391,7 +410,7 @@ let load ~path =
                    | Otoml.TomlTableArray _) -> Error "resources.pids requires an integer" in
           let resources = {cpus;memory_bytes=Int64.of_int memory;pids;max_reply_bytes} in
           let* () = check_resources ~runtime resources in
-          Ok (Container {runtime;image;resources}) in
+          Ok (Container {runtime;image;resources;image_label=None}) in
     let* () = match worker_service with
       | Mcp_tools -> Ok ()
       | Browser_service _ ->

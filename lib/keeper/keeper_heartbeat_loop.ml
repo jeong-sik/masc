@@ -170,6 +170,7 @@ let owner_turn_rejection_cycle_status
       ( Keeper_owner.Reducer_rejected _
       | Keeper_owner.Operation_rejected _
       | Keeper_owner.Store_unavailable _
+      | Keeper_owner.Store_fenced _
       | Keeper_owner.Owner_closed ) -> Turn_cycle_owner_rejected
 ;;
 

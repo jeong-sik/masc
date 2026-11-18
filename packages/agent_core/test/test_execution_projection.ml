@@ -7,6 +7,36 @@ module Writer = Internal.Execution_lane_writer
 module Scope = Internal.Execution_agent_scope
 module Context = Internal.Execution_context
 module Event = Internal.Execution_event
+
+(* A durable response whose every tool call was admitted under its registered
+   name, in provider order. *)
+let all_admitted_snapshot (response : Llm_provider.Types.api_response)
+  : Agent_core__.Execution_provider_response_snapshot.t =
+  let count =
+    List.length
+      (List.filter
+         (function
+           | Llm_provider.Types.ToolUse _ -> true
+           | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+         response.content)
+  in
+  { Agent_core__.Execution_provider_response_snapshot.response
+  ; admission =
+      { Agent_core__.Execution_provider_response_snapshot.source_map =
+          { Agent_core.Hooks.admitted_tool_sources =
+              List.init count (fun index ->
+                { Agent_core.Hooks.planned_index = index
+                ; source_tool_use_ordinal = index
+                ; name_resolution = Agent_core.Hooks.Registered_name
+                })
+          ; source_tool_use_count = count
+          }
+      ; unavailable_names = []
+      ; unreadable = []
+      }
+  }
+;;
 module Binding = Binding_identity
 module Projection = Agent.Execution_projection
 
@@ -458,9 +488,10 @@ let test_settled_invocation_projection () =
     let (_turn, provider, _pending) = open_call root 4 "unsettled-tool" in
     let asked name = Llm_provider.Types.ToolUse {id="asked-" ^ name; name; input=`Assoc []} in
     scope_value (Scope.record_provider_response provider
-      {Types.id="reply-4"; model="fixture"; stop_reason=Types.StopToolUse;
-       content=[asked "unsettled-tool"; asked "never-opened-tool"];
-       unreadable_tool_uses=[]; usage=None; telemetry=None});
+      (all_admitted_snapshot
+         {Types.id="reply-4"; model="fixture"; stop_reason=Types.StopToolUse;
+          content=[asked "unsettled-tool"; asked "never-opened-tool"];
+          unreadable_tool_uses=[]; usage=None; telemetry=None}));
     check int "unsettled result is absent" 3
       (List.length (projection_value (Projection.settled_tool_invocations projection)));
     scope_value (Scope.abort root (Scope.Cancelled

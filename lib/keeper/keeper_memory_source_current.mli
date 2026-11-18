@@ -77,8 +77,9 @@ type source_read_failure =
           knows the source is larger without knowing by how much. *)
   | Source_io_failed of string
       (** This one file could not be read: a host I/O error, a path the
-          endpoint tree cannot name, or the endpoint's
-          [endpoint_source_unreadable_exit]. Other sources may still read. *)
+          endpoint tree cannot name, or the endpoint's open-failed exit
+          ({!Keeper_sandbox_read_backend.Open_failed}). Other sources may
+          still read. *)
   | Source_endpoint_unanswered of string
       (** The endpoint did not finish the read command with one of its
           declared exits: transport failure, absent guest, timeout, signal.
@@ -92,15 +93,13 @@ val install_commit_observer :
   (keepers_dir:string -> keeper_id:string -> unit) -> (unit -> unit)
 
 (** The command a source read runs on an endpoint-owned tree (microVM,
-    remote): at most [max_bytes] of [path], exiting
-    [endpoint_source_missing_exit] when the path does not exist,
-    [endpoint_source_not_regular_exit] when it is not a regular file and
-    [endpoint_source_unreadable_exit] when reading it fails. *)
-val endpoint_source_argv : path:string -> max_bytes:int -> string list
-
-val endpoint_source_missing_exit : int
-val endpoint_source_not_regular_exit : int
-val endpoint_source_unreadable_exit : int
+    remote): at most [max_bytes] of [confined.path], through
+    {!Keeper_sandbox_read_backend.confined_open_prelude}. It exits with
+    {!Keeper_sandbox_read_backend.confined_open_exit} of the refusal when the
+    path is missing, not a regular file, cannot be read, or opens a file
+    outside [confined.root]. *)
+val endpoint_source_argv :
+  confined:Keeper_sandbox_read_backend.confined_path -> max_bytes:int -> string list
 
 (** What one run of [endpoint_source_argv] says about the source. [Error]
     from the run (no declared exit reached) is [Source_endpoint_unanswered];

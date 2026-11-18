@@ -694,6 +694,12 @@ let parse_probe (s : string) : (probe, string) result =
 
 module Relay = struct
   let version = 2
+
+  (* A literal, never built at run time: it has to sit in the shim binary's
+     bytes so a host that cannot run a Linux binary can still read which relay
+     version it speaks before booting a guest with it (#52968). A test keeps
+     the digits equal to [version]. *)
+  let version_declaration = "MASC_EXEC_SHIM_RELAY_VERSION=2;"
   let serve_flag = "--serve"
 
   type request_kind =

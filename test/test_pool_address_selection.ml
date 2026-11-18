@@ -79,7 +79,7 @@ let post ?(url = "http://provider.test:8080/request?turn=1") pool =
   match Pool.request pool ~method_:`POST
     ~url ~body:"one request" () with
   | Ok response -> response
-  | Error msg -> Alcotest.fail msg
+  | Error error -> Alcotest.fail (Pool.request_error_to_string error)
 
 let read_request requests request body =
   let payload = Eio.Buf_read.(of_flow ~max_size:4096 body |> take_all) in
@@ -165,7 +165,7 @@ let pinned_post pool ~url addresses =
   match Pool.request pool ~resolved_addresses:addresses ~method_:`POST
     ~url ~body:"one request" () with
   | Ok response -> response
-  | Error reason -> Alcotest.fail reason
+  | Error error -> Alcotest.fail (Pool.request_error_to_string error)
 
 let test_pinned_address_preserves_http_identity = with_runtime (fun env sw ->
   let requests = ref [] in
@@ -223,7 +223,9 @@ let test_empty_pin_never_falls_back_to_idle_or_dns = with_runtime (fun env sw ->
   let url = Printf.sprintf "http://provider.test:%d/request?turn=1" port in
   ignore (post ~url pool);
   Alcotest.(check bool) "empty authority is refused" true
-    (Result.is_error (Pool.request pool ~resolved_addresses:[] ~method_:`POST ~url ()));
+    (match Pool.request pool ~resolved_addresses:[] ~method_:`POST ~url () with
+     | Error (Pool.Invalid_request Pool.No_resolved_addresses) -> true
+     | Ok _ | Error _ -> false);
   check_attempts [address;address] attempted;
   Alcotest.(check int) "no fallback lookup" 1 !queries;
   Alcotest.(check int) "no fallback dispatch" 1 (List.length !requests);

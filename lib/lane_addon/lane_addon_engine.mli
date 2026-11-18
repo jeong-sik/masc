@@ -57,6 +57,13 @@ val engine_of_info :
   Lane_addon_types.runtime -> string ->
   (Lane_addon_lifecycle.engine, Lane_addon_lifecycle.engine_fault) result
 val image_arguments : Lane_addon_types.runtime -> string -> string list
+val image_label_arguments : image_identity -> (string list, string) result
+(** Reads the labels of the resolved image itself, by its immutable ID. An
+    Apple image's labels are not read, so it is an error. *)
+val image_label_of_inspect : name:string -> string -> (string option, string) result
+(** The value of label [name] in Docker's [{{json .Config.Labels}}] answer:
+    [None] when the image has no such label, an error when the answer is not
+    a label object or the label is not a string. *)
 val volume_list_arguments : Lane_addon_types.runtime -> string -> string list
 val listed_volume : Lane_addon_types.runtime -> name:string -> string -> (bool, string) result
 val verify_volume :

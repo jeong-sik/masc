@@ -97,7 +97,7 @@ let checkpoint ~turn_count ~created_at messages =
     ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
     ; top_k = None; min_p = None; reasoning_effort = None; enable_thinking = None
     ; preserve_thinking = None; response_format = Agent_core.Types.Off; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []
+    ; context = Agent_core.Context.create_sync (); pending_input = None
     ; working_context = None }
 
 let timed f =

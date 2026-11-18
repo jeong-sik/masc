@@ -827,7 +827,7 @@ let test_backlog_of_yojson_rejects_corrupt_task_entries () =
   expect_backlog_decode_error "corrupt task entry" json
 
 (* ============================================================
-   #27499 — dropped nested-field diagnostics
+   #27499, #38219 — unreadable nested fields stay on the task
    ============================================================ *)
 
 let task_json_for ?(extra = []) id =
@@ -861,7 +861,7 @@ let test_legacy_intents_make_the_backlog_unreadable () =
       ; "version", `Int 1
       ]
   in
-  match Masc_domain.backlog_of_yojson_with_diagnostics document with
+  match Masc_domain.backlog_of_yojson document with
   | Ok _ -> fail "a backlog with an intent-bearing awaiting row was accepted"
   | Error error ->
     check bool "the refusal names the intent field" true
@@ -908,95 +908,126 @@ let test_malformed_lifecycle_clock_makes_the_backlog_unreadable () =
     check bool "the refusal names the field" true
       (String_util.contains_substring error "claimed_at must be RFC 3339")
 
-let test_task_of_yojson_with_diagnostics_absent () =
-  match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
-  | Ok (_, d) ->
-    check bool "handoff absent" true
-      (d.handoff_context_outcome = Masc_domain.Field_absent)
+let test_task_handoff_absent () =
+  match Masc_domain.task_of_yojson (task_json_for "task-590") with
+  | Ok task -> check bool "handoff absent" true (task.handoff_context = None)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_task_of_yojson_with_diagnostics_decoded () =
+let test_task_handoff_decoded () =
   let json =
     task_json_for
       ~extra:[ ("handoff_context", `Assoc [ ("summary", `String "halfway") ]) ]
       "task-590"
   in
-  match Masc_domain.task_of_yojson_with_diagnostics json with
-  | Ok (task, d) ->
-    check bool "handoff decoded" true
-      (d.handoff_context_outcome = Masc_domain.Field_decoded);
-    check bool "handoff Some" true (task.handoff_context <> None)
+  match Masc_domain.task_of_yojson json with
+  | Ok { handoff_context = Some (Masc_domain.Handoff_decoded context); _ } ->
+    check string "handoff summary" "halfway" context.summary
+  | Ok { handoff_context = Some (Masc_domain.Handoff_unreadable { reason; raw = _ }); _ } ->
+    fail ("a readable handoff was refused: " ^ reason)
+  | Ok { handoff_context = None; _ } -> fail "a present handoff read as absent"
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_task_of_yojson_with_diagnostics_unreadable () =
+(* #38219: the value the decoder refuses. [summary] is not a string; the
+   unknown key and the integer literal check that nothing is normalised. *)
+let unreadable_handoff_json =
+  `Assoc
+    [ ("summary", `Int 7)
+    ; ("written_by_a_newer_build", `List [ `Intlit "123456789012345678901234567890" ])
+    ]
+
+let test_task_handoff_unreadable_is_kept () =
   let json =
-    task_json_for
-      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
-      "task-590"
+    task_json_for ~extra:[ ("handoff_context", unreadable_handoff_json) ] "task-590"
   in
-  match Masc_domain.task_of_yojson_with_diagnostics json with
-  | Ok (task, d) ->
-    check bool "handoff unreadable" true
-      (Masc_domain.nested_field_outcome_is_unreadable d.handoff_context_outcome);
-    check bool "handoff still None" true (task.handoff_context = None)
+  match Masc_domain.task_of_yojson json with
+  | Ok { handoff_context = Some (Masc_domain.Handoff_unreadable { raw; reason }); _ } ->
+    check bool "the raw value is the stored value" true
+      (Yojson.Safe.equal raw unreadable_handoff_json);
+    check bool "the decoder refusal is kept" true (String.trim reason <> "")
+  | Ok { handoff_context = Some (Masc_domain.Handoff_decoded _); _ } ->
+    fail "a corrupt handoff decoded"
+  | Ok { handoff_context = None; _ } -> fail "a corrupt handoff read as absent"
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_backlog_of_yojson_with_diagnostics_reports_drop () =
+let backlog_document tasks =
+  `Assoc
+    [ ("tasks", `List tasks)
+    ; ("delivered_completion_rejections", `List [])
+    ; ("last_updated", `String "2024-01-15T12:00:00Z")
+    ; ("version", `Int 1)
+    ]
+
+let task_json_named id (backlog : Masc_domain.backlog) =
+  match Masc_domain.backlog_to_yojson backlog with
+  | `Assoc fields ->
+    (match List.assoc_opt "tasks" fields with
+     | Some (`List tasks) ->
+       List.find_opt
+         (fun task ->
+            match task with
+            | `Assoc task_fields -> List.assoc_opt "id" task_fields = Some (`String id)
+            | _ -> false)
+         tasks
+     | Some _ | None -> None)
+  | _ -> None
+
+(* #38219: a backlog rewrite for an unrelated mutation writes the unreadable
+   handoff back unchanged, byte for byte, instead of dropping it. *)
+let test_backlog_rewrite_preserves_unreadable_handoff () =
   let clean = task_json_for "task-good" in
   let corrupt =
-    task_json_for
-      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
-      "task-bad"
+    task_json_for ~extra:[ ("handoff_context", unreadable_handoff_json) ] "task-bad"
   in
-  let json =
-    `Assoc
-      [ ("tasks", `List [ clean; corrupt ])
-      ; ("delivered_completion_rejections", `List [])
-      ; ("last_updated", `String "2024-01-15T12:00:00Z")
-      ; ("version", `Int 1)
-      ]
-  in
-  match Masc_domain.backlog_of_yojson_with_diagnostics json with
-  | Ok (backlog, diags) ->
-    check int "backlog still opens with 2 tasks" 2 (List.length backlog.tasks);
-    check int "exactly one dropped task" 1 (List.length diags);
-    let d = List.hd diags in
-    check int "dropped index" 1 d.dropped_task_index;
-    check string "dropped id" "task-bad" d.dropped_task_id;
-    check bool "handoff unreadable" true
-      (Masc_domain.nested_field_outcome_is_unreadable
-         d.dropped_outcomes.handoff_context_outcome)
+  match Masc_domain.backlog_of_yojson (backlog_document [ clean; corrupt ]) with
   | Error e -> fail ("expected Ok, got: " ^ e)
+  | Ok backlog ->
+    check int "backlog opens with both tasks" 2 (List.length backlog.tasks);
+    (* An unrelated mutation: the other task changes priority. *)
+    let mutated =
+      { backlog with
+        tasks =
+          List.map
+            (fun (task : Masc_domain.task) ->
+               if String.equal task.id "task-good" then { task with priority = 5 } else task)
+            backlog.tasks
+      }
+    in
+    let written = Yojson.Safe.to_string (Masc_domain.backlog_to_yojson mutated) in
+    (match task_json_named "task-bad" mutated with
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt "handoff_context" fields with
+        | Some value ->
+          check string "the rewrite writes the stored bytes"
+            (Yojson.Safe.to_string unreadable_handoff_json)
+            (Yojson.Safe.to_string value)
+        | None -> fail "the rewrite dropped the unreadable handoff")
+     | Some _ | None -> fail "the rewrite lost the task");
+    (* Reading the rewrite back yields the same typed task. *)
+    match Masc_domain.backlog_of_yojson (Yojson.Safe.from_string written) with
+    | Error e -> fail ("the rewrite does not decode: " ^ e)
+    | Ok reread ->
+      check bool "the rewrite reads back to the same backlog" true
+        (List.equal Masc_domain.equal_task mutated.tasks reread.tasks)
 
-let test_backlog_of_yojson_still_drops_diagnostics () =
-  let corrupt =
-    task_json_for
-      ~extra:[ ("handoff_context", `Assoc [ ("summary", `Int 7) ]) ]
-      "task-bad"
+(* An operator cancel with no reason over an unreadable note: the decoder's
+   refusal is about the note, not why the work stopped, so no reason is
+   stated (#52914 review). *)
+let test_stated_reason_unreadable_handoff_states_no_reason () =
+  let stored =
+    Masc_domain.stored_handoff_context_of_yojson unreadable_handoff_json
   in
-  let json =
-    `Assoc
-      [ ("tasks", `List [ corrupt ])
-      ; ("delivered_completion_rejections", `List [])
-      ; ("last_updated", `String "2024-01-15T12:00:00Z")
-      ; ("version", `Int 1)
-      ]
-  in
-  match Masc_domain.backlog_of_yojson json with
-  | Ok backlog -> check int "backward-compatible decode keeps the task" 1 (List.length backlog.tasks)
-  | Error e -> fail ("expected Ok, got: " ^ e)
+  (match stored with
+   | Masc_domain.Handoff_unreadable _ -> ()
+   | Masc_domain.Handoff_decoded _ -> fail "fixture must be unreadable");
+  check (option string) "no reason is stated" None
+    (Masc_domain.stated_reason ~reason:None ~handoff_context:(Some stored));
+  check (option string) "an explicit reason still wins" (Some "operator stop")
+    (Masc_domain.stated_reason ~reason:(Some "operator stop")
+       ~handoff_context:(Some stored))
 
-let test_backlog_of_yojson_with_diagnostics_still_propagates_contract () =
+let test_backlog_of_yojson_still_propagates_contract () =
   let bad = task_json_for ~extra:[ ("contract", `Int 7) ] "task-bad" in
-  let json =
-    `Assoc
-      [ ("tasks", `List [ bad ])
-      ; ("delivered_completion_rejections", `List [])
-      ; ("last_updated", `String "2024-01-15T12:00:00Z")
-      ; ("version", `Int 1)
-      ]
-  in
-  match Masc_domain.backlog_of_yojson_with_diagnostics json with
+  match Masc_domain.backlog_of_yojson (backlog_document [ bad ]) with
   | Error _ -> ()
   | Ok _ -> fail "expected contract corruption to keep propagating"
 
@@ -1718,19 +1749,17 @@ let () =
       test_case "rejects corrupt task entries" `Quick
         test_backlog_of_yojson_rejects_corrupt_task_entries;
     ];
-    "task_decode_diagnostics", [
-      test_case "absent field is Field_absent" `Quick
-        test_task_of_yojson_with_diagnostics_absent;
-      test_case "decoded field is Field_decoded" `Quick
-        test_task_of_yojson_with_diagnostics_decoded;
-      test_case "corrupt field is Field_unreadable" `Quick
-        test_task_of_yojson_with_diagnostics_unreadable;
-      test_case "backlog reports a dropped task" `Quick
-        test_backlog_of_yojson_with_diagnostics_reports_drop;
-      test_case "backlog_of_yojson stays backward compatible" `Quick
-        test_backlog_of_yojson_still_drops_diagnostics;
+    "stored_handoff_context", [
+      test_case "absent handoff is None" `Quick test_task_handoff_absent;
+      test_case "readable handoff decodes" `Quick test_task_handoff_decoded;
+      test_case "corrupt handoff is kept unreadable" `Quick
+        test_task_handoff_unreadable_is_kept;
+      test_case "backlog rewrite keeps the unreadable bytes" `Quick
+        test_backlog_rewrite_preserves_unreadable_handoff;
+      test_case "an unreadable handoff states no reason" `Quick
+        test_stated_reason_unreadable_handoff_states_no_reason;
       test_case "contract corruption still propagates" `Quick
-        test_backlog_of_yojson_with_diagnostics_still_propagates_contract;
+        test_backlog_of_yojson_still_propagates_contract;
     ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;

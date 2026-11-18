@@ -201,6 +201,13 @@ let core_error_cases : (string * CoreError.t * string) list =
            { detail = "config.toml: permission denied" })
     , "task_skill_config_unreadable" )
   ]
+  @ List.map
+      (fun refusal ->
+         ( "Internal_carried official-client session refusal "
+           ^ Keeper_official_client_session_refusal.code refusal
+         , Keeper_official_client_session_refusal.core_error refusal
+         , Keeper_official_client_session_refusal.code refusal ))
+      Keeper_official_client_session_refusal.all
 ;;
 
 let test_api_typed_wire () =

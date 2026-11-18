@@ -119,9 +119,9 @@ let summary = function
          | Some c -> Printf.sprintf "%.4f" c
          | None -> "-")
   | Observer.Event (Observer.Keeper_turn_observation o) ->
-      Printf.sprintf "observation(%s,call=%s,completed=%s)" o.Observer.to_keeper
+      Printf.sprintf "observation(%s,call=%s,keeper_turn=%s)" o.Observer.to_keeper
         (match o.Observer.to_session_turn with Some n -> string_of_int n | None -> "-")
-        (match o.Observer.to_total_turns with Some n -> string_of_int n | None -> "-")
+        (match o.Observer.to_keeper_turn with Some n -> string_of_int n | None -> "-")
   | Observer.Event (Observer.Keeper_composite_changed { keeper; _ }) ->
       "composite(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_metrics_appended { keeper; _ }) ->
@@ -287,18 +287,19 @@ let keeper_tool_call_frame_without_turn =
    \"duration_ms\":8,\"disposition\":\"completed\",\"ts_unix\":1787507570.02}\n\n"
 
 (* Shape from keeper_hooks_agent_core.ml: the hook's per-call report names
-   the keeper, the agent session's ordinal for the call and the keeper turns
-   completed before it. *)
+   the keeper, the agent session's ordinal for the call and the keeper turn
+   number it ran under. *)
 let turn_observation_frame =
   "data: {\"type\":\"keeper_turn_observation\",\"usage_projection\":\"raw_observation\",\
    \"response_id\":null,\"name\":\"largo\",\"turn\":1157,\"model_used\":null,\
    \"input_tokens\":73877,\"output_tokens\":358,\"cost_usd\":0.0258,\
    \"tool_calls_made\":2,\"cache_read_tokens\":null,\"cache_n\":null,\
-   \"prompt_n\":null,\"total_turns\":718,\"ts_unix\":1787505649.0}\n\n"
+   \"prompt_n\":null,\"total_turns\":718,\"keeper_turn_id\":719,\
+   \"ts_unix\":1787505649.0}\n\n"
 
-let test_a_turn_observation_names_the_call_and_the_completed_count () =
-  check (list string) "the keeper, the session ordinal and the completed count"
-    [ "observation(largo,call=1157,completed=718)" ]
+let test_a_turn_observation_names_the_call_and_the_keeper_turn () =
+  check (list string) "the keeper, the session ordinal and the keeper turn"
+    [ "observation(largo,call=1157,keeper_turn=719)" ]
     (List.map summary (decode_all [ turn_observation_frame ]))
 
 (* The settle carries the cache counts beside the input they are part of.
@@ -1989,8 +1990,8 @@ let () =
             test_relay_subscription_loss_is_typed
         ; test_case "a frame this cannot read says why" `Quick
             test_a_frame_this_cannot_read_says_why
-        ; test_case "a turn observation names the call and the completed count"
-            `Quick test_a_turn_observation_names_the_call_and_the_completed_count
+        ; test_case "a turn observation names the call and the keeper turn"
+            `Quick test_a_turn_observation_names_the_call_and_the_keeper_turn
         ; test_case "a settle keeps its cache counts apart from absent" `Quick
             test_a_settle_keeps_its_cache_counts_apart_from_absent
         ; test_case "collected batches join per instance in order" `Quick

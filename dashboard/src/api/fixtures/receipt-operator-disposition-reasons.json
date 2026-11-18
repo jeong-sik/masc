@@ -14,6 +14,7 @@
     "phase_skipped",
     "transcript_corruption",
     "official_client_recovery_required",
+    "official_client_session_refused",
     "provider_attempt_effect_fenced",
     "tool_correction_lost",
     "accept_rejected",

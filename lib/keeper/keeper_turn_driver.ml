@@ -764,6 +764,29 @@ let runtime_failed_decision ~idx ~runtime_id error =
       , `String Agent_core.Error.(category error |> category_label) );
     ]
 
+(* An official-client Gate or checkpoint continuation resumes the vendor
+   session of one runtime. Another lane candidate is refused before its
+   adapter runs, with a refusal the walk moves past, so the continuation's own
+   runtime is still tried when it comes later in the lane (#38402). The
+   continuation's runtime id resolving to a non-official execution is a
+   changed definition of that runtime, which no other candidate repairs. *)
+let official_continuation_admission ~continuation_runtime_id ~attempt_runtime_id
+    ~checkpoint_owner =
+  match continuation_runtime_id with
+  | None -> Ok ()
+  | Some expected_runtime_id when not (String.equal expected_runtime_id attempt_runtime_id) ->
+    Error
+      (Keeper_official_client_session_refusal.core_error
+         Keeper_official_client_session_refusal.Continuation_on_other_runtime)
+  | Some (_ : string) ->
+    (match checkpoint_owner with
+     | Runtime_execution.Official_client -> Ok ()
+     | Runtime_execution.Masc_agent_core ->
+       Error
+         (Agent_core.Error.Internal
+            "official-client continuation runtime no longer runs an official client"))
+;;
+
 let lane_should_retry
     ~is_last
     ~allow_retry
@@ -772,6 +795,13 @@ let lane_should_retry
   if is_last || not allow_retry then
     false
   else if Keeper_required_tools.should_try_next error then
+    true
+  else if Keeper_official_client_session_refusal.should_try_next error then
+    (* A task reference this candidate's client cannot carry, or a
+       continuation bound to another candidate's runtime; the next candidate
+       may take it. Every other session refusal stops the lane,
+       and [core_error_to_http_error] below already answers [None] for its
+       [Internal_carried] (#38402). *)
     true
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
@@ -2793,11 +2823,15 @@ let run_named
            && not (Runtime_execution.supports_native_none runtime.Runtime_instance.execution) then
           Error (Keeper_required_tools.to_core_error
             {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
-        else match official_client_continuation with
-        | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
-            || Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution <> Runtime_execution.Official_client ->
-          Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
-        | Some _ | None -> Ok () in
+        else
+          official_continuation_admission
+            ~continuation_runtime_id:
+              (Option.map
+                 (fun (checkpoint : Keeper_semantic_execution.official_client_checkpoint) ->
+                    checkpoint.runtime_id)
+                 official_client_continuation)
+            ~attempt_runtime_id
+            ~checkpoint_owner:(Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution) in
       let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
@@ -3001,6 +3035,9 @@ let run_named
                                })
                           observed;
                         Agent_core.Hooks.Continue
+                      (* A restored turn sent no request, so it has no
+                         transmitted model input to observe. *)
+                      | Agent_core.Hooks.AfterRestoredTurn _
                       | Agent_core.Hooks.BeforeTurn _
                       | Agent_core.Hooks.BeforeTurnParams _
                       | Agent_core.Hooks.PreToolUse _
@@ -3961,5 +3998,7 @@ module For_testing = struct
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
 
   let lane_should_retry = lane_should_retry
+
+  let official_continuation_admission = official_continuation_admission
 
 end

@@ -145,13 +145,22 @@ let test_a_process_with_only_the_child_process_clock_refuses_the_attempt () =
       ~tools:[]
   in
   let config = { config with Runtime_agent.stream_idle_timeout_s = Some declared_idle_budget_s } in
-  (match Runtime_agent.run ~sw ~net:env#net ~config "this must not be sent" with
+  (match
+     Runtime_agent.run ~sw ~net:env#net ~config
+       ~execution_capture:(Runtime_agent.execution_capture config)
+       "this must not be sent"
+   with
    | Ok _ -> fail "an attempt whose only clock is the child-process clock must not run"
    | Error
-       (Agent_core.Error.Config
-          (Agent_core.Error.InvalidConfig { field = "stream_idle_timeout_s"; _ })) -> ()
-   | Error error ->
-     failf "expected the runtime's no-clock refusal, got %s" (Agent_core.Error.to_string error));
+       (Runtime_agent.Failed_before_dispatch
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "stream_idle_timeout_s"; _ }))) -> ()
+   | Error (Runtime_agent.Failed_before_dispatch error) ->
+     failf "expected the runtime's no-clock refusal, got %s" (Agent_core.Error.to_string error)
+   | Error (Runtime_agent.Failed_after_dispatch { error; runtime_observation = _ }) ->
+     (* #52969: a refusal before the transport has no attempt to capture. *)
+     failf "a refusal before any provider request reported a capture: %s"
+       (Agent_core.Error.to_string error));
   check int "no request reached the provider" 0 (Exact_output_fixture.post_count server)
 ;;
 

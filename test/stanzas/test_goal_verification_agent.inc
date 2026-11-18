@@ -7,7 +7,7 @@
  (name test_goal_verification_agent)
  (modules test_goal_verification_agent)
  (deps (source_tree %{workspace_root}/config/prompts))
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   eio.mock
   masc_test_deps
   masc.agent_core.digest

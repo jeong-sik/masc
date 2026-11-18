@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { computed, signal } from '@preact/signals'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -18,6 +18,9 @@ const navigateMock = vi.hoisted(() => vi.fn())
 const callMcpToolMock = vi.hoisted(() => vi.fn<(name: string, args: Record<string, unknown>) => Promise<string>>())
 const assignmentSourceMock = vi.hoisted(() => vi.fn())
 const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
+const refreshExecutionMock = vi.hoisted(() => vi.fn<(opts?: { force?: boolean }) => Promise<void>>())
+const nextExecutionObservationMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
+const showToastMock = vi.hoisted(() => vi.fn<(message: string, type?: string) => void>())
 
 vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
@@ -50,6 +53,13 @@ vi.mock('../store', () => ({
   executionWorkspaceAuthority: signal({ epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }),
   executionWorkspaceRevision: signal(0),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
+  refreshExecution: refreshExecutionMock,
+  nextExecutionObservation: nextExecutionObservationMock,
+}))
+
+vi.mock('./common/toast', async original => ({
+  ...await original<typeof import('./common/toast')>(),
+  showToast: showToastMock,
 }))
 
 vi.mock('./board/board-surface', () => ({
@@ -108,6 +118,7 @@ import { goalStoreUnavailable, goalTreeData, goalTreeError } from '../goal-tree-
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
+import { ObservationPending } from '../lib/observation-refresh'
 import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
@@ -782,6 +793,186 @@ describe('Work', () => {
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
       expect(screen.getByText('Linked job')).toBeTruthy()
+    })
+
+    describe('claiming a backlog task', () => {
+      // The backlog section is not drawn when nothing is claimable.
+      const backlogClaimButtons = () => [...(screen.queryByTestId('work-backlog')?.querySelectorAll('.wk-task-claim') ?? [])]
+      const settle = async () => { for (let turn = 0; turn < 8; turn += 1) await act(async () => { await Promise.resolve() }) }
+      const unclaimed = { id: 'U-1', title: 'Orphan job', status: 'todo' } as const
+      const claimedOnServer = { id: 'U-1', title: 'Orphan job', status: 'claimed', assignee: 'operator-a' } as const
+      const other = { id: 'U-2', title: 'Another orphan', status: 'todo' } as const
+      // What the store does when it accepts an execution observation: the
+      // tasks are replaced, then whoever waited for the next one is told.
+      const observationWaiters: Array<() => void> = []
+      const accept = (first: typeof unclaimed | typeof claimedOnServer) => {
+        tasks.value = [first, other]
+        for (const told of observationWaiters.splice(0)) told()
+      }
+      const acceptAndSettle = async (first: typeof unclaimed | typeof claimedOnServer) => {
+        await act(async () => { accept(first) })
+        await settle()
+      }
+
+      beforeEach(() => {
+        callMcpToolMock.mockReset().mockResolvedValue('ok')
+        refreshExecutionMock.mockReset().mockResolvedValue(undefined)
+        observationWaiters.length = 0
+        nextExecutionObservationMock.mockReset().mockImplementation(
+          () => new Promise<void>(resolve => { observationWaiters.push(resolve) }),
+        )
+        showToastMock.mockReset()
+        tasks.value = [unclaimed, other]
+      })
+
+      it('draws the task released when it is released elsewhere after the claim (#52964)', async () => {
+        // The read after the claim brings the server's row: claimed, with its assignee.
+        refreshExecutionMock.mockImplementation(async () => { accept(claimedOnServer) })
+        render(html`<${Work} />`)
+        expect(backlogClaimButtons()).toHaveLength(2)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        expect(callMcpToolMock).toHaveBeenCalledWith('masc_transition', { task_id: 'U-1', action: 'claim' })
+        expect(refreshExecutionMock).toHaveBeenCalledWith({ force: true })
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // The same assignee releases it from another client; the server says todo, unassigned.
+        await acceptAndSettle(unclaimed)
+
+        expect(backlogClaimButtons()).toHaveLength(2)
+        expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
+        expect(showToastMock).not.toHaveBeenCalled()
+      })
+
+      it('keeps the task drawn as claimed until the read sent after the claim is accepted', async () => {
+        let claimTaken!: (value: string) => void
+        let readDone!: () => void
+        callMcpToolMock.mockReturnValue(new Promise<string>(resolve => { claimTaken = resolve }))
+        refreshExecutionMock.mockReturnValue(new Promise<void>(resolve => { readDone = resolve }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        // The claim is on the wire.
+        expect(backlogClaimButtons()).toHaveLength(1)
+        expect(refreshExecutionMock).not.toHaveBeenCalled()
+
+        claimTaken('ok')
+        await settle()
+        // Taken, and the tasks still on screen are the ones read before it.
+        expect(refreshExecutionMock).toHaveBeenCalledTimes(1)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // A read that began before the claim lands meanwhile and still says
+        // todo. It is not the read sent after the claim, so the flag stays.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        readDone()
+        await settle()
+        // That read is in. It says todo and unassigned too: taken and released
+        // again before this client saw it. The row is drawn as the server has it.
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it.each([
+        ['is dropped for a newer observation', new ObservationPending('Execution response was superseded by a newer observation')],
+        ['fails', new Error('execution read failed')],
+      ])('keeps the flag when the read sent after the claim %s, until an observation is accepted', async (_how, readError) => {
+        refreshExecutionMock.mockRejectedValue(readError)
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        // The server took the claim and the tasks on screen were read before
+        // it. Without the flag the task would be back in the backlog.
+        expect(refreshExecutionMock).toHaveBeenCalledTimes(1)
+        expect(backlogClaimButtons()).toHaveLength(1)
+        expect(screen.getByTestId('kpi-backlog').textContent).toBe('1')
+        expect(showToastMock).not.toHaveBeenCalled()
+
+        await acceptAndSettle(claimedOnServer)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // Released elsewhere later: the flag ended with the observation above.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('ends a flag left by an unaccepted read with the next accepted observation, whatever it says', async () => {
+        refreshExecutionMock.mockRejectedValue(new ObservationPending('Execution projection is initializing'))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // Taken and released again before any observation reached this client.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('does not count an observation accepted while the read sent after the claim was still out', async () => {
+        let readRefused!: (error: unknown) => void
+        refreshExecutionMock.mockReturnValue(new Promise<void>((_resolve, reject) => { readRefused = reject }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        // It may have been read before the claim, and it says todo.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        readRefused(new ObservationPending('Execution response was superseded by a newer observation'))
+        await settle()
+        // The read is refused only now, so the flag waits for an observation from here on.
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('holds each claimed task by its own flag', async () => {
+        const reads: Array<{ resolve: () => void; reject: (error: unknown) => void }> = []
+        refreshExecutionMock.mockImplementation(() => new Promise<void>((resolve, reject) => { reads.push({ resolve, reject }) }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        expect(callMcpToolMock).toHaveBeenCalledWith('masc_transition', { task_id: 'U-2', action: 'claim' })
+        expect(backlogClaimButtons()).toHaveLength(0)
+
+        // U-1's read is dropped; U-2's is still out.
+        reads[0]!.reject(new ObservationPending('Execution response was superseded by a newer observation'))
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(0)
+
+        // An observation is accepted: U-1's flag ends, U-2 waits for its own read.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons().map(button => button.closest('.wk-bl-row')?.querySelector('.wk-task-id')?.textContent)).toEqual(['U-1'])
+
+        reads[1]!.resolve()
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('returns a refused claim to the backlog and says why', async () => {
+        callMcpToolMock.mockRejectedValue(new Error('already claimed by keeper-x'))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        expect(backlogClaimButtons()).toHaveLength(2)
+        expect(refreshExecutionMock).not.toHaveBeenCalled()
+        expect(nextExecutionObservationMock).not.toHaveBeenCalled()
+        expect(showToastMock).toHaveBeenCalledWith('claim 실패: already claimed by keeper-x', 'error')
+      })
     })
 
     it('keeps every live backlog task in a scrollable region without a numeric preview policy', () => {

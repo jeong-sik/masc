@@ -488,6 +488,12 @@ type t =
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
   ; metadata_error : metadata_fault option ref
+  ; meta_write_unsettled : bool Atomic.t
+        (* A meta write of this Owner ended without a known outcome, so
+           the file may hold the value that write carried while
+           [projection] keeps the one before it. No later commit closes
+           the gap: the store is fenced, or the drain is gone. Set before
+           the row's readers are told, never cleared. *)
   ; operation_error : operation_fault option ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -556,6 +562,7 @@ let operation_error_kind = function
 ;;
 
 let projection t = Atomic.get t.projection
+let meta_write_unsettled t = Atomic.get t.meta_write_unsettled
 let chat_control_token t = Atomic.get t.chat_control_token
 let operation_projection t = Atomic.get t.operation_projection
 
@@ -866,6 +873,7 @@ let set_metadata_fault t detail =
   | Some _ -> () (* Sticky until restart; the first detail is the cause. *)
   | None ->
     t.metadata_error := Some (Metadata_persistence_failure detail);
+    Atomic.set t.meta_write_unsettled true;
     Log.Keeper.error ~keeper_name:t.keeper_name
       "keeper Owner metadata store fenced: %s" detail;
     (* A failed durable replace or remove can still have changed the file
@@ -925,9 +933,12 @@ let health_metadata_equal before after =
 ;;
 
 (* A write that raised may have taken effect, so its readers are told as if
-   it had. The row is announced first: the observer may re-raise a
+   it had. [unsettled] is set before anyone is told: a reader woken by the
+   announcement must already find that the projection no longer stands for
+   the file. The row is announced next: the observer may re-raise a
    cancellation of this fiber, and the row's readers must still hear. *)
-let observe_uncertain_write ~base_path ~keeper_name () =
+let observe_uncertain_write ~unsettled ~base_path ~keeper_name () =
+  Atomic.set unsettled true;
   Keeper_row_broadcast.changed ~base_path ~keeper_name;
   memory_health_moved ~base_path ~keeper_name;
   notify_state_change_observer ~keeper_name
@@ -935,7 +946,11 @@ let observe_uncertain_write ~base_path ~keeper_name () =
 
 let apply_transition t store old_state transition =
   match commit
-    ~on_uncertain:(observe_uncertain_write ~base_path:t.base_path ~keeper_name:t.keeper_name)
+    ~on_uncertain:
+      (observe_uncertain_write
+         ~unsettled:t.meta_write_unsettled
+         ~base_path:t.base_path
+         ~keeper_name:t.keeper_name)
     store transition with
   | Error (Store_unavailable detail as error) ->
     set_metadata_fault t detail;
@@ -1548,6 +1563,7 @@ let start
     ; closed = Atomic.make false
     ; closed_p
     ; metadata_error = ref None
+    ; meta_write_unsettled = Atomic.make false
     ; operation_error = ref None
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
@@ -3540,7 +3556,11 @@ module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
   let enqueue_unless_closed = enqueue_unless_closed
   let commit_metadata_transition ~base_path ~keeper_name store transition =
-    commit ~on_uncertain:(observe_uncertain_write ~base_path ~keeper_name) store transition
+    commit
+      ~on_uncertain:
+        (observe_uncertain_write ~unsettled:(Atomic.make false) ~base_path ~keeper_name)
+      store
+      transition
 
   let observe_state_changes ~sw observer =
     let previous = Atomic.get state_change_observer in

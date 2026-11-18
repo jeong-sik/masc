@@ -340,10 +340,14 @@ type keeper_list_row_shape =
 
 let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
   let effective_meta, persisted_meta =
-    match read_meta_resolved config name with
+    match
+      Keeper_stored_meta.read config name ~read_file:(fun () ->
+        read_meta_resolved config name
+        |> Result.map (Option.map (fun (_resolved_name, persisted) -> persisted)))
+    with
     | Error err -> Error err, None
     | Ok None -> Ok None, None
-    | Ok (Some (_resolved_name, persisted)) ->
+    | Ok (Some persisted) ->
         (match
            Keeper_meta_contract.effective_meta_result
              ~base_path:config.Workspace.base_path

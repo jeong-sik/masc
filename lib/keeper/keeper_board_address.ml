@@ -23,7 +23,10 @@ let read config name =
            ~keeper_name:requested_name
            Keeper_runtime_root_entry.Metadata)
     in
-    match Keeper_meta_store.read_meta_file_path meta_path with
+    match
+      Keeper_stored_meta.read config requested_name ~read_file:(fun () ->
+        Keeper_meta_store.read_meta_file_path meta_path)
+    with
     | Error _ -> Unavailable Effective_metadata_unread
     | Ok None -> Unavailable Metadata_absent
     | Ok (Some meta) ->

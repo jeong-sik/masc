@@ -20,6 +20,15 @@ val read_meta_file_path :
   string ->
   (Keeper_meta_contract.keeper_meta option, string) result
 
+val snapshot_read_back :
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_meta_contract.keeper_meta, string) result
+(** What a file read returns for the snapshot {!replace_snapshot} writes from
+    this meta: the serializer's bytes, taken through the same repair, parse
+    and decode as [read_meta_file_path], without a file. The TOML-owned
+    fields come back as the decoder's placeholders, as they do from the file.
+    [Error] when those bytes do not decode. *)
+
 (** What the store holds at a Keeper's canonical path, keeping the two
     cases [read_meta_file_path] folds into [Ok None] apart. *)
 type meta_presence =

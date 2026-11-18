@@ -3328,6 +3328,8 @@
 
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 
+(include stanzas/test_keeper_stored_meta.inc)
+
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 (include stanzas/test_keeper_request_wire_observation.inc)

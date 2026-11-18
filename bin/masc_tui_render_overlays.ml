@@ -1234,8 +1234,12 @@ let render_agenda (state : state) =
     if selected then Ansi.reverse ^ body ^ Ansi.reset else body
   in
   (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
-     so zone 5 names none of them (RFC tui-one-screen-grammar section 2). *)
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
+     so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
+     holds the help door alone. The panel owns the keys, so the door is not
+     the default ([help_key_answers] says no under a modal); [?] here opens
+     the sheet on the agenda's own section. *)
+  surface_chrome ~overflow:Paged_by_cursor ~help_door:true state ~terminal_rows ~cols
+    ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title (ui_text state ~ko:" 일정·요청" ~en:" Agenda"))
     ~hints:""

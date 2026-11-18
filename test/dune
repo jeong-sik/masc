@@ -3913,8 +3913,8 @@
 (test
  (name test_tui_footer_moves)
  (modules test_tui_footer_moves)
- (libraries alcotest masc_tui_keys masc_tui_types masc_tui_footer masc_tui_theme
-  masc_tui_render_prim))
+ (libraries alcotest masc.runtime masc_tui_keys masc_tui_types masc_tui_footer
+  masc_tui_theme masc_tui_render_prim))
 
 (test
  (name test_tui_runtime_config_receipt)

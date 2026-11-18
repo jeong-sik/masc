@@ -415,8 +415,7 @@ let listing_meta = [ listing_refresh; listing_next; listing_quit ]
 
 (* Tools' [r] keeps the listing's footer word, but what it reloads follows
    what is open there -- the original Task, the original request, or the
-   list -- and the sheet says which. A binding of its own, so
-   [sheet_bindings] keeps it where it drops the shared tail. *)
+   list -- and the sheet says which. *)
 let tools_refresh =
   b ~role:Moves ~ko:"새로 조회" Meta "r" "refresh"
     ~help:"refresh the open original Task body/history, original request \
@@ -2892,24 +2891,6 @@ let keeper_detail_tab_hint ~ko tab =
     (("[ ]:" ^ if ko then "탭" else "tab")
      :: List.map named (keeper_detail_tab_bindings tab))
 
-(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
-   [listing_meta] spells them -- is said once, under Global. Repeated under
-   every surface it took three of the dozen rows an 80x24 sheet shows of the
-   reader's own section. A surface that names one of those keys its own way
-   ([r] reload on Config) keeps that row: it says something Global does not.
-   A row is the same when the sheet would print the same key and words; the
-   fields the sheet does not print, such as [role], do not count. *)
-let same_sheet_row (one : binding) (other : binding) =
-  String.equal one.key other.key
-  && String.equal one.label other.label
-  && String.equal one.label_ko other.label_ko
-  && Option.equal String.equal one.help other.help
-
-let sheet_bindings surface =
-  List.filter
-    (fun binding -> not (List.exists (same_sheet_row binding) listing_meta))
-    (for_surface surface)
-
 (* Additional reading keys stay on the sheet, each naming its owner. The
    volume binding is also used by its catalog and child footers. *)
 let tools_detail_bindings =
@@ -2985,7 +2966,13 @@ let located_sections ~lang ?current () =
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
            | Config | Resources | System_logs -> []
          in
-         (surface, (title, entries ~lang (sheet_bindings surface) @ tab_entries)))
+         (* Every row of the table, the shared r, Tab and q included. The
+            sheet once said those three only under Global, while every footer
+            named them; zone 5 names no key that moves now, so the first [?]
+            page -- the reader's own section and nothing behind it -- is
+            where a new reader finds them, quit among them (RFC
+            tui-one-screen-grammar section 4). *)
+         (surface, (title, entries ~lang (for_surface surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -3182,6 +3169,20 @@ let queue_bindings state panel =
 let footer_hints_queue (state : state) panel =
   hints_in_order ~lang:state.ui_language (queue_bindings state panel)
 
+(* The agenda panel's keys. Every one of them moves, so the panel's zone 5 is
+   the help door alone, and [?] there opens on this section first: before it
+   the sheet had no agenda section, and Enter (open a row) and Esc (close)
+   were named nowhere once they left the footer. [;] closes the panel as
+   well; Global names it. *)
+let agenda_bindings =
+  [ b ~role:Moves ~ko:"선택" Navigate "j/k" "move"
+      ~help:"select a row that opens; a panel with none scrolls instead"
+  ; b ~role:Moves ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~role:Moves ~ko:"처음/끝" Navigate "Home/End" "first/last" ~help:"g and G as well"
+  ; b ~role:Moves ~ko:"열기" Act "Enter" "open" ~help:"open the selected row"
+  ; b ~role:Moves ~ko:"닫기" Act "Esc" "close" ~help:"close the agenda; ; closes it too"
+  ]
+
 let help_sections_for_state ~cols (state : state) =
   let lang = state.ui_language in
   let active =
@@ -3189,6 +3190,7 @@ let help_sections_for_state ~cols (state : state) =
     else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
     else if Option.is_some state.queue_panel then
       Option.map (fun panel -> "Queue", queue_bindings state panel) state.queue_panel
+    else if state.agenda_open then Some ("Agenda", agenda_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
       Some ("Exact activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.machine_activity_open then
@@ -3223,6 +3225,9 @@ let help_sections_for_state ~cols (state : state) =
     else if state.view = Lanes then
       (match state.lanes_mode with
        | Lanes_run_list _ ->
+           (* The run list's footer named r, Tab and q while it named the
+              keys that move; with zone 5 down to the help door, this section
+              is where they are. *)
            Some
              ( "Lane runs",
                lane_run_list_bindings
@@ -3230,7 +3235,8 @@ let help_sections_for_state ~cols (state : state) =
                    (match state.lane_runs with
                     | Some (_ :: _) -> true
                     | Some [] | None -> false)
-                 ~has_older:(Option.is_some state.lane_runs_next) )
+                 ~has_older:(Option.is_some state.lane_runs_next)
+               @ listing_meta )
        | Lanes_run_detail (_, _) ->
            Some ("Lane run", lane_run_detail_bindings @ [preflight_detail_binding])
        | Lanes_overview | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None)

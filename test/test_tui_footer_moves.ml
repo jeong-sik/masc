@@ -7,10 +7,11 @@
 
    This file pins the decisions: no zone 5 key set holds a binding of role
    [Moves]; every table marks the keys that only ever move as [Moves]; the
-   help sheet still names every one of them, quit included; the
-   help door ([?] or the cut marker that ends in it) is on every row; and with
-   the moving keys gone, the converted list rows fit whole at 100 and 160
-   cells, so a refused key stays in its place there. *)
+   first [?] page of a screen whose zone 5 lost them names them, quit
+   included; the help door ([?] or the cut marker that ends in it) is on
+   every row; and with the moving keys gone, the converted list rows with no
+   notice fit whole at 100 and 160 cells, so a refused key stays in its place
+   there. *)
 
 open Alcotest
 module Keys = Masc_tui_keys
@@ -217,41 +218,84 @@ let test_the_board_read_row_names_no_moving_key () =
         flags)
     [ T.Board_read_split; T.Board_read_wide; T.Board_read_one_pane ]
 
-(* The keys that leave zone 5 stay on the sheet: every key of every moving
-   binding of the surface's table is named in its own section or under Global
-   (where [Tab] is spelled "Tab / Shift-Tab"), and Global names quit. The keys
-   are read from the table, not from the sheet, so a sheet that dropped the
-   moves would fail here rather than pass empty. *)
-let test_the_sheet_still_names_the_moving_keys () =
+(* The keys that leave zone 5 stay on the first [?] page. That page draws the
+   reader's own section and nothing behind it, so Global, which comes after,
+   does not count: every key of every moving binding of the surface's table,
+   quit among them, is named in the surface's own section. The keys are read
+   from the table, not from the sheet, so a sheet that dropped the moves would
+   fail here rather than pass empty. The surfaces are the ones whose zone 5
+   named q before it left: the converted lists, the Goal list, the Approvals
+   queue and the Keeper roster. *)
+let surfaces_whose_zone_five_lost_quit =
+  typed_surfaces
+  @ [ ("Goals", T.Planning); ("Approvals", T.Approvals); ("Keepers", T.Keepers T.Keeper_list) ]
+
+let first_page_atoms sections =
+  match sections with
+  | (_, rows) :: _ -> List.concat_map (fun (key, _) -> Keys.key_atoms key) rows
+  | [] -> []
+
+let test_the_first_help_page_names_the_moving_keys () =
   List.iter
     (fun (name, surface) ->
       let sections = Keys.help_sections ~lang:T.Lang_en ~current:surface () in
-      let rows_of pick =
-        match List.find_opt (fun (title, _) -> pick title) sections with
-        | Some (_, rows) -> rows
-        | None -> failf "%s: a section is missing" name
-      in
-      let own = rows_of (String.ends_with ~suffix:Keys.here_marker)
-      and global = rows_of (String.equal "Global") in
-      let named = List.concat_map (fun (key, _) -> Keys.key_atoms key) (own @ global) in
+      (match sections with
+       | (title, _) :: _ ->
+           check bool (name ^ " opens on its own section") true
+             (String.ends_with ~suffix:Keys.here_marker title)
+       | [] -> fail (name ^ ": the sheet is empty"));
+      let named = first_page_atoms sections in
       let moves = List.filter is_move (Keys.for_surface surface) in
       check bool (name ^ " has keys that move") true (moves <> []);
       List.iter
         (fun (binding : Keys.binding) ->
           List.iter
             (fun atom ->
-              check bool (Printf.sprintf "%s sheet names %s" name atom) true
+              check bool (Printf.sprintf "%s first page names %s" name atom) true
                 (List.mem atom named))
             (Keys.key_atoms binding.key))
         moves;
-      check bool (name ^ " sheet names q under Global") true
-        (List.exists (fun (key, _) -> List.mem "q" (Keys.key_atoms key)) global))
-    typed_surfaces
+      check bool (name ^ " first page names q") true (List.mem "q" named))
+    surfaces_whose_zone_five_lost_quit
 
 let state_in lang =
   let state = T.create_state ~workspace:"" ~port:0 () in
   state.T.ui_language <- lang;
   state
+
+(* A lane's run list has no key that acts, so its zone 5 is the help door
+   alone, and its footer named r, Tab and q before. Its first page names
+   them. *)
+let test_the_lane_runs_first_page_names_quit () =
+  let state = state_in T.Lang_en in
+  state.T.view <- T.Lanes;
+  state.T.lanes_mode <- T.Lanes_run_list Lane_run_identity.Librarian;
+  let named = first_page_atoms (Keys.help_sections_for_state ~cols:100 state) in
+  List.iter
+    (fun atom ->
+      check bool ("the lane runs first page names " ^ atom) true (List.mem atom named))
+    [ "Esc"; "r"; "Tab"; "q" ]
+
+(* The agenda panel owns the keys while it is open, and every key of it
+   moves. [?] there opens on the agenda's own section, which names the way
+   into a row and the way out. Before, the sheet had no agenda section, so
+   Enter and Esc were named nowhere once they left the footer. The help door
+   on the panel's zone 5 is the renderer's argument
+   ([Masc_tui_render_overlays.render_agenda] passes [~help_door:true]); the
+   renderer is in the executable, which a test cannot link. *)
+let test_the_agenda_first_page_names_its_keys () =
+  let state = state_in T.Lang_en in
+  state.T.agenda_open <- true;
+  let sections = Keys.help_sections_for_state ~cols:100 state in
+  (match sections with
+   | (title, _) :: _ ->
+       check bool "the agenda opens on its own section" true
+         (String.ends_with ~suffix:Keys.here_marker title)
+   | [] -> fail "the sheet is empty");
+  let named = first_page_atoms sections in
+  List.iter
+    (fun atom -> check bool ("the agenda first page names " ^ atom) true (List.mem atom named))
+    [ "j"; "k"; "Enter"; "Esc" ]
 
 (* What zone 5 draws at [max_cells], the colour marks taken off. *)
 let drawn ~lang ~max_cells keys =
@@ -270,8 +314,9 @@ let rows_drawn ~lang =
     typed_surfaces
   @ [ ("Goals empty", Keys.footer_row_planning_goal_list ~lang ~has_rows:false)
     ; ("Memory facts", Keys.footer_row_memory_facts ~lang ~cols:200)
-    (* The Lanes run list, the agenda panel and a Board post still loading
-       have no key that acts. *)
+    (* A lane's run list and a Board post still loading have no key that
+       acts. The agenda panel has none either; it is a modal, and its door is
+       its renderer's argument (see the agenda test above). *)
     ; ("no key that acts", Footer.Written "")
     ]
 
@@ -296,8 +341,11 @@ let test_every_row_keeps_the_help_door () =
     languages
 
 (* With the moving keys gone, the empty list rows that refuse a key fit whole
-   at 100 and 160 cells: the fitter draws each refused key in its place, the
-   row the full list draws, rather than the row of the answering keys alone. *)
+   at 100 and 160 cells of zone 5 when no notice leads the row: the fitter
+   draws each refused key in its place, the row the full list draws, rather
+   than the row of the answering keys alone. A notice takes the row's head
+   until zone 4 has a row of its own (RFC tui-one-screen-grammar section 10),
+   and then the refused keys go first, which test_tui_footer_row_need pins. *)
 let refusing_rows ~lang =
   List.filter_map
     (fun (name, surface) ->
@@ -375,8 +423,12 @@ let () =
             test_the_keeper_roster_names_no_moving_key
         ; test_case "every table marks the keys that only move" `Quick
             test_every_table_marks_the_keys_that_only_move
-        ; test_case "the sheet still names the moving keys" `Quick
-            test_the_sheet_still_names_the_moving_keys
+        ; test_case "the first help page names the moving keys" `Quick
+            test_the_first_help_page_names_the_moving_keys
+        ; test_case "the lane runs first page names quit" `Quick
+            test_the_lane_runs_first_page_names_quit
+        ; test_case "the agenda first page names its keys" `Quick
+            test_the_agenda_first_page_names_its_keys
         ; test_case "every row keeps the help door" `Quick test_every_row_keeps_the_help_door
         ; test_case "refused keys stay in place at common widths" `Quick
             test_refused_keys_stay_in_place_at_common_widths

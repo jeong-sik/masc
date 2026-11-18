@@ -306,13 +306,37 @@ let append_path_mutex_count_for_testing () =
 
 let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
-let append_file_unix (path : string) (content : string) : unit =
+(* A failed append leaves the file as it was: [Fd_append_whole.run] removes
+   the bytes a partial write added, and the cached descriptor holds no
+   buffer that a later append or a close could write out (#52980). *)
+let append_file_unix_with_io ~io (path : string) (content : string) : unit =
   let canonical = canonical_append_mutex_path path in
   with_append_path_mutex canonical (fun () ->
-    Fd_cache.with_writer canonical (fun oc ->
-      Stdlib.output_string oc content;
-      Stdlib.flush oc))
+    Fd_cache.with_writer canonical (fun fd ->
+      match Fd_append_whole.run ~io ~fd content with
+      | Ok () -> ()
+      | Error
+          { write_failure =
+              Fd_write_all.Operation_failed
+                { exception_; backtrace; bytes_written = _ }
+          ; rollback = _
+          } ->
+        (* Not an I/O failure of the file: an exception the write
+           operation itself raised. Callers see it unchanged. *)
+        Printexc.raise_with_backtrace exception_ backtrace
+      | Error
+          ({ write_failure = Fd_write_all.No_progress _ | Fd_write_all.Unix_error _
+           ; rollback = _
+           } as failure) ->
+        raise
+          (Sys_error (canonical ^ ": " ^ Fd_append_whole.failure_to_string failure))))
 ;;
+
+let append_file_unix (path : string) (content : string) : unit =
+  append_file_unix_with_io ~io:Fd_append_whole.unix_io path content
+;;
+
+let append_file_unix_with_io_for_testing = append_file_unix_with_io
 
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =

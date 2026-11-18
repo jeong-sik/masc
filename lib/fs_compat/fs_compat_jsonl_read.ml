@@ -318,8 +318,8 @@ let fold_jsonl_lines ~init ~f path =
 
     Atomic per record (in-process): the same [append_path_mutex_registry]
     used by {!append_file_unix} serializes callers against each
-    other, and a fresh fd is opened and closed around a single
-    [output_string] of [record + "\n"]. Cross-domain safe. Records
+    other, and the record plus its newline goes to the path's cached
+    descriptor in one append. Cross-domain safe. Records
     of any size are written without interleaving (the mutex spans
     the whole syscall sequence). Crash durability is not guaranteed
     (no fsync).
@@ -339,13 +339,13 @@ let fold_jsonl_lines ~init ~f path =
    to the EMFILE/ENFILE trace.
 
    Design choice — Per-path (not per-domain) cache:
-   - A single [out_channel] per path eliminates the cross-domain
+   - A single descriptor per path eliminates the cross-domain
      write interleave window that an early RFC draft's per-domain
      design opened up (POSIX O_APPEND+write atomicity is only
      guaranteed up to PIPE_BUF, ~4 KB, and tool-call records
      routinely exceed that).
    - The existing [get_append_path_mutex] is already a cross-domain
-     [Stdlib.Mutex] per path. Wrapping [output_string + flush]
+     [Stdlib.Mutex] per path. Wrapping the write
      inside it preserves RFC-0108 §3.2's Record-interleave-0
      guarantee verbatim.
    - The cache lookup uses a separate, microsecond-scoped mutex

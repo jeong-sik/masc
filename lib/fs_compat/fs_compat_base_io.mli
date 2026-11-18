@@ -60,7 +60,15 @@ val append_path_mutex_count_for_testing : unit -> int
 
 val canonical_append_mutex_path_for_testing : string -> string
 
+(** Appends all of the content or leaves the file as it was.
+    @raise Sys_error when the file cannot be opened or written. *)
 val append_file_unix : string -> string -> unit
+
+val append_file_unix_with_io_for_testing
+  :  io:Fs_compat_internal.Fd_append_whole.io
+  -> string
+  -> string
+  -> unit
 
 val mkdir_p_unix : string -> unit
 

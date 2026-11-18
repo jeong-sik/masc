@@ -731,9 +731,11 @@ let grid_tail_cells (grid : Grid.t) =
   + Grid.due_cells
   + if grid.mem_cells > 0 then 1 + grid.mem_cells else 0
 
-(* A recovered Keeper is sound now, so it draws the success colour; its own
-   mark says it recovered (RFC tui-one-screen-grammar section 7.2: one
-   colour per state). *)
+(* A recovered Keeper is sound now, so it draws the success colour (RFC
+   tui-one-screen-grammar section 7.2: one colour per state). Colour alone
+   does not tell it from one that never failed: only the By_cause view's mark
+   and its Recovered group say it recovered, and the other views draw both
+   with the same ok mark. *)
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()
   | Grid.Failing { resting = true } | Grid.Paused | Grid.Other -> Theme.recede ()
@@ -857,21 +859,24 @@ let grid_librarian memory =
      | Memory_reading.Row_refused -> Memory_reading.pass_cell memory)
 
 (* The strip column of the memory and age views: the unread turns as a
-   segmented bar against [peak_lag] on a ground of dots, in the info colour
-   when requests skip atoms. A reading without a row leaves it to the ● cell. *)
+   segmented bar against [peak_lag] on a ground of dots. A reading without a
+   row leaves it to the ● cell. *)
 let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
   let cells = Grid.strip_cells grid in
   let ground count = Theme.recede () ^ grid_repeat count Keeper_mark.grid_dot_mark ^ Ansi.reset in
   match memory with
   | Memory_reading.Row { lag = Memory_reading.Lag turns; gap; _ } ->
       let filled = Grid.lag_fill ~cells ~peak:peak_lag turns in
+      (* Lag against the largest lag is a size, not a limit, so the fill
+         draws in the foreground. A stalled librarian whose requests skip
+         atoms, measured or not, is the anomaly, and the bar takes the
+         warning colour the memory axis gives the same gap (RFC
+         tui-one-screen-grammar section 7.3). *)
       let tone =
         match gap with
-        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.info ()
-        | Memory_reading.No_gap -> Theme.recede ()
+        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.warn ()
+        | Memory_reading.No_gap -> ""
       in
-      (* Lag against the largest lag is a size, not a limit: the fill takes
-         the tone drawn around it. *)
       tone
       ^ Masc_tui_chart.meter_bar ~width:cells ~scale:Masc_tui_chart.Relative
           ~track_style:(Theme.recede ()) ~reset:Ansi.reset ~value:filled

@@ -346,7 +346,7 @@
  (name masc_tui_context_bars)
  (wrapped false)
  (modules masc_tui_context_bars)
- (libraries masc_tui_theme))
+ (libraries masc_tui_chart masc_tui_theme))
 
 (library
  (name masc_tui_chart)

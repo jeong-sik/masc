@@ -32,6 +32,21 @@ val capture
     a projected context. Codex includes credential names declared in the selected
     home's root config.toml; MASC does not select a separate CLI profile. *)
 
+(** {!capture} for Claude Code on an API key read from a file (RFC
+    a-persons-api-key-is-their-own-provider-account 3.4).
+
+    The child takes from the environment of the server only the names a
+    declared account takes, whether or not [declaration] names a home: no API
+    key, authentication token, provider choice, cloud credential or endpoint
+    of the server. A home the environment chose keeps its
+    [CLAUDE_CONFIG_DIR]. [key] is then the one [ANTHROPIC_API_KEY] of the
+    child, which a non-interactive session uses before the account signed in
+    to the home. *)
+val capture_on_key
+  :  declaration:string option
+  -> key:Runtime_api_key_file.key
+  -> (claude_code t, string) result
+
 val resolve_home : client:'client client -> declaration:string option -> (string, string) result
 (** Current directory metadata for setup/display boundaries. This does not
     capture credentials or certify an executable context. *)

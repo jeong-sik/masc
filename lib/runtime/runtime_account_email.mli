@@ -76,7 +76,9 @@ val of_provider : Runtime_schema.provider -> (t, missing) result option
     account: an HTTP provider, or Antigravity with an env or inline credential.
     A native client whose environment names no home is [Source_unavailable].
     Claude Code on the inherited home is [Environment_credential] while
-    {!Runtime_claude_code.runs_on_environment_credential} holds. How Codex
+    {!Runtime_claude_code.runs_on_environment_credential} holds, and so is
+    Claude Code on a file credential, on any home: the key of the file is
+    the credential its calls use. How Codex
     ranks an inherited OPENAI_API_KEY or CODEX_API_KEY against its ChatGPT
     login is not documented (checked 2026-09-28), so a Codex row names the
     login file's email whatever the environment holds. *)

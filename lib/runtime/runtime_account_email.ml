@@ -149,6 +149,11 @@ let resolve_provider (provider : Runtime_schema.provider) =
          (Runtime_official_account.resolve_home ~client:Codex ~declaration:provider.account_home
           |> Result.to_option))
       (fun path -> Codex_auth path)
+  | Claude_code_runtime, Some (Runtime_schema.File _) ->
+    (* The key of the file reaches the client in its environment, and a
+       non-interactive session uses it before the account signed in to the
+       home. *)
+    Some (Error Environment_credential)
   | Claude_code_runtime, _ when Runtime_claude_code.runs_on_environment_credential
       (Runtime_official_account.Current provider.account_home) ->
     Some (Error Environment_credential)

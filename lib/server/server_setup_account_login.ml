@@ -396,7 +396,10 @@ let template_error (error : Runtime_account_runtime.error) =
     Log.Server.warn "Account runtime did not load: %s" (Runtime_account_runtime.error_to_string error);
     `Bad_request, "The runtime of this account does not load."
   | Runtime_account_runtime.Template_not_declared _ | Runtime_account_runtime.Model_not_bound _
-  | Runtime_account_runtime.Runtime_not_bound _ ->
+  | Runtime_account_runtime.Runtime_not_bound _
+  | Runtime_account_runtime.Key_missing | Runtime_account_runtime.Key_unreadable _ ->
+    (* The two of a key file name no path and no key. An account of a login
+       has no key file. *)
     `Bad_request, Runtime_account_runtime.error_to_string error
 
 (* The state a route of a person decides on. A zone that cannot be trusted
@@ -430,7 +433,7 @@ let person_runtime person ~base_path ~provider_account_id:id ~binding =
     |> Result.map_error (fun message -> `Service_unavailable, message) in
   let* config = Server_runtime_setup_actions.config ~base_path |> Result.map_error setup_error in
   let* runtime = Runtime_account_runtime.of_template config ~template:receipt.integration_id
-      ~provider_id:provider_account_id ~account_home ~binding
+      ~provider_id:provider_account_id ~account_home ~account:Runtime_account_runtime.Login ~binding
     |> Result.map_error template_error in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was

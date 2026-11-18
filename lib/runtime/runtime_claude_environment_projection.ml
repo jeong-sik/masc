@@ -2,6 +2,7 @@ let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
 let profile_directory_variable = "ANTHROPIC_CONFIG_DIR"
 let profile_directory_name = "anthropic"
 let profile_directory ~account_home = Filename.concat account_home profile_directory_name
+let api_key_variable = "ANTHROPIC_API_KEY"
 
 let inherited_names ~explicit_account =
   let base_names =
@@ -24,7 +25,7 @@ let inherited_names ~explicit_account =
   let inherited_names =
     base_names @
     [ "CLAUDE_CONFIG_DIR"
-    ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
+    ; api_key_variable; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
     ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
     ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
     ; "ANTHROPIC_DEFAULT_HAIKU_MODEL"; "ANTHROPIC_SMALL_FAST_MODEL"

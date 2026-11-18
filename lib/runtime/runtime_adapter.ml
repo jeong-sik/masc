@@ -1054,14 +1054,23 @@ let claude_code_execution (provider : Runtime_schema.provider)
          "provider %S declares an empty Claude Code CLI command"
          provider.id)
   | Cli command ->
+    let execution captured =
+      Runtime_execution.Claude_code
+        { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
+        ; account_home = Runtime_account_access.seal captured
+        ; model = Some spec.api_name
+        ; timeout_s = Runtime_claude_code.default_timeout_s
+        }
+    in
     (match provider.credentials with
-     | Some _ ->
+     | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) ->
        Error
          (Printf.sprintf
-            "provider %S uses claude-code and must not declare credentials; \
-             the official Claude Code client owns subscription login"
+            "provider %S uses claude-code and declares a credential that is not a file; \
+             the official Claude Code client owns subscription login, and an API key \
+             is declared as a file"
             provider.id)
-     | None when not provider.is_non_interactive ->
+     | (None | Some (Runtime_schema.File _)) when not provider.is_non_interactive ->
        Error
          (Printf.sprintf
             "provider %S uses claude-code and must declare \
@@ -1070,13 +1079,25 @@ let claude_code_execution (provider : Runtime_schema.provider)
      | None ->
        let open Result.Syntax in
        let* captured = Runtime_official_account.capture ~client:Claude_code ~declaration:provider.account_home in
-       Ok
-         (Runtime_execution.Claude_code
-            { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
-            ; account_home = Runtime_account_access.seal captured
-            ; model = Some spec.api_name
-            ; timeout_s = Runtime_claude_code.default_timeout_s
-            }))
+       Ok (execution captured)
+     | Some (Runtime_schema.File path) ->
+       (* The key goes the way of the declaration of the provider (RFC
+          a-persons-api-key-is-their-own-provider-account 3.4): read by the
+          check of every credential file, captured with the account, and
+          handed to a child only by [Runtime_account_access.authorize]. *)
+       let open Result.Syntax in
+       let* key =
+         Runtime_api_key_file.read path
+         |> Result.map_error (fun error ->
+           Printf.sprintf
+             "provider %S uses claude-code on a file credential: %s"
+             provider.id
+             (Runtime_api_key_file.read_error_to_string error))
+       in
+       let* captured =
+         Runtime_official_account.capture_on_key ~declaration:provider.account_home ~key
+       in
+       Ok (execution captured))
 ;;
 
 let muse_serve_execution (provider : Runtime_schema.provider)

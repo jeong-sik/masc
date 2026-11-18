@@ -91,6 +91,16 @@ let read path =
   | Error (Empty | Json_document) -> Error (Key_unreadable Not_a_key)
 ;;
 
+let read_error_to_string = function
+  | Key_missing -> "the API key file is missing"
+  | Key_unreadable Path_not_absolute -> "the API key file must use an absolute path"
+  | Key_unreadable Not_a_regular_file ->
+    "the API key file could not be read as an owned regular file"
+  | Key_unreadable Open_to_others ->
+    "the API key file must be owned by the current user and private"
+  | Key_unreadable Not_a_key -> "the API key file does not hold one raw API key"
+;;
+
 (* ---- writing ---- *)
 
 type write_error =

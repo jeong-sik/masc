@@ -936,8 +936,12 @@ let layout_for ~show_names ~width entries =
   ; continuation_cells = max 1 (budget - name_cells - 1)
   }
 
-(* One entry's rows, at the columns [layout] settled on. *)
-let draw_entry layout tone entry =
+(* How far the text of an entry named on its own row starts under the name. *)
+let under_name_gap = "  "
+
+(* One entry's rows, at the columns [layout] settled on. With [~named:false]
+   the name column stays blank: the name is drawn above the rows. *)
+let draw_entry ?(named = true) layout tone entry =
   let module Text = Masc_tui_message_layout in
   let name_cell tone name =
     Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells (marked ~attention:entry.de_attention name) ^ Ansi.reset
@@ -1011,17 +1015,34 @@ let draw_entry layout tone entry =
          | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
          | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
   in
+  (* An entry named on the row above that reports a state has no bar to line
+     up with the list: its text and notes start just under the name and take
+     the rest of the row, not the room after an empty name column. *)
+  let under_name =
+    (not named)
+    && (match entry.de_body with
+        | State_text _ | Not_reported -> true
+        | Window_lines _ -> false)
+  in
+  let body_prefix = if under_name then indent ^ under_name_gap else layout.continuation in
+  let body_cells =
+    if under_name then max 1 (layout.width - indent_cells - cells_of under_name_gap)
+    else layout.continuation_cells
+  in
   let note_lines ?tone text =
     List.map
-      (fun wrapped -> layout.continuation ^ style tone wrapped)
-      (Text.wrap_words ~max_cells:layout.continuation_cells text)
+      (fun wrapped -> body_prefix ^ style tone wrapped)
+      (Text.wrap_words ~max_cells:body_cells text)
   in
   let state_rows text =
-    match Text.wrap_words ~max_cells:layout.continuation_cells text with
-    | [] -> [ indent ^ name_cell tone entry.de_name ]
-    | first :: rest ->
-        (indent ^ name_cell tone entry.de_name ^ " " ^ first)
-        :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
+    if not named then
+      List.map (fun wrapped -> body_prefix ^ wrapped) (Text.wrap_words ~max_cells:body_cells text)
+    else
+      match Text.wrap_words ~max_cells:layout.continuation_cells text with
+      | [] -> [ indent ^ name_cell tone entry.de_name ]
+      | first :: rest ->
+          (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+          :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
   in
   let rows =
     match entry.de_body with
@@ -1029,7 +1050,7 @@ let draw_entry layout tone entry =
         List.concat
           (List.mapi
              (fun index line ->
-               window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
+               window_row tone ~first:(if index = 0 && named then Some entry.de_name else None) line)
              lines)
     | State_text text -> state_rows text
     | Not_reported -> state_rows not_reported_text
@@ -1156,21 +1177,18 @@ let draw_groups ~show_limit_exhausted ~width groups =
         let tone = section_tone section in
         let draw entry =
           if width < minimum_inline_cells then draw_stacked_entry ~width ~tone entry
-          else
-          let label_overflows =
-            match entry.de_body with
-            | State_text _ | Not_reported -> false
-            | Window_lines lines ->
-                List.exists (fun line -> cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells) lines
-          in
-          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells && not label_overflows then
+          else if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells then
             draw_entry layout tone entry
           else
+            (* A name wider than its column goes on a row of its own, and the
+               windows keep the section's columns, so every bar in the list
+               starts at one place. A label wider than its column already
+               moves to a row of its own inside [draw_entry]. *)
             let heading =
               wrap_marked ~width:(width - 2) ~attention:entry.de_attention entry.de_name
               |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
             in
-            heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
+            heading @ draw_entry ~named:false layout tone entry
         in
         let silent, listed = split_silent section entries in
         group_heading ~width section entries

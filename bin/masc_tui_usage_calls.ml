@@ -72,14 +72,16 @@ let of_series window (series : Series.tool_series) =
 let no_call_mark = "\xc2\xb7"
 
 (* Braille LED columns on the graph rules of RFC tui-one-screen-grammar
-   section 5.6, one text row (four dots) tall: a reported zero is the
-   baseline [⣀], and a value above zero stands at least one level above it,
-   so one failed call among thirty is told apart from none by its shape and
-   not by its colour alone. [⣀] means zero here as on every other graph. *)
+   section 5.6, four dots to a text row: a reported zero is the baseline
+   [⣀], and a value above zero stands at least one level above it, so one
+   failed call among thirty is told apart from none by its shape and not by
+   its colour alone. [⣀] means zero here as on every other graph. *)
 let column_dots = 4
 
-let mark ~maximum sample =
-  Braille.braille_bar_mark ~level:(Braille.braille_level ~dots:column_dots ~maximum sample)
+(* How many text rows a chart row takes when the section has the room. One
+   row leaves a value three levels above the baseline, so most days of a
+   fortnight draw the same glyph; two rows leave seven. *)
+let tall_rows = 2
 
 let microseconds_per_ms = 1000.0
 
@@ -214,7 +216,9 @@ let totals_line ~calls ~failures ~deferred =
    every other bucket walks the row's own hue by its height, deep for a short
    column and bright for the tallest (RFC tui-one-screen-grammar section
    7.3). *)
-let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) ~series buckets =
+let chart_cells ~tall ~(sample : Series.tool_series_calls -> Braille.sample) ~series buckets =
+  let tall = max 1 tall in
+  let dots = column_dots * tall in
   let maximum =
     Braille.graph_maximum
       (List.filter_map
@@ -225,31 +229,45 @@ let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) ~series b
          buckets)
   in
   let tint = Theme.series_tint series in
-  let cells =
+  (* A one-row chart colours a column by its own height
+     ([Braille.value_share]). A taller chart colours each row by the row's height, as a Braille graph
+     does, and a row the column does not reach keeps that colour, so the row
+     opens no code for it. *)
+  let row_tint ~level ~from_base =
+    if tall = 1 then tint (Braille.value_share ~dots level)
+    else tint (float_of_int from_base /. float_of_int (tall - 1))
+  in
+  let blank_style ~from_base = if tall = 1 then "" else row_tint ~level:0 ~from_base in
+  let columns =
     List.map
       (fun (bucket : Series.tool_series_bucket) ->
         match bucket.Series.tsb_activity with
-        | Series.Series_idle -> (no_call_mark, Theme.recede ())
+        | Series.Series_idle ->
+            List.init tall (fun index ->
+              let from_base = tall - 1 - index in
+              if from_base = 0 then (no_call_mark, Theme.recede ())
+              else (Braille.braille_bar_mark ~level:0, blank_style ~from_base))
         | Series.Series_active active ->
             let reading = sample active in
-            let style =
-              if every_call_failed active then Theme.bad ()
-              else
-                match reading with
-                | Braille.Zero -> Theme.recede ()
-                | Braille.Value _ ->
-                    (* A value stands at least one level above the
-                       baseline, so its levels run from 2 to the top. *)
-                    tint
-                      (float_of_int
-                         (Braille.braille_level ~dots:column_dots ~maximum reading - 2)
-                       /. float_of_int (column_dots - 2))
-                | Braille.Absent | Braille.Unread -> ""
-            in
-            (mark ~maximum reading, style))
+            let level = Braille.braille_level ~dots ~maximum reading in
+            List.mapi
+              (fun index glyph ->
+                let from_base = tall - 1 - index in
+                let reaches = level > column_dots * from_base in
+                let style =
+                  if every_call_failed active then Theme.bad ()
+                  else if not reaches then blank_style ~from_base
+                  else
+                    match reading with
+                    | Braille.Zero -> Theme.recede ()
+                    | Braille.Value _ -> row_tint ~level ~from_base
+                    | Braille.Absent | Braille.Unread -> ""
+                in
+                (glyph, style))
+              (Braille.braille_bar_rows ~rows:tall ~level))
       buckets
   in
-  (maximum, cells)
+  (maximum, columns)
 
 (* How many cells a bucket's mark fills and how many blanks separate two marks,
    widest first. The last one is the sparkline proper, one cell per bucket. *)
@@ -300,14 +318,21 @@ let ruler ~span ~series_width buckets =
           ^ " " ^ newest ^ Ansi.reset ]
   | [], _ | _, [] -> []
 
-let chart_lines ~cells t =
+(* The [index]th text row of every column. *)
+let row_of columns index = List.map (fun column -> List.nth column index) columns
+
+let chart_lines ~tall ~cells t =
   let buckets = t.series.Series.tsr_buckets in
   let series_width = t.series.Series.tsr_width in
   let count = List.length buckets in
   let per = unit_suffix series_width in
-  let calls_maximum, calls_cells = chart_cells ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets in
-  let failed_maximum, failed_cells = chart_cells ~sample:failures_sample ~series:Masc_tui_theme.Failures buckets in
-  let _, p95_cells = chart_cells ~sample:p95_sample ~series:Masc_tui_theme.Latency buckets in
+  let calls_maximum, calls_cells =
+    chart_cells ~tall ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets
+  in
+  let failed_maximum, failed_cells =
+    chart_cells ~tall ~sample:failures_sample ~series:Masc_tui_theme.Failures buckets
+  in
+  let _, p95_cells = chart_cells ~tall ~sample:p95_sample ~series:Masc_tui_theme.Latency buckets in
   let count_note maximum =
     if maximum <= 0 then "none" else Printf.sprintf "max %d%s" maximum per
   in
@@ -338,16 +363,20 @@ let chart_lines ~cells t =
   match chosen with
   | None -> []
   | Some (((stretch, gap) as spacing), with_notes) ->
-      let row (label, drawn, note) =
-        margin
-        ^ Layout.fit_width label label_cells
-        ^ draw_cells ~stretch ~gap drawn
-        ^
-        if with_notes then
-          String.make note_gap ' ' ^ Theme.recede () ^ note ^ Ansi.reset
-        else ""
+      (* The label and the scale note sit on the top row, beside the top of
+         the scale they name. *)
+      let row (label, columns, note) =
+        List.init (max 1 tall) (fun index ->
+          let top = index = 0 in
+          margin
+          ^ Layout.fit_width (if top then label else "") label_cells
+          ^ draw_cells ~stretch ~gap (row_of columns index)
+          ^
+          if with_notes && top then
+            String.make note_gap ' ' ^ Theme.recede () ^ note ^ Ansi.reset
+          else "")
       in
-      List.map row rows
+      List.concat_map row rows
       @ ruler ~span:(spacing_span ~count spacing) ~series_width buckets
 
 (* One bucket as the table reads it. A bucket in which no call ran has zero
@@ -410,7 +439,7 @@ let load_bar ~cells ~maximum_calls reading =
          anomaly, and its colour comes first. *)
       let scale =
         if every_call_failed active then
-          Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Bad }
+          Masc_tui_chart.Anomaly { paint = Theme.paint (); alarm = Masc_tui_chart.Alarm_bad }
         else Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls }
       in
       Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls
@@ -509,11 +538,18 @@ let lines ~width:cells ~rows t =
   if calls = 0 then [ heading; " No tool call ran in this window" ]
   else
     let top = [ heading; totals_line ~calls ~failures ~deferred ] in
-    let chart = chart_lines ~cells t in
     let table = table_lines ~cells t in
-    let spaced = top @ [ "" ] @ chart @ legend ~cells ~at_most:2 @ [ "" ] @ table in
-    if List.length spaced <= rows then spaced
-    else top @ chart @ legend ~cells ~at_most:1 @ table
+    let spaced ~tall =
+      top @ [ "" ] @ chart_lines ~tall ~cells t @ legend ~cells ~at_most:2 @ [ "" ] @ table
+    in
+    (* The taller chart takes rows only the section would leave empty: it
+       never pushes a row of the table out of sight. *)
+    let tall_spaced = spaced ~tall:tall_rows in
+    if List.length tall_spaced <= rows then tall_spaced
+    else
+      let short_spaced = spaced ~tall:1 in
+      if List.length short_spaced <= rows then short_spaced
+      else top @ chart_lines ~tall:1 ~cells t @ legend ~cells ~at_most:1 @ table
 
 (* The Dashboard's row names its window in as few cells as the row can spare. *)
 let short_span = function
@@ -545,9 +581,11 @@ let summary_line ~cells t =
     in
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
-      let _, drawn = chart_cells ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets in
+      let _, columns =
+        chart_cells ~tall:1 ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets
+      in
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
-      ^ draw_cells ~stretch:1 ~gap:0 drawn
+      ^ draw_cells ~stretch:1 ~gap:0 (row_of columns 0)
       ^ summary_gap ^ figures
     else if without_chart <= cells then
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures

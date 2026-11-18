@@ -321,6 +321,11 @@ type series =
 val ramp_steps : int
 (** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)
 
+val ramp_reader : paint -> series -> position:float -> string
+(** [ramp_reader paint series] finds the ramp's table once and returns the
+    reader of its steps, for a drawing that colours many cells: each
+    [~position] is then one array read. The colours are {!ramp_style}'s. *)
+
 val ramp_style : paint -> series -> position:float -> string
 (** The SGR a cell at [position] on [series]' ramp draws before its glyph.
     [position] is clamped into [[0, 1]] and [nan] is [0]; the colour is the

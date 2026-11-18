@@ -169,7 +169,15 @@ let gauge ~width ~value ~max_value ?label () =
 type meter_scale =
   | Declared_limit of Masc_tui_theme.paint
   | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
-  | Anomaly of { paint : Masc_tui_theme.paint; status : Masc_tui_theme.status }
+  | Anomaly of { paint : Masc_tui_theme.paint; alarm : alarm }
+
+and alarm =
+  | Alarm_warn
+  | Alarm_bad
+
+let alarm_status = function
+  | Alarm_warn -> Masc_tui_theme.Warn
+  | Alarm_bad -> Masc_tui_theme.Bad
 
 (* How far along the bar a filled cell reaches: its far edge, unless the value
    stops short of it, so the last cell takes the colour of the value it draws
@@ -192,12 +200,23 @@ let meter_cell_style scale ~index ~width ~value ~max_value =
   | Series { paint; series } ->
     Masc_tui_theme.ramp_style paint series
       ~position:(cell_reach ~index ~width ~value ~max_value)
-  | Anomaly { paint; status } -> (
+  | Anomaly { paint; alarm } -> (
     match paint.Masc_tui_theme.depth with
     | Masc_tui_theme.No_color -> ""
     | Masc_tui_theme.Colors_16 | Masc_tui_theme.Colors_256 | Masc_tui_theme.Truecolor ->
       Masc_tui_theme.status_readable ~surface:paint.Masc_tui_theme.surface
-        paint.Masc_tui_theme.palette status)
+        paint.Masc_tui_theme.palette (alarm_status alarm))
+;;
+
+(* [meter_cell_style] for every cell of one bar, with a series ramp's table
+   found once for the whole bar. *)
+let meter_cell_styler scale ~width ~value ~max_value =
+  match scale with
+  | Series { paint; series } ->
+    let read = Masc_tui_theme.ramp_reader paint series in
+    fun ~index -> read ~position:(cell_reach ~index ~width ~value ~max_value)
+  | Declared_limit _ | Anomaly _ ->
+    fun ~index -> meter_cell_style scale ~index ~width ~value ~max_value
 ;;
 
 (* Neighbouring cells of a ramp often round to the same colour; the code goes
@@ -219,11 +238,8 @@ let styled_run ~reset styled =
 ;;
 
 let meter_fill_run ~scale ~width ~value ~max_value ~reset glyphs =
-  styled_run ~reset
-    (List.mapi
-       (fun index glyph ->
-         (meter_cell_style scale ~index ~width ~value ~max_value, glyph))
-       glyphs)
+  let style = meter_cell_styler scale ~width ~value ~max_value in
+  styled_run ~reset (List.mapi (fun index glyph -> (style ~index, glyph)) glyphs)
 ;;
 
 let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")

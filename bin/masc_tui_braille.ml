@@ -29,6 +29,14 @@ let braille_pair ~left ~right =
 
 let braille_bar_mark ~level = braille_pair ~left:level ~right:level
 
+(* A column [rows] cells tall, top cell first: each cell holds the four
+   levels of its own band, the base cell levels 1 to 4. *)
+let braille_bar_rows ~rows ~level =
+  let rows = Stdlib.max 1 rows in
+  List.init rows (fun index ->
+    let from_base = rows - 1 - index in
+    braille_bar_mark ~level:(level - (braille_top * from_base)))
+
 (* Top-down 0..4 dot subcolumns. The lower half of a mirror grows down from
    the axis, so it fills its column from the top: the left column uses dots
    1, 2, 3, 7 and the right column dots 4, 5, 6, 8. *)
@@ -158,12 +166,13 @@ let tinted_row cells =
   Buffer.contents buffer
 ;;
 
-(* A cell's height share on a [dots]-dot column: the taller of its two
-   times, from the baseline (level 1, a zero) at 0 to the top at 1. *)
-let cell_share ~dots (left, right) =
-  float_of_int (Stdlib.max 0 (Stdlib.max left right - 1))
-  /. float_of_int (Stdlib.max 1 (dots - 1))
+let value_share ~dots level =
+  let span = Stdlib.max 1 (dots - 2) in
+  Float.max 0.0 (Float.min 1.0 (float_of_int (level - 2) /. float_of_int span))
 ;;
+
+(* A cell's height share: the taller of its two times. *)
+let cell_share ~dots (left, right) = value_share ~dots (Stdlib.max left right)
 
 (* btop's rule: a graph more than one row tall takes its colour from the row,
    so the colour says how high the row sits; a one-row graph takes it from

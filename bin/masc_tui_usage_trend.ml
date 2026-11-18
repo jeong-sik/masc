@@ -164,7 +164,10 @@ let plot ~width trend row =
       | Some {report = Reported_no_windows; _} -> empty_report_mark) row.samples |> String.concat "" in
     Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ " (daily levels; · no report)")
   else
-    let step = min 4 ((width - axis_cells) / days) in
+    (* A day takes an equal share of the box, as btop's graphs fill theirs:
+       a fortnight in a 100-cell box draws six cells a day, not four with
+       the right third of the box empty. *)
+    let step = (width - axis_cells) / days in
     let pad text = text ^ String.make (max 0 (step - 1)) ' ' in
     let cells = days * step in
     let dot_rows = plot_height * 4 in

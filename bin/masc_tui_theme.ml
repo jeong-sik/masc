@@ -716,11 +716,15 @@ let ramp_table paint series =
     table
 ;;
 
-let ramp_style paint series ~position =
+let ramp_reader paint series =
   match paint.depth with
-  | No_color -> ""
-  | Colors_16 | Colors_256 | Truecolor -> (ramp_table paint series).(step_index position)
+  | No_color -> fun ~position:_ -> ""
+  | Colors_16 | Colors_256 | Truecolor ->
+    let table = ramp_table paint series in
+    fun ~position -> table.(step_index position)
 ;;
+
+let ramp_style paint series ~position = ramp_reader paint series ~position
 
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment

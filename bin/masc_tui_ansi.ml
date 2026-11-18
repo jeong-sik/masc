@@ -287,8 +287,8 @@ module Theme = struct
      ramp, on the page. The paint is read once per graph, the colours from the
      ramp's table. *)
   let series_tint series =
-    let paint = paint () in
-    fun position -> Masc_tui_theme.ramp_style paint series ~position
+    let read = Masc_tui_theme.ramp_reader (paint ()) series in
+    fun position -> read ~position
 
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)

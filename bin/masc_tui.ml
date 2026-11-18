@@ -24892,10 +24892,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) ?(image_input_pen
     state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   fun message ->
-    Masc_tui_types.preserve_keeper_list_selection state (fun () ->
-      apply_async_message_body ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
-        ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message);
-    reconcile_observer_recovery state ~refresh_inflight:http_refresh_inflight ~mailbox
+    let drawn =
+      Masc_tui_types.preserve_keeper_list_selection state (fun () ->
+        apply_async_message_body ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message)
+    in
+    reconcile_observer_recovery state ~refresh_inflight:http_refresh_inflight ~mailbox;
+    drawn
 and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pending = fun () -> false)
     state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
@@ -24904,20 +24907,23 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if workspace_message_admitted state ~authority ~reading message then begin
         let retry = retired_operation_observation state ~authority ~reading message in
         let message = project_workspace_operation_reply state ~authority ~reading message in
-        apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message;
-        (match retry with
-         | Some retry when retain_operation_observation state retry
-             && server_authority_ready state ->
-             (match retry with
-              | Browser_scene_observation (_, _, operation) ->
-                  state.browser_lane_read_resume <- None;
-                  launch_browser_lane state ~mailbox operation
-              | Lane_subscriptions_observation _ ->
-                  state.lane_nested_read_resume <- None;
-                  launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect)
-         | Some _ | None -> ())
-      end else (match message with
+        let drawn =
+          apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
+            ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
+        in
+        match retry with
+        | Some retry when retain_operation_observation state retry
+            && server_authority_ready state ->
+            (match retry with
+             | Browser_scene_observation (_, _, operation) ->
+                 state.browser_lane_read_resume <- None;
+                 launch_browser_lane state ~mailbox operation
+             | Lane_subscriptions_observation _ ->
+                 state.lane_nested_read_resume <- None;
+                 launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect);
+            Drawn_changed
+        | Some _ | None -> drawn
+      end else begin (match message with
         (* The read answers nothing the screen may use, but it is over: its
            slot is freed, so the roster's owed read starts again once the
            server's authority is back. *)
@@ -25078,13 +25084,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ());
+        Drawn_changed
+      end
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
         apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
-      end
+      end else Drawn_changed
   | Workspace_operation message ->
       apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
@@ -25105,7 +25113,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
         ~before:authority;
       report_action state "error" detail
-      end
+      end;
+      Drawn_changed
   | Schedule_msg (Schedule_form_authority_refused {change; refusal; workspace}) ->
       (* Identity observation is delivered separately under its read epoch. *)
       let form_refusal =
@@ -25113,7 +25122,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ; sfr_at = Unix.gettimeofday (); sfr_workspace = workspace } in
       state.schedule_form_refusal <- Some form_refusal;
       report_action state "error"
-        (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) form_refusal)
+        (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) form_refusal);
+      Drawn_changed
   | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -25131,7 +25141,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_failed detail) -> receive (Error detail)
         | Error (Request_withdrawn refusal) ->
             lane_installer_kept_back state view
-              (Masc_tui_lane_installer.Read_catalog directory) refusal)
+              (Masc_tui_lane_installer.Read_catalog directory) refusal);
+      Drawn_changed
   | Lane_msg (Lane_package_preview_loaded (generation,path,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -25148,7 +25159,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_failed detail) -> receive (Error detail)
         | Error (Request_withdrawn refusal) ->
             lane_installer_kept_back state view
-              (Masc_tui_lane_installer.Read_preview path) refusal)
+              (Masc_tui_lane_installer.Read_preview path) refusal);
+      Drawn_changed
   | Keeper_msg (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids)) ->
       settle_keeper_priority_control state keeper_name ~generation
         ~outcome:(match confirmation with
@@ -25168,7 +25180,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_waiting_keeper_input state ~mailbox ~keeper_name;
         launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
         dispatch_ready_run_next state ~mailbox keeper_name
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_queue_action_received (keeper_name, receipt)) ->
       if not (List.mem keeper_name state.keeper_queue_readings) then
         state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
@@ -25182,7 +25195,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some _ | None ->
          if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:Notice_reply (String.concat " · " receipt));
-      dispatch_ready_run_next state ~mailbox keeper_name
+      dispatch_ready_run_next state ~mailbox keeper_name;
+      Drawn_changed
   | Keeper_msg (Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result)) ->
       let observation = match result with
         | Error failure -> Error failure
@@ -25192,7 +25206,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Error reason, _ -> Error (Request_failed reason)
              | Ok _, Some page -> Ok page
              | Ok _, None -> Error (Request_failed "Keeper relationship page is unavailable")) in
-      ignore (stage_keeper_peer_reading state ~keeper_name ~token observation)
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token observation);
+      Drawn_changed
   | Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
        | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result)) ->
@@ -25262,7 +25277,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         dispatch_ready_run_next state ~mailbox keeper_name
       end;
       refresh_queue_after_priority state ~mailbox ~keeper_name;
-      drain_queued_message state ~base_path ~mailbox
+      drain_queued_message state ~base_path ~mailbox;
+      Drawn_changed
   | Lane_msg (Lane_application_loaded (ticket,result)) ->
       map_lane_addons state (fun view ->
         match result with
@@ -25273,7 +25289,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_withdrawn refusal) ->
             Masc_tui_lane_addons.withdraw_application_read view ticket
               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                 ~request:Kept_request.Addon_read refusal))
+                 ~request:Kept_request.Addon_read refusal));
+      Drawn_changed
   | Lane_msg (Lane_subscriptions_loaded (generation,result)) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
@@ -25291,7 +25308,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (* The panel keeps what it showed; the notice says the request
                was not sent. *)
             {view with loading=false;
-              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal})
+              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal});
+      Drawn_changed
   | Lane_msg (Lane_addons_loaded (generation, target, result)) ->
       let showing = Option.is_some state.lane_addons in
       (match target with
@@ -25385,7 +25403,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | (Ok { lar_action = None;_}, _) | (Error _, _)
        | (Ok {lar_action=Some {state=Confirmed; _ }; _ }, Some _)
        | (Ok {lar_action=Some {state=Failed_before_effect; _ }; _ }, Some _)
-       | (Ok {lar_action=Some {state=Outcome_unknown; _ }; _ }, Some _) -> ())
+       | (Ok {lar_action=Some {state=Outcome_unknown; _ }; _ }, Some _) -> ());
+      Drawn_changed
   | Lane_msg (Lane_declaration_loaded (generation, request, edit, create_directory, result)) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
@@ -25433,7 +25452,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))});
       (match state.lane_addons with
        | Some view when view.generation=generation -> launch_lane_application state ~mailbox
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   (* The capture messages carry the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. The
      wizard's carry the number of the save they answer, dropped the same way
@@ -25461,7 +25481,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               | Masc_tui_voice_wizard_session.Save_settled | Masc_tui_voice_wizard_session.Save_needs_reopen _ ->
                   ())
             (Masc_tui_voice_wizard_session.voice_wizard_after_save session ~request reply))
-        state.voice_wizard
+        state.voice_wizard;
+      Drawn_changed
   | Voice_msg (Voice_agent_voices_loaded result) ->
       (match state.voice_agent_voices, result with
        (* The screen closed while the endpoint was being asked: its answer is
@@ -25480,7 +25501,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                       (match voices with
                        | [] -> Some "the endpoint answered with no voices"
                        | _ :: _ -> None)
-                  })
+                  });
+      Drawn_changed
   | Voice_msg (Voice_agent_voice_saved result) ->
       (match state.voice_agent_voices, result with
        | None, (Ok _ | Error _) -> ()
@@ -25514,7 +25536,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                              Printf.sprintf "%s speaks as %s" agent voice
                          | None -> "assigned")
                   };
-           launch_voice_config_load state ~mailbox)
+           launch_voice_config_load state ~mailbox);
+      Drawn_changed
   | Voice_msg (Voice_wizard_probed (request, result)) ->
       Option.iter
         (fun session ->
@@ -25526,14 +25549,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   | Request_failed message -> message
                   | Request_withdrawn refusal ->
                     voice_probe_kept_back ~ko:(state.ui_language = Lang_ko) refusal))))
-        state.voice_wizard
+        state.voice_wizard;
+      Drawn_changed
   | Voice_msg (Voice_wizard_reread (request, result)) ->
       Option.iter
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
             (Masc_tui_voice_wizard_session.voice_wizard_after_reread session ~request result))
-        state.voice_wizard
+        state.voice_wizard;
+      Drawn_changed
   | Voice_msg (Voice_config_loaded (result, setup, device)) ->
       state.voice_input_device <- device;
       (match result with
@@ -25549,11 +25574,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.voice_setup_error <- None
        | Error message ->
            state.voice_setup <- None;
-           state.voice_setup_error <- Some message)
+           state.voice_setup_error <- Some message);
+      Drawn_changed
   | Voice_msg (Voice_calibrated { keeper; floor }) ->
-      ignore (observe_voice_calibration state ~keeper ~floor)
+      ignore (observe_voice_calibration state ~keeper ~floor);
+      Drawn_changed
   | Voice_msg (Voice_level { keeper; level }) ->
-      ignore (observe_voice_level state ~keeper ~level)
+      ignore (observe_voice_level state ~keeper ~level);
+      Drawn_changed
   | Voice_msg (Voice_transcribed { keeper; text }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -25599,7 +25627,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             let (_ : bool) =
               handle_composer_key state ~base_path ~mailbox Composer.send_key
             in
-            ())))
+            ())));
+      Drawn_changed
   | Voice_msg (Voice_silent { keeper; reason }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -25616,7 +25645,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            not. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())));
+      Drawn_changed
   | Voice_msg (Voice_discarded { keeper; reason }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -25630,7 +25660,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            heard" went looking for a microphone fault that was not there. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())));
+      Drawn_changed
   | Voice_msg (Voice_failed { keeper; error }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -25640,7 +25671,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
-        report_voice_failure state ~keeper error)
+        report_voice_failure state ~keeper error);
+      Drawn_changed
   | Http_surface_read_completed (context, completed) ->
       let request=Surface_read_context.current context in
       (* Dataset admission and collector completion have different lifetimes.
@@ -25650,12 +25682,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Surface_read_order.Navigation ->
             Surface_read_order.navigation_active state.http_surface_reads request in
       if active then begin
-        Fun.protect ~finally:(fun () ->
-          Masc_tui_types.finish_http_surface_read state request;
-          http_scoped_refresh_inflight :=
-            Surface_read_order.navigation_in_flight state.http_surface_reads)
-          (fun () -> apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
-            ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox completed);
+        (* Finishing the read frees its slot, which the screen draws, so the
+           arm is drawn whatever the reading it carried did. *)
+        let (_ : drawn_effect) =
+          Fun.protect ~finally:(fun () ->
+            Masc_tui_types.finish_http_surface_read state request;
+            http_scoped_refresh_inflight :=
+              Surface_read_order.navigation_in_flight state.http_surface_reads)
+            (fun () -> apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
+              ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox completed)
+        in
         log_http_surface_read_finished state context;
         (* The last collector's slot must be released before a retained full
            revalidation can run. Other collectors keep their own slots. *)
@@ -25663,7 +25699,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
-      end
+      end;
+      Drawn_changed
   | Http_msg (Http_dataset_loaded early) ->
       let dataset = http_dataset_key early.ed_dataset in
       let source = Surface_read_order.dataset_source dataset in
@@ -25687,7 +25724,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Surface_read_order.dataset_name dataset)
           (if http_dataset_received early.ed_dataset then "received" else "failed")
           board_posts_log
-      end
+      end;
+      Drawn_changed
   | Http_msg (Http_initial_identity_read initial) ->
       (* The initial probe is recorded before its acknowledgement message.
          Drain before preserving/rebinding that ledger to the admitted owner. *)
@@ -25734,7 +25772,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               ~refresh_inflight:http_refresh_inflight
               ~scoped_refresh_inflight:http_scoped_refresh_inflight
               ~scoped_refresh_followup ~before
-          end)
+          end);
+      Drawn_changed
   | Http_msg (Http_approvals_loaded early) ->
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
@@ -25746,8 +25785,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.)
             (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
-        (take_approval_observation state early.eap_observation)
-  | Ask_msg (Asks_reloaded observation) -> apply_asks_observation state observation
+        (take_approval_observation state early.eap_observation);
+      Drawn_changed
+  | Ask_msg (Asks_reloaded observation) -> apply_asks_observation state observation; Drawn_changed
   | Keeper_msg (Keeper_roster_reloaded observation) ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
@@ -25760,7 +25800,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 state.keeper_roster_owed;
             refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
             resolve_opening_chat state ~base_path ~mailbox)
-        (Masc_tui_types.take_keeper_roster_observation state observation)
+        (Masc_tui_types.take_keeper_roster_observation state observation);
+      Drawn_changed
   | Keeper_msg (Keeper_row_reloaded observation) ->
       Option.iter (fun result ->
         let keeper_name = observation.row_keeper in
@@ -25781,7 +25822,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 let previous_items = visible_item_revision state in
                 apply_keeper_roster_load state (Ok (roster, candle));
                 refresh_changed_keeper_items state ~mailbox ~roster_refreshed:false previous_items)
-        (Masc_tui_types.take_keeper_row_observation state observation)
+        (Masc_tui_types.take_keeper_row_observation state observation);
+      Drawn_changed
   | Http_msg (Http_asks_loaded early) ->
       Option.iter (fun result ->
         apply_asks_read state result;
@@ -25791,7 +25833,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000.)
             (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
-        (Masc_tui_types.take_early_asks_observation state early)
+        (Masc_tui_types.take_early_asks_observation state early);
+      Drawn_changed
   | Http_msg (Http_keeper_roster_loaded early) ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
@@ -25807,7 +25850,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok _ ->
              refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
              resolve_opening_chat state ~base_path ~mailbox))
-        (Masc_tui_types.take_early_keeper_roster_observation state early)
+        (Masc_tui_types.take_early_keeper_roster_observation state early);
+      Drawn_changed
   | Http_msg (Http_refresh_done
       (Refresh_workspace_unconfirmed
          { refresh_ticket; detail; unreachable; approval_ticket; latest_identity })) ->
@@ -25827,7 +25871,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       start_scoped_refresh_followup state ~host:server_peer_host
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Http_msg (Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket })) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
@@ -25840,7 +25885,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       else start_scoped_refresh_followup state ~host:server_peer_host
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Http_msg (Http_refresh_done (Refresh_account_server { refresh_ticket; version; approval_ticket })) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
@@ -25858,7 +25904,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       else start_scoped_refresh_followup state ~host:server_peer_host
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Http_msg (Http_refresh_done (Refresh_surfaces results)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:results.http_scoped.http_refresh_ticket;
@@ -25903,12 +25950,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
-  | (Approvals_msg Approvals_listing_superseded) -> launch_approvals_summary_load state ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
+  | (Approvals_msg Approvals_listing_superseded) -> launch_approvals_summary_load state ~mailbox; Drawn_changed
   | Approvals_msg (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result)) ->
-      apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
+      apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result;
+      Drawn_changed
   | Observer_msg (Observer_session_ready session_id) ->
-      state.mcp_session <- Some session_id
+      state.mcp_session <- Some session_id;
+      Drawn_changed
   | Observer_msg (Observer_opened (owner, session_id, handshake))
     when Masc_tui_async_protocol.observer_stream_owned state owner ->
       (* Changes made while no stream was open were not heard. *)
@@ -26001,7 +26051,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox end
-      end
+      end;
+      Drawn_changed
   | Observer_msg (Observer_received (owner, (instance_id, decoded)))
     when Masc_tui_async_protocol.observer_stream_owned state owner ->
       let received = Unix.gettimeofday () in
@@ -26557,10 +26608,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
          | Approvals | Planning | Schedules | Verification | Harness
          | Repositories | Code | Changes | Connectors | Runtime | Config
-         | Resources | Tools | System_logs -> ())
-  | Original_msg answer -> Original_results.apply state answer
+         | Resources | Tools | System_logs -> ());
+      Drawn_changed
+  | Original_msg answer -> Original_results.apply state answer; Drawn_changed
   | Task_msg (Task_creation_read_done (request,result)) ->
-      ignore (complete_task_creation_inspection state request result)
+      ignore (complete_task_creation_inspection state request result);
+      Drawn_changed
   | Task_msg (Task_dispatch_completed request) ->
       (match take_task_dispatch_completion state request with
        | None -> ()
@@ -26589,7 +26642,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 intent.keeper detail)
           | Unconfirmed detail ->
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
-                intent.keeper detail)))
+                intent.keeper detail)));
+      Drawn_changed
   | Observer_msg (Observer_closed (owner, workspace, outcome)) ->
       if Masc_tui_async_protocol.observer_stream_owned state owner then begin
       state.observer_stream_owner <- None;
@@ -26645,7 +26699,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Observer_msg (Observer_opened _) ->
       (* The reopen consumes the revalidate owed for its closed interval; a
          first open owes nothing because nothing was carried before it. *)
@@ -26655,8 +26710,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
-      end
-  | Observer_msg (Observer_received _) -> ()
+      end;
+      Drawn_changed
+  | Observer_msg (Observer_received _) -> Drawn_changed
   | Observer_msg (Observer_retry_due (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with
@@ -26674,20 +26730,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (* An account server has no observer to reopen. *)
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
               | Workspace_identity_match | Workspace_identity_mismatch _),
-              Account_server _ -> ())
+              Account_server _ -> ());
+      Drawn_changed
   | Observer_msg (Observer_recovery_opened (authority, owner, opened)) ->
       (* A stream that would not open opening now is the server answering
          again: the owed pass starts now. It is not a [/health] answer, so
          the run of failures goes on (RFC tui-one-screen-grammar §2). *)
-      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then
-        state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace
+      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
+        let previous = Masc_tui_refresh_pace.next_try state.refresh_pace in
+        state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace;
+        if previous = Masc_tui_refresh_pace.next_try state.refresh_pace then Drawn_unchanged
+        else Drawn_changed
+      end else Drawn_unchanged
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
-      end
+      end;
+      Drawn_changed
   | Observer_msg (Observer_found_account_server (authority, owner)) ->
       (* A recovery that saw the account server has ended, so its owner names
          no loop now. The full refresh reads /health again and applies it. *)
@@ -26699,7 +26761,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          && (from_recovery || Masc_tui_async_protocol.observer_stream_owned state owner) then
         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
           ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Observer_msg (Observer_recovery_identity (authority, owner, live, session_id, instance, origin, attested)) ->
       if Masc_tui_async_protocol.observer_recovery_identity_owned state
            ~authority ~owner ~live ~instance ~origin then begin
@@ -26733,8 +26796,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
           ~before
-      end
-  | Fleet_msg answer -> Fleet_results.apply state answer
+      end;
+      Drawn_changed
+  | Fleet_msg answer -> Fleet_results.apply state answer; Drawn_changed
   | Http_msg (Http_refresh_failed (err, approval_ticket, refresh_ticket)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
@@ -26758,7 +26822,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Chat_msg (Chat_search_finished (generation,restart,plan,result)) ->
       if generation=Atomic.get state.msg_search_generation then begin
         let authority,keeper,needle=keeper_message_search_identity plan in
@@ -26772,9 +26837,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some result -> apply_chat_search_result state ~target:(Some keeper) ~restart ~needle result
                | None -> notice ~kind:Notice_reply
                    "/find source changed while searching; repeat /find to search the current conversation")
-      end
+      end;
+      Drawn_changed
   | (Keeper_msg Keeper_composer_released) ->
-      drain_queued_message state ~base_path ~mailbox
+      drain_queued_message state ~base_path ~mailbox;
+      Drawn_changed
   | Http_msg (Http_scoped_refresh_done (authority, currency_authority, results)) ->
       if authority = state.workspace_authority
          && Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
@@ -26786,7 +26853,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Http_msg (Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest, request)) ->
       let current_authority = authority = state.workspace_authority in
       let current_generation = Http_refresh_order.is_current state.http_refresh_order refresh_ticket in
@@ -26805,7 +26873,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
-        ~scoped_refresh_followup ~mailbox
+        ~scoped_refresh_followup ~mailbox;
+      Drawn_changed
   | Board_msg (Board_post_refresh_done (request, result)) ->
       let current = Board_detail.is_current state.board_detail request in
       Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result;
@@ -26819,7 +26888,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
                   ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())));
         launch_owed_board_post state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_deletion_retry_done (operation_id, result)) ->
       let ko = state.ui_language = Lang_ko in
       let message = match result with
@@ -26838,12 +26908,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           workspace_refusal_text ~ko ~request:Kept_request.Keeper_deletion refusal
           ^ " · " ^ operation_id in
       state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
-      report_action state (if Result.is_ok result then "system" else "error") message
+      report_action state (if Result.is_ok result then "system" else "error") message;
+      Drawn_changed
   | Keeper_msg (Keeper_deletions_loaded (generation, result)) ->
       apply_keeper_deletions_read state ~generation result;
       if generation = state.keeper_deletions_generation && Result.is_ok result
          && Option.is_some state.keeper_deletions_retry_receipt then
-        launch_keeper_deletions state ~mailbox ()
+        launch_keeper_deletions state ~mailbox ();
+      Drawn_changed
   | Keeper_msg (Keeper_settings_save_changed (request,status,observed_ns)) ->
       let key = request.ksv_key in
       let current = keeper_settings_save_current state request in
@@ -26883,7 +26955,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   launch_keeper_sandbox_view state ~mailbox key.ksk_keeper
               | Detail_info | Detail_items | Detail_secrets | Detail_github | Detail_identity
               | Detail_channels | Detail_automation | Detail_runs | Detail_terminal -> ()
-      end
+      end;
+      Drawn_changed
   | Runtime_msg (Runtime_form_save_changed (request, status, observed_ns)) ->
       let attached = runtime_form_is_attached state request in
       let current = runtime_form_save_current state request in
@@ -26966,7 +27039,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      (Masc_tui_runtime_account_form.then_type sign_in)) declaration.sign_in
              | (Form_saved _ | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _
                  | Form_conflict _ | Form_unconfirmed _), (None | Some _) -> ())
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_creation_changed (request, status)) ->
       if apply_keeper_creation_status state request status then begin
         let phase = match status with
@@ -27033,7 +27107,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Creation_unconfirmed detail ->
                report_action state "error"
                  (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
       let original_is_current = authority = state.workspace_authority
         && same_workspace_identity (Some workspace) state.server_identity in
@@ -27067,7 +27142,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            match outcome with
            | Masc_tui_http.Catch_up_kept_back _ -> line ^ " · " ^ original
            | Catch_up_submitted | Catch_up_coalesced | Catch_up_not_sent _
-           | Catch_up_refused _ | Catch_up_unconfirmed _ -> original ^ " · " ^ line)
+           | Catch_up_refused _ | Catch_up_unconfirmed _ -> original ^ " · " ^ line);
+      Drawn_changed
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -27138,7 +27214,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-      end
+      end;
+      Drawn_changed
   | Board_msg (Board_publication_done outcome) ->
       Masc_tui_board_updates.apply_publication state
         ~report:(report_action state)
@@ -27148,7 +27225,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
-        outcome
+        outcome;
+      Drawn_changed
   | Board_msg (Board_comment_done { request_id; post_id; sent_draft; result }) ->
       Masc_tui_board_updates.comment_done state ~request_id ~post_id ~sent_draft
         ~report:(report_action state)
@@ -27158,7 +27236,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
-        ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id) result
+        ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id) result;
+      Drawn_changed
   | Board_msg (Board_vote_done (target, result)) ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
@@ -27168,7 +27247,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
         ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id)
-        target result
+        target result;
+      Drawn_changed
   | Goal_msg (Goal_transition_done (goal_id, ticket, workspace, result)) ->
       record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
       let current = note_goal_action_result state ~goal_id ~ticket result in
@@ -27186,7 +27266,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error" (label ^ err)
        | Error (Request_withdrawn refusal) ->
            report_action state "error"
-             (goal_kept_back_notice state ~goal_id ~current refusal))
+             (goal_kept_back_notice state ~goal_id ~current refusal));
+      Drawn_changed
   | Goal_msg (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
       record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
       (match state.goal_confirmation with
@@ -27223,7 +27304,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some selected when String.equal selected goal_id ->
            state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
            resume_goal_confirmation_identity_refresh state ~mailbox
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Goal_msg (Goal_confirmation_loaded (request, result)) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
@@ -27270,7 +27352,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | true, true, Some selected when String.equal goal_id selected ->
                 launch_goal_confirmation_read state ~mailbox ~goal_id
             | _, _, (Some _ | None) -> ())
-       | Goal_confirmation.Submitting _ -> ())
+       | Goal_confirmation.Submitting _ -> ());
+      Drawn_changed
   | Verification_msg (Verification_evidence_exported (request, result)) ->
       let progress = Atomic.get request.vex_progress in
       let location = match progress with
@@ -27290,13 +27373,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Evidence_export refusal)
-       | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path))
+       | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path));
+      Drawn_changed
   | Verification_msg (Verification_evidence_loaded (request, result)) ->
       let key = Masc_tui_fetched.request_key request.ver_ticket in
       let admitted = state.verification_detail_request_id = Some key.vek_request_id
         && complete_verification_evidence_read state request result in
       log_verification_evidence_read request
-        ~phase:(if admitted then "applied" else "discarded") ~outcome:(verification_evidence_outcome result)
+        ~phase:(if admitted then "applied" else "discarded") ~outcome:(verification_evidence_outcome result);
+      Drawn_changed
   | Task_msg (Task_cancel_done (task_id, expected_workspace, result)) ->
       let refresh certainty =
         remember_task_followup state ~expected_workspace (Task_cancel_refresh { task_id; certainty });
@@ -27314,9 +27399,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "task %s cancellation unconfirmed; checking its workspace: %s"
                 task_id detail);
-           refresh Cancellation_unconfirmed)
+           refresh Cancellation_unconfirmed);
+      Drawn_changed
   | Goal_msg (Goal_timeline_loaded (request, result)) ->
-      complete_goal_timeline_read state request result
+      complete_goal_timeline_read state request result;
+      Drawn_changed
   | Goal_msg (Goal_candle_loaded (request, result)) ->
       let current = Masc_tui_fetched.is_current ~equal:String.equal state.goal_candle request in
       let goal_id = Masc_tui_fetched.request_key request in
@@ -27336,21 +27423,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
            ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
            ~scoped_refresh_followup ~mailbox
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Task_msg (Task_history_loaded (request, result)) ->
       let task_id=Masc_tui_fetched.request_key request.thr_ticket in
       let followup =
         if task_history_request_in_scope state request
         then task_history_followup state request result else None in
       complete_task_history_read state request result;
-      Option.iter (fun limit -> launch_task_history_load ~older:true ~limit state ~mailbox task_id) followup
+      Option.iter (fun limit -> launch_task_history_load ~older:true ~limit state ~mailbox task_id) followup;
+      Drawn_changed
   | Board_msg (Board_attachment_loaded (request,result)) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete state.board_reader request
-          (said_read_result state ~request:Kept_request.Attachment_read result)
+          (said_read_result state ~request:Kept_request.Attachment_read result);
+      Drawn_changed
   | Board_msg (Board_attachment_prepared (request,result)) ->
       if Option.is_some (current_board_reader state) then
-        state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
+        state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result;
+      Drawn_changed
   | Board_msg (Board_attachment_saved (request,result)) ->
       (* The original workspace operation envelope admits this receipt.
          Closing or retiring its read view cannot revoke a completed save. *)
@@ -27442,9 +27533,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     ~open_url:(fun _ -> Error "external opening is unavailable") prepared ~midi_soundfont:None in
                   report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome))
            else finish ()) target
-       | Error error -> report_action state "error" error)
+       | Error error -> report_action state "error" error);
+      Drawn_changed
   | Chat_msg (Chat_call_loaded (request, result)) ->
-      ignore (complete_chat_call_read state request result)
+      ignore (complete_chat_call_read state request result);
+      Drawn_changed
   | Keeper_msg (Keeper_calls_loaded (generation, keeper_name, result)) -> (
       let still_current =
         generation = state.keeper_calls_generation
@@ -27492,7 +27585,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if refresh_pending && still_visible then
           launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
         launch_owed_keeper_calls state ~mailbox
-      end)
+      end);
+      Drawn_changed
   | Keeper_msg (Keeper_settings_editor_loaded (request, result)) ->
       if Masc_tui_types.take_keeper_settings_editor_read state request result then begin
         log_keeper_settings_read ~phase:"admitted" request
@@ -27502,7 +27596,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_failed detail) -> report_action state "error" detail
         | Error (Request_withdrawn refusal) ->
             report_withdrawn state ~request:Kept_request.Keeper_settings_read refusal
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_config_view_loaded (request, result)) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in
@@ -27517,7 +27612,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.keeper_config_view <- Some (keeper_name, lines);
             state.keeper_config_view_error <- None
         | Error detail ->
-            state.keeper_config_view_error <- Some detail)
+            state.keeper_config_view_error <- Some detail);
+      Drawn_changed
   | Keeper_msg (Keeper_items_loaded (request, result)) -> (
       let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
@@ -27545,12 +27641,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             retain_item_browser_selection state selected
         | Error detail ->
             state.item_account <- None;
-            state.item_account_error <- Some detail)
+            state.item_account_error <- Some detail);
+      Drawn_changed
   | Keeper_msg (Keeper_sandbox_view_loaded (request, result)) -> (
       let selected_keeper = List.nth_opt state.keepers state.keeper_cursor
         |> Option.map (fun (keeper : keeper) -> keeper.k_name) in
       Masc_tui_types.apply_keeper_sandbox_result state ~selected_keeper
-        ~authority_ready:(server_authority_ready state) request result)
+        ~authority_ready:(server_authority_ready state) request result);
+      Drawn_changed
   | Keeper_msg (Keeper_sandbox_logs_loaded (keeper_name, generation, result)) -> (
       let is_current =
         match state.keeper_sandbox_logs_inflight with
@@ -27567,12 +27665,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.keeper_sandbox_logs_error <- None
         | Error detail ->
           state.keeper_sandbox_logs_error <- Some (keeper_name, detail)
-      end)
+      end);
+      Drawn_changed
   | Prompts_loaded (request, result) ->
       state.prompts <-
         Masc_tui_fetched.complete ~equal:Unit.equal state.prompts request result;
       state.prompts_cursor <-
-        max 0 (min state.prompts_cursor (prompt_catalog_count_for_state state - 1))
+        max 0 (min state.prompts_cursor (prompt_catalog_count_for_state state - 1));
+      Drawn_changed
   | Preset_msg (Presets_listed (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
@@ -27610,7 +27710,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               shortens the document to its loading rows and clamps a reader
               at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
-       | Preset_to_pane, Error failure -> state.presets_error <- Some failure)
+       | Preset_to_pane, Error failure -> state.presets_error <- Some failure);
+      Drawn_changed
   | Preset_msg (Preset_contents_shown (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
@@ -27625,16 +27726,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           by the cursor, so a pane sink here would be a second answer to a
           question nobody asked. *)
        | Preset_to_pane, Ok _ -> ()
-       | Preset_to_pane, Error failure -> state.presets_error <- Some failure)
+       | Preset_to_pane, Error failure -> state.presets_error <- Some failure);
+      Drawn_changed
   | Preset_msg (Preset_detail_loaded (request, result)) ->
       (* Dropping an answer the cursor has moved past is [complete]'s job
          now, so this arm no longer has to remember to do it. *)
       state.preset_detail <-
-        Masc_tui_fetched.complete ~equal:String.equal state.preset_detail request result
+        Masc_tui_fetched.complete ~equal:String.equal state.preset_detail request result;
+      Drawn_changed
   | Keeper_msg (Keeper_board_quarantines_loaded (request, result)) ->
       state.keeper_board_quarantines <-
         Masc_tui_fetched.complete ~equal:String.equal
-          state.keeper_board_quarantines request result
+          state.keeper_board_quarantines request result;
+      Drawn_changed
   | Keeper_msg (Keeper_efficiency_loaded (request, result)) ->
       state.keeper_efficiency <-
         Masc_tui_fetched.complete ~equal:String.equal state.keeper_efficiency request
@@ -27643,7 +27747,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Request_withdrawn refusal ->
                  Masc_tui_keeper_efficiency.Read_kept_back
                    (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                      ~request:Kept_request.Efficiency_read refusal)) result)
+                      ~request:Kept_request.Efficiency_read refusal)) result);
+      Drawn_changed
   | Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)) ->
       state.board_quarantine_requeue_inflight <- None;
       let partition = Terminal_text.single_line partition_id in
@@ -27675,7 +27780,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match selected_keeper state with
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Board_msg (Board_quarantines_bulk_progress
       (keeper_name, { attempted; total; accepted; refused; uncertain = unanswered; kept_back })) ->
       if state.board_quarantine_requeue_inflight <> None then
@@ -27685,7 +27791,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              "Board requeue %s: %d/%d attempted · %d accepted, %d refused, %d uncertain"
              (Terminal_text.single_line keeper_name) attempted total accepted
              refused unanswered
-           ^ board_requeue_kept_back_count ~ko:(state.ui_language = Lang_ko) kept_back)
+           ^ board_requeue_kept_back_count ~ko:(state.ui_language = Lang_ko) kept_back);
+      Drawn_changed
   | Board_msg (Board_quarantines_bulk_requeued (keeper_name, outcomes)) ->
       state.board_quarantine_requeue_inflight <- None;
       let ko = state.ui_language = Lang_ko in
@@ -27739,7 +27846,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match selected_keeper state with
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Preset_msg (Preset_saved (original, result)) ->
       let pending = Option.value ~default:original
           (List.find_opt (fun request -> request.psp_token == original.psp_token)
@@ -27817,7 +27925,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              report_action state "error"
                (ui_text state ~ko:"프리셋 저장 알림을 확인하세요" ~en:"Check the preset save notice"));
           launch_presets_load state ~mailbox
-        end
+        end;
+      Drawn_changed
   | Preset_msg (Preset_restored (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok report ->
@@ -27849,7 +27958,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail)
        | Preset_to_pane, Error (Request_withdrawn refusal) ->
            state.preset_busy <- false;
-           report_withdrawn state ~request:Kept_request.Preset_restore refusal)
+           report_withdrawn state ~request:Kept_request.Preset_restore refusal);
+      Drawn_changed
   | Preset_msg (Preset_deleted (sink, result)) ->
       (* The list is read again after a failure too: a refusal says the
          list was stale, and an unanswered delete may have landed. *)
@@ -27872,7 +27982,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Preset_to_pane, Error (Request_withdrawn refusal) ->
            state.preset_busy <- false;
            report_withdrawn state ~request:Kept_request.Preset_delete refusal;
-           launch_presets_load state ~mailbox)
+           launch_presets_load state ~mailbox);
+      Drawn_changed
   | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
         let now = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9 in
@@ -27889,7 +28000,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             let ko = state.ui_language = Lang_ko in
             Masc_tui_play_room.kept_back room request ~now
               (kept_back ~ko ~request:named (workspace_refusal_reason ~ko refusal) kept)) state.play_room;
-      if state.msx_open && not state.msx_menu_open then render_spectator state
+      if state.msx_open && not state.msx_menu_open then render_spectator state;
+      Drawn_changed
   | Play_msg (Play_invites_listed (target, result)) ->
       (match target with
        | Play_collab_list read ->
@@ -27928,7 +28040,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
                 (("Shared DOS play invites:" :: Masc_tui_collab.controller_summary pis_controller)
-                 @ List.map row invites))))
+                 @ List.map row invites))));
+      Drawn_changed
   | Play_msg (Play_invite_issued (request, target, result)) ->
       let outcome = match result with
         | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ | Play_kept_back _ ->
@@ -27980,7 +28093,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
       sync_collab_access state;
       refresh_current_collab state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Play_msg (Play_invite_revoked (request, target, requested_name, result)) ->
       let outcome = match result with
         | Play_revoke_absent | Play_revoke_release_failed _
@@ -28036,7 +28150,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
       sync_collab_access state;
       refresh_current_collab state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Librarian_input_loaded (prompt_key, result) ->
       if state.prompts_librarian_input_requested = Some prompt_key then
         state.prompts_librarian_input_requested <- None;
@@ -28060,7 +28175,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail ->
             state.prompts_librarian_input <- None;
             state.prompts_librarian_input_error <- Some detail
-      end
+      end;
+      Drawn_changed
   | Runtime_msg (Runtime_params_loaded result) -> (
       state.runtime_params_loading <- false;
       match result with
@@ -28090,7 +28206,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error failure ->
           (* Reported, not swallowed into an empty list: empty means nothing is
              registered, which is a working state. *)
-          state.runtime_params_error <- Some failure)
+          state.runtime_params_error <- Some failure);
+      Drawn_changed
   | Runtime_msg (Runtime_param_written (edit, result)) ->
       state.runtime_params_loading <- false;
       (match result with
@@ -28099,7 +28216,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Ok notice ->
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (Params_said (true, notice));
-           launch_runtime_params_load state ~mailbox)
+           launch_runtime_params_load state ~mailbox);
+      Drawn_changed
   | Machine_msg (Machine_activity_read (request,result)) ->
       Option.iter (fun session ->
         Masc_tui_types.put_machine_activity state (match result with
@@ -28110,7 +28228,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               Masc_tui_machine_activity.withdraw_read request
                 (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                    ~request:Kept_request.Machine_activity_read refusal) session))
-        (Masc_tui_types.machine_activity_session state (Masc_tui_machine_activity.request_owner request))
+        (Masc_tui_types.machine_activity_session state (Masc_tui_machine_activity.request_owner request));
+      Drawn_changed
   | Machine_msg (Machine_activity_saved (request,result)) ->
       let module Activity = Masc_tui_machine_activity in
       let result = match result with
@@ -28127,7 +28246,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             launch_machine_activity_read state ~mailbox owner;
             launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ | Activity.Kept_back _ -> ())
-       | None | Some _ -> ())
+       | None | Some _ -> ());
+      Drawn_changed
   | Exact_msg (Exact_activity_read (request,result)) ->
       Option.iter (fun session ->
         Masc_tui_types.put_exact_activity state (match result with
@@ -28138,7 +28258,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               Masc_tui_exact_activity.withdraw_read request
                 (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                    ~request:Kept_request.Exact_activity_read refusal) session))
-        (Masc_tui_types.exact_activity_session state (Masc_tui_exact_activity.request_owner request))
+        (Masc_tui_types.exact_activity_session state (Masc_tui_exact_activity.request_owner request));
+      Drawn_changed
   | Exact_msg (Exact_activity_saved (request,result)) ->
       let module Activity = Masc_tui_exact_activity in
       let result = match result with
@@ -28156,7 +28277,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _
           | Activity.Kept_back _ -> ())
-       | None | Some _ -> ())
+       | None | Some _ -> ());
+      Drawn_changed
   | Runtime_msg (Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result)) -> (
       let disposition = if generation <> state.runtime_config_generation then "superseded"
         else match state.runtime_config_read with `Loading true -> "followup" | `Loading false | `Idle -> "admitted" in
@@ -28240,7 +28362,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.runtime_config_owed <- failed_read state.runtime_config_owed;
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
-          state.runtime_config_view_error <- Some failure)
+          state.runtime_config_view_error <- Some failure);
+      Drawn_changed
   | Code_msg answer -> (
       (* The save settles inside [apply]. With input queued, the reread waits
          for [Code_results.saved_refresh_path]. *)
@@ -28249,11 +28372,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Code_results.Reload_saved_file path ->
           if not (input_pending ()) then
             Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
-              ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path)
+              ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path);
+      Drawn_changed
   | Resource_msg (Resources_listed (owner, result)) ->
       withdraw_resource_diagram_pending state;
       Masc_tui_resources_updates.listed state ~owner
-        (said_read_result state ~request:Kept_request.Resource_list_read result)
+        (said_read_result state ~request:Kept_request.Resource_list_read result);
+      Drawn_changed
   | Artifact_msg (Artifact_checks_loaded (request, result)) ->
       (* A read the guard stopped keeps its notice apart, so the confirmation
          it leaves unknown is said as kept back, alone (RFC §2). *)
@@ -28263,7 +28388,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Request_withdrawn refusal ->
                Masc_tui_artifact_checks.Read_kept_back
                  (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                    ~request:Kept_request.Report_checks_read refusal)) result)
+                    ~request:Kept_request.Report_checks_read refusal)) result);
+      Drawn_changed
   | Artifact_msg (Artifact_check_changed (request, result)) ->
       if Masc_tui_resources_updates.check_changed state request then begin
         (match result with
@@ -28273,7 +28399,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error (Request_withdrawn refusal) ->
              report_withdrawn state ~request:Kept_request.Report_check refusal);
         launch_artifact_checks_load state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Resource_msg (Resource_saved (request, outcome)) ->
       if settle_resource_save state request outcome then begin
         match outcome with
@@ -28289,7 +28416,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (resource_save_document_title request.save_document ^ " · "
            ^ resource_save_summary state (Resource_save_settled outcome)
            ^ " · " ^ request.save_path)
-      end
+      end;
+      Drawn_changed
   | Resource_msg (Resource_exported (label, result)) ->
       (match result with
        | Ok detail ->
@@ -28302,7 +28430,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
        | Error (Request_failed detail) -> report_action state "error" (label ^ ": " ^ detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Report_open refusal)
+           report_withdrawn state ~request:Kept_request.Report_open refusal);
+      Drawn_changed
   | Resource_msg (Resource_share_changed (request, result)) ->
       if resource_share_is_owned state request then begin
         let read_key = finish_resource_share state request result in
@@ -28338,7 +28467,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                "The recovery attempt for " ^ request.share_report.id ^ " did not start; the original operation may still apply: " ^ detail
                else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
-      end
+      end;
+      Drawn_changed
   | Resource_msg (Resource_share_recovery_loaded (request, result)) ->
       (match state.resource_share_recovery_lookup with
        | Some current when current.recovery_lookup_owner == request.recovery_lookup_owner ->
@@ -28397,7 +28527,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  if not (List.mem key state.resource_share_uncertain_ids) then
                    state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
                  show_recovery entry ~missing_journal:false))
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Resource_msg (Resource_read (request, result, journal)) ->
       withdraw_resource_diagram_pending state;
       let admitted = match state.resource_read_owner with
@@ -28441,40 +28572,49 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                public_copy_url=url; public_copy_workspace=state.workspace_authority;
                public_copy_read_authority=state.workspace_read_authority;
                public_copy_origin=origin; public_copy_key=request.key })
-      end
+      end;
+      Drawn_changed
   | Resource_msg (Resource_diagram_ready (request,source,claim,result)) ->
       let _,cols = get_terminal_size () in
       let _,height = Masc_tui_render_resources.document_viewport state
         ~rows:(surface_rows state) ~cols in
       Masc_tui_resource_document.settle_diagram ~claim
-        ~cols:(resource_content_cols state ~cols) ~height state ~request ~source result
+        ~cols:(resource_content_cols state ~cols) ~height state ~request ~source result;
+      Drawn_changed
   | Github_msg (Github_identity_view_loaded (request, result)) ->
-      Masc_tui_identity_updates.github_view_loaded state request result
+      Masc_tui_identity_updates.github_view_loaded state request result;
+      Drawn_changed
   | Identity_msg (Identity_switch_set (keeper_name, provider_id, enabled, result)) ->
       Masc_tui_identity_updates.switch_set state ~keeper_name ~provider_id ~enabled
         ~report:(report_action state) ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
-          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
+          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result;
+      Drawn_changed
   | Identity_msg (Identity_providers_loaded (request, result, attempts)) ->
       Masc_tui_identity_updates.providers_loaded state request
-        ~report:(report_action state "error") ~now:(Unix.gettimeofday ()) ~attempts result
+        ~report:(report_action state "error") ~now:(Unix.gettimeofday ()) ~attempts result;
+      Drawn_changed
   | Identity_msg (Identity_login_started (request, result)) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
-        ~report:(report_action state) ~notice:(present_identity_notice state) result
+        ~report:(report_action state) ~notice:(present_identity_notice state) result;
+      Drawn_changed
   | Identity_msg (Identity_app_saved (keeper_name, provider_id, result)) ->
       Masc_tui_identity_updates.app_saved ~ko:(state.ui_language = Lang_ko) ~keeper_name ~provider_id
-        ~notice:(present_identity_notice state) result
+        ~notice:(present_identity_notice state) result;
+      Drawn_changed
   | Identity_msg (Identity_disconnected (keeper_name, provider_id, result)) ->
       Masc_tui_identity_updates.disconnected state ~keeper_name ~provider_id
         ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper)
-        (Result.map (Masc_tui_identity_model.disconnect_receipt_text ~provider_id) result)
+        (Result.map (Masc_tui_identity_model.disconnect_receipt_text ~provider_id) result);
+      Drawn_changed
   | Identity_msg (Identity_refreshed (keeper_name, result)) ->
       Masc_tui_identity_updates.refreshed state ~keeper_name
         ~report:(report_action state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
-          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
+          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result;
+      Drawn_changed
   | Account_msg (Account_login_event (view, generation, event)) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -28483,7 +28623,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view
            | Masc_tui_account_login.Output _ | Screen _ | Input_ready | Complete _ | Login_error -> ());
          launch_account_login_action state ~mailbox view action
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Account_msg (Account_login_json (view, generation, action, result)) ->
       state.account_login_readings <- List.filter
         (fun (held, gen, _) -> held != view || gen <> generation) state.account_login_readings;
@@ -28591,7 +28732,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
              | Login.Select_existing _ | Login.Start _ | Login.Preview_removal _
              | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message)))
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Account_msg (Account_login_removal (view, generation, provider, login_store, outcome)) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
@@ -28608,24 +28750,29 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Masc_tui_http.Post_unanswered detail ->
             view.recovery<-Login.Login_status; view.phase<-Login.Failed;
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Github_msg (Github_login_lines (keeper_name, lines)) ->
-      Masc_tui_github_ui.login_lines state ~keeper_name lines
+      Masc_tui_github_ui.login_lines state ~keeper_name lines;
+      Drawn_changed
   | Github_msg (Github_login_finished (keeper_name, result)) ->
       Masc_tui_github_ui.login_finished state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
-        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result;
+      Drawn_changed
   | Github_msg (Github_token_saved (keeper_name, result)) ->
       Masc_tui_github_ui.token_saved state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
-        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | System_log_streamed (stream, event) -> take_system_log_stream state stream event
+        ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result;
+      Drawn_changed
+  | System_log_streamed (stream, event) -> take_system_log_stream state stream event; Drawn_changed
   | Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result)) ->
       let result = said_read_result state ~request:Kept_request.Schedule_read result in
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
       if current then
-        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
+      Drawn_changed
   | Schedule_msg (Schedules_loaded (Schedule_page_read request, result)) ->
       let result = said_read_result state ~request:Kept_request.Schedule_read result in
       let current_agenda =
@@ -28636,7 +28783,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if current_page then
         state.schedules_page_owed <- settled_schedule_read state.schedules_page_owed result;
       if current_agenda then
-        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
+      Drawn_changed
   | Schedule_msg (Schedule_wake_history_loaded (schedule_id, result)) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
@@ -28661,7 +28809,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       else if
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
-      then state.schedule_wake_history_inflight <- None
+      then state.schedule_wake_history_inflight <- None;
+      Drawn_changed
   | Keeper_msg (Keeper_schedules_loaded (request, result)) ->
       let current = keeper_schedules_answer_current state request in
       (* Asked before the answer is applied, which retires its request. *)
@@ -28669,7 +28818,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       apply_keeper_schedules_read state request result;
       if current then
         settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper ~settles
-          result
+          result;
+      Drawn_changed
   | Keeper_msg (Keeper_story_turns_loaded (request, result)) ->
       (* An answer for a Keeper the cursor has left settles nothing; the read
          of the Keeper it stands on does. *)
@@ -28679,7 +28829,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Ok _ -> Masc_tui_owed_read.succeeded state.keeper_story_turns_owed
            | Error _ -> failed_read state.keeper_story_turns_owed);
       state.keeper_story_turns <-
-        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result;
+      Drawn_changed
   | Keeper_msg (Keeper_memory_activity_loaded (request, result)) ->
       if Masc_tui_fetched.is_current ~equal:String.equal state.memory_activity request then
         state.memory_activity_owed <-
@@ -28687,7 +28838,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.memory_activity_owed);
       state.memory_activity <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_activity request
-          (said_read_result state ~request:Kept_request.Memory_activity_read result)
+          (said_read_result state ~request:Kept_request.Memory_activity_read result);
+      Drawn_changed
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -28705,7 +28857,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.schedule_cancel_error <- Some (schedule_id, err);
           (* A refusal is new evidence for the operator's action. Reveal its
              first row even when the request was sent from the document end. *)
-          if state.schedule_detail_id = Some schedule_id then state.schedule_scroll <- 0)
+          if state.schedule_detail_id = Some schedule_id then state.schedule_scroll <- 0);
+      Drawn_changed
   | Verification_msg (Verification_verdict_done result) -> (
       match result with
       | Ok (message, noop) ->
@@ -28726,7 +28879,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           else launch_verification_load state ~mailbox
       | Error err ->
           state.verification_verdict_armed <- None;
-          state.verification_verdict_error <- Some err)
+          state.verification_verdict_error <- Some err);
+      Drawn_changed
   | Harness_msg (Harness_label_done result) -> (
       match result with
       | Ok message ->
@@ -28737,16 +28891,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           owe_harness_read state
       | Error (Request_failed err) -> report_action state "error" ("Harness label: " ^ err)
       | Error (Request_withdrawn refusal) ->
-          report_withdrawn state ~request:Kept_request.Harness_label refusal)
+          report_withdrawn state ~request:Kept_request.Harness_label refusal);
+      Drawn_changed
   | Approvals_msg (Approval_decision_done (approval, decision, result, generation, approvals)) ->
       apply_approval_decision_completion state generation approval decision
-        result approvals
+        result approvals;
+      Drawn_changed
   | Ask_msg (Ask_followup_observed (read, event, received_ns)) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_source_applied (event,received_ns,Result.is_ok result)))
-        (Masc_tui_types.take_ask_followup_event state request submission event)
+        (Masc_tui_types.take_ask_followup_event state request submission event);
+      Drawn_changed
   | Ask_msg (Ask_followup_finished (read, result)) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
@@ -28757,9 +28914,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Error (Ask.Followup_read_failed _) -> failed_read state.ask_followup_owed);
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_ui_settled result))
-        (Masc_tui_types.finish_ask_followup_read state request submission result)
+        (Masc_tui_types.finish_ask_followup_read state request submission result);
+      Drawn_changed
   | Ask_msg (Ask_answer_receipt_ready submission) ->
-      apply_ask_answer_receipt state submission ~mailbox
+      apply_ask_answer_receipt state submission ~mailbox;
+      Drawn_changed
   | Ask_msg (Ask_answer_done (submission, result, asks)) ->
       if ask_submission_inflight state submission then begin
         apply_ask_answer_receipt state submission ~mailbox;
@@ -28767,7 +28926,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if Option.is_none (Masc_tui_types.current_ask_followup state)
            && Option.is_none state.ask_followup_error then
           launch_ask_followup_load state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_dispatch_started (request, was_replay, acknowledge)) ->
       let proceed = ref false in
       Fun.protect
@@ -28796,7 +28956,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   state.msg_target_keeper_name
               then state.msg_live <- Some entry.log;
               proceed := true
-          | Some _ | None -> ())
+          | Some _ | None -> ());
+      Drawn_changed
   | Keeper_msg (Keeper_chat_done (request, _was_replay, Keeper_chat_kept_back refusal, acknowledge)) ->
       (* Settles as the unsent request it is: the input is retained where the
          preflight put it back, or, beside another preflight for the same
@@ -28821,7 +28982,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Some current when Keeper_chat.same_request_identity current request ->
                 append_chat_history state request Message_status (notice Nothing_kept);
                 report_action state "error" (notice Nothing_kept)
-            | Some _ | None -> ())
+            | Some _ | None -> ());
+      Drawn_changed
   | Keeper_msg (Keeper_chat_done (request, _was_replay, Keeper_chat_answered result, acknowledge)) ->
       let applied =
         Fun.protect
@@ -28864,7 +29026,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~keeper_name:request.Keeper_chat.keeper_name;
         drain_queued_message state ~base_path ~mailbox
       end;
-      launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
+      launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_stream_deltas (request, deltas)) ->
       (* Each Keeper can stream independently. Looking up the request keeps a
          background turn from replacing the selected Keeper's transcript and
@@ -29030,7 +29193,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                ~keeper_name:request.Keeper_chat.keeper_name;
            if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
            then drain_queued_message state ~base_path ~mailbox
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Keeper_msg (Keeper_chat_stream_unavailable (request, detail)) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
@@ -29039,7 +29203,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          when Keeper_chat.same_request_identity entry.sent_request request ->
            entry.phase <- Turn_reconciling
        | Some _ | None -> ());
-      append_chat_history state request Message_status detail
+      append_chat_history state request Message_status detail;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_approval_answered (request, tool_call_id, allow, result)) ->
       (* The operator answered a question that named a tool; echoing the call
          id back tells them nothing they can act on and nothing they can
@@ -29093,7 +29258,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok { Masc_tui_http.remembered = true; _ } ->
              Message_status
          | Ok { remembered = false; settled = false } | Error _ -> Message_error)
-        text
+        text;
+      Drawn_changed
   | Keeper_msg (Keeper_tool_approvals_loaded (request, expected_workspace, result)) ->
       (match Snapshot_read.settle state.keeper_tool_approvals_read request with
        | None -> ()
@@ -29112,7 +29278,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.approval_cursor <- max 0 (count - 1)
        | Error detail ->
            state.held_calls_owed <- failed_read state.held_calls_owed;
-           state.keeper_tool_approvals_error <- Some detail)
+           state.keeper_tool_approvals_error <- Some detail);
+      Drawn_changed
   | Listen_prepared (request, result) ->
       if input_pending () || Option.is_some state.quit_armed then
         withdraw_pending_music_editor state;
@@ -29144,7 +29311,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      else match open_music_midi ~path with
                        | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
                        | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
-      end
+      end;
+      Drawn_changed
   | Sent_image_ready { request; result } ->
       let {sir_generation=generation; sir_view=view; sir_keeper=keeper_name;
            sir_name=name;_} = request in
@@ -29208,7 +29376,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              && (match request.sir_purpose with Open_image -> true | Inspect_image _ -> false) ->
            image_notice state ~view ~keeper_name ~kind:Notice_failure
              "Keeper or Skill source is unconfirmed or changed; reopen the image preview"
-       | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
+       | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ());
+      Drawn_changed
   | Image_render_ready { request; title; caption; page_url; image_url; result } ->
       let current = match Masc_tui_types.take_image_read state request with
         | Some _ ->
@@ -29389,7 +29558,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              Masc_tui_image_cache.discard_captured_copy copy;
              schedule_discarded_copy_cleanup ()
          | Ok (Remote_unfetched | Remote_native _ | Remote_bounded_source _ | Remote_cells _
-              | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ())
+              | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ());
+      Drawn_changed
   | Msx_msg (Msx_live_loaded (request, result)) ->
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
@@ -29418,7 +29588,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    true in
                         if picture_changed then render_spectator state
            end
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Dos_live_loaded (request, result) ->
       (match state.dos_live_in_flight with
        | Some pending when pending == request ->
@@ -29468,7 +29639,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            end
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_read state ~mailbox
-       | Some _ | None -> ())
+       | Some _ | None -> ());
+      Drawn_changed
   | Keeper_msg (Keeper_chat_control_received (keeper_name, generation, token)) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
@@ -29481,7 +29653,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_waiting_keeper_input state ~mailbox ~keeper_name;
         if control_finished then
           launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox
-      end else launch_keeper_turns_load state ~mailbox
+      end else launch_keeper_turns_load state ~mailbox;
+      Drawn_changed
   | Keeper_msg (Keeper_preparation_loaded (request, result)) ->
       let details = state.msg_preparation_details in
       state.msg_preparation_details <- (match result with
@@ -29491,7 +29664,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_withdrawn refusal) ->
             Masc_tui_preparation_details.withdraw request
               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                 ~request:Kept_request.Preparation_read refusal) details)
+                 ~request:Kept_request.Preparation_read refusal) details);
+      Drawn_changed
   | Keeper_msg (Keeper_waiting_loaded (request, snapshot, result)) ->
       let usable = Keeper_waiting_read.accepts_event state.keeper_waiting_read request in
       let reconcile = Keeper_waiting_read.event_needs_reconciliation state.keeper_waiting_read request in
@@ -29524,7 +29698,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              else launch_keeper_waiting_load ~exclusive:(not usable && reconcile) state ~mailbox
            end
            else if not usable && reconcile && Result.is_ok result then
-             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox)
+             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox);
+      Masc_tui_types.keeper_waiting_effect state
   | Keeper_msg (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result)) ->
       state.keeper_turns_inflight <- false;
       (match result with
@@ -29598,7 +29773,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox
        | Error detail ->
            state.keeper_turns_owed <- failed_read state.keeper_turns_owed;
-           refuse_keeper_turn_observation state detail)
+           refuse_keeper_turn_observation state detail);
+      Masc_tui_types.keeper_turns_effect state
   | Gate_msg (Gate_snapshot_loaded (request, expected_workspace, result)) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
        | None -> ()
@@ -29620,7 +29796,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.gate_snapshot_observed <- false;
            state.gate_snapshot_authority <- None;
            state.gate_error <- Some detail
-       end)
+       end);
+      Drawn_changed
   | Gate_msg (Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation)) ->
       (* Release the single-action slot [launch_gate_resolve] took, whatever the
          outcome, so the header stops drawing [submitting] and the next decision
@@ -29653,7 +29830,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
                 detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Gate_decision refusal)
+           report_withdrawn state ~request:Kept_request.Gate_decision refusal);
+      Drawn_changed
   | Gate_msg (Gate_auto_judge_retried (approval_id, expected_workspace, result, generation)) ->
       let flow, owns_action =
         Approval.Flow.finish_action state.approval_flow generation
@@ -29670,7 +29848,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
                 detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal)
+           report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal);
+      Drawn_changed
   | Gate_msg (Gate_mode_set (lane, mode, result)) ->
       (match result with
        | Ok () ->
@@ -29681,7 +29860,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Gate_mode_change refusal)
+           report_withdrawn state ~request:Kept_request.Gate_mode_change refusal);
+      Drawn_changed
   | Keeper_msg (Keeper_gate_settings_loaded result) ->
       (match result with
        | Ok (modes, exact_lanes) ->
@@ -29695,7 +29875,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               the first successful read, the "last known" values are the
               defaults. A read the guard stopped says so alone (RFC §2). *)
            state.keeper_gate_settings_unread <- Some (request_failure_text
-             ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Gate_settings_read failure))
+             ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Gate_settings_read failure));
+      Drawn_changed
   | Keeper_msg (Keeper_tool_modes_loaded (result, ticket)) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
@@ -29725,7 +29906,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error failure ->
              state.tool_modes_owed <- failed_read state.tool_modes_owed;
              state.keeper_tool_modes_error <- Some (request_failure_text
-               ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Tool_modes_read failure))
+               ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Tool_modes_read failure));
+      Drawn_changed
   | Keeper_msg (Keeper_tool_mode_set (keeper_name, mode, result, generation)) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
       state.approval_flow <- flow;
@@ -29758,7 +29940,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail)
        | Error (Request_withdrawn refusal) ->
-           report_withdrawn state ~request:Kept_request.Tool_mode_change refusal)
+           report_withdrawn state ~request:Kept_request.Tool_mode_change refusal);
+      Drawn_changed
   | Keeper_msg (Keeper_tool_approval_answered
       (keeper_name, tool_call_id, approval_id, allow, result, generation)) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
@@ -29802,7 +29985,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                keeper_name
                (Keeper_chat.compact_request_id tool_call_id)
          | Error (Request_failed detail) -> "could not answer the held call: " ^ detail);
-      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
+      Drawn_changed
   | Keeper_msg (Keeper_run_next_done (request, result)) ->
       (match settle_keeper_run_next state request result with
        | Run_next_untracked -> ()
@@ -29819,7 +30003,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Run_next_untracked | Run_next_retired), _
             | Run_next_received, Ok _ -> ());
            dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name;
-           refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name)
+           refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name);
+      Drawn_changed
   | Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result)) ->
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
@@ -29838,7 +30023,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Ok (Not_signalled { reason; detail }) ->
             Interrupt_declined (Option.value ~default:reason detail)
           | Error (Request_failed detail) -> Interrupt_failed detail
-          | Error (Request_withdrawn refusal) -> Interrupt_kept_back refusal }) state.keeper_observed_interrupts
+          | Error (Request_withdrawn refusal) -> Interrupt_kept_back refusal }) state.keeper_observed_interrupts;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_interrupt_done (request, generation, result)) ->
       let keeper_name = request.Keeper_chat.keeper_name in
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
@@ -29879,7 +30065,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (* The turn settled before the answer came back. Nothing to mark,
               and the outcome the transcript already recorded is the one that
               counts. *)
-           ())
+           ());
+      Drawn_changed
   | Keeper_msg (Keeper_chat_dispatch_blocked (request, detail)) ->
       (* The POST never left. Nothing durable was written for it, so there is
          nothing to reconcile: say what happened and let the operator send
@@ -29889,9 +30076,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Printf.sprintf "Keeper request %s was not dispatched: %s"
              request.request_id detail);
         launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
-      end
-  | Context_msg answer -> Context_results.apply state answer
-  | Keeper_msg (Keeper_chat_copy_loaded (generation, _, _)) when generation <> state.msg_copy_generation -> ()
+      end;
+      Drawn_changed
+  | Context_msg answer -> Context_results.apply state answer; Drawn_changed
+  | Keeper_msg (Keeper_chat_copy_loaded (generation, _, _)) when generation <> state.msg_copy_generation -> Drawn_changed
   | Keeper_msg (Keeper_chat_copy_loaded (_, keeper_name, result)) ->
       state.msg_copy_pending <- None;
       let notice = chat_notice state ~keeper_name:(Some keeper_name) in
@@ -29956,7 +30144,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 notice ~kind:Notice_reply
                   (Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
                      keeper_name assessment characters (String.length row.text)
-                     (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)))
+                     (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)));
+      Drawn_changed
   | Keeper_msg (Keeper_chat_history_loaded (request, source, result)) ->
       (* The current refresh owns its slots until each has been admitted.
          A collected old result cannot settle a replacement request. *)
@@ -30073,7 +30262,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           match state.msg_history_inflight with
           | Some current when current == request -> state.msg_history_inflight <- None
           | Some _ | None -> ()
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_first_page_loaded (request, result)) ->
       let owned = match state.msg_history_inflight with
         | Some current when current == request -> Keeper_history_read.settle_page request
@@ -30115,13 +30305,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               launch_current_autonomous_journals state ~mailbox ~keeper_name;
               launch_unavailable_journal_operations state ~mailbox ~keeper_name
         end
-      end
+      end;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state}) ->
       journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
-        (settled_log_for_request state ~keeper_name operation_id)
+        (settled_log_for_request state ~keeper_name operation_id);
+      Drawn_changed
   | Keeper_msg (Keeper_native_tasks_loaded (keeper_name,result)) ->
       state.msg_native_tasks_inflight <- List.filter (fun (name,_) -> name <> keeper_name) state.msg_native_tasks_inflight;
       state.chat_native_tasks_owed <-
@@ -30134,7 +30326,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error error -> Masc_tui_native_tasks.failed previous error in
       state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
       if List.mem keeper_name state.msg_native_tasks_audit_pending then
-        launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
+        launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name;
+      Drawn_changed
   | Keeper_msg (Keeper_child_content_loaded (keeper_name,result)) ->
       state.msg_child_content_inflight <- List.remove_assoc keeper_name state.msg_child_content_inflight;
       state.chat_child_content_owed <-
@@ -30147,7 +30340,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error error -> Masc_tui_child_content.failed previous error in
       state.msg_child_content <- (keeper_name,snapshots) :: List.remove_assoc keeper_name state.msg_child_content;
       if List.mem keeper_name state.msg_child_content_audit_pending then
-        launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name
+        launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name;
+      Drawn_changed
   | Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; turn_state; journal; operation_state; terminal_replay }) -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
@@ -30297,7 +30491,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Keeper_chat_log.Autonomous_turn _, Some Keeper_chat_log.Turn_running, Ok _
        | Keeper_chat_log.Autonomous_turn _, (Some Keeper_chat_log.Turn_ended | None), Ok _
        | Keeper_chat_log.Autonomous_turn _, _, Error _
-       | Keeper_chat_log.Operation _, _, (Ok _ | Error _) -> ()))
+       | Keeper_chat_log.Operation _, _, (Ok _ | Error _) -> ()));
+      Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result })) ->
       let current = settle_tools_read state ~generation Tools_inventory_read in
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
@@ -30350,7 +30545,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           (* The failure is this Keeper's, like a reading. *)
           state.tools_inventory_keeper <- keeper_name;
-          state.tools_error <- Some detail)
+          state.tools_error <- Some detail);
+      Masc_tui_types.tools_inventory_effect state
   | Skill_evidence_loaded (request, key, result) ->
       if Option.exists (fun held -> held == request) state.tools_evidence_request then (
         state.tools_evidence_request <- None;
@@ -30360,7 +30556,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_failed detail) -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Error (Request_withdrawn refusal) ->
             report_withdrawn state ~request:Kept_request.Skill_evidence refusal
-        | Ok json -> state.tools_skill_evidence <- Some (key, json))
+        | Ok json -> state.tools_skill_evidence <- Some (key, json));
+      Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
       let (_ : bool) = settle_tools_read state ~generation Tools_activations_read in
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
@@ -30373,7 +30570,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_activations_owed <- Masc_tui_owed_read.succeeded state.tools_activations_owed
       | Error detail ->
           state.tools_activations_error <- Some { taf_keeper = keeper; taf_detail = detail };
-          state.tools_activations_owed <- failed_read state.tools_activations_owed)
+          state.tools_activations_owed <- failed_read state.tools_activations_owed);
+      Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_usage_loaded { generation; keeper; result })) ->
       settle_tools_skill_read state ~generation (Tools_usage_read keeper);
       if generation = state.tools_skill_generation then begin
@@ -30382,7 +30580,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (match result with
            | Ok _ -> Masc_tui_owed_read.succeeded (keeper_skill_usage_owed state keeper)
            | Error _ -> failed_read (keeper_skill_usage_owed state keeper))
-      end
+      end;
+      Drawn_changed
   | Tools_msg (Tools_read_loaded (Tools_catalog_loaded { generation; result })) ->
       settle_tools_skill_read state ~generation Tools_catalog_read;
       if generation = state.tools_skill_generation then (
@@ -30393,7 +30592,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_catalog_owed <- Masc_tui_owed_read.succeeded state.tools_catalog_owed
       | Error detail ->
           state.skills_catalog_error <- Some detail;
-          state.tools_catalog_owed <- failed_read state.tools_catalog_owed)
+          state.tools_catalog_owed <- failed_read state.tools_catalog_owed);
+      Drawn_changed
   | Tools_msg (Tools_async_detail_loaded (request,result)) ->
       let current = tools_async_detail_current state request in
       complete_tools_async_detail state request result;
@@ -30414,10 +30614,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Ok
                (Masc.Tui_decode_async_request.Observed
                  { Masc.Tui_decode_async_request.nested = Masc.Keeper_composition_observation.Invalid _; _ })
-           | Error _ -> failed_read state.tools_async_detail_owed)
+           | Error _ -> failed_read state.tools_async_detail_owed);
+      Drawn_changed
   | Task_msg (Task_document_prepared (request,result)) ->
       let _,terminal_cols=get_terminal_size () in
-      complete_task_document state ~cols:(task_document_columns state ~terminal_cols) request result
+      complete_task_document state ~cols:(task_document_columns state ~terminal_cols) request result;
+      Drawn_changed
   | Tools_msg (Tools_async_task_body_loaded (request,result)) ->
       let current =
         tools_async_task_request_current state request state.tools_async_task_body_request
@@ -30428,15 +30630,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.tools_async_task_owed <-
           (match result with
            | Ok _ -> Masc_tui_owed_read.succeeded state.tools_async_task_owed
-           | Error _ -> failed_read state.tools_async_task_owed)
+           | Error _ -> failed_read state.tools_async_task_owed);
+      Drawn_changed
   | Tools_msg (Tools_async_task_history_loaded (request,result)) ->
-      complete_tools_async_task_history state request result
+      complete_tools_async_task_history state request result;
+      Drawn_changed
   | Tools_msg (Tools_async_observation_loaded (generation, result)) ->
       if apply_tools_async_observation_result state ~generation result then
         state.async_requests_owed <-
           (match result with
            | Ok (Tui_decode.Async_ready _) -> Masc_tui_owed_read.succeeded state.async_requests_owed
-           | Ok (Tui_decode.Async_unavailable _) | Error _ -> failed_read state.async_requests_owed)
+           | Ok (Tui_decode.Async_unavailable _) | Error _ -> failed_read state.async_requests_owed);
+      Drawn_changed
   | Runtime_msg (Runtime_lane_slots_written (written, replacement_selection, result)) ->
       (* Re-read the list the write changed rather than patching the local
          snapshot: a hand-applied edit and a rejected write look the same on
@@ -30460,14 +30665,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Masc_tui_types.Runtime_surface_list ->
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
-       | Error _ -> ())
+       | Error _ -> ());
+      Drawn_changed
   | Runtime_msg (Runtime_catalog_loaded (request,result)) ->
       let admitted = take_runtime_catalog_read state request result in
       Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld admitted_ns=%Ld admitted=%b followup=%b"
         (Local_read_order.request_id request.rcr_request) request.rcr_started_ns (Mtime_clock.elapsed_ns ())
         admitted (Local_read_order.has_followup state.runtime_catalog_order);
       if admitted && Local_read_order.has_followup state.runtime_catalog_order then
-        launch_runtime_catalog_load state ~mailbox
+        launch_runtime_catalog_load state ~mailbox;
+      Drawn_changed
   | Runtime_msg (Runtime_assignment_changed (request,status,observed_ns)) ->
       let current = runtime_assignment_current state request in
       if apply_runtime_assignment state request status then begin
@@ -30485,7 +30692,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               | Assignment_answered _ | Assignment_conflict _ | Assignment_unconfirmed _ ->
                   launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox
               | Assignment_not_sent _ | Assignment_refused _ -> ()
-      end
+      end;
+      Drawn_changed
   | Browser_msg (Browser_history_list_loaded (generation, result)) ->
       (match state.browser_history with
        | Some history when generation=state.browser_history_generation ->
@@ -30501,12 +30709,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               let entries = Browser_history.entries snapshot in
               state.browser_history <- Some (Browser_history.select 0 entries history);
               launch_browser_history state ~mailbox ~reload:false)
-       | _ -> ())
+       | _ -> ());
+      Drawn_changed
   | Browser_msg (Browser_history_page_loaded (generation, result)) ->
       (match state.browser_history with
        | Some history when generation=state.browser_history_generation ->
            state.browser_history <- Some (Browser_history.accept result history)
-       | _ -> ())
+       | _ -> ());
+      Drawn_changed
   | Browser_msg (Browser_lane_clients_loaded (generation, result)) ->
       (match state.browser_lane with
        | None -> ()
@@ -30521,13 +30731,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
            state.browser_lane <- Some next;
-           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read)
+           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read);
+      Drawn_changed
   | Browser_msg (Browser_lane_loaded (generation, result)) ->
       state.browser_lane <- Option.map
-        (Browser_lane_view.accept ~generation result) state.browser_lane
+        (Browser_lane_view.accept ~generation result) state.browser_lane;
+      Drawn_changed
   | Browser_msg (Browser_lane_scene_loaded (generation, result)) ->
       state.browser_lane <- Option.map
-        (Browser_lane_view.accept_scene ~generation result) state.browser_lane
+        (Browser_lane_view.accept_scene ~generation result) state.browser_lane;
+      Drawn_changed
   | Browser_msg (Browser_lane_follow_loaded (generation, result)) ->
       state.browser_lane <- Option.map
         (fun view ->
@@ -30540,7 +30753,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  navigation_source = receipt.navigation_source;
                } in
                Browser_lane_view.accept_follow ~generation ~guard scene_result view)
-        state.browser_lane
+        state.browser_lane;
+      Drawn_changed
   | Browser_msg (Browser_lane_screenshot_ready { generation; image_generation; result }) ->
       (match state.browser_lane with
        | None -> ()
@@ -30576,11 +30790,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                         draw_browser_viewport state shot bytes)
                  end
              | None, (Ok _ | Error _) | Some _, Error _ ->
-                 if Option.is_some state.browser_viewport then close_image state)
+                 if Option.is_some state.browser_viewport then close_image state);
+      Drawn_changed
   | Tools_msg (Tools_volume_gc_reported result) ->
-      settle_volume_gc state Masc_tui_volume_gc.Report_request result
+      settle_volume_gc state Masc_tui_volume_gc.Report_request result;
+      Drawn_changed
   | Tools_msg (Tools_volume_gc_reclaimed (names, result)) ->
-      settle_volume_gc state (Masc_tui_volume_gc.Reclaim_request names) result
+      settle_volume_gc state (Masc_tui_volume_gc.Reclaim_request names) result;
+      Drawn_changed
   | Connectors_msg (Connector_unbind_all_done { keeper_name; results }) ->
       state.connector_unbind_all_inflight <- false;
       List.iter
@@ -30597,7 +30814,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             || Masc_tui_connector_unbind.any_kept_back results then "error"
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
-      reload_connectors_after_write state ~mailbox
+      reload_connectors_after_write state ~mailbox;
+      Drawn_changed
   | Connectors_msg (Connectors_status_loaded (request, snapshot)) ->
       (match receive_connectors_status state request snapshot with
        | None -> ()
@@ -30606,7 +30824,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            retire_connector_read state retirement;
            (match retirement with
             | Connector_read.No_retirement -> ()
-            | Retire _ -> launch_connectors_load state ~mailbox))
+            | Retire _ -> launch_connectors_load state ~mailbox));
+      Drawn_changed
   | Connectors_msg (Connectors_loaded (request, read)) ->
       let result = said_read_result state ~request:Kept_request.Connector_list_read read in
       (match complete_connectors_read state request result with
@@ -30636,7 +30855,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             List.iter
               (fun keeper_name -> report_action state "error" (line keeper_name))
               pending)
-      end)
+      end);
+      Drawn_changed
   | Runtime_msg (Runtime_surface_loaded (generation, result)) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
@@ -30691,9 +30911,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
-      end
+      end;
+      Drawn_changed
   | Workspace_msg (Workspace_activity_loaded (request, result)) ->
-      apply_workspace_activity_read state request result
+      apply_workspace_activity_read state request result;
+      Drawn_changed
   | Repository_msg (Repositories_loaded result) ->
       state.repositories_inflight <- false;
       (match result with
@@ -30703,7 +30925,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.repositories_error <- None
       | Error detail ->
           state.repositories_owed <- failed_read state.repositories_owed;
-          state.repositories_error <- Some detail)
+          state.repositories_error <- Some detail);
+      Drawn_changed
   | Memory_msg (Memory_loaded (Fleet_health_read result)) ->
       state.memory_health_inflight <- false;
       state.memory_health_owed <-
@@ -30718,7 +30941,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               < held.Masc.Tui_decode_memory_health.mhs_generated_at -> ()
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
        | Error failure, (Some _ | None) -> state.memory_health_error <- Some failure);
-      owe_memory_input_read state
+      owe_memory_input_read state;
+      Drawn_changed
   | Memory_msg (Memory_loaded ((Row_health_read { keeper; result }
       | Command_health_read { keeper; result }) as reading)) ->
       (match reading with
@@ -30806,7 +31030,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | None, Error failure ->
            state.memory_health_error <- Some failure;
            state.memory_health_owed <- failed_read state.memory_health_owed
-       | None, Ok _ -> owe_memory_health_read state)
+       | None, Ok _ -> owe_memory_health_read state);
+      Drawn_changed
   | Memory_msg (Memory_input_loaded (request, result)) ->
       (* An answer for a selection already left settles nothing; the read
          of the current selection does. *)
@@ -30816,7 +31041,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Ok _ -> Masc_tui_owed_read.succeeded state.memory_input_owed
            | Error _ -> failed_read state.memory_input_owed);
       state.memory_input <-
-        Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result;
+      Drawn_changed
   | Memory_msg (Memory_world_loaded (request, result)) ->
       (* An answer for a read the workspace has moved past is dropped whole by
          [complete]; a failed refresh keeps the inventory held. *)
@@ -30833,7 +31059,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error (Request_withdrawn refusal) ->
             Masc_tui_memory_world.withdraw ~retry_s ~max_retry_s ~now state.memory_world request
               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                 ~request:Kept_request.Memory_world_read refusal))
+                 ~request:Kept_request.Memory_world_read refusal));
+      Drawn_changed
   | Memory_msg (Memory_facts_loaded (request, result)) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
@@ -30843,7 +31070,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (match result with Ok _ -> Masc_tui_owed_read.succeeded state.memory_facts_owed
            | Error _ -> failed_read state.memory_facts_owed);
       state.memory_facts <-
-        Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result;
+      Drawn_changed
   | Repository_msg (Repository_changes_loaded (scope, result)) ->
       if
         state.repository_changes_open
@@ -30873,7 +31101,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok _ ->
              state.repository_changes_error <-
                Some "Git changes response belongs to a different workspace"
-         | Error detail -> state.repository_changes_error <- Some detail)
+         | Error detail -> state.repository_changes_error <- Some detail);
+      Drawn_changed
   | Repository_msg (Repository_changes_diff_loaded (request, result)) ->
       (* Each response belongs to one request incarnation, not to every open
          pane that happens to name the same relative path. *)
@@ -30892,7 +31121,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                min state.repository_changes_diff_hscroll
                  (max 0 (state.repository_changes_diff_max_width - 1));
              state.repository_changes_diff_error <- None
-         | Error detail -> state.repository_changes_diff_error <- Some detail)
+         | Error detail -> state.repository_changes_diff_error <- Some detail);
+      Drawn_changed
   | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, read)) ->
       let result = said_read_result state ~request:Kept_request.File_changes_read read in
       let still_current =
@@ -30929,7 +31159,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if refresh_pending && state.view = Keepers Keeper_message then
           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
-      end
+      end;
+      Drawn_changed
   | Acting_pane_changes_loaded (request, result) ->
       (* An answer for a keeper the cursor has left is not this tab's
          answer and [complete] drops it. The stamp belongs to an answer
@@ -30978,7 +31209,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
               state.acting_pane_changes_at <- None
         end
-      end
+      end;
+      Drawn_changed
   | File_changes_loaded (keeper_name, result) ->
       let result = said_read_result state ~request:Kept_request.File_changes_read result in
       (* An answer for a keeper the surface has since left is not this
@@ -31028,7 +31260,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                A refreshed list cannot close or reset that retained reader. *)
             if Option.is_none state.changes_tree_diff_path then
               refresh_recorded_diff_bounds state ~reset:(Option.is_none kept_row)
-        | Error detail -> state.changes_error <- Some detail)
+        | Error detail -> state.changes_error <- Some detail);
+      Drawn_changed
   | Git_diff_loaded (path, result) ->
       (* An answer for a file the view has since left is not this view's
          answer, and drawing it would put one file's diff under another's
@@ -31041,7 +31274,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.changes_diff_hscroll <-
               min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
-        | Error detail -> state.changes_tree_diff_error <- Some detail)
+        | Error detail -> state.changes_tree_diff_error <- Some detail);
+      Drawn_changed
   | Keeper_msg (Keeper_composite_loaded (authority, keeper_name, result)) ->
       if authority == state.detail_read_authority && server_authority_ready state then begin
         state.keeper_composite_inflight <- None;
@@ -31061,7 +31295,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  ~max_retry_s:keeper_execute_stream_max_reconnect_s
                  ~now:(monotonic_now_s ())));
         launch_owed_keeper_composite state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Lane_msg (Lane_inventory_loaded (generation, result)) ->
       state.standalone_lanes_inflight <- false;
       state.lanes_owed <-
@@ -31099,7 +31334,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if state.standalone_lanes_reread_pending then begin
         state.standalone_lanes_reread_pending <- false;
         launch_lanes_load state ~mailbox
-      end
+      end;
+      Drawn_changed
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
       Masc_tui_types.settle_clients_read state ~now:(monotonic_now_s ()) result;
@@ -31115,7 +31351,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 0
                 (min state.clients_surface_cursor
                    (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
-        | Error detail -> state.clients_surface_error <- Some detail)
+        | Error detail -> state.clients_surface_error <- Some detail);
+      Drawn_changed
   | Lane_msg (Lane_runs_loaded (lane, generation, before, result)) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
@@ -31145,7 +31382,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (* A failed page retains both the rows and its retry cursor.
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
-       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ())
+       | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ());
+      Drawn_changed
   | Lane_msg (Lane_run_detail_loaded (run_id, generation, result)) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run)
@@ -31159,12 +31397,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 state.lane_run_detail_error <-
                   Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
-       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
+       | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ());
+      Drawn_changed
   | Measurement_artifact_loaded (sha256, generation, result) ->
-      accept_measurement_artifact state ~sha256 ~generation result
+      accept_measurement_artifact state ~sha256 ~generation result;
+      Drawn_changed
   | Engine_sample_read reading ->
-      (* The drain draws a frame for every answer it applies, so a sample
-         this takes needs nothing more to be drawn. *)
+      (* A sample answer is not compared with what is drawn, so it asks for a
+         frame like an answer that did change it. *)
       let samples, (_ : Masc_tui_engine_samples.step), report =
         Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
       in
@@ -31172,14 +31412,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match report with
        | Masc_tui_engine_samples.Quiet -> ()
        | Masc_tui_engine_samples.Failure_began detail ->
-         add_event state "error" (Terminal_text.single_line detail))
+         add_event state "error" (Terminal_text.single_line detail));
+      Drawn_changed
   | Overview_loaded result ->
       state.overview_inflight <- false;
       state.overview_owed <-
         (match result with
          | Ok _ -> Masc_tui_owed_read.succeeded state.overview_owed
          | Error _ -> failed_read state.overview_owed);
-      apply_overview_load state result
+      apply_overview_load state result;
+      Drawn_changed
   | Harness_msg (Harness_loaded result) ->
       state.harness_inflight <- false;
       (match result with
@@ -31206,7 +31448,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                end)
       | Error detail ->
           state.harness_owed <- failed_read state.harness_owed;
-          state.harness_error <- Some detail)
+          state.harness_error <- Some detail);
+      Drawn_changed
   | Fusion_msg (Fusion_runs_loaded (request, result)) ->
       let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.runs_loaded state request result with
@@ -31214,34 +31457,40 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
            launch_fusion_runs_load state ~mailbox
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Runs result
-       | Reread | Await_observer | Obsolete -> ())
+       | Reread | Await_observer | Obsolete -> ());
+      Drawn_changed
   | Fusion_msg (Fusion_detail_loaded (generation, run_id, result)) ->
       let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
            launch_fusion_detail_load state ~mailbox ~run_id
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Detail result
-       | Reread | Await_observer | Obsolete -> ())
+       | Reread | Await_observer | Obsolete -> ());
+      Drawn_changed
   | Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result)) ->
       let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
            launch_fusion_historical_detail_load state ~mailbox ~reference
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Historical result
-       | Reread | Await_observer | Obsolete -> ())
+       | Reread | Await_observer | Obsolete -> ());
+      Drawn_changed
   | Fusion_msg (Fusion_launch_options_loaded (generation, result)) ->
       Masc_tui_fusion_updates.launch_options_loaded state ~generation
-        ~report:(report_action state "system") result
+        ~report:(report_action state "system") result;
+      Drawn_changed
   | Fusion_msg (Fusion_launched (generation, result)) ->
       Masc_tui_fusion_updates.launched state ~generation
         ~report:(report_action state "system")
         ~refresh:(fun () -> launch_fusion_runs_load
-          ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result
+          ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result;
+      Drawn_changed
   | Memory_msg (Memory_recall_standing_loaded (generation, result)) ->
       Masc_tui_types.finish_memory_recall_standing_read state ~generation
         (match result with
          | Ok reading -> Masc_tui_memory_recall_form.Server_read reading
-         | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail)
+         | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail);
+      Drawn_changed
   | Verification_msg (Verification_loaded result) ->
       state.verification_inflight <- false;
       if state.verification_refresh_after_inflight then begin
@@ -31287,7 +31536,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_owed <- failed_read state.verification_owed;
-          state.verification_error <- Some failure)
+          state.verification_error <- Some failure);
+      Drawn_changed
   | Local_msg (Local_workspace_read (request, result)) ->
       (match observe_local_source state ~source:Local_work
           ~is_observed:Masc_tui_loader.local_workspace_observed request result with
@@ -31297,7 +31547,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Error detail -> report_action state "error" ("Local work read failed: " ^ detail)
             | Ok reading -> Local_read_observation.apply request.lwr_observation
                 (Masc_tui_loader.apply_local_workspace state) reading);
-           launch_local_source_followup state ~mailbox Local_work)
+           launch_local_source_followup state ~mailbox Local_work);
+      Drawn_changed
   | Local_msg (Local_keepers_read (request, result)) ->
       (match observe_local_source state ~source:Local_keepers
           ~is_observed:Masc_tui_loader.local_keepers_observed request result with
@@ -31317,7 +31568,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (* Metadata owns this wake; optional work cannot replay it. *)
                 drain_queued_message state ~base_path ~mailbox;
                 ignore (launch_current_live_context state ~mailbox));
-           launch_local_source_followup state ~mailbox Local_keepers)
+           launch_local_source_followup state ~mailbox Local_keepers);
+      Drawn_changed
   | Keeper_msg (Keeper_logs_loaded (request, result)) ->
       let admission = take_keeper_log_read state request result in
       let keeper_name = (Masc_tui_fetched.request_key request.klr_request).klk_keeper in
@@ -31340,14 +31592,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
         if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Join)) admission;
-      launch_owed_keeper_logs state ~mailbox
+      launch_owed_keeper_logs state ~mailbox;
+      Drawn_changed
   | Keeper_msg (Keeper_execute_streamed (stream, event)) ->
-      ignore (take_keeper_execute_stream state stream event)
+      ignore (take_keeper_execute_stream state stream event);
+      Drawn_changed
   | Live_context_loaded (request, started_ns, result) ->
       let admitted = take_live_context_observation state request result in
       log_live_context_read ~phase:"observed" request ~started_ns
         ~outcome:(if not admitted then "discarded" else
-          match result with Ok _ -> "received" | Error _ -> "failed")
+          match result with Ok _ -> "received" | Error _ -> "failed");
+      Drawn_changed
   | Keeper_msg (Keeper_chat_older_loaded (generation, keeper_name, cursor, result)) ->
       Masc_tui_frame_timing.time_stage ~name:"chat.older.apply" (fun () ->
       (* A page that arrived for a keeper the pane has since left, or after a
@@ -31428,7 +31683,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               (Keeper_chat_history.page_error_to_string Keeper_chat_history.Page_stale))
         | Error (Keeper_chat_history.Page_read_failed detail) ->
             (* A failed read retains its exact cursor for retry. *)
-            state.msg_older_error <- Some (Request_failed detail)))
+            state.msg_older_error <- Some (Request_failed detail)));
+      Drawn_changed
 (* How long one pass of the loop applies queued results before it goes back
    to read a key. Results arrive in bursts (a history page, then a journal
    read for each turn on it), and applying all of them in one pass held a
@@ -31599,8 +31855,10 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
         let image_was_open = state.image_open in
         let machine_was_open = state.msx_open in
         let previous_copy = state.resource_copy_ready in
-        apply_async_message ~input_pending ~image_input_pending:share_input_pending state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
+        let drawn =
+          apply_async_message ~input_pending ~image_input_pending:share_input_pending state ~base_path ~http_refresh_inflight
+            ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg
+        in
         if previous_copy != state.resource_copy_ready then begin
           resource_copy_sweep := None; copy_sweep_complete := false
         end;
@@ -31611,7 +31869,9 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
            || (machine_was_open && not state.msx_open) then (
           Frame_presenter.invalidate frame_presenter;
           Render_schedule.request render_schedule Render_schedule.Force);
-        loop true
+        (* Only an answer that changed what the screen draws asks for a
+           frame (RFC tui-one-screen-grammar §8). *)
+        loop (match drawn with Drawn_changed -> true | Drawn_unchanged -> changed)
   in
   let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
@@ -45219,7 +45479,11 @@ Use relative paths for resources already held in the package. -->
                    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
                    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
                    | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None);
-                 render ~home ~compact_recovery_notice state)
+                 let built = render ~home ~compact_recovery_notice state in
+                 (* What this frame drew is what the readers' next answers
+                    are compared with (RFC tui-one-screen-grammar §8). *)
+                 Masc_tui_types.note_drawn_reads state;
+                 built)
            in
            time_redraw_due :=
              Render_schedule.Time_redraw.due ~now:(Unix.gettimeofday ())

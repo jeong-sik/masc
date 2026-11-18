@@ -6,10 +6,16 @@ type read =
 
 type failure = { read : read; since : float; count : int }
 
-(* At most one failure per read, oldest run first. *)
+(* At most one failure per read, in the order the notice draws them. *)
 type t = failure list
 
 let empty = []
+
+(* The reads of the whole server come first: a question or confirm-queue read
+   that fails may be failing because the server does. *)
+let whole_server = function
+  | Server_health | Refresh_pass -> true
+  | Asks | Confirmations -> false
 
 let position = function
   | Server_health -> 0
@@ -18,8 +24,11 @@ let position = function
   | Confirmations -> 3
 
 let earlier left right =
-  match Float.compare left.since right.since with
-  | 0 -> Int.compare (position left.read) (position right.read)
+  match Bool.compare (whole_server right.read) (whole_server left.read) with
+  | 0 ->
+      (match Float.compare left.since right.since with
+       | 0 -> Int.compare (position left.read) (position right.read)
+       | order -> order)
   | order -> order
 
 let failed failures read ~at =
@@ -44,11 +53,13 @@ let read_name ~ko = function
 
 let notice_text ~ko ~now failure =
   let failed = read_name ~ko failure.read ^ if ko then " 읽기 실패" else " read failed" in
-  let run = Masc_tui_value.Ongoing.since ~now failure.since in
+  let at =
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now failure.since in
+  let started = if ko then at ^ " 부터" else "since " ^ at in
   let separator = " \xc2\xb7 " in
-  if failure.count = 1 then failed ^ separator ^ run
+  if failure.count = 1 then failed ^ separator ^ started
   else
     let count = Masc_tui_value.Count.grouped failure.count in
     failed ^ separator
     ^ (if ko then count ^ "회 연속" else count ^ " in a row")
-    ^ separator ^ run
+    ^ separator ^ started

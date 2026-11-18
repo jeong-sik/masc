@@ -14,9 +14,10 @@
 
 type read =
   | Server_health
-      (** [GET /health], the identity probe each refresh starts and ends
-          with. A sampler that reads the same route reports here too, so one
-          notice says that [/health] is failing. *)
+      (** [GET /health], the identity probe each full and navigation
+          refresh starts and ends with. Another reader of the same route
+          reports here, not as a read of its own, so one notice says that
+          [/health] is failing. *)
   | Refresh_pass  (** The refresh as a whole, when it raised before it settled. *)
   | Asks  (** Keeper questions. *)
   | Confirmations  (** The operator confirm queue. *)
@@ -39,9 +40,12 @@ val succeeded : t -> read -> t
 (** [read] answered, so it no longer fails. *)
 
 val failures : t -> failure list
-(** The oldest run first, then in declaration order: a failure that repeats
-    keeps its place, so the notice drawn first stays the same. *)
+(** The reads of the whole server ([Server_health], [Refresh_pass]) first,
+    since a question or confirm-queue read may fail because the server does;
+    within each, the oldest run first, then in declaration order. A failure
+    that repeats keeps its place, so the notice drawn first stays the same. *)
 
 val notice_text : ko:bool -> now:float -> failure -> string
-(** [서버 상태 읽기 실패 · 3회 연속 · 6s]. The length of the run notes when
-    it next reads differently ({!Masc_tui_value.Redraw}). *)
+(** [서버 상태 읽기 실패 · 3회 연속 · 15:04 부터]. The run's start is a
+    moment, not a length, so the text changes only when the read fails again
+    and asks for no redraw of its own (RFC tui-one-screen-grammar §8). *)

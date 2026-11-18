@@ -1957,10 +1957,17 @@ let schedule_turn_rows ~ko
       ~(field : ?style:string -> string -> string -> string * string)
       (row : schedule_row) =
   let t korean english = if ko then korean else english in
+  let turn_finished_seen =
+    Option.map
+      (function
+        | Schedule_turn_open -> false
+        | Schedule_turn_finished _ -> true)
+      row.sch_turn_finished
+  in
   let step_observed =
     [ row.sch_wake_seen
     ; row.sch_turn_started
-    ; row.sch_turn_finished
+    ; turn_finished_seen
     ; row.sch_queue_ack_seen
     ; row.sch_wake_cancelled
     ]
@@ -2022,8 +2029,13 @@ let schedule_turn_rows ~ko
     @ [ step (t "실행 확인" "Wake seen") row.sch_wake_seen row.sch_stimulus_recorded_at_iso
       ; step (t "턴 시작" "Turn started") row.sch_turn_started
           row.sch_turn_started_recorded_at_iso
-      ; step (t "턴 종료" "Turn finished") row.sch_turn_finished
+      ; step (t "턴 종료" "Turn finished") turn_finished_seen
           row.sch_turn_finished_recorded_at_iso
+      ; field (t "턴 결과" "Turn outcome")
+          (match row.sch_turn_finished with
+           | Some (Schedule_turn_finished disposition) ->
+               Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
+           | Some Schedule_turn_open | None -> Masc_tui_theme.Glyph.no_value)
       ; step (t "큐 확인" "Queue ack") row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
       ; step ~bad_when_true:true (t "취소" "Cancelled") row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso

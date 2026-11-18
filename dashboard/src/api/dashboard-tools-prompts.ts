@@ -170,6 +170,15 @@ export type DashboardScheduledAutomationDispatchReceipt =
       reason: string
     }
 
+export type ScheduledTurnDisposition =
+  | 'completed'
+  | 'checkpointed'
+  | 'input_required'
+  | 'cancelled'
+  | 'skipped'
+  | 'failed'
+  | 'rested'
+
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
   // Ranked by the server: cancelled and ack are terminal, finished outranks
   // started, and a stimulus row alone is the producer's record, not a
@@ -198,7 +207,8 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
-  turn_finished_seen?: boolean
+  /** How the turn the wake started ended (Keeper_reaction_ledger.Turn_disposition); null until it finishes. */
+  turn_finished_disposition?: ScheduledTurnDisposition | null
   event_queue_ack_seen?: boolean
   event_queue_cancelled_seen?: boolean
   matched_record_count?: number

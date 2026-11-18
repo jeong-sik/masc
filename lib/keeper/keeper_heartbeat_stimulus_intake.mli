@@ -111,7 +111,7 @@ val record_event_queue_stimulus_turn_started
 val record_event_queue_stimulus_turn_finished
   :  ctx:_ context
   -> keeper_name:string
-  -> disposition:string
+  -> disposition:Keeper_reaction_ledger.Turn_disposition.t
   -> Keeper_event_queue.stimulus
   -> unit
 (** The closing half of {!record_event_queue_stimulus_turn_started}. A

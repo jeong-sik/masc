@@ -273,15 +273,25 @@ module Theme = struct
 
   let recede () = (resolved ()).recede
 
-  (* What a meter against a declared limit draws its cells with on the page:
-     the process's colour depth and the palette the terminal reported. *)
-  let limit_paint () =
+  (* What a picture draws its colours with on the page: the process's colour
+     depth and the palette the terminal reported. *)
+  let paint () =
     { Masc_tui_theme.depth = Masc_tui_theme.color_depth ()
     ; surface = Masc_tui_theme.Page
     ; palette =
         Masc_tui_terminal_palette.snapshot ()
         |> Masc_tui_terminal_palette.snapshot_palette
     }
+
+  (* A graph's tint: the colour a dot at a height share takes on [ramp], on
+     the page. The paint is read once per graph, the colours from the ramp's
+     table. *)
+  let tint ramp =
+    let paint = paint () in
+    fun position -> Masc_tui_theme.ramp_style paint ramp ~position
+
+  (* A graph of one quantity: its series' hue from deep to bright. *)
+  let series_tint series = tint (Masc_tui_theme.Series_ramp series)
 
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)

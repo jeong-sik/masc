@@ -208,9 +208,9 @@ val limit_cell_colour :
     [Near_limit]. [No_color] draws [Cell_plain], [Colors_16] the band,
     [Colors_256] and [Truecolor] a blend. *)
 
-(** What a declared-limit meter needs to draw its cells: the terminal's depth,
-    and the ground and palette its colours are measured against. *)
-type limit_paint = {
+(** What a picture (meter, graph) needs to draw its colours: the terminal's
+    depth, and the ground and palette its colours are measured against. *)
+type paint = {
   depth : color_depth;
   surface : surface;
   palette : Masc_tui_terminal_palette.t option;
@@ -284,7 +284,7 @@ val status_text_readable
     ANSI colour when the reader has explicitly disabled
     colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
 
-val meter_cell_readable : limit_paint -> meter_cell_colour -> string
+val meter_cell_readable : paint -> meter_cell_colour -> string
 (** The SGR a meter cell draws before its glyph. [Cell_plain] is [""].
     [Cell_band] is the band's status colour through {!status_readable}.
     [Cell_blend] is an Oklab interpolation of the palette's success, warning
@@ -292,6 +292,53 @@ val meter_cell_readable : limit_paint -> meter_cell_colour -> string
     projected through [best_color]. It draws the band's colour instead when no
     palette is reported, lifting is off, or the projection misses the floor.
     Under [NO_COLOR] every cell is [""]. *)
+
+(** {1 Picture ramps}
+
+    Every filled meter cell and every graph dot takes a colour from a ramp,
+    the way btop paints its boxes (RFC tui-one-screen-grammar section 7.3).
+    The position on the ramp is the cell's reach along the bar, or the dot's
+    height in the graph, in [[0, 1]]. *)
+
+(** The quantity a picture draws. One quantity draws in one hue on every
+    screen, so a reader who learned its colour once finds it again. *)
+type series =
+  | Calls  (** Tool calls, requests: how much ran. Cyan. *)
+  | Failures
+      (** Failed calls. Magenta: red is the status colour of a bucket in which
+          every call failed, and a legend says so. *)
+  | Latency  (** p95 and other waits. Yellow. *)
+  | Memory  (** Heap words, memory facts. Magenta. *)
+  | Completion  (** Done against a total, finished per day. Green. *)
+  | Capacity  (** Running against bootable, capacity against a target. Blue. *)
+  | Backlog  (** Work behind: a lag, a queue. Yellow. *)
+  | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
+
+(** What a ramp walks along. *)
+type ramp =
+  | Limit_ramp
+      (** Success to warning to danger: the reach toward a declared limit. The
+          sixteen-colour steps are the ones {!limit_cell_colour} uses. *)
+  | Series_ramp of series
+      (** One hue, deep at the bottom of the bar or graph and bright at its
+          top. *)
+
+val ramp_steps : int
+(** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)
+
+val ramp_style : paint -> ramp -> position:float -> string
+(** The SGR a cell at [position] draws before its glyph. [position] is clamped
+    into [[0, 1]] and [nan] is [0]. Under [No_color] it is [""].
+
+    A series ramp interpolates in Oklab from its hue stepped toward the
+    ground, clearing 3:1 (a graphical object), to the palette's bright entry of
+    that hue lifted to clear 4.5:1, so every hue spans at least that band. Where it cannot --
+    sixteen colours, no reported palette, lifting turned off, a projection
+    under the floor -- the lower half draws the hue's normal palette code and
+    the upper half its bright code.
+
+    The colours of one ramp are computed once per palette, depth and ground and
+    then read from a table, so a frame of graphs costs one array read a cell. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -372,12 +419,22 @@ module For_testing : sig
     -> string
   (** Capability fixture for {!val:status_text_readable}. *)
 
+  val ramp_style
+    :  colors_enabled:bool
+    -> project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option)
+    -> paint
+    -> ramp
+    -> position:float
+    -> string
+  (** {!ramp_style} without the table, with the colour switch and projection
+      given. *)
+
   val meter_cell_readable
     :  colors_enabled:bool
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
-    -> limit_paint
+    -> paint
     -> meter_cell_colour
     -> string
   (** Capability fixture for {!val:meter_cell_readable}. *)

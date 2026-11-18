@@ -167,23 +167,58 @@ let gauge ~width ~value ~max_value ?label () =
 ;;
 
 type meter_scale =
-  | Declared_limit of Masc_tui_theme.limit_paint
-  | Relative
+  | Declared_limit of Masc_tui_theme.paint
+  | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
+  | Anomaly of string
 
-let meter_cell_colour scale ~index ~width ~value ~max_value =
-  match scale with
-  | Declared_limit paint ->
-    Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
-      ~width ~value ~limit:max_value
-  | Relative -> Masc_tui_theme.Cell_plain
+(* How far along the bar a filled cell reaches: its far edge, unless the value
+   stops short of it, so the last cell takes the colour of the value it draws
+   and never one past it. *)
+let cell_reach ~index ~width ~value ~max_value =
+  let width = Stdlib.max 1 width in
+  let max_value = Stdlib.max 1 max_value in
+  let value = Stdlib.max 0 (Stdlib.min max_value value) in
+  Float.min
+    (float_of_int (Stdlib.min width (index + 1)) /. float_of_int width)
+    (float_of_int value /. float_of_int max_value)
 ;;
 
 let meter_cell_style scale ~index ~width ~value ~max_value =
   match scale with
   | Declared_limit paint ->
     Masc_tui_theme.meter_cell_readable paint
-      (meter_cell_colour scale ~index ~width ~value ~max_value)
-  | Relative -> ""
+      (Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
+         ~width ~value ~limit:max_value)
+  | Series { paint; series } ->
+    Masc_tui_theme.ramp_style paint (Masc_tui_theme.Series_ramp series)
+      ~position:(cell_reach ~index ~width ~value ~max_value)
+  | Anomaly code -> code
+;;
+
+(* Neighbouring cells of a ramp often round to the same colour; the code goes
+   out only where it changes, and one reset closes the run. *)
+let styled_run ~reset styled =
+  let buffer = Buffer.create 64 in
+  let last =
+    List.fold_left
+      (fun last (style, glyph) ->
+        if not (String.equal style last) then
+          (* An empty style is the foreground, which only a reset gives back. *)
+          Buffer.add_string buffer (if String.equal style "" then reset else style);
+        Buffer.add_string buffer glyph;
+        style)
+      "" styled
+  in
+  if not (String.equal last "") then Buffer.add_string buffer reset;
+  Buffer.contents buffer
+;;
+
+let meter_fill_run ~scale ~width ~value ~max_value ~reset glyphs =
+  styled_run ~reset
+    (List.mapi
+       (fun index glyph ->
+         (meter_cell_style scale ~index ~width ~value ~max_value, glyph))
+       glyphs)
 ;;
 
 let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
@@ -193,16 +228,8 @@ let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     let filled = bar_filled_cells ~width ~value ~max_value in
     let unfilled = Stdlib.max 0 (width - filled) in
     let filled_part =
-      if filled <= 0 then ""
-      else
-        match scale with
-        | Relative -> repeat meter_fill filled
-        | Declared_limit _ ->
-          String.concat ""
-            (List.init filled (fun index ->
-               meter_cell_style scale ~index ~width ~value ~max_value
-               ^ meter_fill))
-          ^ reset
+      meter_fill_run ~scale ~width ~value ~max_value ~reset
+        (List.init (Stdlib.max 0 filled) (fun _ -> meter_fill))
     in
     let track_part =
       if unfilled <= 0 then ""

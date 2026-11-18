@@ -30,6 +30,10 @@ python3 scripts/harness/tui/idle.py \
 
 `idle.py` exits 0 when every screen opened and reached its keys and the relay's refusals were read. It exits 2 when the run stopped early (a bad argument, `/health` not answering through the relay, a stop signal) and 3 when it ran to the end but a screen failed, the relay log could not be read or the preferences could not be put back; `idle.json` says which.
 
+A run that exits 0 often lists refusals in `relay.refused`. The TUI posts `/api/v1/tui/preferences` when its screen changes, and the relay refuses that as `rest-write`. Those refusals are the evidence that only reads went through, so they do not fail the run.
+
+The relay ends every log line with a newline. When the last line has none and is not JSON, the relay was stopped while it wrote that line, for example by the SIGKILL that follows its 5 s grace. The run still exits 3, and the error names the relay's exit. `summary.py --reads` reads that exit from `idle.json`.
+
 For each screen, `idle.json` records:
 
 - `opened` (the first frame arrived), `keys` and `keys_ok` (each palette jump found the palette open), and `top_rows`, the first three screen rows when the window starts, which show where the keys landed;

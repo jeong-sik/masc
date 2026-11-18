@@ -6,8 +6,8 @@ status: live
 
 > Current package version: v0.73.1
 > Latest changelog entry: v0.73.1 (2026-11-18)
-> Latest published GitHub release: v0.68.0 (2026-11-05)
-> Updated: 2026-11-12
+> Latest published GitHub release: v0.73.1 (2026-11-18)
+> Updated: 2026-11-18
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope

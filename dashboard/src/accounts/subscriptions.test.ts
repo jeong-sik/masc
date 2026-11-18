@@ -573,11 +573,20 @@ describe('what the panel knows of each account', () => {
       accounts: [
         { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
         { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, removal: 'start_given_up' },
+        { id: 'acct_left_refused', integration: { read: true, value: 'codex' }, held: { kind: 'key', key: 'readable' }, removal: 'home_not_removed' },
         { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
       ],
       runtimes: [],
     }).map((one) => [one.account.id, one.keeper.kind])
-    expect(kinds).toEqual([['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_key', 'needs_model']])
+    expect(kinds).toEqual([['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_left_refused', 'removal_left'], ['acct_key', 'needs_model']])
+  })
+
+  it('says a Keeper can run on a key account with a checked model only while the server read its key', () => {
+    const states = ['readable', 'key_missing', 'key_unreadable', 'not_looked_at', 'unrecognised'] as const
+    const accounts = states.map((key) => ({ id: `acct_${key}`, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, removal: null }) as const)
+    const runtimes = accounts.map((account) => ({ id: `${account.id}.claude-sonnet-5`, accountId: account.id, model: { read: true, value: 'claude-sonnet-5' } }) as const)
+    expect(accountFacts(integrations, { accounts, runtimes }).map((one) => one.keeper.kind))
+      .toEqual(['can_run', 'key_not_readable', 'key_not_readable', 'key_not_readable', 'key_not_readable'])
   })
 
   it('counts a model as checked only while the server still finds it in its settings', () => {

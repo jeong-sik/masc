@@ -655,6 +655,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertIn('[Provider busy (temporary)] provider_overloaded: fixture message', busy)
         self.assertIn('Retry shortly', busy)
         self.assertIn('[Credential refused] provider_auth_refused:', shown('provider_auth_refused'))
+        self.assertIn('[API key refused] key_refused:', shown('key_refused'))
         self.assertIn('[Model check failed] provider_rejected:', shown('provider_rejected'))
         # Captured output is not a terminal, so it carries no escape codes.
         self.assertNotIn('\x1b[', busy)

@@ -423,6 +423,14 @@ describe('the models a Keeper can be given', () => {
   it('are the models read on accounts whose subscription a Keeper may run on here', () => {
     expect(runtimeChoices([claude, codex], owned).map((one) => one.runtimeId)).toEqual(['rt_sonnet', 'rt_opus'])
   })
+
+  it('leave out the models of a key account whose key the server did not read, and of one a removal was left on', () => {
+    const keyOf = (id: string, key: 'readable' | 'key_missing' | 'key_unreadable' | 'not_looked_at', removal: 'key_not_removed' | null = null) =>
+      ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, removal }) as const
+    const accounts = [keyOf('readable', 'readable'), keyOf('missing', 'key_missing'), keyOf('unreadable', 'key_unreadable'), keyOf('unseen', 'not_looked_at'), keyOf('left', 'readable', 'key_not_removed')]
+    const runtimes = accounts.map((account) => ({ id: `rt_${account.id}`, accountId: account.id, model: { read: true, value: 'claude-sonnet-5' } }) as const)
+    expect(runtimeChoices([claude], { accounts, runtimes }).map((one) => one.runtimeId)).toEqual(['rt_readable'])
+  })
 })
 
 const nothingSent: Send = () => Promise.reject(new Error('nothing is sent'))

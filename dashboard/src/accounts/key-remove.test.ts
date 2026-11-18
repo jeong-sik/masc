@@ -381,6 +381,18 @@ describe('the remove button of an account', () => {
     expect([first === null, second === null, second === first]).toEqual([false, false, false])
   })
 
+  it('draws no model and no check on an account a removal was left on, and moves a focus that was on its check to its title', () => {
+    const removals = showing(undefined)
+    const withModel = (account: ProviderAccount): Owned =>
+      ({ accounts: [account], runtimes: [{ id: 'acct_key.claude-sonnet-5', accountId: 'acct_key', model: { read: true, value: 'claude-sonnet-5' } }] })
+    const { container, rerender } = render(list(removals, withModel(keyAccount())))
+    const before = [container.querySelectorAll('.models').length, container.querySelectorAll('.check').length]
+    buttonOf(container, 'check-button-acct_key').focus()
+    rerender(list(removals, withModel(keyAccount('key_not_removed'))))
+    expect([before, container.querySelectorAll('.models').length, container.querySelectorAll('.check').length, document.activeElement === container.querySelector('#row-title-acct_key')])
+      .toEqual([[1, 1], 0, 0, true])
+  })
+
   it('stays the same button, with the focus on it, when the list comes to say a removal was left on the account', () => {
     const removals = showing(undefined)
     const { container, rerender } = render(list(removals, owning(keyAccount())))

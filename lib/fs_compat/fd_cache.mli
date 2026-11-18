@@ -2,7 +2,9 @@
     write-path. RFC-0162 §3.4.
 
     Each path keeps one descriptor opened
-    [O_APPEND | O_CREAT | O_WRONLY | O_CLOEXEC], reused across calls.
+    [O_APPEND | O_CREAT | O_RDWR | O_CLOEXEC], reused across calls.
+    It is readable because a line append reads the file's last byte
+    through it.
     The cache holds a descriptor and not an [out_channel]: a channel
     keeps the bytes of a failed write in its buffer and writes them
     with the next append or when it is closed. The

@@ -308,32 +308,50 @@ let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
 (* A failed append leaves the file as it was: [Fd_append_whole.run] removes
    the bytes a partial write added, and the cached descriptor holds no
-   buffer that a later append or a close could write out (#52980). *)
-let append_file_unix_with_io ~io (path : string) (content : string) : unit =
+   buffer that a later append or a close could write out (#52980).
+   With [~start:At_line_start] the content does not join onto a line an
+   earlier writer left unfinished (#52974). *)
+let append_file_unix_with_io ~io ~start (path : string) (content : string) : unit =
   let canonical = canonical_append_mutex_path path in
   with_append_path_mutex canonical (fun () ->
     Fd_cache.with_writer canonical (fun fd ->
-      match Fd_append_whole.run ~io ~fd content with
+      match Fd_append_whole.run ~io ~start ~fd content with
       | Ok () -> ()
       | Error
-          { write_failure =
-              Fd_write_all.Operation_failed
-                { exception_; backtrace; bytes_written = _ }
-          ; rollback = _
-          } ->
+          (Fd_append_whole.Write_failed
+            { write_failure =
+                Fd_write_all.Operation_failed
+                  { exception_; backtrace; bytes_written = _ }
+            ; rollback = _
+            }) ->
         (* Not an I/O failure of the file: an exception the write
            operation itself raised. Callers see it unchanged. *)
         Printexc.raise_with_backtrace exception_ backtrace
       | Error
-          ({ write_failure = Fd_write_all.No_progress _ | Fd_write_all.Unix_error _
-           ; rollback = _
-           } as failure) ->
+          (( Fd_append_whole.End_unreadable _
+           | Fd_append_whole.Write_failed
+               { write_failure =
+                   Fd_write_all.No_progress _ | Fd_write_all.Unix_error _
+               ; rollback = _
+               } ) as failure) ->
         raise
           (Sys_error (canonical ^ ": " ^ Fd_append_whole.failure_to_string failure))))
 ;;
 
 let append_file_unix (path : string) (content : string) : unit =
-  append_file_unix_with_io ~io:Fd_append_whole.unix_io path content
+  append_file_unix_with_io
+    ~io:Fd_append_whole.unix_io
+    ~start:Fd_append_whole.Anywhere
+    path
+    content
+;;
+
+let append_lines_unix (path : string) (lines : string) : unit =
+  append_file_unix_with_io
+    ~io:Fd_append_whole.unix_io
+    ~start:Fd_append_whole.At_line_start
+    path
+    lines
 ;;
 
 let append_file_unix_with_io_for_testing = append_file_unix_with_io

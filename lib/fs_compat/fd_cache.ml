@@ -66,12 +66,14 @@ let get_or_open_locked path now =
   | None ->
     if Hashtbl.length cached >= max_entries then evict_lru_locked ();
     (* [Sys_error] with the path first is what [Stdlib.open_out_gen] raised
-       here before; the append callers document and catch [Sys_error]. *)
+       here before; the append callers document and catch [Sys_error].
+       [O_RDWR]: a line append reads the file's last byte through this
+       descriptor. *)
     let fd =
       try
         Unix.openfile
           path
-          [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ]
+          [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ]
           0o644
       with
       | Unix.Unix_error (error, _, _) ->

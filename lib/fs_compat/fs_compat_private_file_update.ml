@@ -771,7 +771,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
     let buf = Buffer.create 256 in
     Yojson.Safe.to_buffer buf json;
     Buffer.add_char buf '\n';
-    append_file_unix path (Buffer.contents buf)
+    append_lines_unix path (Buffer.contents buf)
   in
   (* Keep the path lock and cached-channel lease wholly inside the job.
      The joined result is also the caller's commit-acknowledgement boundary:
@@ -794,7 +794,7 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
         Yojson.Safe.to_buffer buf json;
         Buffer.add_char buf '\n'
       ) jsons;
-      append_file_unix path (Buffer.contents buf)
+      append_lines_unix path (Buffer.contents buf)
     in
     match execution_context () with
     | Non_eio -> write ()

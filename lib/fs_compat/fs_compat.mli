@@ -1225,9 +1225,21 @@ val cleanup_atomic_orphans
 
 (** Append string to file. The file gets all of the string or stays as it
     was: bytes of a write that failed part-way are removed again, and
-    nothing is kept to be written later.
+    nothing is kept to be written later. The string goes right after the
+    file's last byte, whatever that byte is. A writer of lines uses
+    {!append_lines}.
     @raise Sys_error when the file cannot be opened or written. *)
 val append_file : string -> string -> unit
+
+(** Append whole lines to file: [lines] is one or more lines, each ending
+    in a newline. As {!append_file}, and the lines start at a line start.
+    When the file ends in the middle of a line (a writer died part-way, or
+    raw bytes were appended), a newline is written before the lines, so
+    the unfinished bytes stay a line of their own and every appended line
+    is read whole. The file's last byte is read on each call to decide
+    that.
+    @raise Sys_error when the file cannot be opened, read or written. *)
+val append_lines : string -> string -> unit
 
 (** Check if file exists. *)
 val file_exists : string -> bool
@@ -2418,6 +2430,11 @@ val append_fd_durable_for_testing :
     written. There is no additional cancellation check after the writer
     returns, so callers can record their commit acknowledgement first.
 
+    The record starts at a line start. When the file ends in the middle
+    of a line (a writer died part-way, or raw bytes were appended), a
+    newline is written before the record, so the unfinished bytes stay a
+    line of their own and the record is read whole.
+
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).
     Each path keeps one cached descriptor reused across appends;
     cross-domain serialization is provided by the same per-path
@@ -2459,6 +2476,7 @@ val with_cached_writer_for_testing : string -> (Unix.file_descr -> 'a) -> 'a
     chosen number of bytes. *)
 val append_file_unix_with_io_for_testing
   :  io:Fs_compat_internal.Fd_append_whole.io
+  -> start:Fs_compat_internal.Fd_append_whole.start
   -> string
   -> string
   -> unit

@@ -60,12 +60,19 @@ val append_path_mutex_count_for_testing : unit -> int
 
 val canonical_append_mutex_path_for_testing : string -> string
 
-(** Appends all of the content or leaves the file as it was.
+(** Appends all of the content or leaves the file as it was. The content
+    goes right after the file's last byte.
     @raise Sys_error when the file cannot be opened or written. *)
 val append_file_unix : string -> string -> unit
 
+(** As {!append_file_unix} for content made of whole lines: when the file
+    ends in the middle of a line, a newline is written before the lines.
+    @raise Sys_error when the file cannot be opened, read or written. *)
+val append_lines_unix : string -> string -> unit
+
 val append_file_unix_with_io_for_testing
   :  io:Fs_compat_internal.Fd_append_whole.io
+  -> start:Fs_compat_internal.Fd_append_whole.start
   -> string
   -> string
   -> unit

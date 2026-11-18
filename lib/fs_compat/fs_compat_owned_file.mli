@@ -1,10 +1,11 @@
 (** Path probes and owned-file reads of [Fs_compat]: [append_file],
-    [file_exists], the path kind and owned directory chain types, and the
+    [append_lines], [file_exists], the path kind and owned directory chain types, and the
     reads of one owned regular file with their snapshot checks and failure
     types. [Fs_compat] includes this module. *)
 open Fs_compat_internal
 
 val append_file : string -> string -> unit
+val append_lines : string -> string -> unit
 
 val file_exists : string -> bool
 

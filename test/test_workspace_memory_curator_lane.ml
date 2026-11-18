@@ -461,7 +461,7 @@ let test_new_child_rejects_changed_worker_inputs ()=
     await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
     let capture=capture_classification config in
     let parent=seed_size_refusal store capture in
-    let configured=Lane_addon_config.load_file ~path:source |> get in
+    let configured=Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~path:source |> get in
     save_source config source (Printf.sprintf "id=\"curator\"\nenabled=true\nrun_id=\"changed-original-inputs\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
       (Yojson.Safe.to_string (`String configured.manifest_path)));
     reconcile_until_export clock ~config;
@@ -1009,7 +1009,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     await clock exports_ready;
     let old_capture=capture_classification config in
     let old=seed_size_refusal store old_capture in
-    let configured=Lane_addon_config.load_file ~path:source |> get in
+    let configured=Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~path:source |> get in
     save_source config source (Printf.sprintf "id=\"curator\"\nenabled=true\nrun_id=\"current-successor-frontier\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
       (Yojson.Safe.to_string (`String configured.manifest_path)));
     reconcile_until_export clock ~config;

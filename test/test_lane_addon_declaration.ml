@@ -19,6 +19,7 @@ module Runtime = struct
     |> Result.map_error Lane_addon_runtime.error_to_string
 end
 module Editor = Lane_addon_declaration
+let packages (config : Workspace.config) = Config_dir_resolver.packages_dir ~base_path:config.base_path
 module Types = Lane_addon_types
 let member = Yojson.Safe.Util.member
 let text key json = member key json |> Yojson.Safe.Util.to_string
@@ -355,7 +356,7 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
     let shared = declaration ~id:"private-save" () in
     let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory))) path source in
-    let writer ~directory request = Editor.For_testing.write ~replace_file ~directory request in
+    let writer ~packages ~directory request = Editor.For_testing.write ~replace_file ~packages ~directory request in
     let saved = Runtime.For_testing.with_declaration_writer writer (fun () ->
       Runtime.save_declaration ~caller:"editor-keeper" ~config
         (request ~revision ~mode:"save" ~file_name:"private.toml" shared)) |> unwrap in
@@ -461,7 +462,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   let missing = read config directory "broken.toml" in
   check string "missing package still permits reading declaration bytes" (declaration ()) (text "source_text" missing);
   check bool "a missing dependency does not hide the declaration inventory" true
-    (Lane_addon_config.load ~directory).complete;
+    (Lane_addon_config.load ~packages:(packages config) ~directory).complete;
   write (Filename.concat root ".masc/replacement-package.toml") manifest;
   let repaired_source = declaration ~manifest_path:"../../replacement-package.toml" () in
   let repaired = save config (request ~revision:(text "source_revision" missing) ~mode:"save"
@@ -477,7 +478,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   Unix.mkdir unreadable 0o700;
   Fun.protect ~finally:(fun () -> Unix.rmdir unreadable) (fun () ->
     check bool "an unreadable declaration makes inventory incomplete" false
-      (Lane_addon_config.load ~directory).complete;
+      (Lane_addon_config.load ~packages:(packages config) ~directory).complete;
     match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~revision:(text "source_revision" repaired)
       ~mode:"save" ~file_name:"broken.toml" ("# cannot inventory peers\n" ^ repaired_source)) with
     | Error error -> check bool "unreadable inventory still blocks publication" true (error.code=Editor.Io_error)
@@ -519,7 +520,7 @@ let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock confi
   let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
     ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory)))
     path source in
-  let receipt = Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~directory request) |> unwrap in
+  let receipt = Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~directory request) |> unwrap in
   let json = Editor.receipt_to_json receipt in
   check string "post-rename result records visible save" "saved" (member "write" json |> text "state");
   check string "failed parent fsync is not claimed durable" "unconfirmed" (member "write" json |> text "durability");
@@ -535,7 +536,7 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
     | Error error -> Error error
     | Ok () -> write path competing; Ok () in
   let request = Editor.write_request (request ~mode:"create" ~file_name:"contested.toml" (declaration ())) |> unwrap in
-  (match Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~directory request) with
+  (match Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~directory request) with
    | Error error -> check bool "publication refuses a concurrently created file" true (error.code=Editor.Revision_conflict)
    | Ok _ -> fail "create overwrote the competing publication");
   check string "competing source bytes survive" competing (read config directory "contested.toml" |> text "source_text");

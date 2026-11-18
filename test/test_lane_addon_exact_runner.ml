@@ -1588,7 +1588,8 @@ let test_original_undispatched_cli_visit_order () =
 module Sweep = Server_unowned_exact_sweep
 let sweep ~store package =
   let declaration : Lane_addon_config.declaration =
-    { id=declaration_id; enabled=true; run_id="sweep"; manifest_path="/nonexistent/lane.toml";
+    { id=declaration_id; enabled=true; run_id="sweep"; package_source=Lane_addon_config.Manifest_path;
+      manifest_path="/nonexistent/lane.toml";
       package; binding=`Null; revision="1"; source_revision="1"; source_path="/nonexistent/quiz.toml";
       max_exact_in_flight=Lane_addon_config.one_exact_at_a_time } in
   Sweep.run ~store ~declarations:[declaration]

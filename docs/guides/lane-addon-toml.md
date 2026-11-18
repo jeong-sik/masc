@@ -32,13 +32,33 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 4. 다른 설치와 겹치지 않는 `id`와 관측 묶음의 `run_id`를 정하고 저장한다. Dashboard를 새로 읽어
    설정 적용 상태와 인스턴스의 관측 상태를 각각 확인한다.
 
-설치 선언의 필수 최상위 필드는 `id`, `run_id`, `manifest_path`, `[binding]` 네 가지다.
+설치 선언의 필수 최상위 필드는 `id`, `run_id`, `[binding]`과 패키지를 고르는 필드 하나다.
+패키지는 `manifest_path`나 `package` 중 하나로 고른다. 둘 다 적거나 둘 다 빠지면 거절한다.
 선택적인 `tool_hooks`와 `exact_outputs`는 아래에서 각각 설정한다.
 선택 필드 `max_exact_in_flight`는 host가 이 설치의 exact 요청을 함께 실행하는 수다. 1 이상의 정수이고,
 없으면 1이다. 이 수를 바꿔도 worker는 다시 뜨지 않는다. 이 키를 모르는 서버 빌드는 그 선언을
 거절하므로, 그 선언 파일을 읽는 서버가 모두 이 키를 아는 빌드일 때 넣고 되돌릴 때는 키부터 지운다.
 패키지의 `lane.toml`은 image·command·contributions·worker 자원 한도를 정의하는 별도 문서다.
 설치 선언의 `id`는 유지할 설치의 식별자이며, 패키지 ID나 실행 인스턴스 ID와 구분한다.
+
+### 서버가 가진 Exact 패키지
+
+`package = "keeper-librarian"`처럼 이름을 적으면 서버 빌드가 함께 가진 Exact worker 패키지를 쓴다.
+이름은 `keeper-librarian`, `workspace-curator`, `candle-appraiser`, `hitl-auto-judge` 넷이다.
+서버는 이름을 `<base-path>/.masc/packages/<이름>-<revision>/lane.toml`로 바꿔 읽는다.
+`<revision>`은 그 서버 빌드가 가진 manifest의 값이다. 그래서 서버를 새 빌드로 바꾸면
+같은 선언이 새 revision의 폴더를 가리킨다.
+
+그 폴더는 저장소의 `addons/<이름>/` 아래 `.toml`·`.json`·`.py` 파일과 `Dockerfile`을 같은 바이트로
+담아야 한다. 서버는 폴더가 이 빌드가 가진 파일과 같을 때만 선언을 받는다.
+
+- 폴더가 없으면 패키지가 설치되지 않았다고 거절한다.
+- 파일이 빠졌거나, 더 있거나, 바이트가 다르면 그 파일 이름을 적어 거절한다.
+- 폴더 안의 심볼릭 링크도 다른 파일로 보고 거절한다.
+- 서버가 모르는 이름이면 서버가 가진 이름을 나열해 거절한다.
+
+`package` 키를 모르는 서버 빌드는 그 선언을 거절한다. 그런 서버로 되돌릴 때는 선언의 `package`를
+`manifest_path`로 먼저 바꾼다.
 
 `manifest_path`와 `binding.sources`의 `snapshot_file.path`는 선언 파일이 있는 디렉터리를 기준으로
 해석한다. 그 밖의 package-specific binding 문자열을 파일 경로로 추측하거나 확장하지 않는다.

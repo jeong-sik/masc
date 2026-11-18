@@ -20,8 +20,10 @@ type receipt = private { document : document; state : write_state; durability : 
 
 val read_request : Yojson.Safe.t -> (string, error) result
 val write_request : Yojson.Safe.t -> (write_request, error) result
-val read : directory:string -> source_path:string -> (document, error) result
-val write : directory:string -> write_request -> (receipt, error) result
+(** [packages] resolves a declaration that names a carried package
+    ({!Lane_addon_config.load_file}). *)
+val read : packages:string -> directory:string -> source_path:string -> (document, error) result
+val write : packages:string -> directory:string -> write_request -> (receipt, error) result
 val document_to_json : document -> Yojson.Safe.t
 val receipt_to_json : receipt -> Yojson.Safe.t
 val error_to_json : error -> Yojson.Safe.t
@@ -29,5 +31,5 @@ val error_to_json : error -> Yojson.Safe.t
 module For_testing : sig
   val write :
     replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
-    directory:string -> write_request -> (receipt, error) result
+    packages:string -> directory:string -> write_request -> (receipt, error) result
 end

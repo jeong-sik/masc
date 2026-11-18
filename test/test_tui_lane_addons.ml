@@ -28,15 +28,17 @@ let with_directory f =
     Unix.mkdir directory 0o700;
     write (Filename.concat root "lane.toml") manifest;
     f directory)
+let packages directory =
+  Config_dir_resolver.packages_dir ~base_path:(Filename.dirname directory)
 let save directory session =
   let request = Owner.write_request (Draft.write_json session) |> owner_ok in
-  let status, json = match Owner.write ~directory request with
+  let status, json = match Owner.write ~packages:(packages directory) ~directory request with
     | Ok receipt -> 200,Owner.receipt_to_json receipt
     | Error error -> (match error.code with Owner.Revision_conflict -> 409 | _ -> 400),Owner.error_to_json error in
   Draft.decode_response (Draft.Save session) ~status ~body:(Yojson.Safe.to_string json) |> ok
 let read directory session =
   let path = Filename.concat directory session.Draft.file_name in
-  let document = Owner.read ~directory ~source_path:path |> owner_ok in
+  let document = Owner.read ~packages:(packages directory) ~directory ~source_path:path |> owner_ok in
   Draft.decode_response (Draft.Read path) ~status:200
     ~body:(Yojson.Safe.to_string (Owner.document_to_json document)) |> ok
 
@@ -91,7 +93,7 @@ let file_identity_and_draft_sessions () = with_directory (fun directory ->
   check int "switching documents retains both drafts" 2 (List.length view.documents);
   check string "unsubmitted second draft retained" second.text
     (List.find (fun (s : Draft.session) -> s.file_name=second.file_name) view.documents).text;
-  let document = Owner.read ~directory ~source_path:(Filename.concat directory first.file_name) |> owner_ok in
+  let document = Owner.read ~packages:(packages directory) ~directory ~source_path:(Filename.concat directory first.file_name) |> owner_ok in
   check bool "another source path cannot replace requested file" true
     (Result.is_error (Draft.decode_response (Draft.Read (Filename.concat directory "other.toml")) ~status:200
       ~body:(Yojson.Safe.to_string (Owner.document_to_json document))));

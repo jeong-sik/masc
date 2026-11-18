@@ -229,13 +229,12 @@ let chart_cells ~tall ~(sample : Series.tool_series_calls -> Braille.sample) ~se
          buckets)
   in
   let tint = Theme.series_tint series in
-  (* A one-row chart colours a column by its own height; a value stands at
-     least one level above the baseline, so its levels run from 2 to the top.
-     A taller chart colours each row by the row's height, as a Braille graph
+  (* A one-row chart colours a column by its own height
+     ([Braille.value_share]). A taller chart colours each row by the row's height, as a Braille graph
      does, and a row the column does not reach keeps that colour, so the row
      opens no code for it. *)
   let row_tint ~level ~from_base =
-    if tall = 1 then tint (float_of_int (level - 2) /. float_of_int (dots - 2))
+    if tall = 1 then tint (Braille.value_share ~dots level)
     else tint (float_of_int from_base /. float_of_int (tall - 1))
   in
   let blank_style ~from_base = if tall = 1 then "" else row_tint ~level:0 ~from_base in
@@ -247,7 +246,7 @@ let chart_cells ~tall ~(sample : Series.tool_series_calls -> Braille.sample) ~se
             List.init tall (fun index ->
               let from_base = tall - 1 - index in
               if from_base = 0 then (no_call_mark, Theme.recede ())
-              else (" ", blank_style ~from_base))
+              else (Braille.braille_bar_mark ~level:0, blank_style ~from_base))
         | Series.Series_active active ->
             let reading = sample active in
             let level = Braille.braille_level ~dots ~maximum reading in
@@ -440,7 +439,7 @@ let load_bar ~cells ~maximum_calls reading =
          anomaly, and its colour comes first. *)
       let scale =
         if every_call_failed active then
-          Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Bad }
+          Masc_tui_chart.Anomaly { paint = Theme.paint (); alarm = Masc_tui_chart.Alarm_bad }
         else Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls }
       in
       Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls

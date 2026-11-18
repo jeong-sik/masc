@@ -185,7 +185,11 @@ let series_cells_walk_their_hue () =
             (Printf.sprintf "the table at %g is the computed colour" position)
             (Theme.For_testing.ramp_style ~colors_enabled:Theme.colors_enabled
                ~project:Masc_tui_terminal_palette.best_color paint Theme.Failures ~position)
-            (Theme.ramp_style paint Theme.Failures ~position))
+            (Theme.ramp_style paint Theme.Failures ~position);
+          Alcotest.(check string)
+            (Printf.sprintf "the reader at %g is the same colour" position)
+            (Theme.ramp_style paint Theme.Failures ~position)
+            (Theme.ramp_reader paint Theme.Failures ~position))
         [ 0.0; 0.25; 0.49; 0.495; 0.499; 0.5; 0.75; 0.999; 1.0 ])
     [ series_paint Theme.Colors_16; series_paint ?palette:(dark_palette ()) Theme.Truecolor ];
   (* A cell takes the step at or below its reach, never one past it: 0.495
@@ -434,14 +438,10 @@ let meter_bar_opens_a_code_per_colour () =
     (bar (Chart.Series { paint = series_paint Theme.Colors_16; series = Theme.Calls }));
   Alcotest.(check string) "an anomaly opens its status colour once"
     (opened (Theme.status_readable ~surface:Theme.Page None Theme.Bad))
-    (bar (Chart.Anomaly { paint = series_paint Theme.Colors_16; status = Theme.Bad }));
+    (bar (Chart.Anomaly { paint = series_paint Theme.Colors_16; alarm = Chart.Alarm_bad }));
   Alcotest.(check string) "no colour opens nothing" (glyphs 10)
     (bar (Chart.Series { paint = series_paint Theme.No_color; series = Theme.Calls }))
 
-(* btop's graph colours: rows by their height when the graph is taller than
-   one row, cells by their own height in a one-row graph. A blank cell opens
-   no code, a code goes out only where it changes, and a row that opened one
-   ends with a reset. *)
 (* A column two cells tall: the base cell fills before the one above it
    starts, a zero is the baseline of the base cell alone, and the top of the
    scale fills both. One cell is the one-row mark. *)
@@ -459,6 +459,10 @@ let braille_bar_rows_stack () =
   Alcotest.(check (list string)) "one row is the one-row mark" [ mark 3 ]
     (Braille.braille_bar_rows ~rows:1 ~level:3)
 
+(* btop's graph colours: rows by their height when the graph is taller than
+   one row, cells by their own height in a one-row graph. A blank cell opens
+   no code, a code goes out only where it changes, and a row that opened one
+   ends with a reset. *)
 let braille_graph_tints_by_height () =
   let tint share = Printf.sprintf "<%.2f>" share in
   let reset = Theme.Sgr.reset in
@@ -471,7 +475,7 @@ let braille_graph_tints_by_height () =
      Alcotest.(check string) "one row: each cell by its own height"
        ("8 " ^ Braille.braille_cell ~mask:0 ^ "<1.00>" ^ Braille.braille_pair ~left:4 ~right:4
         ^ "<0.00>" ^ Braille.braille_pair ~left:1 ~right:1
-        ^ "<0.67>" ^ Braille.braille_pair ~left:3 ~right:3 ^ reset)
+        ^ "<0.50>" ^ Braille.braille_pair ~left:3 ~right:3 ^ reset)
        row
    | other -> Alcotest.failf "expected one drawn row, got %a" (Alcotest.pp graph_t) other);
   match

@@ -390,12 +390,13 @@ let test_refusals_of_the_session_start_fresh_next () =
           (Process_eio.Spawn_failed { executable = "muse"; error = Unix.E2BIG }))
      = Store.Fatal);
   (* The child's execve errno arrives only as text: the cause is unknown, so
-     the claim is released as before rather than held for an operator. *)
-  check bool "a child setup failure releases the claim" true
+     the claim is recorded for an operator rather than released for another
+     automatic try. *)
+  check bool "a child setup failure is not released" true
     (disposition
        (Serve.Spawn_refused
-          (Process_eio.Child_setup_failed { executable = "muse"; detail = "execve: Text file busy" }))
-     = Store.Transient)
+          (Process_eio.Child_setup_failed { executable = "muse"; detail = "execve: Argument list too long" }))
+     = Store.Ambiguous)
 ;;
 
 let test_error_projection () =

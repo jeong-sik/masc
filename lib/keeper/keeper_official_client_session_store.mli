@@ -54,8 +54,8 @@ type recovery_failure =
   | Spawn_failed_cause_unknown
       (** The forked child could not finish its setup (fchdir, dup2, execve)
           and reported the errno only as text, so whether the same request
-          fails again is not known. Transient, as every spawn failure was
-          before the outlook existed. *)
+          fails again is not known. Ambiguous: recorded for an operator,
+          never released as transient. *)
   | Owner_stopped_turn
   | Retryable_turn_failed
   | Transport_interrupted

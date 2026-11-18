@@ -810,7 +810,7 @@ let test_release_transient_refuses_a_fatal_spawn_refusal () =
 ;;
 
 (* #28072: each spawn outlook names its own recovery failure, and the one
-   whose cause is unknown stays transient. *)
+   whose cause is unknown is not transient. *)
 let test_spawn_refusal_recovery_failures () =
   let failed error = Process_eio.Spawn_failed { executable = "cli"; error } in
   List.iter
@@ -825,8 +825,49 @@ let test_spawn_refusal_recovery_failures () =
     ; ( "child setup failed"
       , Process_eio.Child_setup_failed { executable = "cli"; detail = "execve: Text file busy" }
       , Spawn_failed_cause_unknown
-      , Transient )
+      , Ambiguous )
     ]
+;;
+
+(* #28072: the child's execve errno arrived only as text (the 2026-08-10
+   E2BIG ran 237 times this way). The claim is not released for another
+   automatic try; it is recorded as a recovery that carries the child's text
+   for an operator. *)
+let test_cause_unknown_spawn_is_recorded_not_released () =
+  with_workspace "masc-official-client-store-cause-unknown-spawn-" (fun base_path ->
+    let keeper_name = "cause-unknown-spawn" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex ~runtime_id:"codex.default"
+        ~owner_epoch ~at:1.0
+    in
+    let failure =
+      recovery_failure_of_spawn_refusal
+        (Process_eio.Child_setup_failed
+           { executable = "cli"; detail = "execve: Argument list too long" })
+    in
+    check bool "the release is refused" true
+      (Result.is_error
+         (release_transient ~base_path ~keeper_name ~expected:claimed ~failure
+            ~released_at:2.0));
+    check bool "the claim is left as it was" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    match
+      require_recovery ~base_path ~keeper_name ~expected:claimed ~failure
+        ~detail:"child for \"cli\" could not start: execve: Argument list too long"
+        ~required_at:2.0
+    with
+    | Error detail -> failf "the recovery was not recorded: %s" detail
+    | Ok { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ } ->
+      fail "the recovery did not leave the session in Recovery_required"
+    | Ok { phase = Recovery_required _; _ } ->
+      (* The durable record decodes with the same typed failure. *)
+      (match load ~base_path ~keeper_name with
+       | Ok (Some { phase = Recovery_required stored; _ }) ->
+         check bool "the stored failure is the unknown cause" true
+           (stored.failure = Spawn_failed_cause_unknown)
+       | Ok None
+       | Ok (Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ })
+       | Error _ -> fail "the recorded recovery did not read back"))
 ;;
 
 let test_exact_recovery_restart () =
@@ -2738,6 +2779,8 @@ let () =
             test_release_transient_refuses_a_fatal_spawn_refusal
         ; test_case "spawn refusal recovery failures" `Quick
             test_spawn_refusal_recovery_failures
+        ; test_case "a spawn whose cause is unknown is recorded, not released" `Quick
+            test_cause_unknown_spawn_is_recorded_not_released
         ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
         ; test_case "vendor session full ends the continuation and frees the session" `Quick
             test_vendor_session_full_ends_the_continuation_and_frees_the_session

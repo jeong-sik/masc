@@ -848,6 +848,23 @@ let run_next_operation ?priority_predecessors ~base_path ~keeper_name ~operation
     Keeper_owner.run_next_operation ?priority_predecessors owner ~operation_id ~observed)
 ;;
 
+let allocate_turn ~base_path ~keeper_name =
+  match
+    apply_meta
+      ~base_path
+      ~keeper_name
+      (Keeper_owner_reducer.Allocate_turn
+         { updated_at = Keeper_meta_contract.now_iso () })
+  with
+  | Error _ as error -> error
+  | Ok (Some (meta : Keeper_meta_contract.keeper_meta)) -> Ok meta.runtime.last_turn_id
+  (* Only [Delete_if_snapshot] commits leave no meta; an allocation over a
+     removed meta is the reducer's [Meta_missing]. *)
+  | Ok None ->
+    Error
+      (Command_rejected (Keeper_owner.Reducer_rejected Keeper_owner_reducer.Meta_missing))
+;;
+
 let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
   match Keeper_owner_reducer.turn_runtime_delta_of_snapshots ~before ~after with
   | Error error -> Error (Command_rejected (Keeper_owner.Reducer_rejected error))

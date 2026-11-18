@@ -765,13 +765,8 @@ let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_go
       [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
     else [] in
   let criterion =
-    match goal.pg_metric, goal.pg_target_value with
-    | Some metric, Some target ->
-        text "성공 조건: " "Success criterion: " ^ metric ^ "\n"
-        ^ text "목표값: " "Target: " ^ target
-    | Some metric, None -> text "성공 조건: " "Success criterion: " ^ metric
-    | None, Some target -> text "목표값: " "Target: " ^ target
-    | None, None -> text "성공 조건 미확인" "Success criterion not observed" in
+    text "목표: " "Measure: " ^ Planning_detail.measure_text goal.pg_measure ^ "\n"
+    ^ text "측정 방법: " "Procedure: " ^ goal.pg_procedure in
   let room = max 0 (rows - List.length header - List.length hint) in
   header @ work_preview_body ~cells ~rows:room criterion @ hint
 
@@ -922,9 +917,8 @@ let planning_measurement_lines (state : state) ~width (goal : planning_goal) =
        | Some row ->
            if not (Option.equal String.equal goal.pg_criterion_revision
                         row.og_criterion_revision)
-              || not (Option.equal String.equal goal.pg_metric row.og_metric)
-              || not (Option.equal String.equal goal.pg_target_value
-                        row.og_target_value)
+              || not (Goal_measure.equal goal.pg_measure row.og_measure)
+              || not (String.equal goal.pg_procedure row.og_procedure)
            then unavailable (text "목표 목록과 측정 목록의 기준 버전 또는 목표값이 다름" "criterion revision or target differs between Work and the Goal tree")
            else
              let tasks =
@@ -1068,8 +1062,8 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let overview =
     section (text "목표와 성공 조건" "Goal and criterion")
     @ field (text "제목" "Title") goal.pg_title
-    @ field (text "성공 조건" "Metric") (optional goal.pg_metric)
-    @ field (text "목표값" "Target") (optional goal.pg_target_value)
+    @ field (text "목표" "Measure") (Planning_detail.measure_text goal.pg_measure)
+    @ field (text "측정 방법" "Procedure") goal.pg_procedure
     @ field (text "다음 행동" "Next") next_text in
   let metadata = gap @ section (text "상세 정보" "Details")
     @ field ~tone:Planning_detail.Quiet (text "목표 ID" "Goal") goal.pg_id

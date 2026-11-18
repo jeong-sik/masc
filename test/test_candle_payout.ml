@@ -22,8 +22,8 @@ let snapshot ?(goal_id = "goal-1") ?(request_id = "req-1") ?(verification_run_id
         ; goal_created_at = at "2026-09-20T01:00:00Z"
         ; due_date = None
         ; title = "Ship the ledger"
-        ; metric = None
-        ; target_value = None
+        ; measure = Goal_measure_fixture.measure
+        ; procedure = "read the fixture"
         ; linked_task_ids = []
         }
   }
@@ -370,8 +370,8 @@ let test_validate_settlement_rejects_partial_keeper_suppression_for_same_assigne
           ; goal_created_at = at "2026-09-20T01:00:00Z"
           ; due_date = None
           ; title = "Ship the ledger"
-          ; metric = None
-          ; target_value = None
+          ; measure = Goal_measure_fixture.measure
+          ; procedure = "read the fixture"
           ; linked_task_ids = [ "task-1"; "task-2"; "task-3" ]
           }
     }
@@ -472,8 +472,8 @@ let test_validate_settlement_requires_matching_failed_due_date () =
           ; goal_created_at = at "2026-09-20T01:00:00Z"
           ; due_date
           ; title = "Ship the ledger"
-          ; metric = None
-          ; target_value = None
+          ; measure = Goal_measure_fixture.measure
+          ; procedure = "read the fixture"
           ; linked_task_ids = [ "task-1" ]
           }
     }

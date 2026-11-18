@@ -127,15 +127,14 @@ type keeper_turn_complete = {
 (** One provider call inside a keeper turn, as the keeper's Agent-Core hook
     reports it ([keeper_turn_observation]). [to_session_turn] is the agent
     session's ordinal for the call -- the [turn] every [agent_core:*] frame
-    and every {!keeper_tool_call} carries -- and [to_total_turns] is how many
-    keeper turns had completed when the call ran, so the call belongs to
-    keeper turn [to_total_turns + 1], the number that turn's
+    and every {!keeper_tool_call} carries -- and [to_keeper_turn] is the
+    keeper turn number the hook ran under, the number that turn's
     {!keeper_turn_complete} settles with. The Activity fold reads these to
     file session-numbered frames under their keeper turn. *)
 type keeper_turn_observation = {
   to_keeper : string;
   to_session_turn : int option;
-  to_total_turns : int option;
+  to_keeper_turn : int option;
   to_at : float;
 }
 

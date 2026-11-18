@@ -402,7 +402,7 @@ let ensure_goal fixture =
       let goal =
         match
           Goal_store.upsert_goal_with_events ~actor:"test" (Mcp_server.workspace_config fixture.state)
-            ~title:"Tool Matrix Goal" ~metric:"m" ~target_value:"1" ()
+            ~title:"Tool Matrix Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" ()
         with
         | Ok (goal, _status, _) -> goal
         | Error err ->

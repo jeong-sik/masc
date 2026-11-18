@@ -1236,7 +1236,12 @@ type judgment_delivery_outcome =
           distinguish "retired" from any other cause a candidate is gone —
           both mean the same thing for this delivery: it cannot succeed on a
           retry of the identical request, because the row it would update no
-          longer exists. *)
+          longer exists. Only a fully decoded ledger gives this answer. *)
+  | Candidate_unreadable of { rejected_rows : int }
+      (** The candidate is not among the readable rows, and the ledger holds
+          [rejected_rows] rows the decoder refused. One of them may be this
+          candidate, so absence is not known and nothing was written. A
+          repaired ledger answers the identical request again. *)
   | Judgment_conflict of
       { recorded : judgment
       ; offered : judgment
@@ -1249,6 +1254,13 @@ type judgment_delivery_outcome =
 
 let judgment_conflict_detail ~candidate_id =
   "Board attention candidate judgment conflicts with worker result: " ^ candidate_id
+;;
+
+let candidate_unreadable_detail ~candidate_id ~rejected_rows =
+  Printf.sprintf
+    "Board attention candidate is not among the readable rows of a ledger holding %d unreadable row(s): %s"
+    rejected_rows
+    candidate_id
 ;;
 
 let deliver_recorded_judgment ~base_path ~keeper_name ~candidate_id judged_candidate =
@@ -1287,10 +1299,11 @@ let deliver_recorded_judgment ~base_path ~keeper_name ~candidate_id judged_candi
 ;;
 
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
-  let* candidates = load_candidates ~base_path ~keeper_name in
-  match find_candidate candidates candidate_id with
-  | None -> Ok Candidate_absent
-  | Some candidate ->
+  let* found = lookup ~base_path ~keeper_name ~candidate_id in
+  match found with
+  | Not_in_ledger -> Ok Candidate_absent
+  | Behind_rejected_rows { rejected_rows } -> Ok (Candidate_unreadable { rejected_rows })
+  | In_ledger candidate ->
     let* record =
       match status_view candidate.status with
       | Direct_resumable (Resumable_pending _)

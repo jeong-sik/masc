@@ -468,8 +468,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
           ~current_owner_epoch:owner_epoch
           ~required_at:(Time_compat.now ())
         |> Result.map Option.some
-        |> Result.map_error (fun detail ->
-          config_error ~field:"official_client_session.phase" detail)
+        |> Result.map_error Session_store.process_restart_error_to_core_error
       | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
         Ok stored_session
     in
@@ -556,7 +555,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
       | Some checkpoint ->
         Keeper_official_client_session_store.validate_continuation ~checkpoint
           ~expected:stored_session ~client_kind:Antigravity ~runtime_id ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
+        |> Result.map_error (fun (_ : string) ->
+          Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Gate_continuation_unresumable) in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -572,8 +572,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     in
     let* () = match official_task_reference with
       | None -> Ok ()
-      | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
-          "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
+      | Some _ ->
+        (* A limit of this client alone: the lane moves on to a candidate
+           that carries task references (#38402). *)
+        Error (Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Task_reference_unsupported) in
     let* prepared =
       Host.prepare_turn
         ~composed_context
@@ -604,9 +606,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
     let snapshot_sha256 = Keeper_official_client_context_codec.canonical_source_sha256
       ~system_prompt:prepared.system_prompt ~messages:snapshot_messages ~rest:[] in
-    let admission_error reason = config_error
-        ~field:"official_client_session.context_admission"
-        (Session_store.context_admission_error_to_string reason) in
+    let admission_error reason =
+      Keeper_official_client_session_refusal.core_error (Session_store.gate_context_refusal reason) in
     (* A Gate continuation is bound to its original vendor session: completion
        requires that session to settle again, so a fresh one would run the
        effects and then fail. It keeps the refusal, before any dispatch. *)

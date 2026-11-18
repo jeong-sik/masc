@@ -376,6 +376,26 @@ val read_dropped :
     drop reasons remain best-effort, so absence is not proof that a fact was
     never stored or removed. *)
 
+type commit_lineage =
+  { revisions : Keeper_memory_os_types.revision list
+  (** Revision links of committed journal rows, in journal order: each names a
+      fact the commit removed and the successor it kept. *)
+  ; retractions : string list
+  (** One memory id per fact an explicit retraction removed, in journal order,
+      with repeats when the same claim was stored and retracted again. *)
+  }
+
+val read_commit_lineage :
+  keepers_dir:string -> keeper_id:string -> (commit_lineage, string) result
+(** Revisions and explicit retractions as the committed journal records them.
+    The journal row is part of the commit (written by it or recovered from its
+    publication receipt), so a commit cannot keep its snapshot and lose this
+    lineage. Recovers a prepared publication first, as public snapshot reads
+    do, then scans the complete journal in an IO pool job. A missing journal is
+    no lineage; a malformed or unreadable journal, or a pending removal
+    receipt, is an error, not an empty lineage. Rows that predate
+    [revision_links] contribute no revisions. *)
+
 type retirement_context =
   | Retirement_source_changed
   | Retirement_source_unavailable of string
@@ -601,8 +621,8 @@ type disposition =
             the locked snapshot no longer holds. In the answer's order. *)
   ; revisions_applied : Keeper_memory_os_types.revision list
         (** the [revisions] this commit carried out: the old id left the
-            snapshot and its successor is in it. Only these get a [Revised]
-            event. In the answer's order. *)
+            snapshot and its successor is in it. Only these reach the
+            journal's [revision_links]. In the answer's order. *)
   }
 (** What one [apply_disposition] commit did. The absorptions, claims and
     revisions a caller passed in are what it asked for; these lists are what

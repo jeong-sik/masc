@@ -183,7 +183,7 @@ type unread_observation
 val unread_turns_observed :
   ?previous:unread_observation -> config:Workspace.config -> keeper_name:string -> unit ->
   (unread * unread_observation option, error) result
-(** Read the same fresh count inputs as [unread_turns]. An unchanged complete
+(** Read the same fresh count inputs as [unread_turns]. A revalidated complete
     checkpoint witness and equal count-relevant metadata permit reuse of the
     prior scalar atom count. No checkpoint messages or boundary task contexts
     are retained. Errors, absent/superseded checkpoints and the existing
@@ -324,6 +324,11 @@ module For_testing : sig
     config:Workspace.config -> keeper_name:string -> unit ->
     (unread * unread_observation option, error) result
   (** Observe actual full-load attempts without replacing the store reader. *)
+
+  val revalidate_unread_observation_after_object_read :
+    after_object_read:(Agent_core.Checkpoint_objects.digest -> unit) ->
+    unread_observation -> Keeper_checkpoint_store.Read_observation.revalidation
+  (** Revalidate the actual witness returned by the count reader. *)
 
   val consume_one_with_runtime_and_progress_writers
     : ?cli_runner:Keeper_lane_cli_oneshot.runner

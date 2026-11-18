@@ -79,7 +79,15 @@ let complete ~base_path ~worker_epoch candidate partition (judged : Jev.judged) 
          { recorded = (_ : Candidate.judgment); offered = (_ : Candidate.judgment) } ->
        (* Nothing was delivered for this judgment, so the root stays
           Completed. The caller reports the error and wakes the owner. *)
-       Error (Candidate.judgment_conflict_detail ~candidate_id:candidate.candidate_id))
+       Error (Candidate.judgment_conflict_detail ~candidate_id:candidate.candidate_id)
+     | Candidate.Candidate_unreadable { rejected_rows } ->
+       (* An unreadable row may be this candidate, so its absence is not
+          known: the root stays Completed for the owner walk, which holds it
+          until a repaired ledger delivers it (#38068). *)
+       Error
+         (Candidate.candidate_unreadable_detail
+            ~candidate_id:candidate.candidate_id
+            ~rejected_rows))
   | Keeper_board_attention_judgment.Relevant, Error detail ->
     Error ("Board comment parent unavailable: " ^ detail)
 

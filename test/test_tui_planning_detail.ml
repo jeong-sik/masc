@@ -47,7 +47,7 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
     | None -> if confirmed then Goal_phase.Completed else Goal_phase.Awaiting_confirmation in
   let criterion = Goal_store.Criterion
       { revision = "revision-1"; title = "Harness";
-        metric = Some "passing scenarios"; target_value = Some "10" } in
+        measure = Goal_measure_fixture.done_when "10"; procedure = "passing scenarios" } in
   let verdict : Goal_verification.verdict =
     { outcome = Proven; request_id = "request-1"; criterion;
       verification_run_id = run_id;
@@ -77,8 +77,8 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
         ; "phase", Goal_phase.to_yojson phase
         ; "title", `String "Harness"
         ; "criterion_revision", `String revision
-        ; "metric", `String metric
-        ; "target_value", `String "10"
+        ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "10")
+        ; "procedure", `String metric
         ]
     ; "verification", verification
     ]

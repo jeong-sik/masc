@@ -93,7 +93,7 @@ type durable_search_error =
   | Source_revalidate_failed of string
   | Absorbed_read_failed of string
   | Dropped_read_failed of string
-  | Events_read_failed of string
+  | Lineage_read_failed of string
   | Cursor_invalid
   | Cursor_stale
   | Cursor_scope_unsupported
@@ -103,7 +103,7 @@ let durable_search_error_kind_to_string = function
   | Source_revalidate_failed _ -> "source_revalidate_failed"
   | Absorbed_read_failed _ -> "absorbed_read_failed"
   | Dropped_read_failed _ -> "dropped_read_failed"
-  | Events_read_failed _ -> "events_read_failed"
+  | Lineage_read_failed _ -> "lineage_read_failed"
   | Cursor_invalid -> "invalid_memory_search_cursor"
   | Cursor_stale -> "stale_memory_search_cursor"
   | Cursor_scope_unsupported -> "unsupported_memory_search_cursor_scope"
@@ -114,7 +114,7 @@ let durable_search_error_detail = function
   | Source_revalidate_failed detail
   | Absorbed_read_failed detail
   | Dropped_read_failed detail
-  | Events_read_failed detail -> detail
+  | Lineage_read_failed detail -> detail
   | Cursor_invalid -> "Pass the next_cursor returned by the previous current-memory page."
   | Cursor_stale -> "Current memory or query changed. Restart the search without cursor."
   | Cursor_scope_unsupported -> "Pagination is available only for source=current."
@@ -435,10 +435,6 @@ type absorbed_search =
   { matches : absorbed_match list
   ; candidates : int
   ; unreadable : (int * Keeper_memory_absorbed.read_error) list
-  ; unreadable_events : (int * Keeper_memory_os_events.read_error) list
-        (** Lines of the memory events sidecar that did not decode. A
-            [Revised] step on such a line is not followed. Empty when the
-            sidecar was not read. *)
   }
 
 let current_memory_ids facts =
@@ -467,11 +463,11 @@ let current_memory_ids facts =
    its claim current; with none current, the latest row is taken. A chain
    that would come back to a claim it already passed stops at the claim
    before it. A claim that left the snapshot because a newer claim
-   continues it -- a [Revised] event (RFC-0418), written by the Librarian or
-   by [keeper_memory_write ~supersedes] -- is followed to that newer claim
-   the same way, so an absorbed fact whose claim was later revised still
-   reaches the claim current now. Only a claim that never became current, or
-   whose own departure has no row and no [Revised] event, ends as
+   continues it -- a revision link in the memory journal, committed by the
+   Librarian or by [keeper_memory_write ~supersedes] -- is followed to that
+   newer claim the same way, so an absorbed fact whose claim was later revised
+   still reaches the claim current now. Only a claim that never became
+   current, or whose own departure has no row and no revision link, ends as
    [into_current = false].
 
    [answered_by] names the current claims that answer this search themselves.
@@ -565,50 +561,34 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
       in
       whole_query @ fragments
     in
-    (* The events sidecar grows with every search ([Retrieved] rows), so it is
-       read only when a chain of absorbed rows alone stops short of a current
-       claim in a row that answers this search; only then can a [Revised] step
-       move it. A chain that stops short in a row the query does not answer
-       never reaches the results, so it does not open the sidecar. *)
+    (* The journal is the complete commit history, so it is read only when a
+       chain of absorbed rows alone stops short of a current claim in a row
+       that answers this search; only then can a revision link move it. A
+       chain that stops short in a row the query does not answer never reaches
+       the results, so it does not open the journal. *)
     let by_rows = List.map (resolve ~revised_to:StringMap.empty) absorbed in
     let statements = statements_of by_rows in
     let answered_by_rows = answered statements in
     let followed =
       if List.for_all (fun (m : absorbed_match) -> m.into_current) answered_by_rows
-      then Ok (statements, answered_by_rows, [])
+      then Ok (statements, answered_by_rows)
       else (
-        match
-          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            Keeper_memory_os_events.read ~keepers_dir ~keeper_id)
-        with
-        | Error error ->
-          Error
-            (Events_read_failed (Keeper_memory_os_events.file_read_error_to_string error))
-        | Ok event_lines ->
-          let revised_to, unreadable_events =
+        match Keeper_memory_os_current.read_commit_lineage ~keepers_dir ~keeper_id with
+        | Error detail -> Error (Lineage_read_failed detail)
+        | Ok lineage ->
+          let revised_to =
             List.fold_left
-              (fun (revised_to, unreadable) (line, decoded) ->
-                 match decoded with
-                 | Ok
-                     { Keeper_memory_os_events.memory_id
-                     ; kind = Keeper_memory_os_events.Revised { superseded_by }
-                     ; _
-                     } -> StringMap.add memory_id superseded_by revised_to, unreadable
-                 | Ok
-                     { Keeper_memory_os_events.kind =
-                         Keeper_memory_os_events.(Retrieved _ | Retracted)
-                     ; _
-                     } -> revised_to, unreadable
-                 | Error error -> revised_to, (line, error) :: unreadable)
-              (StringMap.empty, [])
-              event_lines
+              (fun revised_to (link : Keeper_memory_os_types.revision) ->
+                 StringMap.add link.superseded link.superseded_by revised_to)
+              StringMap.empty
+              lineage.Keeper_memory_os_current.revisions
           in
           let statements = statements_of (List.map (resolve ~revised_to) absorbed) in
-          Ok (statements, answered statements, List.rev unreadable_events))
+          Ok (statements, answered statements))
     in
     match followed with
     | Error _ as error -> error
-    | Ok (statements, answered_rows, unreadable_events) ->
+    | Ok (statements, answered_rows) ->
     Ok
       { matches =
           answered_rows
@@ -617,7 +597,6 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
           |> take limit
       ; candidates = List.length statements
       ; unreadable
-      ; unreadable_events
       }
 ;;
 
@@ -980,25 +959,6 @@ let keeper_memory_search_with_outcome
                ; "last", `Int last
                ] )
          ])
-      @ (match absorbed.unreadable_events with
-         | [] -> []
-         | (first, first_error) :: _ ->
-           let last =
-             List.fold_left (fun _ (line, _) -> line) first absorbed.unreadable_events
-           in
-           Log.Keeper.warn
-             ~keeper_name:meta.name
-             "keeper_memory_search could not follow %d memory event line(s) it could not read; first: line %d: %s"
-             (List.length absorbed.unreadable_events)
-             first
-             (Keeper_memory_os_events.read_error_to_string first_error);
-           [ ( "event_unreadable_lines"
-             , `Assoc
-                 [ "count", `Int (List.length absorbed.unreadable_events)
-                 ; "first", `Int first
-                 ; "last", `Int last
-                 ] )
-           ])
       @
       match unavailable with
       | None -> []
@@ -1120,7 +1080,7 @@ let keeper_memory_search_with_outcome
              with
              | Ok absorbed -> absorbed, None
              | Error error ->
-               ( { matches = []; candidates = 0; unreadable = []; unreadable_events = [] }
+               ( { matches = []; candidates = 0; unreadable = [] }
                , Some error )
            in
            let dropped, dropped_total, dropped_error =
@@ -1145,7 +1105,6 @@ let keeper_memory_search_with_outcome
              || successor_incomplete
              || history_has_read_errors history
              || absorbed.unreadable <> []
-             || absorbed.unreadable_events <> []
              || unavailable <> None
              || dropped_error <> None
            in
@@ -1239,7 +1198,7 @@ let keeper_memory_search_with_outcome
             | Error _ as error -> error
             | Ok absorbed ->
               let read_errors =
-                absorbed.unreadable <> [] || absorbed.unreadable_events <> []
+                absorbed.unreadable <> []
               in
               Ok
                 { output =
@@ -1272,7 +1231,7 @@ let keeper_memory_search_with_outcome
       let rejection = match error with
         | Cursor_invalid | Cursor_stale | Cursor_scope_unsupported -> true
         | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
-        | Dropped_read_failed _ | Events_read_failed _ -> false in
+        | Dropped_read_failed _ | Lineage_read_failed _ -> false in
       if not rejection then record_search_outcome Store_unavailable;
       Keeper_tool_execution.failure
         ~class_:(if rejection then Tool_result.Policy_rejection else Tool_result.Dependency_unavailable)
@@ -1280,7 +1239,7 @@ let keeper_memory_search_with_outcome
           | Cursor_stale -> Tool_result.Effect_outcome_unknown
           | Cursor_invalid | Cursor_scope_unsupported
           | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
-          | Dropped_read_failed _ | Events_read_failed _ -> Tool_result.Proven_pre_effect)
+          | Dropped_read_failed _ | Lineage_read_failed _ -> Tool_result.Proven_pre_effect)
         (error_json
            ~fields:
              [ "error_kind", `String (durable_search_error_kind_to_string error)
@@ -1865,20 +1824,6 @@ let keeper_memory_write_with_outcome
        (match written_fact with
         | Some written_fact ->
           let written_memory_id = Keeper_memory_os_types.memory_id written_fact in
-          (* The supersession is already committed; its history event names
-             the successor, as a Librarian revision does (RFC-0418). A target
-             the Librarian had already dropped was not revised by this write,
-             so it gets no event. *)
-          (match supersession with
-           | Superseded superseded_memory_id ->
-             record_memory_events
-               ~keepers_dir
-               ~meta
-               ~now:snapshot.updated_at
-               ~kind:
-                 (Keeper_memory_os_events.Revised { superseded_by = written_memory_id })
-               [ superseded_memory_id ]
-           | No_supersedes | Target_already_dropped _ -> ());
           respond
             ~ok:true
             ~error_kind:No_memory_write_error
@@ -2043,14 +1988,9 @@ let keeper_memory_retract_with_outcome
          ()
      with
      | Ok snapshot ->
-       (* The fact is gone from the snapshot; its retraction remains in the
-          history if the same claim is later stored again. *)
-       record_memory_events
-         ~keepers_dir
-         ~meta
-         ~now
-         ~kind:Keeper_memory_os_events.Retracted
-         [ memory_id ];
+       (* The fact is gone from the snapshot. The commit's journal row records
+          the retraction, so it stays in the history if the same claim is
+          later stored again. *)
        Log.Keeper.info
          "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"
          meta.name

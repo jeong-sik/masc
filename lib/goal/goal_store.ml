@@ -706,21 +706,16 @@ let append_audit_event config json =
     (fun () ->
   let path = goal_events_path config in
   try
-    let expected = try (Unix.stat path).Unix.st_size with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> 0 in
-    (* The transaction carries the new end offset on success and the append
-       error on failure; the offset mismatch is a failure, the same reading
-       world_constitution_store gives it. The append did not commit on a
-       mismatch, so the retry cannot write the event twice. *)
-    let rec append expected_end_offset =
-      match Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
-          path ~expected_end_offset (Yojson.Safe.to_string json ^ "\n") with
-      | Fs_compat.Private_file_failed (Fs_compat.End_offset_mismatch {actual;_})
-      | Fs_compat.Private_file_failed_with_cleanup_failure
-          { error = Fs_compat.End_offset_mismatch {actual;_}; _ } -> append actual
-      | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
-    match append expected with
-    | Fs_compat.Private_file_succeeded _ ->
+    (* The rows end after the last newline. Bytes after it are an append a
+       crash cut short, never an event: this append cuts them under the same
+       path mutex and exclusive lock and writes after the last complete row.
+       It carries no end offset because the event is unconditional; the
+       ledger's order is the lock's order. *)
+    let outcome =
+      Fs_compat.append_private_jsonl_durable_locked_result
+        path (Yojson.Safe.to_string json ^ "\n") in
+    match outcome with
+    | Fs_compat.Private_file_succeeded () ->
         projection_source_changed config;
         Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
@@ -757,11 +752,13 @@ let flush_pending_events_locked config =
             ~finally:(fun () ->
               if !append_requested then
                 Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
-            (fun () -> Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+            (* [decide] receives the complete rows only. Bytes after the last
+               newline are an append a crash cut short, never an event; a
+               suffix written here goes in after the update cuts them. *)
+            (fun () -> Fs_compat.update_private_jsonl_after_cursor_durable_locked_result path
+               ~after:(None : (Fs_compat.Private_jsonl_cursor.t * unit) option)
+               (fun { Fs_compat.rows = existing; _ } ->
             let inspect () =
-              if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then
-                Error "goal event ledger has an incomplete tail"
-              else
                 let rec decode acc malformed = function
                   | [] ->
                       if malformed > 0 then
@@ -775,8 +772,7 @@ let flush_pending_events_locked config =
                        | json -> decode (json :: acc) malformed rest
                        | exception Yojson.Json_error _ ->
                            (* Complete historical rows remain byte-for-byte in
-                              the ledger; they cannot witness event identity.
-                              The tail check above still rejects torn writes. *)
+                              the ledger; they cannot witness event identity. *)
                            decode acc (malformed + 1) rest) in
                 let* rows = decode [] 0 (String.split_on_char '\n' existing) in
                 let rec select acc = function
@@ -845,14 +841,13 @@ let append_audit_event_after_pending config json =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
-let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
+let goal_with_fields ~now ?title ?measure ?procedure ?due_date ?priority
     (existing : goal) =
   let updated =
     { existing with
       title = Option.value title ~default:existing.title;
-      metric = (match metric with Some _ -> metric | None -> existing.metric);
-      target_value =
-        (match target_value with Some _ -> target_value | None -> existing.target_value);
+      measure = Option.value measure ~default:existing.measure;
+      procedure = Option.value procedure ~default:existing.procedure;
       due_date = (match due_date with Some _ -> due_date | None -> existing.due_date);
       priority = clamp_priority (Option.value priority ~default:existing.priority);
       updated_at = now;
@@ -860,16 +855,15 @@ let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
   in
   let criterion_changed =
     not (String.equal existing.title updated.title)
-    || not (Option.equal String.equal existing.metric updated.metric)
-    || not (Option.equal String.equal existing.target_value updated.target_value)
+    || not (Goal_measure.equal existing.measure updated.measure)
+    || not (String.equal existing.procedure updated.procedure)
   in
   updated, criterion_changed
 
 let validate_changed_criterion (goal : goal) : (unit, write_error) result =
-  if blank_opt (Some goal.title) || blank_opt goal.metric
-     || blank_opt goal.target_value then
+  if blank_opt (Some goal.title) || blank_opt (Some goal.procedure) then
     Error (Rejected
-      "a changed goal criterion requires non-blank title, metric and target_value; \
+      "a changed goal criterion requires a non-blank title and procedure; \
        omitted fields retain their stored values")
   else Ok ()
 
@@ -877,9 +871,9 @@ let goal_with_new_criterion ~criterion_revision (goal : goal) =
   { goal with criterion_revision; phase = Goal_phase.criterion_changed goal.phase;
     last_review_note = None; last_review_at = None }
 
-let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
+let new_goal ~now ~id ~criterion_revision ~title ~measure ~procedure ~due_date
     ~priority : goal =
-  { id; criterion_revision; title; metric; target_value; due_date;
+  { id; criterion_revision; title; measure; procedure; due_date;
     priority = clamp_priority (Option.value priority ~default:3);
     phase = Goal_phase.Executing;
     last_review_note = None; last_review_at = None;
@@ -908,7 +902,7 @@ let resolve_goal_id = function
 
 type upsert_precondition = Unconditional | Require_absent
 
-let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date
+let upsert_goal_with_events config ~actor ?id ?title ?measure ?procedure ?due_date
     ?priority ?(precondition = Unconditional) () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
@@ -933,7 +927,7 @@ let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_
             match existing_goal with
             | Some existing ->
                 let updated, criterion_changed =
-                  goal_with_fields ~now ?title ?metric ?target_value ?due_date
+                  goal_with_fields ~now ?title ?measure ?procedure ?due_date
                     ?priority existing in
                 let* () =
                   if criterion_changed then validate_changed_criterion updated
@@ -956,16 +950,17 @@ let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_
                         "a non-blank title is required for a new goal \
                          (a goal without a name states no success condition \
                          to hold it to)") in
-                if blank_opt metric || blank_opt target_value then
-                  Error (Rejected
-                    "metric and target_value are required for a new goal \
-                     (RFC-0387 B1: a goal must declare a measurable \
-                     success condition)")
-                else
+                match measure, procedure with
+                | Some measure, Some procedure when String.trim procedure <> "" ->
                   let criterion_revision = Random_id.hex ~bytes:16 in
                   let goal = new_goal ~now ~id:resolved_id ~criterion_revision
-                      ~title ~metric ~target_value ~due_date ~priority in
+                      ~title ~measure ~procedure ~due_date ~priority in
                   Ok (goal, `created)
+                | None, _ | Some _, (None | Some _) ->
+                  Error (Rejected
+                    "measure and a non-blank procedure are required for a new goal \
+                     (RFC-0387 B1: a goal must declare a measurable \
+                     success condition)")
           in
           let revision = state.version + 1 in
           let goals = match action with

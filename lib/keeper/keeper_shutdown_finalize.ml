@@ -111,16 +111,22 @@ let operation_evidence_ref operation =
 
 let task_has_operation_receipt operation (task : Masc_domain.task) =
   match task.task_status, task.handoff_context with
-  | Masc_domain.Todo, Some handoff ->
+  | Masc_domain.Todo, Some (Masc_domain.Handoff_decoded handoff) ->
     List.exists
       (String.equal (operation_evidence_ref operation))
       handoff.evidence_refs
-  | Masc_domain.Claimed _, _
-  | Masc_domain.InProgress _, _
-  | Masc_domain.AwaitingVerification _, _
-  | Masc_domain.Done _, _
-  | Masc_domain.Cancelled _, _
+  (* The shutdown release writes its receipt as a readable handoff, so an
+     unreadable one was not written by this operation. *)
+  | Masc_domain.Todo, Some (Masc_domain.Handoff_unreadable _)
   | Masc_domain.Todo, None -> false
+  | ( ( Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ )
+    , ( None
+      | Some (Masc_domain.Handoff_decoded _ | Masc_domain.Handoff_unreadable _) ) ) ->
+    false
 ;;
 
 let find_task tasks task_id =
@@ -170,15 +176,20 @@ let append_unique_evidence_ref (refs : string list) (receipt_ref : string)
   else non_empty @ [ receipt_ref ]
 ;;
 
+(* The release keeps the previous owner's summary and next step. An unreadable
+   stored handoff has none to keep, so the release authors its own note like an
+   agent release does. The release is an exit-class transition, and the
+   transition executor records the replaced unreadable value on the
+   transition log row (#38219). *)
 let release_handoff_context
       ~now
       operation
-      (previous : Masc_domain.task_handoff_context option)
+      (previous : Masc_domain.stored_handoff_context option)
   : Masc_domain.task_handoff_context
   =
   let receipt_ref = operation_evidence_ref operation in
   match previous with
-  | None ->
+  | None | Some (Masc_domain.Handoff_unreadable _) ->
     { summary = shutdown_release_summary
     ; reason = Some shutdown_release_reason
     ; next_step = Some shutdown_release_next_step
@@ -187,7 +198,7 @@ let release_handoff_context
     ; updated_at = Some now
     ; updated_by = Some operation.actor
     }
-  | Some prev ->
+  | Some (Masc_domain.Handoff_decoded prev) ->
     let summary =
       match non_empty_trimmed prev.summary with
       | Some preserved -> preserved

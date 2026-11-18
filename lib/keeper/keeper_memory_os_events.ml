@@ -10,10 +10,7 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
 
-type event_kind =
-  | Retrieved of { query : string }
-  | Retracted
-  | Revised of { superseded_by : string }
+type event_kind = Retrieved of { query : string }
 
 type event =
   { recorded_at : float
@@ -27,23 +24,15 @@ let field_memory_id = "memory_id"
 let field_trace_id = "trace_id"
 let field_kind = "kind"
 let field_query = "query"
-let field_superseded_by = "superseded_by"
 let kind_retrieved = "retrieved"
-let kind_retracted = "retracted"
-let kind_revised = "revised"
 let common_fields = [ field_recorded_at; field_memory_id; field_trace_id; field_kind ]
 
 let kind_token = function
   | Retrieved _ -> kind_retrieved
-  | Retracted -> kind_retracted
-  | Revised _ -> kind_revised
 ;;
 
-(* Only events with additional data carry a payload field. *)
 let payload = function
   | Retrieved { query } -> [ field_query, `String query ]
-  | Retracted -> []
-  | Revised { superseded_by } -> [ field_superseded_by, `String superseded_by ]
 ;;
 
 let event_to_json (e : event) : Yojson.Safe.t =
@@ -76,14 +65,6 @@ let validate (e : event) : (event, W.wire_error) result =
       if non_blank query
       then Ok ()
       else W.wire_fail [ W.Wire_field field_query ] W.Blank_string
-    | Retracted -> Ok ()
-    | Revised { superseded_by } ->
-      if W.is_memory_id superseded_by
-      then Ok ()
-      else
-        W.wire_fail
-          [ W.Wire_field field_superseded_by ]
-          (W.Not_a_memory_id superseded_by)
   in
   e
 ;;
@@ -93,11 +74,6 @@ let kind_of_token token =
   | "retrieved" ->
     Ok ([ field_query ], fun fields ->
       let+ query = W.wire_string_field field_query fields in Retrieved { query })
-  | "retracted" -> Ok ([], fun _ -> Ok Retracted)
-  | "revised" ->
-    Ok ([ field_superseded_by ], fun fields ->
-      let+ superseded_by = W.wire_string_field field_superseded_by fields in
-      Revised { superseded_by })
   | unknown -> W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token unknown)
 ;;
 
@@ -168,9 +144,8 @@ let append ~keepers_dir ~keeper_id (e : event) : (unit, append_error) result =
 ;;
 
 (* Reject the events that fail validation, then write the rest in one append.
-   A producer on a path that must not fail (a search returning its results, a
-   librarian pass that has committed) reports what comes back in its log and
-   goes on. *)
+   A producer on a path that must not fail (a search returning its results)
+   reports what comes back in its log and goes on. *)
 let append_all ~keepers_dir ~keeper_id (events : event list) : append_error list =
   let rejected, valid =
     List.partition_map
@@ -245,61 +220,59 @@ type summary_accumulator =
   { retrievals : int
   ; days : Day_set.t
   ; latest : float option
-  ; retractions : int
-  ; predecessors : Memory_id_set.t
   }
 
-let empty_accumulator =
-  { retrievals = 0; days = Day_set.empty; latest = None
-  ; retractions = 0; predecessors = Memory_id_set.empty }
+let empty_accumulator = { retrievals = 0; days = Day_set.empty; latest = None }
 
-let summaries_for ~memory_ids (events : event list) : summary list =
+let summaries_for ~memory_ids ~(revisions : W.revision list) ~retractions
+    (events : event list) : summary list =
   match memory_ids with
   | [] -> []
   | _ :: _ ->
   let requested = List.fold_left (fun summaries memory_id ->
     Memory_id_map.add memory_id empty_accumulator summaries)
       Memory_id_map.empty memory_ids in
-  let summaries =
+  let retrievals =
     List.fold_left
       (fun summaries (event : event) ->
-         let target_id = match event.kind with
-           | Retrieved _ | Retracted -> event.memory_id
-           | Revised { superseded_by } -> superseded_by
-         in
-         match Memory_id_map.find_opt target_id summaries with
+         match Memory_id_map.find_opt event.memory_id summaries with
          | None -> summaries
          | Some current ->
            match event.kind with
            | Retrieved _ ->
-             Memory_id_map.add target_id
-               { current with
-                 retrievals = current.retrievals + 1
+             Memory_id_map.add event.memory_id
+               { retrievals = current.retrievals + 1
                ; days = Day_set.add (utc_day event.recorded_at) current.days
                ; latest = Some (match current.latest with
                    | None -> event.recorded_at
                    | Some seen -> Float.max seen event.recorded_at)
-               } summaries
-           | Retracted ->
-             Memory_id_map.add target_id
-               { current with retractions = current.retractions + 1 } summaries
-           | Revised _ ->
-             if String.equal event.memory_id target_id then summaries
-             else
-               Memory_id_map.add target_id
-                 { current with
-                   predecessors = Memory_id_set.add event.memory_id current.predecessors
-                 } summaries)
+               } summaries)
       requested events
-    |> Memory_id_map.map (fun current ->
-         { retrieved_count = current.retrievals
-         ; retrieved_distinct_days = Day_set.cardinal current.days
-         ; last_retrieved_at = current.latest
-         ; retracted_count = current.retractions
-         ; revised_from = Memory_id_set.elements current.predecessors
-         })
   in
-  List.map (fun memory_id -> Memory_id_map.find memory_id summaries) memory_ids
+  let retracted_count memory_id =
+    List.length (List.filter (String.equal memory_id) retractions)
+  in
+  let revised_from memory_id =
+    List.filter_map
+      (fun (link : W.revision) ->
+         if String.equal link.superseded_by memory_id
+            && not (String.equal link.superseded memory_id)
+         then Some link.superseded
+         else None)
+      revisions
+    |> Memory_id_set.of_list
+    |> Memory_id_set.elements
+  in
+  List.map
+    (fun memory_id ->
+       let current = Memory_id_map.find memory_id retrievals in
+       { retrieved_count = current.retrievals
+       ; retrieved_distinct_days = Day_set.cardinal current.days
+       ; last_retrieved_at = current.latest
+       ; retracted_count = retracted_count memory_id
+       ; revised_from = revised_from memory_id
+       })
+    memory_ids
 ;;
 
 let summary_to_json (s : summary) : Yojson.Safe.t =

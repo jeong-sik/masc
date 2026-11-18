@@ -69,5 +69,12 @@ let remember key ~atoms ~witness = { key; atoms; witness }
 let reuse key observation =
   if not (equal_key key observation.key) then None
   else match Checkpoint.revalidate observation.witness with
-    | Checkpoint.Unchanged -> Some observation.atoms
+    | Checkpoint.Unchanged -> Some (observation.atoms, observation)
+    | Checkpoint.Refreshed witness ->
+      Some (observation.atoms, { observation with witness })
     | Checkpoint.Changed | Checkpoint.Unavailable _ -> None
+
+module For_testing = struct
+  let revalidate_after_object_read ~after_object_read observation =
+    Checkpoint.For_testing.revalidate_after_object_read ~after_object_read observation.witness
+end

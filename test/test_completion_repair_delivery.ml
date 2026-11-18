@@ -197,7 +197,7 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
     Alcotest.(check int) "no queue is written under a name no Keeper reads" 0
       (List.length (queue config));
     (match only_task config with
-     | { task_status = D.Todo; handoff_context = Some handoff; _ } ->
+     | { task_status = D.Todo; handoff_context = Some (D.Handoff_decoded handoff); _ } ->
        Alcotest.(check (option string)) "the verdict's reason stays on the Task"
          (Some reason) handoff.reason;
        Alcotest.(check (list string)) "verification correlation is not submitted evidence"
@@ -267,7 +267,7 @@ let test_an_operator_verdict_releases_as_the_operator () =
     commit config ~authority:human ~verification_id (D.Verdict_rejected { reason });
     reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
     match only_task config with
-    | { task_status = D.Todo; handoff_context = Some handoff; _ } ->
+    | { task_status = D.Todo; handoff_context = Some (D.Handoff_decoded handoff); _ } ->
       Alcotest.(check (option string)) "the operator who decided is the releaser"
         (Some "repair-operator") handoff.updated_by
     | { task_status; _ } ->
@@ -487,13 +487,14 @@ let test_release_before_acknowledgement_replays_idempotently () =
      | Error detail -> Alcotest.fail detail);
     let released = only_task config in
     (match released.handoff_context with
-     | Some handoff ->
+     | Some (D.Handoff_decoded handoff) ->
        Alcotest.(check (list string))
          "unroutable rejection does not turn its verification ID into evidence"
          [] handoff.evidence_refs;
        Alcotest.(check (option string)) "release retains the correction reason"
          (Some reason) handoff.reason
-     | None -> Alcotest.fail "unroutable release must retain the correction handoff");
+     | Some (D.Handoff_unreadable _) | None ->
+       Alcotest.fail "unroutable release must retain the correction handoff");
     check_pending config 0;
     (match Wake.release_unroutable_task ~config obligation with
      | Ok `Superseded -> ()

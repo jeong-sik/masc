@@ -1009,7 +1009,8 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
              [ `Assoc
                  [ "id", `String "goal-1"
                  ; "title", `String "g"
-                 ; "metric", `Null
+                 ; "measure", Goal_measure.to_yojson Goal_measure_fixture.measure
+                 ; "procedure", `String "tests"
                  ; "priority", `Int 2
                  ; "phase", `String "executing"
                  ; "owner", `Null

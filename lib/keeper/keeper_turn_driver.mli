@@ -883,4 +883,14 @@ module For_testing : sig
       calls this instead of re-typing the predicate chain, so a predicate
       added to the chain is part of the comparison without a test edit. *)
 
+  val official_continuation_admission :
+    continuation_runtime_id:string option ->
+    attempt_runtime_id:string ->
+    checkpoint_owner:Runtime_execution.checkpoint_owner ->
+    (unit, Agent_core.Error.t) result
+  (** Whether a lane candidate may take an official-client Gate or checkpoint
+      continuation: another runtime than the continuation's is refused with
+      {!Keeper_official_client_session_refusal.Continuation_on_other_runtime},
+      which the walk moves past (#38402). *)
+
 end

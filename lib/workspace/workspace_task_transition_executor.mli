@@ -12,7 +12,20 @@ type transition_backlog_update =
   { backlog : Masc_domain.backlog
   ; transitioned_task : Masc_domain.task
   ; persisted_handoff_context : Masc_domain.task_handoff_context option
+  ; replaced_unreadable_handoff : Masc_domain.replaced_unreadable_handoff option
+      (** The stored [Handoff_unreadable] this exit-class transition replaced,
+          or [None] when it replaced a readable note, nothing, or (entry-class)
+          kept the stored value. The caller writes it on the transition log
+          row so the replaced value is recorded (#38219). *)
   }
+
+val unreadable_handoff_replaced
+  :  Masc_domain.stored_handoff_context option
+  -> Masc_domain.replaced_unreadable_handoff option
+(** What overwriting a stored handoff with a new value removes, when the stored
+    value is [Handoff_unreadable]; [None] for a readable or absent note. Every
+    path that overwrites the field records this on its transition row, so an
+    unreadable note is recorded when it is replaced (#38219). *)
 
 val build_backlog_update
   :  backlog:Masc_domain.backlog

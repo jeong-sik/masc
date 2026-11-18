@@ -1,6 +1,6 @@
 open Result.Syntax
 type identity = { goal_id : string; request_id : string; verification_run_id : string }
-type goal = { title : string; metric : string option; target_value : string option }
+type goal = { title : string; measure : Goal_measure.t; procedure : string }
 type task = { task_id : string; title : string; keeper : string }
 type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }
@@ -20,9 +20,8 @@ let relation_text = function Related -> "related" | Unrelated -> "unrelated"
 let relation_of_text = function
   | `String "related" -> Ok Related | `String "unrelated" -> Ok Unrelated
   | _ -> Error "expected related or unrelated"
-let nullable = function None -> `Null | Some s -> `String s
-let goal_json (g : goal) = `Assoc ["title", `String g.title; "metric", nullable g.metric;
-  "target_value", nullable g.target_value]
+let goal_json (g : goal) = `Assoc ["title", `String g.title;
+  "measure", Goal_measure.to_yojson g.measure; "procedure", `String g.procedure]
 let stage = function Grade _ -> "grade" | Relation _ -> "relation" | Weights _ -> "weights"
 let input = function
   | Grade g -> `Assoc ["goal", goal_json g.goal;

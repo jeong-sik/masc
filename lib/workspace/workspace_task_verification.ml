@@ -25,10 +25,11 @@ let note_evidence_ref value =
   then Some trimmed
   else Some ("note:" ^ trimmed)
 
-let verification_submission_evidence_refs task ~notes =
+let verification_submission_evidence_refs
+      ~(handoff : Masc_domain.task_handoff_context option) ~notes =
   let handoff_refs, summary_refs =
-    match task.handoff_context with
-    | Some (hc : Masc_domain.task_handoff_context) ->
+    match handoff with
+    | Some hc ->
       let summary_trimmed = String.trim hc.summary in
       let summary_keep = Option.to_list (note_evidence_ref summary_trimmed) in
       (hc.evidence_refs, summary_keep)

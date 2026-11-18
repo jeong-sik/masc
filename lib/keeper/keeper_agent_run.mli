@@ -176,6 +176,7 @@ val run_turn
   : ?event_scope:Keeper_turn_scope.t
   -> ?preview:Keeper_turn_preview.writer
   -> ?observation_token:Keeper_turn_observation_token.t
+  -> keeper_turn_id:int
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

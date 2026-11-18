@@ -2561,31 +2561,6 @@ let run_pass
                    that did not commit is on the run's output and in the log. *)
                 (match publish_continuity prepared working_state with
                  | Continuity_committed | Continuity_not_committed _ -> ()));
-             (* The snapshot is committed; each supersede it carried out is now
-                a Revised event on the old id (RFC-0418). A supersede of a
-                memory the keeper removed during the pass was not carried out
-                and gets no event, so the old id keeps the one successor the
-                keeper gave it. A sidecar that cannot be written is said here
-                and does not undo the pass. *)
-             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-               Keeper_memory_os_events.append_all
-                 ~keepers_dir
-                 ~keeper_id
-                 (List.map
-                    (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
-                       { recorded_at = disposition.snapshot.updated_at
-                       ; memory_id = revision.superseded
-                       ; trace_id = input_trace_id inp
-                       ; kind =
-                           Keeper_memory_os_events.Revised
-                             { superseded_by = revision.superseded_by }
-                       })
-                    disposition.revisions_applied))
-             |> List.iter (fun error ->
-               Log.Keeper.warn
-                 ~keeper_name:keeper_id
-                 "%s"
-                 (Keeper_memory_os_events.append_error_to_string error));
              `Memory_committed (disposition, exact_output, selected_slot, absorb_gate)
            in
            match result with

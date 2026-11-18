@@ -676,10 +676,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           ~system_prompt:"changed core instructions" ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages:large_history ~hooks ~context:(Agent_core.Context.create ())
                           ~sw ~net:(Eio.Stdenv.net env) () with
-                       | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
-                         check string "a Gate continuation keeps the context refusal"
-                           "official_client_session.context_admission" field
-                       | Error error -> fail (Agent_core.Error.to_string error)
+                       | Error error ->
+                         (match Keeper_official_client_session_refusal.of_core_error error with
+                          | Some Keeper_official_client_session_refusal.Gate_canonical_context_changed -> ()
+                          | Some _ | None -> fail (Agent_core.Error.to_string error))
                        | Ok _ -> fail "a Gate continuation ran in a fresh vendor session");
                       check string "the refused Gate continuation never reaches the CLI"
                         prompt_before_gate (In_channel.with_open_bin

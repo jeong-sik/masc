@@ -196,7 +196,10 @@ let body_lines ~ko ~cols ~goal_lines (task : Masc_domain.task) =
     @ many "대상 파일" "File" task.files in
   let evidence = (match task.handoff_context with
     | None -> []
-    | Some handoff -> optional "사유" "Reason" handoff.reason
+    | Some (Masc_domain.Handoff_unreadable {reason; raw = _}) ->
+      field ~style:(Theme.warn ()) "인수인계" "Handoff"
+        (text "저장값을 읽을 수 없음: " "stored value unreadable: " ^ reason)
+    | Some (Handoff_decoded handoff) -> optional "사유" "Reason" handoff.reason
       @ (if String.equal handoff.summary "" then [] else field "인수인계" "Handoff" handoff.summary)
       @ optional "다음 행동" "Next" handoff.next_step
       @ optional "실패" "Failure" handoff.failure_mode
@@ -217,7 +220,9 @@ let body_lines ~ko ~cols ~goal_lines (task : Masc_domain.task) =
     @ optional ~style:provenance_style "세션 ID" "Session" task.execution_links.session_id
     @ (List.concat_map (fun skill -> quiet "스킬" "Skill"
         (Yojson.Safe.to_string (Skill_reference.to_yojson skill))) task.skills)
-    @ (match task.handoff_context with None -> [] | Some handoff ->
+    @ (match task.handoff_context with
+      | None | Some (Masc_domain.Handoff_unreadable _) -> []
+      | Some (Handoff_decoded handoff) ->
         optional ~style:provenance_style "인수인계 갱신" "Handoff updated" handoff.updated_at
         @ optional ~style:provenance_style "갱신한 주체" "Handoff updater" handoff.updated_by) in
   request

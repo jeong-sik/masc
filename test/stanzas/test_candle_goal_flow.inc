@@ -1,7 +1,7 @@
 (test
  (name test_candle_goal_flow)
  (modules test_candle_goal_flow)
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   masc_test_deps
   masc.server
   exact_output_fixture

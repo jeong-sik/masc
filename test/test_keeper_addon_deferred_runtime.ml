@@ -187,7 +187,7 @@ sources = []
         ~identity:{Candle_appraisal.goal_id="deferred-goal";request_id="deferred-payout";
           verification_run_id="deferred-proof"}
         ~prompt:"Judge the immutable deferred-tool fixture only."
-        (Candle_appraisal.Grade {goal={title="Deferred tool fixture";metric=None;target_value=None};
+        (Candle_appraisal.Grade {goal={title="Deferred tool fixture";measure=Goal_measure_fixture.measure;procedure="read the fixture"};
           grades=[grade,"Observed execution"]}) |> get in
       let submit = Candle_appraisal_intent.submit_arguments intent in
       let read = Candle_appraisal_intent.read_arguments intent in

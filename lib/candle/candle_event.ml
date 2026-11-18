@@ -55,8 +55,8 @@ type body =
       ; goal_created_at : Candle_time.t
       ; due_date : string option
       ; title : string
-      ; metric : string option
-      ; target_value : string option
+      ; measure : Goal_measure.t
+      ; procedure : string
       ; linked_task_ids : string list
       }
   | Payout_owed of
@@ -219,8 +219,8 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "goal_created_at", Candle_time.to_yojson s.goal_created_at
     ; "due_date", nullable_text s.due_date
     ; "title", `String s.title
-    ; "metric", nullable_text s.metric
-    ; "target_value", nullable_text s.target_value
+    ; "measure", Goal_measure.to_yojson s.measure
+    ; "procedure", `String s.procedure
     ; "linked_task_ids", `List (List.map (fun id -> `String id) s.linked_task_ids)
     ]
   | Payout_owed p ->
@@ -303,12 +303,8 @@ let snapshot_of_fields ~context fields =
     field "due_date" (Candle_json.as_nullable Candle_json.as_string) fields
   in
   let* title, fields = field "title" Candle_json.as_string fields in
-  let* metric, fields =
-    field "metric" (Candle_json.as_nullable Candle_json.as_string) fields
-  in
-  let* target_value, fields =
-    field "target_value" (Candle_json.as_nullable Candle_json.as_string) fields
-  in
+  let* measure, fields = field "measure" Goal_measure.of_yojson fields in
+  let* procedure, fields = field "procedure" Candle_json.as_non_blank fields in
   let* linked_task_ids, fields =
     field "linked_task_ids" (Candle_json.as_list Candle_json.as_non_blank) fields
   in
@@ -323,8 +319,8 @@ let snapshot_of_fields ~context fields =
        ; goal_created_at
        ; due_date
        ; title
-       ; metric
-       ; target_value
+       ; measure
+       ; procedure
        ; linked_task_ids
        })
 ;;

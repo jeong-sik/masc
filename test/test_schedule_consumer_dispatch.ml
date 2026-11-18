@@ -3561,7 +3561,7 @@ let test_wake_received_during_a_turn_survives_its_finish () =
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
        let observation_token = Keeper_turn_observation_token.fresh () in
-       Keeper_registry.mark_turn_started ~observation_token ~base_path
+       Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path
          ~wake:Keeper_registry.Chat_request keeper_name;
        Atomic.set entry.fiber_wakeup false;
        let request = create_keeper_wake_schedule

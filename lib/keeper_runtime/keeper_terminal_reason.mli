@@ -87,6 +87,12 @@ type t =
       {!Keeper_internal_error.official_client_recovery_required_kind}. The
       durable official-client session refused a local claim before provider
       dispatch and remains held until an operator resolves its recovery. *)
+  | Official_client_session_refused of Keeper_official_client_session_refusal.t
+  (** Exact codes {!Keeper_official_client_session_refusal.code}. An
+      official-client runtime refused the turn before provider dispatch
+      because of the state of its durable vendor session, not because of a
+      setting (#38402). The payload names which refusal; [to_wire] writes its
+      code, which is the only spelling [of_wire] accepts for it. *)
   | Provider_attempt_effect_fenced of string
   (** Exact canonical wire
       {!Keeper_internal_error.provider_attempt_effect_fenced_kind}. A provider

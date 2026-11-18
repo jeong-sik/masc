@@ -67,7 +67,7 @@ let make_goal id title =
   {
     Goal_store.id;
     criterion_revision = "fixture-criterion-" ^ id; title;
-    metric = None; target_value = None; due_date = None;
+    measure = Goal_measure_fixture.measure; procedure = "read the fixture"; due_date = None;
     priority = 3; phase = Goal_phase.Executing;
     last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
@@ -348,8 +348,8 @@ let test_status_field_no_longer_decodes () =
         ("id", `String id);
         ("criterion_revision", `String "fixture-revision");
         ("title", `String ("Goal " ^ id));
-        ("metric", `Null);
-        ("target_value", `Null);
+        ("measure", Goal_measure.to_yojson Goal_measure_fixture.measure);
+        ("procedure", `String "tests");
         ("due_date", `Null);
         ("priority", `Int 3);
         ("status", `String status);
@@ -384,8 +384,8 @@ let test_status_field_no_longer_decodes () =
      the next upsert would overwrite goals.json AND its .last-good mirror with an
      empty state, turning one undecodable row into permanent loss. *)
   (match
-     Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~metric:"m"
-       ~target_value:"1" ()
+     Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~measure:(Goal_measure_fixture.done_when "1")
+       ~procedure:"m" ()
    with
    | Ok _ -> fail "Goal upsert wrote over an undecodable store"
    | Error (Goal_store.Store_unavailable u) ->
@@ -404,8 +404,8 @@ let test_status_field_no_longer_decodes () =
 let test_serializer_omits_status () =
   with_workspace @@ fun config ->
   match
-    Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~metric:"m"
-      ~target_value:"1" ()
+    Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"phase only" ~measure:(Goal_measure_fixture.done_when "1")
+      ~procedure:"m" ()
   with
   | Error error -> fail (write_error_msg error)
   | Ok (goal, _, _) -> (
@@ -496,7 +496,7 @@ let test_duplicate_document_members_refuse_writes () =
     `Goal, "criterion_revision", "criterion_revision", `String "other-revision";
     `Goal, "phase", "phase", `String "dropped";
     `Goal, "priority", "priority", `Int 1;
-    `Goal, "metric", "metric", `Null;
+    `Goal, "procedure", "procedure", `String "other procedure";
     `Goal, "", "goals", `Int 1;
     `Goal, " ", "goals", `Int 1;
     `Goal, "name with spaces", "goals", `Int 1;
@@ -560,7 +560,7 @@ let test_duplicate_document_members_refuse_writes () =
        | Ok _ -> fail "duplicate document licensed a write");
       check bool "writer callback not entered" false !called;
       check bool "writer effects not projected" false !projected;
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new goal" ~metric:"m" ~target_value:"1" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
        | Error (Goal_store.Store_unavailable _) -> ()
        | Error other -> fail ("wrong upsert refusal: " ^ write_error_msg other)
        | Ok _ -> fail "duplicate document licensed an upsert");
@@ -610,8 +610,8 @@ let test_phaseless_row_no_longer_decodes () =
                   ("id", `String "phase-less");
                   ("criterion_revision", `String "fixture-revision");
                   ("title", `String "Phase-less row");
-                  ("metric", `Null);
-                  ("target_value", `Null);
+                  ("measure", Goal_measure.to_yojson Goal_measure_fixture.measure);
+                  ("procedure", `String "tests");
                   ("due_date", `Null);
                   ("priority", `Int 3);
                   ("last_review_note", `Null);
@@ -646,8 +646,8 @@ let test_priorityless_row_no_longer_decodes () =
                   ("id", `String "no-priority");
                   ("criterion_revision", `String "fixture-revision");
                   ("title", `String "Priority-less row");
-                  ("metric", `Null);
-                  ("target_value", `Null);
+                  ("measure", Goal_measure.to_yojson Goal_measure_fixture.measure);
+                  ("procedure", `String "tests");
                   ("due_date", `Null);
                   ("phase", `String "Executing");
                   ("last_review_note", `Null);
@@ -666,7 +666,7 @@ let test_priorityless_row_no_longer_decodes () =
 (* A goal in [phase], for fixtures. Creation makes Executing goals; the
    phase is then seeded through a Goal transaction. *)
 let upsert_goal_in_phase config ~title phase =
-  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
   | Error error -> Error error
   | Ok (goal, _, _) when goal.Goal_store.phase = phase -> Ok goal
   | Ok (goal, _, _) ->
@@ -733,8 +733,8 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   let goal =
     {
       (make_goal "utf8-goal" "bad\xffgoal") with
-      metric = Some "metric\xffvalue";
-      target_value = Some "target\xffvalue";
+      measure = Goal_measure_fixture.done_when "target\xffvalue";
+      procedure = "metric\xffvalue";
     }
   in
   Goal_store.write_state config
@@ -750,9 +750,9 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   in
   check string "title repaired on write" ("bad" ^ replacement ^ "goal")
     saved_goal.title;
-  check (option string) "metric repaired on write"
-    (Some ("metric" ^ replacement ^ "value"))
-    saved_goal.metric;
+  check string "procedure repaired on write"
+    ("metric" ^ replacement ^ "value")
+    saved_goal.procedure;
   let stats = Safe_ops.persistence_utf8_repair_stats () in
   check int "read path did not repair goal store" 0 stats.repaired_reads
 
@@ -767,7 +767,7 @@ let test_goal_publication_uses_local_authority backend_kind () =
   let generation = Goal_projection_generation.current () in
   let goal, events =
     match Goal_store.upsert_goal_with_events config ~actor:"local-author"
-            ~title:"Local authority" ~metric:"proof" ~target_value:"1" () with
+            ~title:"Local authority" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () with
     | Ok (goal, `created, events) -> goal, events
     | Ok (_, `updated _, _) -> fail "expected local Goal creation"
     | Error error -> fail (write_error_msg error)
@@ -795,7 +795,7 @@ let test_blocked_goal_primary_preserves_publication backend_kind () =
   with_goal_publication_backend backend_kind @@ fun config ->
   let goal =
     match Goal_store.upsert_goal_with_events config ~actor:"original-author"
-            ~title:"Preserved local Goal" ~metric:"proof" ~target_value:"1" () with
+            ~title:"Preserved local Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () with
     | Ok (goal, `created, _) -> goal
     | Ok (_, `updated _, _) -> fail "expected initial Goal creation"
     | Error error -> fail (write_error_msg error)
@@ -871,8 +871,8 @@ let test_write_state_result_keeps_primary_commit_when_recovery_write_fails
   check_goal_memory_documents config independent;
   check_goal_filesystem_alias config
 
-let upsert_exn config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  match Goal_store.upsert_goal_with_events ~actor:"test" config ?id ?title ?metric ?target_value ?due_date ?priority () with
+let upsert_exn config ?id ?title ?measure ?procedure ?due_date ?priority () =
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ?id ?title ?measure ?procedure ?due_date ?priority () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (write_error_msg error)
 
@@ -880,7 +880,7 @@ let test_blank_criterion_edits_preserve_store_and_outbox () =
   List.iter (fun phase ->
     with_workspace @@ fun config ->
     let created = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-        ~title:"Measured service" ~metric:"p99" ~target_value:"400ms" () with
+        ~title:"Measured service" ~measure:(Goal_measure_fixture.done_when "400ms") ~procedure:"p99" () with
       | Ok (goal, `created, _) -> goal
       | Ok (_, `updated _, _) -> fail "expected a creation"
       | Error error -> fail (write_error_msg error) in
@@ -898,9 +898,7 @@ let test_blank_criterion_edits_preserve_store_and_outbox () =
         [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
               ~id:created.id ~title:blank ());
           (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
-              ~id:created.id ~metric:blank ());
-          (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
-              ~id:created.id ~target_value:blank ()) ] in
+              ~id:created.id ~procedure:blank ()) ] in
       List.iter (fun attempt ->
         (match attempt () with
          | Error (Goal_store.Rejected _) -> ()
@@ -916,60 +914,23 @@ let test_blank_criterion_edits_preserve_store_and_outbox () =
         attempts) [""; " \t\n"])
     Goal_phase.all
 
-let test_incomplete_historical_criterion_can_be_maintained_and_repaired () =
-  with_workspace ~now:calendar_fixture_now @@ fun config ->
-  let old = { (make_goal "historical" "Historical condition") with
-    phase = Goal_phase.Paused Goal_phase.Resume_verifying;
-    last_review_note = Some "old review"; last_review_at = Some (iso_now ()) } in
-  Goal_store.write_state config
-    { pending_events = []; pending_notifications = []; version = 7;
-      updated_at = iso_now (); goals = [old] };
-  let maintained = upsert_exn config ~id:old.id ~priority:1
-      ~due_date:"2026-09-21" () in
-  check string "maintenance preserves revision" old.criterion_revision maintained.criterion_revision;
-  check bool "maintenance preserves suspension" true (old.phase = maintained.phase);
-  check int "priority still editable" 1 maintained.priority;
-  check (option string) "existing goals may be overdue" (Some "2026-09-21") maintained.due_date;
-  let primary = Goal_store.goals_path config in
-  let before = Fs_compat.load_file primary in
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:old.id ~title:"Renamed" () with
-   | Error (Goal_store.Rejected _) -> ()
-   | Error error -> fail (write_error_msg error)
-   | Ok _ -> fail "partial edit left an incomplete effective criterion");
-  check string "partial repair writes nothing" before (Fs_compat.load_file primary);
-  (* Supplying the exact stored value is unchanged, including on historical
-     incomplete rows. It retains existing successful-upsert semantics. *)
-  let unchanged = upsert_exn config ~id:old.id ~title:old.title () in
-  check string "unchanged criterion preserves revision" old.criterion_revision unchanged.criterion_revision;
-  let repaired = upsert_exn config ~id:old.id ~title:"  Repaired condition  "
-      ~metric:"  board:measurement  " ~target_value:"  zero failures  " () in
-  check string "accepted title is not normalized" "  Repaired condition  " repaired.title;
-  check (option string) "accepted metric is not normalized"
-    (Some "  board:measurement  ") repaired.metric;
-  check (option string) "accepted target is not numerically constrained"
-    (Some "  zero failures  ") repaired.target_value;
-  check bool "repair changes revision" true (repaired.criterion_revision <> old.criterion_revision);
-  check bool "repair keeps suspension with fresh restore target" true
-    (repaired.phase = Goal_phase.Paused Goal_phase.Resume_executing);
-  check (option string) "repair clears current review" None repaired.last_review_note
-
 let test_criterion_edits_invalidate_proof_phase () =
   with_workspace @@ fun config ->
-  let original = upsert_exn config ~title:"Measured service" ~metric:"p99" ~target_value:"400ms" () in
+  let original = upsert_exn config ~title:"Measured service" ~measure:(Goal_measure_fixture.done_when "400ms") ~procedure:"p99" () in
   check bool "creation has revision" true (original.criterion_revision <> "");
   let completed = { original with phase = Goal_phase.Completed;
     last_review_note = Some "proved"; last_review_at = Some (iso_now ()) } in
   Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 1; updated_at = iso_now (); goals = [completed] };
-  let same = upsert_exn config ~id:original.id ~title:original.title ~metric:"p99"
-      ~target_value:"400ms" ~priority:1 ~due_date:"2027-09-23" () in
+  let same = upsert_exn config ~id:original.id ~title:original.title ~measure:(Goal_measure_fixture.done_when "400ms")
+      ~procedure:"p99" ~priority:1 ~due_date:"2027-09-23" () in
   check string "priority, due date and no-op criterion preserve revision" original.criterion_revision same.criterion_revision;
   check bool "unrelated edit preserves completion" true (same.phase = Goal_phase.Completed);
-  let changed = upsert_exn config ~id:original.id ~target_value:"200ms" () in
+  let changed = upsert_exn config ~id:original.id ~measure:(Goal_measure_fixture.done_when "200ms") () in
   check bool "criterion edit reopens" true (changed.phase = Goal_phase.Executing);
   check bool "criterion edit rotates revision" true (changed.criterion_revision <> original.criterion_revision);
   check (option string) "old note no longer current" None changed.last_review_note;
   check (option string) "old review time no longer current" None changed.last_review_at;
-  let restored = upsert_exn config ~id:original.id ~target_value:"400ms" () in
+  let restored = upsert_exn config ~id:original.id ~measure:(Goal_measure_fixture.done_when "400ms") () in
   check bool "ABA cannot restore old proof identity" false
     (Goal_store.criterion_equal (Goal_store.criterion_of_goal original) (Goal_store.criterion_of_goal restored));
   let verifying = { restored with phase = Goal_phase.Verifying } in
@@ -978,7 +939,7 @@ let test_criterion_edits_invalidate_proof_phase () =
   check bool "title edit supersedes active review" true (renamed.phase = Goal_phase.Executing);
   let dropped = { renamed with phase = Goal_phase.Dropped } in
   Goal_store.write_state config { pending_events = []; pending_notifications = []; version = 6; updated_at = iso_now (); goals = [dropped] };
-  let updated = upsert_exn config ~id:original.id ~metric:"p95" () in
+  let updated = upsert_exn config ~id:original.id ~procedure:"p95" () in
   check bool "criterion edit does not reopen dropped Goal" true (updated.phase = Goal_phase.Dropped)
 
 (* [due_date] is a calendar day written YYYY-MM-DD; it falls due at 23:59:59
@@ -996,8 +957,8 @@ let test_upsert_refuses_a_due_date_that_is_not_a_calendar_day () =
   List.iter
     (fun raw ->
       match
-        Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Dated" ~metric:"m"
-          ~target_value:"1" ~due_date:raw ()
+        Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Dated" ~measure:(Goal_measure_fixture.done_when "1")
+          ~procedure:"m" ~due_date:raw ()
       with
       | Error (Goal_store.Rejected message) ->
         check bool (Printf.sprintf "%S: the refusal says what a due date is" raw) true
@@ -1017,7 +978,7 @@ let test_upsert_accepts_a_real_calendar_day () =
   List.iter
     (fun raw ->
       let goal =
-        upsert_exn config ~title:("Due " ^ raw) ~metric:"m" ~target_value:"1"
+        upsert_exn config ~title:("Due " ^ raw) ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
           ~due_date:raw ()
       in
       check (option string) (raw ^ " is stored as written") (Some raw)
@@ -1037,21 +998,21 @@ let test_upsert_refuses_a_blank_title_at_creation () =
   in
   (* A whitespace title states nothing, on the id-less path (refused before
      the lock, beside the pre-existing missing-title check) … *)
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"   " ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"   " ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error other -> fail ("blank title was not Rejected: " ^ write_error_msg other)
    | Ok _ -> fail "a goal with a blank title was created");
   (* … and an explicit unknown id no longer defaults to "Untitled goal". *)
   rejected_naming "non-blank title"
-    (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-explicit-no-title" ~metric:"m"
-       ~target_value:"1" ());
+    (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-explicit-no-title" ~measure:(Goal_measure_fixture.done_when "1")
+       ~procedure:"m" ());
   (* Blank or whitespace-padded Goal IDs are refused so Goal store rows and
      trimmed goal_task_links keys cannot diverge (#39964). *)
   List.iter
     (fun bad_id ->
        match
-         Goal_store.upsert_goal_with_events ~actor:"test" config ~id:bad_id ~title:"Padded id" ~metric:"m"
-           ~target_value:"1" ()
+         Goal_store.upsert_goal_with_events ~actor:"test" config ~id:bad_id ~title:"Padded id" ~measure:(Goal_measure_fixture.done_when "1")
+           ~procedure:"m" ()
        with
        | Error (Goal_store.Rejected _) -> ()
        | Error other ->
@@ -1062,7 +1023,7 @@ let test_upsert_refuses_a_blank_title_at_creation () =
     (Sys.file_exists (Goal_store.goals_path config));
   (* A due date already past is stored as written. *)
   let goal =
-    upsert_exn config ~title:"Late" ~metric:"m" ~target_value:"1"
+    upsert_exn config ~title:"Late" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
       ~due_date:"2026-09-21" ()
   in
   check (option string) "the past date is stored" (Some "2026-09-21") goal.due_date
@@ -1072,7 +1033,7 @@ let test_upsert_refuses_a_blank_title_at_creation () =
 let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
   let goal =
-    upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
+    upsert_exn config ~title:"Dated" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
       ~due_date:"2026-09-23" ()
   in
   let before = available config in
@@ -1093,7 +1054,7 @@ let test_upsert_keeps_the_stored_due_date_when_the_new_one_is_refused () =
 let test_upsert_returns_the_row_as_it_was_before_an_update () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
   let created =
-    upsert_exn config ~title:"Dated" ~metric:"m" ~target_value:"1"
+    upsert_exn config ~title:"Dated" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
       ~due_date:"2026-09-23" ~priority:2 ()
   in
   match
@@ -1109,7 +1070,7 @@ let test_upsert_returns_the_row_as_it_was_before_an_update () =
 
 let test_transact_goal_authoritative_and_noop () =
   with_workspace @@ fun config ->
-  let goal = upsert_exn config ~title:"Atomic Goal" ~metric:"count" ~target_value:"10" () in
+  let goal = upsert_exn config ~title:"Atomic Goal" ~measure:(Goal_measure_fixture.done_when "10") ~procedure:"count" () in
   let path = Goal_store.goals_path config in
   let bytes () = In_channel.with_open_bin path In_channel.input_all in
   let before = bytes () in
@@ -1319,6 +1280,71 @@ let test_source_uninitialized_only_when_both_files_absent () =
   check bool "reading did not create goals.json" false
     (Sys.file_exists (Goal_store.goals_path config))
 
+(* RFC a-goal-states-its-measure-as-a-typed-value §6, RFC-0444 §2.7: a store
+   written before the typed measure holds rows with free-text [metric] and
+   [target_value]. Every phase is present, the mirror holds the same bytes,
+   and one row was hand-edited to carry a measure but no procedure. Reading
+   refuses the store, names the field and repair step, and writes nothing,
+   however many times the server boots. *)
+let rows_before_the_measure_cut config ~edit =
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1;
+      updated_at = iso_now ();
+      goals = List.mapi (fun index phase ->
+        { (make_goal (Printf.sprintf "pre-cut-%d" index) "Pre-cut Goal") with phase })
+        Goal_phase.all };
+  let path = Goal_store.goals_path config in
+  let document = match Yojson.Safe.from_file path with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          match key, value with
+          | "goals", `List rows ->
+              key, `List (List.map (function
+                | `Assoc row -> `Assoc (edit row)
+                | other -> other) rows)
+          | _ -> key, value) fields)
+    | _ -> fail "goals.json is not an object" in
+  let bytes = Yojson.Safe.to_string document in
+  write_raw path bytes;
+  write_raw (goals_recovery_path config) bytes
+
+let free_text_criterion row =
+  List.filter (fun (key, _) -> key <> "measure" && key <> "procedure") row
+  @ [ "metric", `String "passing checks"; "target_value", `String "5" ]
+
+let hand_edited_without_procedure row =
+  List.filter (fun (key, _) -> key <> "procedure") row
+
+let check_cut_refusal config ~field =
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let digests () = file_digest primary, file_digest mirror in
+  let before = digests () in
+  let refuse boot =
+    match unavailable config with
+    | { reason = Goal_store.Schema_rejected { field = actual; _ };
+        mirror = Goal_store.Mirror_rejected (Goal_store.Schema_rejected { field = mirror_field; _ });
+        reset_step = Goal_store.Repair_field step_field; _ } ->
+        check string (boot ^ ": rejected field") field actual;
+        check string (boot ^ ": mirror rejects the same field") field mirror_field;
+        check string (boot ^ ": the repair step names the field") field step_field
+    | u -> fail (boot ^ ": expected a schema rejection with a rejected mirror: "
+                 ^ Goal_store.unavailable_to_string u) in
+  refuse "first boot";
+  refuse "second boot";
+  check bool "two boots leave goals.json and its mirror byte-identical" true
+    (before = digests ())
+
+let test_rows_written_before_the_measure_cut_are_refused () =
+  with_workspace @@ fun config ->
+  rows_before_the_measure_cut config ~edit:free_text_criterion;
+  check_cut_refusal config ~field:"metric"
+
+let test_a_hand_edited_row_without_procedure_is_refused () =
+  with_workspace @@ fun config ->
+  rows_before_the_measure_cut config ~edit:hand_edited_without_procedure;
+  check_cut_refusal config ~field:"procedure"
+
 let test_source_missing_after_init () =
   with_workspace @@ fun config ->
   let stamp = "2026-09-08T16:20:13Z" in
@@ -1364,7 +1390,7 @@ let fifo_primary_case dir =
     | u -> fail ("expected an unreadable FIFO: " ^ Goal_store.unavailable_to_string u)
   in
   expect_unavailable ();
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert accepted a FIFO primary");
@@ -1406,7 +1432,7 @@ let fifo_mirror_link_case dir =
        mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_fifo;
        reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected FIFO mirror inspection: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert accepted a FIFO mirror");
@@ -1517,7 +1543,7 @@ let test_dangling_primary_is_not_uninitialized () =
    | { reason = Goal_store.Unreadable Unix.ENOENT; mirror = Goal_store.Mirror_absent;
        reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected unreadable dangling primary: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert replaced a dangling primary link");
@@ -1533,7 +1559,7 @@ let test_dangling_mirror_is_evidence_of_prior_store () =
    | { reason = Goal_store.Missing_after_init;
        mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
    | u -> fail ("expected unreadable dangling mirror: " ^ Goal_store.unavailable_to_string u));
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"count" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
    | Error (Goal_store.Store_unavailable _) -> ()
    | Error error -> fail (write_error_msg error)
    | Ok _ -> fail "upsert treated a dangling mirror as an absent store");
@@ -1556,7 +1582,7 @@ let test_store_root_symlink_paths () =
        | Goal_store.Uninitialized -> ()
        | Goal_store.Available _ -> fail "new linked workspace was already initialized"
        | Goal_store.Unavailable u -> fail (Goal_store.unavailable_to_string u));
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"linked root" ~metric:"count" ~target_value:"1" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"linked root" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
        | Ok _ -> () | Error error -> fail (write_error_msg error));
       check_goal_file_link root (Filename.basename saved);
       ignore (available config)))
@@ -1842,7 +1868,7 @@ let test_writers_refuse_unavailable_and_keep_bytes () =
         { reason = Goal_store.Schema_rejected { field = "criterion_revision"; _ }; _ } -> ()
     | other -> fail (label ^ ": refusal was not Store_unavailable: " ^ write_error_msg other)
   in
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"new" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
    | Ok _ -> fail "upsert wrote over an unavailable store"
    | Error error -> refused "upsert_goal_with_events" error);
   unchanged "upsert_goal_with_events";
@@ -1937,7 +1963,7 @@ let test_first_write_creates_the_store () =
    | Error (Goal_store.Goal_lock_failed error) -> fail (Masc_domain.masc_error_to_string error)
    | Ok () -> fail "uninitialized store admitted a goal reference");
   check bool "refused writers created no goals.json" false (Sys.file_exists primary);
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"first" ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"first" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
    | Ok (_, `created, _) -> ()
    | Ok (_, `updated _, _) -> fail "first write reported an update"
    | Error error -> fail (write_error_msg error));
@@ -1960,7 +1986,7 @@ let test_refused_audited_upserts_preserve_store_and_outbox () =
     | Ok _ -> fail "an invalid audited upsert was accepted" in
   let attempts =
     [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
-          ~id:"unknown-goal" ~metric:"m" ~target_value:"1" ());
+          ~id:"unknown-goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" ());
       (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
           ~title:"No condition" ()) ] in
   List.iter (fun attempt ->
@@ -1973,7 +1999,7 @@ let test_refused_audited_upserts_preserve_store_and_outbox () =
       check bool "refused creation writes no store, mirror or ledger" false
         (Sys.file_exists path)) [primary; mirror; ledger]) attempts;
   let goal = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-      ~title:"Keep attribution" ~metric:"m" ~target_value:"1" () with
+      ~title:"Keep attribution" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
     | Ok (goal, `created, _) -> goal
     | Ok (_, `updated _, _) -> fail "expected the first accepted creation"
     | Error error -> fail (write_error_msg error) in
@@ -1996,7 +2022,7 @@ let test_refused_audited_upserts_preserve_store_and_outbox () =
 let test_identical_audited_upsert_still_commits () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
   let created = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-      ~title:"Confirmed criterion" ~metric:"m" ~target_value:"1"
+      ~title:"Confirmed criterion" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
       ~due_date:"2026-09-23" ~priority:2 () with
     | Ok (goal, `created, _) -> goal
     | Ok (_, `updated _, _) -> fail "expected a creation"
@@ -2012,7 +2038,7 @@ let test_identical_audited_upsert_still_commits () =
     [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
           ~id:created.id ());
       (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
-          ~id:created.id ~title:"Confirmed criterion" ~metric:"m" ~target_value:"1"
+          ~id:created.id ~title:"Confirmed criterion" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m"
           ~due_date:"2026-09-23" ~priority:2 ()) ] in
   List.iter (fun attempt ->
     let before = available config in
@@ -2047,7 +2073,7 @@ let test_audit_outbox_retains_creation_and_deduplicates_retry () =
   let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
   Unix.mkdir path 0o700;
   let goal, events = match Goal_store.upsert_goal_with_events config ~actor:"original-creator"
-      ~title:"durable attribution" ~metric:"proof" ~target_value:"1" () with
+      ~title:"durable attribution" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () with
     | Ok (goal, `created, events) -> goal, events
     | Ok _ -> fail "expected a creation"
     | Error error -> fail (write_error_msg error) in
@@ -2105,7 +2131,7 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
       (fun () -> output_string channel contents) in
   write prefix;
   let events = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-      ~title:"audit continues" ~metric:"proof" ~target_value:"1" () with
+      ~title:"audit continues" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () with
     | Ok (_, _, events) -> events
     | Error error -> fail (write_error_msg error) in
   let event = List.hd events in
@@ -2117,7 +2143,7 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
   let delivered = Fs_compat.load_file path in
   flush ();
   check string "second tick does not duplicate delivery" delivered (Fs_compat.load_file path);
-  let other = upsert_exn config ~title:"another Goal" ~metric:"proof" ~target_value:"1" () in
+  let other = upsert_exn config ~title:"another Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () in
   let phase = `Assoc ["goal_id", `String other.id; "event_type", `String "goal_phase";
       "payload", `Assoc ["phase", Goal_phase.to_yojson Goal_phase.Dropped]] in
   (match Goal_store.append_audit_event_after_pending config phase with
@@ -2134,12 +2160,15 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
   check bool "unrelated phase delivered" true (List.exists (Yojson.Safe.equal phase) rows);
   let acknowledged = available config in
   Goal_store.write_state config { acknowledged with pending_events = [event] };
+  (* The event is already in [contents], so delivery after a torn tail owes
+     no append: the fragment is not a row and stays until a write cuts it. *)
   write (contents ^ "{\"torn\":");
   let torn = Fs_compat.load_file path in
   (match Goal_store.flush_pending_events config with
-   | Error _ -> () | Ok () -> fail "incomplete tail must still refuse delivery");
-  check string "incomplete tail unchanged" torn (Fs_compat.load_file path);
-  check int "incomplete tail retains intent" 1
+   | Ok () -> () | Error detail -> fail ("a torn tail must not refuse delivery: " ^ detail));
+  check string "delivered event behind a torn tail writes nothing" torn
+    (Fs_compat.load_file path);
+  check int "delivered event behind a torn tail acknowledges its intent" 0
     (List.length (available config).pending_events);
   write contents;
   let collision = { event with payload = `Assoc ["actor", `String "different"] } in
@@ -2149,16 +2178,54 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
   check string "collision keeps every byte" contents (Fs_compat.load_file path);
   check int "collision retains intent" 1 (List.length (available config).pending_events)
 
+(* A server that died inside an append leaves the ledger ending in bytes with
+   no newline. Neither writer of the ledger may refuse after that, and
+   neither may join its row onto the fragment. *)
+let test_audit_ledger_writes_after_a_torn_tail () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
+  let write contents =
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents) in
+  let complete = "{\"event_id\":\"before-crash\"}\n" in
+  let fragment = "{\"event_id\":\"cut-by-cr" in
+  write (complete ^ fragment);
+  let phase = `Assoc ["goal_id", `String "goal-torn"; "event_type", `String "goal_phase"] in
+  (match Goal_store.append_audit_event config phase with
+   | Ok () -> () | Error detail -> fail ("audit append after a torn tail: " ^ detail));
+  check string "audit append cuts the fragment and writes after the last row"
+    (complete ^ Yojson.Safe.to_string phase ^ "\n") (Fs_compat.load_file path);
+  let before_delivery = Fs_compat.load_file path in
+  write (before_delivery ^ fragment);
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"delivery after a torn tail" ~measure:(Goal_measure_fixture.done_when "1")
+      ~procedure:"proof" () with
+    | Ok (_, _, events) -> events
+    | Error error -> fail (write_error_msg error) in
+  (match Goal_store.flush_pending_events config with
+   | Ok () -> () | Error detail -> fail ("delivery after a torn tail: " ^ detail));
+  check int "delivery acknowledges every intent" 0
+    (List.length (available config).pending_events);
+  let delivered = Fs_compat.load_file path in
+  check bool "delivery cuts the fragment" true
+    (String.starts_with ~prefix:before_delivery delivered
+     && String.ends_with ~suffix:"\n" delivered);
+  let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
+  check int "no row joined onto the fragment" 0 malformed;
+  check int "every intent delivered once after the kept rows"
+    (2 + List.length events) (List.length rows)
+
 let test_pending_phase_precedes_drop_and_survives_retry () =
   with_workspace @@ fun config ->
   let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
   let goal = upsert_exn config ~title:"Changed criterion then dropped"
-      ~metric:"proof" ~target_value:"1" () in
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () in
   let state = available config in
   Goal_store.write_state config
     { state with goals = [{ goal with phase = Goal_phase.Verifying }] };
   let events = match Goal_store.upsert_goal_with_events config ~actor:"editor"
-      ~id:goal.id ~target_value:"2" () with
+      ~id:goal.id ~measure:(Goal_measure_fixture.done_when "2") () with
     | Ok (updated, _, events) ->
         check bool "criterion edit returns to execution" true
           (updated.phase = Goal_phase.Executing);
@@ -2204,7 +2271,7 @@ let test_pending_phase_precedes_drop_and_survives_retry () =
 let test_audit_intents_survive_other_goal_mutations () =
   with_workspace @@ fun config ->
   let goal, initial = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-      ~title:"retained" ~metric:"proof" ~target_value:"1" () with
+      ~title:"retained" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () with
     | Ok (goal, _, events) -> goal, events
     | Error error -> fail (write_error_msg error) in
   let check_pending label =
@@ -2255,13 +2322,17 @@ let () =
           test_case "intents survive every mutator" `Quick
             test_audit_intents_survive_other_goal_mutations;
           test_case "pending phase precedes drop and retry preserves history" `Quick
-            test_pending_phase_precedes_drop_and_survives_retry ] );
+            test_pending_phase_precedes_drop_and_survives_retry;
+          test_case "both ledger writers continue after a torn tail" `Quick
+            test_audit_ledger_writes_after_a_torn_tail ] );
       ( "proof identity",
         [ test_case "blank criterion edits preserve every phase and outbox" `Quick
             test_blank_criterion_edits_preserve_store_and_outbox;
-          test_case "historical incomplete criteria remain maintainable and repairable" `Quick
-            test_incomplete_historical_criterion_can_be_maintained_and_repaired;
           test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
+          test_case "rows written before the measure cut are refused in every phase" `Quick
+            test_rows_written_before_the_measure_cut_are_refused;
+          test_case "a hand-edited row without procedure is refused" `Quick
+            test_a_hand_edited_row_without_procedure_is_refused;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "duplicate identity refuses Goal writers and preserves independent work" `Quick test_duplicate_identity_refuses_goal_writers;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );

@@ -313,6 +313,10 @@ let keeper_world_current_task_handoff_evidence =
   "keeper.world.current_task.handoff_evidence"
 ;;
 
+let keeper_world_current_task_handoff_unreadable =
+  "keeper.world.current_task.handoff_unreadable"
+;;
+
 let keeper_world_current_task_attribution_full =
   "keeper.world.current_task.attribution.full"
 ;;

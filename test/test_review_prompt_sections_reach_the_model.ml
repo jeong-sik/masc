@@ -207,7 +207,7 @@ let test_every_section_template_renders () =
 
 (* The Goal proof template renders the goal's own declaration and the surface
    the judge holds. A variable it stops placing would leave the judge asked to
-   compare a metric it was never shown, or holding read tools nobody described
+   compare a measure it was never shown, or holding read tools nobody described
    to it. *)
 let test_goal_proof_prompt_renders_its_variables () =
   init ();
@@ -215,8 +215,8 @@ let test_goal_proof_prompt_renders_its_variables () =
     Prompt_registry.render_prompt_template
       Prompt_names.goal_verification_proof
       [ "goal_title", marker "goal_title"
-      ; "metric", marker "metric"
-      ; "target_value", marker "target_value"
+      ; "measure", marker "measure"
+      ; "procedure", marker "procedure"
       ; "reported_measurement", marker "reported_measurement"
       ; "lookup_section", marker "lookup_section"
       ]
@@ -227,7 +227,7 @@ let test_goal_proof_prompt_renders_its_variables () =
       (fun name ->
          check bool (name ^ " is rendered") true
            (Astring.String.is_infix ~affix:(marker name) text))
-      [ "goal_title"; "metric"; "target_value"; "reported_measurement"; "lookup_section" ]
+      [ "goal_title"; "measure"; "procedure"; "reported_measurement"; "lookup_section" ]
 ;;
 
 (* The Goal lookup template describes the tools and the root they resolve

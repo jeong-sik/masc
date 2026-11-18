@@ -345,6 +345,7 @@
   ; Transitive module visibility is disabled, so the dependency is spelled out.
   masc_backend
   masc_goal
+  masc.goal_measure
   masc_candle
   masc_candle_runtime
   zarith

@@ -236,11 +236,9 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     if absent then confirm record else
     let source : Current.source={kind=Current.Librarian;
       trace_id=Ids.Turn_ref.trace_id (Capture.input capture).turn_ref} in
-    let committed=ref None in
     let applied=io (fun () ->
       let* ()=live_owner owner in
       Ok (Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Admission
-        ~on_committed:(fun disposition -> committed:=Some disposition)
         ~dropped_statements:accepted.selection.dropped
         ~explicit_candidate_ids:accepted.explicit_candidate_ids
         ~admission_recall:{decided_at_revision=Capture.expected_revision capture;
@@ -252,18 +250,7 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     (* Secondary journal/unlock failure can follow snapshot publication. Only
        the same independently verified receipts settle the domain effect. *)
     let* proved=read_receipts () in
-    if proved then (
-      let ()=match !committed with
-        | None -> ()
-        | Some disposition ->
-          io (fun () -> Keeper_memory_os_events.append_all ~keepers_dir ~keeper_id
-            (List.map (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
-              {recorded_at=disposition.snapshot.updated_at;memory_id=revision.superseded;
-                trace_id=source.trace_id;kind=Keeper_memory_os_events.Revised {superseded_by=revision.superseded_by}})
-              disposition.revisions_applied))
-          |> List.iter (fun error -> Log.Keeper.warn ~keeper_name:keeper_id "%s"
-            (Keeper_memory_os_events.append_error_to_string error)) in
-      confirm record)
+    if proved then confirm record
     else
       let uncertain detail =
         let* _new,_record=publish record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in

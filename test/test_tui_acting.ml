@@ -45,13 +45,13 @@ let settled keeper : Observer.event =
     ; tc_at = 100.
     }
 
-(* The hook's per-call report: provider call [session] ran while [completed]
-   keeper turns were done, so it belongs to keeper turn [completed + 1]. *)
-let observation ~keeper ~session ~completed : Observer.event =
+(* The hook's per-call report: provider call [session] ran inside keeper
+   turn [keeper_turn]. *)
+let observation ~keeper ~session ~keeper_turn : Observer.event =
   Observer.Keeper_turn_observation
     { Observer.to_keeper = keeper
     ; to_session_turn = Some session
-    ; to_total_turns = Some completed
+    ; to_keeper_turn = Some keeper_turn
     ; to_at = 100.
     }
 
@@ -119,7 +119,7 @@ let turn_settled ?cache_read ?cache_creation ~keeper ~turn ~input ~output ~cost 
 let test_turns_fold_the_two_planes_into_one_row_per_turn () =
   let k = "kpr-07" in
   let events_oldest_first =
-    [ observation ~keeper:k ~session:149 ~completed:48
+    [ observation ~keeper:k ~session:149 ~keeper_turn:49
     ; ledger_tool ~duration_ms:63. ~keeper:k "masc_schedule_list"
     ; turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100 ()
     ; agent_core ~kind:Observer.Turn_completed ~turn:149 k
@@ -129,7 +129,7 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
         ~turn:149 ~tool_use_id:"c49" k
     ; agent_core ~kind:Observer.Turn_started ~turn:150 k
     ; agent_core ~kind:Observer.Turn_ready ~turn:150 k
-    ; observation ~keeper:k ~session:150 ~completed:49
+    ; observation ~keeper:k ~session:150 ~keeper_turn:50
     ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
     ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102 ()
     ; agent_core ~kind:Observer.Turn_completed ~turn:150 k
@@ -139,7 +139,7 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
         ~turn:150 ~tool_use_id:"c50" k
     ; agent_core ~kind:Observer.Turn_started ~turn:151 k
     ; agent_core ~kind:Observer.Turn_ready ~turn:151 k
-    ; observation ~keeper:k ~session:151 ~completed:50
+    ; observation ~keeper:k ~session:151 ~keeper_turn:51
     ]
   in
   let rows = Acting.chunk_rows ~ko:false ~traces:[] (entries_of events_oldest_first) in
@@ -523,7 +523,7 @@ let test_a_reply_does_not_trim_the_observation_a_call_needs () =
     List.init 1_200 stream
     @ [ agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:149
           ~tool_use_id:"w1" "alpha"
-      ; observation ~keeper:"alpha" ~session:149 ~completed:48
+      ; observation ~keeper:"alpha" ~session:149 ~keeper_turn:49
       ]
   in
   let kept, dropped = Acting.retain ~actions:1_000 ~quiet:200 ~event_of:Fun.id ring in
@@ -539,7 +539,7 @@ let test_a_reply_does_not_trim_the_observation_a_call_needs () =
 let test_an_observation_spends_an_action_slot () =
   let kept, dropped =
     Acting.retain ~actions:1 ~quiet:0 ~event_of:Fun.id
-      [ observation ~keeper:"a" ~session:2 ~completed:1; settled "b" ]
+      [ observation ~keeper:"a" ~session:2 ~keeper_turn:2; settled "b" ]
   in
   (match kept with
    | [ Observer.Keeper_turn_observation _ ] -> ()
@@ -547,8 +547,8 @@ let test_an_observation_spends_an_action_slot () =
   check int "the older action is counted" 1 dropped;
   let kept, dropped =
     Acting.retain ~actions:1 ~quiet:5 ~event_of:Fun.id
-      [ observation ~keeper:"a" ~session:2 ~completed:1
-      ; observation ~keeper:"a" ~session:1 ~completed:1
+      [ observation ~keeper:"a" ~session:2 ~keeper_turn:2
+      ; observation ~keeper:"a" ~session:1 ~keeper_turn:2
       ]
   in
   check int "a second observation finds no action slot" 1 (List.length kept);
@@ -565,7 +565,7 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
     let id = Printf.sprintf "b%d" index in
     [ agent_core ~kind:Observer.Turn_started ~turn "beta"
     ; agent_core ~kind:Observer.Turn_ready ~turn "beta"
-    ; observation ~keeper:"beta" ~session:turn ~completed:500
+    ; observation ~keeper:"beta" ~session:turn ~keeper_turn:501
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn ~tool_use_id:id "beta"
     ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn ~tool_use_id:id "beta"
     ; agent_core ~kind:Observer.Turn_completed ~turn "beta"
@@ -573,14 +573,14 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
   in
   let oldest_first =
     [ agent_core ~kind:Observer.Turn_started ~turn:1 "alpha"
-    ; observation ~keeper:"alpha" ~session:1 ~completed:11
+    ; observation ~keeper:"alpha" ~session:1 ~keeper_turn:12
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
     ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
     ; turn_settled ~keeper:"alpha" ~turn:12 ~input:10 ~output:2 ~cost:0.001 ()
     ]
     @ List.concat (List.init 220 beta_call)
     @ [ agent_core ~kind:Observer.Turn_started ~turn:0 "alpha"
-      ; observation ~keeper:"alpha" ~session:0 ~completed:12
+      ; observation ~keeper:"alpha" ~session:0 ~keeper_turn:13
       ; agent_core ~kind:Observer.Tool_called ~tool:"Grep" ~turn:0 ~tool_use_id:"a2" "alpha"
       ; agent_core ~kind:Observer.Tool_completed ~tool:"Grep" ~turn:0 ~tool_use_id:"a2" "alpha"
       ; agent_core ~kind:Observer.Turn_started ~turn:1 "alpha"
@@ -791,10 +791,10 @@ let test_elapsed_text_picks_a_unit () =
 let test_late_ledger_row_stays_on_its_own_turn () =
   let events =
     [ agent_core ~kind:Observer.Turn_started ~turn:7 ~at:100. "alpha"
-    ; observation ~keeper:"alpha" ~session:7 ~completed:41
+    ; observation ~keeper:"alpha" ~session:7 ~keeper_turn:42
     ; ledger_tool ~turn:7 ~keeper:"alpha" "Read"
     ; agent_core ~kind:Observer.Turn_started ~turn:8 ~at:102. "alpha"
-    ; observation ~keeper:"alpha" ~session:8 ~completed:42
+    ; observation ~keeper:"alpha" ~session:8 ~keeper_turn:43
     ; ledger_tool ~turn:8 ~keeper:"alpha" "Grep"
       (* Turn 42's second call is reported only now, after turn 43 opened. *)
     ; ledger_tool ~turn:7 ~keeper:"alpha" "Write"
@@ -897,19 +897,19 @@ let test_one_keeper_turn_of_three_calls_is_one_row () =
   let k = "alpha" in
   let calls =
     [ agent_core ~kind:Observer.Turn_started ~turn:100 k
-    ; observation ~keeper:k ~session:100 ~completed:6
+    ; observation ~keeper:k ~session:100 ~keeper_turn:7
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:100
         ~tool_use_id:"w1" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:100
         ~tool_use_id:"w1" k
     ; agent_core ~kind:Observer.Turn_started ~turn:101 k
-    ; observation ~keeper:k ~session:101 ~completed:6
+    ; observation ~keeper:k ~session:101 ~keeper_turn:7
     ; agent_core ~kind:Observer.Tool_called ~tool:"Grep" ~turn:101
         ~tool_use_id:"w2" k
     ; agent_core ~kind:Observer.Tool_completed ~tool:"Grep" ~turn:101
         ~tool_use_id:"w2" k
     ; agent_core ~kind:Observer.Turn_started ~turn:102 k
-    ; observation ~keeper:k ~session:102 ~completed:6
+    ; observation ~keeper:k ~session:102 ~keeper_turn:7
     ]
   in
   let tools chunk =
@@ -947,7 +947,7 @@ let test_an_observation_after_its_frames_still_files_them () =
     [ agent_core ~kind:Observer.Turn_started ~turn:5 "alpha"
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:5
         ~tool_use_id:"w1" "alpha"
-    ; observation ~keeper:"alpha" ~session:5 ~completed:11
+    ; observation ~keeper:"alpha" ~session:5 ~keeper_turn:12
     ]
   in
   match Acting.chunks ~traces:[] (entries_of events_oldest_first) with
@@ -964,7 +964,7 @@ let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
   let k = "critic" in
   let before =
     [ ledger_tool ~duration_ms:75. ~turn:6 ~keeper:k "masc_board_comment"
-    ; observation ~keeper:k ~session:6 ~completed:2273
+    ; observation ~keeper:k ~session:6 ~keeper_turn:2274
     ; turn_settled ~keeper:k ~turn:2274 ~input:853484 ~output:1662 ~cost:0.0100 ()
     ]
   in
@@ -991,7 +991,7 @@ let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
   let ended =
     running
     @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_post_get"
-      ; observation ~keeper:k ~session:7 ~completed:2274
+      ; observation ~keeper:k ~session:7 ~keeper_turn:2275
       ; turn_settled ~keeper:k ~turn:2275 ~input:1288966 ~output:1779 ~cost:0.0100 ()
       ]
   in

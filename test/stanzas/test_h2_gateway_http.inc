@@ -4,4 +4,4 @@
  (name test_h2_gateway_http)
  (modules test_h2_gateway_http)
  (deps fixtures/skill-ledger-async-actions.json)
- (libraries masc_test_deps h2 h2-eio bigstringaf eio.mock))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps h2 h2-eio bigstringaf eio.mock))

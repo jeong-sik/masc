@@ -354,6 +354,7 @@ export const OPERATOR_DISPOSITION_REASONS = [
   'phase_skipped',
   'transcript_corruption',
   'official_client_recovery_required',
+  'official_client_session_refused',
   'provider_attempt_effect_fenced',
   'tool_correction_lost',
   'accept_rejected',
@@ -388,6 +389,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS = {
   phase_skipped: 'phase 건너뜀',
   transcript_corruption: '도구 호출 기록이 깨짐 - checkpoint purge 로 고쳐야 함',
   official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
+  official_client_session_refused: '공식 클라이언트 세션 상태로 거절 - 종료 코드에 이유가 있음',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   // tool_correction_lost has been a backend reason since #29038 and was
   // missing here, so the table fell back to printing the raw wire string.

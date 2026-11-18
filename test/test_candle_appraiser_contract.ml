@@ -17,7 +17,7 @@ let intent =
     ~identity:{Candle_appraisal.goal_id="goal-original";
       request_id="payout-original";verification_run_id="proof-original"}
     ~prompt:"Judge only the captured goal."
-    (Candle_appraisal.Grade {goal={title="Original goal";metric=None;target_value=None};
+    (Candle_appraisal.Grade {goal={title="Original goal";measure=Goal_measure_fixture.measure;procedure="read the fixture"};
       grades=[grade,"Connected feature"]}) |> unwrap
 let submit = Candle_appraisal_intent.submit_arguments intent
 let read = Candle_appraisal_intent.read_arguments intent

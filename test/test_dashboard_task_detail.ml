@@ -1,7 +1,7 @@
 open Alcotest
 module Detail = Server_dashboard_task_detail
 
-let task ?links id description =
+let task ?links ?handoff id description =
   let json = `Assoc ([
     "id", `String id; "title", `String "Complete task";
     "description", `String description; "priority", `Int 2;
@@ -11,7 +11,8 @@ let task ?links id description =
       "completion_contract", `List [`String "Verify the visible result"];
       "required_evidence", `List [`String "artifact://proof"];
       "inspect_gate_evidence", `List []; "verify_gate_evidence", `List []]
-  ] @ (match links with None -> [] | Some links -> ["execution_links", links])) in
+  ] @ (match links with None -> [] | Some links -> ["execution_links", links])
+    @ (match handoff with None -> [] | Some handoff -> ["handoff_context", handoff])) in
   match Masc_domain.task_of_yojson json with
   | Ok task -> task
   | Error detail -> fail detail
@@ -68,6 +69,16 @@ let test_tui_reads_served_detail () =
   reads_back "a claimed Task"
     (task "task-linked" "body"
        ~links:(`Assoc ["operation_id", `String "op-1"; "session_id", `String "trace-1"]))
+  ;
+  (* #38219: a stored handoff the decoder refuses reaches the TUI as the same
+     unreadable value, not as a Task without a handoff. *)
+  let unreadable = task "task-unreadable-handoff" "body"
+      ~handoff:(`Assoc ["summary", `Int 7]) in
+  (match unreadable.handoff_context with
+   | Some (Masc_domain.Handoff_unreadable _) -> ()
+   | Some (Masc_domain.Handoff_decoded _) | None ->
+       fail "fixture handoff must be unreadable");
+  reads_back "a Task whose stored handoff is unreadable" unreadable
 
 let test_authoritative_storage () =
   Eio_main.run @@ fun env ->

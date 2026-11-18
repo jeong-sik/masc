@@ -14,8 +14,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
        passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
          | Ok value -> value | Error detail -> Alcotest.fail detail);
-       due_date=None;title="Completed funding fixture";metric=Some "completed";
-       target_value=Some "1";linked_task_ids=task_ids}}
+       due_date=None;title="Completed funding fixture";measure=Goal_measure_fixture.done_when "1";
+       procedure="completed";linked_task_ids=task_ids}}
   ; {Candle_event.at;body=Candle_event.Payout_owed
       {goal_id=identity.goal_id;request_id=identity.request_id;
        verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}

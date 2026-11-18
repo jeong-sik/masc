@@ -220,7 +220,14 @@ let handle_transition ~tool_name ~start_time ctx args =
            (Some
               (* The same sentence the transition recorded: the caller may have
                  stated it in handoff_context.summary rather than in [reason]. *)
-              (match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
+              (match
+                 Masc_domain.stated_reason
+                   ~reason:(Some reason)
+                   ~handoff_context:
+                     (Option.map
+                        (fun context -> Masc_domain.Handoff_decoded context)
+                        handoff_context)
+               with
                | Some reason -> reason
                | None -> "Cancelled"))
          ~collaborators:collaborators_from_task

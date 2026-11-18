@@ -90,6 +90,8 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Candidate_unreadable { rejected_rows }) ->
+    Alcotest.failf "%s: candidate behind %d unreadable row(s)" label rejected_rows
   | Ok (A.Judgment_conflict _) ->
     Alcotest.failf "%s: the candidate already records another judgment" label
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -766,6 +768,109 @@ let test_completed_snapshot_walks_past_a_refused_judgment () =
   Alcotest.(check (list string))
     "a second walk delivers nothing more"
     [ second.candidate_id; third.candidate_id ]
+    (delivered_ids ~base_path)
+;;
+
+(* The head completion's candidate sits behind a row the decoder refuses.
+   The ledger cannot say that candidate is gone, so its judgment is not
+   settled undelivered: the member stays [Completed], the walk settles the
+   members behind it, and a repaired ledger delivers it (#38068). *)
+let test_completed_snapshot_holds_a_member_behind_an_unreadable_row () =
+  with_temp_base "board-completed-unreadable" @@ fun base_path ->
+  let make index =
+    record ~base_path
+      (candidate ~id:(Printf.sprintf "unreadable-%d" index)
+         ~recorded_at:(float_of_int index) ())
+  in
+  let hidden = make 1 in
+  let second = make 2 in
+  let third = make 3 in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  let path = A.ledger_path ~base_path ~keeper_name:"alpha" in
+  let unreadable = "{not-json}" in
+  let replace_lines map =
+    let lines =
+      In_channel.with_open_bin path In_channel.input_all
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> not (String.equal line ""))
+    in
+    let staged = path ^ ".replace" in
+    Out_channel.with_open_bin staged (fun channel ->
+      List.iter (fun line -> output_string channel (map line ^ "\n")) lines);
+    Sys.rename staged path
+  in
+  (* Every row of the hidden candidate becomes a row the decoder refuses. *)
+  let hidden_rows = Queue.create () in
+  replace_lines (fun line ->
+    match Yojson.Safe.from_string line with
+    | `Assoc fields
+      when List.assoc_opt "candidate_id" fields
+           = Some (`String hidden.candidate_id) ->
+      Queue.push line hidden_rows;
+      unreadable
+    | (_ : Yojson.Safe.t) -> line);
+  Alcotest.(check bool) "the fixture hid the head candidate" false
+    (Queue.is_empty hidden_rows);
+  (match
+     ok
+       "walk the snapshot"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; continuation_wake = None } ->
+     Alcotest.(check string)
+       "the walk reaches the last member"
+       third.candidate_id
+       candidate_id
+   | W.Partition_settled { continuation_wake = Some _; _ } ->
+     Alcotest.fail "the held member asked for a continuation wake"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the members behind the unreadable candidate were not settled"
+   | W.No_completed_partition -> Alcotest.fail "the snapshot was empty");
+  Alcotest.(check (list string))
+    "only the readable members reach the Keeper queue"
+    [ second.candidate_id; third.candidate_id ]
+    (delivered_ids ~base_path);
+  List.iter
+    (fun (partition : P.t) ->
+       match
+         String.equal partition.candidate_id hidden.candidate_id, partition.state
+       with
+       | true, P.Completed _ | false, P.Settled _ -> ()
+       | _ -> Alcotest.fail "the walk settled the wrong partitions")
+    (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
+  (match
+     ok
+       "walk the held member again"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Completed_partitions_held { held = 1; continuation_wake = None } -> ()
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the held member was miscounted or asked for a continuation wake"
+   | W.Partition_settled _ ->
+     Alcotest.fail "the unreadable member was settled without delivery"
+   | W.No_completed_partition ->
+     Alcotest.fail "the held member left the completed set");
+  (* Repair: the refused rows read again, in their original order. *)
+  replace_lines (fun line ->
+    if String.equal line unreadable then Queue.pop hidden_rows else line);
+  (match
+     ok
+       "walk after repair"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; continuation_wake = None } ->
+     Alcotest.(check string)
+       "the repaired member is settled"
+       hidden.candidate_id
+       candidate_id
+   | W.Partition_settled { continuation_wake = Some _; _ }
+   | W.Completed_partitions_held _ | W.No_completed_partition ->
+     Alcotest.fail "the repaired member was not delivered");
+  Alcotest.(check (list string))
+    "the repaired member reaches the Keeper queue"
+    [ second.candidate_id; third.candidate_id; hidden.candidate_id ]
     (delivered_ids ~base_path)
 ;;
 
@@ -5280,6 +5385,8 @@ let () =
         ; Alcotest.test_case
             "completed snapshot walks past a judgment its candidate refused"
             `Quick test_completed_snapshot_walks_past_a_refused_judgment
+        ; Alcotest.test_case "completed snapshot holds a member behind an unreadable row"
+            `Quick test_completed_snapshot_holds_a_member_behind_an_unreadable_row
         ; Alcotest.test_case
             "completed snapshot capture defers new completions to the next wake"
             `Quick test_completed_snapshot_captures_settle_and_continues_waking

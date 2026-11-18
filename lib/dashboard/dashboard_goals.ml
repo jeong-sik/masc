@@ -392,8 +392,8 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ("phase_color", `String (goal_phase_color goal.phase));
       ("goal_fsm", goal_fsm_to_json goal node);
       ("priority", `Int goal.priority);
-      ("metric", Json_util.string_opt_to_json goal.metric);
-      ("target_value", Json_util.string_opt_to_json goal.target_value);
+      ("measure", Goal_measure.to_yojson goal.measure);
+      ("procedure", `String goal.procedure);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("tasks", `List (List.map task_to_tree_json node.tasks));

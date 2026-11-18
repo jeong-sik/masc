@@ -171,7 +171,7 @@ let test_bound_goal_tree_compresses_before_capacity_reservation () =
       | Some state -> state | None -> fail "fixture server has no workspace" in
     let config = Masc.Mcp_server.workspace_config state in
     (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:(String.make 32768 'g')
-       ~metric:"count" ~target_value:"1" () with
+       ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"count" () with
      | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
     let base = Unix.realpath config.base_path in
     let root = Unix.realpath (Masc.Workspace.masc_dir config) in

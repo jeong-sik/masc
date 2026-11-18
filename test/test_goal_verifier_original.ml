@@ -48,7 +48,7 @@ let submit_items config goal_id items =
       ~submitted_evidence:items config ~goal_id ~criterion:(Goal_store.criterion_of_goal goal)))))
 let pending ?id ?(items=evidence) config =
   let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config ?id
-    ~title:"Measure the actual result" ~metric:"artifact:measurement.json" ~target_value:"100" ()) in
+    ~title:"Measure the actual result" ~measure:(Goal_measure_fixture.done_when "100") ~procedure:"artifact:measurement.json" ()) in
   submit_items config goal.id items;
   request_complete config goal.id;
   goal.id
@@ -68,7 +68,7 @@ let test_fresh_goal_without_keeper_or_manual_playground () =
       (Array.length (Sys.readdir root));
     let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Read a public measurement without creating a Keeper"
-      ~metric:"https://example.com/measurement.json" ~target_value:"100" ()) in
+      ~measure:(Goal_measure_fixture.done_when "100") ~procedure:"https://example.com/measurement.json" ()) in
     request_complete config goal.id;
     let requested = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
       | Ok (Some record) -> record
@@ -173,7 +173,7 @@ let test_other_subject_evidence_and_workspace_refuse () = with_workspace (fun co
      the public Verifying retry no longer permits this replacement. *)
   submit_items config goal_id [Evidence.Evidence_note "Changed submission"];
   let changed_submission = authority config goal_id in
-  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"101" ()));
+  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "101") ()));
   request_complete config goal_id;
   let changed_criterion = authority config goal_id in
   List.iter (fun other -> Alcotest.(check bool) "different current proof or submission asks another question" false
@@ -291,7 +291,7 @@ let test_only_current_goal_revision_is_reported () = with_workspace (fun config 
   check_prompt_observation "missing report is explicit" (original admitted) (Ok None);
   let stale = reported config goal_id ~value:"old criterion"
     ~source:"https://example.com/old-criterion" in
-  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"101" ()));
+  ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "101") ()));
   request_complete config goal_id;
   let current = authority config goal_id in
   Alcotest.(check bool) "changed revision has no inherited report" true

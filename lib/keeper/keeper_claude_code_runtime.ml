@@ -912,8 +912,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
              ~required_at:(Time_compat.now ())
          with
          | Ok reconciled -> Ok (Some reconciled)
-         | Error detail ->
-           Error (config_error ~field:"official_client_session.phase" detail))
+         | Error error -> Error (Session_store.process_restart_error_to_core_error error))
       | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
         Ok stored_session
     in
@@ -948,7 +947,8 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       | Some checkpoint ->
         Keeper_official_client_session_store.validate_continuation ~checkpoint
           ~expected:stored_session ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
+        |> Result.map_error (fun (_ : string) ->
+          Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Gate_continuation_unresumable) in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -963,7 +963,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       | Some reference -> Keeper_official_task_reference.message
           ~current:official_client_continuation reference
         |> Result.map Option.some
-        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+        |> Result.map_error Keeper_official_client_session_refusal.core_error in
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
     let* prepared =
       Host.prepare_turn
@@ -981,7 +981,9 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
-      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+      (* The host's own model-input projection removed the reference it was
+         given: a MASC contract break, not a setting or a session state. *)
+      |> Result.map_error internal_error in
     (* Every attempt of the run carries the snapshot its first attempt loaded,
        in the form the capacity-refusal hook left it, and acknowledges that
        snapshot (RFC retained-results-carrier-shrinks-to-an-address §5.1,

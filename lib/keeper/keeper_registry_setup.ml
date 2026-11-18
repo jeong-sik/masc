@@ -1235,11 +1235,10 @@ let stamp_turn_progress ~now ~event_kind obs =
   }
 ;;
 
-let mark_turn_started ~observation_token ~base_path ~wake name =
+let mark_turn_started ~observation_token ~base_path ~wake ~turn_id name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
-      let turn_id = e.meta.runtime.usage.total_turns + 1 in
       let obs =
         { observation_token
         ; turn_id

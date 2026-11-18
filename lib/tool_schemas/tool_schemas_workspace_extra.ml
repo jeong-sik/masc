@@ -18,7 +18,7 @@ open Masc_domain
 
 let schema_of_name = Tool_definition_embedded.schema
 
-(* B1 — creation requires metric and target_value — is deliberately not a
+(* B1 — creation requires measure and procedure — is deliberately not a
    schema-level [required] on masc_goal_upsert: the one tool serves both create
    and update, and JSON Schema [required] is unconditional, so declaring it
    would reject every metadata update of an existing goal. The create/update

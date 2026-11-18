@@ -71,10 +71,12 @@ type failure_disposition =
 let failure_disposition = function
   | Pre_dispatch_failed | Spawn_resources_busy | Owner_stopped_turn | Retryable_turn_failed -> Transient
   (* The child reported its setup failure only as text, so nothing says the
-     same request fails again; it stays on the retry path every spawn failure
-     had before #28072 rather than waiting on an operator who may have
-     nothing to change. *)
-  | Spawn_failed_cause_unknown -> Transient
+     same request can pass either. A transient release would rewind the turn
+     as if a retry were known to be safe and leave only
+     [last_transient_release] behind; the 2026-08-10 E2BIG execve ran 237
+     times that way. Recorded as a recovery instead, with the child's text as
+     its detail, for an operator to read (#28072). *)
+  | Spawn_failed_cause_unknown -> Ambiguous
   (* The same argv, env and cwd fail the same way again: retrying spends a
      turn per attempt and changes nothing until an operator does (#28072). *)
   | Spawn_refused_same_input -> Fatal
@@ -1701,11 +1703,11 @@ let forgotten_sessions ~before ~after =
     then Same_client session_ids
     else Other_client { client_kind = before.client_kind; runtime_id = before.runtime_id; session_ids }
 
-let context_admission_error_to_string = function
+let gate_context_refusal = function
   | Context_frontier_missing ->
-    "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
+    Keeper_official_client_session_refusal.Gate_context_frontier_missing
   | Canonical_context_changed ->
-    "canonical_context_changed: retained vendor conversation cannot replace its canonical history or core instructions; original session and effects remain preserved"
+    Keeper_official_client_session_refusal.Gate_canonical_context_changed
 
 let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
@@ -2065,13 +2067,13 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ( Ready | Start _ | Active _ | Recovery_required _ | Settled _
       | Turn_inflight { turn_id = None; _ } ) ->
       Error "retryable official-client terminal requires an acknowledged turn identity"
-    | ( ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_failed_cause_unknown
-        | Owner_stopped_turn )
+    | ( ( Pre_dispatch_failed | Spawn_resources_busy | Owner_stopped_turn )
       , _ ) -> Ok (previous_settlement, max 0 (expected.turn_count - 1))
     (* Refused above by [failure_disposition]; refused here as well, so no
        arm of this match writes a transient release record for a failure the
        stored-record decoders reject as transient (#28072). *)
-    | ( ( Spawn_refused_same_input | Transport_interrupted | Protocol_failed
+    | ( ( Spawn_refused_same_input | Spawn_failed_cause_unknown
+        | Transport_interrupted | Protocol_failed
         | Provider_rejected | Input_rejected _ | Host_hook_failed
         | State_persistence_failed | Process_restarted | Vendor_session_full _ )
       , _ ) -> Error not_transient in
@@ -2129,13 +2131,30 @@ let revert_claim ~base_path ~keeper_name ~expected ~restore ~reverted_at =
   Ok restored
 ;;
 
+type process_restart_error =
+  | Claim_held_by_current_epoch
+  | Restart_recovery_unrecorded of string
+
+let process_restart_error_to_core_error = function
+  | Claim_held_by_current_epoch ->
+    Keeper_official_client_session_refusal.core_error
+      Keeper_official_client_session_refusal.Claim_held_by_this_process
+  | Restart_recovery_unrecorded detail ->
+    Agent_core.Error.Internal
+      ("official-client process restart recovery was not recorded: " ^ detail)
+;;
+
 let reconcile_process_restart ~base_path ~keeper_name ~expected
     ~current_owner_epoch ~required_at =
-  let* () = validate_uuid "current_owner_epoch" current_owner_epoch in
+  let unrecorded detail = Restart_recovery_unrecorded detail in
+  let* () =
+    validate_uuid "current_owner_epoch" current_owner_epoch
+    |> Result.map_error unrecorded
+  in
   match incomplete_claim expected.phase with
   | None -> Ok expected
   | Some (owner_epoch, _) when String.equal owner_epoch current_owner_epoch ->
-    Error "official-client claim is still owned by the current process epoch"
+    Error Claim_held_by_current_epoch
   | Some (owner_epoch, _) ->
     require_recovery
       ~base_path
@@ -2148,6 +2167,7 @@ let reconcile_process_restart ~base_path ~keeper_name ~expected
            owner_epoch
            current_owner_epoch)
       ~required_at
+    |> Result.map_error unrecorded
 ;;
 
 let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution

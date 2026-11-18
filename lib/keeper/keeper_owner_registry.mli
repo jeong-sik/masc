@@ -153,6 +153,15 @@ val apply_meta
     from the committed owner projection.  The existing lifecycle reservation
     remains the admission authority through the owner commit. *)
 
+val allocate_turn
+  :  base_path:string
+  -> keeper_name:string
+  -> (int, command_error) result
+(** Hand out the Keeper's next turn number. The Owner advances the durable
+    [runtime.last_turn_id] and persists it before this returns, so a turn
+    writes nothing under its number until the number is spent. Every turn
+    path takes its number here and nowhere else (#52839). *)
+
 val commit_turn_runtime
   :  base_path:string
   -> keeper_name:string

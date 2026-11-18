@@ -455,11 +455,25 @@ let fake_apple_guest_inspect ~container_name ~labels =
   fake_apple_guest_inspect_publishing ~published_sockets:[] ~container_name ~labels
 ;;
 
-(* A fixture shim this server will mount: it declares the relay version the
-   host speaks (#52968). *)
-let current_shim_fixture =
-  "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"
+(* This test binary's source identity: the server under test runs only a
+   shim that declares it (#52968, RFC host-and-shim-share-one-build-identity). *)
+let this_source =
+  match Source_identity.current with
+  | Some identity -> identity
+  | None -> failwith "this test build has no source identity"
 ;;
+
+let this_source_declaration = Source_identity.declaration this_source
+
+(* A source this test build is not: no git object name is all zeros. *)
+let other_source = { this_source with Source_identity.commit = String.make 40 '0' }
+
+let other_source_shim_fixture =
+  "#!/bin/sh\nexit 0\n# " ^ Source_identity.declaration other_source ^ "\n"
+;;
+
+(* A fixture shim this server will mount: it declares this build's source. *)
+let current_shim_fixture = "#!/bin/sh\nexit 0\n# " ^ this_source_declaration ^ "\n"
 
 let initialize_fixture_shim ~base =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
@@ -4340,7 +4354,7 @@ esac
        A fresh runtime drives the real boot entry again, not just the hash
        helper; neither branch may admit this changed shim to a guest. *)
     Out_channel.with_open_bin shim (fun channel -> output_string channel
-      ("#!/bin/sh\nexit 1\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"));
+      ("#!/bin/sh\nexit 1\n# " ^ this_source_declaration ^ "\n"));
     Unix.utimes shim original_shim.Unix.st_atime original_shim.Unix.st_mtime;
     let changed_shim = Unix.stat shim in
     Alcotest.(check bool) "device/inode/size/mtime are unchanged" true
@@ -4370,13 +4384,13 @@ esac
     [ true; false ]
 ;;
 
-(* #52968. A running guest whose agent speaks another relay is replaced by
-   booting a new guest with the mounted shim. When that shim declares relay 1
-   the new guest would be refused the same way, so the replacement is refused
+(* #52968. A running guest whose agent was built from another source is
+   replaced by booting a new guest with the mounted shim. When that shim
+   declares another source too, the new guest would be refused the same way, so the replacement is refused
    before the old guest is stopped: no stop, delete or run. Once the shim
    built from this source is mounted, the same request goes on to replace the
    guest. *)
-let test_a_stale_relay_shim_refuses_the_replacement () =
+let test_a_shim_of_another_source_refuses_the_replacement () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   let module Ready = Masc.Keeper_microvm_shim_readiness in
@@ -4407,8 +4421,8 @@ let test_a_stale_relay_shim_refuses_the_replacement () =
     Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name) (fun out ->
       output_string out
         (Agent_core_sha256.(to_hex (digest_string contents)) ^ "  masc-exec-shim-linux-arm64\n")) in
-  (* A release shim from before the bump: verified by its sidecar, relay 1. *)
-  install "#!/bin/sh\nexit 0\n# MASC_EXEC_SHIM_RELAY_VERSION=1;\n";
+  (* A release shim of another source: verified by its sidecar. *)
+  install other_source_shim_fixture;
   let cli = Filename.concat bin "container" in
   Out_channel.with_open_bin cli (fun out ->
     Printf.fprintf out {|#!/bin/sh
@@ -4446,8 +4460,8 @@ esac
     lines in
   let refusal = Ready.error_message
       (Ready.Verification_failed
-         (Ready.Shim_relay_version_mismatch
-            { installed = M.Relay_version 1; required = Exec_ssh_protocol.Relay.version })) in
+         (Ready.Shim_from_other_source
+            { shim = Source_identity.Declared other_source; server = Source_identity.current })) in
   let attempt () =
     Turn.microvm_remote_endpoint ~timeout_sec:5.
       (Turn.create ~config ~meta ~image:(Ok "fixture:image") ~network_mode:meta.network_mode ()) in
@@ -4455,9 +4469,9 @@ esac
   List.iter (fun turn ->
     (match attempt () with
      | Error detail ->
-       Alcotest.(check bool) (turn ^ " turn names the relay refusal") true
+       Alcotest.(check bool) (turn ^ " turn names the source refusal") true
          (Astring.String.is_infix ~affix:refusal detail)
-     | Ok _ -> Alcotest.fail "a relay-1 shim was given an endpoint");
+     | Ok _ -> Alcotest.fail "a shim of another source was given an endpoint");
     Alcotest.(check (list string)) (turn ^ " turn stops, deletes or boots nothing") []
       (effects (calls ()));
     Alcotest.(check bool) (turn ^ " turn leaves the guest in place") true
@@ -4473,10 +4487,10 @@ esac
    Microsandbox removes the guest it finds before provisioning reads the
    shim, so the shim is checked first: a stopped guest and a running one
    this process cannot adopt both stay where they are while the mounted shim
-   declares relay 1. With the shim built from this source mounted, the same
+   declares another source. With the shim built from this source mounted, the same
    start goes on to stop the old guest. The Apple runtime is pinned by
-   [test_a_stale_relay_shim_refuses_the_replacement]. *)
-let test_a_stale_relay_shim_removes_no_process_bound_guest () =
+   [test_a_shim_of_another_source_refuses_the_replacement]. *)
+let test_a_shim_of_another_source_removes_no_process_bound_guest () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   let module Ready = Masc.Keeper_microvm_shim_readiness in
@@ -4504,7 +4518,7 @@ let test_a_stale_relay_shim_removes_no_process_bound_guest () =
       Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name) (fun out ->
         output_string out
           (Agent_core_sha256.(to_hex (digest_string contents)) ^ "  masc-exec-shim-linux-arm64\n")) in
-    install "#!/bin/sh\nexit 0\n# MASC_EXEC_SHIM_RELAY_VERSION=1;\n";
+    install other_source_shim_fixture;
     (* nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
        answers a literal; msb inspect NAME --format json answers a status. *)
     let script = match backend with
@@ -4554,16 +4568,16 @@ esac
       lines in
     let refusal = Ready.error_message
         (Ready.Verification_failed
-           (Ready.Shim_relay_version_mismatch
-              { installed = M.Relay_version 1; required = Exec_ssh_protocol.Relay.version })) in
+           (Ready.Shim_from_other_source
+              { shim = Source_identity.Declared other_source; server = Source_identity.current })) in
     let attempt () =
       Turn.microvm_remote_endpoint ~timeout_sec:5.
         (Turn.create ~config ~meta ~image:(Ok "fixture:image") ~network_mode:meta.network_mode ()) in
     (match attempt () with
      | Error detail ->
-       Alcotest.(check bool) (label ^ ": the start names the relay refusal") true
+       Alcotest.(check bool) (label ^ ": the start names the source refusal") true
          (Astring.String.is_infix ~affix:refusal detail)
-     | Ok _ -> Alcotest.fail (label ^ ": a relay-1 shim was given an endpoint"));
+     | Ok _ -> Alcotest.fail (label ^ ": a shim of another source was given an endpoint"));
     Alcotest.(check (list string)) (label ^ ": nothing is stopped, removed or booted") []
       (effects (calls ()));
     install current_shim_fixture;
@@ -4668,17 +4682,18 @@ let test_the_shim_sidecar_decides_the_boot () =
   let binary = Filename.concat dir M.shim_binary_name in
   let sidecar = Filename.concat dir M.shim_sidecar_name in
   let write path content = ignore (Fs_compat.save_file_atomic path content) in
-  let shim = "#!/bin/sh\necho shim\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n" in
+  let shim = "#!/bin/sh\necho shim\n# " ^ this_source_declaration ^ "\n" in
   write binary shim;
   let digest = Agent_core_sha256.(to_hex (digest_string shim)) in
   (match M.inspect_shim ~dir with
-   | Ok { M.provenance = M.Shim_unverified; relay = M.Relay_version version } ->
-     Alcotest.(check int) "the declared relay" Exec_ssh_protocol.Relay.version version
+   | Ok { M.provenance = M.Shim_unverified; source = Source_identity.Declared declared } ->
+     Alcotest.(check string) "the declared source" (Source_identity.to_string this_source)
+       (Source_identity.to_string declared)
    | Ok _ -> Alcotest.fail "a hand-built current shim read as something else"
    | Error e -> Alcotest.fail e);
   write sidecar (digest ^ "  masc-exec-shim-linux-arm64\n");
   (match M.inspect_shim ~dir with
-   | Ok { M.provenance = M.Shim_verified { sha256 }; relay = _ } ->
+   | Ok { M.provenance = M.Shim_verified { sha256 }; source = _ } ->
      Alcotest.(check string) "the digest" digest sha256
    | Ok { M.provenance = M.Shim_unverified; _ } -> Alcotest.fail "a matching sidecar read as absent"
    | Error e -> Alcotest.fail e);
@@ -4696,46 +4711,6 @@ let test_the_shim_sidecar_decides_the_boot () =
     Alcotest.(check bool) "named invalid sidecar" true
       (String_util.contains_substring e "microvm_shim_sidecar_invalid")
   | Ok _ -> Alcotest.fail "a sidecar without a digest passed"
-;;
-
-(* #52968: the relay version a guest will speak is read from the mounted
-   shim's own bytes. The literal the shim's source carries parses to the
-   host's version, so a shim built from this source is admitted; a shim built
-   before the declaration, or one declaring another version, is not. *)
-let test_the_shim_declares_its_relay_version () =
-  let relay = M.relay_declaration_of_bytes in
-  let declare version = Printf.sprintf "MASC_EXEC_SHIM_RELAY_VERSION=%d;" version in
-  (match relay Exec_ssh_protocol.Relay.version_declaration with
-   | M.Relay_version version ->
-     Alcotest.(check int) "the literal names Relay.version" Exec_ssh_protocol.Relay.version version
-   | M.No_relay_version | M.Several_relay_versions _ ->
-     Alcotest.fail "the source's own declaration does not parse");
-  let in_binary text = "\127ELF\002\001\000" ^ text ^ "\000\000tail" in
-  (match relay (in_binary (declare 1)) with
-   | M.Relay_version 1 -> ()
-   | M.Relay_version _ | M.No_relay_version | M.Several_relay_versions _ ->
-     Alcotest.fail "a relay-1 shim was not read as relay 1");
-  (match relay (in_binary "a relay-1 shim from before the declaration") with
-   | M.No_relay_version -> ()
-   | M.Relay_version _ | M.Several_relay_versions _ ->
-     Alcotest.fail "a shim without a declaration was given a version");
-  (match relay (in_binary (declare 2 ^ "\000" ^ declare 2)) with
-   | M.Relay_version 2 -> ()
-   | M.Relay_version _ | M.No_relay_version | M.Several_relay_versions _ ->
-     Alcotest.fail "a repeated declaration is still one version");
-  (match relay (in_binary (declare 1 ^ "\000" ^ declare 2)) with
-   | M.Several_relay_versions [ 1; 2 ] -> ()
-   | M.Several_relay_versions _ | M.Relay_version _ | M.No_relay_version ->
-     Alcotest.fail "two distinct declarations were not both reported");
-  (* The prefix alone, digits without the terminator, and more than four
-     digits are not declarations. *)
-  List.iter (fun text ->
-    match relay (in_binary text) with
-    | M.No_relay_version -> ()
-    | M.Relay_version _ | M.Several_relay_versions _ ->
-      Alcotest.failf "%S was read as a declaration" text)
-    [ "MASC_EXEC_SHIM_RELAY_VERSION="; "MASC_EXEC_SHIM_RELAY_VERSION=2";
-      "MASC_EXEC_SHIM_RELAY_VERSION=;"; "MASC_EXEC_SHIM_RELAY_VERSION=12345;" ]
 ;;
 
 let test_shim_travels_read_only_with_its_config () =
@@ -6159,12 +6134,10 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick
             test_the_shim_sidecar_decides_the_boot
-        ; Alcotest.test_case "the shim declares its relay version" `Quick
-            test_the_shim_declares_its_relay_version
-        ; Alcotest.test_case "a stale relay shim refuses the replacement" `Quick
-            test_a_stale_relay_shim_refuses_the_replacement
-        ; Alcotest.test_case "a stale relay shim removes no process-bound guest" `Quick
-            test_a_stale_relay_shim_removes_no_process_bound_guest
+        ; Alcotest.test_case "a shim of another source refuses the replacement" `Quick
+            test_a_shim_of_another_source_refuses_the_replacement
+        ; Alcotest.test_case "a shim of another source removes no process-bound guest" `Quick
+            test_a_shim_of_another_source_removes_no_process_bound_guest
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick

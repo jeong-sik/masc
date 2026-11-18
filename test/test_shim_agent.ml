@@ -292,6 +292,10 @@ exit 3|}
     split_hello (relay_to_end ~program ~env:base_env (kind_byte Relay.Run ^ "abc\n"))
   in
   check int "hello version" Relay.version hello.Relay.relay_version;
+  check bool "hello names the source this build links" true
+    (match Source_identity.current, hello.Relay.source_identity with
+     | Some this, Some named -> Source_identity.equal this named
+     | None, (Some _ | None) | Some _, None -> false);
   check int "hello uid" (Unix.geteuid ()) hello.Relay.uid;
   check int "hello gid" (Unix.getegid ()) hello.Relay.gid;
   let outcome = outcome_of rest in

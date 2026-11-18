@@ -12,7 +12,14 @@ let write path content = Out_channel.with_open_bin path (fun output -> output_st
 let read path = In_channel.with_open_bin path In_channel.input_all
 (* A fixture shim this server will mount: it declares the relay version the
    host speaks (#52968). *)
-let shim_fixture = "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"
+(* This test binary's source identity: the server under test runs only a
+   shim that declares it (RFC host-and-shim-share-one-build-identity). *)
+let this_source_declaration =
+  match Source_identity.current with
+  | Some identity -> Source_identity.declaration identity
+  | None -> failwith "this test build has no source identity"
+
+let shim_fixture = "#!/bin/sh\nexit 0\n# " ^ this_source_declaration ^ "\n"
 let json path = Yojson.Safe.from_string (read path)
 let save_json path value = write path (Yojson.Safe.to_string value)
 let append path value =
@@ -287,11 +294,12 @@ let published_host_sockets row =
   | `List sockets -> List.map (fun socket -> text (field "hostPath" socket)) sockets
   | _ -> fail "fixture guest published sockets are not an array"
 
-(* The facts the production check reads from a hello: this build's relay,
-   a read-only root, the Keeper's uid and gid (this host's in the fixture)
+(* The facts the production check reads from a hello: this build's source
+   identity, a read-only root, the Keeper's uid and gid (this host's in the fixture)
    and no_new_privs. *)
 let fixture_agent_hello () : Exec_ssh_protocol.Relay.hello =
-  { relay_version = Exec_ssh_protocol.Relay.version; root_read_only = true;
+  { relay_version = Exec_ssh_protocol.Relay.version;
+    source_identity = Source_identity.current; root_read_only = true;
     uid = Unix.getuid (); gid = Unix.getgid (); no_new_privs = true }
 
 let rec write_all fd bytes offset =

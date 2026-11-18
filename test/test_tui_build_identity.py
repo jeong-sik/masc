@@ -21,7 +21,9 @@ def read_stamp(path: Path) -> tuple[str | None, int | None]:
     source = path.read_text().strip()
     match = re.fullmatch(
         r'let commit : string option = (?:Some "([0-9a-f]+)"|None)\n'
-        r'let commit_unix_ts : int64 option = (?:Some ([0-9]+)L|None)', source)
+        r'let commit_unix_ts : int64 option = (?:Some ([0-9]+)L|None)\n'
+        r'let source_identity_declaration : string option = '
+        r'(?:Some "MASC_SOURCE_IDENTITY=[0-9a-f]+/(?:clean|modified:[0-9a-f]+);"|None)', source)
     if match is None:
         raise AssertionError(f"Unrecognized generated build stamp: {source!r}")
     commit, timestamp = match.groups()

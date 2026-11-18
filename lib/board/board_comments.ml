@@ -213,6 +213,15 @@ let add_comment_with_audience
              later participant routing. Check before the append while holding
              the same lock that serializes the posts source. *)
           let* () = require_posts_source_readable store in
+          (* Staging read the parent before this lock was held, and a sweep
+             that ran in between may have removed it for its TTL. The sweep
+             holds this persistence lock for its whole pass, so a parent that
+             is listed here stays listed until the reply is committed.
+             Refusing here means such a reply is never written. *)
+          let* () =
+            with_lock store (fun () ->
+              require_reply_parent_unlocked store pid parent_cid)
+          in
           let* receipt = append_comment store ~reader comment in
           let committed = with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
@@ -224,8 +233,9 @@ let add_comment_with_audience
               | None -> Error (Post_not_found post_id)
               | Some post ->
                 let* () = Board_comment_admission.validate_parent ~reader ~post_id ~audience post in
-                (* The parent can leave the thread while the append is in
-                   flight: its TTL runs out and the sweep removes the row. *)
+                (* Read again from the model this commit publishes, like the
+                   checks around it. The sweep is not what this guards
+                   against: the check before the append already covers it. *)
                 let* () = require_reply_parent_unlocked store pid parent_cid in
                 (match comment_count_cap_error_unlocked store pid with
                  | Some msg -> Error (Validation_error msg)

@@ -3,14 +3,16 @@
 """Read-only HTTP relay between a TUI under measurement and a MASC server.
 
 usage: readonly_proxy.py --upstream-port PORT --log PATH [--listen-port PORT] [--record DIR]
+                         [--until-stdin-closes]
 
 GET and HEAD pass to the server; an event stream is relayed as its bytes
 arrive. POST /mcp passes only when every JSON-RPC message in it is a request
 for a method in READ_METHODS or a tools/call of a tool in READ_TOOLS. The
 relay answers 403 to every other request and never forwards it: other POSTs,
 PUT, PATCH, DELETE, OPTIONS, TRACE, CONNECT, websocket upgrades, JSON-RPC
-responses and request bodies without a Content-Length. A method the HTTP
-library does not know is answered 501, also without reaching the server.
+responses, bodies that name a member twice in one object, and request bodies
+without a Content-Length. A method the HTTP library does not know is answered
+501, also without reaching the server.
 
 The relay listens on 127.0.0.1, prints `listening PORT` on stdout once it
 accepts connections, and writes one JSON line per decision to --log:
@@ -34,6 +36,10 @@ With --record DIR the relay keeps each 200 or 404 answer to a GET or an allowed
 POST /mcp (an event-stream answer to POST /mcp included), and the headers of
 each GET event stream, for frozen_server.py (relay_files.py describes the
 format).
+
+With --until-stdin-closes the relay also stops when its standard input reaches
+end of file. idle.py starts it so, with a pipe it never writes to: the pipe
+closes when idle.py exits, however it exits, so the relay does not outlive it.
 """
 import argparse
 from collections.abc import Sequence
@@ -43,10 +49,12 @@ import http.client
 import http.server
 from http import HTTPStatus
 import json
+import os
 from pathlib import Path
 import signal
 import socketserver
 import sys
+import threading
 import time
 from types import FrameType
 from typing import cast
@@ -101,6 +109,23 @@ class Refused:
 type Decision = Allowed | Refused
 
 
+class DuplicateMember(ValueError):
+    """A JSON object names a member twice."""
+
+
+def unique_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """json.loads keeps the last of two equal names, so `method` or
+    `params.name` given twice would be judged by one value while a server
+    reading the first one runs another. A body with a repeated name is not
+    judged at all."""
+    members: dict[str, object] = {}
+    for name, value in pairs:
+        if name in members:
+            raise DuplicateMember(name)
+        members[name] = value
+    return members
+
+
 class Ending(enum.Enum):
     COMPLETE = 'complete'
     CLIENT_LEFT = 'client_left'
@@ -131,7 +156,9 @@ def message_decision(message: object) -> Decision:
 def mcp_decision(body: bytes) -> Decision:
     """Allowed only when every message of a JSON-RPC body (one or a batch) reads."""
     try:
-        decoded: object = json.loads(body.decode('utf-8') or 'null')
+        decoded: object = json.loads(body.decode('utf-8') or 'null', object_pairs_hook=unique_members)
+    except DuplicateMember:
+        return Refused('duplicate-member')
     except (UnicodeDecodeError, ValueError, RecursionError):
         return Refused('unparsable-json')
     messages: Sequence[object] = cast(list[object], decoded) if isinstance(decoded, list) else (decoded,)
@@ -357,6 +384,21 @@ def stop_serving(signum: int, frame: FrameType | None) -> None:
     raise SystemExit(128 + signum)
 
 
+def stop_when_stdin_closes(server: RelayServer) -> None:
+    """Stop serving once standard input reaches end of file. The thread reads
+    the descriptor, not sys.stdin: a daemon thread blocked inside the buffered
+    reader holds its lock, and the interpreter aborts when it cannot take that
+    lock at exit."""
+    stdin_fd = sys.stdin.fileno()
+
+    def watch() -> None:
+        while os.read(stdin_fd, READ_BYTES):
+            pass
+        server.shutdown()
+
+    threading.Thread(target=watch, name='stdin-watch', daemon=True).start()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='Read-only HTTP relay in front of a MASC server.')
     parser.add_argument('--upstream-port', type=int, required=True,
@@ -366,17 +408,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--log', type=Path, required=True, help='decision log, one JSON line per decision')
     parser.add_argument('--record', type=Path, default=None,
                         help='recording directory for frozen_server.py; holds workspace data')
+    parser.add_argument('--until-stdin-closes', action='store_true',
+                        help='also stop when standard input reaches end of file')
     args = parser.parse_args(argv)
     upstream_port: int = args.upstream_port
     listen_port: int = args.listen_port
     log_path: Path = args.log
     record: Path | None = args.record
+    until_stdin_closes: bool = args.until_stdin_closes
     log = JsonLog(log_path)
     server = RelayServer(listen_port, upstream_port, log, None if record is None else Recorder(record))
     signal.signal(signal.SIGTERM, stop_serving)
     try:
         log.write({'decision': 'listening', 'listen': server.bound_port(), 'upstream': upstream_port})
         print(f'{LISTENING} {server.bound_port()}', flush=True)
+        if until_stdin_closes:
+            stop_when_stdin_closes(server)
         server.serve_forever()
     finally:
         server.server_close()

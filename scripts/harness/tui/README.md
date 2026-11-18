@@ -13,7 +13,7 @@ These tools measure what each TUI screen costs while nobody presses a key. They 
 
 ## The relay
 
-`readonly_proxy.py` forwards GET and HEAD. It forwards a POST to `/mcp` only when every JSON-RPC message in it is a request for a read method (`initialize`, `ping`, the `*/list` methods, `resources/read`) or a `tools/call` of a tool in `READ_TOOLS`. `READ_TOOLS` lists tools that `lib/tool/tool_catalog.ml` registers as read-only. The relay answers 403 to everything else and does not forward it: other POSTs, PUT, PATCH, DELETE, websocket upgrades and JSON-RPC responses. A refused request shows in the log with its path and reason, so a run also shows which writes a screen tried. The TUI posts `/api/v1/tui/preferences` when it starts, and the relay refuses that, so a measured run leaves the server's stored TUI preferences as they were.
+`readonly_proxy.py` forwards GET and HEAD. It forwards a POST to `/mcp` only when every JSON-RPC message in it is a request for a read method (`initialize`, `ping`, the `*/list` methods, `resources/read`) or a `tools/call` of a tool in `READ_TOOLS`. `READ_TOOLS` lists tools that `lib/tool/tool_catalog.ml` registers as read-only. The relay answers 403 to everything else and does not forward it: other POSTs, PUT, PATCH, DELETE, websocket upgrades, JSON-RPC responses and bodies that name a member twice in one object (`json.loads` would judge the last `method` or tool name, while a server may run the first). A refused request shows in the log with its path and reason, so a run also shows which writes a screen tried. The TUI posts `/api/v1/tui/preferences` when it starts, and the relay refuses that, so a measured run leaves the server's stored TUI preferences as they were.
 
 Each `done` line in the log is one answer: its path with the query, status, bytes and arrival time. An event stream also gets `progress` lines, about once a second, with its events and bytes so far per event name. Events are named by `scripts/harness/perf/tui_request_events.py`, the same parser [the TUI request probe](../perf/README-tui-requests.md) uses.
 
@@ -80,9 +80,13 @@ The header line of each directory shows the binary's SHA-256. Compare a screen o
 
 ## Safety
 
-- The TUI starts a MASC server itself when nothing answers on its port. Before the first TUI starts, `idle.py` checks that `GET /health` through the relay answers 200, and it stops each TUI before it stops the relay.
-- The TUI gets only `HOME`, `PATH`, `LANG` and `MASC_TOKEN` from the caller's environment, plus `TERM`, `COLORTERM` and `MASC_TUI_FRAME_TIMING`. A `MASC_HTTP_BASE_URL`, `MASC_BASE_PATH` or `MASC_CONFIG_DIR` in the caller's environment cannot send it past the relay or to another configuration. The TUI reads its credential from the workspace or from `MASC_TOKEN`.
-- `v` on the Keeper list writes `<base-path>/.masc/config/tui-keepers.toml` directly. `idle.py` reads that file before the first TUI starts. When the run ends, it writes the file back if a TUI changed it, or removes it if a TUI created it. This also happens when the run is stopped with SIGTERM. `idle.json` records the outcome in `preferences`. No other file under the base path is watched.
+- The TUI starts a MASC server itself the first time nothing answers on its port. It runs the `masc` beside its own binary, or else the first `masc` on `PATH`. `idle.py` therefore runs a copy of `--tui` from a temporary directory and leaves out of the TUI's `PATH` every directory that holds a `masc`. If the relay stops answering, the TUI finds no server to start and only notes the manual command. Before the first TUI starts, `idle.py` also checks that `GET /health` through the relay answers 200, and it stops each TUI before it stops the relay.
+- SIGINT (Ctrl-C), SIGTERM and SIGHUP (the terminal closing) end a run the same way. `idle.py` stops the TUI on screen, then the relay, puts the preferences file back and writes `idle.json` with `aborted`. A signal that arrives while a TUI starts, or while the run cleans up, waits until that step ends. A cleanup takes up to about 15 s: 5 s each for a TUI and a relay that ignore SIGTERM, and 5 s for a held preferences lock. The relay runs in its own session, so the terminal's signals reach only `idle.py`. It also stops by itself when `idle.py` exits. SIGKILL cannot be caught: the relay and the TUI still stop, but the preferences file stays as the TUI left it, `idle.json` lacks the last screen, and the copy of the TUI binary stays in the temporary directory (`masc-tui-idle-*`).
+- The TUI gets only `HOME`, `PATH` (without `masc`, as above), `LANG` and `MASC_TOKEN` from the caller's environment, plus `TERM`, `COLORTERM` and `MASC_TUI_FRAME_TIMING`. A `MASC_HTTP_BASE_URL`, `MASC_BASE_PATH` or `MASC_CONFIG_DIR` in the caller's environment cannot send it past the relay or to another configuration.
+- `v` on the Keeper list writes `<base-path>/.masc/config/tui-keepers.toml` directly. `idle.py` reads that file before the first TUI starts. When the run ends, it writes the file back with its mode if a TUI changed it, or removes it if a TUI created it. It does so under the lock the TUI takes on `tui-keepers.toml.lock`. A change anyone else made to the file during the run, such as a masc-tui of your own on the same workspace, is undone too. `idle.json` records the outcome in `preferences`; `lock-held` means the lock stayed taken for 5 s and the file was left as it was.
+- Two more kinds of file under the base path are the TUI's own and stay after the run:
+  - Each TUI writes its stderr to `<base-path>/.masc/logs/masc-tui-<pid>.log`, one file per screen. The `pid` of each screen in `idle.json` names its file.
+  - When `MASC_TOKEN` is unset and the workspace has no stored masc-tui credential, or only an expired or mismatched one, the first TUI mints a new admin credential and stores it under `<base-path>/.masc/auth` (bin/masc_tui_credential.ml). This is local file work, so the relay cannot refuse it. Set `MASC_TOKEN` to run with a credential you choose instead.
 
 ## Output holds workspace data
 
@@ -105,11 +109,12 @@ Keep them in a directory outside the repository.
 - The window is placed in the TUI's frame report by the time since the fork, so the exec delay is the error.
 - The emulator reads rows of text. It knows the cursor addressing, erase, SGR and query answers the TUI's presenter uses. It does not implement scroll regions, insert or delete line, or autowrap.
 - The relay speaks HTTP/1.1, answers each request on its own connection, and needs a request body to come with `Content-Length`. A compressed event stream is counted in bytes, not events.
+- After the first frame, `idle.py` waits up to 12 s for 2 s without output before it types a screen's keys. A screen that redraws at least every 2 s uses the whole 12 s.
 
 ## Self-test
 
 ```sh
-python3 -m unittest scripts.tests.test_tui_frozen_server
+python3 -m unittest scripts.tests.test_tui_frozen_server scripts.tests.test_tui_readonly_proxy
 ```
 
-It writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. It needs no MASC server and no TUI binary. CI does not run it.
+`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. Neither needs a MASC server or a TUI binary. CI does not run them.

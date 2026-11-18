@@ -7,8 +7,9 @@ No MASC server is involved. The test starts a stand-in upstream on a free
 loopback port that records every request it receives, starts
 scripts/harness/tui/readonly_proxy.py in front of it, and sends writes the
 relay must refuse: REST verbs, POST outside /mcp, a tools/call of a mutating
-tool, a batch with one, a JSON-RPC response, a chunked body and a websocket
-upgrade. None of them may reach the upstream. A GET and a tools/call of a read
+tool, a batch with one, a JSON-RPC response, a body that names `method` or the
+tool name twice, a chunked body and a websocket upgrade. None of them may
+reach the upstream. A GET and a tools/call of a read
 tool must reach it.
 """
 from collections.abc import Mapping
@@ -111,6 +112,14 @@ REFUSED: tuple[Case, ...] = (
     Case('batch with a mutating tool', 'POST', '/mcp',
          encoded([tool_call(READ_TOOL), tool_call(WRITE_TOOL)]), JSON),
     Case('JSON-RPC response', 'POST', '/mcp', encoded({'jsonrpc': '2.0', 'id': 9, 'result': {}}), JSON),
+    # json.loads keeps the last of two equal names; a server may read the first.
+    Case('method named twice', 'POST', '/mcp',
+         b'{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+         b'"params":{"name":"' + WRITE_TOOL.encode() + b'","arguments":{}},"method":"ping"}', JSON),
+    Case('tool named twice', 'POST', '/mcp',
+         b'{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+         b'"params":{"name":"' + WRITE_TOOL.encode() + b'","name":"' + READ_TOOL.encode() + b'","arguments":{}}}',
+         JSON),
     Case('unlisted method', 'POST', '/mcp', encoded(rpc('resources/subscribe', {'uri': 'masc://x'})), JSON),
     Case('chunked read', 'POST', '/mcp', encoded(tool_call(READ_TOOL)), JSON, chunked=True),
     Case('websocket upgrade', 'GET', '/mcp', b'',

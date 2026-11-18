@@ -2,8 +2,9 @@
 """Run a TUI in a pseudo-terminal, read what it draws and type keys into it.
 
 The child gets its window size before it starts, SIGPIPE and SIGXFSZ back at
-their defaults (Python ignores both and an exec keeps that), and exactly the
-environment the caller passes. Everything the TUI writes goes through a `Vte`,
+their defaults (Python ignores both and an exec keeps that), no blocked
+signals (a caller may fork with its stop signals held, and an exec keeps the
+mask), and exactly the environment the caller passes. Everything the TUI writes goes through a `Vte`,
 and the answers the `Vte` gives to the TUI's terminal queries are written back.
 
 A key is a `Press`, bytes typed as they are, or a `Jump`, a command palette
@@ -107,6 +108,7 @@ def spawn(argv: Sequence[str], env: Mapping[str, str], geometry: Geometry) -> Ch
             fcntl.ioctl(1, termios.TIOCSWINSZ, geometry.winsize())
             for restored in RESTORED_SIGNALS:
                 signal.signal(restored, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_SETMASK, ())
             os.execve(argv[0], list(argv), dict(env))
         finally:
             os._exit(EXEC_FAILED)

@@ -59,12 +59,12 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 
 행이 읽는 meta 는 파일을 decode 한 값이다. Owner 가 메모리에 든 값과 같지 않다.
 
-- decoder 는 설정 필드 열넷을 읽지 않고 자리 채움 값을 둔다(`keeper_meta_json_parse.ml:258-292`. `:240` 의 주석은 열하나라고 적었다). `sandbox_profile` 은 `Docker`, `network_mode` 는 `Network_inherit`, `activation_mode` 는 `Autonomous` 다. encoder 도 그 필드를 쓰지 않는다(`keeper_meta_json.ml:10-68`).
+- decoder 는 설정 필드 열넷을 읽지 않고 자리 채움 값을 둔다(`keeper_meta_json_parse.ml:258-292`. `:240` 의 주석은 열하나라고 적었다). `sandbox_profile` 은 `Docker`, `network_mode` 는 `Network_inherit`, `activation_mode` 는 `Autonomous` 다. `id` 도 읽지 않고 `None` 을 둔다. encoder 도 그 필드들을 쓰지 않는다(`keeper_meta_json.ml:10-68`).
 - Owner 의 메모리 값에는 TOML 값이 들어 있다. `Update_profile` 이 넣는다(`keeper_owner_reducer.ml:404-425`).
 - `keepers_json` 의 행은 자리 채움 값을 그대로 내보낸다. `activation_mode` 가 그렇다(`operator_control_snapshot.ml:412`). receipt 가 없는 Keeper 의 trust 는 sandbox 종류와 network mode 를 meta 에서 가져온다(`keeper_runtime_trust_snapshot.ml:504-516`). 이 값이 TOML 과 다른 것은 #53007 에 적었다.
 - `masc_keeper_list` 와 board address 는 다르다. 파일을 읽은 뒤 profile 을 덮는다(`keeper_tool_surface_ops.ml:343-348`, `keeper_board_address.ml:26-33`). 그래서 TOML 값을 보인다. 덮기는 TOML 이 적지 않은 key 에는 받은 값을 남긴다(`keeper_meta_contract.ml:287-291`). 지금 받는 값은 자리 채움 값이다.
 
-최근 receipt 를 읽는 함수는 둘이다. 둘 다 가장 새 온전한 줄을 준다. `latest_json` 은 `read_recent store 1` 이고, 그 함수는 JSON 으로 읽힌 줄만 센다(`keeper_execution_receipt.ml:584-589`, `dated_jsonl.ml:949-953`). `read_latest_receipt` 는 깨진 줄을 건너뛰며 끝에서부터 훑는다(`:769-779`). 그래서 마지막 줄이 끊겨 있어도 둘 다 그 앞의 receipt 를 준다. 둘이 갈리는 곳은 둘뿐이다. 목록이나 파일을 못 읽으면 앞의 것은 '없음'을, 뒤의 것은 오류를 낸다. 점으로 시작하는 `.jsonl` 은 앞의 것만 읽는다(§3.4). trust 와 `masc_keeper_list` 는 앞의 것을 쓰고 blocker 는 뒤의 것을 쓴다(`keeper_runtime_trust_snapshot.ml:388-389`, `keeper_tool_surface_ops.ml:470`, `keeper_status_bridge.ml:126`).
+최근 receipt 를 읽는 함수는 둘이다. 둘 다 가장 새 온전한 줄을 준다. `latest_json` 은 `read_recent store 1` 이고, 그 함수는 JSON 으로 읽힌 줄만 센다(`keeper_execution_receipt.ml:584-589`, `dated_jsonl.ml:949-953`). `read_latest_receipt` 는 깨진 줄을 건너뛰며 끝에서부터 훑는다(`keeper_execution_receipt.ml:769-779`). 그래서 마지막 줄이 끊겨 있어도 둘 다 그 앞의 receipt 를 준다. 둘이 갈리는 곳은 둘뿐이다. 목록이나 파일을 못 읽으면 앞의 것은 '없음'을, 뒤의 것은 오류를 낸다. 점으로 시작하는 `.jsonl` 은 앞의 것만 읽는다(§3.4). trust 와 `masc_keeper_list` 는 앞의 것을 쓰고 blocker 는 뒤의 것을 쓴다(`keeper_runtime_trust_snapshot.ml:388-389`, `keeper_tool_surface_ops.ml:470`, `keeper_status_bridge.ml:126`).
 
 행 하나에서 registry phase 와 receipt 를 여러 번 읽는다. quarantine inventory 는 snapshot 하나에 한 번 읽는다(`operator_control_snapshot.ml:668-689`). 승인 audit 와 quarantine 원장은 이 RFC 밖이다.
 
@@ -335,8 +335,10 @@ match step before.slot written with
 
 - 엄격한 읽기는 `YYYY-MM/DD.jsonl` 모양의 일반 파일만 받는다. symlink 와 낯선 이름은 `Error` 다(`dated_jsonl.mli:267-273`). 그런 저장소의 칸은 채워지지 않고, 행은 지금 reader 로 읽는다. 보이는 값은 그대로다.
 - 도구 호출 원장이 지금 그 경우다. 디렉터리에 읽기 색인 파일이 있어서 달 목록이 `Error` 를 낸다(§1.4). 이대로면 `tool_calls` 칸은 운영에서 한 번도 채워지지 않는다. Keeper 31개가 행마다 원장을 다시 읽는다. 새로 만든 base path 에는 색인이 없어서 시험은 통과한다.
-  - L2 는 이것부터 고친다. 저장소 선언(`Dated_jsonl.Store`)이 그 디렉터리의 곁 파일 이름을 갖는다. 도구 호출 원장의 선언은 `Common.tool_call_read_index_filenames` 를 가리킨다. 다른 저장소의 선언은 빈 목록이다.
-  - 엄격한 목록은 선언된 이름을 건너뛴다. 그 밖의 낯선 이름은 지금처럼 `Error` 다. 색인 주인과 scanner 가 이미 그 이름 목록을 같이 쓴다(`lib/core/common.mli:202-210`, `tool_blob_maintenance.ml:1007`).
+  - L2 는 이것부터 고친다. 저장소 선언(`Dated_jsonl.Store`)이 그 디렉터리의 어떤 이름이 곁 파일인지 답한다. 도구 호출 원장의 답은 `Common.is_tool_call_read_index_file` 이다. 저장소 종류마다 답을 적는다. 종류가 늘면 컴파일러가 빠진 답을 잡는다.
+  - 행이 읽는 나머지 저장소는 Keeper 저장소다. 거기에는 곁 파일이 없다. 운영 설치에서 달 디렉터리를 가진 디렉터리 990개를 이름만 훑었다(2026-11-18). 달 옆의 낯선 이름은 이 색인 파일 셋과 `activity-events` 의 `_seq` 뿐이다.
+  - `activity-events` 는 행이 읽지 않는다. 그 저장소를 읽는 task history 는 자기 목록에서 `_seq` 를 건너뛴다(`task_history_inventory.ml:8-11`, `:59`). 이 RFC 는 그 저장소의 답을 바꾸지 않는다.
+  - 엄격한 목록은 곁 파일을 건너뛴다. 그 밖의 낯선 이름은 지금처럼 `Error` 다. blob 을 훑는 scanner 가 이미 같은 함수로 색인 파일을 건너뛴다(`lib/core/common.mli:202-210`, `tool_blob_maintenance.ml:1007`).
 - 점으로 시작하는 이름은 엄격한 목록이 조용히 건너뛴다(`dated_jsonl.ml:255`, `dated_jsonl_layout.ml:143-155`). 이 layout 이 만들 수 없는 이름이라서다. 너그러운 목록은 `.jsonl` 로 끝나면 점으로 시작해도 읽는다(`dated_jsonl.ml:197-200`). 그래서 달 디렉터리에 `._18.jsonl` 같은 파일이 있으면, 엄격한 읽기는 `Ok` 인데 줄이 다르다.
   - 갈리는 reader 는 `latest_json`, `read_latest ~keeper_name`, 최근 활동 5줄이다. TurnRecord 와 tool audit 는 지금도 엄격해서 같다.
   - 이 RFC 는 엄격한 쪽을 따른다. 그 파일은 저장소가 쓴 것이 아니다. 운영 설치의 Keeper 저장소와 도구 호출 원장에는 지금 그런 파일이 없다(2026-11-18 에 `find` 로 확인). 값이 달라지는 경우로 §7 에 적는다.

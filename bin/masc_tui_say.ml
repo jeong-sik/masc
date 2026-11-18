@@ -13,6 +13,13 @@ let both ~ko ~en = function
 
 let per_language choose = choose
 let as_received text _ = text
+let code text _ = text
+
+let of_ko_flag write = function
+  | Ko -> write ~ko:true
+  | En -> write ~ko:false
+
+let map change text language = change (text language)
 let empty _ = ""
 let ( ++ ) left right language = left language ^ right language
 

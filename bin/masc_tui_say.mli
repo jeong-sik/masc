@@ -30,6 +30,22 @@ val as_received : string -> t
     number a value module formatted. Never a literal: a literal is words the
     app wrote, and those go through {!both}. *)
 
+val code : string -> t
+(** A literal that reads the same in both languages because it holds no
+    words: a field label in an evidence row ([bytes=], [sha256=]), a protocol
+    name the reader compares with logs, a glyph, a separator. A word, or a
+    wire state a reader is meant to read as one ([queued]), goes through
+    {!both}. *)
+
+val of_ko_flag : (ko:bool -> string) -> t
+(** The text a function that still takes [~ko:bool] writes in each language.
+    A bridge to the functions not moved yet; the last layer of section 7.1
+    removes it with the flag. *)
+
+val map : (string -> string) -> t -> t
+(** The same change made to the text in each language: fitting it to a
+    width, cutting it, padding it. *)
+
 val empty : t
 (** No text. *)
 

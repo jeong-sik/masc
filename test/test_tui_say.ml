@@ -36,6 +36,16 @@ let joining_keeps_order_and_language () =
   Alcotest.(check string) "ko" "K|R|K" (Say.render Say.Ko text);
   Alcotest.(check string) "en" "E/R/E" (Say.render Say.En text)
 
+let ko_flag_bridge_follows_the_language () =
+  let text = Say.of_ko_flag (fun ~ko -> if ko then ko_marker else en_marker) in
+  Alcotest.(check string) "ko" ko_marker (Say.render Say.Ko text);
+  Alcotest.(check string) "en" en_marker (Say.render Say.En text)
+
+let map_changes_each_language () =
+  let text = Say.map String.lowercase_ascii marked in
+  Alcotest.(check string) "ko" "k" (Say.render Say.Ko text);
+  Alcotest.(check string) "en" "e" (Say.render Say.En text)
+
 let () =
   Alcotest.run "tui_say"
     [ ( "say",
@@ -45,4 +55,7 @@ let () =
           Alcotest.test_case "as_received is the same in both" `Quick
             as_received_is_the_same_in_both;
           Alcotest.test_case "joining keeps order and language" `Quick
-            joining_keeps_order_and_language ] ) ]
+            joining_keeps_order_and_language;
+          Alcotest.test_case "the ko flag bridge follows the language" `Quick
+            ko_flag_bridge_follows_the_language;
+          Alcotest.test_case "map changes each language" `Quick map_changes_each_language ] ) ]

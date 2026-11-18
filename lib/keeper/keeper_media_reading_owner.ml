@@ -1,6 +1,7 @@
 module Owner = Lane_addon_tool_request_owner
 module Original = Keeper_media_reading_original
 module Reply = Keeper_media_reading_reply
+module Transport = Keeper_media_reading_transport
 module Progress = Lane_addon_request_progress
 open Result.Syntax
 
@@ -13,6 +14,11 @@ type error =
   | Reply_blob_unavailable of Tool_blob_store.fetch_error
   | Reply_blob_write_failed of string
   | Reply_update_error of Owner.update_error
+  | Invalid_transport of string
+  | Transport_blob_missing of string
+  | Transport_blob_unavailable of Tool_blob_store.fetch_error
+  | Transport_blob_write_failed of string
+  | Transport_update_error of Owner.update_error
 
 let error_to_string = function
   | Store_error error -> Owner.error_to_string error
@@ -25,6 +31,11 @@ let error_to_string = function
   | Reply_blob_unavailable error -> Tool_blob_store.fetch_error_to_string error
   | Reply_blob_write_failed detail -> "media reply blob publication failed: " ^ detail
   | Reply_update_error error -> Owner.update_error_to_string error
+  | Invalid_transport detail -> "invalid media transport observation: " ^ detail
+  | Transport_blob_missing sha256 -> "retained media transport blob is missing: " ^ sha256
+  | Transport_blob_unavailable error -> Tool_blob_store.fetch_error_to_string error
+  | Transport_blob_write_failed detail -> "media transport blob publication failed: " ^ detail
+  | Transport_update_error error -> Owner.update_error_to_string error
 
 let scope = "keeper-media-reading-originals"
 let installation_id = Owner.installation_id (Owner.Manual "keeper-media-reader-host")
@@ -35,15 +46,18 @@ type retained = {
   record : Owner.retained;
   original : Original.t;
   reply_link : Reply.link option;
+  transport_link : Transport.link option;
 }
 let record retained = retained.record
 let original retained = retained.original
+let transport_artifact retained = Option.map Transport.artifact retained.transport_link
 type inventory = retained list
 let originals inventory = inventory
 
 let stored result = Result.map_error (fun error -> Store_error error) result
 let captured result = Result.map_error (fun error -> Invalid_original error) result
 let replied result = Result.map_error (fun detail -> Invalid_reply detail) result
+let transported result = Result.map_error (fun detail -> Invalid_transport detail) result
 let invalid detail = Error (Invalid_original (Original.Invalid_binding detail))
 
 let check_header ~stored_scope ~stored_installation ~stored_package ~stored_tool =
@@ -61,8 +75,9 @@ let restore (record : Owner.retained) =
   let* original = captured (Original.restore record) in
   let* () = Keeper_media_reading_approval.validate_progress ~original record.progress
       |> Result.map_error (fun detail -> Invalid_original (Original.Invalid_binding detail)) in
-  let+ reply_link = replied (Reply.validate_progress ~original record.progress) in
-  { record; original; reply_link }
+  let* reply_link = replied (Reply.validate_progress ~original record.progress) in
+  let+ transport_link = transported (Transport.validate_progress ~original record.progress) in
+  { record; original; reply_link; transport_link }
 
 let check_retained record =
   restore record |> Result.map (fun _ -> ()) |> Result.map_error error_to_string
@@ -130,13 +145,15 @@ type reply_publication =
   | Already_stored of retained
   | Unconfirmed of string
 
-let current_retained ~store (expected : retained) =
+type transport_publication = reply_publication
+
+let current_retained ?(conflict = Reply_update_error Owner.State_conflict) ~store (expected : retained) =
   let subject = Original.original_subject expected.original in
   let* owner = observe_subject ~store subject in
   let* current = load ~store ~owner ~request_id:expected.record.request_id in
   match current with
   | None -> Error (Store_error (Owner.Store_unavailable
-      "media original disappeared before reply observation"))
+      "media original disappeared before result observation"))
   | Some current ->
     (* The body was read and restored above. Reuse the common owner's exact
        immutable-binding comparison; only progress may differ. *)
@@ -147,7 +164,7 @@ let current_retained ~store (expected : retained) =
            (Progress.events expected.record.progress)
            (Progress.events current.record.progress)
        then Ok current
-       else Error (Reply_update_error Owner.State_conflict))
+       else Error conflict)
 
 let blob_store (retained : retained) =
   Tool_blob_store.create
@@ -198,6 +215,9 @@ let retain_reply_with ~put_blob ~advance_events ~store ~(expected : retained) ~r
         | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
           Error (Reply_update_error (Owner.Invalid_transition
             "media reply requires the original dispatch-pending record")) in
+      let* () = if Option.exists Transport.link_request_not_sent current.transport_link then
+          Error (Invalid_transport "reply contradicts transport Request_not_sent")
+        else Ok () in
       (* Only this durable blob boundary catches Sys_error. The canonical
          returned SDK value remains with the caller on failure; no RPC runs. *)
       let* artifact =
@@ -225,7 +245,75 @@ let retain_reply ~store ~expected ~reply =
   retain_reply_with ~put_blob:Tool_blob_store.put_durable
     ~advance_events:Owner.advance_events ~store ~expected ~reply
 
+let fetch_transport (retained : retained) link =
+  let artifact = Transport.artifact link in
+  let* bytes = Tool_blob_store.fetch (blob_store retained) ~sha256:artifact.sha256
+      |> Result.map_error (fun error -> Transport_blob_unavailable error) in
+  match bytes with
+  | None -> Error (Transport_blob_missing artifact.sha256)
+  | Some bytes ->
+    let* () = if String.length bytes=artifact.bytes then Ok ()
+      else Error (Invalid_transport "retained blob byte length differs from its transport link") in
+    let* captured = transported (Transport.restore_bytes bytes) in
+    let+ () = transported (Transport.check_value link captured) in
+    captured
+
+let load_transport ~store retained =
+  let* current = current_retained ~conflict:(Transport_update_error Owner.State_conflict) ~store retained in
+  let* observed = match current.transport_link with
+    | None -> Ok None
+    | Some link -> Result.map (fun captured -> Some (Transport.observation captured))
+        (fetch_transport current link) in
+  let+ () = check_current ~store
+      ~keeper_name:(Original.subject_keeper_name (Original.original_subject current.original)) current in
+  observed
+
+let retain_transport_with ~put_blob ~advance_events ~store ~(expected : retained) ~observation =
+  let* captured = transported (Transport.capture observation) in
+  let* current = current_retained ~conflict:(Transport_update_error Owner.State_conflict) ~store expected in
+  let check_workspace () = check_current ~store
+      ~keeper_name:(Original.subject_keeper_name (Original.original_subject current.original)) current in
+  match current.transport_link with
+  | Some link ->
+    let* existing = fetch_transport current link in
+    let* () = check_workspace () in
+    if Transport.bytes existing=Transport.bytes captured then Ok (Already_stored current)
+    else Error (Transport_update_error Owner.State_conflict)
+  | None ->
+    let* () = if Owner.same_record expected.record current.record then Ok ()
+      else Error (Transport_update_error Owner.State_conflict) in
+    let not_sent = Transport.request_not_sent captured in
+    let* () = if not_sent && Option.is_some current.reply_link then
+        Error (Invalid_transport "reply contradicts transport Request_not_sent")
+      else if not not_sent && not (List.mem Progress.Dispatch_intended (Progress.events current.record.progress)) then
+        Error (Invalid_transport "possibly-sent transport has no dispatch fact")
+      else Ok () in
+    let* artifact = try Ok (put_blob (blob_store current)
+        ~bytes:(Transport.bytes captured) ~mime:Transport.mime_type)
+      with Sys_error detail -> Error (Transport_blob_write_failed detail) in
+    let* link = transported (Transport.link ~original:current.original ~captured
+        (Tool_output.with_preview artifact "")) in
+    let event = Progress.Transport_observed (Transport.link_to_json link) in
+    let* prospective = Progress.append current.record.progress event |> transported in
+    let* _link = transported (Transport.validate_progress ~original:current.original prospective) in
+    let* () = check_workspace () in
+    let* published = advance_events ~store ~expected:current.record ~events:[event]
+        |> Result.map_error (fun error -> Transport_update_error error) in
+    let* () = check_workspace () in
+    match published with
+    | Owner.Unconfirmed detail -> Ok (Unconfirmed detail)
+    | Owner.Stored record -> Result.map (fun retained -> Stored retained) (restore record)
+    | Owner.Already_stored record -> Result.map (fun retained -> Already_stored retained) (restore record)
+
+let retain_transport ~store ~expected ~observation =
+  retain_transport_with ~put_blob:Tool_blob_store.put_durable
+    ~advance_events:Owner.advance_events ~store ~expected ~observation
+
 module For_testing = struct
+  let retain_transport ?(put_blob = Tool_blob_store.put_durable)
+      ?(save = Lane_addon_store.save_tool_request_owner) ~store ~expected ~observation () =
+    retain_transport_with ~put_blob ~advance_events:(Owner.For_testing.advance_events ~save)
+      ~store ~expected ~observation
   let retain_reply ?(put_blob = Tool_blob_store.put_durable)
       ?(save = Lane_addon_store.save_tool_request_owner) ~store ~expected ~reply () =
     retain_reply_with ~put_blob ~advance_events:(Owner.For_testing.advance_events ~save)

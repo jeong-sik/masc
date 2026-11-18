@@ -77,7 +77,7 @@ let references ~original progress =
        | Some _ -> Error "review execution call has conflicting ownership"
        | None -> Ok (reference::refs))
     | P.Execution_observed (Outcome_unknown _ | Absent _)
-    | Approval_intended _ | Approval_wait_retained _
+    | Transport_observed _ | Approval_intended _ | Approval_wait_retained _
     | Dispatch_intended | Admission_declined _ | Judgment_retained _ | Preparation_intended _
     | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _

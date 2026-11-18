@@ -1118,7 +1118,7 @@ let test_inventory_observation_rejects_mixed_parent_and_bad_scope () = with_fixt
   check int "corrupt inventory cannot trigger a fresh provider call" posts (F.post_count fixture.server);
   check bool "corrupt inventory preserves source acknowledgements" true (progress fixture=positions))
 
-let test_librarian_transcript_refuses_foreign_approval_facts () = with_fixture (fun ~sw:_ fixture ->
+let test_librarian_transcript_refuses_foreign_facts transport () = with_fixture (fun ~sw:_ fixture ->
   let module Approval = Lane_addon_request_approval in
   let module Fingerprint = Keeper_approval_request_fingerprint in
   drive_advanced fixture;
@@ -1140,6 +1140,10 @@ let test_librarian_transcript_refuses_foreign_approval_facts () = with_fixture (
           ~input_hash:(Fingerprint.input_hash exact) |> get in
       let prefix = Progress.append Progress.captured (Progress.Approval_intended intent) |> get in
       let prefix = Progress.append prefix (Progress.Approval_wait_retained wait) |> get in
+      let transport_evidence = `Assoc ["foreign_transport",`String "owned elsewhere"] in
+      let prefix = if transport then
+          Progress.append Progress.captured (Progress.Transport_observed transport_evidence) |> get
+        else prefix in
       let with_foreign = List.fold_left (fun state event ->
         Result.bind state (fun state -> Progress.append state event))
           (Ok prefix) (Progress.events gate.progress) |> get in
@@ -1156,12 +1160,13 @@ let test_librarian_transcript_refuses_foreign_approval_facts () = with_fixture (
       check json "generic restore keeps the complete gate request" gate.request changed.request;
       check bool "generic fold preserves the completed phase" true
         (Progress.phase changed.progress=Progress.phase gate.progress);
-      check bool "generic fold accepts the well-formed foreign approval link" true
-        (match Progress.approval changed.progress with
+      check bool "generic fold accepts the well-formed foreign fact" true
+        (if transport then Progress.transport_observation changed.progress=Some transport_evidence
+         else match Progress.approval changed.progress with
          | Some (Progress.Waiting_for_approval (seen,linked)) ->
            Approval.equal_intent intent seen && Approval.equal_wait wait linked
          | None | Some (Progress.Intent_pending _) -> false);
-      check (result unit string) "the actual Librarian transcript rejects approval facts"
+      check (result unit string) "the actual Librarian transcript rejects foreign facts"
         (Error "Unexpected event in original gate journal")
         (Gate.validate ~store:fixture.store ~owner ~capture ~record:changed)));
   check int "read-only validation makes no further provider call" posts (F.post_count fixture.server);
@@ -2973,7 +2978,7 @@ let test_interrupted_evidence_cannot_release_another_actual_host_cause ~raised (
       let event=match event with
         | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
             evidence=Exact.retained_final_to_json (Exact.Retained_unknown Interrupted)}
-        | Dispatch_intended | Admission_declined _ | Approval_intended _ | Approval_wait_retained _
+        | Transport_observed _ | Dispatch_intended | Admission_declined _ | Approval_intended _ | Approval_wait_retained _
         | Execution_observed _ | Judgment_retained _
         | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
         | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
@@ -5212,7 +5217,7 @@ let test_linked_replacement_preserves_the_resolution_protocol ?competing_ending 
         let event=match event with
           | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
               evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Raised)}
-          | Approval_intended _ | Approval_wait_retained _
+          | Transport_observed _ | Approval_intended _ | Approval_wait_retained _
           | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
           | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
           | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
@@ -8420,7 +8425,9 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "inventory observation rejects mixed parents and unrelated malformed gates" `Quick
     test_inventory_observation_rejects_mixed_parent_and_bad_scope;
   test_case "Librarian transcript rejects otherwise valid foreign approval facts" `Quick
-    test_librarian_transcript_refuses_foreign_approval_facts;
+    (test_librarian_transcript_refuses_foreign_facts false);
+  test_case "Librarian transcript rejects otherwise valid foreign transport facts" `Quick
+    (test_librarian_transcript_refuses_foreign_facts true);
   test_case "a gate request names its parent by digest instead of copying it" `Quick
     test_gate_request_names_its_parent_by_digest;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);

@@ -18,6 +18,7 @@ type approval =
 type event =
   | Approval_intended of Lane_addon_request_approval.intent
   | Approval_wait_retained of Lane_addon_request_approval.wait
+  | Transport_observed of Yojson.Safe.t
   | Dispatch_intended
   | Admission_declined of Yojson.Safe.t
   | Execution_observed of observation
@@ -45,6 +46,11 @@ type t
 val captured : t
 val phase : t -> phase
 val events : t -> event list
+val transport_observation : t -> Yojson.Safe.t option
+(** One immutable domain-owned transport evidence link, independent of phase.
+    The host validates its original identity and actual evidence. Recording it
+    performs no effect and claims neither a successful result nor a commit.
+    Duplicate facts are rejected; all other transitions preserve it. *)
 val approval : t -> approval option
 (** Optional immutable approval facts, independent of the execution phase.
     [None] means no approval intent was recorded, not that an approval is

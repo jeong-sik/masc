@@ -171,6 +171,12 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
     if not provider.enabled
     then Error (Provider_disabled provider.id)
     else
+      (match Runtime_adapter.check_catalog_row provider with
+      | Error (Runtime_adapter.Catalog_row_not_declared catalog_provider) ->
+        Error (Catalog_provider_not_declared { provider_id = provider.id; catalog_provider })
+      | Error (Runtime_adapter.Catalog_row_beside_own_row catalog_provider) ->
+        Error (Catalog_provider_beside_own_row { provider_id = provider.id; catalog_provider })
+      | Ok () ->
       (match Runtime_adapter.materialize_execution ~construction cfg b with
        | Ok selected ->
          let execution = selected.Runtime_adapter.execution in
@@ -199,7 +205,7 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
            })
            (quota_scope_of_materialized ~provider ~execution ~credential_admission)
          |> Result.map_error (fun reason -> Execution_unbuildable reason)
-       | Error reason -> Error (Execution_unbuildable reason))
+       | Error reason -> Error (Execution_unbuildable reason)))
   | None, _ -> Error (Provider_not_declared b.provider_id)
   | Some _, None -> Error (Model_not_declared b.model_id)
 ;;

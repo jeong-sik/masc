@@ -40,6 +40,9 @@ type t =
 
 val empty : t
 
+(** Stable token for a metric label or a log field. *)
+val why_not_kind : why_not -> string
+
 (** Memory after the commit made at [at]: removed facts leave, touched facts
     are seen at [at], added facts follow in order. *)
 val apply : at:float -> fact list -> t -> fact list

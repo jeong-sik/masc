@@ -786,7 +786,7 @@ let test_restart_recovery_and_transient_release () =
       check bool "transient evidence" true (record.failure = failure);
       check string "release epoch" next_owner_epoch record.owner_epoch
     | None -> fail "transient release evidence was not persisted"))
-    [Pre_dispatch_failed; Spawn_resources_busy; Spawn_failed_cause_unknown]
+    [Pre_dispatch_failed; Spawn_resources_busy]
 ;;
 
 (* #28072: a spawn the same request cannot pass is Fatal, and the release

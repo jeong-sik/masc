@@ -26500,7 +26500,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               Account_server _ -> ())
   | Observer_msg (Observer_recovery_opened (authority, owner, opened)) ->
       (* A stream that would not open opening now is the server answering
-         again (RFC tui-one-screen-grammar §2). *)
+         again: the owed pass starts now. It is not a [/health] answer, so
+         the run of failures goes on (RFC tui-one-screen-grammar §2). *)
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then
         state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->

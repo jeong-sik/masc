@@ -23,9 +23,10 @@ type t = private
   | Failing of { failures : int; retry_at : float }
       (** The last [failures] probes failed in a row. One pass is owed at
           [retry_at]. *)
-  | Recovered
-      (** The server answered again while a pass was owed. The wait is over
-          and that pass starts now. *)
+  | Recovered of { failures : int }
+      (** The wait ended early while a pass was owed, and that pass starts
+          now. [failures] is the run a failure after it continues: zero when
+          [/health] answered, the run so far when only the stream reopened. *)
 
 type ask =
   | Revalidate
@@ -44,7 +45,8 @@ type stream_open =
       (** Every attempt opened it. A server whose [/health] alone fails
           still opens it, so this says nothing new. *)
   | Opened_after_failure
-      (** An earlier attempt did not open it. The server answers again. *)
+      (** An earlier attempt did not open it. The server answers again, but
+          this is not a [/health] answer. *)
 
 val answering : t
 
@@ -58,13 +60,15 @@ val pass_answered : t -> t
     stays owed. *)
 
 val answered_again : t -> t
-(** The server answered again: a screen's probe answered, or a server the
-    TUI started answered its liveness probe. The wait is over; a pass the
-    failure owed is still owed and starts now. *)
+(** [/health] answered again: a screen's probe answered, or a server the TUI
+    started answered its liveness probe. The wait and the run of failures are
+    over; a pass the failure owed is still owed and starts now. *)
 
 val stream_opened : stream_open -> t -> t
 (** The stream that restores the workspace confirmation opened. Only
-    {!Opened_after_failure} ends the wait, as {!answered_again} does. *)
+    {!Opened_after_failure} ends the wait, and the owed pass starts now. The
+    run of failures goes on, since an open stream is not a [/health] answer:
+    a failure after it waits longer than the last wait. *)
 
 val due : now:float -> t -> bool
 (** Whether the owed pass should start now. *)

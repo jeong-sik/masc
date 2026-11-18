@@ -11,7 +11,7 @@
     coordination; each reader retains its existing captured extent/tail policy. *)
 
 type t
-(** Opaque handle.  Holds [base_dir] and the append mutex. *)
+(** Opaque handle. Holds the store's location. *)
 
 type read_operation =
   | Inspect
@@ -74,8 +74,16 @@ val open_store :
   Store.location ->
   t
 (** Open the store at a listed location. A store can be opened only where
-    {!Store} puts it. Every handle of one store shares the store's entry in
-    the process registry, which holds the mutex its writers take. A caller
+    {!Store} puts it.
+
+    The writers of one store directory take one mutex, whichever spelling
+    reached the directory. The process registry keeps it under the name the
+    file system gives the directory ({!Store.directory_name}). A handle asks
+    for it on each write or prune, so a handle opened before its directory
+    existed takes the directory's mutex once the directory is there. The
+    file system is asked once for each spelling of a directory that exists;
+    a spelling keeps that answer while the process runs, also when the
+    directory is later removed and made again under another name. A caller
     that only reads and must leave no entry behind opens a {!Reader}.
 
     When [?max_bytes] is positive, [append] prunes
@@ -592,11 +600,11 @@ val map_tail_rows_result :
 
 (** A handle that reads one store and is not in the store registry.
 
-    Opening one leaves no registry entry, so a route that reads the store of
-    whatever Keeper name a client sent does not grow the registry by one
-    entry per made-up name. No function that writes or prunes takes a
-    reader: every change of a store's files goes through a handle that
-    shares the store's registry entry. *)
+    A reader never asks for the store's mutex, so a route that reads the
+    store of whatever Keeper name a client sent does not grow the registry
+    by one entry per made-up name. No function that writes or prunes takes
+    a reader: every change of a store's files goes through a handle that
+    takes the store's mutex. *)
 module Reader : sig
   type t
 
@@ -614,13 +622,8 @@ end
 
 module For_testing : sig
   val cross_context_mutex : t -> Cross_context_mutex.t
-  (** Expose the internal mutex so tests can verify sharing. *)
+  (** The mutex a write through the handle would take now. *)
 
   val in_registry : Store.location -> bool
   (** Whether the registry holds an entry for the store. *)
-
-  val cross_context_mutex_for_base_dir : string -> Cross_context_mutex.t
-  (** Lookup or insert the registry entry for [base_dir].
-      Equivalent to the default-mutex path of {!open_store}. *)
-
 end

@@ -24,7 +24,6 @@ module Layout = Dated_jsonl_layout
 type t = {
   location : Store.location;
   base_dir : string;
-  cross_context_mutex : Cross_context_mutex.t Atomic.t;
   max_bytes : int option;
 }
 
@@ -123,39 +122,59 @@ let read_error_to_string = function
 let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
-let mutex_registry : (string, Cross_context_mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
+(* One mutex for each store directory, under the name the file system gives
+   the directory ([Store.directory_name]). A handle holds no mutex: it asks
+   for its store's each time it writes or prunes. The handles of a Keeper's
+   stores are kept for the life of the process, and a mutex chosen when a
+   handle was opened would stay with the spelling even after the directory
+   came to exist under another one. *)
+let mutex_registry : (string, Cross_context_mutex.t) Hashtbl.t = Hashtbl.create 16
 let mutex_registry_mu = Stdlib.Mutex.create ()
 
-let strip_trailing_slashes path =
-  let rec loop len =
-    if len > 1 && path.[len - 1] = '/' then loop (len - 1) else len
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-
-let mutex_key base_dir =
-  let path =
-    if Filename.is_relative base_dir then
-      Filename.concat (Config_dir_resolver.current_working_dir ()) base_dir
-    else
-      base_dir
-  in
-  strip_trailing_slashes path
-
-let mutex_for_base_dir ~base_dir =
-  let key = mutex_key base_dir in
+let mutex_named name =
   Stdlib.Mutex.protect mutex_registry_mu (fun () ->
-    match Hashtbl.find_opt mutex_registry key with
-    | Some cell -> cell
+    match Hashtbl.find_opt mutex_registry name with
+    | Some mutex -> mutex
     | None ->
-        let mutex = Cross_context_mutex.create () in
-        let cell = Atomic.make mutex in
-        Hashtbl.add mutex_registry key cell;
-        cell)
+      let mutex = Cross_context_mutex.create () in
+      Hashtbl.add mutex_registry name mutex;
+      mutex)
+
+module Spellings = Map.Make (String)
+
+(* The mutex of each spelling whose directory existed when the file system
+   was asked. A directory that exists keeps its name, so each spelling costs
+   the system calls once and a write makes none after that. A spelling whose
+   directory does not exist yet is asked again each time: its answer changes
+   when the directory is made. *)
+let mutexes_of_existing : Cross_context_mutex.t Spellings.t Atomic.t =
+  Atomic.make Spellings.empty
+
+let rec remember_existing spelling mutex =
+  let seen = Atomic.get mutexes_of_existing in
+  if not
+       (Atomic.compare_and_set
+          mutexes_of_existing
+          seen
+          (Spellings.add spelling mutex seen))
+  then remember_existing spelling mutex
+
+let mutex_of_location location =
+  let spelling = Store.absolute_dir location in
+  match Spellings.find_opt spelling (Atomic.get mutexes_of_existing) with
+  | Some mutex -> mutex
+  | None ->
+    (match Store.directory_name location with
+     | Store.Existing name ->
+       let mutex = mutex_named name in
+       remember_existing spelling mutex;
+       mutex
+     | Store.Not_yet name -> mutex_named name)
+
+let store_mutex t = mutex_of_location t.location
 
 let open_store ?max_bytes location =
   let base_dir = Store.dir location in
-  let cross_context_mutex = mutex_for_base_dir ~base_dir in
   let max_bytes =
     match max_bytes with
     | Some bytes when bytes > 0 -> Some bytes
@@ -164,7 +183,6 @@ let open_store ?max_bytes location =
   {
     location;
     base_dir;
-    cross_context_mutex;
     max_bytes;
   }
 
@@ -880,7 +898,7 @@ let append_unlocked ~on_committed t json =
      only serializes a real fiber and raises for the rest, so the
      cross-context gate is what covers both: a fiber yields cooperatively and
      a raw thread takes the Stdlib mutex. *)
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
+  Cross_context_mutex.with_lock (store_mutex t) (fun () ->
     let dated = Store.dated_path_now t.location in
     Jsonl_writer.append_jsonl ~path:dated.path json;
     on_committed ();
@@ -1743,7 +1761,7 @@ let load_count_cache ~path =
 ;;
 
 let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
+  Cross_context_mutex.with_lock (store_mutex t) (fun () ->
     let dated = Store.dated_path_now t.location in
     let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
     let current_bytes = file_size dated.path in
@@ -2279,7 +2297,7 @@ let read_range_recent ?offset t ~since ~until n =
 (* Keep the existing store mutex on the fiber. Descriptor operations offload
    through Fs_compat, so neither directory reads nor unlinks block the domain. *)
 let prune t ~days =
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
+  Cross_context_mutex.with_lock (store_mutex t) (fun () ->
     prune_unlocked t ~days)
 
 let days_to_keep ~operator_window_days store =
@@ -2301,7 +2319,7 @@ let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
            ~f:(fun location directory ->
              let t = open_store location in
              let removed =
-               Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex)
+               Cross_context_mutex.with_lock (store_mutex t)
                  (fun () -> prune_bound_directory ~location ~days directory)
              in
              if removed > 0 then on_pruned location;
@@ -2312,30 +2330,22 @@ let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
    module so tests can verify mutex-registry sharing without
    widening the public API surface. *)
 module For_testing = struct
-  let cross_context_mutex (t : t) = Atomic.get t.cross_context_mutex
-
-  let cross_context_mutex_for_base_dir base_dir =
-    let cell = mutex_for_base_dir ~base_dir in
-    Atomic.get cell
+  let cross_context_mutex = store_mutex
 
   let in_registry location =
-    let key = mutex_key (Store.dir location) in
-    Stdlib.Mutex.protect mutex_registry_mu (fun () -> Hashtbl.mem mutex_registry key)
+    let (Store.Existing name | Store.Not_yet name) = Store.directory_name location in
+    Stdlib.Mutex.protect mutex_registry_mu (fun () -> Hashtbl.mem mutex_registry name)
 
 end
 
-(* The handle's own mutex is never taken: only the functions that write or
-   prune take a handle's mutex, and none of them is in [Reader]'s
+(* A store gets its registry entry when its mutex is first asked for, and
+   only the functions that write or prune ask. None of them is in [Reader]'s
    signature. *)
 module Reader = struct
   type nonrec t = t
 
   let open_store location =
-    { location
-    ; base_dir = Store.dir location
-    ; cross_context_mutex = Atomic.make (Cross_context_mutex.create ())
-    ; max_bytes = None
-    }
+    { location; base_dir = Store.dir location; max_bytes = None }
 
   let base_dir = base_dir
   let read_recent_result = read_recent_result

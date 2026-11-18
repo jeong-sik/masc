@@ -2230,7 +2230,7 @@
  (wrapped false)
  (modules masc_tui_home)
  (libraries masc_tui_credential_preparation masc_tui_types masc_tui_ask_projection masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
-  masc_tui_message_layout masc_tui_config masc.keeper_registry masc masc_tui_scroll))
+  masc_tui_message_layout masc_tui_config masc_tui_health_section masc.keeper_registry masc masc_tui_scroll))
 
 ; Which list the move keys walk on the surface on screen (RFC
 ; tui-one-screen-grammar section 3.1), outside the executable so a test links it.
@@ -2239,6 +2239,12 @@
  (wrapped false)
  (modules masc_tui_list_moves)
  (libraries masc_tui_types masc_tui_home masc_tui_scroll))
+
+; The health section an operator action names, decoded from its wire name.
+(library
+ (name masc_tui_health_section)
+ (wrapped false)
+ (modules masc_tui_health_section))
 
 (library
  (name masc_tui_surface_navigation)

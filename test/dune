@@ -5471,6 +5471,7 @@
 (include stanzas/test_tui_file_icon.inc)
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
+(include stanzas/test_tui_health_section.inc)
 (include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_value.inc)
 (include stanzas/test_tui_value_forms_source.inc)

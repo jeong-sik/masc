@@ -1156,7 +1156,11 @@ let test_unreadable_row_does_not_hide_the_rest () =
    nothing, and a repaired ledger delivers the same request (#38068). *)
 let test_delivery_behind_an_unreadable_row_is_not_absence () =
   with_temp_base "board-attention-candidate-delivery-unreadable" @@ fun base_path ->
-  let persisted = record ~base_path (candidate (signal "post-unreadable-delivery")) in
+  Masc_test_deps.Board_attention_parent_fixture.with_source ~base_path @@ fun () ->
+  let post_id =
+    Masc_test_deps.Board_attention_parent_fixture.post_id "post-unreadable-delivery"
+  in
+  let persisted = record ~base_path (candidate (signal post_id)) in
   let path = ledger_path ~base_path in
   let readable = In_channel.with_open_bin path In_channel.input_all in
   let unreadable = "{not-json}\n" in

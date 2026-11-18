@@ -167,6 +167,22 @@ let refused label request captured expected =
 ;;
 
 (* The Muse home of the person's account, as the layout spells it. *)
+(* The judgment of a turn before its account is read ({!Access.admit}). *)
+let admitted label request =
+  match Access.admit request with
+  | Ok () -> ()
+  | Error refusal -> Alcotest.failf "%s: not admitted: %s" label (Access.refusal_to_string refusal)
+;;
+
+let not_admitted label request expected =
+  match Access.admit request with
+  | Ok () -> Alcotest.failf "%s: admitted" label
+  | Error refusal ->
+    if not (expected refusal)
+    then
+      Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
+;;
+
 let muse_path (who : person) =
   get_text
     (Layout.home
@@ -454,6 +470,30 @@ let test_multi_account () =
           (denied (function
              | Authz_decision.Pat_expired -> true
              | _ -> false));
+        (* A server asks whether the log gives the turn before it takes the
+           call of the account, so a turn the log refuses holds no call. *)
+        admitted "a direct turn by a token that covers it, before its account" (by_pat (turn_pat alice ()));
+        not_admitted
+          "a token of another Runtime, before its account"
+          (by_pat
+             (turn_pat alice ~runtimes:(Runtime_scope.only (Runtime_id.Set.singleton bob.runtime)) ()))
+          (denied (function
+             | Authz_decision.Runtime_out_of_scope -> true
+             | _ -> false));
+        not_admitted
+          "a token that expired, before its account"
+          (by_pat (turn_pat alice ~expires_at:(Float.of_int start_ms /. 1000.) ()))
+          (denied (function
+             | Authz_decision.Pat_expired -> true
+             | _ -> false));
+        not_admitted
+          "a turn on a Runtime the Keeper is not on, before its account"
+          (turn alice ~runtime:bob.runtime ())
+          (function
+            | Access.Not_the_assigned_runtime _ -> true
+            | _ -> false);
+        (* What only the account tells is left to the call. *)
+        admitted "a request for one's own account, which the call judges whole" (own alice ());
         refused "a turn of another person's Keeper" (turn bob ()) alice_account (function
           | Access.Not_the_account_home _ -> true
           | _ -> false);
@@ -1008,6 +1048,48 @@ let test_multi_account () =
           (turn frank_key ())
           on_another_file
           (not_the_key_of frank_key);
+        (* A file that shares a part of the spelling of the key file is not
+           it: another generation in the folder of the account, the first
+           generation in the folder of another account of the person, and
+           the same spelling under the runtime root of another person. *)
+        let key_at path =
+          make_dirs (Filename.dirname path);
+          Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 path (fun channel ->
+            Out_channel.output_string channel "sk-test-a-key-beside");
+          Unix.chmod path 0o600;
+          path
+        in
+        List.iter
+          (fun (what, path) ->
+             let on_it = captured_on_key frank_key.home ~key_file:(key_at path) in
+             refused ("a key account, on " ^ what) (own frank_key ()) on_it (not_the_key_of frank_key);
+             refused
+               ("a turn on a key account, on " ^ what)
+               (turn frank_key ())
+               on_it
+               (not_the_key_of frank_key))
+          [ "another generation of the account", Filename.concat (Filename.dirname key_of_frank) "2"
+          ; ( "the first generation of another account of the person"
+            , get_text
+                (Layout.key_file
+                   ~runtime_root:frank.runtime_root
+                   ~account_id:frank.account
+                   ~generation:Key_generation.first) )
+          ; ( "the same spelling under the root of another person"
+            , get_text
+                (Layout.key_file
+                   ~runtime_root:bob.runtime_root
+                   ~account_id:frank_key.account
+                   ~generation:Key_generation.first) )
+          ];
+        (* An account no record links carries no key: the home of an id of
+           the person's own choosing, on a key file, is refused. *)
+        let unlinked = get (Provider_account_id.of_string "account-no-record-links") in
+        refused
+          "an account no record links, on a key"
+          (own frank ~account:unlinked ())
+          (captured_on_key (claude_home ~runtime_root:frank.runtime_root unlinked) ~key_file:key_of_frank)
+          (fun refusal -> refusal = Access.Not_the_account_key unlinked);
         (* The key of one's own key account is not the key of one's login
            account either: an account runs on what its records say. *)
         let login_on_a_key = captured_on_key frank.home ~key_file:key_of_frank in

@@ -112,9 +112,13 @@ type write_error =
       and the file stays. It also stays after an exception that is no
       [Unix.Unix_error], which this function does not catch.
 
-    A generation that got an error is not written again: a second write of
-    it is [Generation_taken]. Whoever asked removes the folder of the account
-    ({!Runtime_account_home_layout.key_dir}). No function of this module
+    A second write of a generation is [Generation_taken] only while a file
+    of it is there, in place or beside the place. After an error that left
+    neither, a folder that was not private, a file that could not be made,
+    or a step that failed and whose file was removed, a second write of the
+    generation goes through. No caller writes a generation again: whoever
+    asked removes the folder of the account after an error
+    ({!Runtime_key_account_files.remove}). No function of this module
     removes it. *)
 val write
   :  runtime_root:string

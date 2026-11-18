@@ -78,9 +78,11 @@ val status : owner:owner -> base_path:string ->
 (** Calls a person's own account once (plan D1-6a): the body is
     [{"provider_account_id":...,"model":...}]. The account must be one the
     person owns in the authorization log; another person's is answered as one
-    that does not exist (404). The runtime is the workspace provider the login
-    receipt names, with the person's account home and that provider's binding
-    of [model] ({!Runtime_account_runtime}), and the call is
+    that does not exist (404), before the call of the account is taken, so
+    whether a call of another person's account runs is not told. The runtime
+    is the workspace provider of the integration of the account
+    ({!person_runtime}), with the person's account home and that provider's
+    binding of [model] ({!Runtime_account_runtime}), and the call is
     {!Runtime_verification.verify_as_command}, the readiness check of the
     [runtime-verify] command: a model answer and a tool round trip, within 120
     seconds.
@@ -96,7 +98,9 @@ val status : owner:owner -> base_path:string ->
     When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
 
     One call of an account runs at a time ({!one_call_of}): a request while a
-    verification or a Keeper turn of the account runs is answered 409. *)
+    verification or a Keeper turn of the account runs is answered 409. A key
+    account whose key file is not there or is not read as a key is a 409 too,
+    with the [code] [key_missing] or [key_unreadable] beside the [error]. *)
 val verify : person:person -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 
@@ -123,7 +127,10 @@ type runtime_error =
 val key_unusable_message : Runtime_api_key_file.read_error -> string
 
 (** The call of an account that is running. Only {!one_call_of} makes one,
-    and it hands it to the work it runs. *)
+    and it hands it to the work it runs. The type keeps a caller from making
+    one. It does not keep the work from handing the value on: a value that
+    outlives its call, given back as the result or kept by a fiber the work
+    started, names a call that ended. No caller does either. *)
 type in_call
 
 (** The runtime of [binding] on the home of the account of the call, an

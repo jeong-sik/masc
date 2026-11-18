@@ -369,9 +369,22 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
     let* name, message = request_of body in
     let* keeper_id = keeper_id_of name in
     let* runtime_id, provider_account_id = assigned person keeper_id in
-    (* The runtime is made and the turn is judged inside the call of the
-       account: its key is read there, and the removal of an account takes
-       the same call before it removes the key (RFC
+    let request =
+      Runtime_account_access.Keeper_turn
+        { owner = person.user_id
+        ; keeper_id
+        ; channel = Authz_types.Channel.Direct
+        ; pat
+        ; runtime_id = Authz_types.Runtime_id.to_string runtime_id
+        }
+    in
+    (* A turn the log refuses takes no call of the account, and is not told
+       whether one runs: the scope of a token is judged here, before the
+       call. *)
+    let* () = Runtime_account_access.admit request |> Result.map_error refusal_error in
+    (* The runtime is made and the turn is judged again inside the call of
+       the account: its key is read there, and the removal of an account
+       takes the same call before it removes the key (RFC
        a-persons-api-key-is-their-own-provider-account 3.6). *)
     let* prepared_runtime_id, { model; text; conversation } =
       Login.one_call_of
@@ -379,7 +392,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
         ~busy:(E.Account_call_running E.Runtime_account)
         (fun in_call ->
            (* The binding is chosen by the Runtime id, so
-              [prepared.runtime_id] is [runtime_id]. *)
+              [prepared.runtime_id] is [runtime_id], the one of [request]. *)
            let* prepared =
              Login.person_runtime
                in_call
@@ -387,15 +400,6 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
                ~base_path
                ~binding:(Runtime_account_runtime.Runtime (Authz_types.Runtime_id.to_string runtime_id))
              |> Result.map_error login_error
-           in
-           let request =
-             Runtime_account_access.Keeper_turn
-               { owner = person.user_id
-               ; keeper_id
-               ; channel = Authz_types.Channel.Direct
-               ; pat
-               ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
-               }
            in
            let authorize account =
              Runtime_account_access.authorize request account |> Result.map_error refusal_error

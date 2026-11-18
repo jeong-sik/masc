@@ -1057,15 +1057,27 @@ let test_turn () =
             Eio.Time.sleep clock 0.02;
             started (tries - 1))
         in
-        let held, busy =
+        let held, (busy, refused_meanwhile) =
           Eio.Fiber.pair
             (fun () -> reply alice (body ~keeper:"keeper-alice" ~message:"first"))
             (fun () ->
               started 500;
               let busy = reply alice (body ~keeper:"keeper-alice-second" ~message:"second") in
+              (* A turn the log refuses takes no call of the account: it is
+                 answered as refused, and not told that a call runs. *)
+              let refused =
+                reply
+                  ~pat:(token Effect.[ Manage_own_keeper; Read_state ])
+                  alice
+                  (body ~keeper:"keeper-alice-second" ~message:"refused")
+              in
               Sys.remove hold;
-              busy)
+              busy, refused)
         in
+        Alcotest.(check int)
+          "a turn the log refuses, while a call of the account runs"
+          403
+          (fst refused_meanwhile);
         check_reply
           "a turn while another runs on the account"
           (409, {|{"error":"A call of the account of this Keeper's Runtime is running. Try again when it ends.","code":"account_call_running"}|})

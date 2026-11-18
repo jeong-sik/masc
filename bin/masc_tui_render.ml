@@ -203,11 +203,8 @@ let overview_capacity_status (state : state) : Masc_tui_card.status =
       ; word = Masc_tui_fleet_line.status_text ~ko fleet.fs_status
       ; tone }
 
-(* The plain rows drawn when the cards do not fit have no edge, so a status
-   that needs a look leads them. A settled fleet spends no row: the plain rows
-   are drawn in spare room, where a meter or the Tool calls row is worth more
-   than "ok". With no reading the rows under it say why, which the edge's lone
-   mark stands for. *)
+(* An observed fleet status that needs attention leads its plain rows. A
+   settled fleet leaves room for the readings or the Tool calls row. *)
 let overview_capacity_status_rows (status : Masc_tui_card.status) =
   let row mark = [ status.tone ^ Masc_tui_value.Mark.glyph mark ^ " " ^ status.word ^ Ansi.reset ] in
   match status.symbol with
@@ -264,9 +261,15 @@ let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
       (* The first row says the counts below are an earlier reading and why,
          before any of them can be read as the fleet's current state. *)
       let scope =
-        List.concat_map
-          (fun row -> wrap (warning (Masc_tui_fleet_line.retained_row_text ~ko ~now row)))
-          (Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed)
+        let retained_text = Masc_tui_fleet_line.retained_row_text ~ko ~now in
+        match Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed with
+        | first :: rest ->
+            lead (retained_text first)
+            @ List.concat_map (fun row -> wrap (warning (retained_text row))) rest
+        | [] ->
+            (match mark with
+             | Mark_on_card_edge -> []
+             | Mark_in_body -> overview_capacity_status_rows (overview_capacity_status state))
       in
       let avail =
         max 0 (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
@@ -447,8 +450,7 @@ let render_overview (state : state) home =
            List.iter draw_row body.hb_rows;
            let spare = max 0 (body.hb_spare - 1) in
            List.take spare
-             (overview_capacity_status_rows (overview_capacity_status state)
-              @ capacity_lines @ [tool_calls_line ~cells:inner_cols])
+             (capacity_lines @ [tool_calls_line ~cells:inner_cols])
            |> List.iter c.push);
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 

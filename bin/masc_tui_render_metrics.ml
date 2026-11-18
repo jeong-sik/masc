@@ -141,6 +141,27 @@ let scheduler_probe_text ~ko = function
   | None -> Unknown.(glyph Unreported)
   | Some probe -> scheduler_probe_word ~ko probe
 
+(* The probe as a card's status: the mark says which kind of state it is and
+   the word says which one. A word this build does not know reads [?] and the
+   word as it came (RFC tui-one-screen-grammar section 7.1); no probe at all
+   is the [?] alone. *)
+let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
+  let symbol, word =
+    match probe with
+    | None -> (Masc_tui_card.Unknown Unknown.Unreported, "")
+    | Some (Decode.Probe_unknown word) ->
+        (Masc_tui_card.Unknown Unknown.Unreported, Terminal_text.single_line word)
+    | Some (Decode.Probe_reported lag as reported) ->
+        let mark =
+          match lag with
+          | Scheduler_lag.Not_started -> Masc_tui_value.Mark.Waiting
+          | Scheduler_lag.Running -> Masc_tui_value.Mark.Under_way
+          | Scheduler_lag.Stopped _ | Scheduler_lag.Cancelled -> Masc_tui_value.Mark.Paused
+        in
+        (Masc_tui_card.Mark mark, scheduler_probe_word ~ko reported)
+  in
+  { Masc_tui_card.symbol; word; tone }
+
 let pulse_line ~cols (state : state) kpis =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -214,16 +235,17 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let render_card ?badge ~title_style title line1 line2 =
+  let render_card ?status ?count ~title_style name line1 line2 =
     let style =
-      { Masc_tui_card.edge = Theme.recede ()
+      { Masc_tui_card.border = Theme.recede ()
       ; title_style = Ansi.bold ^ title_style
       ; reset = Ansi.reset
       }
     in
-    let chrome = { Masc_tui_card.hotkey = None; badge } in
-    Masc_tui_card.render ~rounded:true ~chrome ~style ~width:card_w ~height:4
-      { Masc_tui_card.title; body = (fun ~cells:_ -> [ line1; line2 ]) }
+    Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
+      { Masc_tui_card.edge =
+          { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
+      ; body = (fun ~cells:_ -> [ line1; line2 ]) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
@@ -248,21 +270,22 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
               Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
-          Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
-            domains (format_words gc.sgc_minor_heap_size)
+          Printf.sprintf (if ko then "마이너 힙 %s" else "minor %s")
+            (format_words gc.sgc_minor_heap_size)
       in
-      ( Printf.sprintf (if ko then "힙 %s · 사용 중 %s" else "Heap %s · live %s")
-          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
+      (* The worker count is data, so it is in the body: a card's edge holds
+         its name, status and count (RFC tui-one-screen-grammar section 2). *)
+      ( Printf.sprintf (if ko then "힙 %s · 사용 중 %s · 워커 %s" else "Heap %s · live %s · %s workers")
+          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words) domains
       , live_line )
     | None -> say "힙 " "Heap " ^ Unknown.glyph identity_gap, say "워커 " "Workers " ^ domains
   in
-  let c1_badge = (domains ^ say " 워커" " wk", Theme.recede ()) in
-  let c2_l1, c2_l2, c2_tone, c2_badge = match sched_opt with
+  let c2_l1, c2_l2, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
         say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
         Theme.recede (),
-        (scheduler_probe_text ~ko s.ssch_probe, Theme.recede ()) )
+        scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
     | Some s ->
       let tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.recede () in
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
@@ -271,14 +294,19 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
          (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
        tone,
-       (scheduler_probe_text ~ko s.ssch_probe, badge_tone))
+       scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
     (* One condition -- no scheduler reading at all -- so both halves of the
        card draw the same mark. *)
     | None ->
       let mark = Unknown.glyph identity_gap in
-      "p95 " ^ mark, say "표본 " "Samples " ^ mark, Theme.recede (), (mark, Theme.recede ())
+      ( "p95 " ^ mark,
+        say "표본 " "Samples " ^ mark,
+        Theme.recede (),
+        { Masc_tui_card.symbol = Masc_tui_card.Unknown identity_gap
+        ; word = ""
+        ; tone = Theme.recede () } )
   in
-  let c3_l1, c3_l2, c3_badge = match kpis.tasks with
+  let c3_l1, c3_l2, c3_count = match kpis.tasks with
     | Some count ->
       let total = Task_flow.total_count count in
       let done_line =
@@ -298,7 +326,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
           (Count.grouped (Task_flow.open_count count))
           (Count.grouped count.awaiting_verification)
       , done_line
-      , (Count.grouped total ^ say "건" " total", Theme.recede ()) )
+      , Some (Masc_tui_card.Whole total) )
     | None ->
       let mark =
         Unknown.glyph
@@ -306,7 +334,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
            | Some _ -> Unknown.Read_failed
            | None -> Unknown.Unread)
       in
-      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark, (mark, Theme.recede ())
+      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark, None
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
   let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
@@ -317,18 +345,31 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let failed =
     is_failed (gate_observation state) || is_failed (held_observation state)
   in
-  let mark = Unknown.(glyph (if failed then Read_failed else Unread)) in
-  let c4_tone, c4_badge =
+  (* With a half unread, the edge says why and the body keeps the half that
+     was read: [Gate 3] beside [Tool holds ◌]. *)
+  let unread tone =
+    Some
+      { Masc_tui_card.symbol =
+          Masc_tui_card.Unknown (if failed then Unknown.Read_failed else Unknown.Unread)
+      ; word = ""
+      ; tone }
+  in
+  let c4_tone, c4_status, c4_count =
     match kpis.gate_pending_count, kpis.held_approvals_count with
-    | Some 0, Some 0 -> Theme.recede (), (say "정상" "clear", Theme.ok ())
-    | Some g, Some h -> Theme.warn (), (Count.grouped (g + h), Theme.warn ())
+    | Some 0, Some 0 ->
+      ( Theme.recede (),
+        Some
+          { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Settled
+          ; word = say "정상" "clear"
+          ; tone = Theme.ok () },
+        None )
+    | Some g, Some h -> Theme.warn (), None, Some (Masc_tui_card.Whole (g + h))
     | Some n, None | None, Some n ->
-      if n > 0 then Theme.warn (), (Count.grouped n ^ "+" ^ mark, Theme.warn ())
-      else if failed then Theme.warn (), (mark, Theme.warn ())
-      else Theme.recede (), (mark, Theme.recede ())
+      if n > 0 || failed then Theme.warn (), unread (Theme.warn ()), None
+      else Theme.recede (), unread (Theme.recede ()), None
     | None, None ->
-      if failed then Theme.warn (), (mark, Theme.warn ())
-      else Theme.recede (), (mark, Theme.recede ())
+      if failed then Theme.warn (), unread (Theme.warn ()), None
+      else Theme.recede (), unread (Theme.recede ()), None
   in
 
   let rec zip4 r1 r2 r3 r4 =
@@ -342,10 +383,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_cells >= minimum_card_text_cells then
     zip4
-      (render_card ~badge:c1_badge ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
-      (render_card ~badge:c2_badge ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ~badge:c3_badge ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
-      (render_card ~badge:c4_badge ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
+      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
+      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
+      (render_card ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
+      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1

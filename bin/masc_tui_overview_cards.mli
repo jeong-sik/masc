@@ -18,27 +18,18 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
-type titles =
-  { decisions : string
-  ; continuation : string
-  ; capacity : string
-  ; actions : string
+type edges =
+  { decisions : Masc_tui_card.edge
+  ; continuation : Masc_tui_card.edge
+  ; capacity : Masc_tui_card.edge
+  ; actions : Masc_tui_card.edge
   }
-(** The caller owns the language and observation scope of each heading. *)
-
-type chromes =
-  { decisions : Masc_tui_card.chrome
-  ; continuation : Masc_tui_card.chrome
-  ; capacity : Masc_tui_card.chrome
-  ; actions : Masc_tui_card.chrome
-  }
-(** Optional border-embedded hotkey tags and live summary badges per card. *)
-
-val empty_chromes : chromes
+(** What each card's edge says. The caller owns the language and the
+    observation behind each name, status and count. *)
 
 val draw :
-  chromes:chromes ->
-  titles:titles ->
+  ko:bool ->
+  edges:edges ->
   empty_decisions:string ->
   inner:int ->
   rows:int ->

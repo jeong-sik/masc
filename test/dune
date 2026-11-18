@@ -5192,7 +5192,7 @@
 (test
  (name test_tui_card)
  (modules test_tui_card)
- (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (test
  (name test_tui_keeper_mark)

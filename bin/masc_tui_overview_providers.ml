@@ -1158,7 +1158,12 @@ let rec pairs = function
    empty inside the card: the title already says it. The section's shared
    layout keeps every window row on the same axes. *)
 let account_card ~tone ~layout entry =
-  { Masc_tui_card.title = marked ~attention:entry.de_attention entry.de_name
+  { Masc_tui_card.edge =
+      { Masc_tui_card.name = marked ~attention:entry.de_attention entry.de_name
+      ; key = None
+      ; status = None
+      ; count = None
+      ; focus = Masc_tui_card.Unfocused }
   ; body =
       (fun ~cells ->
         let full_name =
@@ -1173,9 +1178,9 @@ let account_card ~tone ~layout entry =
 (* Each pair of accounts is one row of cards that end on the same line; a lone
    last account leaves its neighbour's place empty rather than stretching
    across the screen. *)
-let draw_card_rows ~width ~tone entries =
+let draw_card_rows ~ko ~width ~tone entries =
   let style =
-    { Masc_tui_card.edge = Theme.recede ()
+    { Masc_tui_card.border = Theme.recede ()
     ; title_style = Ansi.bold ^ tone
     ; reset = Ansi.reset
     }
@@ -1195,7 +1200,7 @@ let draw_card_rows ~width ~tone entries =
       | _ :: _ :: _ | [] -> List.map (fun card -> [ card ]) cards
     in
     match
-      Masc_tui_card.grid ~rounded:true ~style ~inner_width ~gap:card_gap
+      Masc_tui_card.grid ~ko ~style ~inner_width ~gap:card_gap
         ~row_gap:card_row_gap ~max_rows:max_int columns
     with
     | Some rows -> List.map (fun line -> indent ^ line) rows
@@ -1203,7 +1208,7 @@ let draw_card_rows ~width ~tone entries =
   in
   separated (List.map row (pairs entries))
 
-let draw_cards ~show_limit_exhausted ~width groups =
+let draw_cards ~ko ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
     | At_limit_or_exhausted when not show_limit_exhausted ->
@@ -1212,7 +1217,7 @@ let draw_cards ~show_limit_exhausted ~width groups =
         let tone = section_tone section in
         let silent, listed = split_silent section entries in
         group_heading ~width section entries
-        @ blocks [ draw_card_rows ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
+        @ blocks [ draw_card_rows ~ko ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1391,9 +1396,9 @@ let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~wid
   section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
     ~providers ~runtimes ~account_emails ~now ~width ~rows
 
-let section_cards ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
+let section_cards ~ko ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   let draw =
-    if cards_fit ~width then draw_cards ~show_limit_exhausted ~width
+    if cards_fit ~width then draw_cards ~ko ~show_limit_exhausted ~width
     else draw_groups ~show_limit_exhausted ~width
   in
   section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width ~rows

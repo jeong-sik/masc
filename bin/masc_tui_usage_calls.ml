@@ -246,7 +246,7 @@ let chart_cells ~tall ~(sample : Series.tool_series_calls -> Braille.sample) ~se
             List.init tall (fun index ->
               let from_base = tall - 1 - index in
               if from_base = 0 then (no_call_mark, Theme.recede ())
-              else (" ", blank_style ~from_base))
+              else (Braille.braille_bar_mark ~level:0, blank_style ~from_base))
         | Series.Series_active active ->
             let reading = sample active in
             let level = Braille.braille_level ~dots ~maximum reading in

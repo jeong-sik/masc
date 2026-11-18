@@ -442,10 +442,6 @@ let meter_bar_opens_a_code_per_colour () =
   Alcotest.(check string) "no colour opens nothing" (glyphs 10)
     (bar (Chart.Series { paint = series_paint Theme.No_color; series = Theme.Calls }))
 
-(* btop's graph colours: rows by their height when the graph is taller than
-   one row, cells by their own height in a one-row graph. A blank cell opens
-   no code, a code goes out only where it changes, and a row that opened one
-   ends with a reset. *)
 (* A column two cells tall: the base cell fills before the one above it
    starts, a zero is the baseline of the base cell alone, and the top of the
    scale fills both. One cell is the one-row mark. *)
@@ -463,6 +459,10 @@ let braille_bar_rows_stack () =
   Alcotest.(check (list string)) "one row is the one-row mark" [ mark 3 ]
     (Braille.braille_bar_rows ~rows:1 ~level:3)
 
+(* btop's graph colours: rows by their height when the graph is taller than
+   one row, cells by their own height in a one-row graph. A blank cell opens
+   no code, a code goes out only where it changes, and a row that opened one
+   ends with a reset. *)
 let braille_graph_tints_by_height () =
   let tint share = Printf.sprintf "<%.2f>" share in
   let reset = Theme.Sgr.reset in

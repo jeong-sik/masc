@@ -19,20 +19,20 @@ val braille_pair : left:int -> right:int -> string
     ["⣶"], ["⣾"], ["⣿"]). *)
 
 val braille_bar_mark : level:int -> string
+(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
+    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
+    measured zero draws. *)
 
 val braille_bar_rows : rows:int -> level:int -> string list
+(** A column [rows] cells tall drawn to [level] dots, top cell first. The
+    base cell holds levels 1 to 4, the next one up 5 to 8, and so on; a cell
+    the column does not reach is the blank Braille cell. *)
 
 val value_share : dots:int -> int -> float
 (** Where a column [level] dots tall on a [dots]-dot scale stands on a
     ramp, in [[0, 1]]: the lowest value, one level above the baseline, at
     [0], the top at [1]. The baseline itself, a zero, also reads [0]. Every
     graph that colours a column by its own height reads it here. *)
-(** A column [rows] cells tall drawn to [level] dots, top cell first. The
-    base cell holds levels 1 to 4, the next one up 5 to 8, and so on; a cell
-    the column does not reach is the blank Braille cell. *)
-(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
-    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
-    measured zero draws. *)
 
 (** {1 Samples} *)
 

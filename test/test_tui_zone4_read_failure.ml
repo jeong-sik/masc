@@ -6,6 +6,7 @@
 module Failure = Masc_tui_read_failure
 module Order = Masc_tui_notice_order
 module Prim = Masc_tui_render_prim
+module Pace = Masc_tui_refresh_pace
 module Redraw = Masc_tui_value.Redraw
 
 let check_int = Alcotest.(check int)
@@ -109,7 +110,7 @@ let test_repeating_failure_changes_only_its_count () =
   let failure = List.hd (Failure.failures every_two_seconds) in
   List.iter (fun now ->
     Redraw.begin_frame ();
-    ignore (Failure.notice_text ~ko:true ~now failure);
+    ignore (Failure.notice_text ~ko:true ~now ~next_try:None failure);
     check_bool "the notice asks for no time redraw" true (Redraw.next_change () = None))
     [ 15.5; 100.; 4000. ]
 
@@ -151,8 +152,25 @@ let test_answer_decides_the_run () =
    drawn and whether the waiting count is drawn, never the product wording. *)
 let action_token = "zq-action-result-zq"
 
-let drawn_row ?action failures =
+let retry_s = 2.
+let max_retry_s = 30.
+
+(* A wall clock whose local minute is 13, 28, 43 or 58 past in any zone of
+   whole quarter hours, so the moments below never cross a day boundary. *)
+let scheduled_wall = 1_700_000_000.
+
+(* [/health] failed once and the pass it owes waits [retry_s]. *)
+let failing_pace =
+  Pace.probe_failed ~retry_s ~max_retry_s ~now:5. ~wall_now:scheduled_wall Pace.answering
+
+let next_try_wall = scheduled_wall +. retry_s
+
+let health_failing = Failure.(failed empty Server_health ~at:10.)
+let asks_failing = Failure.(failed empty Asks ~at:10.)
+
+let drawn_row ?action ?pace failures =
   let state = state_with failures in
+  Option.iter (fun pace -> state.refresh_pace <- pace) pace;
   Option.iter (fun text ->
     Masc_tui_types.set_last_action state (Some (text, Unix.gettimeofday ()))) action;
   Prim.footer_line state ~max_cells:400 ~hints:""
@@ -183,17 +201,61 @@ let test_drawn_failure_asks_no_redraw () =
      notes its own expiry, so the row is compared with the same row without
      the failures. *)
   let at = Unix.gettimeofday () in
-  let next_change ?action ~max_cells failures =
+  let next_change ?action ?pace ~max_cells failures =
     let state = state_with failures in
     Option.iter (fun text -> Masc_tui_types.set_last_action state (Some (text, at))) action;
+    Option.iter (fun pace -> state.refresh_pace <- pace) pace;
     Redraw.begin_frame ();
     ignore (Prim.footer_line state ~max_cells ~hints:"");
     Redraw.next_change () in
   List.iter (fun (action, max_cells) ->
     check_bool "no redraw asked by a failing read" true
       (next_change ?action ~max_cells two_failures
+       = next_change ?action ~max_cells Failure.empty);
+    check_bool "no redraw asked by the next try" true
+      (next_change ?action ~pace:failing_pace ~max_cells two_failures
        = next_change ?action ~max_cells Failure.empty))
     [ (None, 400); (None, 12); (Some action_token, 400); (Some action_token, 12) ]
+
+(* While the pass a failing [/health] owes waits, the notice says when it
+   starts (RFC §2); once nothing waits it does not. Which rows differ is
+   checked, never the wording. *)
+let test_the_notice_says_the_next_try_while_the_probe_fails () =
+  check_bool "a failing probe's notice carries the next try" false
+    (String.equal (drawn_row ~pace:failing_pace health_failing) (drawn_row health_failing));
+  check_bool "an answer takes the next try away" true
+    (String.equal (drawn_row ~pace:(Pace.answered_again failing_pace) health_failing)
+       (drawn_row health_failing));
+  check_bool "the owed pass starting now takes it away" true
+    (String.equal
+       (drawn_row ~pace:(Pace.stream_opened Pace.Opened_after_failure failing_pace) health_failing)
+       (drawn_row health_failing));
+  check_bool "a read that does not wait for that pass says no next try" true
+    (String.equal (drawn_row ~pace:failing_pace asks_failing) (drawn_row asks_failing))
+
+(* The next try is a moment fixed when the wait was scheduled, not a
+   countdown: the notice reads the same as the wait runs out, and only a new
+   failure changes it (RFC §2, §8). *)
+let test_the_next_try_does_not_move_between_draws () =
+  let failure = List.hd (Failure.failures health_failing) in
+  let next_try = Pace.next_try failing_pace in
+  let texts =
+    List.map (fun now ->
+      Redraw.begin_frame ();
+      let text = Failure.notice_text ~ko:true ~now ~next_try failure in
+      check_bool "the next try asks for no redraw" true (Redraw.next_change () = None);
+      text)
+      [ next_try_wall -. 1.5; next_try_wall -. 0.5; next_try_wall +. 0.5; next_try_wall +. 3. ]
+  in
+  check_bool "the notice reads the same as the wait runs out" true
+    (List.for_all (String.equal (List.hd texts)) texts);
+  check_bool "two draws of the row read the same" true
+    (String.equal (drawn_row ~pace:failing_pace health_failing)
+       (drawn_row ~pace:failing_pace health_failing));
+  let again =
+    Pace.probe_failed ~retry_s ~max_retry_s ~now:7. ~wall_now:(next_try_wall +. 0.5) failing_pace in
+  check_bool "a new failure changes the row" false
+    (String.equal (drawn_row ~pace:again health_failing) (drawn_row ~pace:failing_pace health_failing))
 
 let () =
   Alcotest.run "tui_zone4_read_failure"
@@ -216,6 +278,10 @@ let () =
             test_drawn_slot_says_a_failure_when_nothing_outranks_it
         ; Alcotest.test_case "a drawn failure asks for no redraw" `Quick
             test_drawn_failure_asks_no_redraw
+        ; Alcotest.test_case "the notice says the next try while the probe fails" `Quick
+            test_the_notice_says_the_next_try_while_the_probe_fails
+        ; Alcotest.test_case "the next try does not move between draws" `Quick
+            test_the_next_try_does_not_move_between_draws
         ; Alcotest.test_case "the whole server's reads lead" `Quick
             test_whole_server_reads_lead
         ; Alcotest.test_case "an answer decides the run" `Quick

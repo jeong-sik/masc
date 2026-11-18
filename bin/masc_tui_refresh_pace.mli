@@ -20,9 +20,11 @@
 type t = private
   | Answering
       (** The last probe answered, or none has failed. Nothing is owed. *)
-  | Failing of { failures : int; retry_at : float }
+  | Failing of { failures : int; retry_at : float; retry_wall_at : float }
       (** The last [failures] probes failed in a row. One pass is owed at
-          [retry_at]. *)
+          [retry_at] on the monotonic clock. [retry_wall_at] is the same
+          moment on the wall clock, fixed when the wait was scheduled, so the
+          notice that says it does not move while the TUI redraws. *)
   | Recovered of { failures : int }
       (** The wait ended early while a pass was owed, and that pass starts
           now. [failures] is the run a failure after it continues: zero when
@@ -61,10 +63,12 @@ type stream_open =
 
 val answering : t
 
-val probe_failed : retry_s:float -> max_retry_s:float -> now:float -> t -> t
+val probe_failed :
+  retry_s:float -> max_retry_s:float -> now:float -> wall_now:float -> t -> t
 (** A probe failed, or a pass raised before it settled. The wait is
     [retry_s] after the first failure and doubles with each failure in a
-    row, up to [max_retry_s]. *)
+    row, up to [max_retry_s]. [now] is the monotonic clock and [wall_now]
+    the wall clock, read at the same instant. *)
 
 val pass_answered : t -> t
 (** A full pass's probe answered. A pass is a whole revalidation, so nothing
@@ -80,6 +84,11 @@ val stream_opened : stream_open -> t -> t
     {!Opened_after_failure} ends the wait, and the owed pass starts now. The
     run of failures goes on, since an open stream is not a [/health] answer:
     a failure after it waits longer than the last wait. *)
+
+val next_try : t -> float option
+(** The wall-clock moment the owed pass starts, while a wait is scheduled.
+    It changes only when a new failure schedules a new wait. [None] once
+    [/health] answered or the owed pass starts now. *)
 
 val due : now:float -> t -> bool
 (** Whether the owed pass should start now. *)

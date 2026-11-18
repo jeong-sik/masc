@@ -17326,12 +17326,14 @@ let note_read state read result =
   Masc_tui_types.note_read_answer state read ~at:(Unix.gettimeofday ()) result
 
 (* A probe failed, or a pass raised before it settled: the next pass waits
-   (RFC tui-one-screen-grammar §2). The owed reads' retry constants. *)
+   (RFC tui-one-screen-grammar §2). The owed reads' retry constants. The
+   wall clock read here fixes the next try zone 4 says, so a redraw cannot
+   move it. *)
 let fail_refresh_pace state =
   state.refresh_pace <-
     Masc_tui_refresh_pace.probe_failed ~retry_s:stream_reconnect_s
       ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
-      state.refresh_pace
+      ~wall_now:(Unix.gettimeofday ()) state.refresh_pace
 
 (* The [/health] probe's reading: its error is the probe's own failure. It
    also paces the next pass; [answered] says what an answer settles, the

@@ -11,7 +11,9 @@ module P = Masc_tui_refresh_pace
 
 let retry_s = 2.0
 let max_retry_s = 30.0
-let failed ~now t = P.probe_failed ~retry_s ~max_retry_s ~now t
+(* The wall clock runs apart from the monotonic one, as it does in the TUI. *)
+let wall_offset = 1_700_000_000.0
+let failed ~now t = P.probe_failed ~retry_s ~max_retry_s ~now ~wall_now:(now +. wall_offset) t
 
 let wait_after ~now t =
   match t with
@@ -142,6 +144,25 @@ let test_a_screen_read_waits_unless_the_operator_asks () =
     (P.screen_read_starts ~now:10.1 P.Owed_read_due
        (P.stream_opened P.Opened_after_failure t))
 
+(* Zone 4 says when the owed pass starts (RFC §2). The moment is fixed on the
+   wall clock when the wait is scheduled, so only a new failure moves it, and
+   it goes once nothing waits any more. *)
+let test_the_next_try_is_fixed_while_failing_and_gone_after_an_answer () =
+  let moment = option (float 1e-9) in
+  check moment "nothing waits, so no next try" None (P.next_try P.answering);
+  let t = failed ~now:10.0 P.answering in
+  check moment "the next try is the end of the wait on the wall clock"
+    (Some (10.0 +. wall_offset +. retry_s)) (P.next_try t);
+  check moment "a stream open at every attempt does not move it" (P.next_try t)
+    (P.next_try (P.stream_opened P.Opened_each_time t));
+  let again = failed ~now:12.0 t in
+  check moment "a new failure moves it to the end of the new wait"
+    (Some (12.0 +. wall_offset +. (2.0 *. retry_s))) (P.next_try again);
+  check moment "an answer takes it away" None (P.next_try (P.answered_again again));
+  check moment "a pass that answered takes it away" None (P.next_try (P.pass_answered again));
+  check moment "a reopened stream takes it away: the owed pass starts now" None
+    (P.next_try (P.stream_opened P.Opened_after_failure again))
+
 let () =
   run "tui_refresh_pace"
     [ ( "pace",
@@ -165,5 +186,7 @@ let () =
             test_a_failure_after_a_reopened_stream_waits_longer
         ; test_case "a screen read waits unless the operator asks" `Quick
             test_a_screen_read_waits_unless_the_operator_asks
+        ; test_case "the next try is fixed while failing and gone after an answer" `Quick
+            test_the_next_try_is_fixed_while_failing_and_gone_after_an_answer
         ] )
     ]

@@ -1,6 +1,6 @@
 type t =
   | Answering
-  | Failing of { failures : int; retry_at : float }
+  | Failing of { failures : int; retry_at : float; retry_wall_at : float }
   | Recovered of { failures : int }
 
 type ask = Revalidate | Operator_key | Owed_pass
@@ -11,7 +11,7 @@ type stream_open = Opened_each_time | Opened_after_failure
 
 let answering = Answering
 
-let probe_failed ~retry_s ~max_retry_s ~now t =
+let probe_failed ~retry_s ~max_retry_s ~now ~wall_now t =
   let failures =
     1
     + (match t with
@@ -19,7 +19,7 @@ let probe_failed ~retry_s ~max_retry_s ~now t =
        | Answering -> 0)
   in
   let wait = Float.min max_retry_s (retry_s *. Float.pow 2.0 (float_of_int (failures - 1))) in
-  Failing { failures; retry_at = now +. wait }
+  Failing { failures; retry_at = now +. wait; retry_wall_at = wall_now +. wait }
 
 let pass_answered (_ : t) = Answering
 
@@ -32,6 +32,10 @@ let stream_opened opened t =
   | Opened_after_failure, Failing { failures; _ } -> Recovered { failures }
   | Opened_after_failure, (Answering | Recovered _) -> t
   | Opened_each_time, (Answering | Failing _ | Recovered _) -> t
+
+let next_try = function
+  | Failing { retry_wall_at; _ } -> Some retry_wall_at
+  | Answering | Recovered _ -> None
 
 let due ~now = function
   | Failing { retry_at; _ } -> now >= retry_at

@@ -37,7 +37,7 @@ type op =
 
 type working_state =
   | Keep
-  | Set of string
+  | Set of string (** Replaces it. [Set ""] clears it. *)
 
 type t =
   { question : Librarian_question_id.t

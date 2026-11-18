@@ -67,12 +67,13 @@ Stopped	Pulse		`Stopped s`
 Stopped	Write		`Refused (Store_stopped s)`
 Stopped	Ask_ended		늦은 답
 Stopped	Declaration_changed		저장하고 폭 기억을 비운다 → `Stopped s`
-Stopped	Resume		`Booting`. boot 를 다시 한다
+Stopped	Resume		`Booting`. 저장소 시작을 다시 한다. 턴 기록 모듈이 파일을 확인하고, 그다음 boot 다(§8.6)
 Stopped	Skip_item		`Refused (Store_stopped s)`
 Stopped	Skip_line		`Refused (Store_stopped s)`
 Stopped	Restart_reading		`Refused (Store_stopped s)`
-Stopped	Adopt	s 가 `Log_diverged` 나 `Log_unreadable` 이고 조건이 맞다	§8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기
-Stopped	Adopt	s 가 그 둘인데 파일의 sha 가 다르거나 해석되지 않는다	`Refused Snapshot_mismatch`
+Stopped	Adopt	s 가 `Log_diverged` 나 `Log_unreadable` 이고, 파일의 sha 가 `observed` 와 같고 codec 으로 해석된다	§8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기
+Stopped	Adopt	s 가 그 둘인데 파일의 sha 가 다르다	`Refused Snapshot_mismatch`
+Stopped	Adopt	s 가 그 둘이고 sha 는 같은데 파일이 해석되지 않는다	`Refused Snapshot_unreadable`
 Stopped	Adopt	s 가 `Memory_unreadable` 이나 `Store_unwritable`	`Refused (Store_stopped s)`
 Stopped	Retire		`Retired`
 Retired	Boot_finished		`Retired`

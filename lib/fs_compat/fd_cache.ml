@@ -1,7 +1,7 @@
 (* RFC-0162 §3.4. See [fd_cache.mli] for the contract. *)
 
 type cached_writer =
-  { oc : out_channel
+  { fd : Unix.file_descr
   ; mutable last_used : float
   ; mutable active : int
   ; mutable close_on_release : bool
@@ -11,9 +11,10 @@ let cached : (string, cached_writer) Hashtbl.t = Hashtbl.create 32
 let mu = Stdlib.Mutex.create ()
 let max_entries = 32
 
+(* The descriptor has no user-space buffer, so closing it writes nothing. *)
 let close_silently w =
-  try Stdlib.close_out w.oc with
-  | _ -> () (* cancel-guard-ok: Stdlib.close_out performs no Eio operation. *)
+  try Unix.close w.fd with
+  | Unix.Unix_error _ -> ()
 ;;
 
 let drop_cached_writer_locked path w =
@@ -45,7 +46,7 @@ let evict_lru_locked () =
 
 let writer_matches_path path w =
   try
-    let opened = Unix.fstat (Unix.descr_of_out_channel w.oc) in
+    let opened = Unix.fstat w.fd in
     let current = Unix.stat path in
     opened.Unix.st_dev = current.Unix.st_dev
     && opened.Unix.st_ino = current.Unix.st_ino
@@ -64,13 +65,19 @@ let get_or_open_locked path now =
     w
   | None ->
     if Hashtbl.length cached >= max_entries then evict_lru_locked ();
-    let oc =
-      Stdlib.open_out_gen
-        [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-        0o644
-        path
+    (* [Sys_error] with the path first is what [Stdlib.open_out_gen] raised
+       here before; the append callers document and catch [Sys_error]. *)
+    let fd =
+      try
+        Unix.openfile
+          path
+          [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ]
+          0o644
+      with
+      | Unix.Unix_error (error, _, _) ->
+        raise (Sys_error (path ^ ": " ^ Unix.error_message error))
     in
-    let w = { oc; last_used = now; active = 0; close_on_release = false } in
+    let w = { fd; last_used = now; active = 0; close_on_release = false } in
     Hashtbl.add cached path w;
     w
 ;;
@@ -94,7 +101,7 @@ let with_writer path f =
            inactive fd eviction, never persisted annotation semantics. *)
         w.last_used <- Unix.gettimeofday ();
         if w.active = 0 && w.close_on_release then close_silently w))
-    (fun () -> f w.oc)
+    (fun () -> f w.fd)
 ;;
 
 let invalidate path =
@@ -112,8 +119,7 @@ let close_all () =
 
 let reset_for_testing () = close_all ()
 
-(* Best-effort cache drain at process exit. RFC-0108 §6 already
-   states per-record fsync is out of scope, so the [flush] inside
-   the hot path is the durability boundary; this close is just to
-   release the fd handles cleanly. *)
+(* Release the descriptors at process exit. Every append has reached the
+   kernel before it returned and nothing is buffered here, so this close
+   writes nothing. RFC-0108 §6 keeps per-record fsync out of scope. *)
 let () = Stdlib.at_exit close_all

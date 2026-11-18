@@ -1677,6 +1677,13 @@
  (wrapped false)
  (modules masc_tui_owed_read))
 
+;; When the next refresh pass may read /health after the probe failed
+;; (RFC tui-one-screen-grammar section 2). Pure; the main loop starts it.
+(library
+ (name masc_tui_refresh_pace)
+ (wrapped false)
+ (modules masc_tui_refresh_pace))
+
 ;; Which Keeper rows, or the whole roster, the TUI owes a read after the
 ;; server says they changed (RFC-0481 section 3.3). Pure; the main loop
 ;; starts the reads.

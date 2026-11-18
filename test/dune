@@ -5492,6 +5492,7 @@
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 (include stanzas/test_tui_zone4_read_failure.inc)
+(include stanzas/test_tui_refresh_pace.inc)
 
 (test
  (name test_tui_action_notice)

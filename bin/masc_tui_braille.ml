@@ -29,6 +29,14 @@ let braille_pair ~left ~right =
 
 let braille_bar_mark ~level = braille_pair ~left:level ~right:level
 
+(* A column [rows] cells tall, top cell first: each cell holds the four
+   levels of its own band, the base cell levels 1 to 4. *)
+let braille_bar_rows ~rows ~level =
+  let rows = Stdlib.max 1 rows in
+  List.init rows (fun index ->
+    let from_base = rows - 1 - index in
+    braille_bar_mark ~level:(level - (braille_top * from_base)))
+
 (* Top-down 0..4 dot subcolumns. The lower half of a mirror grows down from
    the axis, so it fills its column from the top: the left column uses dots
    1, 2, 3, 7 and the right column dots 4, 5, 6, 8. *)

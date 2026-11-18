@@ -442,6 +442,23 @@ let meter_bar_opens_a_code_per_colour () =
    one row, cells by their own height in a one-row graph. A blank cell opens
    no code, a code goes out only where it changes, and a row that opened one
    ends with a reset. *)
+(* A column two cells tall: the base cell fills before the one above it
+   starts, a zero is the baseline of the base cell alone, and the top of the
+   scale fills both. One cell is the one-row mark. *)
+let braille_bar_rows_stack () =
+  let blank = Braille.braille_bar_mark ~level:0 in
+  let mark level = Braille.braille_bar_mark ~level in
+  let check name expected level =
+    Alcotest.(check (list string)) name expected (Braille.braille_bar_rows ~rows:2 ~level)
+  in
+  check "a zero is the base cell's baseline" [ blank; mark 1 ] 1;
+  check "four levels fill the base cell" [ blank; mark 4 ] 4;
+  check "six levels reach two into the cell above" [ mark 2; mark 4 ] 6;
+  check "the top of the scale fills both" [ mark 4; mark 4 ] 8;
+  check "past the top stays full" [ mark 4; mark 4 ] 9;
+  Alcotest.(check (list string)) "one row is the one-row mark" [ mark 3 ]
+    (Braille.braille_bar_rows ~rows:1 ~level:3)
+
 let braille_graph_tints_by_height () =
   let tint share = Printf.sprintf "<%.2f>" share in
   let reset = Theme.Sgr.reset in
@@ -634,6 +651,7 @@ let () =
     ; "braille graph",
       [ Alcotest.test_case "levels for zero, small, absent and unread" `Quick braille_levels
       ; Alcotest.test_case "unread, narrow and baseline rules" `Quick braille_graph_rules
+      ; Alcotest.test_case "a two-cell column stacks its levels" `Quick braille_bar_rows_stack
       ; Alcotest.test_case "a graph takes its colour from its height" `Quick
           braille_graph_tints_by_height
       ; Alcotest.test_case "an empty tint resets the colour" `Quick braille_empty_tint_resets

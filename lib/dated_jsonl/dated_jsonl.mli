@@ -357,7 +357,11 @@ val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
     files changed meanwhile. A failed read keeps nothing.
 
     A store whose directory does not exist yet is asked about each time, as
-    for a write. *)
+    for a write.
+
+    Each call is counted in
+    [Otel_builtin_metric_names.metric_dated_jsonl_fact_reads] by the kind of
+    store, the fact and the constructor of the answer. *)
 
 val month_dir_paths_newest_first_result : t -> (string list, read_error) result
 (** The store's month directories, newest first, listed and validated as

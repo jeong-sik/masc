@@ -119,6 +119,12 @@ let metric_telemetry_cache_rescans =
 let metric_telemetry_scanned_bytes =
   Otel_metric_store_core.declare_counter "masc_telemetry_snapshot_scanned_bytes_total"
 
+(* Reads of a fact a dated JSONL store keeps in memory, by how the value was
+   come by. A fact whose reads are never [held] is not being kept: its strict
+   read fails, or every fill loses to a write. *)
+let metric_dated_jsonl_fact_reads =
+  Otel_metric_store_core.declare_counter "masc_dated_jsonl_fact_reads_total"
+
 (* The dashboard cache patcher drops a lifecycle event it cannot decode and
    bumps this so `rate(...)` sees the encoding regression. It was emitted with
    a bare string at both of its call sites, which is the one thing

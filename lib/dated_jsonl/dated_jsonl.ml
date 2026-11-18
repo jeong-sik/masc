@@ -111,6 +111,7 @@ type 'a held =
    alone does not tell. *)
 type 'a fact =
   { id : 'a Type.Id.t
+  ; name : string (* the [fact] label of the fact's read counter *)
   ; read : t -> ('a held, read_error) result
   ; step : 'a -> written -> 'a option
   }
@@ -2595,6 +2596,7 @@ let place_of_day_file_path path =
 
 let last_row : recent_entry option fact =
   { id = Type.Id.make ()
+  ; name = "last_row"
   ; read =
       (fun t ->
         read_recent_using_result t 1 ~decode:(fun ~path line ->
@@ -2606,6 +2608,12 @@ let last_row : recent_entry option fact =
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
   }
 
+let fact_read_outcome = function
+  | Fact_cell.Held _ -> "held"
+  | Fact_cell.Read_and_kept _ -> "read_and_kept"
+  | Fact_cell.Read_not_kept _ -> "read_not_kept"
+  | Fact_cell.Read_failed _ -> "read_failed"
+
 let read_fact t fact =
   let cell = cell_of_entry (resolve t.location).entry fact in
   let value_of = function
@@ -2614,15 +2622,26 @@ let read_fact t fact =
     | Fact_cell.Read_not_kept held -> Fact_cell.Read_not_kept held.value
     | Fact_cell.Read_failed _ as failed -> failed
   in
-  match Fact_cell.held cell with
-  | Some held -> Fact_cell.Held held.value
-  | None ->
-    (* The cell is seen and the files are read in one job. A cell seen
-       before the wait for a worker would lose to every append that lands
-       during the wait. *)
-    off_fiber ~name:(job_name t) (fun () ->
-      Fact_cell.fill cell ~read:(fun () -> fact.read t))
-    |> value_of
+  let answer =
+    match Fact_cell.held cell with
+    | Some held -> Fact_cell.Held held.value
+    | None ->
+      (* The cell is seen and the files are read in one job. A cell seen
+         before the wait for a worker would lose to every append that lands
+         during the wait. *)
+      off_fiber ~name:(job_name t) (fun () ->
+        Fact_cell.fill cell ~read:(fun () -> fact.read t))
+      |> value_of
+  in
+  Otel_metric_store_core.inc_counter
+    Otel_builtin_metric_names.metric_dated_jsonl_fact_reads
+    ~labels:
+      [ "store", Store.pool_job_name (Store.of_location t.location)
+      ; "fact", fact.name
+      ; "outcome", fact_read_outcome answer
+      ]
+    ();
+  answer
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

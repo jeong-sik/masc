@@ -8,6 +8,7 @@ These tools measure what each TUI screen costs while nobody presses a key. They 
 | `frozen_server.py` | Replays what the relay recorded and never sends new data, so a TUI in front of it redraws only because time passes. |
 | `idle.py` | Starts one TUI per screen through the relay, brings it to its screen and measures an idle window. |
 | `summary.py` | Prints one line per screen, and with `--reads` what the TUI read in each window. |
+| `key_steps.py` | Presses navigation keys after a window and captures the screen after each (`idle.py --keys`). |
 | `vte.py`, `pty_driver.py` | The terminal emulator and the pseudo-terminal driver `idle.py` uses. |
 | `relay_files.py` | The decision log and the recording format that the relay and the frozen server share. |
 
@@ -42,7 +43,8 @@ For each screen, `idle.json` records:
 - `rss_mb` when the window ends, and `row_changes`: the rows that changed most, with the first column that changed and the text there;
 - `frames`: the frames the TUI recorded in the window through `MASC_TUI_FRAME_TIMING`, with build and present times, bytes presented and surface tags. The TUI keeps only its first 512 frames per phase. When the window reaches past them, `covered` is false and the counts are a lower bound;
 - with `--probes N`, `key_latency_ms` for N Down and N Up presses, each timed from the write to the first byte back. A press is skipped while the screen is still drawing, and a press that draws nothing within 1 s is not counted;
-- with `--png-font FONT` (needs Pillow), `<screen>.png`: the screen at the window start drawn with that font. Use a font that has the glyphs of the workspace's language. Repeat `--png-font` to add fallback fonts: the first sets the cell size and each glyph uses the first font that has it. Many monospace fonts lack braille, so graph rows draw blank without a fallback that has it (on macOS, `/System/Library/Fonts/Apple Symbols.ttf`).
+- with `--png-font FONT` (needs Pillow), `<screen>.png`: the screen at the window start drawn with that font. Use a font that has the glyphs of the workspace's language. Repeat `--png-font` to add fallback fonts: the first sets the cell size and each glyph uses the first font that has it. Many monospace fonts lack braille, so graph rows draw blank without a fallback that has it (on macOS, `/System/Library/Fonts/Apple Symbols.ttf`);
+- with `--keys`, `key_steps`: what each key did, described below.
 
 ```sh
 python3 scripts/harness/tui/summary.py "$IDLE_OUT"
@@ -50,6 +52,27 @@ python3 scripts/harness/tui/summary.py --reads "$IDLE_OUT"
 ```
 
 `--reads` adds, for each window, the requests that arrived in it by path, the requests the relay refused, and per event name the events and bytes of each event stream. Stream counts come from the relay's `progress` lines, so the span they cover can start and end up to a second away from the window. The rates divide by the span between the two lines, not by the window.
+
+## Pressing keys after the window
+
+```sh
+python3 scripts/harness/tui/idle.py ... --steps overview --keys j,j,k --png-font "$FONT"
+```
+
+`--keys` takes key names separated by commas: `j`, `k`, `PgUp`, `PgDn`, `Home`, `End` and `Tab`. Any other name stops the run before it starts. These keys only move. Keys that act on some screens, such as `p`, `w`, `s`, `x`, `g` and `U`, cannot be pressed, and neither can Esc. After each screen's idle window, before the probes, `idle.py` waits for the screen to go quiet, captures it, and then presses the keys one at a time. After each key the TUI has 1 s to draw. Once it draws, the capture waits for 0.5 s without output, for up to 5 s.
+
+`key_steps` in `idle.json` holds:
+
+- `start`: the capture before the first key, with its `outcome`, `png` and `layout`;
+- `keys`, one entry per key:
+  - `key` and `outcome`: `quiet` (it drew, then went quiet), `nothing` (it drew nothing within 1 s), `busy` (still drawing after 5 s, so the capture may be mid-frame) or `closed`;
+  - `png`: `<screen>.key<N>-<key>.png` with `--png-font`; the start is `<screen>.key0.png`;
+  - `changed_rows`: rows whose cells differ from the capture before this key, colours included. A key that only moves the selection highlight changes rows here;
+  - `text_changed_rows`: the subset whose text differs;
+  - `layout`, `kind_changed` and `card_rows_changed`;
+- `kinds`: the layout kind of the start and of each captured key, in order, and `kind_stable`, true when they are all the same.
+
+The layout kind is read from box-drawing glyphs alone, never from words. `bin/masc_tui_card.ml` draws a full card's top edge as `╭─ … ─╮` and its bottom as `╰─ … ─╯`, and a squashed card as the single row `╶─ … ─╴`. A card edge is an opening glyph followed by `─` and its closing glyph after a `─`, on one row. A screen with at least one edge is `cards`, and a screen with none is `plain`. `layout` lists each edge with its row, columns and shape, and `card_rows`, the rows that hold one. A chat's turn rail draws `╭` and `╶` followed by a space, so it is no edge. A pane frame drawn with the same rounded corners does count as an edge, so compare kinds only on screens whose plain layout draws no rounded box, such as the overview. A closed terminal ends the keys and fails the screen.
 
 ## Record once, replay with the frozen server
 
@@ -120,7 +143,8 @@ Keep them in a directory outside the repository.
 ## Self-test
 
 ```sh
-python3 -m unittest scripts.tests.test_tui_frozen_server scripts.tests.test_tui_readonly_proxy
+python3 -m unittest scripts.tests.test_tui_frozen_server scripts.tests.test_tui_readonly_proxy \
+  scripts.tests.test_tui_relay_log scripts.tests.test_tui_key_steps scripts.tests.test_tui_vte_png
 ```
 
-`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. Neither needs a MASC server or a TUI binary. CI does not run them.
+`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. `test_tui_relay_log` reads decision logs with a cut last line. `test_tui_key_steps` checks which keys may be pressed, the layout kind of drawn screens with cards, without cards and with stray glyphs, and the shape of the per-key report. `test_tui_vte_png` draws a reverse-video wide character and checks that its second half is drawn. It needs Pillow and a font with Hangul, and is skipped without them. None of these tests needs a MASC server or a TUI binary. CI does not run them.

@@ -171,11 +171,15 @@ module Ongoing = struct
 
   let until ~now at =
     let seconds = at -. now in
-    (if Float.is_finite seconds && seconds > 0. then
+    (if Float.is_finite seconds && seconds > 0. then begin
        let floor = reading_floor seconds in
        (* Below its first second the countdown already reads [0s], as every
-          moment after it does, so it changes no more. *)
-       if floor > 0. then Redraw.note_change_at (at -. floor));
+          moment after it does. *)
+       if floor > 0. then Redraw.note_change_at (at -. floor);
+       (* A screen words a moment that has come differently from one still
+          coming ("in 5m" against "late 1m"), so its arrival is a change too. *)
+       Redraw.note_change_at at
+     end);
     text seconds
 end
 

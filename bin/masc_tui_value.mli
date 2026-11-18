@@ -125,8 +125,9 @@ module Ongoing : sig
 
   val until : now:float -> float -> string
   (** {!text} of the span from [now] to a coming moment, noting when it next
-      reads differently. A moment already passed reads [0s] and notes
-      nothing, as nothing about it changes any more. *)
+      reads differently and when the moment arrives, since a screen words an
+      arrived moment differently. A moment already passed reads [0s] and
+      notes nothing. *)
 end
 
 (** The mark ahead of a state word. One mark has one meaning on every screen

@@ -209,6 +209,10 @@ let test_a_frame_notes_its_earliest_change () =
   Alcotest.(check (option (float 1e-9))) "another domain built no frame" None
     (Domain.join worker);
   Redraw.begin_frame ();
+  ignore (Ongoing.until ~now:1000. 1000.5);
+  Alcotest.(check (option (float 1e-9))) "a moment under a second away notes its arrival"
+    (Some 1000.5) (Redraw.next_change ());
+  Redraw.begin_frame ();
   ignore (Ongoing.until ~now:1000. 990.);
   Alcotest.(check (option (float 1e-9))) "a passed moment changes no more" None
     (Redraw.next_change ())

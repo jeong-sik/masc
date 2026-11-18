@@ -38,6 +38,7 @@ import {
   commentSubmitting,
   replyingTo,
   loadPostDetail,
+  refreshPostDetail,
   submitComment,
   authorAvatar,
   kindBadgeColor,
@@ -276,7 +277,7 @@ function CommentItem({
     if (!voteKnown) return
     try {
       await voteComment(comment.id, dir)
-      await loadPostDetail(postId)
+      await refreshPostDetail(postId)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] comment vote failed (comment=${comment.id}, dir=${dir})`, err instanceof Error ? err.message : err)
@@ -587,7 +588,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
     if (post.current_vote === undefined) return
     try {
       await votePost(post.id, dir)
-      await loadPostDetail(post.id)
+      await refreshPostDetail(post.id)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)

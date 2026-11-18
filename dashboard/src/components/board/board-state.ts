@@ -421,6 +421,14 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   }
 }
 
+/** Re-read a thread after a write to it (comment, vote). Opening a post is the
+ *  only thing that decides which post the detail signals hold: a write that
+ *  ends after the operator opened another post leaves that post in place. */
+export async function refreshPostDetail(postId: string, focusedCommentId?: string | null) {
+  if (detailPostId.value !== postId) return
+  await loadPostDetail(postId, focusedCommentId)
+}
+
 export async function loadOlderPostComments(postId: string) {
   const page = detailCommentPage.value
   if (detailPostId.value !== postId || page.offset === 0 || detailLoadingOlder.value) return
@@ -459,7 +467,7 @@ export async function submitComment(postId: string, parentId?: string) {
     commentText.value = ''
     replyingTo.value = null
     showToast('댓글을 등록했습니다', 'success')
-    await loadPostDetail(postId, parentId)
+    await refreshPostDetail(postId, parentId)
     refreshBoard()
   } catch (err) {
     console.warn('[board] comment submit failed', err instanceof Error ? err.message : err)

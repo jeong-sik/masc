@@ -226,7 +226,7 @@ cycle():
 Librarian 을 host cycle 밖으로 옮기는 재설계가 따로 진행 중이다.
 
 - 옮기기 전까지 Librarian 은 §3.3 의 host cycle 로 돈다.
-- 옮긴 뒤에도 Librarian 의 질문은 §3.1 의 걷기로 자리를 잡는다. 따로 고른 동시 실행 수를 두지 않는다.
+- 옮긴 뒤에도 Librarian 의 질문은 §3.1 의 걷기로 자리를 잡는다. Librarian 쪽에는 동시 실행 상한이 없다. Keeper 마다 질문이 하나라서 같이 도는 질문은 Keeper 수를 넘지 않는다.
 - §3.3 은 다른 Lane Add-on(curator, candle, lesson, quiz, hitl-auto-judge)에 남는다.
 
 ## 4. 틱으로 따라가 보기
@@ -264,6 +264,7 @@ Librarian lane 의 HTTP slot 이 A(자리 8, Keeper 턴과 같이 씀), B(자리
 
 - 뒤 slot 이 지금보다 많이 불린다. tinker 처럼 쓴 만큼 돈을 내는 slot 은 비용이 는다. 비싼 slot 은 운영자가 뒤로 옮기거나 목록에서 뺀다.
 - 한 요청이 여러 줄에 같이 서므로, 계정마다 보이는 줄 길이가 실제로 기다리는 요청 수보다 길다. 자리 화면을 읽는 쪽은 이것을 알아야 한다.
+- 모든 자리가 차면 Librarian 요청이 Keeper 턴과 같은 줄에 선다. `admission-priority-run-limit` 를 선언하지 않은 provider 에서는 줄이 하나라서 먼저 선 요청이 먼저 받는다. 그러면 Keeper 턴이 Librarian 요청 뒤에서 기다린다. 운영 runtime.toml 에는 이 키를 선언한 provider 가 없다(11-18). 지금도 Librarian 이 첫 slot 의 줄에 서면 같은 일이 생긴다. 이 RFC 뒤에는 Librarian 이 여러 줄에 같이 서므로 더 자주 생긴다.
 - Exact lane 의 CLI slot 은 `max-concurrent` 를 선언해야 로드된다. 선언하기 전 runtime.toml 은 새 빌드에서 거절된다.
 - official client binding 에 `max-concurrent` 를 적으면 그 계정의 Keeper 턴도 자리를 기다린다. 지금은 그 값이 무시된다.
 - 요청이 끊이지 않으면 cycle 이 오래 열린다. 그동안 그 instance 의 action 과 observation 은 기다린다. 지금도 같은 성질이지만, 이제 더 자주 일어난다. keeper-librarian 은 source 가 없어 observation 이 비어 있다.
@@ -295,6 +296,7 @@ native stack 으로 올린다. 층마다 Draft PR 이다.
 
 배포 때 운영자가 할 일:
 
+- L1 을 설치하기 전: Keeper 턴과 Exact lane 이 같이 쓰는 provider 에 `admission-priority-run-limit` 를 적는다. 그래야 줄에서 Keeper 턴이 Librarian(`Background`)보다 먼저 자리를 받는다(§5).
 - L2 를 설치하기 전: Librarian·candle lane 의 CLI binding 에 `max-concurrent` 를 적는다. 계정이 한 번에 받는 요청 수다.
 - L3 를 설치하기 전: 서버를 멈춘 뒤 `keeper-librarian.toml` 의 `max_exact_in_flight` 줄을 지운다.
 - 두 층의 changelog 에 이 일을 `Operator action required` 로 적는다.

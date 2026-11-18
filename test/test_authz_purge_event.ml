@@ -228,6 +228,26 @@ let members_of_the_other_kind () =
         ; "vendor_copy", `String "none"
         ]);
   refused
+    "a failed account whose stage comes before its target"
+    E.Wrong_members
+    (`Assoc
+        [ "event", `String "failed"
+        ; "failed_stage", `String "key_not_removed"
+        ; "target", account_json ()
+        ]);
+  refused
+    "an account whose id comes before its owner"
+    E.Wrong_members
+    (`Assoc
+        [ "event", `String "pending"
+        ; ( "target"
+          , `Assoc
+              [ "type", `String "provider_account"
+              ; "provider_account_id", `String "account-1"
+              ; "owner", `String "alice"
+              ] )
+        ]);
+  refused
     "an account id that is no id"
     (E.Invalid_provider_account_id Authz_id.Empty)
     (`Assoc [ "event", `String "pending"; "target", account_json ~id:"" () ]);

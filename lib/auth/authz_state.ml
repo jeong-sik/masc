@@ -458,7 +458,13 @@ let owner_of_issuer = function
    only bring back a session that its owner meant to end. Nor the block of a
    Keeper conversation whose purge was given up (plan S1b-3c): it is not read
    while blocked, and its owner closes the block by asking for the purge
-   again. Lifting it would only bring back what its owner meant to delete. *)
+   again. Lifting it would only bring back what its owner meant to delete. Nor
+   the block of a provider account whose purge was given up (RFC
+   a-persons-api-key-is-their-own-provider-account 3.6), for the same reason:
+   no turn spends the account while it is blocked, and its owner closes the
+   block by asking for the purge again. The log has no start of that purge, so
+   a start of the server finds none to end, and the key of the account stays
+   on disk until its owner asks again. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map

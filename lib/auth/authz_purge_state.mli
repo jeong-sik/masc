@@ -1,6 +1,8 @@
 (* HIGH-RISK-UNREVIEWED: this is what the purge records of the authorization log
    add up to. A target that this module holds as pending or purged is not read
-   again; one that it holds as neither reads as if no purge had begun. *)
+   again. An account is not read from the start of its purge on, whatever
+   became of the purge, a failure too ({!Authz_state.provider_account_status}).
+   A target no purge record names reads as if no purge had begun. *)
 
 (** Where the purge of each target stands (design 8.5, plan S1b-3c, RFC
     a-persons-api-key-is-their-own-provider-account 3.6): what the last purge

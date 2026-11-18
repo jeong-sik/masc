@@ -1591,6 +1591,26 @@ let test_key_accounts () =
      (match Pae.of_body body with
       | Ok event -> Alcotest.(check bool) "read back" true (Pae.equal event (key_linked ~by:user))
       | Error error -> Alcotest.failf "its own body is refused: %s" (Pae.error_to_string error)));
+  (* A login account keeps the body it had before a key account was a kind:
+     the logs on disk hold these bytes, and a log that holds them is read. *)
+  (match Pae.to_body (linked ~by:user) with
+   | Error _ -> Alcotest.fail "fixture login account body refused"
+   | Ok body ->
+     Alcotest.(check string)
+       "the body of a login account on disk"
+       {|{"event":"linked","provider_account_id":"claude-code-user","user_id":"user-1"}|}
+       (Authz_body.to_string body));
+  (match
+     Pae.of_body
+       (body_of_json
+          (`Assoc
+              [ "event", `String "linked"
+              ; "provider_account_id", `String "claude-code-user"
+              ; "user_id", `String "user-1"
+              ]))
+   with
+   | Ok event -> Alcotest.(check bool) "a login body of a log on disk is read" true (Pae.equal event (linked ~by:user))
+   | Error error -> Alcotest.failf "a login body of a log on disk is refused: %s" (Pae.error_to_string error));
   refused_as
     "a key linked twice"
     state
@@ -2082,6 +2102,14 @@ let test_account_purges () =
     state
     (purge_record ~author:(human bob) (Pg.Purge_pending { target = as_bobs }))
     (S.Purge (Pgs.Not_the_owner { target = as_bobs; author = bob }));
+  (* The owner of the account names it as another's. The log links the
+     account to them and not to the owner the target names, so no purge
+     starts under that name, and the account is read as before. *)
+  refused_as
+    "one's own account, named as another's"
+    state
+    (purge_record ~author:(human user) (Pg.Purge_pending { target = as_bobs }))
+    (S.Purge (Pgs.Not_the_owner { target = as_bobs; author = user }));
   let never_linked = Pg.Provider_account { owner = user; provider_account_id = first_account } in
   refused_as
     "an account no record linked"

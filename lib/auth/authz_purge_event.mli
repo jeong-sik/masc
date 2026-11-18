@@ -141,8 +141,10 @@ type error =
 
 val error_to_string : error -> string
 
-(** Reads a body. The first check that fails is the result: it is an object,
-    its first member names an event, its members are those of that event, the
-    target is one, the members are those of its kind, and then the stage and
-    the vendor copy are ones. *)
+(** Reads a body. The first check that fails is the result. It is an object
+    and its first member names an event. A start has the target alone, and
+    then the target is one. An end has the target next, which is read before
+    the members that follow it, because its kind says which members those
+    are: the target is one, the members are those of its kind, and then the
+    stage and the vendor copy are ones. *)
 val of_body : Authz_body.t -> (t, error) result

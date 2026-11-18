@@ -1701,11 +1701,11 @@ let forgotten_sessions ~before ~after =
     then Same_client session_ids
     else Other_client { client_kind = before.client_kind; runtime_id = before.runtime_id; session_ids }
 
-let context_admission_error_to_string = function
+let gate_context_refusal = function
   | Context_frontier_missing ->
-    "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
+    Keeper_official_client_session_refusal.Gate_context_frontier_missing
   | Canonical_context_changed ->
-    "canonical_context_changed: retained vendor conversation cannot replace its canonical history or core instructions; original session and effects remain preserved"
+    Keeper_official_client_session_refusal.Gate_canonical_context_changed
 
 let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
@@ -2129,13 +2129,30 @@ let revert_claim ~base_path ~keeper_name ~expected ~restore ~reverted_at =
   Ok restored
 ;;
 
+type process_restart_error =
+  | Claim_held_by_current_epoch
+  | Restart_recovery_unrecorded of string
+
+let process_restart_error_to_core_error = function
+  | Claim_held_by_current_epoch ->
+    Keeper_official_client_session_refusal.core_error
+      Keeper_official_client_session_refusal.Claim_held_by_this_process
+  | Restart_recovery_unrecorded detail ->
+    Agent_core.Error.Internal
+      ("official-client process restart recovery was not recorded: " ^ detail)
+;;
+
 let reconcile_process_restart ~base_path ~keeper_name ~expected
     ~current_owner_epoch ~required_at =
-  let* () = validate_uuid "current_owner_epoch" current_owner_epoch in
+  let unrecorded detail = Restart_recovery_unrecorded detail in
+  let* () =
+    validate_uuid "current_owner_epoch" current_owner_epoch
+    |> Result.map_error unrecorded
+  in
   match incomplete_claim expected.phase with
   | None -> Ok expected
   | Some (owner_epoch, _) when String.equal owner_epoch current_owner_epoch ->
-    Error "official-client claim is still owned by the current process epoch"
+    Error Claim_held_by_current_epoch
   | Some (owner_epoch, _) ->
     require_recovery
       ~base_path
@@ -2148,6 +2165,7 @@ let reconcile_process_restart ~base_path ~keeper_name ~expected
            owner_epoch
            current_owner_epoch)
       ~required_at
+    |> Result.map_error unrecorded
 ;;
 
 let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution

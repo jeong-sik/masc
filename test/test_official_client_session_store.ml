@@ -736,7 +736,9 @@ let test_restart_recovery_and_transient_release () =
          ~current_owner_epoch:owner_epoch
          ~required_at:2.0
      with
-     | Error _ -> ()
+     | Error Claim_held_by_current_epoch -> ()
+     | Error (Restart_recovery_unrecorded detail) ->
+       fail ("same process epoch was refused as an unrecorded recovery: " ^ detail)
      | Ok _ -> fail "same process epoch was classified as a restart");
     let recovery =
       reconcile_process_restart

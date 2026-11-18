@@ -1034,11 +1034,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
              ~required_at:(Time_compat.now ())
          with
          | Ok reconciled -> Ok (Some reconciled)
-         | Error detail ->
+         | Error error ->
            Error
-             (config_error
-                ~field:"official_client_session.phase"
-                detail))
+             (Keeper_official_client_session_store.process_restart_error_to_core_error
+                error))
       | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
         Ok stored_session
     in
@@ -1100,7 +1099,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       | Some checkpoint ->
         Keeper_official_client_session_store.validate_continuation ~checkpoint
           ~expected:stored_session ~client_kind:Codex ~runtime_id ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
+        |> Result.map_error (fun (_ : string) ->
+          Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Gate_continuation_unresumable) in
     let claim_plan =
       Keeper_official_client_session_store.reconcile_tool_surface
         claim_plan
@@ -1118,7 +1118,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       | Some reference -> Keeper_official_task_reference.message
           ~current:official_client_continuation reference
         |> Result.map Option.some
-        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+        |> Result.map_error Keeper_official_client_session_refusal.core_error in
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
     let* prepared =
       Host.prepare_turn
@@ -1151,7 +1151,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
-      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+      (* The host's own model-input projection removed the reference it was
+         given: a MASC contract break, not a setting or a session state. *)
+      |> Result.map_error internal_error in
     (* Preserve the declaration until the selected account admits it. The raw
        run start records this request; the admission hook records the wire
        effort after live negotiation, including on every resumed turn. *)

@@ -4,7 +4,9 @@ type t
 val create : operation_id:Keeper_chat_operation.Operation_id.t -> message:string ->
   original_turn:Keeper_semantic_execution.official_client_checkpoint -> t
 val message : current:Keeper_semantic_execution.official_client_checkpoint option ->
-  t -> (Agent_core.Types.message, string) result
+  t -> (Agent_core.Types.message, Keeper_official_client_session_refusal.t) result
+(** [Error Task_reference_unbound] when [current] is not the operation's
+    original vendor session. *)
 val is_reference : Agent_core.Types.message -> bool
 (** Whether the message is the one {!message} builds: it carries this
     module's metadata marker. *)

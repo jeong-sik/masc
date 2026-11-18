@@ -130,28 +130,75 @@ let levelled ~dots ~maximum ~cells samples =
     (pairs (newest (2 * cells) samples))
 ;;
 
-let draw_rows ~rows ~mask cell_pairs =
+type tint = float -> string
+
+(* One row of cells, each drawn with the tint its height takes. A blank cell
+   keeps whatever colour is open, a code goes out only where the colour
+   changes, and the row closes with a reset when any code went out. *)
+let tinted_row cells =
+  let buffer = Buffer.create 64 in
+  let open_style =
+    List.fold_left
+      (fun open_style (mask, style) ->
+        let open_style =
+          if mask = 0 || String.equal style open_style then open_style
+          else begin
+            (* An empty style is the foreground, which only a reset gives
+               back. *)
+            Buffer.add_string buffer
+              (if String.equal style "" then Masc_tui_theme.Sgr.reset else style);
+            style
+          end
+        in
+        Buffer.add_string buffer (braille_cell ~mask);
+        open_style)
+      "" cells
+  in
+  if not (String.equal open_style "") then Buffer.add_string buffer Masc_tui_theme.Sgr.reset;
+  Buffer.contents buffer
+;;
+
+(* A cell's height share on a [dots]-dot column: the taller of its two
+   times, from the baseline (level 1, a zero) at 0 to the top at 1. *)
+let cell_share ~dots (left, right) =
+  float_of_int (Stdlib.max 0 (Stdlib.max left right - 1))
+  /. float_of_int (Stdlib.max 1 (dots - 1))
+;;
+
+(* btop's rule: a graph more than one row tall takes its colour from the row,
+   so the colour says how high the row sits; a one-row graph takes it from
+   each cell's own height. [distance] counts rows from where the columns
+   start growing. *)
+let draw_rows ~tint ~rows ~dots ~distance ~mask cell_pairs =
   List.init rows (fun row ->
-    String.concat ""
+    let from_base = distance row in
+    let row_style =
+      if rows > 1 then tint (float_of_int from_base /. float_of_int (rows - 1)) else ""
+    in
+    tinted_row
       (List.map
-         (fun (left, right) -> braille_cell ~mask:(mask ~row left right))
+         (fun ((left, right) as pair) ->
+           ( mask ~row left right,
+             if rows > 1 then row_style else tint (cell_share ~dots pair) ))
          cell_pairs))
 ;;
 
 (* Rows, top first, of columns growing up: the top row holds the dots
    [rows - 1] rows above the base. *)
-let rising_rows ~rows cell_pairs =
-  draw_rows ~rows cell_pairs ~mask:(fun ~row left right ->
-    let from_base = rows - 1 - row in
+let rising_rows ~tint ~rows ~dots cell_pairs =
+  let distance row = rows - 1 - row in
+  draw_rows ~tint ~rows ~dots ~distance cell_pairs ~mask:(fun ~row left right ->
+    let from_base = distance row in
     braille_left_dots.(row_dots ~row:from_base left)
     lor braille_right_dots.(row_dots ~row:from_base right))
 ;;
 
 (* Rows, top first, of columns growing down from the row above them. *)
-let falling_rows ~rows cell_pairs =
-  draw_rows ~rows cell_pairs ~mask:(fun ~row left right ->
-    braille_left_dots_down.(row_dots ~row left)
-    lor braille_right_dots_down.(row_dots ~row right))
+let falling_rows ~tint ~rows ~dots cell_pairs =
+  draw_rows ~tint ~rows ~dots ~distance:(fun row -> row) cell_pairs
+    ~mask:(fun ~row left right ->
+      braille_left_dots_down.(row_dots ~row left)
+      lor braille_right_dots_down.(row_dots ~row right))
 ;;
 
 let with_axis ~axis ~axis_cells rows =
@@ -161,7 +208,7 @@ let with_axis ~axis ~axis_cells rows =
     rows
 ;;
 
-let braille_graph ~width ~rows ~axis ~maximum samples =
+let braille_graph ~tint ~width ~rows ~axis ~maximum samples =
   let rows = Stdlib.max 1 rows in
   let axis_cells, cells = graph_layout ~width ~axis in
   if never_read samples then Never_read
@@ -170,10 +217,10 @@ let braille_graph ~width ~rows ~axis ~maximum samples =
     let dots = rows * braille_top in
     Drawn
       (with_axis ~axis ~axis_cells
-         (rising_rows ~rows (levelled ~dots ~maximum ~cells samples)))
+         (rising_rows ~tint ~rows ~dots (levelled ~dots ~maximum ~cells samples)))
 ;;
 
-let braille_mirror ~width ~half_rows ~axis ~maximum ~up ~down =
+let braille_mirror ~up_tint ~down_tint ~width ~half_rows ~axis ~maximum ~up ~down =
   let half_rows = Stdlib.max 1 half_rows in
   let axis_cells, cells = graph_layout ~width ~axis in
   if never_read up && never_read down then Never_read
@@ -182,6 +229,8 @@ let braille_mirror ~width ~half_rows ~axis ~maximum ~up ~down =
     let dots = half_rows * braille_top in
     Drawn
       (with_axis ~axis ~axis_cells
-         (rising_rows ~rows:half_rows (levelled ~dots ~maximum ~cells up)
-          @ falling_rows ~rows:half_rows (levelled ~dots ~maximum ~cells down)))
+         (rising_rows ~tint:up_tint ~rows:half_rows ~dots
+            (levelled ~dots ~maximum ~cells up)
+          @ falling_rows ~tint:down_tint ~rows:half_rows ~dots
+              (levelled ~dots ~maximum ~cells down)))
 ;;

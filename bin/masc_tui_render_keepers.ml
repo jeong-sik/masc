@@ -844,20 +844,19 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
   | Memory_reading.Row { lag = Memory_reading.Lag turns; gap; _ } ->
       let filled = Grid.lag_fill ~cells ~peak:peak_lag turns in
       (* Lag against the largest lag is a size, not a limit, so the fill
-         draws in the foreground. A stalled librarian whose requests skip
-         atoms, measured or not, is the anomaly, and the bar takes the
-         warning colour the memory axis gives the same gap (RFC
-         tui-one-screen-grammar section 7.3). *)
-      let tone =
+         walks the backlog hue. A stalled librarian whose requests skip
+         atoms, measured or not, is the anomaly: the anomaly's colour comes
+         before the ramp, and the bar takes the warning colour the memory axis
+         gives the same gap (RFC tui-one-screen-grammar section 7.3). *)
+      let scale =
         match gap with
-        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.warn ()
-        | Memory_reading.No_gap -> ""
+        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
+            Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Warn }
+        | Memory_reading.No_gap ->
+            Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Backlog }
       in
-      tone
-      ^ Masc_tui_chart.meter_bar ~width:cells ~scale:Masc_tui_chart.Relative
-          ~track_style:(Theme.recede ()) ~reset:Ansi.reset ~value:filled
-          ~max_value:(max 1 cells) ()
-      ^ Ansi.reset
+      Masc_tui_chart.meter_bar ~width:cells ~scale ~track_style:(Theme.recede ())
+        ~reset:Ansi.reset ~value:filled ~max_value:(max 1 cells) ()
   | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } ->
       Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset ^ ground (cells - 1)
   | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ ->
@@ -3705,7 +3704,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               Masc_tui_chart.meter_bar ~width:bar_width
                 ~value:(Observation_layout.percentage_tenths ratio)
                 ~max_value:Observation_layout.percentage_tenths_full
-                ~scale:(Masc_tui_chart.Declared_limit (Theme.limit_paint ()))
+                ~scale:(Masc_tui_chart.Declared_limit (Theme.paint ()))
                 ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
             in
             add_row context_label

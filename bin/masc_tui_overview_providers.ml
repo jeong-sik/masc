@@ -213,16 +213,11 @@ let coloured_meter ~cells ~fill:bar ~around share =
     match bar, fill with
     | Limit_fill, [] -> ""
     | Limit_fill, (_ :: _ as fill) ->
-        let scale = Masc_tui_chart.Declared_limit (Theme.limit_paint ()) in
+        let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
         let value = percent_of_fraction share in
-        String.concat ""
-          (List.mapi
-             (fun index glyph ->
-               Masc_tui_chart.meter_cell_style scale ~index ~width ~value
-                 ~max_value:percent_of_full
-               ^ glyph)
-             fill)
-        ^ Masc_tui_theme.Sgr.default_fg ^ around
+        Masc_tui_chart.meter_fill_run ~scale ~width ~value
+          ~max_value:percent_of_full ~reset:Masc_tui_theme.Sgr.default_fg fill
+        ^ around
     | Foreground_fill, fill ->
         Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
     | Row_tone_fill, fill -> String.concat "" fill

@@ -46,36 +46,43 @@ val gauge :
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
 
-(** What a meter's maximum is, which decides its colour (RFC
+(** What a meter's maximum is, which decides the ramp its cells walk (RFC
     tui-one-screen-grammar section 7.3). *)
 type meter_scale =
-  | Declared_limit of Masc_tui_theme.limit_paint
+  | Declared_limit of Masc_tui_theme.paint
       (** A cap set in settings or stated by a provider, where reaching it
           refuses or holds work: a plan window that blocks model calls when
           full, a context window's used tokens against its maximum. Each
-          filled cell takes the colour of its position against the cap. *)
-  | Relative
+          filled cell takes the status colour of its position against the cap. *)
+  | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
       (** Anything else: a completion ratio, a share of a total, a size
-          against the largest, a cap no one has confirmed is a limit. The fill
-          draws no colour of its own, so it takes the foreground or whatever
-          state colour the caller drew around the bar. *)
-
-val meter_cell_colour :
-  meter_scale ->
-  index:int ->
-  width:int ->
-  value:int ->
-  max_value:int ->
-  Masc_tui_theme.meter_cell_colour
-(** The colour filled cell [index] of a [width]-cell bar drawing [value]
-    against [max_value] takes: {!Masc_tui_theme.limit_cell_colour} at the
-    paint's depth for a declared limit, [Cell_plain] for a relative bar at
-    every depth. *)
+          against the largest. Each filled cell takes [series]'s hue at its
+          position along the bar, deep at the start and bright at the end. *)
+  | Anomaly of { paint : Masc_tui_theme.paint; status : Masc_tui_theme.status }
+      (** An anomaly the bar reports -- every call failed, a stalled reader
+          -- whose status colour comes before any ramp: every filled cell
+          draws in [status] through {!Masc_tui_theme.status_readable}. *)
 
 val meter_cell_style :
   meter_scale -> index:int -> width:int -> value:int -> max_value:int -> string
-(** The SGR drawn before that cell's glyph: {!meter_cell_colour} through
-    {!Masc_tui_theme.meter_cell_readable}, and [""] for a relative bar. *)
+(** The SGR drawn before filled cell [index] of a [width]-cell bar drawing
+    [value] against [max_value]. A declared limit draws
+    {!Masc_tui_theme.limit_cell_colour} through
+    {!Masc_tui_theme.meter_cell_readable}; a series draws
+    {!Masc_tui_theme.ramp_style} at the cell's reach, the smaller of its far
+    edge and [value / max_value]; an anomaly draws its status colour. *)
+
+val meter_fill_run :
+  scale:meter_scale ->
+  width:int ->
+  value:int ->
+  max_value:int ->
+  reset:string ->
+  string list ->
+  string
+(** The filled glyphs, cell [0] first, each coloured by {!meter_cell_style}.
+    A colour code goes out only where it differs from the cell before, and
+    [reset] closes the run when any code went out. *)
 
 val meter_bar :
   width:int ->
@@ -87,8 +94,8 @@ val meter_bar :
   unit ->
   string
 (** Bracketless segmented bar of exactly [width] display cells ([""] when
-    [width <= 0]): filled cells draw ["■"] coloured by [scale] (see
-    {!meter_cell_colour}), and remaining cells draw ["·"] in [track_style]. *)
+    [width <= 0]): filled cells draw ["■"] through {!meter_fill_run}, and
+    remaining cells draw ["·"] in [track_style]. *)
 
 val meter :
   width:int ->

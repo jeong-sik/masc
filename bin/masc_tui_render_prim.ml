@@ -3378,7 +3378,8 @@ let planning_rollup_clauses ~cols (rollup : planning_rollup) =
     let progress_bar =
       Printf.sprintf "[%s] %2d%% (%d/%d)"
         (Masc_tui_context_bars.ratio_bar ~width:bar_width
-           ~numerator:rollup.pr_done ~denominator:total_goals ~scale:Chart.Relative)
+           ~numerator:rollup.pr_done ~denominator:total_goals
+           ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion }))
         (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
     in
     let counter phase glyph name value =
@@ -5045,7 +5046,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             @ [ "  "
                 ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
                     ~denominator:maximum
-                    ~scale:(Chart.Declared_limit (Theme.limit_paint ()))
+                    ~scale:(Chart.Declared_limit (Theme.paint ()))
               ]
         | Some tokens, (None | Some _) ->
             [ Printf.sprintf "  %s input tokens; window not observed"
@@ -5142,6 +5143,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
+              ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
         ; "  "
           ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
               ~total

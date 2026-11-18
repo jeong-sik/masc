@@ -322,7 +322,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
             ~label:(say "점유" "Live") ~suffix:live
             (* The heap grows as the GC asks for more, so live words against
                it are a share, not a use of a limit. *)
-            ~scale:Chart.Relative
+            ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
           Printf.sprintf (if ko then "사용 중 %s · 마이너 힙 %s" else "live %s · minor %s")
@@ -388,7 +388,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
             ~suffix:(Count.grouped count.completed)
-            ~scale:Chart.Relative
+            ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
           Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
@@ -573,7 +573,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
             ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
                 ~value:gc.sgc_live_words ~max_value:(max 1 gc.sgc_heap_words)
                 ~label:(say "점유율" "Occupancy")
-                ~scale:Chart.Relative
+                ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
                 ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ]
         else []
@@ -858,7 +858,11 @@ let render_section_resources ~cols (state : state) =
            let axis = Count.grouped maximum in
            let width = Layout.display_width axis + 1 + ((List.length samples + 1) / 2) in
            let spark =
-             match Braille.braille_graph ~width ~rows:1 ~axis ~maximum samples with
+             match
+               Braille.braille_graph
+                 ~tint:(Theme.series_tint Masc_tui_theme.Completion)
+                 ~width ~rows:1 ~axis ~maximum samples
+             with
              | Braille.Drawn rows -> String.concat "" rows
              | Braille.Too_narrow ->
                Count.grouped
@@ -997,7 +1001,7 @@ let render_section_tools ~cols (state : state) : string list =
                 let bar =
                   Chart.meter ~width:16 ~value:k.mkh_facts
                     ~max_value:(max 1 total_facts)
-                    ~scale:Chart.Relative
+                    ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
                     ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
                 in
                 Printf.sprintf

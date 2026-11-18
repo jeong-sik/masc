@@ -102,13 +102,15 @@ let cell_colour_t =
       | Theme.Cell_band _, (Theme.Cell_plain | Theme.Cell_blend _)
       | Theme.Cell_blend _, (Theme.Cell_plain | Theme.Cell_band _) -> false)
 
-let declared_limit depth =
-  Chart.Declared_limit { Theme.depth; surface = Theme.Page; palette = None }
+(* A tint that draws no colour, for the rules that are about dots. *)
+let plain (_ : float) = ""
+
+let declared_limit depth = depth
 
 (* Every cell of a full bar: each reaches its own far edge. *)
-let cells scale ~width =
+let cells depth ~width =
   List.init width (fun index ->
-    Chart.meter_cell_colour scale ~index ~width ~value:width ~max_value:width)
+    Theme.limit_cell_colour ~depth ~index ~width ~value:width ~limit:width)
 
 (* Ten cells reach 10%, 20%, ... 100% of the limit. Under 50% is success,
    under 80% warning, the rest danger (RFC tui-one-screen-grammar 7.3). *)
@@ -138,14 +140,125 @@ let declared_limit_cells_by_depth () =
             Cell_band Near_limit; Cell_band Near_limit ]
     (cells (declared_limit Theme.Colors_16) ~width:5)
 
-let relative_cells_are_plain () =
-  Alcotest.(check (list cell_colour_t)) "a relative bar draws no colour of its own"
-    (List.init 10 (fun _ -> Theme.Cell_plain))
-    (cells Chart.Relative ~width:10);
-  Alcotest.(check string) "a relative bar's cells carry no SGR" ""
-    (String.concat ""
-       (List.init 10 (fun index ->
-          Chart.meter_cell_style Chart.Relative ~index ~width:10 ~value:10 ~max_value:10)))
+(* A series bar walks its hue: under half its reach the hue's normal code,
+   from half its bright code, where no palette lets it blend. Without colour
+   it draws nothing (RFC tui-one-screen-grammar 7.3). *)
+let series_paint ?palette depth = { Theme.depth; surface = Theme.Page; palette }
+
+module Palette = Masc_tui_terminal_palette
+
+let rgb (r, g, b) = Palette.make_rgb ~red:r ~green:g ~blue:b
+let dark_ground = rgb (30, 30, 30)
+
+(* xterm's sixteen entries on a near-black ground. *)
+let dark_palette () =
+  let xterm =
+    [| (0, 0, 0); (205, 0, 0); (0, 205, 0); (205, 205, 0); (0, 0, 238); (205, 0, 205);
+       (0, 205, 205); (229, 229, 229); (127, 127, 127); (255, 0, 0); (0, 255, 0);
+       (255, 255, 0); (92, 92, 255); (255, 0, 255); (0, 255, 255); (255, 255, 255) |]
+  in
+  Palette.of_responses ~foreground:(Some (rgb (220, 220, 220))) ~background:(Some dark_ground)
+    ~ansi:(Array.map (fun entry -> Some (rgb entry)) xterm)
+
+let truecolor = Palette.For_testing.best_color_for_level ~level:Palette.True_color
+
+let series_cells_walk_their_hue () =
+  let style depth ~index =
+    Chart.meter_cell_style
+      (Chart.Series { paint = series_paint depth; series = Theme.Calls })
+      ~index ~width:10 ~value:10 ~max_value:10
+  in
+  Alcotest.(check (list string)) "no colour draws no SGR"
+    (List.init 10 (fun _ -> ""))
+    (List.init 10 (fun index -> style Theme.No_color ~index));
+  Alcotest.(check (list string)) "sixteen colours draw the hue's bright code throughout"
+    (List.init 10 (fun _ -> Theme.Sgr.bright_cyan))
+    (List.init 10 (fun index -> style Theme.Colors_16 ~index));
+  Alcotest.(check (list string)) "without a palette truecolor draws the same"
+    (List.init 10 (fun index -> style Theme.Colors_16 ~index))
+    (List.init 10 (fun index -> style Theme.Truecolor ~index));
+  List.iter
+    (fun paint ->
+      List.iter
+        (fun position ->
+          Alcotest.(check string)
+            (Printf.sprintf "the table at %g is the computed colour" position)
+            (Theme.For_testing.ramp_style ~colors_enabled:Theme.colors_enabled
+               ~project:Masc_tui_terminal_palette.best_color paint Theme.Failures ~position)
+            (Theme.ramp_style paint Theme.Failures ~position))
+        [ 0.0; 0.25; 0.49; 0.495; 0.499; 0.5; 0.75; 0.999; 1.0 ])
+    [ series_paint Theme.Colors_16; series_paint ?palette:(dark_palette ()) Theme.Truecolor ];
+  (* A cell takes the step at or below its reach, never one past it: 0.495
+     reads step 49, not 50 (review on #53181). *)
+  let blended = series_paint ?palette:(dark_palette ()) Theme.Truecolor in
+  let at position =
+    Theme.For_testing.ramp_style ~colors_enabled:true ~project:truecolor blended Theme.Calls
+      ~position
+  in
+  Alcotest.(check bool) "steps 49 and 50 are different colours" false
+    (String.equal (at 0.49) (at 0.5));
+  Alcotest.(check string) "0.495 reads step 49" (at 0.49) (at 0.495);
+  Alcotest.(check string) "nan is the start of the ramp"
+    (Theme.ramp_style (series_paint Theme.Colors_16) Theme.Calls ~position:0.0)
+    (Theme.ramp_style (series_paint Theme.Colors_16) Theme.Calls ~position:Float.nan)
+
+(* Truecolor with a reported palette: one hue from deep to bright, every stop
+   clearing 3:1 against the ground, never darker further along, and the top
+   at least one contrast step above the start. xterm's bright blue reads 3.5:1
+   on this ground, so it has to be lifted for its ramp to show. *)
+let series_blend_rises () =
+  let ground = dark_ground in
+  let palette = dark_palette () in
+  let colour_of code =
+    match String.split_on_char ';' code with
+    | [ _; "2"; r; g; b ] ->
+      let b = String.sub b 0 (String.length b - 1) in
+      Some (rgb (int_of_string r, int_of_string g, int_of_string b))
+    | _ -> None
+  in
+  List.iter
+    (fun series ->
+      let contrasts =
+        List.init (Theme.ramp_steps + 1) (fun step ->
+          let position = float_of_int step /. float_of_int Theme.ramp_steps in
+          let code =
+            Theme.For_testing.ramp_style ~colors_enabled:true ~project:truecolor
+              (series_paint ?palette Theme.Truecolor) series ~position
+          in
+          match colour_of code with
+          | Some colour -> Masc_tui_color.contrast_ratio colour ground
+          | None -> Alcotest.failf "position %g drew %S, not a 24-bit colour" position code)
+      in
+      List.iter
+        (fun contrast ->
+          Alcotest.(check bool) "every stop clears 3:1" true (contrast >= 3.0 -. 1e-9))
+        contrasts;
+      (* Every one of the 101 steps, not a sample of them: an eight-bit
+         rounding dip sits between two tenths (review on #53181). *)
+      let rec rising = function
+        | a :: (b :: _ as rest) -> a <= b && rising rest
+        | [ _ ] | [] -> true
+      in
+      Alcotest.(check bool) "the ramp never darkens toward its top" true (rising contrasts);
+      if not (List.hd contrasts +. 1.0 < List.nth contrasts Theme.ramp_steps) then
+        Alcotest.failf "the deep end is not darker than the bright end: %s"
+          (String.concat " " (List.map (Printf.sprintf "%.2f") contrasts)))
+    Theme.[ Calls; Failures; Latency; Memory; Completion; Capacity; Backlog; Usage ]
+
+(* A ramp is blended whole or not at all: where one step cannot be projected
+   above the floor, every step draws the hue's bright code, so a 256-colour
+   terminal never mixes a palette code into a run of cube codes. *)
+let series_ramp_falls_back_whole () =
+  let palette = dark_palette () in
+  let project colour =
+    if Masc_tui_color.contrast_ratio colour dark_ground < 3.6 then None else truecolor colour
+  in
+  Alcotest.(check (list string)) "a deep step under the projection floor flattens the ramp"
+    (List.init 11 (fun _ -> Theme.Sgr.bright_cyan))
+    (List.init 11 (fun step ->
+       Theme.For_testing.ramp_style ~colors_enabled:true ~project
+         (series_paint ?palette Theme.Colors_256) Theme.Calls
+         ~position:(float_of_int step /. 10.0)))
 
 let graph_t =
   Alcotest.testable
@@ -181,7 +294,7 @@ let braille_levels () =
 let last_cell row = String.sub row (String.length row - 3) 3
 
 let braille_graph_rules () =
-  let graph ~width samples = Braille.braille_graph ~width ~rows:1 ~axis:"9" ~maximum:9 samples in
+  let graph ~width samples = Braille.braille_graph ~tint:plain ~width ~rows:1 ~axis:"9" ~maximum:9 samples in
   Alcotest.(check graph_t) "no sample at all is never read" Braille.Never_read (graph ~width:12 []);
   Alcotest.(check graph_t) "only unread samples is never read" Braille.Never_read
     (graph ~width:12 [ Braille.Unread; Braille.Unread ]);
@@ -208,7 +321,7 @@ let braille_graph_rules () =
 let braille_mirror_minimum_dot () =
   match
     (* The axis "1K" and its gap take three cells, leaving four for dots. *)
-    Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
+    Braille.braille_mirror ~up_tint:plain ~down_tint:plain ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
       ~up:[ (Braille.of_count 1000) ] ~down:[ (Braille.of_count 1) ]
   with
   | Braille.Drawn [ upper; lower ] ->
@@ -218,7 +331,7 @@ let braille_mirror_minimum_dot () =
       (Braille.braille_cell ~mask:0x18) (last_cell lower);
     Alcotest.(check graph_t) "a mirror with neither side read is never read"
       Braille.Never_read
-      (Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
+      (Braille.braille_mirror ~up_tint:plain ~down_tint:plain ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
          ~up:[ Braille.Unread ] ~down:[])
   | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "a one-row half draws two rows: %a" (Alcotest.pp graph_t) other
@@ -309,12 +422,71 @@ let meter_cell_fallbacks () =
   Alcotest.(check string) "a plain cell draws no SGR with colours on" ""
     (readable Theme.Truecolor Theme.Cell_plain)
 
-(* A relative bar puts no colour codes in its fill or track, so it takes the
-   foreground or the colour its caller drew around it. *)
-let relative_meter_bar_has_no_sgr () =
-  let bar = Chart.meter_bar ~width:10 ~value:7 ~max_value:10 ~scale:Chart.Relative () in
-  Alcotest.(check bool) "a relative bar with no track style has no escape" false
-    (String.contains bar '\027')
+(* A code goes out only where the colour changes, and one reset closes the
+   fill. An anomaly draws the whole fill in its own code. *)
+let meter_bar_opens_a_code_per_colour () =
+  let reset = "<0>" in
+  let bar scale = Chart.meter_bar ~width:10 ~value:10 ~max_value:10 ~scale ~reset () in
+  let glyphs count = String.concat "" (List.init count (fun _ -> "\xe2\x96\xa0")) in
+  let opened code = if String.equal code "" then glyphs 10 else code ^ glyphs 10 ^ reset in
+  Alcotest.(check string) "one colour opens one code"
+    (opened Theme.Sgr.bright_cyan)
+    (bar (Chart.Series { paint = series_paint Theme.Colors_16; series = Theme.Calls }));
+  Alcotest.(check string) "an anomaly opens its status colour once"
+    (opened (Theme.status_readable ~surface:Theme.Page None Theme.Bad))
+    (bar (Chart.Anomaly { paint = series_paint Theme.Colors_16; status = Theme.Bad }));
+  Alcotest.(check string) "no colour opens nothing" (glyphs 10)
+    (bar (Chart.Series { paint = series_paint Theme.No_color; series = Theme.Calls }))
+
+(* btop's graph colours: rows by their height when the graph is taller than
+   one row, cells by their own height in a one-row graph. A blank cell opens
+   no code, a code goes out only where it changes, and a row that opened one
+   ends with a reset. *)
+let braille_graph_tints_by_height () =
+  let tint share = Printf.sprintf "<%.2f>" share in
+  let reset = Theme.Sgr.reset in
+  (match
+     Braille.braille_graph ~tint ~width:6 ~rows:1 ~axis:"8" ~maximum:8
+       [ Braille.Absent; Braille.Absent; Braille.of_count 8; Braille.of_count 8;
+         Braille.Zero; Braille.Zero; Braille.of_count 6; Braille.of_count 6 ]
+   with
+   | Braille.Drawn [ row ] ->
+     Alcotest.(check string) "one row: each cell by its own height"
+       ("8 " ^ Braille.braille_cell ~mask:0 ^ "<1.00>" ^ Braille.braille_pair ~left:4 ~right:4
+        ^ "<0.00>" ^ Braille.braille_pair ~left:1 ~right:1
+        ^ "<0.67>" ^ Braille.braille_pair ~left:3 ~right:3 ^ reset)
+       row
+   | other -> Alcotest.failf "expected one drawn row, got %a" (Alcotest.pp graph_t) other);
+  match
+    Braille.braille_graph ~tint ~width:6 ~rows:2 ~axis:"8" ~maximum:8
+      [ Braille.of_count 8; Braille.of_count 8; Braille.of_count 8; Braille.of_count 8;
+        Braille.of_count 8; Braille.of_count 8; Braille.of_count 8; Braille.of_count 8 ]
+  with
+  | Braille.Drawn [ top; bottom ] ->
+    let full = String.concat "" (List.init 4 (fun _ -> Braille.braille_pair ~left:4 ~right:4)) in
+    Alcotest.(check string) "the top row takes the top of the ramp"
+      ("8 <1.00>" ^ full ^ reset) top;
+    Alcotest.(check string) "the base row takes its own height"
+      ("  <0.00>" ^ full ^ reset) bottom
+  | other -> Alcotest.failf "expected two drawn rows, got %a" (Alcotest.pp graph_t) other
+
+(* A tint that draws nothing for low cells hands the foreground back with a
+   reset, so the colour of a tall cell does not run into the cells after it
+   or past the row (review on #53181). *)
+let braille_empty_tint_resets () =
+  let tint share = if share >= 0.5 then "<c>" else "" in
+  match
+    Braille.braille_graph ~tint ~width:6 ~rows:1 ~axis:"8" ~maximum:8
+      [ Braille.Absent; Braille.Absent; Braille.Absent; Braille.Absent;
+        Braille.of_count 8; Braille.of_count 8; Braille.Zero; Braille.Zero ]
+  with
+  | Braille.Drawn [ row ] ->
+    Alcotest.(check string) "the low cell after a coloured one resets"
+      ("8 " ^ Braille.braille_cell ~mask:0 ^ Braille.braille_cell ~mask:0
+       ^ "<c>" ^ Braille.braille_pair ~left:4 ~right:4
+       ^ Theme.Sgr.reset ^ Braille.braille_pair ~left:1 ~right:1)
+      row
+  | other -> Alcotest.failf "expected one drawn row, got %a" (Alcotest.pp graph_t) other
 
 let sample_name = function
   | Braille.Unread -> "Unread"
@@ -361,15 +533,15 @@ let narrow_graphs_are_numbers () =
           Alcotest.(check graph_t)
             (Printf.sprintf "width %d with axis %S is too narrow" width axis)
             Braille.Too_narrow
-            (Braille.braille_graph ~width ~rows:1 ~axis ~maximum:5 [ (Braille.of_count 5) ]);
+            (Braille.braille_graph ~tint:plain ~width ~rows:1 ~axis ~maximum:5 [ (Braille.of_count 5) ]);
           Alcotest.(check graph_t)
             (Printf.sprintf "a mirror of width %d with axis %S is too narrow" width axis)
             Braille.Too_narrow
-            (Braille.braille_mirror ~width ~half_rows:1 ~axis ~maximum:5
+            (Braille.braille_mirror ~up_tint:plain ~down_tint:plain ~width ~half_rows:1 ~axis ~maximum:5
                ~up:[ (Braille.of_count 5) ] ~down:[ Braille.Zero ]))
         [ ""; "5" ])
     [ 0; 1; 2; 3 ];
-  match Braille.braille_graph ~width:6 ~rows:1 ~axis:"5" ~maximum:5 [ (Braille.of_count 5) ] with
+  match Braille.braille_graph ~tint:plain ~width:6 ~rows:1 ~axis:"5" ~maximum:5 [ (Braille.of_count 5) ] with
   | Braille.Drawn _ -> ()
   | (Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "four cells of dots draw a graph: %a" (Alcotest.pp graph_t) other
@@ -382,7 +554,7 @@ let only_row = function
 (* A time not read, or whose read failed, inside a graph with readings is a
    blank half-cell beside the baseline of a measured zero. *)
 let missing_times_are_blank () =
-  let graph samples = Braille.braille_graph ~width:6 ~rows:1 ~axis:"9" ~maximum:9 samples in
+  let graph samples = Braille.braille_graph ~tint:plain ~width:6 ~rows:1 ~axis:"9" ~maximum:9 samples in
   Alcotest.(check string) "an unread time after a zero is blank" (Braille.braille_cell ~mask:0x40)
     (last_cell (only_row (graph [ Braille.Zero; Braille.Unread ])));
   Alcotest.(check string) "a failed read after a zero is blank" (Braille.braille_cell ~mask:0x40)
@@ -392,7 +564,7 @@ let missing_times_are_blank () =
    stays blank. *)
 let small_value_in_two_rows () =
   match
-    Braille.braille_graph ~width:7 ~rows:2 ~axis:"1K" ~maximum:1000
+    Braille.braille_graph ~tint:plain ~width:7 ~rows:2 ~axis:"1K" ~maximum:1000
       [ Braille.Absent; (Braille.of_count 1) ]
   with
   | Braille.Drawn [ top; bottom ] ->
@@ -408,7 +580,7 @@ let small_value_in_two_rows () =
    dots while the other side draws. *)
 let mirror_shared_axis_and_baselines () =
   let mirror ~up ~down =
-    Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000 ~up ~down
+    Braille.braille_mirror ~up_tint:plain ~down_tint:plain ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000 ~up ~down
   in
   (match mirror ~up:[ Braille.Zero; Braille.Zero ] ~down:[ Braille.Zero; Braille.Zero ] with
    | Braille.Drawn [ upper; lower ] ->
@@ -448,17 +620,23 @@ let () =
     ; "meter colour",
       [ Alcotest.test_case "declared limit cells by colour depth" `Quick
           declared_limit_cells_by_depth
-      ; Alcotest.test_case "relative bars draw plain cells" `Quick relative_cells_are_plain
+      ; Alcotest.test_case "series bars walk their hue" `Quick series_cells_walk_their_hue
+      ; Alcotest.test_case "a series blend rises from deep to bright" `Quick series_blend_rises
+      ; Alcotest.test_case "a ramp falls back whole" `Quick series_ramp_falls_back_whole
       ; Alcotest.test_case "declared limit steps at other widths" `Quick
           declared_limit_steps_at_other_widths
       ; Alcotest.test_case "a cell stops at the value it draws" `Quick
           declared_limit_cell_stops_at_the_value
       ; Alcotest.test_case "blend and plain fallbacks" `Quick meter_cell_fallbacks
-      ; Alcotest.test_case "a relative bar carries no SGR" `Quick relative_meter_bar_has_no_sgr
+      ; Alcotest.test_case "a bar opens a code per colour" `Quick
+          meter_bar_opens_a_code_per_colour
       ]
     ; "braille graph",
       [ Alcotest.test_case "levels for zero, small, absent and unread" `Quick braille_levels
       ; Alcotest.test_case "unread, narrow and baseline rules" `Quick braille_graph_rules
+      ; Alcotest.test_case "a graph takes its colour from its height" `Quick
+          braille_graph_tints_by_height
+      ; Alcotest.test_case "an empty tint resets the colour" `Quick braille_empty_tint_resets
       ; Alcotest.test_case "the mirrored smaller side shows a dot" `Quick
           braille_mirror_minimum_dot
       ; Alcotest.test_case "counts become samples" `Quick counts_become_samples

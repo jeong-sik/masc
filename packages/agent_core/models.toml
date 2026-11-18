@@ -2871,6 +2871,69 @@ output_per_million = 50.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# GPT-6.2 Sol·Astra(2026-11-18 확인). 창·출력·가격은 모델 문서가 정한다
+# (developers.openai.com/api/docs/models/gpt-6.2-sol 과 -astra): 창 1,050,000,
+# 최대 입력 922,000, 출력 128,000, sol $2/$10, astra $8/$40. 캐시는 읽기 1/20,
+# 쓰기 1.25배(문서의 $0.1/$2, $0.4/$8, $2.5/$2, $10/$8). 272K 초과 입력은 단가가
+# 배가되는데 요금 티어는 catalog 가 모델하지 않는다.
+# 라이브 프로브(OPENAI_API_KEY_MAIN, /v1/responses, 2026-11-18). 파라미터 검사가
+# 접근 검사보다 앞이라 이 키의 프로젝트가 6.2 호출을 model_not_found 로 거부하는
+# 상태에서도 실측이 성립한다:
+#   temperature 0.4  400 "'temperature' is not supported with this model" — 두 모델 모두.
+#                    6-astra 행과 같은 방어로 ignored_sampling_parameters 를 넣는다.
+#   effort banana   400 파라미터 스키마는 none·minimal·low·medium·high·xhigh·max.
+#   effort minimal  400 "'minimal' is not supported with the 'gpt-6.2-*' model.
+#                    Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'"
+#   effort none     400 같은 문양('none' is not supported) — none·minimal 은 이
+#                    표면에서 못 쓴다. Codex model/list 캐시(~/.codex/models_cache.json)의
+#                    ultra·기본 창 272000 도 CLI 쪽 값이다(gpt-6-sol 행의 2026-09-23
+#                    기록과 같은 결론). bare 행은 일부러 넣지 않는다: 이 행은 HTTP
+#                    responses 런타임용이고(gpt-5.6-luna 와 같은 scoped-only 구도),
+#                    codex native 가 6.2 를 실을 때 bare 행을 그때 넣는다.
+[[models]]
+model_id = "gpt-6.2-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
+[[models]]
+model_id = "gpt-6.2-astra"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 8.0
+output_per_million = 40.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
 
 [[providers]]
 id = "gemini"

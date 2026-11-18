@@ -379,13 +379,20 @@ let render_overview (state : state) home =
             if state.keeper_navigation_open then None
             else Some (tag, Ansi.bold ^ Theme.accent ())
           in
-          (* Every card counts the rows it lists; none of them owns the
-             keyboard yet, so each writes its count. *)
+          (* Every card counts what it lists; none of them owns the keyboard
+             yet, so each writes its count. The decisions card counts the
+             requests, not the row that opens the whole list or one that says
+             a source was not read. *)
           let rows_of rows = Some (Masc_tui_card.Whole (List.length rows)) in
+          let decisions_count =
+            match Masc_tui_home.home_decision_count home with
+            | Masc_tui_home.Every_source_read requests -> Masc_tui_card.Whole requests
+            | Masc_tui_home.Some_source_unread requests -> Masc_tui_card.At_least requests
+          in
           let edges : Masc_tui_overview_cards.edges =
             { decisions =
                 { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-                ; key = key "p"; status = None; count = rows_of all_decisions
+                ; key = key "p"; status = None; count = Some decisions_count
                 ; focus = Masc_tui_card.Unfocused }
             ; continuation =
                 { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
@@ -404,7 +411,6 @@ let render_overview (state : state) home =
           in
           let status ~cells = overview_capacity_lines ~cells state in
           Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
-            ~empty_decisions:(ui_text state ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you.")
             ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
             ~decisions:all_decisions ~decisions_whole:true ~continuation ~status

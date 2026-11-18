@@ -30,7 +30,6 @@ type edges =
 val draw :
   ko:bool ->
   edges:edges ->
-  empty_decisions:string ->
   inner:int ->
   rows:int ->
   is_selected:('action -> bool) ->
@@ -45,7 +44,8 @@ val draw :
     columns, the cards need more than [rows] lines, or [decisions_whole] is
     false. [decisions_whole] says the window holds every decision; a partial
     window uses the plain selectable list instead. The cards are as tall as
-    their rows and the two columns end on the same line.
+    their rows and the two columns end on the same line. A card with no rows
+    has an empty body: its edge's count says there are none.
 
     [actions] are the reasons the server gives for needing the operator, one
     row each, drawn as a card under the status readings. With none, there is

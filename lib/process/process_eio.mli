@@ -273,7 +273,8 @@ type spawn_outlook =
           ([E2BIG], [ENOEXEC]) and for a shortage that passes ([ENOMEM],
           [EAGAIN], [ENFILE], [ETXTBSY] while the binary is replaced). The
           text is not parsed, so a caller must not treat this as either
-          answer; the keeper keeps it on the retryable path. *)
+          answer; the keeper records it for an operator instead of
+          releasing it as transient. *)
 
 val unix_error_spawn_outlook : Unix.error -> spawn_outlook
 val spawn_refusal_outlook : spawn_refusal -> spawn_outlook

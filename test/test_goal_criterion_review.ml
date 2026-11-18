@@ -11,7 +11,7 @@ let tool config name fields =
   | None -> Alcotest.fail ("unhandled tool " ^ name)
 let create config =
   let json = tool config "masc_goal_upsert" ["title", `String "Measure real source units";
-    "metric", `String "criterion-owner/source.txt"; "target_value", `String "100"] in
+    "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "100"); "procedure", `String "criterion-owner/source.txt"] in
   Yojson.Safe.Util.(json |> member "goal_id" |> to_string)
 let goal config goal_id = match Goal_store.find_goal config ~goal_id with
   | Goal_store.Goal_found goal -> goal
@@ -117,7 +117,7 @@ let test_stale_verdict_cannot_approve_new_criterion () = with_workspace (fun con
   let goal_id = create config in
   let original = current config goal_id in
   let change () = ignore (tool config "masc_goal_upsert"
-    ["id", `String goal_id; "target_value", `String "200"]) in
+    ["id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "200")]) in
   with_reviewer (reviewer config goal_id (ref 0) change (Some (AR.Approve "Old target is viable.")))
     (fun () -> get (Agent.For_testing.process config ~goal_id));
   Alcotest.(check string) "replacement criterion still awaits review" "pending" (state config goal_id);
@@ -391,7 +391,7 @@ let test_retained_judgments_recover_after_goal_mutation () = with_workspace (fun
         get (Agent.For_testing.process config ~goal_id));
     let request_id = retain_unpublished_fixture config goal_id in
     if replacement then ignore (tool config "masc_goal_upsert"
-      ["id", `String goal_id; "target_value", `String "200"]);
+      ["id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "200")]);
     ignore (Goal_store.transact_goal config ~goal_id (fun goal ->
       Ok ({goal with phase=Goal_phase.Paused Goal_phase.Resume_executing}, ())));
     get (Agent.For_testing.recover config);

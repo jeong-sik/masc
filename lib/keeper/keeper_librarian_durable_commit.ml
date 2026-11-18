@@ -427,7 +427,6 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
              | Ok record -> Ok (Publication.Publication_complete record)) in
         let apply record =
           let source=Request.source request in
-          let committed=ref None in
           let applied=io (fun () ->
             Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
               let* actual=reload ~store ~previous:record request in
@@ -437,7 +436,6 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in
               Ok (Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Durable
-                ~on_committed:(fun disposition -> committed:=Some disposition)
                 ~expected_basis:(expected_basis request)
                 ~dropped_statements:accepted.selection.dropped
                 ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
@@ -453,20 +451,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           (* An atomic save or outer source-lock release can fail after Memory
              publication. The real receipts, never the returned status, decide. *)
           let* proved=io (fun () -> let* ()=Request.confirm_owner request in receipt_state request) in
-          if proved then (
-            let ()=match !committed with
-              | None -> ()
-              | Some disposition ->
-                io (fun () -> Keeper_memory_os_events.append_all
-                  ~keepers_dir:(Request.keepers_dir owner) ~keeper_id
-                  (List.map (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
-                    {recorded_at=disposition.Current.snapshot.updated_at;
-                      memory_id=revision.superseded;trace_id=Ids.Turn_ref.trace_id (Source.input source).turn_ref;
-                      kind=Keeper_memory_os_events.Revised {superseded_by=revision.superseded_by}})
-                    disposition.revisions_applied))
-                |> List.iter (fun error -> Log.Keeper.warn ~keeper_name:keeper_id "%s"
-                  (Keeper_memory_os_events.append_error_to_string error)) in
-            confirm record)
+          if proved then confirm record
           else match applied with
           | Ok (Error (Current.Basis_superseded observed)) ->
             (* Only the locked store guard can establish this decision. Its

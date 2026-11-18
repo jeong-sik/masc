@@ -953,6 +953,162 @@ let test_a_written_memo_releases_omitted_source_fields () =
   ignore (Sys.opaque_identity (memo, plan, next))
 ;;
 
+let header_fixture () =
+  let context = Context.create_sync () in
+  Context.set context "execution_scope" (`String "original-operation");
+  let pending_input : Agent_input_request.pending =
+    { run_id = "original-run"
+    ; request =
+        { request_id = "original-request"; participant_name = None; question = "Continue?"
+        ; schema = None; timeout_s = None; created_at = 42.0 }
+    }
+  in
+  let cp messages =
+    { (checkpoint messages) with context; pending_input = Some pending_input
+    ; tools = [ Types.tool_schema_of_params ~name:"read" ~description:"Read"
+                  ~parameters:[] () ] }
+  in
+  let memo = O.create_memo () in
+  let first = plan_ok memo O.Turn_closes (cp (turn 1)) in
+  let plan = plan_ok memo ~previous:first.head O.Turn_continues (cp (turn 1 @ [user "next"])) in
+  let objects = store () in
+  write objects first;
+  write objects plan;
+  objects, plan
+;;
+
+let replace_header_object objects (plan : O.plan) field bytes =
+  let digest = O.digest_of_bytes bytes in
+  Hashtbl.replace objects (digest :> string) bytes;
+  with_head_edited plan.head_bytes (function
+    | "header_objects", `Assoc fields ->
+      "header_objects", `Assoc (List.map (set_field field (`String (digest :> string))) fields)
+    | field -> field)
+  |> O.head_of_string |> Result.get_ok
+;;
+
+let test_header_validation_does_not_read_history () =
+  let objects, plan = header_fixture () in
+  let header_objects = plan.O.head.header_objects in
+  let expected = [header_objects.system_prompt; header_objects.tools] in
+  let reads = ref [] in
+  let read_object digest =
+    reads := digest :: !reads;
+    if List.mem digest expected then read objects digest
+    else Alcotest.fail "header validation read a history object"
+  in
+  let head = O.head_of_string plan.head_bytes |> Result.get_ok in
+  (match O.validate_header ~read_object head with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (O.load_error_to_string error));
+  Alcotest.(check bool) "actual header objects are checked in order" true
+    (List.rev !reads = expected);
+  (* A valid header is not proof of a complete checkpoint. *)
+  let bundle = (List.hd head.history.turns).bundle in
+  Hashtbl.remove objects (bundle :> string);
+  (match O.validate_header ~read_object:(read objects) head with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (O.load_error_to_string error));
+  match O.load_read_only ~read_object:(read objects) head with
+  | Error (O.Object_missing missing) when missing = bundle -> ()
+  | Ok _ | Error _ -> Alcotest.fail "a valid header must not hide missing history"
+;;
+
+let test_header_validation_refuses_actual_object_damage () =
+  let objects, plan = header_fixture () in
+  let head = plan.O.head in
+  let prompt = head.header_objects.system_prompt in
+  let check_same_error read_object head =
+    let expected = match O.validate_header ~read_object head with
+      | Error error -> error
+      | Ok () -> Alcotest.fail "damaged header passed validation" in
+    List.iter (fun load ->
+      match load ~read_object head with
+      | Error error -> Alcotest.(check bool) "same complete-loader header error" true
+          (error = expected)
+      | Ok _ -> Alcotest.fail "damaged header loaded")
+      [O.load_read_only; O.load (O.create_memo ())];
+    expected
+  in
+  (match check_same_error (fun _digest -> Ok None) head with
+   | O.Object_missing digest when digest = prompt -> ()
+   | _ -> Alcotest.fail "missing first header object must be Object_missing");
+  (match check_same_error (fun _digest -> Error "read refused") head with
+   | O.Object_unreadable {digest;detail="read refused"} when digest = prompt -> ()
+   | _ -> Alcotest.fail "unreadable first header object must keep its error");
+  let exception Reader_raised in
+  Alcotest.(check bool) "a callback exception propagates" true
+    (try
+       ignore (O.validate_header ~read_object:(fun _digest -> raise Reader_raised) head);
+       false
+     with Reader_raised -> true);
+  let original = Hashtbl.find objects (prompt :> string) in
+  Hashtbl.replace objects (prompt :> string) (original ^ " ");
+  (match check_same_error (read objects) head with
+   | O.Object_digest_mismatch {expected;_} when expected = prompt -> ()
+   | _ -> Alcotest.fail "changed header bytes must fail their digest");
+  Hashtbl.replace objects (prompt :> string) original;
+  let malformed = replace_header_object objects plan "tools" "not json" in
+  (match check_same_error (read objects) malformed with
+   | O.Header_object_invalid {digest;_} when digest = malformed.header_objects.tools -> ()
+   | _ -> Alcotest.fail "a correctly addressed malformed object must fail JSON decoding");
+  List.iter (fun (field, bytes) ->
+    let malformed = replace_header_object objects plan field bytes in
+    match check_same_error (read objects) malformed with
+    | O.Checkpoint_invalid _ -> ()
+    | _ -> Alcotest.fail "real header object types must pass the checkpoint codec")
+    ["system_prompt", "42"; "tools", "null"; "tools", {|[{"name":"incomplete"}]|}]
+;;
+
+let test_header_validation_keeps_complete_load_order () =
+  let objects, plan = header_fixture () in
+  let head = replace_header_object objects plan "tools" "null" in
+  let bundle = (List.hd head.history.turns).bundle in
+  Hashtbl.remove objects (bundle :> string);
+  (match O.validate_header ~read_object:(read objects) head with
+   | Error (O.Checkpoint_invalid _) -> ()
+   | Ok () | Error _ -> Alcotest.fail "header-only validation must check actual tools");
+  List.iter (fun load ->
+    let reads = ref [] in
+    let read_object digest = reads := digest :: !reads; read objects digest in
+    (match load ~read_object head with
+     | Error (O.Object_missing digest) when digest = bundle -> ()
+     | Ok _ | Error _ ->
+       Alcotest.fail "complete load must still observe missing history before the header type error");
+    Alcotest.(check bool) "header object reads precede the failed history read" true
+      (List.rev !reads = [head.header_objects.system_prompt; head.header_objects.tools; bundle]))
+    [O.load_read_only; O.load (O.create_memo ())]
+;;
+
+let test_changed_header_bytes_are_parsed_before_validation () =
+  let objects, plan = header_fixture () in
+  let read_count = ref 0 in
+  let read_object digest = incr read_count; read objects digest in
+  let validate bytes = Result.bind (O.head_of_string bytes) (O.validate_header ~read_object) in
+  let edited field value =
+    with_head_edited plan.O.head_bytes (function
+      | "checkpoint", `Assoc fields ->
+        "checkpoint", `Assoc (List.map (set_field field value) fields)
+      | field -> field)
+  in
+  let later = Checkpoint.checkpoint_version + 1 in
+  (match validate (edited "version" (`Int later)) with
+   | Error (O.Checkpoint_invalid (Error.Serialization (VersionMismatch {got;_})))
+       when got = later -> ()
+   | Ok () | Error _ -> Alcotest.fail "changed header version must remain a version error");
+  List.iter (fun (field, value) ->
+    match validate (edited field value) with
+    | Error (O.Checkpoint_invalid _) -> ()
+    | Ok () | Error _ -> Alcotest.fail "malformed context or pending ownership must fail")
+    ["context", `List [];
+     "context", `Assoc ["scope", `Null; "scope", `Null];
+     "pending_input", `Assoc ["run_id", `String ""; "request", `Assoc []]];
+  (match validate (edited "messages" (`List [Checkpoint.message_to_json (user "hidden")])) with
+   | Error (O.Head_invalid _) -> ()
+   | Ok () | Error _ -> Alcotest.fail "the header must not construct an inline history");
+  Alcotest.(check int) "invalid head bytes never read objects" 0 !read_count
+;;
+
 let () =
   Alcotest.run "checkpoint_objects"
     [ ( "save and load"
@@ -987,6 +1143,8 @@ let () =
         ; Alcotest.test_case "an edit inside a segment writes it again" `Quick
             test_an_edit_inside_a_segment_writes_it_again
         ; Alcotest.test_case "an absent segment is not kept" `Quick test_an_absent_segment_is_not_kept
+        ; Alcotest.test_case "header validation does not read history" `Quick
+            test_header_validation_does_not_read_history
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick
@@ -999,6 +1157,12 @@ let () =
             test_a_document_that_is_not_a_head
         ; Alcotest.test_case "a later head reads as its version" `Quick
             test_a_later_head_reads_as_its_version
+        ; Alcotest.test_case "header validation refuses actual object damage" `Quick
+            test_header_validation_refuses_actual_object_damage
+        ; Alcotest.test_case "header validation keeps complete load order" `Quick
+            test_header_validation_keeps_complete_load_order
+        ; Alcotest.test_case "changed header bytes are parsed before validation" `Quick
+            test_changed_header_bytes_are_parsed_before_validation
         ] )
     ]
 ;;

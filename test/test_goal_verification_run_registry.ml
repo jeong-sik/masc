@@ -5,7 +5,7 @@ module R = Goal_verification_run_registry
 
 let criterion = Goal_store.Criterion
   { revision = "criterion-original"; title = "Verify three services";
-    metric = Some "verified services"; target_value = Some "3" }
+    measure = Goal_measure_fixture.done_when "3"; procedure = "verified services" }
 
 
 let with_path f =

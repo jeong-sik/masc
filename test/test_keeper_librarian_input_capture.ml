@@ -17,7 +17,7 @@ let stored_source ~media_type raw =
 let get = function Ok value -> value | Error detail -> fail detail
 let reference = Ids.Turn_ref.make ~trace_id:"original-input" ~absolute_turn:7
 let criterion = Goal_store.Criterion {revision="original-criterion";title="Retain every input";
-  metric=Some "original fields";target_value=Some "all"}
+  measure=Goal_measure_fixture.done_when "all";procedure="original fields"}
 let fact claim = Keeper_memory_os_types.observed ~claim ~category:Keeper_memory_os_types.Fact
   ~now:100. ~origin:{kind=Keeper_memory_os_types.Authored;trace_id="original-input"}
 let source reference : C.source = {reference;content=`Assoc ["z",`Int 2;"a",`String "original"]}

@@ -41,8 +41,8 @@ let snapshot ?(request_id = "req-1") goal_id : E.t =
         ; goal_created_at = at "2026-09-20T01:00:00Z"
         ; due_date = Some "2026-09-26"
         ; title = "Ship the ledger"
-        ; metric = Some "tests"
-        ; target_value = Some "10"
+        ; measure = Goal_measure_fixture.done_when "10"
+        ; procedure = "tests"
         ; linked_task_ids = [ "task-1"; "task-2" ]
         }
   }
@@ -161,7 +161,7 @@ let payment_prerequisites ?completed_at (row : E.t) =
   [ { E.at = row.at; body = E.Snapshot {
         goal_id; request_id; verification_run_id; criterion_revision = "receipt-fixture";
         passed_at = row.at; goal_created_at = at "2026-09-28T00:00:00Z";
-        due_date = None; title = "Recorded payout"; metric = None; target_value = None;
+        due_date = None; title = "Recorded payout"; measure = Goal_measure_fixture.measure; procedure = "read the fixture";
         linked_task_ids = ids } }
   ; { E.at = row.at; body = E.Payout_owed {
         goal_id; request_id; verification_run_id; passed_at = row.at; confirmed_at = row.at } }

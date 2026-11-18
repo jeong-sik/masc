@@ -7,7 +7,7 @@ module Runs = Exact_lane_run_registry
 module Json = Yojson.Safe.Util
 let () = Prompt_defaults.init (); Prompt_registry.set_markdown_dir "../config/prompts"
 let identity : A.identity = {goal_id="original-goal";request_id="original-payout";verification_run_id="original-proof"}
-let goal : A.goal = {title="Ship the connected feature";metric=Some "tests";target_value=Some "10"}
+let goal : A.goal = {title="Ship the connected feature";measure=Goal_measure_fixture.done_when "10";procedure="tests"}
 let grade = A.Grade {goal;grades=[Option.get (Candle_grade.of_string "medium"),"Connected feature"]}
 let unwrap = function Ok value -> value | Error error -> fail (A.error_to_string error)
 let reply id state extra =

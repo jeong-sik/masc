@@ -183,6 +183,7 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
+ let* last_turn_id = int_field fields "last_turn_id" in
   let* paused = bool_field fields "paused" in
   let* latched_reason = parse_latched_reason fields in
   let* current_task_id = parse_current_task_id fields in
@@ -195,6 +196,8 @@ let decode_current_meta fields =
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
   then invalidf "name is invalid: %S" name
+  else if last_turn_id < 0
+  then invalidf "last_turn_id must be non-negative: %d" last_turn_id
   (* Generation is the lifecycle fencing counter, so zero is not a valid
      persisted value: it is what an unstamped or reset row looks like. This
      decoder replaces [parse_required_positive_generation], which enforced the
@@ -234,6 +237,7 @@ let decode_current_meta fields =
       ; last_usage_resolution
       ; proactive_rt
       ; trace_id
+      ; last_turn_id
       ; message_scope_ack_id
       }
     in

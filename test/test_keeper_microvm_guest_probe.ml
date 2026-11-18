@@ -301,7 +301,7 @@ let with_fake_cli backend f =
     ; List.fold_left Filename.concat base [ ".masc"; "microvm" ]
     ; shim_dir
     ];
-  let shim_contents = "#!/bin/sh\nexit 0\n" in
+  let shim_contents = "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n" in
   let shim = Filename.concat shim_dir M.shim_binary_name in
   write shim shim_contents;
   Unix.chmod shim 0o755;

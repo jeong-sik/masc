@@ -843,7 +843,7 @@ let render_harness_list (state : state) =
 
 (* Which goals the judged task serves, and what those goals are aiming at.
    The verdict names a task, the task names its goals, and a goal carries the
-   metric it is measured by -- three hops that were all present and never
+   measure it is judged by -- three hops that were all present and never
    walked, so a verdict said "pass" without saying what it was passing
    towards. *)
 (* The label column of the verdict detail, in display cells: a Korean label
@@ -898,13 +898,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
              ; Ansi.dim, harness_labeled "" (Link.reference Goal id)
              ]
            | Some goal ->
-             let aim =
-               match goal.pg_metric, goal.pg_target_value with
-               | Some metric, Some target -> Printf.sprintf "%s -> %s" metric target
-               | Some metric, None -> metric
-               | None, Some target -> t "목표값 " "target " ^ target
-               | None, None -> t "선언한 지표 없음" "no metric declared"
-             in
+             let aim = Masc_tui_planning_detail.measure_text goal.pg_measure in
              [ Ansi.reset,
                harness_labeled (t "목표" "Goal") (Terminal_text.single_line goal.pg_title)
              ; Ansi.reset, harness_labeled (t "지표" "Aim") (Terminal_text.single_line aim)

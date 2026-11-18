@@ -2318,6 +2318,13 @@ let bounded_model_input_projection
     |> Result.map_error (fun error -> Agent_core.Error.Media error)
 ;;
 
+(* #52969: what the attempt can say about its own execution. A failure the
+   runtime classified as undispatched is the only one without a capture. *)
+type attempt_execution =
+  | Execution_captured of Runtime_observation.runtime_observation
+  | Execution_not_reported
+  | Execution_not_dispatched
+
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =
   (* The dispatch-wide progress also protects retries. Acceptance needs a
      narrower fact: this attempt wrote a tool-result checkpoint. Earlier
@@ -2751,6 +2758,16 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       observe_provider_lease ~now:Time_compat.now
         ~on_yield:ctx.on_yield ~on_resume:ctx.on_resume
     in
+    let manifest_turn_id =
+      Option.bind ctx.runtime_manifest_context (fun context ->
+        context.Keeper_runtime_manifest.manifest_keeper_turn_id)
+    in
+    (* Owned here, not inside the run: the stall watchdog below cancels the
+       run, and the attempts it made must still reach the observation. *)
+    let execution_capture =
+      Runtime_agent.execution_capture ~keeper_name:ctx.keeper_name
+        ?turn_id:manifest_turn_id config
+    in
     let run_attempt_switch () =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
@@ -2794,7 +2811,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               capture_provider_ordinal config, checkpoint, input)
             prepared in
           let result = match prepared with
-          | Error _ as error -> error
+          | Error error -> Error (Runtime_agent.run_failure_of_capture execution_capture error)
           | Ok (config, checkpoint, input) ->
             (* The one place a Keeper turn hands its request to AGENT_CORE.
                The operator snapshot's inference_inflight counts the calls
@@ -2805,7 +2822,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             match input with
             | Native.Continue_from_checkpoint ->
               (match checkpoint with
-               | None -> Error (Agent_core.Error.Internal "native continuation has no exact checkpoint")
+               | None ->
+                 Error
+                   (Runtime_agent.run_failure_of_capture execution_capture
+                      (Agent_core.Error.Internal "native continuation has no exact checkpoint"))
                | Some checkpoint ->
                 Runtime_agent.continue_from_checkpoint
                   ~sw:attempt_sw
@@ -2817,6 +2837,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                   ~on_resume
                   ~agent_ref:attempt_agent_ref
                   ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                  ~execution_capture
                   ())
             | Native.New_input { blocks; metadata } ->
                 Runtime_agent.run_blocks
@@ -2830,6 +2851,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                   ~agent_ref:attempt_agent_ref
                   ?cooperative_yield_probe:ctx.cooperative_yield_probe
                   ~input_metadata:metadata
+                  ~execution_capture
                   blocks
 
           in
@@ -2899,7 +2921,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_stalled ->
            Error
-             (Agent_core.Error.Api
+             (Runtime_agent.run_failure_of_capture execution_capture
+             @@ Agent_core.Error.Api
                 (Llm_provider.Retry.Timeout
                    { message =
                        Printf.sprintf
@@ -2929,7 +2952,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
            so a turn that gets here is a wiring fault; typed, and nothing
            was sent. *)
         Error
-          (Agent_core.Error.Config
+          (Runtime_agent.run_failure_of_capture execution_capture
+          @@ Agent_core.Error.Config
              (Agent_core.Error.InvalidConfig
                 { field = "provider_call_deadline_sec"
                 ; detail =
@@ -2958,11 +2982,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | Ok {Runtime_agent.stop_reason=(Yielded_to_durable_stimulus _
           | InputRequired _);_}
       | Error _ -> false in
-    let execution_observation =
+    let execution =
       match result with
-      | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation
-      | Error _ -> None
+      | Ok (run_result : Runtime_agent.run_result) ->
+        (match run_result.runtime_observation with
+         | Some observation -> Execution_captured observation
+         | None -> Execution_not_reported)
+      | Error (Runtime_agent.Failed_after_dispatch { runtime_observation; error = _ }) ->
+        Execution_captured runtime_observation
+      | Error (Runtime_agent.Failed_before_dispatch _) -> Execution_not_dispatched
     in
+    let result = Result.map_error Runtime_agent.run_failure_error result in
     let result =
       match result with
       | Ok run_result ->
@@ -2997,23 +3027,22 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           err
     in
     let observation =
-      match execution_observation, result with
-      | Some observation, result ->
+      match execution, result with
+      | Execution_captured observation, result ->
         let acceptance = match result with
           | Ok _ -> Runtime_observation.Accepted
           | Error error -> Runtime_observation.Rejected (Agent_core.Error.to_string error) in
         Some (Runtime_observation.record_host_acceptance
           ~keeper_name:ctx.keeper_name
-          ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
-            context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+          ?turn_id:manifest_turn_id
           observation acceptance)
-      | None, Ok run_result -> run_result.Runtime_agent.runtime_observation
-      | None, Error err ->
+      | (Execution_not_reported | Execution_not_dispatched), Ok run_result ->
+        run_result.Runtime_agent.runtime_observation
+      | (Execution_not_reported | Execution_not_dispatched), Error err ->
         Option.map (fun _emit ->
           Runtime_observation.observe_uncaptured_failure
             ~runtime_id:ctx.runtime_id ~keeper_name:ctx.keeper_name
-            ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
-              context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+            ?turn_id:manifest_turn_id
             ~error:(Agent_core.Error.to_string err) ())
           ctx.on_runtime_observation
     in

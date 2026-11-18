@@ -207,7 +207,7 @@ val union_evidence : evidence -> evidence -> evidence
 
 (** A new claim that continues a retired memory, both by exact memory id:
     [superseded] leaves the snapshot and [superseded_by] carries it on. The
-    commit records it as a [Revised] event on the old id (RFC-0418). *)
+    commit records it as a revision link in its journal row. *)
 type revision =
   { superseded : string
   ; superseded_by : string

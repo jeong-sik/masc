@@ -217,8 +217,9 @@ journal receipt is an unavailable evidence state until a writer recovers it.
 
 A coherent read exposes the current snapshot and revision evidence after a
 requested revision. Missing link metadata is unrecorded, not an inferred
-relationship. The separate `Revised` events sidecar remains an observation
-surface; its presence alone is not commit proof.
+relationship. The journal links are the only record of revisions: the
+dashboard's `revised_from` and the absorbed-chain search read them, and no
+separate sidecar event is written after the commit (#37433).
 
 These links establish declared structural succession. They do not establish
 that every historical input remains applicable to every successor. Demand

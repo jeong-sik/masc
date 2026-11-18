@@ -6,6 +6,10 @@ type initialization_failure =
 type verification_failure =
   | Guest_shim_missing of Unix.error
   | Sidecar_rejected of string
+  | Shim_relay_version_mismatch of
+      { installed : Keeper_sandbox_microvm.relay_declaration
+      ; required : int
+      }
 
 type config_failure =
   | Config_missing
@@ -94,6 +98,36 @@ let write_failure (error : Fs_compat.capability_write_error) =
     (Fs_compat.capability_write_target_effect_to_string error.target_effect)
     primary (List.length error.cleanup_failures)
 
+(* The fix names both ways a shim reaches the workspace. The source build
+   always declares this server's relay version. A release's shim declares
+   the relay version of the source it was cut from, and nothing typed here
+   records which release ships which relay version, so the release line is
+   offered with the condition under which it works rather than as the fix.
+   [install.sh] keeps a same-version shim unless it is given [--force]. *)
+let relay_version_mismatch_message ~installed ~required =
+  let declared = match (installed : Shim.relay_declaration) with
+    | Shim.Relay_version version -> Printf.sprintf "declares relay version %d" version
+    | Shim.No_relay_version -> "declares no relay version (it was built before shims declared one)"
+    | Shim.Several_relay_versions versions ->
+      "declares several relay versions ("
+      ^ String.concat ", " (List.map string_of_int versions) ^ ")" in
+  Printf.sprintf
+    "microvm_shim_relay_version_mismatch: the mounted guest shim \
+     .masc/microvm/shim/%s %s and this server speaks relay version %d, so no \
+     guest is booted, adopted or replaced with it. Install a shim that declares \
+     relay version %d. A shim built from this server's source always does: run \
+     `scripts/remote-ssh/build-shim.sh --arch arm64` (--arch amd64 on an x86-64 \
+     Linux host), copy dist/remote-ssh/masc-exec-shim-linux-<arch> to \
+     .masc/microvm/shim/%s and remove .masc/microvm/shim/%s. A release shim \
+     does only when that release was cut with relay version %d, which this \
+     server cannot check; while relay version %d is newer than the last release, \
+     only the source build works. For such a release, run \
+     `scripts/install.sh --version v%s --force --base-path <workspace>` \
+     (without --force the installer keeps a shim already at that version) \
+     (docs/MICROVM-REMOTE-RUNBOOK.md)"
+    Shim.shim_binary_name declared required required
+    Shim.shim_binary_name Shim.shim_sidecar_name required required Build_version.current
+
 let rec error_message = function
   | Invalid_base_path _ -> "microvm shim base path is invalid"
   | Not_initialized -> "microvm shim startup initialization has not run"
@@ -102,6 +136,8 @@ let rec error_message = function
   | Verification_failed (Guest_shim_missing _) ->
     "microvm_shim_missing: install the architecture-matched guest shim for this base"
   | Verification_failed (Sidecar_rejected _) -> "microvm shim sidecar verification failed; check the installed binary and sidecar"
+  | Verification_failed (Shim_relay_version_mismatch {installed; required}) ->
+    relay_version_mismatch_message ~installed ~required
   | Verification_invalidated -> "microvm shim guest verification was invalidated by guest replacement"
   | Config_unavailable Config_missing ->
     "microvm_shim_config_missing: the host shim config disappeared during recovery"
@@ -356,15 +392,19 @@ let verify_files ~base =
     match Unix.access (Filename.concat dir Shim.shim_binary_name) [Unix.X_OK] with
     | () -> Ok ()
     | exception Unix.Unix_error (error, _, _) -> Error (Verification_failed (Guest_shim_missing error))) in
-  let* provenance = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-    Eio_guard.run_in_systhread ~label:"microvm-shim-sidecar" (fun () -> Shim.verify_shim_sidecar ~dir))
+  let* {Shim.provenance; relay} = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+    Eio_guard.run_in_systhread ~label:"microvm-shim-sidecar" (fun () -> Shim.inspect_shim ~dir))
     |> Result.map_error (fun detail -> Verification_failed (Sidecar_rejected detail)) in
   (match provenance with
    | Shim.Shim_verified {sha256} ->
      Log.Keeper.info "microvm guest shim verified against its sidecar: sha256 %s" sha256
    | Shim.Shim_unverified ->
      Log.Keeper.info "microvm guest shim has no sidecar; running a hand-built shim unverified");
-  Ok ()
+  let required = Exec_ssh_protocol.Relay.version in
+  match relay with
+  | Shim.Relay_version version when version = required -> Ok ()
+  | Shim.Relay_version _ | Shim.No_relay_version | Shim.Several_relay_versions _ ->
+    Error (Verification_failed (Shim_relay_version_mismatch {installed = relay; required}))
 
 let new_verification key =
   let base, _, _ = key in

@@ -130,7 +130,7 @@ let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
          Some
            ( snapshot.passed_at
            , { goal_created_at = snapshot.goal_created_at
-             ; goal = {Candle_appraisal.title = snapshot.title; metric = snapshot.metric; target_value = snapshot.target_value}
+             ; goal = {Candle_appraisal.title = snapshot.title; measure = snapshot.measure; procedure = snapshot.procedure}
              ; due_date = snapshot.due_date
              ; linked_task_ids = snapshot.linked_task_ids
              } )
@@ -176,8 +176,8 @@ let observe_current_pass (waiting : waiting) events =
            && snapshot.verification_run_id = waiting.verification_run_id
            && Candle_time.equal snapshot.passed_at waiting.passed_at ->
       Some {goal_created_at = snapshot.goal_created_at;
-            goal = {Candle_appraisal.title = snapshot.title; metric = snapshot.metric;
-                    target_value = snapshot.target_value};
+            goal = {Candle_appraisal.title = snapshot.title; measure = snapshot.measure;
+                    procedure = snapshot.procedure};
             due_date = snapshot.due_date; linked_task_ids = snapshot.linked_task_ids}
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _

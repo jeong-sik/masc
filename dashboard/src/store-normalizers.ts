@@ -72,6 +72,47 @@ export function normalizeAgent(raw: unknown): Agent | null {
   }
 }
 
+type StoredHandoff =
+  | { kind: 'absent' }
+  | { kind: 'readable'; context: NonNullable<Task['handoff_context']> }
+  | { kind: 'unreadable' }
+
+const HANDOFF_OPTIONAL_STRING_KEYS = ['reason', 'next_step', 'failure_mode', 'updated_at', 'updated_by'] as const
+
+function isOptionalWireString(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'string'
+}
+
+// The server writes a stored handoff it cannot decode back unchanged (#38219),
+// so a value that breaks the handoff wire contract is a stored-but-unreadable
+// note, not a note with empty fields. The checks follow the server decoder:
+// an absent key takes its default, a present key must have its declared type.
+function parseStoredHandoff(value: unknown): StoredHandoff {
+  if (value === undefined || value === null) return { kind: 'absent' }
+  if (!isRecord(value)) return { kind: 'unreadable' }
+  const summary = value.summary
+  if (summary !== undefined && typeof summary !== 'string') return { kind: 'unreadable' }
+  if (!HANDOFF_OPTIONAL_STRING_KEYS.every(key => isOptionalWireString(value[key]))) {
+    return { kind: 'unreadable' }
+  }
+  const refs = value.evidence_refs
+  if (refs !== undefined && !(Array.isArray(refs) && refs.every(ref => typeof ref === 'string'))) {
+    return { kind: 'unreadable' }
+  }
+  return {
+    kind: 'readable',
+    context: {
+      summary: asString(summary, ''),
+      reason: asString(value.reason) ?? null,
+      next_step: asString(value.next_step) ?? null,
+      failure_mode: asString(value.failure_mode) ?? null,
+      evidence_refs: asStringArray(refs),
+      updated_at: asString(value.updated_at) ?? null,
+      updated_by: asString(value.updated_by) ?? null,
+    },
+  }
+}
+
 export function normalizeTask(raw: unknown): Task | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -86,17 +127,7 @@ export function normalizeTask(raw: unknown): Task | null {
         verify_gate_evidence: asStringArray(raw.contract.verify_gate_evidence),
       }
     : null
-  const handoffContext = isRecord(raw.handoff_context)
-    ? {
-        summary: asString(raw.handoff_context.summary, ''),
-        reason: asString(raw.handoff_context.reason) ?? null,
-        next_step: asString(raw.handoff_context.next_step) ?? null,
-        failure_mode: asString(raw.handoff_context.failure_mode) ?? null,
-        evidence_refs: asStringArray(raw.handoff_context.evidence_refs),
-        updated_at: asString(raw.handoff_context.updated_at) ?? null,
-        updated_by: asString(raw.handoff_context.updated_by) ?? null,
-      }
-    : null
+  const handoff = parseStoredHandoff(raw.handoff_context)
   const executionLinks = isRecord(raw.execution_links)
     ? {
         operation_id: asString(raw.execution_links.operation_id) ?? null,
@@ -124,7 +155,8 @@ export function normalizeTask(raw: unknown): Task | null {
     // with it undefined and the section returned null on its first guard.
     predecessor_task_id: asString(raw.predecessor_task_id) ?? null,
     contract,
-    handoff_context: handoffContext,
+    handoff_context: handoff.kind === 'readable' ? handoff.context : null,
+    handoff_context_unreadable: handoff.kind === 'unreadable',
     execution_links: executionLinks,
   }
 }

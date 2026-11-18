@@ -47,7 +47,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
-      let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
+      let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose a design" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"verified designs" () |> require "goal" in
       let contract : Masc_domain.task_contract = {completion_contract=["Decision must preserve measured behavior"];
         required_evidence=["artifact:expected-proof.json"]; inspect_gate_evidence=[]; verify_gate_evidence=["Run acceptance scenario"]} in
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
@@ -212,6 +212,10 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
          (Fusion_decision.failure_class error = Tool_result.Runtime_failure)
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
+(* A day file is framed by newlines. Bytes after the last one are an append
+   that never finished: whatever they read as, they are not a row, a read
+   skips them, and the next append cuts them. A newline-terminated row that
+   does not decode is a row, and still refuses the read and every write. *)
 let test_event_file_final_rows_and_strict_failures () = with_fixture (fun config task_id _ ->
   let proposal = Fusion_decision.parse
     (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
@@ -222,13 +226,25 @@ let test_event_file_final_rows_and_strict_failures () = with_fixture (fun config
     | _ -> fail "recorded decision is not an object" in
   let dated = events_day_file config in
   let prefix = Fs_compat.load_file dated.path in
-  let final = `Assoc (("notes", `String "valid final row without a newline") :: fields) in
-  let valid = prefix ^ "\n \t\n{\"type\":\"unrelated\"}\n" ^ Yojson.Safe.to_string final in
-  Fs_compat.save_file dated.path valid;
-  check bool "valid unterminated row and stable chronological order are retained" true
-    (Fusion_decision.read ~config ~run_id:"run-advice" |> require "read final row"
-      = [recorded.event; final]);
-  check string "read leaves every physical byte unchanged" valid (Fs_compat.load_file dated.path);
+  let read () = Fusion_decision.read ~config ~run_id:"run-advice" in
+  let kept = prefix ^ "\n \t\n{\"type\":\"unrelated\"}\n" in
+  List.iter (fun fragment ->
+    let bytes = kept ^ fragment in
+    Fs_compat.save_file dated.path bytes;
+    check bool "an unfinished last line is not read as a row" true
+      (read () |> require "read past an unfinished line" = [recorded.event]);
+    check string "read leaves every physical byte unchanged" bytes
+      (Fs_compat.load_file dated.path))
+    [ "{malformed"
+    ; Yojson.Safe.to_string
+        (`Assoc (("notes", `String "valid bytes without a newline") :: fields)) ];
+  let later = Ids.Turn_ref.make ~trace_id:"decision-trace" ~absolute_turn:8 in
+  let second = Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref:later proposal
+    |> require "record after an unfinished line" in
+  check string "the append cuts the unfinished line and writes after the last row"
+    (kept ^ Yojson.Safe.to_string second.event ^ "\n") (Fs_compat.load_file dated.path);
+  check bool "both decisions read back in order" true
+    (read () |> require "read after append" = [recorded.event; second.event]);
   let invalid_selected = `Assoc (List.remove_assoc "choice" fields) |> Yojson.Safe.to_string in
   List.iter (fun suffix ->
     let bytes = prefix ^ suffix in
@@ -236,11 +252,29 @@ let test_event_file_final_rows_and_strict_failures () = with_fixture (fun config
     let expect_storage_failure = function
       | Error (Fusion_decision.Storage_failure _) -> ()
       | Error (Fusion_decision.Rejected _) | Ok _ -> fail "unreadable history was accepted" in
-    expect_storage_failure (Fusion_decision.read ~config ~run_id:"run-advice");
+    expect_storage_failure (read ());
     expect_storage_failure
       (Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal);
     check string "strict failure appends and repairs nothing" bytes (Fs_compat.load_file dated.path))
-    ["{malformed"; "{malformed\n"; invalid_selected])
+    ["{malformed\n"; invalid_selected ^ "\n"])
+
+(* [log_event] appends to the same day file as decisions. After a server
+   died inside an append, it cuts the unfinished line first, so its row never
+   joins onto that line and the next decision still reads the file. *)
+let test_task_event_after_an_unfinished_line () = with_fixture (fun config task_id _ ->
+  let dated = events_day_file config in
+  let kept = if Sys.file_exists dated.path then Fs_compat.load_file dated.path else "" in
+  Fs_compat.save_file dated.path (kept ^ "{\"type\":\"cut-by-cr");
+  let row = `Assoc ["type", `String "torn_tail_probe"; "task_id", `String task_id] in
+  Workspace_utils_ops.log_event config row;
+  check string "the task event cuts the unfinished line and follows the last row"
+    (kept ^ Yojson.Safe.to_string row ^ "\n") (Fs_compat.load_file dated.path);
+  let proposal = Fusion_decision.parse
+    (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
+  let recorded = Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal
+    |> require "record after a task event" in
+  check bool "the decision reads back" true
+    (Fusion_decision.read ~config ~run_id:"run-advice" |> require "read" = [recorded.event]))
 
 let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _ ->
   let rejection run_id =
@@ -366,7 +400,7 @@ let test_request_context_snapshot () = with_fixture (fun config task_id goal_id 
   let rendered_context = String.sub prompt (String.length marker) (String.length prompt - String.length marker) |> Yojson.Safe.from_string in
   check bool "question is not repeated in context JSON" true (Yojson.Safe.Util.member "question" rendered_context = `Null);
   check string "snapshot roundtrip preserves actual panel prompt" (Fusion_request_context.render snapshot) (Fusion_request_context.render restored);
-  Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~title:"Changed later" ~target_value:"9" () |> require "later update" |> ignore;
+  Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~title:"Changed later" ~measure:(Goal_measure_fixture.done_when "9") () |> require "later update" |> ignore;
   check bool "later Goal edit does not rewrite captured input" true (wire = Fusion_request_context.to_yojson restored);
   rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"foreign" ~turn_ref:(Some turn_ref) ~args);
   rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"fusion-keeper" ~turn_ref:None
@@ -464,5 +498,6 @@ let () = run "Fusion decision attribution" ["behavior", [
     test_historical_turn_spelling_preserves_conflict_and_retry;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
-  test_case "final physical rows preserve strict event history semantics" `Quick test_event_file_final_rows_and_strict_failures;
+  test_case "an unfinished last line is skipped and cut while complete rows stay strict" `Quick test_event_file_final_rows_and_strict_failures;
+  test_case "a task event after an unfinished line cuts it and keeps decisions readable" `Quick test_task_event_after_an_unfinished_line;
   test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]

@@ -210,6 +210,30 @@ type task_handoff_context =
     verification correlation IDs. Rejected verification identity belongs to
     the typed verdict/outbox/event records. *)
 
+(** A handoff context as a task stores it. [Handoff_unreadable] keeps the
+    stored JSON value the current decoder refused, with the refusal, and
+    {!task_to_yojson} writes [raw] back unchanged: a backlog rewrite for an
+    unrelated mutation does not erase it (#38219). *)
+type stored_handoff_context =
+  | Handoff_decoded of task_handoff_context
+  | Handoff_unreadable of { raw : Yojson.Safe.t; reason : string }
+[@@deriving show, eq]
+
+val stored_handoff_context_of_yojson : Yojson.Safe.t -> stored_handoff_context
+val stored_handoff_context_to_yojson : stored_handoff_context -> Yojson.Safe.t
+
+(** A stored [Handoff_unreadable] that a transition overwrote with a new
+    note. The transition's log row carries it, so the replaced value is
+    recorded rather than dropped by the replacement (#38219). *)
+type replaced_unreadable_handoff =
+  { replaced_raw : Yojson.Safe.t
+  ; replaced_reason : string
+  }
+[@@deriving show, eq]
+
+(** [{"raw": <stored value>, "reason": <decoder refusal>}]. *)
+val replaced_unreadable_handoff_to_yojson : replaced_unreadable_handoff -> Yojson.Safe.t
+
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];
     [release_task_r] takes none and forwards only a handoff context.
@@ -220,9 +244,10 @@ type task_handoff_context =
     Single definition on purpose: the committed broadcast and the author wake
     both answer "why did this stop", and resolving it separately let them
     disagree about the same cancellation. [None] when neither carries a
-    non-blank reason. *)
+    non-blank reason. An unreadable stored handoff states no reason; the
+    note's own display names it unreadable. *)
 val stated_reason :
-  reason:string option -> handoff_context:task_handoff_context option -> string option
+  reason:string option -> handoff_context:stored_handoff_context option -> string option
 
 type task =
   { id : string
@@ -242,7 +267,7 @@ type task =
         (** Runtime identifiers attached after creation by whichever execution
             picks the task up. Separate from [contract] so linking them never
             rewrites what counts as done. *)
-  ; handoff_context : task_handoff_context option [@default None]
+  ; handoff_context : stored_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
   ; skills : Skill_reference.t list [@default []]
         (** Exact, immutable Skill references attached at Task creation.
@@ -265,30 +290,6 @@ val task_to_yojson : task -> Yojson.Safe.t
 val task_compact_to_yojson : task -> Yojson.Safe.t
 
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
-
-(** Outcome of decoding one optional nested field. Splits "the key was
-    absent" from "the key was present but could not be decoded" — the two
-    cases the plain [option] field collapses into [None]. *)
-type nested_field_outcome =
-  | Field_absent
-  | Field_decoded
-  | Field_unreadable of string
-[@@deriving show, eq]
-
-val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
-
-(** Per-field decode outcome for the optional nested [handoff_context]. *)
-type task_decode_diagnostics =
-  { handoff_context_outcome : nested_field_outcome
-  }
-[@@deriving show, eq]
-
-val task_decode_diagnostics_is_unreadable : task_decode_diagnostics -> bool
-
-(** Like [task_of_yojson], but also returns the typed per-field outcome so a
-    caller can report a dropped corruption instead of silently losing it. *)
-val task_of_yojson_with_diagnostics :
-  Yojson.Safe.t -> (task * task_decode_diagnostics, string) result
 
 (** The task-status fact that prevents an agent claim. *)
 type task_claim_block =
@@ -442,22 +443,6 @@ type backlog =
 
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
-
-(** A task whose decode dropped an optional nested field or legacy intent.
-    [dropped_task_index]
-    is the position in [backlog.tasks]; [dropped_task_id] is the decoded id
-    (empty when the id itself was absent). *)
-type backlog_task_diagnostics =
-  { dropped_task_index : int
-  ; dropped_task_id : string
-  ; dropped_outcomes : task_decode_diagnostics
-  }
-[@@deriving show, eq]
-
-(** Like [backlog_of_yojson], but also returns the typed per-task diagnostics
-    for every task whose optional nested field or legacy intent was dropped. *)
-val backlog_of_yojson_with_diagnostics :
-  Yojson.Safe.t -> (backlog * backlog_task_diagnostics list, string) result
 
 type sse_session =
   { agent_name : string

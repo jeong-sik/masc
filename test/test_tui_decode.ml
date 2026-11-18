@@ -1269,11 +1269,14 @@ let planning_goal_json id phase priority =
     ; "title", `String ("Goal " ^ id)
     ; "phase", `String phase
     ; "priority", `Int priority
+    ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+    ; "procedure", `String "count"
     ; "verifier_unreconciled", `Null
     ]
 
-let proof_criterion ?(title="Goal x") ?(metric=Some "count") ?(target_value=Some "1") revision =
-  Goal_store.criterion_to_yojson (Goal_store.Criterion {revision; title; metric; target_value})
+let proof_criterion ?(title="Goal x") revision =
+  Goal_store.criterion_to_yojson (Goal_store.Criterion
+    {revision; title; measure = Goal_measure_fixture.done_when "1"; procedure = "count"})
 
 (* The server projects a complete typed completion, including provenance. *)
 let verification_json ?verdict state =
@@ -1358,8 +1361,9 @@ let decoded_proof ?verification ?last_review_note ?(phase = "executing") ?(extra
     ]
     @ (if List.mem_assoc "criterion_revision" extra then []
        else ["criterion_revision", `String "revision-default"])
-    @ (if List.mem_assoc "metric" extra then [] else ["metric", `String "count"])
-    @ (if List.mem_assoc "target_value" extra then [] else ["target_value", `String "1"])
+    @ (if List.mem_assoc "measure" extra then []
+       else ["measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")])
+    @ (if List.mem_assoc "procedure" extra then [] else ["procedure", `String "count"])
     @ (if List.mem_assoc "verifier_unreconciled" extra
        then []
        else [ "verifier_unreconciled", `Null ])
@@ -1472,19 +1476,9 @@ let test_planning_proof_requires_a_bound_valid_completion () =
      | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ -> false);
   Alcotest.check Alcotest.bool "same revision mismatch cannot grant a new request" true
     (Option.is_none old.Tui_decode.pg_retry_binding);
-  let null_pending = envelope (`Assoc ["state", `String "proof_pending"; "request_id", `String "null-request";
-    "requested_at", `String "2026-08-23T13:15:16Z";
-    "criterion", proof_criterion ~metric:None ~target_value:None "revision-default"]) in
-  let null_goal = decoded_proof ~phase:"verifying" ~verification:null_pending
-      ~extra:["metric", `Null; "target_value", `Null] () in
-  Alcotest.check Alcotest.bool "explicit null criterion fields can bind" true
-    (match null_goal.Tui_decode.pg_retry_binding with
-     | Some {grb_request_id=Some "null-request"; _} -> true | Some _ | None -> false);
   let bad_rows =
-    [ decoded_proof ~phase:"verifying" ~verification:(envelope current) ~omit:["metric"] ()
-    ; decoded_proof ~phase:"verifying" ~verification:(envelope current) ~omit:["target_value"] ()
-    ; decoded_proof ~phase:"verifying" ~verification:(envelope current)
-        ~extra:["metric", `String "count"; "metric", `Null] ()
+    [ decoded_proof ~phase:"verifying" ~verification:(envelope current)
+        ~extra:["procedure", `String "count"; "procedure", `String "other"] ()
     ; decoded_proof ~phase:"verifying" ~verification:(envelope current) ~extra:["title", `String "other"] ()
     ; decoded_proof ~phase:"verifying" ~verification:(envelope current)
         ~extra:["verification", `Assoc ["state", `String "ledger_error"]] ()
@@ -1495,7 +1489,14 @@ let test_planning_proof_requires_a_bound_valid_completion () =
       (match goal.Tui_decode.pg_proof with Proof_unreadable _ -> true
        | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
     Alcotest.check Alcotest.bool "ambiguous Goal fields grant no retry" true
-      (Option.is_none goal.Tui_decode.pg_retry_binding)) bad_rows
+      (Option.is_none goal.Tui_decode.pg_retry_binding)) bad_rows;
+  List.iter (fun field ->
+    let row = match planning_goal_json "goal-x" "verifying" 1 with
+      | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+      | _ -> Alcotest.fail "goal fixture is not an object" in
+    Alcotest.check Alcotest.bool ("a row without " ^ field ^ " refuses the snapshot") true
+      (Result.is_error (Tui_decode.decode_planning_snapshot (planning_goals_json [row]))))
+    ["measure"; "procedure"]
 ;;
 
 (* Exercise the actual Goal and verification serializers used by the planning
@@ -1503,7 +1504,7 @@ let test_planning_proof_requires_a_bound_valid_completion () =
 let test_planning_proof_matches_producer_projection () =
   let goal : Goal_store.goal = {
     id="goal-x"; criterion_revision="revision-default"; title="Goal x";
-    metric=Some "count"; target_value=Some "1"; due_date=None; priority=1;
+    measure=Goal_measure_fixture.done_when "1"; procedure="count"; due_date=None; priority=1;
     phase=Goal_phase.Verifying; last_review_note=None; last_review_at=None;
     created_at="2026-08-23T13:15:16Z"; updated_at="2026-08-23T13:15:16Z"
   } in
@@ -12779,6 +12780,26 @@ let test_task_history_decodes_live_rows () =
         second.th_label;
       Alcotest.(check (option string)) "no actor" None second.th_actor
 
+(* #38219: a release that replaced a stored note the server could not read
+   shows that note's refusal on the history row. *)
+let test_task_history_names_a_replaced_unreadable_handoff () =
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"task_transition","agent":"alpha","task":"task-770",
+          "from_status":"in_progress","to_status":"todo",
+          "ts":"2026-11-18T09:25:14Z","action":"release",
+          "handoff_context":{"summary":"new note"},
+          "replaced_unreadable_handoff":{"raw":{"summary":7},
+            "reason":"summary is not a string"}}]|}
+  in
+  match Masc.Tui_decode.decode_task_history json with
+  | Error err -> Alcotest.fail err
+  | Ok [ row ] ->
+      Alcotest.(check (option string)) "note names the replaced note"
+        (Some "new note (replaced unreadable handoff: summary is not a string)")
+        row.Masc.Tui_decode.th_note
+  | Ok rows -> Alcotest.failf "expected one row, got %d" (List.length rows)
+
 let test_task_history_rejects_a_non_list () =
   match
     Masc.Tui_decode.decode_task_history
@@ -13963,6 +13984,8 @@ let () =
     ( "decode_task_history",
       [ Alcotest.test_case "decodes live rows" `Quick
           test_task_history_decodes_live_rows
+      ; Alcotest.test_case "names a replaced unreadable handoff" `Quick
+          test_task_history_names_a_replaced_unreadable_handoff
       ; Alcotest.test_case "rejects a non-list" `Quick
           test_task_history_rejects_a_non_list
       ] );

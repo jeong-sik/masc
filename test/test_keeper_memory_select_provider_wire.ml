@@ -162,7 +162,8 @@ let replay ~provider_wire () =
     let runtime_config=Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"selection-wire" ~provider_cfg
       ~system_prompt:meta.instructions ~tools:bundle.tools in
     (match Runtime_agent.run_blocks ~sw ~net ~config:runtime_config
-      [Agent_core.Types.Text (jstring "query" query)] with
+      ~execution_capture:(Runtime_agent.execution_capture runtime_config)
+      [Agent_core.Types.Text (jstring "query" query)] |> Result.map_error Runtime_agent.run_failure_error with
      | Ok {Runtime_agent.stop_reason=Runtime_agent.Completed _;response;_} ->
        check bool "runtime consumes the expected final provider answer" true
          (List.exists (function Llm_provider.Types.Text text -> text="Selection inspected." | _ -> false) response.content)

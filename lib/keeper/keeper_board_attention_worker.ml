@@ -850,17 +850,38 @@ let is_not_relevant_completion partition =
    Settling the partition here without one is the terminal outcome, not a
    fallback (masc, board attention finalizer, 2026-08-16).
 
+   [Candidate_absent] is only a fully decoded ledger's answer. A ledger with
+   rows the decoder refused answers [Candidate_unreadable]: one of those rows
+   may be this candidate, still waiting for this judgment, so the partition
+   stays [Completed] and a repaired ledger delivers it (#38068).
+
    [Judgment_conflict] means the candidate already records another judgment
    than this partition's. Nothing was delivered for this judgment, so the
    partition stays [Completed]: settling it would record a delivery that did
    not happen. *)
+type held_reason =
+  | Held_judgment_conflict of
+      { recorded : Candidate.judgment
+      ; offered : Candidate.judgment
+      }
+  | Held_candidate_unreadable of { rejected_rows : int }
+
 type completed_delivery =
   | Completed_settled of Partition.t
   | Completed_held of
       { partition : Partition.t
-      ; recorded : Candidate.judgment
-      ; offered : Candidate.judgment
+      ; reason : held_reason
       }
+
+let held_detail partition = function
+  | Held_judgment_conflict
+      { recorded = (_ : Candidate.judgment); offered = (_ : Candidate.judgment) } ->
+    Candidate.judgment_conflict_detail ~candidate_id:partition.Partition.candidate_id
+  | Held_candidate_unreadable { rejected_rows } ->
+    Candidate.candidate_unreadable_detail
+      ~candidate_id:partition.Partition.candidate_id
+      ~rejected_rows
+;;
 
 let deliver_completed ~base_path ~keeper_name partition =
   match partition.Partition.state with
@@ -887,8 +908,14 @@ let deliver_completed ~base_path ~keeper_name partition =
          item.candidate_id;
        settle ()
      | Candidate.Delivered (_ : Candidate.candidate) -> settle ()
+     | Candidate.Candidate_unreadable { rejected_rows } ->
+       Ok
+         (Completed_held
+            { partition; reason = Held_candidate_unreadable { rejected_rows } })
      | Candidate.Judgment_conflict { recorded; offered } ->
-       Ok (Completed_held { partition; recorded; offered }))
+       Ok
+         (Completed_held
+            { partition; reason = Held_judgment_conflict { recorded; offered } }))
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
@@ -899,22 +926,16 @@ let deliver_completed ~base_path ~keeper_name partition =
        ^ partition.partition_id)
 ;;
 
-(* The worker settles its own [Not_relevant] judgment through this. A
-   judgment the candidate refuses stays an [Error] on this path, as before:
+(* The worker settles its own [Not_relevant] judgment through this. A held
+   delivery (a refused judgment or an unreadable candidate) stays an [Error]
+   on this path, as before:
    the drain returns it and the worker ends with [Durable_drain] while its
    lane goes on. Only the owner walk holds a refused member and continues. *)
 let deliver_and_settle_completed ~base_path ~keeper_name partition =
   let* delivery = deliver_completed ~base_path ~keeper_name partition in
   match delivery with
   | Completed_settled settled -> Ok settled
-  | Completed_held
-      { partition
-      ; recorded = (_ : Candidate.judgment)
-      ; offered = (_ : Candidate.judgment)
-      } ->
-    Error
-      (Candidate.judgment_conflict_detail
-         ~candidate_id:partition.Partition.candidate_id)
+  | Completed_held { partition; reason } -> Error (held_detail partition reason)
 ;;
 
 (* [Not_relevant] carries nothing across the owner lane: no event is
@@ -2055,10 +2076,11 @@ let replay_completed_owner_wake
    while this owner yields, but those belong to the next admission snapshot.
    Yield outside each durable transaction so other fibers remain runnable.
 
-   A member whose candidate records another judgment stays [Completed] and
-   the walk goes on to the next member. Stopping there held every later
-   completion of this Keeper behind one refused judgment, on every
-   heartbeat, with no transition that could ever move it. *)
+   A member whose candidate records another judgment, or whose candidate the
+   ledger cannot read, stays [Completed] and the walk goes on to the next
+   member. Stopping there held every later completion of this Keeper behind
+   one held member, on every heartbeat, with no transition that could ever
+   move it. *)
 let settle_completed_snapshot ~base_path ~keeper_name
       ?on_captured
       ?yield
@@ -2080,25 +2102,32 @@ let settle_completed_snapshot ~base_path ~keeper_name
       let last_settled, held =
         match delivery with
         | Completed_settled settled -> Some settled, held
-        | Completed_held { partition; recorded; offered } ->
-          (* Two judgments with one decision still differ by slot or time,
-             so the line names all three. *)
-          let describe (judgment : Candidate.judgment) =
-            Printf.sprintf
-              "%s slot=%s judged_at=%.3f"
-              (Keeper_board_attention_judgment.decision_to_string
-                 judgment.verdict.decision)
-              judgment.slot_id
-              judgment.judged_at
-          in
-          Log.Keeper.error
-            ~keeper_name
-            "Board attention completion remains pending; it holds no other completion back: %s partition=%s recorded=[%s] offered=[%s]"
-            (Candidate.judgment_conflict_detail
-               ~candidate_id:partition.Partition.candidate_id)
-            partition.partition_id
-            (describe recorded)
-            (describe offered);
+        | Completed_held { partition; reason } ->
+          (match reason with
+           | Held_judgment_conflict { recorded; offered } ->
+             (* Two judgments with one decision still differ by slot or time,
+                so the line names all three. *)
+             let describe (judgment : Candidate.judgment) =
+               Printf.sprintf
+                 "%s slot=%s judged_at=%.3f"
+                 (Keeper_board_attention_judgment.decision_to_string
+                    judgment.verdict.decision)
+                 judgment.slot_id
+                 judgment.judged_at
+             in
+             Log.Keeper.error
+               ~keeper_name
+               "Board attention completion remains pending; it holds no other completion back: %s partition=%s recorded=[%s] offered=[%s]"
+               (held_detail partition reason)
+               partition.partition_id
+               (describe recorded)
+               (describe offered)
+           | Held_candidate_unreadable { rejected_rows = (_ : int) } ->
+             Log.Keeper.error
+               ~keeper_name
+               "Board attention completion remains pending; it holds no other completion back: %s partition=%s"
+               (held_detail partition reason)
+               partition.partition_id);
           last_settled, partition :: held
       in
       (match rest with

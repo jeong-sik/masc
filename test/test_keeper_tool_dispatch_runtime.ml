@@ -5213,7 +5213,9 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
                 Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
-              [Agent_core.Types.Text "run probe"])
+              ~execution_capture:(Runtime_agent.execution_capture config)
+              [Agent_core.Types.Text "run probe"]
+            |> Result.map_error Runtime_agent.run_failure_error)
       in
       check int "one actual provider call" 1 provider_calls;
       check int "one completed local tool" 1 !tool_calls;
@@ -5335,7 +5337,9 @@ let test_deferred_web_search_keeps_the_turn_going () =
            ~cooperative_yield_probe:(fun _boundary ->
              Masc.Keeper_agent_run.terminal_effect_boundary_decision
                (bundle.terminal_effect_state ()))
+           ~execution_capture:(Runtime_agent.execution_capture runtime_config)
            [ Agent_core.Types.Text "search for the tool" ]
+         |> Result.map_error Runtime_agent.run_failure_error
        in
        check int
          "the turn continued past the parked effect"
@@ -5556,7 +5560,9 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ~cooperative_yield_probe:(fun _boundary ->
                     Masc.Keeper_agent_run.terminal_effect_boundary_decision
                       (runtime_bundle.terminal_effect_state ()))
+                  ~execution_capture:(Runtime_agent.execution_capture runtime_config)
                   [ Agent_core.Types.Text "deliver the dashboard reply" ]
+                |> Result.map_error Runtime_agent.run_failure_error
               with
               | Error error -> error
               | Ok _ -> fail "terminal failure reached ordinary provider completion"
@@ -9520,8 +9526,8 @@ let composable_output_probes =
              (Goal_store.upsert_goal_with_events ~actor:"test"
                 config
                 ~title:"composable output probe goal"
-                ~metric:"probes covered"
-                ~target_value:"1"
+                ~measure:(Goal_measure_fixture.done_when "1")
+                ~procedure:"probes covered"
                 ~priority:2
                 ());
            `Assoc [])
@@ -10461,8 +10467,11 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let changed = {continuation with tool_surface_sha256=String.make 64 'f'} in
          let refused = run ~continuation:changed ~on_runtime_ready:check_runtime_selection ~goal:model.text ~on_transmitted:(fun _ -> fail "changed contract transmitted") () in
          (match refused.Masc.Keeper_codex_runtime.result with
-          | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="official_client_session.gate_continuation"; _})) -> ()
-          | Error e -> fail (Agent_core.Error.to_string e) | Ok _ -> fail "changed native Gate contract was admitted");
+          | Error e ->
+            (match Keeper_official_client_session_refusal.of_core_error e with
+             | Some Keeper_official_client_session_refusal.Gate_continuation_unresumable -> ()
+             | Some _ | None -> fail (Agent_core.Error.to_string e))
+          | Ok _ -> fail "changed native Gate contract was admitted");
          check string "changed surface is rejected before process dispatch" before (Fs_compat.load_file capture);
          (match Gate.complete_native ~config ~keeper_name ~operation_id admission with
           | Error _ -> () | Ok () -> fail "unsent replay was discharged");

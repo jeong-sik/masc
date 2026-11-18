@@ -153,8 +153,7 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
     |> Result.map_error (fun detail -> Adopted_guest_volume_unverified detail) in
   let* () = verify_microvm_shim ~base_path:t.config.base_path
       ~backend ~guest_name:container_name
-    |> Result.map_error (fun error -> Guest_provisions_unavailable
-        (Keeper_microvm_shim_readiness.error_message error)) in
+    |> Result.map_error (fun error -> Guest_shim_unready error) in
   let* () = ensure_microvm_keeper_work_root ~timeout_sec t ~backend ~container_name
     |> Result.map_error (fun detail -> Adopted_guest_volume_unverified detail) in
   let entry = register_microvm_work_root ~base_path:t.config.base_path ~backend ~container_name in
@@ -322,6 +321,10 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
          with
          | Keeper_microvm_agent_socket.Agent_answered -> Ok `Adopt
          | Keeper_microvm_agent_socket.Agent_unusable reason ->
+           (* The Boot arm verifies the mounted shim before it stops this
+              guest, so a replacement is booted only with a shim that speaks
+              this relay: an agent refused for its relay version was started
+              from older bytes, and the replacement does not repeat it. *)
            Log.Keeper.info "microvm agent guest replaced instead of adopted keeper=%s name=%s: %s"
              t.meta.name container_name reason;
            Ok `Boot
@@ -334,6 +337,13 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
      | Ok None -> Error (Github_identity_invalid "validated guest identity is missing")
      | Error error -> Error (Guest_identity_store_unavailable error))
   | `Boot ->
+    (* The guest's agent is the mounted shim (#52968). A shim this server may
+       not run -- one that declares another relay version, or none -- would
+       give the new guest the hello the old one was refused for, so it is
+       refused here, before any guest is stopped or booted. Provisioning
+       takes the result and verifies again after teardown. *)
+    let* shim = verify_microvm_shim_before_teardown t ~backend
+      |> Result.map_error (fun error -> Guest_shim_unready error) in
     (* Refuse before stopping or replacing any existing guest when a legacy
        helper is present or its owner is unknown. Provisioning reads again
        after teardown; neither read fences another process between them. *)
@@ -382,7 +392,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
     else
       let* () = Keeper_sandbox_microvm.image_present_for backend ~name:t.meta.sandbox_image
           ~image ~timeout_sec |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* _provisions = microvm_guest_provisions t ~backend ~timeout_sec
+      let* _provisions = microvm_guest_provisions t ~backend ~shim ~timeout_sec
         |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
       let* gateway = ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode
         |> Result.map_error (fun detail -> Policy_network_unavailable detail) in

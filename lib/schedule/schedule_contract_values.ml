@@ -161,6 +161,94 @@ let wake_status_of_string =
 
 let wake_status_strings = List.map wake_status_to_string wake_statuses
 
+(* What the dashboard schedule projection read from the woken Keeper's durable
+   event queue, as [keeper_queue_evidence.projection_status]. The server writes
+   it, the TUI and the dashboard read it; this table is the one spelling of
+   each value (#36009). *)
+type queue_projection_status =
+  | Queue_matched_pending
+  | Queue_retained_terminal_wake
+  | Queue_withdrawn_at_cancel
+  | Queue_not_found
+  | Queue_matched_terminal_completed
+  | Queue_matched_terminal_cancelled
+  | Queue_terminal_projection_pending
+  | Queue_transfer_projection_pending
+  | Queue_evidence_invalid
+  | Queue_read_error
+  | Queue_unrecognized_receipt
+[@@deriving enumerate]
+
+let queue_projection_status_to_string = function
+  | Queue_matched_pending -> "matched_pending"
+  | Queue_retained_terminal_wake -> "retained_terminal_wake"
+  | Queue_withdrawn_at_cancel -> "withdrawn_at_cancel"
+  | Queue_not_found -> "not_found"
+  | Queue_matched_terminal_completed -> "matched_terminal_completed"
+  | Queue_matched_terminal_cancelled -> "matched_terminal_cancelled"
+  | Queue_terminal_projection_pending -> "terminal_projection_pending"
+  | Queue_transfer_projection_pending -> "transfer_projection_pending"
+  | Queue_evidence_invalid -> "evidence_invalid"
+  | Queue_read_error -> "read_error"
+  | Queue_unrecognized_receipt -> "unrecognized_receipt"
+;;
+
+let queue_projection_status_of_string =
+  decode_wire_value
+    ~field:"keeper_queue_evidence.projection_status"
+    ~to_string:queue_projection_status_to_string
+    all_of_queue_projection_status
+;;
+
+let queue_projection_status_strings =
+  List.map queue_projection_status_to_string all_of_queue_projection_status
+;;
+
+(* What the dashboard schedule projection read from the woken Keeper's reaction
+   ledger, as [keeper_reaction_evidence.projection_status]. Same table rule as
+   the queue axis above; the two axes share some spellings and stay separate
+   types because each answers a different question. *)
+type reaction_projection_status =
+  | Reaction_conflicting_terminal_evidence
+  | Reaction_matched_terminal_cancelled
+  | Reaction_matched_consumed_ack
+  | Reaction_matched_turn_finished
+  | Reaction_matched_turn_started
+  | Reaction_matched_stimulus
+  | Reaction_not_found
+  | Reaction_quarantined
+  | Reaction_read_error
+  | Reaction_missing_stimulus_id
+  | Reaction_invalid_stimulus_id
+  | Reaction_unrecognized_receipt
+[@@deriving enumerate]
+
+let reaction_projection_status_to_string = function
+  | Reaction_conflicting_terminal_evidence -> "conflicting_terminal_evidence"
+  | Reaction_matched_terminal_cancelled -> "matched_terminal_cancelled"
+  | Reaction_matched_consumed_ack -> "matched_consumed_ack"
+  | Reaction_matched_turn_finished -> "matched_turn_finished"
+  | Reaction_matched_turn_started -> "matched_turn_started"
+  | Reaction_matched_stimulus -> "matched_stimulus"
+  | Reaction_not_found -> "not_found"
+  | Reaction_quarantined -> "quarantined"
+  | Reaction_read_error -> "read_error"
+  | Reaction_missing_stimulus_id -> "missing_stimulus_id"
+  | Reaction_invalid_stimulus_id -> "invalid_stimulus_id"
+  | Reaction_unrecognized_receipt -> "unrecognized_receipt"
+;;
+
+let reaction_projection_status_of_string =
+  decode_wire_value
+    ~field:"keeper_reaction_evidence.projection_status"
+    ~to_string:reaction_projection_status_to_string
+    all_of_reaction_projection_status
+;;
+
+let reaction_projection_status_strings =
+  List.map reaction_projection_status_to_string all_of_reaction_projection_status
+;;
+
 type runner_status =
   | Runner_not_started
   | Runner_running

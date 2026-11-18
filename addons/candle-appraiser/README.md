@@ -79,7 +79,13 @@ Finished worker records retain the request ID, input digest and result without
 the input body. Deploy this revision with the
 [worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
 
-Build the optional container from the repository root:
+The masc server carries this package. Declare it with `package = "candle-appraiser"`,
+then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
+the package under `<base-path>/.masc/packages/` and builds its image
+([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+State that still holds worker record v1 needs the hard cut above before the move.
+A declaration that pins the package with `manifest_path` builds the image from
+the repository root instead:
 
 ```sh
 docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.8 addons

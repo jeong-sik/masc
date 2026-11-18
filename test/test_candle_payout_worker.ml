@@ -162,8 +162,8 @@ let seed_payout ?(linked_task_ids = []) (config : Workspace.config) ~goal_id =
             ; goal_created_at = at "2026-09-20T01:00:00Z"
             ; due_date = None
             ; title = "Ship the ledger"
-            ; metric = None
-            ; target_value = None
+            ; measure = Goal_measure_fixture.measure
+            ; procedure = "read the fixture"
             ; linked_task_ids
             }
       }

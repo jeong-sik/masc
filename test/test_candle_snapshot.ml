@@ -36,8 +36,8 @@ let make_goal ?(created_at = "2026-09-20T01:00:00Z") ?(due_date = Some "2026-09-
   { Goal_store.id = "goal-1"
   ; criterion_revision = "rev-1"
   ; title = "Ship the ledger"
-  ; metric = Some "tests"
-  ; target_value = Some "10"
+  ; measure = Goal_measure_fixture.done_when "10"
+  ; procedure = "tests"
   ; due_date
   ; priority = 3
   ; phase = Goal_phase.Verifying
@@ -55,8 +55,8 @@ let make_verdict ?(recorded_at = "2026-09-28T06:32:00Z") () : Goal_verification.
       Goal_store.Criterion
         { revision = "rev-1"
         ; title = "Ship the ledger"
-        ; metric = Some "tests"
-        ; target_value = Some "10"
+        ; measure = Goal_measure_fixture.done_when "10"
+        ; procedure = "tests"
         }
   ; verification_run_id = "run-1"
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
@@ -275,8 +275,9 @@ let test_the_snapshot_holds_what_the_goal_held () =
       (Candle_time.equal at (Candle_time.of_ptime (Option.get (Ptime.of_float_s clock))));
     check (option string) "due date as the Goal held it" (Some "2026-09-26") s.due_date;
     check string "title" "Ship the ledger" s.title;
-    check (option string) "metric" (Some "tests") s.metric;
-    check (option string) "target" (Some "10") s.target_value;
+    check string "procedure" "tests" s.procedure;
+    check bool "measure" true
+      (Goal_measure.equal (Goal_measure_fixture.done_when "10") s.measure);
     check (list string) "only this Goal's Tasks" [ "task-1"; "task-2" ] s.linked_task_ids
   | events -> failf "expected one Snapshot, got %d rows" (List.length events)
 ;;
@@ -327,8 +328,8 @@ let earlier_snapshot : Candle_event.t =
         ; goal_created_at = time "2026-08-01T00:00:00Z"
         ; due_date = None
         ; title = ""
-        ; metric = None
-        ; target_value = None
+        ; measure = Goal_measure_fixture.measure
+        ; procedure = "read the fixture"
         ; linked_task_ids = []
         }
   }

@@ -226,26 +226,6 @@ let respond_error request reqd ~status ~code detail =
        ])
 ;;
 
-let append_retraction_events ~keepers_dir ~keeper_id ~plan_id ~now retractions =
-  Keeper_memory_os_events.append_all
-    ~keepers_dir
-    ~keeper_id
-    (List.map
-       (fun ({ Current.memory_id; _ } : Current.retraction) ->
-          { Keeper_memory_os_events.recorded_at = now
-          ; memory_id
-          ; trace_id = plan_id
-          ; kind = Keeper_memory_os_events.Retracted
-          })
-       retractions)
-  |> List.iter (fun error ->
-       Log.Keeper.warn
-         ~keeper_name:keeper_id
-         "admin memory retraction event append failed plan_id=%s: %s"
-         plan_id
-         (Keeper_memory_os_events.append_error_to_string error))
-;;
-
 let handle_current_memory state ~actor request reqd keeper_name body =
   match parse_current_memory_request body with
   | Error detail ->
@@ -272,12 +252,6 @@ let handle_current_memory state ~actor request reqd keeper_name body =
          parsed.retractions
      with
      | Ok snapshot ->
-       append_retraction_events
-         ~keepers_dir
-         ~keeper_id:keeper_name
-         ~plan_id:parsed.plan_id
-         ~now
-         parsed.retractions;
        Log.Keeper.info
          "admin current Memory retraction committed keeper=%s actor=%s plan_id=%s revision=%d direct=%d invalidated=%d"
          keeper_name

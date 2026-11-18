@@ -113,7 +113,9 @@ let child root =
   in
   let config = {config with execution_store=Some execution_store;
     checkpoint_sink=Some checkpoint_sink} in
-  let _ = Runtime_agent.run ~sw ~net:env#net ~config goal |> or_fail in
+  let _ = Runtime_agent.run ~sw ~net:env#net ~config
+    ~execution_capture:(Runtime_agent.execution_capture config) goal
+    |> Result.map_error Runtime_agent.run_failure_error |> or_fail in
   Alcotest.fail "child returned instead of stopping at the settled result boundary"
 
 let assert_counts root ~providers =
@@ -152,7 +154,8 @@ let run_restart () =
     let config = {config with Runtime_agent.execution_store=Some execution_store} in
     Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
       (fun () -> Runtime_agent.run ~sw ~net:env#net ~config
-        ~agent_core_checkpoint:checkpoint input)
+        ~agent_core_checkpoint:checkpoint ~execution_capture:(Runtime_agent.execution_capture config) input
+        |> Result.map_error Runtime_agent.run_failure_error)
   in
   (match resume config "A different operation must not reuse this scope." with
    | Error _ -> () | Ok _ -> Alcotest.fail "changed original input was accepted");

@@ -270,7 +270,12 @@ let perform_task_transition
            incoming owner can read it (RFC-0365); resolving from it would put
            that owner's sentence forward as this owner's reason. *)
         let stated_reason =
-          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+          Masc_domain.stated_reason
+            ~reason:(Some reason)
+            ~handoff_context:
+              (Option.map
+                 (fun context -> Masc_domain.Handoff_decoded context)
+                 handoff_context)
         in
         let action_s = Masc_domain.task_action_to_string action in
         let* decision =
@@ -360,7 +365,8 @@ let perform_task_transition
           Workspace_task_transition_executor.build_backlog_update
             ~backlog ~task ~action ~new_status ~handoff_context
         in
-        (* An operator stops the Task without authoring its owner's handoff. *)
+        (* An operator stops the Task without authoring its owner's handoff.
+           The stored note stays, so nothing was replaced. *)
         let backlog_update =
           match request with
           | Agent_action _ | Shutdown_release _ -> backlog_update
@@ -371,6 +377,7 @@ let perform_task_transition
             let backlog = backlog_update.backlog in
             { backlog_update with
               transitioned_task;
+              replaced_unreadable_handoff = None;
               backlog = { backlog with tasks =
                 List.map (fun (updated : task) ->
                   if String.equal updated.id task_id then transitioned_task else updated)
@@ -385,8 +392,14 @@ let perform_task_transition
           match backlog_update.transitioned_task.task_status with
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; _ } ->
+            (* The handoff this submission authored, not the stored field:
+               an exit-class submit replaces the stored value with exactly this
+               argument, and the argument is typed readable. *)
+            let submitted_handoff =
+              backlog_update.persisted_handoff_context
+            in
             let has_summary =
-              match backlog_update.transitioned_task.handoff_context with
+              match submitted_handoff with
               | Some context -> String.trim context.Masc_domain.summary <> ""
               | None -> false
             in
@@ -406,7 +419,7 @@ let perform_task_transition
                        { evidence_refs =
                            Workspace_task_verification
                            .verification_submission_evidence_refs
-                             backlog_update.transitioned_task
+                             ~handoff:submitted_handoff
                              ~notes
                        } ))
           | Masc_domain.Todo
@@ -580,6 +593,8 @@ let perform_task_transition
                    ?notes:(trim_opt (Some notes))
                    ?reason:stated_reason
                    ?handoff_context:backlog_update.persisted_handoff_context
+                   ?replaced_unreadable_handoff:
+                     backlog_update.replaced_unreadable_handoff
                    ()));
               run_post_commit "activity" (fun () ->
               (match new_status with
@@ -996,14 +1011,15 @@ let commit_verdict_r
              | Masc_domain.Verdict_approved -> task.handoff_context
              | Masc_domain.Verdict_rejected { reason } ->
                Some
-                 { Masc_domain.summary = reason
-                 ; reason = Some reason
-                 ; next_step = None
-                 ; failure_mode = None
-                 ; evidence_refs = []
-                 ; updated_at = Some now
-                 ; updated_by = Some authority_actor
-                 }
+                 (Masc_domain.Handoff_decoded
+                    { Masc_domain.summary = reason
+                    ; reason = Some reason
+                    ; next_step = None
+                    ; failure_mode = None
+                    ; evidence_refs = []
+                    ; updated_at = Some now
+                    ; updated_by = Some authority_actor
+                    })
            in
            let pending_completion_rejections =
              List.filter
@@ -1031,6 +1047,22 @@ let commit_verdict_r
              | Masc_domain.Verdict_approved ->
                { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
                :: backlog.pending_completion_approvals
+           in
+           (* A rejection overwrites the stored note; an unreadable one it
+              replaces goes on the verdict audit row (#38219). *)
+           let replaced_unreadable_handoff_fields =
+             match verdict with
+             | Masc_domain.Verdict_approved -> []
+             | Masc_domain.Verdict_rejected _ ->
+               (match
+                  Workspace_task_transition_executor.unreadable_handoff_replaced
+                    task.handoff_context
+                with
+                | Some replaced ->
+                  [ ( "replaced_unreadable_handoff"
+                    , Masc_domain.replaced_unreadable_handoff_to_yojson replaced )
+                  ]
+                | None -> [])
            in
            let committed_task = { task with task_status = new_status; handoff_context } in
            let new_backlog =
@@ -1266,7 +1298,8 @@ let commit_verdict_r
                   :: ("from_status", `String (task_status_to_string task.task_status))
                   :: ("to_status", `String (task_status_to_string new_status))
                   :: ("ts", `String now)
-                  :: completion_verdict_fields)));
+                  :: (completion_verdict_fields
+                      @ replaced_unreadable_handoff_fields))));
            Ok
              { message =
                  Printf.sprintf

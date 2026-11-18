@@ -146,13 +146,15 @@ let check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_ev
     (List.length (events_for ~keepers_dir ~keeper_id))
 ;;
 
-let revised_events events =
-  List.filter_map
-    (fun (event : Events.event) ->
-       match event.kind with
-       | Events.Revised { superseded_by } -> Some (event.memory_id, superseded_by)
-       | Events.Retrieved _ | Events.Retracted -> None)
-    events
+(* Revisions are the journal's revision links, written by the commit itself
+   (#37433). *)
+let revised_links ~keepers_dir ~keeper_id =
+  match Current.read_commit_lineage ~keepers_dir ~keeper_id with
+  | Ok lineage ->
+    List.map
+      (fun (link : Types.revision) -> link.superseded, link.superseded_by)
+      lineage.Current.revisions
+  | Error detail -> Alcotest.fail ("memory lineage unreadable: " ^ detail)
 ;;
 
 let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
@@ -194,9 +196,9 @@ let test_supersede_replaces_the_earlier_claim () =
        successor.last_seen
    | Some _ | None -> Alcotest.fail "expected exactly one current fact");
   Alcotest.(check (list (pair string string)))
-    "exactly one Revised event, old id to new id"
+    "exactly one revision link, old id to new id"
     [ first_id, second_id ]
-    (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id));
+    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id);
   match readable_journal_tail ~keepers_dir:env.keepers_dir ~keeper_id ~limit:1 with
   | [ Ok (Current.Journal_committed { dropped = Some [ statement ]; _ }) ] ->
     Alcotest.(check string)
@@ -341,9 +343,9 @@ let test_supersede_into_an_existing_claim_reobserves_it () =
      Alcotest.(check bool) "its last_seen moves forward" true (kept.last_seen > 200.)
    | Some _ | None -> Alcotest.fail "expected exactly one current fact");
   Alcotest.(check (list (pair string string)))
-    "one Revised event pointing at the existing claim"
+    "one revision link pointing at the existing claim"
     [ Types.memory_id old_fact, Types.memory_id kept_fact ]
-    (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id))
+    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id)
 ;;
 
 let test_refusals_write_nothing () =
@@ -478,9 +480,9 @@ let test_librarian_dropped_target_still_writes_the_claim () =
     (int_field "removed_in_revision" removal);
   Alcotest.(check string) "with the Librarian's reason" reason (string_field "reason" removal);
   Alcotest.(check (list (pair string string)))
-    "no Revised event: the Librarian's drop was not this write's revision"
+    "no revision link: the Librarian's drop was not this write's revision"
     []
-    (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id))
+    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id)
 ;;
 
 (* A Librarian copy stays the Librarian's to revise after the Librarian drops

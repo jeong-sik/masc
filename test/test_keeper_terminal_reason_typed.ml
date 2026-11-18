@@ -440,6 +440,7 @@ let () =
     | Tr.Provider_runtime_failure _
     | Tr.Transcript_corruption _
     | Tr.Official_client_recovery_required _
+    | Tr.Official_client_session_refused _
     | Tr.Provider_attempt_effect_fenced _
     | Tr.Tool_correction_lost _
     | Tr.Accept_rejected _
@@ -1508,8 +1509,13 @@ max-concurrent = 1
       in
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in
+      (* The Owner allocated a turn past [meta]'s snapshot and the turn
+         context cell is still empty, as for a turn that fails before tool
+         hooks run (#52839). *)
+      let allocated_turn_id = meta.runtime.last_turn_id + 1 in
       Masc.Keeper_unified_metrics_decision.append_decision_record
-        ~config ~meta ~observation ~latency_ms:3 ~outcome:Keeper_decision_outcome.Success
+        ~config ~meta ~keeper_turn_id:allocated_turn_id ~observation ~latency_ms:3
+        ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
         ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
         ~degraded_retry_applied:settlement.degraded_retry_applied
@@ -1525,6 +1531,8 @@ max-concurrent = 1
         (Yojson.Safe.Util.member "tools_used" row =
          `List [ `String "tool_read_file"; `String "tool_read_file";
                  `String "tool_write_file" ]);
+      check "decision row names the allocated turn, not meta's previous turn"
+        (Yojson.Safe.Util.member "turn_id" row = `Int allocated_turn_id);
       check "decision carries the settlement's applied retry unchanged"
         (Yojson.Safe.Util.member "degraded_retry_applied" row
          = Masc.Keeper_execution_receipt.degraded_retry_json
@@ -3220,7 +3228,7 @@ max-concurrent = 1
   let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   let append_and_read ~outcome ~result ?executed_runtime_id () =
     Masc.Keeper_unified_metrics_decision.append_decision_record
-      ~config ~meta ~observation:world ~latency_ms:3 ~outcome
+      ~config ~meta ~keeper_turn_id:1 ~observation:world ~latency_ms:3 ~outcome
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
       ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
       ~degraded_retry_applied:None ~degraded_retry_deferred:None
@@ -3341,6 +3349,65 @@ let () =
     (Keeper_internal_error.fenced_attempt_summary
        (Keeper_internal_error.Receipt_persistence_failed { detail = "disk full" })
      = None)
+;;
+
+(* #38402: an official-client session refusal is its own terminal reason, not
+   a configuration error. Each refusal's code decodes to its own variant,
+   round-trips, and takes the receipt pair that says what follows. The
+   expected pair is written per constructor, without a wildcard, so a refusal
+   added later has to be answered here. *)
+let () =
+  let module Refusal = Keeper_official_client_session_refusal in
+  let expected_disposition = function
+    | Refusal.Gate_continuation_unresumable
+    | Refusal.Gate_context_frontier_missing
+    | Refusal.Gate_canonical_context_changed
+    | Refusal.Task_reference_unbound ->
+      R.Disp_operator_action_required, R.Reason_official_client_session_refused
+    | Refusal.Claim_held_by_this_process ->
+      R.Disp_retry_later, R.Reason_official_client_session_refused
+    | Refusal.Task_reference_unsupported | Refusal.Continuation_on_other_runtime ->
+      R.Disp_fail_open_next_runtime, R.Reason_official_client_session_refused
+  in
+  List.iter
+    (fun refusal ->
+       let code = Refusal.code refusal in
+       check
+         (Printf.sprintf "%s is the code the turn ends with" code)
+         (String.equal
+            (Masc.Keeper_agent_error.terminal_reason_code_of_core_error
+               (Refusal.core_error refusal))
+            code);
+       check
+         (Printf.sprintf "%s decodes to its own refusal" code)
+         (match Tr.of_wire code with
+          | Tr.Official_client_session_refused decoded -> decoded = refusal
+          | Tr.Runtime_exhausted _ | Tr.Config_invalid _ | Tr.Authorization_refused _
+          | Tr.Provider_runtime_failure _ | Tr.Transcript_corruption _
+          | Tr.Official_client_recovery_required _ | Tr.Provider_attempt_effect_fenced _
+          | Tr.Tool_correction_lost _ | Tr.Accept_rejected _ | Tr.Terminal_effect_failed _
+          | Tr.Internal_error _ | Tr.Pre_dispatch_success _ | Tr.Unknown _ -> false);
+       check
+         (Printf.sprintf "%s round-trips" code)
+         (String.equal (Tr.to_wire (Tr.of_wire code)) code);
+       let disposition =
+         R.operator_disposition
+           { base_receipt with
+             terminal_reason_code = code
+           ; runtime_outcome = R.Runtime_not_dispatched
+           }
+       in
+       check
+         (Printf.sprintf "%s takes its own receipt pair" code)
+         (disposition = expected_disposition refusal);
+       check
+         (Printf.sprintf "%s does not ask for a toml edit" code)
+         (snd disposition <> R.Reason_config_invalid))
+    Refusal.all;
+  check
+    "every refusal has its own code"
+    (List.length (List.sort_uniq String.compare (List.map Refusal.code Refusal.all))
+     = List.length Refusal.all)
 ;;
 
 let () =

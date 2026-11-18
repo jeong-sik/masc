@@ -280,6 +280,32 @@ val find_latest_entry_result :
     match. Malformed rows are delivered to the callback. Missing stores return
     [Ok None]; layout and I/O failures remain explicit. *)
 
+type 'a latest_view
+(** A strict latest projection over one store. It keeps each visited file's
+    selected value (including [None]) and verified regular-file identity,
+    size and timestamps. Outside the selected value it retains no parsed rows
+    or source bytes. Its lifetime belongs to the caller. *)
+
+val latest_view : t -> f:(recent_entry -> 'a option) -> 'a latest_view
+(** Fix the store and projection for a reusable strict latest read. The
+    callback runs newest first on rows that need decoding; cached results do
+    not replay its effects. *)
+
+val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
+(** Walk fresh strict month/day order, opening verified regular handles before
+    reuse, and stop at the first selected value. Unchanged files reuse their
+    result. A same-inode append after a newline-complete cached extent scans
+    only its new suffix; replacement, shrinkage, same-size metadata changes
+    and appends to an incomplete tail rescan that file. In-place prefix edits
+    combined with growth are outside the append-only contract.
+
+    Missing stores yield [Ok None]. Removed paths cannot supply a cached
+    result. A same-inode append during a scan preserves the result through
+    the captured end; the next read inspects the appended bytes. Replacement,
+    shrinkage, same-size metadata changes and storage errors remain explicit
+    failures. Only files visited by a successful read remain in the view;
+    no full retained row count is taken. *)
+
 val month_dir_paths_newest_first_result : t -> (string list, read_error) result
 (** The store's month directories, newest first, listed and validated as
     {!find_latest_entry_result} lists them. A missing store is empty. *)

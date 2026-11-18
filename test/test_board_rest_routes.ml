@@ -529,8 +529,8 @@ let test_goal_transition_uses_authenticated_actor () =
     match
       Goal_store.upsert_goal_with_events ~actor:"test" config
         ~title:"Canonical actor transition"
-        ~metric:"transition"
-        ~target_value:"recorded"
+        ~measure:(Goal_measure_fixture.done_when "recorded")
+        ~procedure:"transition"
         ()
     with
     | Ok (goal, `created, _) -> goal

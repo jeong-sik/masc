@@ -623,7 +623,7 @@ let goal_verification_run ~run_id ~started_at : Goal_verification.run =
   ; request_id = "proof-request-4"
   ; criterion = Goal_store.Criterion
       { revision = "criterion-4"; title = "Four verified services";
-        metric = Some "verified services"; target_value = Some "4" }
+        measure = Goal_measure_fixture.done_when "4"; procedure = "verified services" }
   ; review_kind = Goal_verification.Proof
   ; authority_actor = verifier_lane_id
   ; started_at

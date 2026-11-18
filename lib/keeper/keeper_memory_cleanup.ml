@@ -53,7 +53,7 @@ let run_with ~execute ~base_path ~keeper_name =
               { keeper_id
               ; turn_ref = Ids.Turn_ref.make
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~absolute_turn:meta.runtime.usage.total_turns
+                  ~absolute_turn:meta.runtime.last_turn_id
               ; keeper_instructions = meta.instructions
               ; current = Some { facts = snapshot.facts }
               ; historical_task_contexts = []

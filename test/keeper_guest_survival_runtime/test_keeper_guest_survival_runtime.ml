@@ -10,6 +10,9 @@ module Profile = Keeper_types_profile_sandbox
 
 let write path content = Out_channel.with_open_bin path (fun output -> output_string output content)
 let read path = In_channel.with_open_bin path In_channel.input_all
+(* A fixture shim this server will mount: it declares the relay version the
+   host speaks (#52968). *)
+let shim_fixture = "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"
 let json path = Yojson.Safe.from_string (read path)
 let save_json path value = write path (Yojson.Safe.to_string value)
 let append path value =
@@ -687,7 +690,7 @@ let process_step root operation =
       let shim = Config_dir_resolver.microvm_shim_dir ~base_path in
       Fs_compat.mkdir_p shim;
       let binary = Filename.concat shim Microvm.shim_binary_name in
-      write binary "#!/bin/sh\nexit 0\n"; Unix.chmod binary 0o700) [base; other]) other_base;
+      write binary shim_fixture; Unix.chmod binary 0o700) [base; other]) other_base;
   let config = Workspace.default_config base in
   value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin"
     |> Result.map_error Keeper_microvm_shim_readiness.error_message);
@@ -1062,7 +1065,7 @@ let process_step root operation =
             let shim = Config_dir_resolver.microvm_shim_dir ~base_path:next_base in
             Fs_compat.mkdir_p shim;
             let binary = Filename.concat shim Microvm.shim_binary_name in
-            write binary "#!/bin/sh\nexit 0\n"; Unix.chmod binary 0o700;
+            write binary shim_fixture; Unix.chmod binary 0o700;
             value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:next_base
               ~payload_path:"/usr/bin:/bin" |> Result.map_error Keeper_microvm_shim_readiness.error_message);
             Workspace.default_config next_base, network_mode)
@@ -1603,7 +1606,7 @@ let process_step root operation =
         let other_shim = Config_dir_resolver.microvm_shim_dir ~base_path:other_base in
         Fs_compat.mkdir_p other_shim;
         let other_binary = Filename.concat other_shim Microvm.shim_binary_name in
-        write other_binary "#!/bin/sh\nexit 0\n"; Unix.chmod other_binary 0o700;
+        write other_binary shim_fixture; Unix.chmod other_binary 0o700;
         value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:other_base ~payload_path:"/usr/bin:/bin"
           |> Result.map_error Keeper_microvm_shim_readiness.error_message);
         let verify ~base_path ~backend = Keeper_microvm_shim_readiness.verify ~fs ~base_path ~backend ~guest_name:guest in
@@ -1733,7 +1736,7 @@ let process_step root operation =
         let other_shim = Config_dir_resolver.microvm_shim_dir ~base_path:other_base in
         Fs_compat.mkdir_p other_shim;
         let other_binary = Filename.concat other_shim Microvm.shim_binary_name in
-        write other_binary "#!/bin/sh\nexit 0\n"; Unix.chmod other_binary 0o700;
+        write other_binary shim_fixture; Unix.chmod other_binary 0o700;
         let verify_name ~base_path ~backend ~guest_name =
           Keeper_microvm_shim_readiness.verify ~fs ~base_path ~backend ~guest_name in
         let verify ~base_path ~backend = verify_name ~base_path ~backend ~guest_name:guest in
@@ -1814,7 +1817,7 @@ let with_fixture use =
     let masc = Config_dir_resolver.masc_root ~base_path:root in mkdir masc;
     let microvm = Filename.concat masc "microvm" in mkdir microvm;
     let shim = Config_dir_resolver.microvm_shim_dir ~base_path:root in mkdir shim;
-    write (Filename.concat shim Microvm.shim_binary_name) "#!/bin/sh\nexit 0\n";
+    write (Filename.concat shim Microvm.shim_binary_name) shim_fixture;
     Unix.chmod (Filename.concat shim Microvm.shim_binary_name) 0o700;
     let bin = Filename.concat root "bin" in mkdir bin;
     write (Filename.concat bin "container") (Printf.sprintf "#!/bin/sh\nexec %s --provider %s \"$@\"\n"

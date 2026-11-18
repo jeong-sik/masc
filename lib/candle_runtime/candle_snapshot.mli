@@ -3,8 +3,8 @@
     When the verifier's passing result is about to reach the verification
     ledger, the Goal's inputs to a later payout are written to the Candle ledger
     first: the request and exact verifier run that passed, the criterion revision, when it passed, when
-    the Goal was created, its due date as the Goal held it, its title, metric
-    and target, and the Tasks linked to it. A payout follows these values and
+    the Goal was created, its due date as the Goal held it, its title, measure
+    and procedure, and the Tasks linked to it. A payout follows these values and
     not the Goal, so editing the Goal afterwards changes nothing.
 
     The step runs under the Goal lock, as the [before_proof_commit] step of

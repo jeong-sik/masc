@@ -83,6 +83,7 @@ type agent_runtime_state =
   ; last_usage_resolution : Keeper_usage_resolution.t option
   ; proactive_rt : proactive_runtime
   ; trace_id : Keeper_id.Trace_id.t
+ ; last_turn_id : int
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)

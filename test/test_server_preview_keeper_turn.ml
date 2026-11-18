@@ -672,7 +672,7 @@ let test_turn () =
         Alcotest.(check (pair int string))
           "the integrations a person is offered"
           ( 200
-          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
           )
           (let { R.status; headers = _; body } = Server_person_integrations.answer ~base_path in
            R.status_code status, body);
@@ -697,6 +697,13 @@ let test_turn () =
           (List.map
              (fun (offer : Server_person_integrations.integration) ->
                offer.integration_id, offer.models)
+             offered);
+        Alcotest.(check (list string))
+          "the integrations a person registers an API key for"
+          [ "claude_code" ]
+          (List.filter_map
+             (fun (offer : Server_person_integrations.integration) ->
+               if offer.takes_key then Some offer.integration_id else None)
              offered);
         Alcotest.(check (list string))
           "the integrations whose models are called here"
@@ -726,7 +733,7 @@ let test_turn () =
          Alcotest.(check (pair int string))
            "the models a person is offered and the one left out, with why"
            ( 200
-           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","connect":["login"],"models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
            )
            (let { R.status; headers = _; body } =
               Server_person_integrations.answer ~base_path:every_kind_base
@@ -748,7 +755,7 @@ let test_turn () =
          Alcotest.(check (pair int string))
            "the bindings of a provider, offered and withheld, in declared order"
            ( 200
-           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[{"model":"claude-ghost","reason":"model_undeclared"},{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":[],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[{"model":"claude-ghost","reason":"model_undeclared"},{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":[],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
            )
            (let { R.status; headers = _; body } =
               Server_person_integrations.answer ~base_path:withheld_base
@@ -807,6 +814,7 @@ let test_turn () =
            ; models
            ; withheld = []
            ; calls
+           ; takes_key = true
            }
          in
          Alcotest.(check (list note))

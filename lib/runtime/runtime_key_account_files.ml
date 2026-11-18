@@ -113,3 +113,21 @@ let present ~runtime_root ~account_id =
       let* keys_there = named keys in
       if keys_there then Ok true else named home)
 ;;
+
+type key_state =
+  | Key_readable
+  | Key_not_read of Runtime_api_key_file.read_error
+  | Key_not_looked_at of string
+
+let key_state ~runtime_root ~account_id ~generation =
+  match root_there ~runtime_root with
+  | Error detail -> Key_not_looked_at detail
+  | Ok false -> Key_not_read Runtime_api_key_file.Key_missing
+  | Ok true ->
+    (match Layout.key_file ~runtime_root ~account_id ~generation with
+     | Error detail -> Key_not_looked_at detail
+     | Ok file ->
+       (match Runtime_api_key_file.read file with
+        | Ok (_ : Runtime_api_key_file.key) -> Key_readable
+        | Error error -> Key_not_read error))
+;;

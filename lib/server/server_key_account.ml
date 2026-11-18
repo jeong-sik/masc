@@ -130,6 +130,11 @@ let takes_no_key =
     "This integration takes no API key. In this stage a key is one of a Claude Code provider."
 ;;
 
+let takes_key : Client.client -> bool = function
+  | Client.Claude -> true
+  | Client.Codex | Client.Muse | Client.Antigravity -> false
+;;
+
 (* Whether a person registers a key for the integration: a provider that
    runtime.toml declares, of the client whose key this stage takes. It is
    the target a verification of the account resolves again
@@ -144,12 +149,8 @@ let key_target config ~integration_id =
          "This workspace declares no provider of this id.")
   | Error (Login.No_login (_ : Server_runtime_setup_actions.error) | Login.Copy_without_owner) ->
     Error takes_no_key
-  | Ok { Server_runtime_setup_actions.client = Client.Claude; cli_path = _; spawn_path = _ } -> Ok ()
-  | Ok
-      { Server_runtime_setup_actions.client = Client.Codex | Client.Muse | Client.Antigravity
-      ; cli_path = _
-      ; spawn_path = _
-      } -> Error takes_no_key
+  | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
+    if takes_key client then Ok () else Error takes_no_key
 ;;
 
 let not_recorded =

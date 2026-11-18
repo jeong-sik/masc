@@ -15,6 +15,7 @@ type integration =
   ; models : string list
   ; withheld : (string * withheld) list
   ; calls : calls
+  ; takes_key : bool
   }
 
 (* The posture a call of the client starts with, by the name its default
@@ -72,6 +73,7 @@ let of_config (config : Runtime_schema.config) =
           ; models
           ; withheld
           ; calls = calls_of client
+          ; takes_key = Server_key_account.takes_key client
           })
     config.providers
 ;;
@@ -103,10 +105,16 @@ let withheld_json (model, why) =
   `Assoc [ "model", `String model; "reason", `String (withheld_code why) ]
 ;;
 
-let integration_json { integration_id; display_name; models; withheld; calls } =
+(* Every integration here is one a person signs in to ([of_config]). *)
+let connect_json ~takes_key =
+  `List (`String "login" :: (if takes_key then [ `String "key" ] else []))
+;;
+
+let integration_json { integration_id; display_name; models; withheld; calls; takes_key } =
   `Assoc
     ([ "integration_id", `String integration_id
      ; "display_name", `String display_name
+     ; "connect", connect_json ~takes_key
      ; "models", `List (List.map (fun model -> `String model) models)
      ; "withheld", `List (List.map withheld_json withheld)
      ]
@@ -130,7 +138,7 @@ let start_notes = function
   | _ :: _ as integrations ->
     let notes =
       List.filter_map
-        (fun { integration_id; display_name = (_ : string); models; withheld; calls } ->
+        (fun { integration_id; display_name = (_ : string); models; withheld; calls; takes_key = (_ : bool) } ->
           match calls, models with
           | Refused Runtime_account_access.Native_unpublished, (_ : string list) ->
             Some Access_unpublished

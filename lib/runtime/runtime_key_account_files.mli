@@ -72,3 +72,29 @@ val present
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (bool, string) result
+
+(** What a list says of the key of an account (RFC
+    a-persons-api-key-is-their-own-provider-account 3.8). *)
+type key_state =
+  | Key_readable
+      (** The file of the generation gives a key. Whether the vendor takes
+          the key is what a verification says. *)
+  | Key_not_read of Runtime_api_key_file.read_error
+      (** What a use of the account answers ({!Runtime_api_key_file.read}):
+          the file is missing, or it gives no key. A runtime root that is
+          not there holds no file, so its accounts read [Key_missing]. *)
+  | Key_not_looked_at of string
+      (** The place of the file could not be looked at. The detail can name
+          paths of the server. *)
+
+(** Reads the key file of [generation] of [account_id] as a use of the
+    account reads it, and gives nothing of the key. It makes nothing: where
+    a use makes the runtime root of the person, this looks whether it is
+    there. It takes no call of the account, so it says what was there at the
+    reading: an account whose registration or removal is under way can read
+    [Key_missing] for that moment. *)
+val key_state
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> key_state

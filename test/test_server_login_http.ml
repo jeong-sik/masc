@@ -743,7 +743,7 @@ let the_preview_follows_a_login () =
       let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
       reply.status, reply.body
     in
-    let account id fact = Printf.sprintf {|{"provider_account_id":"%s",%s}|} id fact in
+    let account id fact = Printf.sprintf {|{"provider_account_id":"%s","kind":"login",%s}|} id fact in
     let runtime account model fact =
       Printf.sprintf {|{"runtime_id":"%s.%s","provider_account_id":"%s",%s}|} account model account fact
     in
@@ -876,7 +876,7 @@ let the_preview_follows_a_login () =
     check_reply
       "the integrations of the workspace"
       ( 200
-      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"}]}|}
+      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"}]}|}
       )
       (integrations ());
     let refused sentence = 400, Yojson.Safe.to_string (`Assoc [ "error", `String sentence ]) in
@@ -1324,7 +1324,7 @@ let a_person_keeps_keepers_over_mcp () =
       "the Runtimes of the person"
       ( "false"
       , Printf.sprintf
-          {|{"provider_accounts":[{"provider_account_id":"account-1","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
+          {|{"provider_accounts":[{"provider_account_id":"account-1","kind":"login","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","kind":"login","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
           connected
           connected
           connected )
@@ -1685,13 +1685,30 @@ let a_person_registers_a_key () =
       | (Some _ | None), (Some _ | None) -> Alcotest.failf "no key account in %S" registered.body
     in
     Alcotest.(check int) "the log holds the account" 1 (accounts ());
+    (* The list of the accounts of the person (RFC 3.8): the kind, the
+       integration the record names, and whether the key file gives a key. *)
+    let listed () =
+      let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+      reply.status, reply.body
+    in
+    Alcotest.(check (pair int string))
+      "the list of the accounts, after the registration"
+      ( 200
+      , Printf.sprintf
+          {|{"provider_accounts":[{"provider_account_id":"%s","kind":"key","key":"readable","integration_id":"claude_code"}],"runtimes":[]}|}
+          account )
+      (listed ());
     let by_token = register [ "Authorization", "Bearer " ^ pat {|["manage_own_provider"]|} ] in
     Alcotest.(check int) ("a PAT that manages provider accounts: " ^ by_token.body) 200 by_token.status;
     Alcotest.(check int) "the same key again is a second account" 2 (accounts ());
     let removed =
       send admin router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ account) ~headers:(changing ~csrf ())
     in
-    Alcotest.(check int) ("the removal of the account it made: " ^ removed.body) 200 removed.status)
+    Alcotest.(check int) ("the removal of the account it made: " ^ removed.body) 200 removed.status;
+    let status, after = listed () in
+    Alcotest.(check int) "the list of the accounts, after the removal" 200 status;
+    Alcotest.(check bool) "the removed account is not in it" false (contains ~sub:account after);
+    Alcotest.(check bool) "and nothing of the key is" false (contains ~sub:key after))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved

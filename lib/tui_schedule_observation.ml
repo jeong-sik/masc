@@ -170,10 +170,19 @@ let decode row_json =
         | "failed" -> optional_text "error" wake |> Result.map (fun reason -> Dispatch_failed reason)
         | "succeeded" ->
             let* detail_json = field "detail" wake in
+            (* Refuses a detail that names one field twice, as every other
+               evidence object here is refused; the fields themselves are the
+               decoder's to read. *)
             let* _unique_fields = object_fields detail_json in
             (* The server's own decoder, so a receipt kind it writes cannot be
-               one this reader calls unsupported. *)
-            let* receipt = Schedule_dispatch_receipt.dispatch_receipt_of_detail detail_json in
+               one this reader calls unsupported. A receipt it cannot read --
+               a kind a newer server added -- keeps its row as unknown, as the
+               server's own [Unrecognized_receipt] does, and the page around
+               it still reads. Identity checks below stay errors: a mismatch
+               means another row's evidence was mixed in. *)
+            (match Schedule_dispatch_receipt.dispatch_receipt_of_detail detail_json with
+             | Error reason -> Ok (Unknown ("예약 실행 증거 미지원: " ^ reason))
+             | Ok receipt ->
             let same_id name expected actual =
               if String.equal expected actual then Ok ()
               else Error ("schedule observation identity mismatch: " ^ name) in
@@ -317,7 +326,7 @@ let decode row_json =
                           | Contract.Queue_withdrawn_at_cancel -> matched (Cancelled None)
                           | Contract.Queue_read_error | Contract.Queue_evidence_invalid
                           | Contract.Queue_unrecognized_receipt ->
-                              Ok (Unknown "예약 큐 조회 불가")))))
+                              Ok (Unknown "예약 큐 조회 불가"))))))
         | _ -> Ok (Unknown "예약 전달 상태 미지원") in
       Ok { stage; due_at_iso }
 

@@ -255,7 +255,9 @@ let test_missing_stimulus_receipt_is_unconfirmed () =
     (replace "stimulus_id" (`String "other-stimulus")));
   refused (row |> nested "keeper_reaction_evidence"
     (replace "post_id" (`String "other-occurrence")));
-  refused (unrecognized (`Int 1))
+  (* A stimulus that is not text is a receipt the decoder cannot read: its
+     row stays unknown rather than refusing the page (review on #53163). *)
+  unknown (unrecognized (`Int 1))
 
 (* #53064: a delivered tool-result receipt and a handed-over Lane action are
    the whole record of their occurrence. No queue or reaction evidence
@@ -282,10 +284,37 @@ let test_receipt_is_the_record () =
   refused (delivered ~keeper_name:"another" ());
   refused (delivered ~schedule_id:"another-schedule" ());
   refused (handed_over ~schedule_instance_id:"another-instance" ());
-  (* A kind the server's decoder does not know is refused, not shown as an
-     unsupported receipt. *)
-  refused (pending () |> nested "last_wake" (nested "detail"
-    (replace "kind" (`String "masc.keeper_wake.invented"))))
+  (* A receipt the server's decoder refuses keeps its row as unknown, so one
+     newer kind does not drop the page (review on #53163). *)
+  let unsupported name row =
+    match (decoded row).stage with
+    | Observation.Unknown _ -> ()
+    | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _
+    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
+    | Cancelled _ | Settling _ | Transferring _ ->
+        Alcotest.failf "%s did not stay an unknown row" name in
+  unsupported "a kind the decoder does not know"
+    (pending () |> nested "last_wake" (nested "detail"
+       (replace "kind" (`String "masc.keeper_wake.invented"))));
+  (* A wake still waiting for its ACK must have tried to activate its owner;
+     the decoder refuses "not required" there. *)
+  unsupported "a waiting wake that says activation was not required"
+    (pending () |> nested "last_wake" (replace "detail"
+       (Receipt.dispatch_receipt_to_yojson
+          (Receipt.Keeper_wake_enqueued
+             { keeper_name = "reviewer"
+             ; schedule_instance_id = "instance-1"
+             ; schedule_id = "review"
+             ; urgency = "normal"
+             ; post_id = "occurrence-1"
+             ; queue = Receipt.keeper_event_queue_label
+             ; stimulus = "schedule_due"
+             ; stimulus_id = Some "occurrence-1"
+             ; reaction_ledger_status = Some Receipt.Keeper_wake_reaction_ledger_recorded
+             ; result_delivery_policy = Receipt.Keeper_wake_result_delivery_none
+             ; occurrence_status = Receipt.Keeper_wake_awaiting_ack
+             ; activation_outcome = Receipt.Keeper_wake_activation_not_required
+             }))))
 
 let test_dispatch_failure_retains_reason () =
   stage (Observation.Dispatch_failed (Some "queue write failed"))

@@ -134,8 +134,8 @@ let handle_keeper_tool_approvals_list _state request reqd =
 
 (* Which keepers are mid-turn right now, one row per registered keeper. The
    running-turn slot lives in the Keeper Owner (process memory), not in the
-   durable meta a keeper list is read from, so surfaces that want an
-   "answering now" badge poll this projection instead of growing the meta
+   durable meta a keeper list is read from, so surfaces that draw a
+   running turn read this projection instead of growing the meta
    contract. [started_at_unix] is the owner clock's epoch reading; the
    consumer derives display age against its own clock (same policy as
    [asked_at] above). An unreadable name census is an error response, not an

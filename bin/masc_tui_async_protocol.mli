@@ -384,8 +384,7 @@ type keeper_msg =
   | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
       * (Masc.Tui_decode.keeper_turns_projection, request_failure) result
   | Keeper_chat_control_received of string * int * string
-      (** Which keepers are mid-turn right now, for the "answering now"
-          badge drawn from every surface. *)
+      (** Which keepers are mid-turn right now. *)
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of

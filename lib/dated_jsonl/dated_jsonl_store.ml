@@ -109,6 +109,35 @@ let decision_audit root ~keeper_dirname =
   under root Decision_audit [ decision_audit_dirname; keeper_dirname ]
 
 let dir location = location.dir
+
+type directory_name =
+  | Existing of string
+  | Not_yet of string
+
+(* [path] with its nearest existing ancestor named by the file system and the
+   pieces below that ancestor as spelled. *)
+let name_through_nearest_existing path =
+  let rec resolve dir below =
+    match Unix.realpath dir with
+    | real -> List.fold_left Filename.concat real below
+    | exception Unix.Unix_error _ ->
+      let parent = Filename.dirname dir in
+      if String.equal parent dir
+      then List.fold_left Filename.concat dir below
+      else resolve parent (Filename.basename dir :: below)
+  in
+  resolve path []
+
+let absolute_dir location =
+  if Filename.is_relative location.dir
+  then Filename.concat (Config_dir_resolver.current_working_dir ()) location.dir
+  else location.dir
+
+let directory_name location =
+  let spelled = absolute_dir location in
+  match Unix.realpath spelled with
+  | name -> Existing name
+  | exception Unix.Unix_error _ -> Not_yet (name_through_nearest_existing spelled)
 let of_location location = location.store
 let keeper_store location = location.keeper_store
 

@@ -71,6 +71,11 @@ EVENT_STREAM = 'text/event-stream'
 READ_BYTES = 65536
 PROGRESS_S = 1.0
 LISTEN_BACKLOG = 256
+# int() raises ValueError on a string of more than 4300 digits
+# (sys.int_info.default_max_str_digits), which would end the handler with no
+# answer and no refused line. 18 digits allow a body just under 10**18 bytes,
+# far past anything a TUI posts, and int() reads them at once.
+CONTENT_LENGTH_DIGITS = 18
 RECORDED_STATUSES = frozenset({HTTPStatus.OK, HTTPStatus.NOT_FOUND})
 BODYLESS_STATUSES = frozenset({HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED})
 HOP_BY_HOP = frozenset({
@@ -235,14 +240,15 @@ class Relay(http.server.BaseHTTPRequestHandler):
         """The one body length this relay and the server both read. Two
         Content-Length headers, or one that is not plain ASCII digits, may be
         framed one way here and another way upstream (int() takes '+5', ' 5',
-        '4_5' and non-ASCII digits), so such a request is refused."""
+        '4_5' and non-ASCII digits), so such a request is refused, and so is
+        one with more than CONTENT_LENGTH_DIGITS digits."""
         values = self.headers.get_all('Content-Length') or []
         if len(values) > 1:
             return Refused('content-length-twice')
         if not values:
             return 0
         value = values[0]
-        if not (value.isascii() and value.isdigit()):
+        if not (value.isascii() and value.isdigit()) or len(value) > CONTENT_LENGTH_DIGITS:
             return Refused('bad-content-length')
         return int(value)
 

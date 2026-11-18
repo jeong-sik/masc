@@ -10,8 +10,9 @@ relay must refuse: REST verbs, POST outside /mcp, a tools/call of a mutating
 tool, a batch with one, a JSON-RPC response, a body that names `method` or the
 tool name twice, a chunked body, a websocket upgrade, and requests whose body
 framing a server could read differently from the relay (Content-Length twice,
-not plain digits, or on a GET). None of them may reach the upstream. A GET and a tools/call of a read
-tool must reach it.
+not plain digits, or on a GET). None of them may reach the upstream. A
+Content-Length too long for int() is refused too, with a line in the log. A
+GET and a tools/call of a read tool must reach it.
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from typing import cast
 import unittest
 
 RELAY = Path(__file__).resolve().parent.parent / 'harness' / 'tui' / 'readonly_proxy.py'
@@ -129,6 +131,7 @@ REFUSED: tuple[Case, ...] = (
           'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ=='}),
 )
 PING = encoded(rpc('ping'))
+PAST_DIGIT_CAP = 'Content-Length past the digit cap'
 
 
 def raw_request(head: str, body: bytes) -> bytes:
@@ -146,6 +149,11 @@ RAW_REFUSED: tuple[tuple[str, bytes], ...] = (
     ('Content-Length with a sign', raw_request(
         f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: +{len(PING)}\n',
         PING)),
+    # int() refuses a string past 4300 digits with ValueError, which would end
+    # the handler with no answer and no refused line in the log.
+    (PAST_DIGIT_CAP, raw_request(
+        f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: {"9" * 4301}\n',
+        PING)),
     ('GET with a body', raw_request('GET /health HTTP/1.1\nHost: relay\nContent-Length: 5\n', b'hello')),
     ('HEAD with a chunked body', raw_request(
         'HEAD /health HTTP/1.1\nHost: relay\nTransfer-Encoding: chunked\n', b'5\r\nhello\r\n0\r\n\r\n')),
@@ -154,6 +162,17 @@ ALLOWED: tuple[Case, ...] = (
     Case('GET', 'GET', '/health', b'', {}),
     Case('read tool', 'POST', '/mcp', encoded(tool_call(READ_TOOL)), JSON),
 )
+
+
+def refusal_reasons(log: Path) -> list[object]:
+    reasons: list[object] = []
+    for line in log.read_text(encoding='utf-8').splitlines():
+        entry: object = json.loads(line)
+        if isinstance(entry, dict):
+            fields = cast(dict[str, object], entry)
+            if fields.get('decision') == 'refused':
+                reasons.append(fields.get('why'))
+    return reasons
 
 
 def listening_port(process: subprocess.Popen[bytes]) -> int:
@@ -172,6 +191,7 @@ def listening_port(process: subprocess.Popen[bytes]) -> int:
 class ReadonlyProxyTest(unittest.TestCase):
     upstream: Upstream
     relay_port = 0
+    log_path: Path
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -182,9 +202,10 @@ class ReadonlyProxyTest(unittest.TestCase):
         thread.start()
         cls.addClassCleanup(cls.upstream.server_close)
         cls.addClassCleanup(cls.upstream.shutdown)
+        cls.log_path = Path(scratch.name) / 'relay.jsonl'
         process = subprocess.Popen(
             [sys.executable, str(RELAY), '--upstream-port', str(cls.upstream.server_address[1]),
-             '--log', str(Path(scratch.name) / 'relay.jsonl')],
+             '--log', str(cls.log_path)],
             stdout=subprocess.PIPE)
         cls.addClassCleanup(process.wait)
         cls.addClassCleanup(process.terminate)
@@ -228,6 +249,12 @@ class ReadonlyProxyTest(unittest.TestCase):
                 before = len(self.received())
                 self.assertEqual(self.send_raw(request), FORBIDDEN)
                 self.assertEqual(self.received()[before:], [])
+
+    def test_a_content_length_past_the_digit_cap_is_logged_as_refused(self) -> None:
+        request = dict(RAW_REFUSED)[PAST_DIGIT_CAP]
+        self.assertEqual(self.send_raw(request), FORBIDDEN)
+        # The relay logs a refusal before it answers, so the line is there now.
+        self.assertIn('bad-content-length', refusal_reasons(self.log_path))
 
     def test_a_get_declaring_no_body_reaches_the_upstream(self) -> None:
         # The TUI sends Content-Length: 0 on its GETs.

@@ -164,6 +164,39 @@ let test_mixed_append_file_and_jsonl_share_mutex () =
     (n_threads * n_records_per_thread)
     (Hashtbl.length seen)
 
+(* [append_jsonl_rows] takes rows its caller rendered. The tests below that
+   take an appender run it through this one too. *)
+let append_rendered path rows =
+  Fs_compat.append_jsonl_rows
+    path
+    (String.concat "" (List.map (fun row -> Yojson.Safe.to_string row ^ "\n") rows))
+
+(* The bytes the caller rendered are the bytes in the file: nothing is parsed
+   and printed again on the way. A number written as [1.0] stays [1.0], and
+   the spaces a caller's printer left stay too. *)
+let test_rendered_rows_reach_the_file_as_given () =
+  let dir = tmpdir "fs_compat_rendered_rows" in
+  let path = Filename.concat dir "absent/out.jsonl" in
+  let first = "{\"n\": 1.0, \"text\": \"한글\"}\n" in
+  let second = "{\"n\":2}\n[3]\n" in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.reset_fd_cache_for_testing ();
+      Unix.unlink path;
+      Unix.rmdir (Filename.dirname path);
+      Unix.rmdir dir)
+    (fun () ->
+      Fs_compat.append_jsonl_rows path first;
+      Fs_compat.append_jsonl_rows path second;
+      Fs_compat.append_jsonl path (`Assoc [ "n", `Int 4 ]);
+      let ic = open_in_bin path in
+      let written =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () -> really_input_string ic (in_channel_length ic))
+      in
+      check string "the rows as given, in order" (first ^ second ^ "{\"n\":4}\n") written)
+
 (* A reader on this very scheduler can release a blocked FIFO open/write.
    No elapsed-time threshold: success requires the original bytes to arrive. *)
 let test_eio_fifo_append append =
@@ -240,6 +273,7 @@ let test_eio_errors_and_empty_batch () =
       in
       refused (fun () -> Fs_compat.append_jsonl dir (`String "single"));
       refused (fun () -> Fs_compat.append_jsonl_batch dir [ `String "batch" ]);
+      refused (fun () -> Fs_compat.append_jsonl_rows dir "\"rendered\"\n");
       let absent = Filename.concat dir "absent/out.jsonl" in
       Fs_compat.append_jsonl_batch absent [];
       check bool "empty batch does not create parent" false
@@ -325,6 +359,10 @@ let () =
             List.iter (Fs_compat.append_jsonl path) rows));
         test_case "Eio batch append yields to its FIFO reader" `Quick
           (fun () -> test_eio_fifo_append Fs_compat.append_jsonl_batch);
+        test_case "rendered rows reach the file as given" `Quick
+          test_rendered_rows_reach_the_file_as_given;
+        test_case "Eio rendered append yields to its FIFO reader" `Quick
+          (fun () -> test_eio_fifo_append append_rendered);
         test_case "Eio mixed writers retain complete records" `Quick
           test_eio_mixed_writers;
         test_case "Eio writer errors and empty batches retain their result" `Quick
@@ -334,10 +372,14 @@ let () =
             List.iter (Fs_compat.append_jsonl path) rows));
         test_case "batch append cancelled before dispatch" `Quick
           (fun () -> test_cancelled_before_append Fs_compat.append_jsonl_batch);
+        test_case "rendered append cancelled before dispatch" `Quick
+          (fun () -> test_cancelled_before_append append_rendered);
         test_case "single append cancellation waits for commit acknowledgement" `Quick
           (fun () -> test_cancelled_during_append (fun path rows ->
             List.iter (Fs_compat.append_jsonl path) rows));
         test_case "batch append cancellation waits for commit acknowledgement" `Quick
           (fun () -> test_cancelled_during_append Fs_compat.append_jsonl_batch);
+        test_case "rendered append cancellation waits for commit acknowledgement" `Quick
+          (fun () -> test_cancelled_during_append append_rendered);
       ]
     ]

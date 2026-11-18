@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-16T15:40:54Z (HEAD: bfe5dc065b84)
+Generated: 2026-11-18T14:46:51Z (HEAD: a971cb636510d)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 39 |
-| Manual specs | 39 |
+| Total .tla files | 40 |
+| Manual specs | 40 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 140 |
-| Buggy .cfg (bug-model pair) | 95 |
+| Total .cfg files | 155 |
+| Buggy .cfg (bug-model pair) | 108 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -41,7 +41,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} buggy={inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} | 4c6c55a9e9eb |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |
 
-### specs/bug-models (16 specs)
+### specs/bug-models (17 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -53,6 +53,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |
 | KeeperOwnerOperation.tla | KeeperOwnerOperation | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} buggy={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} | 6c83a9ef70fd |
 | KeeperReceiptWait.tla | KeeperReceiptWait | manual | 14 | 13 | clean={inv:Safety, prop:WaiterResolves} buggy={inv:Safety} cancel-keeps-owner-buggy={inv:OwnerIsLive} claim-while-waiting-buggy={inv:ClaimedHasReceipt} duplicate-resolve-buggy={inv:SlotMatchesTask} duplicate-wait-buggy={inv:OneOwner} late-receipt-reachable-buggy={inv:LateReceiptAfterCancelUnreachable} orphan-wait-reachable-buggy={inv:WaitOnOrphanUnreachable} restart-loses-request-buggy={inv:WaitingHasSource} restart-requeue-reachable-buggy={inv:RestartRequeueThenSucceedUnreachable} resume-reachable-buggy={inv:WaitThenSucceedUnreachable} revive-cancelled-buggy={inv:TerminalIsFinal} unfiltered-load-buggy={inv:ReadyHasReceipt} wake-never-delivered-buggy={prop:WaiterResolves} | 3dbfc3a79852 |
+| KeeperRowFacts.tla | KeeperRowFacts | manual | 15 | 13 | clean={inv:TypeOK, inv:Agree} cell-made-during-a-write-kept-buggy={inv:TypeOK, inv:Agree} failed-read-kept-buggy={inv:TypeOK, inv:Agree} failed-remover-keeps-buggy={inv:TypeOK, inv:Agree} failed-write-keeps-buggy={inv:TypeOK, inv:Agree} fill-overwrites-buggy={inv:TypeOK, inv:Agree} late-bytes-buggy={inv:TypeOK, inv:Agree} list-drops-broken-buggy={inv:TypeOK, inv:Agree} lost-settle-overwrites-buggy={inv:TypeOK, inv:Agree} no-mutex={inv:TypeOK, inv:Agree} no-newline-after-fragment-buggy={inv:TypeOK, inv:Agree} remover-keeps-buggy={inv:TypeOK, inv:Agree} seen-after-the-row-buggy={inv:TypeOK, inv:Agree} unchanged-value-keeps-generation-buggy={inv:TypeOK, inv:Agree} writer-fills-buggy={inv:TypeOK, inv:Agree} | 894759bffe45 |
 | KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | 3729df26b85a |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
 | LibrarianContinuityWidth.tla | LibrarianContinuityWidth | manual | 5 | 4 | clean={inv:TypeOK, inv:NoRefusedUnitOffered, inv:LearnedWidthHolds} narrow-on-other-buggy={inv:TypeOK} no-carry-buggy={inv:TypeOK} release-on-commit-buggy={inv:TypeOK, inv:LearnedWidthHolds} release-on-unreadable-buggy={inv:TypeOK, inv:LearnedWidthHolds} | f23a79f08a08 |

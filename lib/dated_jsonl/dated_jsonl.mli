@@ -82,9 +82,8 @@ val open_store :
     for it on each write or prune, so a handle opened before its directory
     existed takes the directory's mutex once the directory is there. The
     file system is asked once for each spelling of a directory that exists;
-    a spelling keeps that answer while the process runs, also when the
-    directory is later removed and made again under another name. A caller
-    that only reads and must leave no entry behind opens a {!Reader}.
+    a spelling keeps that answer until {!directories_removed} is called. A
+    caller that only reads and must leave no entry behind opens a {!Reader}.
 
     When [?max_bytes] is positive, [append] prunes
     oldest completed day-files until the store is at or below the cap, while
@@ -102,7 +101,19 @@ val close : t -> unit
 val prepare_for_directory_removal : t -> unit
 (** Close the current append writer and forget its memoized month directory
     and row count before application-owned code removes [base_dir t]. A later
-    append can then recreate the directory and observe the new file identity. *)
+    append can then recreate the directory and observe the new file identity.
+    The removal is followed by {!directories_removed}. *)
+
+val directories_removed : unit -> unit
+(** Tell this module that store directories, or files inside them, were
+    removed or renamed by code outside it. Called after the removal, on every
+    way out of it: a removal that failed half-way has changed files too.
+
+    Every fact kept in memory ({!read_fact}) is forgotten, for every store,
+    and so is every directory name the file system gave; the next read of a
+    fact reads the files and the next write asks the file system again. Which
+    directories were removed is not looked at. A removal that is not followed
+    by this call leaves the facts of the removed store as they were. *)
 
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
@@ -315,6 +326,38 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     shrinkage, same-size metadata changes and storage errors remain explicit
     failures. Only files visited by a successful read remain in the view;
     no full retained row count is taken. *)
+
+(** {1 Facts kept in memory}
+
+    A fact is one value read from a store's files that this module also keeps
+    in memory, so that a reader does not open a file for it (RFC "Keeper row
+    facts are kept in memory by their writers"). The files stay the
+    authority: while nothing is changing them, the kept value is the value
+    the fact's strict read gives.
+
+    The functions of this module that change a store's files keep the facts
+    right themselves: {!append}, {!append_notifying_commit} and
+    {!append_rotating} move a kept value over the row they wrote, and
+    {!prune}, {!prune_listed_stores_bound}, an append's own byte-budget prune
+    and any append that fails forget the store's facts. A change made any
+    other way is told with {!directories_removed}. *)
+
+type 'a fact
+
+val last_row : recent_entry option fact
+(** The store's newest physical row, as [read_recent_result t 1] reads it:
+    [None] for a store without rows, and a row that is not JSON is
+    {!Malformed_json}. *)
+
+val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
+(** The fact's value for the store. When the store keeps it, no file is read
+    and no system call is made for a directory that exists
+    ({!Fact_cell.Held}). Otherwise the fact's strict read runs, in one pool job
+    for a caller outside the pool, and the store keeps the value unless its
+    files changed meanwhile. A failed read keeps nothing.
+
+    A store whose directory does not exist yet is asked about each time, as
+    for a write. *)
 
 val month_dir_paths_newest_first_result : t -> (string list, read_error) result
 (** The store's month directories, newest first, listed and validated as
@@ -626,4 +669,17 @@ module For_testing : sig
 
   val in_registry : Store.location -> bool
   (** Whether the registry holds an entry for the store. *)
+
+  val after_row :
+    'a fact ->
+    value:'a ->
+    newest:(string * string) option ->
+    row:recent_entry ->
+    written:string * string ->
+    ('a * (string * string) option) option
+  (** What an append makes of a kept value. [value] saw its newest row in the
+      day file [newest], and [row] went to the end of the day file [written];
+      a day file is its month directory and its file name. The result is the
+      value after the row with the newest day file it saw, or [None] when the
+      append forgets the fact instead. It reads no file and no clock. *)
 end

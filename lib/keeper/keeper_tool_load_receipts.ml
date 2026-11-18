@@ -225,10 +225,11 @@ let store context snapshot =
    open instead, a load stayed on every request until the Task or surface
    changed.
 
-   The counter is the absolute Keeper-lane turn ([total_turns + 1] of the
-   admitted meta), which both lanes advance once per recorded turn, whether
-   it succeeded or failed. A turn resumed before its record was written binds
-   as the same turn, so its own loads stay. A load from a later turn than the
+   The counter is the absolute Keeper-lane turn number the Keeper Owner
+   allocated at turn entry ([Keeper_turn_allocation]); every turn of either
+   lane takes a new one, whether it succeeds, fails or never commits. A
+   provider attempt resumed inside the same turn binds under the same number,
+   so its own loads stay. A load from a later turn than the
    one being bound belongs to no turn of this timeline. *)
 type standing =
   | Loaded_this_turn

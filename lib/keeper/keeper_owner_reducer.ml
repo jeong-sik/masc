@@ -72,6 +72,7 @@ type meta_command =
   | Update_profile of profile_update
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Commit_turn_runtime of turn_runtime_delta
+  | Allocate_turn of { updated_at : string }
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
       ; updated_at : string
@@ -428,6 +429,12 @@ let apply_existing (state : state) meta command =
     (match apply_turn_runtime_delta meta delta with
      | Error _ as error -> error
      | Ok meta -> Ok (with_meta state meta))
+  | Allocate_turn { updated_at } ->
+    let* last_turn_id = checked_add "last_turn_id" meta.runtime.last_turn_id 1 in
+    Ok
+      (with_meta
+         state
+         { meta with runtime = { meta.runtime with last_turn_id }; updated_at })
   | Set_current_task { task_id; updated_at } ->
     Ok (with_meta state { meta with current_task_id = task_id; updated_at })
 ;;
@@ -445,7 +452,8 @@ let apply_meta (state : state) command =
            { expected = state.keeper_name; actual = meta.name })
     | None, Delete_if_snapshot _ -> Ok (publish_transition state No_persistence)
     | (None, Pause _) | (None, Resume _) | (None, Reset_latch _) | (None, Retain_shutdown_latch _)
-    | (None, Update_profile _) | (None, Commit_turn_runtime _) | (None, Set_current_task _) -> Error Meta_missing
+    | (None, Update_profile _) | (None, Commit_turn_runtime _) | (None, Allocate_turn _)
+    | (None, Set_current_task _) -> Error Meta_missing
     | Some meta, command -> apply_existing state meta command
 ;;
 

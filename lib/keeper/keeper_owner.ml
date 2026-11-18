@@ -2263,7 +2263,8 @@ let start
                       Atomic.get t.turn_in_flight with
                     | Keeper_owner_reducer.Create meta,None,None -> Ok meta
                     | (Create _ | Pause _ | Resume _ | Reset_latch _ | Retain_shutdown_latch _
-                      | Update_profile _ | Delete_if_snapshot _ | Commit_turn_runtime _ | Set_current_task _),
+                      | Update_profile _ | Delete_if_snapshot _ | Commit_turn_runtime _ | Allocate_turn _
+                      | Set_current_task _),
                         (Some _ | None),(Some _ | None) ->
                       Error (Operation_rejected (Chat_operation_store.Invalid_input
                         "initial input creation requires an empty idle Owner")) in
@@ -2282,7 +2283,7 @@ let start
             | Keeper_owner_reducer.Create _, None ->
               reopen_operation_store_if_missing t
             | (Keeper_owner_reducer.Create _, Some _)
-            | ((Keeper_owner_reducer.Pause _ | (Keeper_owner_reducer.Resume _ | (Keeper_owner_reducer.Reset_latch _ | (Keeper_owner_reducer.Retain_shutdown_latch _ | (Keeper_owner_reducer.Update_profile _ | (Keeper_owner_reducer.Delete_if_snapshot _ | (Keeper_owner_reducer.Commit_turn_runtime _ | Keeper_owner_reducer.Set_current_task _))))))), _) -> Ok ()
+            | ((Keeper_owner_reducer.Pause _ | (Keeper_owner_reducer.Resume _ | (Keeper_owner_reducer.Reset_latch _ | (Keeper_owner_reducer.Retain_shutdown_latch _ | (Keeper_owner_reducer.Update_profile _ | (Keeper_owner_reducer.Delete_if_snapshot _ | (Keeper_owner_reducer.Commit_turn_runtime _ | (Keeper_owner_reducer.Allocate_turn _ | Keeper_owner_reducer.Set_current_task _)))))))), _) -> Ok ()
           in
           (match operation_store_ready with
            | Error error ->

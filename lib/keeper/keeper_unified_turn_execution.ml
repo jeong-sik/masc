@@ -242,6 +242,7 @@ let run (ctx : ctx)
                  ~preview
                  ~event_scope
                  ~observation_token
+                 ~keeper_turn_id
                  ~config
                  ~meta:run_meta
                  ~publication_recovery

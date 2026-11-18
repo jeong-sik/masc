@@ -633,6 +633,7 @@ let handle
     KUM.append_decision_record
       ~config
       ~meta
+      ~keeper_turn_id
       ~turn_ctx_cell
       ~observation
       ~latency_ms

@@ -385,8 +385,8 @@ and turn_observation = {
   observation_token : Keeper_turn_observation_token.t;
       (** Process-local ownership; not a persisted operation or display ID. *)
   turn_id : int;
-      (** Per-keeper turn counter at turn start (matches
-          [meta.runtime.usage.total_turns] + 1). *)
+      (** The number this turn took from the Keeper Owner
+          ([meta.runtime.last_turn_id] after its allocation). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
   last_progress_at : float;

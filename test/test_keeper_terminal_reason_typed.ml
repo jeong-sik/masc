@@ -1509,8 +1509,13 @@ max-concurrent = 1
       in
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in
+      (* The Owner allocated a turn past [meta]'s snapshot and the turn
+         context cell is still empty, as for a turn that fails before tool
+         hooks run (#52839). *)
+      let allocated_turn_id = meta.runtime.last_turn_id + 1 in
       Masc.Keeper_unified_metrics_decision.append_decision_record
-        ~config ~meta ~observation ~latency_ms:3 ~outcome:Keeper_decision_outcome.Success
+        ~config ~meta ~keeper_turn_id:allocated_turn_id ~observation ~latency_ms:3
+        ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
         ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
         ~degraded_retry_applied:settlement.degraded_retry_applied
@@ -1526,6 +1531,8 @@ max-concurrent = 1
         (Yojson.Safe.Util.member "tools_used" row =
          `List [ `String "tool_read_file"; `String "tool_read_file";
                  `String "tool_write_file" ]);
+      check "decision row names the allocated turn, not meta's previous turn"
+        (Yojson.Safe.Util.member "turn_id" row = `Int allocated_turn_id);
       check "decision carries the settlement's applied retry unchanged"
         (Yojson.Safe.Util.member "degraded_retry_applied" row
          = Masc.Keeper_execution_receipt.degraded_retry_json
@@ -3221,7 +3228,7 @@ max-concurrent = 1
   let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   let append_and_read ~outcome ~result ?executed_runtime_id () =
     Masc.Keeper_unified_metrics_decision.append_decision_record
-      ~config ~meta ~observation:world ~latency_ms:3 ~outcome
+      ~config ~meta ~keeper_turn_id:1 ~observation:world ~latency_ms:3 ~outcome
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
       ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
       ~degraded_retry_applied:None ~degraded_retry_deferred:None

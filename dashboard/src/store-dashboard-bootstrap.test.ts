@@ -74,6 +74,24 @@ describe('refreshDashboard bootstrap', () => {
     expect(store.goalIdentityObservation.value?.observation.complete).toBe(false)
   })
 
+  it('reads the measure and procedure a planning row carries, and no measure from the old fields', async () => {
+    const store = await import('./store')
+    const rollup = { active_count: 2, verifying_count: 0, awaiting_confirmation_count: 0,
+      done_count: 0, dropped_count: 0, paused_count: 0, blocked_count: 0 }
+    store.hydratePlanningSnapshot({ generated_at: 'now', rollup, goals: [
+      { id: 'goal-new', title: 'New shape', phase: 'executing', created_at: 'now', updated_at: 'now',
+        measure: { kind: 'quantity', unit: 'ms', direction: 'at_most', target: 400 },
+        procedure: 'Read p99 from the trace summary.' },
+      { id: 'goal-old', title: 'Old shape', phase: 'executing', created_at: 'now', updated_at: 'now',
+        metric: 'passed cases', target_value: '10' },
+    ] })
+    const [current, old] = store.goals.value
+    expect(current?.measure).toEqual({ kind: 'quantity', unit: 'ms', direction: 'at_most', target: 400 })
+    expect(current?.procedure).toBe('Read p99 from the trace summary.')
+    expect(old?.measure).toBeNull()
+    expect(old?.procedure).toBeNull()
+  })
+
   function pending<T>() {
     let resolve!: (value: T) => void
     let reject!: (error: unknown) => void

@@ -36,6 +36,7 @@ import { VerifyQueue } from './verification/verify-queue'
 import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
+import { goalMeasureText, MEASURE_UNREADABLE } from '../api/goal-measure'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification' | 'artifacts'
 
@@ -314,8 +315,8 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
     id: node.id,
     title: node.title,
     verification: node.verification,
-    metric: node.metric,
-    target_value: node.target_value,
+    measure: node.measure,
+    procedure: node.procedure,
     due_date: node.due_date,
     priority: node.priority,
     phase: node.phase,
@@ -758,13 +759,13 @@ function GoalCard({
         </span>
         <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
         <${GoalProofStatus} proof=${proof} />
-        ${goal.metric ? html`
+        ${goal.measure !== undefined ? html`
           <span
             class="wk-metric mono"
-            data-goal-metric
-            title=${`목표 지표${goal.target_value ? ` · 목표치 ${goal.target_value}` : ''}`}
+            data-goal-measure
+            title=${goal.procedure ?? ''}
           >
-            ${goal.metric}${goal.target_value ? ` · ${goal.target_value}` : ''}
+            ${goal.measure ? goalMeasureText(goal.measure) : MEASURE_UNREADABLE}
           </span>
         ` : null}
       </div>

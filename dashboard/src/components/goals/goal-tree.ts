@@ -75,6 +75,7 @@ import { DECK_CHIP, DECK_LABEL } from './deck-classes'
 import { GoalStoreUnavailableAlert } from './goal-store-unavailable'
 import { errorToString } from '../../lib/format-string'
 import { isUnambiguousGoalId } from '../../lib/goal-identity'
+import { goalMeasureText, MEASURE_UNREADABLE } from '../../api/goal-measure'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
@@ -1303,14 +1304,13 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             <${GoalTaskRelationStrip} node=${node} compact />
-            ${node.metric ? html`
-              <span
-                class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
-                title=${`metric · ${node.metric}${node.target_value ? ` → ${node.target_value}` : ''}`}
-              >
-                <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
-              </span>
-            ` : null}
+            <span
+              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 font-mono text-3xs ${node.measure ? 'text-text-strong' : 'text-[var(--status-warn)]'}"
+              data-goal-measure
+              title=${node.procedure ?? ''}
+            >
+              <span aria-hidden="true">↗ </span>${node.measure ? goalMeasureText(node.measure) : MEASURE_UNREADABLE}
+            </span>
             <${GoalMeasurementBadge} node=${node} />
             <${GoalCriterionReviewStatus} review=${node.criterion_review} />
             ${(() => {
@@ -1401,7 +1401,7 @@ function GoalMeasurementDetail({ node }: { node: GoalTreeNode }) {
           </div>
           <div>
             <div class="text-3xs text-text-muted">선언된 목표값</div>
-            <div class="mt-1 break-words text-sm text-text-body">${node.target_value ?? '설정되지 않음'}</div>
+            <div class="mt-1 break-words text-sm text-text-body">${node.measure ? goalMeasureText(node.measure) : MEASURE_UNREADABLE}</div>
           </div>
         </div>
         <div class="mt-3 break-words text-xs text-text-body" data-testid="goal-measurement-evidence">
@@ -1791,20 +1791,19 @@ function GoalDetailPanel({
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
-            ${selectedNode.metric ? html`
-              <span
-                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
-                title="이 목표가 추적하는 metric"
-              >
-                <span class="text-text-muted">metric</span>
-                <span class="ml-1.5">${selectedNode.metric}</span>
-                ${selectedNode.target_value ? html`
-                  <span class="text-text-muted">·</span>
-                  <span class="ml-1 text-text-strong">${selectedNode.target_value}</span>
-                ` : null}
-              </span>
-            ` : null}
+            <span
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
+              title="이 목표의 성공 조건"
+            >
+              <span class="text-text-muted">목표</span>
+              <span class="ml-1.5 ${selectedNode.measure ? 'text-text-strong' : 'text-[var(--status-warn)]'}">${selectedNode.measure ? goalMeasureText(selectedNode.measure) : MEASURE_UNREADABLE}</span>
+            </span>
           </div>
+          ${selectedNode.procedure ? html`
+            <p class="mt-2 whitespace-pre-wrap break-words text-xs text-text-body" data-goal-procedure>
+              <span class="text-text-muted">측정 방법 · </span>${selectedNode.procedure}
+            </p>
+          ` : null}
         </div>
         <div class="flex items-center gap-2">
           <${ActionButton}

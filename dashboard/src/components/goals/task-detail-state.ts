@@ -10,6 +10,7 @@ import { findKeeper } from '../../lib/keeper-utils'
 import { statusLabel } from '../../lib/status-label'
 import { goalById } from './goal-helpers'
 import type { Goal, Task } from '../../types'
+import { goalMeasureText } from '../../api/goal-measure'
 
 // -- Activity filter (owned here, consumed by task-activity-list) ---
 
@@ -247,7 +248,7 @@ export function filterTaskEvents(
  * Pure filter for goal relation rows (the assignee keeper's active goals).
  *
  * - `query` is case-insensitive substring match across the goal's `id`,
- *   resolved `title`, `status`, and `metric` (trimmed). Unresolved goal
+ *   resolved `title`, `status`, measure text and procedure (trimmed). Unresolved goal
  *   ids still match on the raw id so operators can search by identifier
  *   even when the goal store has not loaded that entry yet.
  * - Empty/whitespace-only query returns the input reference unchanged
@@ -269,7 +270,8 @@ export function filterGoalRelations(
     if (!goal) return false
     if (goal.title.toLowerCase().includes(needle)) return true
     if (goal.phase.toLowerCase().includes(needle)) return true
-    if (goal.metric && goal.metric.toLowerCase().includes(needle)) return true
+    if (goal.measure && goalMeasureText(goal.measure).toLowerCase().includes(needle)) return true
+    if (goal.procedure && goal.procedure.toLowerCase().includes(needle)) return true
     return false
   })
 }

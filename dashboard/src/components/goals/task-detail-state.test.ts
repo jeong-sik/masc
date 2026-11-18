@@ -108,8 +108,8 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
   return {
     id: 'g-1',
     title: 'default title',
-    metric: null,
-    target_value: null,
+    measure: null,
+    procedure: null,
     due_date: null,
     priority: 3,
     phase: 'executing',
@@ -123,9 +123,9 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
 
 describe('filterGoalRelations', () => {
   const store: Record<string, Goal> = {
-    'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', metric: 'error_rate' }),
-    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift runtime coverage', metric: 'coverage_pct', phase: 'paused' }),
-    'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', metric: null }),
+    'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', procedure: 'Read error_rate from the tool log.' }),
+    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift runtime coverage', measure: { kind: 'quantity', unit: 'coverage_pct', direction: 'at_least', target: 80 }, phase: 'paused' }),
+    'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', measure: null }),
   }
   const ids: string[] = ['g-alpha', 'g-beta', 'g-gamma', 'g-orphan']
   const resolve = (id: string): Goal | undefined => store[id]
@@ -152,9 +152,9 @@ describe('filterGoalRelations', () => {
     expect(out).toEqual(['g-beta'])
   })
 
-  it('matches resolved goal metric substring', () => {
-    const out = filterGoalRelations(ids, 'coverage', resolve)
-    expect(out).toEqual(['g-beta'])
+  it('matches resolved goal measure and procedure text', () => {
+    expect(filterGoalRelations(ids, 'coverage', resolve)).toEqual(['g-beta'])
+    expect(filterGoalRelations(ids, 'error_rate from', resolve)).toEqual(['g-alpha'])
   })
 
   it('matches raw id even when the goal is unresolved', () => {

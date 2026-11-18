@@ -1215,7 +1215,7 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 
 let memo_keeper_turns = json_memo ()
 
-(** Load which keepers are mid-turn right now (the "answering now" badge). *)
+(** Load which keepers are mid-turn right now, with their waiting rows. *)
 let load_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
     (Tui_decode.keeper_turns_projection, string) result =
   let ( let* ) = Result.bind in

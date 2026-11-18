@@ -411,12 +411,14 @@ class WaitingEventTest(unittest.TestCase):
                     lambda: (
                         server.observer_ready.is_set()
                         and server.response_count("setup", "/health") >= 2
-                        and server.response_count("setup", TURNS_PATH) >= 1
                         and server.response_count("setup", SCHEDULE_PATH) >= 1
                     ),
-                    "observer and initial turns read were not ready",
+                    "observer and initial schedule read were not ready",
                 )
                 drain_for(1.0)
+                # Overview draws neither the turns nor the waiting list, so the
+                # owed reads wait until the Keepers list opens.
+                self.assertEqual(server.count("setup", TURNS_PATH), 0)
                 os.write(master, b"i")
                 wait_until(
                     lambda: b"old-waiting" in output,

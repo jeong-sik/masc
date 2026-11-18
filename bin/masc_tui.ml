@@ -9047,18 +9047,55 @@ let owe_held_calls_read state =
 let owe_tool_modes_read state =
   state.tool_modes_owed <- Masc_tui_owed_read.changed state.tool_modes_owed
 
-(* The turns read when the server says a Keeper's turns changed, when a
+(* The turns are owed when the server says a Keeper's turns changed, when a
    preview changed that a surface on screen draws, on a revalidation or a
    resumed authority, and after any failed turns read (RFC-0481 §3.4, §3.5).
-   The answering badge is drawn on every surface, so a turns change is owed
-   whatever is on screen. *)
+   The debt is read only while something uses the answer
+   ({!keeper_turns_in_use}); until then it stays owed. *)
 let owe_keeper_turns_read state =
   state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed
 
+(* Who uses the turns answer: the surfaces that draw a running turn (the
+   Keepers list rows, a Keeper's chat, Metrics, the answering overlay), and
+   chat input held for a Keeper's control token, which only a turns answer
+   brings. *)
+let keeper_turns_in_use state =
+  state.answering_open
+  || not (Masc_tui_keeper_chat_queue.is_empty state.msg_queued)
+  || state.keeper_interactive_waiting <> []
+  || state.keeper_chat_control_pending <> []
+  || (match state.view with
+      | Keepers (Keeper_list | Keeper_message) | Metrics -> true
+      | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+      | Overview | Approvals | Acting | Memory | Lanes | Clients | Board | Planning
+      | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+      | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+          false)
+
+(* The waiting list is drawn by the Keepers list only: its rows and the
+   Activity pane beside them. *)
+let keeper_waiting_in_use state =
+  match state.view with
+  | Keepers Keeper_list -> true
+  | Keepers (Keeper_message | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs ->
+      false
+
+(* A waiting change marks its Keepers unverified and owes the list a read,
+   which {!launch_owed_keeper_waiting} starts while the list is in use. *)
+let owe_keeper_waiting_read ?change state =
+  Option.iter (note_keeper_waiting_change state) change;
+  state.keeper_waiting_owed <- Masc_tui_owed_read.changed state.keeper_waiting_owed
+
 (* Where a Keeper's running-turn preview is drawn: its own chat pane's
-   activity line, and the Keepers list's last activity. A preview change is
-   read only while one of them is on screen (RFC-0481 §3.5). *)
+   activity line, the Keepers list's last activity, and the answering
+   overlay. A preview change is read only while one of them is on screen
+   (RFC-0481 §3.5). *)
 let preview_on_screen state ~keeper_name =
+  state.answering_open
+  ||
   match state.view with
   | Keepers Keeper_list -> true
   | Keepers Keeper_message ->
@@ -10576,8 +10613,9 @@ let launch_owed_keeper_turns state ~mailbox =
     else Masc_tui_owed_read.abandoned state.keeper_turns_owed
   in
   state.keeper_turns_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
-    launch_keeper_turns_load state ~mailbox
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading
+     && keeper_turns_in_use state
+  then launch_keeper_turns_load state ~mailbox
 
 (* Runs on every loop iteration. A waiting read that failed is read again
    after a growing wait; one in flight is let finish first. *)
@@ -10588,7 +10626,8 @@ let launch_owed_keeper_waiting state ~mailbox =
     else Masc_tui_owed_read.abandoned state.keeper_waiting_owed
   in
   state.keeper_waiting_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading
+     && keeper_waiting_in_use state then
     launch_keeper_waiting_load state ~mailbox
 
 (* Runs on every loop iteration. The modes are not read while an operator's
@@ -25636,11 +25675,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (* The closed stream carried readings, so the replay cannot vouch for
              the interval: read the waiting inventory and the agenda once. *)
           if revalidate_owed then begin
-            launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+            owe_keeper_waiting_read ~change:Waiting_all state;
             owe_agenda_revalidation state
           end
         end else begin
-          launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+          owe_keeper_waiting_read ~change:Waiting_all state;
           owe_agenda_revalidation state;
           launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
           revalidate_visible_fusion state ~mailbox;
@@ -26040,8 +26079,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] then
         note_keeper_waiting_change state (Waiting_keepers waiting_keepers);
       if waiting_unattributed then note_keeper_waiting_change state Waiting_unattributed;
-      if waiting_keepers <> [] || waiting_unattributed then
-        launch_keeper_waiting_load state ~mailbox;
+      if waiting_keepers <> [] || waiting_unattributed then owe_keeper_waiting_read state;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if !turn_state_keepers <> [] && not !observer_source_loss_seen then
          owe_keeper_story_turns_read_for state ~keepers:!turn_state_keepers);
@@ -44859,8 +44897,11 @@ Use relative paths for resources already held in the package. -->
                 Masc_tui_types.detail_read_waiting state
                   ~tab:state.detail_tab ~keeper:keeper.k_name)
       in
+      (* Turns are not read while nothing uses them, so the rows kept from the
+         last read may still say running; they drive no motion then. *)
       let anything_running =
-        Masc_tui_answering.anything_running ~turns:state.keeper_turns
+        Masc_tui_answering.anything_running
+          ~turns:(if keeper_turns_in_use state then state.keeper_turns else [])
           ~live_transcript:(Option.is_some state.msg_live)
           ~lanes:state.standalone_lanes ~awaiting_detail_read
       in

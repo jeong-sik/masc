@@ -9829,7 +9829,7 @@ type state = {
   mutable answering_cursor: int;
   (* Keepers whose turn finished within the glow TTL, newest first, with
      the poll time that saw them finish. Fed by comparing consecutive
-     keeper_turns polls; read by the footer glow and the overlay's ✓ rows. *)
+     keeper_turns reads; read by the answering overlay's ✓ rows. *)
   mutable keeper_turn_finishes: (string * float) list;
   mutable keeper_turns_observed_at: float option;
   (* [/context] opens the last observed provider-input inspector. It is an
@@ -10725,9 +10725,9 @@ type state = {
   mutable keeper_tool_approvals_observed: bool;
   mutable keeper_tool_approvals_read: Snapshot_read.t;
   (* Which keepers are mid-turn right now, from GET /api/v1/keepers/turns.
-     Rides the same tick as the approvals above, for the same reason: the
-     "answering now" badge is drawn from every surface, so it cannot wait
-     for the operator to open the keeper list. *)
+     Read only while something uses it: the Keepers list rows, a Keeper's
+     chat, Metrics, the answering overlay, or chat input held for a control
+     token. *)
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   (* Canonical waiting rows accepted by the same turns response. A missing
      field stays absent here; neither it nor a failed refresh means idle. *)
@@ -10740,8 +10740,8 @@ type state = {
   mutable keeper_turns_error: request_failure option;
   mutable keeper_turns_inflight: bool;
   (* The turns read owed after a server signal, a revalidation, a resumed
-     authority or a failed read (RFC-0481 §3.4). The answering badge is drawn
-     on every surface, so it is owed whatever is on screen. *)
+     authority or a failed read (RFC-0481 §3.4). It is read once something
+     uses the turns; until then it stays owed. *)
   mutable keeper_turns_owed: Masc_tui_owed_read.t;
   (* Keepers whose running-turn preview changed while no surface drew it,
      since the last turns read began. Opening a surface that draws one owes

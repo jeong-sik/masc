@@ -245,15 +245,17 @@ let test_lru_evict_skips_active_writer () =
     Thread.create
       (fun () ->
          try
-           Fs_compat.with_cached_writer_for_testing active_path (fun oc ->
-             output_string oc "{\"phase\":\"before\"}\n";
-             flush oc;
+           Fs_compat.with_cached_writer_for_testing active_path (fun fd ->
+             let write line =
+               let written = Unix.write_substring fd line 0 (String.length line) in
+               if written <> String.length line then failwith "short write"
+             in
+             write "{\"phase\":\"before\"}\n";
              Atomic.set ready true;
              while not (Atomic.get release) do
                Thread.yield ()
              done;
-             output_string oc "{\"phase\":\"after\"}\n";
-             flush oc)
+             write "{\"phase\":\"after\"}\n")
          with exn -> Atomic.set worker_error (Some (Printexc.to_string exn)))
       ()
   in
@@ -298,6 +300,105 @@ let test_replaced_path_reopens () =
   check (list string) "retired inode receives no new record" [ "1" ] (read_lines old)
 ;;
 
+(* #52980. A write that fails part-way leaves the file as it was, and nothing
+   of it reaches the file later: not with the next append and not when the
+   cached descriptor is closed. Before, the cached [out_channel] kept the
+   unwritten bytes in its buffer and wrote them on the next flush or close. *)
+
+let read_all path = In_channel.with_open_bin path In_channel.input_all
+
+(* The real write, limited to [budget] more bytes in total. Once they are
+   used up every write fails the way a full disk does. *)
+let io_failing_after budget =
+  let left = ref budget in
+  { Fs_compat_internal.Fd_append_whole.unix_io with
+    write =
+      (fun fd content offset length ->
+        if !left = 0
+        then raise (Unix.Unix_error (Unix.ENOSPC, "write", ""))
+        else (
+          let written =
+            Unix.single_write_substring fd content offset (min length !left)
+          in
+          left := !left - written;
+          written))
+  }
+;;
+
+let failing_append ~budget path content =
+  match
+    Fs_compat.append_file_unix_with_io_for_testing
+      ~io:(io_failing_after budget)
+      path
+      content
+  with
+  | () -> fail "the append was expected to fail"
+  | exception Sys_error _ -> ()
+;;
+
+let row_0 = "{\"row\":0}\n"
+let row_a = "{\"row\":\"A\"}\n"
+let row_a2 = "{\"row\":\"A2\"}\n"
+let row_b = "{\"row\":\"B\"}\n"
+
+let failed_append_file name =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let path = Filename.concat (tmpdir "fd_cache_failed_append") name in
+  Fs_compat.append_file path row_0;
+  path
+;;
+
+let test_failed_append_without_bytes_leaves_nothing () =
+  let path = failed_append_file "no-bytes.jsonl" in
+  failing_append ~budget:0 path row_a;
+  check string "file after the failed append" row_0 (read_all path);
+  Fs_compat.append_file path row_b;
+  check string "the next append adds its own row only" (row_0 ^ row_b) (read_all path)
+;;
+
+let test_failed_append_with_bytes_is_rolled_back () =
+  let path = failed_append_file "some-bytes.jsonl" in
+  failing_append ~budget:4 path row_a;
+  check string "the four written bytes are removed again" row_0 (read_all path);
+  Fs_compat.append_file path row_b;
+  check string "the next append starts where the file ended" (row_0 ^ row_b) (read_all path)
+;;
+
+let test_failed_append_is_not_written_on_close () =
+  let path = failed_append_file "close.jsonl" in
+  failing_append ~budget:0 path row_a;
+  Fs_compat.reset_fd_cache_for_testing ();
+  check string "closing the cached descriptor writes nothing" row_0 (read_all path)
+;;
+
+let test_repeated_failed_appends_do_not_pile_up () =
+  let path = failed_append_file "repeated.jsonl" in
+  failing_append ~budget:0 path row_a;
+  failing_append ~budget:0 path row_a2;
+  check string "file after two failed appends" row_0 (read_all path);
+  Fs_compat.append_file path row_b;
+  check string "only the append that succeeded is in the file" (row_0 ^ row_b) (read_all path)
+;;
+
+(* When the rollback itself fails the bytes stay, and the error says so. *)
+let test_failed_rollback_is_reported () =
+  let path = failed_append_file "rollback-fails.jsonl" in
+  let io =
+    { (io_failing_after 4) with
+      truncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
+    }
+  in
+  (match Fs_compat.append_file_unix_with_io_for_testing ~io path row_a with
+   | () -> fail "the append was expected to fail"
+   | exception Sys_error message ->
+     check
+       bool
+       "the error names the path"
+       true
+       (String.starts_with ~prefix:(Fs_compat.canonical_append_mutex_path_for_testing path) message));
+  check string "the partial bytes are still there" (row_0 ^ String.sub row_a 0 4) (read_all path)
+;;
+
 let () =
   Alcotest.run
     "fs_compat_fd_cache"
@@ -328,6 +429,28 @@ let () =
             "LRU eviction does not close active writer"
             `Quick
             test_lru_evict_skips_active_writer
+        ] )
+    ; ( "failed append"
+      , [ test_case
+            "a write that fails before any byte leaves nothing for later"
+            `Quick
+            test_failed_append_without_bytes_leaves_nothing
+        ; test_case
+            "a write that fails part-way is rolled back"
+            `Quick
+            test_failed_append_with_bytes_is_rolled_back
+        ; test_case
+            "closing the cached descriptor writes nothing"
+            `Quick
+            test_failed_append_is_not_written_on_close
+        ; test_case
+            "repeated failed appends do not pile up"
+            `Quick
+            test_repeated_failed_appends_do_not_pile_up
+        ; test_case
+            "a failed rollback is reported and the bytes stay"
+            `Quick
+            test_failed_rollback_is_reported
         ] )
     ]
 ;;

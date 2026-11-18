@@ -52,7 +52,18 @@ type resources = {
     An Apple container declaration needs whole vCPUs, an exact number of MiB of
     at least 200 MiB (the least Apple [container] creates), and no [pids]. *)
 val check_resources : ?runtime:runtime -> resources -> (unit, string) result
-type container = { runtime : runtime; image : string; resources : resources }
+type image_label = { label_key : string; label_value : string }
+type container = {
+  runtime : runtime;
+  image : string;
+  resources : resources;
+  image_label : image_label option;
+      (** A label the image must carry for a worker to start from it. A
+          manifest sets [None]. A declaration that names a package this server
+          carries sets this server's digest of that package's image inputs
+          ({!Lane_addon_config}), so its worker starts only from the image this
+          server's [masc exact-addon-setup] builds. *)
+}
 type execution = Container of container | Host_process of { max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling

@@ -187,6 +187,17 @@ let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
              |> Option.to_result ~none:Lane_addon_manifest.outside_workspace) in
   let* package = Lane_addon_manifest.load ~path:manifest_path
     |> Result.map_error Lane_addon_manifest.error_to_string in
+  (* RFC server-carries-its-exact-worker-packages 3.3: the worker of a carried
+     package starts only from an image built from this server's own copy of
+     the image inputs. *)
+  let* package = match package_source, package.execution with
+    | Manifest_path, (Lane_addon_types.Container _ | Lane_addon_types.Host_process _) -> Ok package
+    | Carried carried, Lane_addon_types.Container container ->
+        let image_label : Lane_addon_types.image_label =
+          { label_key = Lane_addon_carried.image_label; label_value = Lane_addon_carried.image_digest carried } in
+        Ok { package with execution = Lane_addon_types.Container { container with image_label = Some image_label } }
+    | Carried carried, Lane_addon_types.Host_process _ ->
+        Error (Printf.sprintf "package %s does not run in a container" (Lane_addon_carried.name carried)) in
   let* package = match List.assoc_opt "tool_hooks" fields with
     | None -> Ok package
     | Some value ->

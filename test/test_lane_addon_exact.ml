@@ -56,7 +56,8 @@ let package : Types.package =
   ; host_request_listing = Types.One_answer
   ; binding_schema = None; presentation = Masc.Lane_addon_presentation.empty
   ; execution = Types.Container { runtime = Types.Docker; image = "unused"
-      ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } }
+      ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 }
+      ; image_label = None } }
 
 let declaration_id = "quiz"
 

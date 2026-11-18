@@ -1021,7 +1021,8 @@ let host_answer ~base ~(declared:Lane_addon_types.exact_output) request answer =
     ; host_request_listing = Lane_addon_types.One_answer
     ; binding_schema = None; presentation = Lane_addon_presentation.empty
     ; execution = Lane_addon_types.Container { runtime = Lane_addon_types.Docker; image = "unused"
-        ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } } in
+        ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 }
+        ; image_label = None } } in
   let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
     Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
         before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in

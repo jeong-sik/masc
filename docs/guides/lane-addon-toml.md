@@ -68,6 +68,12 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 - 파일이 빠졌거나, 더 있거나, 바이트가 다르면 그 파일 이름을 적어 거절한다.
 - 폴더 안의 심볼릭 링크도 다른 파일로 보고 거절한다.
 - 서버가 모르는 이름이면 서버가 가진 이름을 나열해 거절한다.
+- worker를 띄울 때 manifest의 이미지 이름이 가리키는 이미지 ID를 풀고, 그 ID의 label
+  `masc.lane.carried.digest`가 이 서버의 digest와 같은지 본다. 다르거나 없으면 붙지 않는다.
+  다른 masc 판의 `masc exact-addon-setup`이 같은 태그로 이미지를 다시 만든 경우다.
+  이 서버의 `masc exact-addon-setup`을 다시 돌리면 맞는 이미지가 생긴다.
+- 이 확인은 `package` 선언에만 있다. `manifest_path` 선언은 label을 보지 않고, revision도 그대로다.
+  같은 폴더라도 `manifest_path`를 `package`로 바꾸면 revision이 바뀌어 worker를 새로 띄운다.
 
 `package` 키를 모르는 서버 빌드는 그 선언을 거절한다. 그런 서버로 되돌릴 때는 선언의 `package`를
 `manifest_path`로 먼저 바꾼다.

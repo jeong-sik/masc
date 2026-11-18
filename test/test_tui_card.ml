@@ -834,6 +834,90 @@ let test_a_squashing_grid_asks_each_body_once () =
    | None -> fail "the grid drew nothing");
   check int "one ask per card" 3 !seen
 
+(* Cards squashed on the way open again from the last one squashed (RFC
+   section 2). The bottom card squashes first, then the middle one, then the
+   top one, which is too tall on its own. The top card opens first and does
+   not fit, the middle card opens and fits, and then the bottom card no longer
+   fits. Opening the first squashed card first would keep the bottom card
+   full and the middle one squashed. *)
+let test_cards_open_again_from_the_last_squashed () =
+  check plan "the middle card opens, the bottom card stays squashed"
+    (Some [ [ squashed; full; squashed ] ])
+    (Card.heights ~row_gap:0 ~max_rows:7 [ [ may 10; may 4; may 4 ] ])
+
+(* Whatever the heights squash, the grid is the rectangle they promise. It
+   draws exactly when {!Card.heights} finds a fit, its rows are those of the
+   tallest column at the chosen heights, and every row is the grid's width. A
+   shorter column ends on the same row whether its lowest card is full,
+   squashed or the column has no full card at all. *)
+let test_a_squashing_grid_keeps_its_rectangle () =
+  let inner_width = 101 and gap = 2 in
+  let kinds =
+    [ (1, Card.No_selected_row)
+    ; (4, Card.No_selected_row)
+    ; (1, Card.Holds_selected_row)
+    ; (4, Card.Holds_selected_row)
+    ]
+  in
+  let rec stacks size =
+    if size = 0 then [ [] ]
+    else
+      []
+      :: List.concat_map
+           (fun kind -> List.map (fun rest -> kind :: rest) (stacks (size - 1)))
+           kinds
+  in
+  let lefts = List.sort_uniq compare (stacks 3) in
+  let rights = List.sort_uniq compare (stacks 2) in
+  let card_of (rows, selection) =
+    { Card.edge = edge ~count:(Card.Whole rows) "Tasks"
+    ; body = (fun ~cells:_ -> rows_of rows)
+    ; selection
+    }
+  in
+  let natural (rows, selection) =
+    ( rows + 2
+    , match selection with
+      | Card.No_selected_row -> Card.May_squash
+      | Card.Holds_selected_row -> Card.Stays_full )
+  in
+  List.iter
+    (fun row_gap ->
+       List.iter
+         (fun left ->
+            List.iter
+              (fun right ->
+                 let columns = [ left; right ] in
+                 let cards = List.map (List.map card_of) columns in
+                 let naturals = List.map (List.map natural) columns in
+                 for max_rows = 0 to 20 do
+                   let at what = Printf.sprintf "%s, gap %d at %d rows" what row_gap max_rows in
+                   match
+                     ( Card.heights ~row_gap ~max_rows naturals
+                     , Card.grid ~ko:true ~style:styled ~inner_width ~gap ~row_gap ~max_rows
+                         cards )
+                   with
+                   | None, None -> ()
+                   | None, Some _ -> fail (at "drew a grid the heights do not fit")
+                   | Some _, None -> fail (at "drew nothing for heights that fit")
+                   | Some shapes, Some rows ->
+                       let tallest =
+                         List.fold_left max 0
+                           (List.map2 (column_rows ~row_gap) naturals shapes)
+                       in
+                       check int (at "as tall as the tallest column") tallest
+                         (List.length rows);
+                       if
+                         not
+                           (List.for_all
+                              (fun row -> Layout.display_width row = inner_width)
+                              rows)
+                       then fail (at "a row is not the grid's width")
+                 done)
+              rights)
+         lefts)
+    [ 0; 1 ]
+
 let () =
   run "tui card"
     [ ( "geometry"
@@ -903,5 +987,9 @@ let () =
             test_a_squashed_card_keeps_its_count
         ; test_case "a squashing grid asks each body once" `Quick
             test_a_squashing_grid_asks_each_body_once
+        ; test_case "cards open again from the last squashed" `Quick
+            test_cards_open_again_from_the_last_squashed
+        ; test_case "a squashing grid keeps its rectangle" `Quick
+            test_a_squashing_grid_keeps_its_rectangle
         ] )
     ]

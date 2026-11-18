@@ -32,8 +32,7 @@ let poll_interval_s = 0.02
    stopped the run (#8056: 5400 s, the parent and child still alive together at
    66 minutes, while #8045 ran this same case 21/21 in 0.73 s). A stuck child
    now fails this one case with a named reason and the rest keeps running.
-   [reaped] is set before the kill so [finally] never waits on a child it has
-   already given up on. *)
+   On timeout [finally] still kills the child and tries to reap it. *)
 let reap_within child ~seconds =
   let started = Unix.gettimeofday () in
   let rec loop () =
@@ -229,14 +228,12 @@ let test_fifo_refusal_releases_publishers () =
       Fun.protect
         ~finally:(fun () ->
           if not !reaped then (
-            reaped := true;
             (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
             ignore (reap_within child ~seconds:5.));
           Fs_compat.remove_tree base_path)
         (fun () ->
           match reap_within child ~seconds:60. with
           | None ->
-              reaped := true;
               fail "the FIFO prune child did not finish within 60 s; it is stuck"
           | Some status ->
               reaped := true;

@@ -250,6 +250,39 @@ describe('buildAgenda', () => {
   })
 })
 
+describe('buildAgenda on a local day that is not 24 hours long', () => {
+  // #52963: America/New_York leaves daylight time on 2026-11-01, which makes
+  // that local day 25 hours long.
+  const runnerTimeZone = process.env.TZ
+
+  beforeEach(() => {
+    process.env.TZ = 'America/New_York'
+  })
+
+  afterEach(() => {
+    if (runnerTimeZone === undefined) delete process.env.TZ
+    else process.env.TZ = runnerTimeZone
+  })
+
+  it('dates every column by the local calendar', () => {
+    const nextMidnight = new Date(2026, 10, 2).getTime()
+    // The case below means nothing unless this runtime applied the time zone.
+    expect(nextMidnight - new Date(2026, 10, 1).getTime()).toBe(25 * HOUR_MS)
+
+    const columns = buildAgenda(
+      [req({ schedule_id: 'next-morning', due_at: localEpochSeconds(2026, 10, 2, 9) })],
+      { nowMs: new Date(2026, 10, 1, 12, 0, 0).getTime(), days: 3 },
+    )
+
+    expect(columns.map(column => {
+      const date = new Date(column.dateMs)
+      return [date.getMonth() + 1, date.getDate(), date.getHours()]
+    })).toEqual([[11, 1, 0], [11, 2, 0], [11, 3, 0]])
+    expect(columns[1]!.dateMs).toBe(nextMidnight)
+    expect(columns[1]!.events.map(event => event.request.schedule_id)).toEqual(['next-morning'])
+  })
+})
+
 describe('schedule calendar components', () => {
   let container: HTMLDivElement
 

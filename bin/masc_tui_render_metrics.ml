@@ -731,16 +731,26 @@ let render_section_resources ~cols (state : state) =
         rows
       @ (match flow.Task_flow.daily with
          | [] -> []
-         | days ->
-           let done_series = List.map (fun (d : Task_flow.day) -> d.d_completed) days in
+         | (first : Task_flow.day) :: rest ->
+           (* A day that completed nothing is the baseline, not a gap
+              (RFC tui-one-screen-grammar 5.6). *)
+           let samples =
+             List.map
+               (fun (day : Task_flow.day) ->
+                 match day.d_completed with 0 -> Chart.Zero | count -> Chart.Value count)
+               (first :: rest)
+           in
+           let maximum = Chart.graph_maximum samples in
+           let axis = Count.grouped maximum in
+           let width = Layout.display_width axis + 1 + ((List.length samples + 1) / 2) in
            let spark =
-             if List.for_all (( = ) 0) done_series then
-               Theme.recede ()
-               ^ String.concat ""
-                   (List.init ((List.length done_series + 1) / 2) (fun _ -> "\xc2\xb7"))
-               ^ Ansi.reset
-             else
-               Chart.braille_sparkline ~min:0 done_series
+             match Chart.braille_graph ~width ~rows:1 ~axis ~maximum samples with
+             | Chart.Drawn rows -> String.concat "" rows
+             | Chart.Too_narrow ->
+               Count.grouped
+                 (List.fold_left (fun _ (day : Task_flow.day) -> day.d_completed)
+                    first.d_completed rest)
+             | Chart.Never_read -> Unknown.(glyph Unread)
            in
            [ "    " ^ Layout.fit_width (say "완료 추세" "done trend") 10 ^ " " ^ spark ])
   in

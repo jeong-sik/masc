@@ -8,4 +8,13 @@
 (test
  (name test_server_key_account_registration)
  (modules test_server_key_account_registration)
- (libraries alcotest eio_main masc.auth masc.runtime masc.server unix yojson))
+ (libraries
+  alcotest
+  eio_main
+  masc.auth
+  masc.masc_log
+  masc.runtime
+  masc.server
+  masc.string_util
+  unix
+  yojson))

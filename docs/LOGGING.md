@@ -74,6 +74,12 @@ its typed `host_acceptance`; receipts still mark host rejection as failed.
 Execution success is not a Task completion or delivered-result claim. The model
 label retains the existing public redaction policy.
 
+An Agent Core run records one `runtime_execution_terminal` for every provider
+request that enters its transport (`attempt_details_source=runtime_agent_transport`).
+A run that fails after such a request returns those attempts with its error, so
+the failure joins its execution terminals by `observation_id`. Only a run that
+fails before any request (configuration, admission, clock) has no capture.
+
 An error returned without its execution capture has typed `Uncaptured_failure`
 evidence, an empty attempt list, and `attempt_details_available=false`. Its gap
 event has its own observation identity because the original capture cannot be

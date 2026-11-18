@@ -15,7 +15,7 @@ open Keeper_context_core
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint_bytes : int option;
-  message_count : int;
+  message_count : int option;
 }
 
 (* The store answers from the summary it published when this process wrote
@@ -42,7 +42,7 @@ let apply_post_turn_lifecycle
       {
         updated_meta;
         checkpoint_bytes = None;
-        message_count = 0;
+        message_count = None;
       }
   | Some cp ->
       let ctx = context_of_agent_core_checkpoint cp in
@@ -62,5 +62,5 @@ let apply_post_turn_lifecycle
                ~labels:[("keeper", meta.name); ("phase", "checkpoint_bytes")]
                ();
              None);
-        message_count = message_count ctx;
+        message_count = Some (message_count ctx);
       }

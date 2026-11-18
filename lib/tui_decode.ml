@@ -811,9 +811,9 @@ let decode_log_entry json =
           }
   | Keeper_metrics_record.Turn ->
       let* le_channel = decode_turn_channel raw_channel in
-      let* le_message_count = Json_util.require_int json "message_count" in
+      let* le_message_count = required_nullable_int_field json "message_count" in
       let* () =
-        if le_message_count < 0 then
+        if Option.exists (fun count -> count < 0) le_message_count then
           Error "turn message_count must be non-negative"
         else Ok ()
       in
@@ -883,7 +883,7 @@ let decode_log_entry json =
         { le_kind = Log_turn;
           le_ts;
           le_channel;
-          le_message_count = Some le_message_count;
+          le_message_count;
           le_input_tokens;
           le_output_tokens;
           le_latency_ms = Some latency_ms;

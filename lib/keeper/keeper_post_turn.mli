@@ -17,7 +17,10 @@ type post_turn_lifecycle =
       (** Bytes of the canonical checkpoint on disk after the turn. [None]
           when no checkpoint was preserved or the store could not answer;
           the latter is logged and counted. *)
-  ; message_count : int
+  ; message_count : int option
+      (** Messages in the checkpoint preserved after the turn. [None] when no
+          checkpoint was preserved, so the count is unknown rather than zero
+          (#32802). *)
   }
 
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to

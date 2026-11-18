@@ -2435,6 +2435,18 @@ let test_decode_current_heartbeat_metrics () =
        | Error err -> Alcotest.fail err)
   | Error err -> Alcotest.fail err
 
+(* #32802: a turn that preserved no checkpoint records its message count as
+   null, and the reader keeps it unknown instead of reading zero. *)
+let test_turn_unknown_message_count_stays_unknown () =
+  match
+    Tui_decode.decode_log_entry
+      (current_turn_metrics () |> set_field "message_count" `Null)
+  with
+  | Ok entry ->
+      Alcotest.(check (option int)) "unknown turn message count" None
+        entry.le_message_count
+  | Error err -> Alcotest.fail err
+
 let test_metrics_contract_rejects_retired_or_unknown_rows () =
   let versionless =
     match current_turn_metrics () with
@@ -2478,6 +2490,8 @@ let test_metrics_contract_rejects_retired_or_unknown_rows () =
       , current_heartbeat_metrics ~message_count:(`Int (-1)) () )
     ; ( "heartbeat missing nullable message count"
       , current_heartbeat_metrics () |> remove_field "message_count" )
+    ; ( "turn missing nullable message count"
+      , current_turn_metrics () |> remove_field "message_count" )
     ]
   in
   List.iter
@@ -14471,6 +14485,8 @@ let () =
           test_decode_current_turn_metrics;
         Alcotest.test_case "all current turn variants" `Quick
           test_decode_current_turn_variants;
+        Alcotest.test_case "turn unknown message count stays unknown" `Quick
+          test_turn_unknown_message_count_stays_unknown;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
         Alcotest.test_case "a turn priced by no provider is still a turn" `Quick

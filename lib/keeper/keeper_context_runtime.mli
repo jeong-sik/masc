@@ -43,7 +43,7 @@ val context_of_agent_core_checkpoint
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
   ; checkpoint_bytes : int option
-  ; message_count : int
+  ; message_count : int option
   }
 
 type max_context_resolution =

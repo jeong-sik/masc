@@ -249,8 +249,7 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
               ~max_value:(max 1 fleet.fs_bootable_count)
               ~label:(text "실행" "Run ")
               ~suffix:(Printf.sprintf "%d/%d" fleet.fs_running_count fleet.fs_bootable_count)
-              ~cell_style:(fun ~index ~width ->
-                Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              ~scale:Chart.Relative
               ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ; Chart.meter ~width:cells ~value:avail
               ~max_value:(max 1 fleet.fs_target_reaction_capacity)
@@ -260,9 +259,13 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
                    Printf.sprintf "%d/%d -%d" avail fleet.fs_target_reaction_capacity
                      fleet.fs_reaction_capacity_shortfall
                  else Printf.sprintf "%d/%d" avail fleet.fs_target_reaction_capacity)
-              ~cell_style:(fun ~index ~width ->
-                if fleet.fs_reaction_capacity_shortfall > 0 then Theme.warn ()
-                else Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              (* Capacity against its target is a share; refusing work is
+                 not what the target means. A shortfall is the anomaly, so
+                 the figure that states it carries the warning colour. *)
+              ~scale:Chart.Relative
+              ?suffix_style:
+                (if fleet.fs_reaction_capacity_shortfall > 0 then Some (Theme.warn ())
+                 else None)
               ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ]
         else

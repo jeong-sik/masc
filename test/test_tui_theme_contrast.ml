@@ -756,13 +756,10 @@ let test_side_pane_recede_reads_on_every_scheme () =
   check bool "some scheme recedes on the side pane" true (receded <> [])
 ;;
 
-let test_oklab_ramps_clear_floor_on_every_scheme_and_surface () =
-  let stops = [ 0.0; 0.25; 0.5; 0.75; 1.0 ] in
-  let ramps =
-    [ "Pressure", Masc_tui_theme.Pressure
-    ; "Progress", Masc_tui_theme.Progress
-    ]
-  in
+(* A declared-limit meter's blended cells walk success -> warning -> danger;
+   every position along that walk clears the floor on both grounds. *)
+let test_limit_blend_clears_floor_on_every_scheme_and_surface () =
+  let positions = [ 0.0; 0.25; 0.5; 0.75; 1.0 ] in
   with_lift true (fun () ->
       List.iter
         (fun scheme ->
@@ -773,34 +770,43 @@ let test_oklab_ramps_clear_floor_on_every_scheme_and_surface () =
           in
           List.iter
             (fun (surface_name, surface, ground) ->
+              let paint =
+                { Masc_tui_theme.depth = Masc_tui_theme.Truecolor
+                ; surface
+                ; palette = Some scheme.palette
+                }
+              in
               List.iter
-                (fun (ramp_name, ramp) ->
-                  List.iter
-                    (fun t ->
-                      let drawn =
-                        Masc_tui_theme.For_testing.ramp_readable
-                          ~colors_enabled:true ~project:truecolor ~surface
-                          (Some scheme.palette) ramp ~t
-                      in
-                      match truecolor_rgb ~prefix:truecolor_prefix drawn with
-                      | None ->
-                        Alcotest.failf
-                          "%s/%s %s@%.2f drew non-truecolor sequence %S"
-                          scheme.name surface_name ramp_name t drawn
-                      | Some color ->
-                        let ratio = Color.contrast_ratio color ground in
-                        check bool
-                          (Printf.sprintf "%s/%s: %s@%.2f reads at %.2f"
-                             scheme.name surface_name ramp_name t ratio)
-                          true
-                          (ratio >= text_floor -. 0.01))
-                    stops)
-                ramps)
+                (fun position ->
+                  let drawn =
+                    Masc_tui_theme.For_testing.meter_cell_readable
+                      ~colors_enabled:true ~project:truecolor paint
+                      (Masc_tui_theme.Cell_blend
+                         { band = Masc_tui_theme.Midway; position })
+                  in
+                  match truecolor_rgb ~prefix:truecolor_prefix drawn with
+                  | None ->
+                    Alcotest.failf
+                      "%s/%s limit blend@%.2f drew non-truecolor sequence %S"
+                      scheme.name surface_name position drawn
+                  | Some color ->
+                    let ratio = Color.contrast_ratio color ground in
+                    check bool
+                      (Printf.sprintf "%s/%s: limit blend@%.2f reads at %.2f"
+                         scheme.name surface_name position ratio)
+                      true
+                      (ratio >= text_floor -. 0.01))
+                positions)
             surfaces;
-          check string "NO_COLOR suppresses ramp output" ""
-            (Masc_tui_theme.For_testing.ramp_readable ~colors_enabled:false
-               ~project:truecolor ~surface:Masc_tui_theme.Page
-               (Some scheme.palette) Masc_tui_theme.Pressure ~t:0.5))
+          check string "NO_COLOR suppresses the limit blend" ""
+            (Masc_tui_theme.For_testing.meter_cell_readable ~colors_enabled:false
+               ~project:truecolor
+               { Masc_tui_theme.depth = Masc_tui_theme.Truecolor
+               ; surface = Masc_tui_theme.Page
+               ; palette = Some scheme.palette
+               }
+               (Masc_tui_theme.Cell_blend
+                  { band = Masc_tui_theme.Midway; position = 0.5 })))
         schemes)
 ;;
 
@@ -1068,8 +1074,8 @@ let () =
             `Quick test_every_side_pane_token_reads_on_every_scheme
         ; Alcotest.test_case "side pane recede reads on every scheme" `Quick
             test_side_pane_recede_reads_on_every_scheme
-        ; Alcotest.test_case "oklab ramps clear floor on every scheme and surface"
-            `Quick test_oklab_ramps_clear_floor_on_every_scheme_and_surface
+        ; Alcotest.test_case "a declared-limit blend clears the floor on every scheme and surface"
+            `Quick test_limit_blend_clears_floor_on_every_scheme_and_surface
 
         ] )
     ; ( "toml theme loading"

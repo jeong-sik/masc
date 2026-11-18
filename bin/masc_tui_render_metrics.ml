@@ -1,6 +1,7 @@
 open Masc_tui_types
 open Masc_tui_ansi
 module Decode = Masc.Tui_decode
+module Braille = Masc_tui_braille
 module Chart = Masc_tui_chart
 module Layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
@@ -249,8 +250,9 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
           Chart.meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
             ~label:(say "점유" "Live")
-            ~cell_style:(fun ~index ~width ->
-              Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+            (* The heap grows as the GC asks for more, so live words against
+               it are a share, not a use of a limit. *)
+            ~scale:Chart.Relative
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
           Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
@@ -292,8 +294,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
             ~suffix:(Printf.sprintf "%s/%s" (Count.grouped count.completed) (Count.grouped total))
-            ~cell_style:(fun ~index ~width ->
-              Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+            ~scale:Chart.Relative
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
           Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
@@ -457,8 +458,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
             ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
                 ~value:gc.sgc_live_words ~max_value:(max 1 gc.sgc_heap_words)
                 ~label:(say "점유율" "Occupancy")
-                ~cell_style:(fun ~index ~width ->
-                  Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+                ~scale:Chart.Relative
                 ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ]
         else []
@@ -732,18 +732,24 @@ let render_section_resources ~cols (state : state) =
         rows
       @ (match flow.Task_flow.daily with
          | [] -> []
-         | days ->
-           let done_series = List.map (fun (d : Task_flow.day) -> d.d_completed) days in
+         | (first : Task_flow.day) :: rest ->
+           (* A day that completed nothing is the baseline, not a gap
+              (RFC tui-one-screen-grammar 5.6). *)
+           let samples =
+             List.map (fun (day : Task_flow.day) -> Braille.of_count day.d_completed)
+               (first :: rest)
+           in
+           let maximum = Braille.graph_maximum samples in
+           let axis = Count.grouped maximum in
+           let width = Layout.display_width axis + 1 + ((List.length samples + 1) / 2) in
            let spark =
-             if List.for_all (( = ) 0) done_series then
-               Theme.recede ()
-               ^ String.concat ""
-                   (List.init ((List.length done_series + 1) / 2) (fun _ -> "\xc2\xb7"))
-               ^ Ansi.reset
-             else
-               Theme.progress ~t:0.75
-               ^ Chart.braille_sparkline ~min:0 done_series
-               ^ Ansi.reset
+             match Braille.braille_graph ~width ~rows:1 ~axis ~maximum samples with
+             | Braille.Drawn rows -> String.concat "" rows
+             | Braille.Too_narrow ->
+               Count.grouped
+                 (List.fold_left (fun _ (day : Task_flow.day) -> day.d_completed)
+                    first.d_completed rest)
+             | Braille.Never_read -> Unknown.(glyph Unread)
            in
            [ "    " ^ Layout.fit_width (say "완료 추세" "done trend") 10 ^ " " ^ spark ])
   in
@@ -876,8 +882,7 @@ let render_section_tools ~cols (state : state) : string list =
                 let bar =
                   Chart.meter ~width:16 ~value:k.mkh_facts
                     ~max_value:(max 1 total_facts)
-                    ~cell_style:(fun ~index ~width ->
-                      Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+                    ~scale:Chart.Relative
                     ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
                 in
                 Printf.sprintf

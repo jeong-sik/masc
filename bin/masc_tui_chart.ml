@@ -166,7 +166,27 @@ let gauge ~width ~value ~max_value ?label () =
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
 ;;
 
-let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.limit_paint
+  | Relative
+
+let meter_cell_colour scale ~index ~width ~value ~max_value =
+  match scale with
+  | Declared_limit paint ->
+    Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
+      ~width ~value ~limit:max_value
+  | Relative -> Masc_tui_theme.Cell_plain
+;;
+
+let meter_cell_style scale ~index ~width ~value ~max_value =
+  match scale with
+  | Declared_limit paint ->
+    Masc_tui_theme.meter_cell_readable paint
+      (meter_cell_colour scale ~index ~width ~value ~max_value)
+  | Relative -> ""
+;;
+
+let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
@@ -175,11 +195,13 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
     let filled_part =
       if filled <= 0 then ""
       else
-        match cell_style with
-        | None -> repeat meter_fill filled
-        | Some style_at ->
+        match scale with
+        | Relative -> repeat meter_fill filled
+        | Declared_limit _ ->
           String.concat ""
-            (List.init filled (fun index -> style_at ~index ~width ^ meter_fill))
+            (List.init filled (fun index ->
+               meter_cell_style scale ~index ~width ~value ~max_value
+               ^ meter_fill))
           ^ reset
     in
     let track_part =
@@ -190,7 +212,7 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
     filled_part ^ track_part
 ;;
 
-let meter ~width ~value ~max_value ?label ?suffix ?cell_style
+let meter ~width ~value ~max_value ~scale ?label ?suffix
     ?(track_style = "") ?(suffix_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -232,7 +254,7 @@ let meter ~width ~value ~max_value ?label ?suffix ?cell_style
     if width >= chrome_cells + 3 then
       let bar_width = width - chrome_cells in
       prefix
-      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ?cell_style
+      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ~scale
           ~track_style ~reset ()
       ^ styled_suffix
     else
@@ -306,80 +328,4 @@ let distribution_bars ~width items =
             count_width count
             pct)
       items shares
-;;
-
-let braille_cell ~mask =
-  let m = mask land 0xff in
-  let b1 = Char.chr 0xe2 in
-  let b2 = Char.chr (0xa0 lor ((m lsr 6) land 0x03)) in
-  let b3 = Char.chr (0x80 lor (m land 0x3f)) in
-  let s = Bytes.create 3 in
-  Bytes.set s 0 b1;
-  Bytes.set s 1 b2;
-  Bytes.set s 2 b3;
-  Bytes.to_string s
-;;
-
-(* Bottom-up 0..4 dot subcolumns in the Unicode Braille block:
-   left column uses dots 7, 3, 2, 1; right column uses dots 8, 6, 5, 4. *)
-let braille_left_dots = [| 0x00; 0x40; 0x44; 0x46; 0x47 |]
-let braille_right_dots = [| 0x00; 0x80; 0xa0; 0xb0; 0xb8 |]
-let braille_top = 4
-
-let braille_levels ?min ?max values =
-  match values with
-  | [] -> []
-  | first :: rest ->
-    let v_min =
-      match min with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.min first rest
-    in
-    let v_max =
-      match max with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.max first rest
-    in
-    let lower = Z.of_int v_min in
-    let range = Z.sub (Z.of_int v_max) lower in
-    List.map
-      (fun v ->
-        if Z.sign range <= 0 then
-          if v_min <= 0 then 0 else braille_top / 2
-        else
-          let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-          let offset = Z.sub (Z.of_int clamped_v) lower in
-          let scaled =
-            Z.to_int (Z.div (Z.mul offset (Z.of_int braille_top)) range)
-          in
-          if v_min = 0 && clamped_v > 0 then Stdlib.max 1 scaled else scaled)
-      values
-;;
-
-let clamp_braille_level level = Stdlib.max 0 (Stdlib.min braille_top level)
-
-let braille_pair ~left ~right =
-  let l = clamp_braille_level left and r = clamp_braille_level right in
-  braille_cell ~mask:(braille_left_dots.(l) lor braille_right_dots.(r))
-;;
-
-let braille_bar_mark ~level = braille_pair ~left:level ~right:level
-
-let braille_sparkline ?min ?max values =
-  match braille_levels ?min ?max values with
-  | [] -> ""
-  | levels ->
-    let aligned =
-      if List.length levels mod 2 = 1 then 0 :: levels else levels
-    in
-    let buf = Buffer.create ((List.length aligned / 2) * 3) in
-    let rec emit = function
-      | left :: right :: rest ->
-        Buffer.add_string buf (braille_pair ~left ~right);
-        emit rest
-      | [ only ] -> Buffer.add_string buf (braille_pair ~left:0 ~right:only)
-      | [] -> ()
-    in
-    emit aligned;
-    Buffer.contents buf
 ;;

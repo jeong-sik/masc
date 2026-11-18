@@ -199,7 +199,7 @@
   split across matrix jobs instead of saturating one runner's disk (#52838).
 - The TUI design notes no longer carry the 2026-10-07 "지금처럼 여유 있게" density choice. `LAYOUT-LANGUAGE.md` loses the decision sentence and its "give headings, sections and the composer breathing room" rule, `FULL-SCREEN-LAYOUT.md` loses the two bullets that rested on it, and the layout preview tagline drops "여유 있는 여백". The TUI follows the btop-style density merged on 2026-11-17 (#52844).
 
-## [0.73.1] - 2026-11-17
+## [0.73.1] - 2026-11-18
 
 ### 요약
 

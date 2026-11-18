@@ -3732,10 +3732,15 @@ let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading
   (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
      is open, and [s] and [m] with them. *)
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
-  (* The keys that move -- [j/k], [v], [o], Enter, Right, Left and Esc on the
-     roster, and [r] and [q] -- are the help sheet's to name on the roster
-     (RFC tui-one-screen-grammar section 2). The detail keeps its way back,
-     [r] and [q] until it is drawn from the action list. *)
+  (* The keys that move -- [j/k], [v], [o], Right, Left and Esc on the
+     roster, the Story window's [Tab] to its next page, and [r] and [q] -- are
+     the help sheet's to name on the roster (RFC tui-one-screen-grammar
+     section 2). The roster's Enter opens and closes the Story or World
+     window: a table key doing something that is not a move, so it acts and
+     stays until the roster's keys move. On the Memory page it goes into the
+     memory browser instead, which is a move, and on a group heading there is
+     no window to open. The detail keeps its way back, [r] and [q] until it is
+     drawn from the action list. *)
   let accent key = (Theme.accent ()) ^ key ^ Ansi.reset in
   let moves =
     match keys with
@@ -3743,9 +3748,20 @@ let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading
     | Detail_keys ->
         [ "j/k", Ansi.dim ^ "j/k:" ^ say "선택" "move" ^ Ansi.reset ]
   in
+  let window_key word = [ "Enter", accent "Enter" ^ ":" ^ word ] in
+  let close_word = say "닫기" "close" in
   let way_and_tail =
     match keys with
-    | Roster_keys -> []
+    | Roster_keys ->
+        if keeper_list_on_heading state then []
+        else if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+          window_key (match story with None -> say "World" "world" | Some _ -> close_word)
+        else
+          (match story with
+           | None | Some Masc_tui_keeper_story.Schedule -> window_key (say "Story" "story")
+           | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
+               window_key close_word
+           | Some Masc_tui_keeper_story.Memory -> [])
     | Detail_keys ->
         [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ say "뒤로" "back" ^ Ansi.reset
         ; "r", Ansi.dim ^ "r:" ^ say "새로 조회" "refresh" ^ Ansi.reset
@@ -3757,8 +3773,7 @@ let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading
     | None -> []
     | Some Masc_tui_keeper_story.World -> []
     | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) ->
-        [ accent "Tab" ^ ":" ^ say "쪽" "page"
-        ; accent "s" ^ ":" ^ say "일정" "schedules"
+        [ accent "s" ^ ":" ^ say "일정" "schedules"
         ; accent "m" ^ ":" ^ say "기억" "memory"
         ]
   in

@@ -21286,11 +21286,15 @@ let log_http_surface_read_finished state context =
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  (* While [/health] keeps failing, a pass the TUI asks for by itself waits
+     for the one the failure owes, which revalidates everything this one
+     would, side reads included (RFC tui-one-screen-grammar §2). *)
+  let paced = Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace in
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle. A revalidation owes it a read. Owed, so a pane
      scrolled into older rows or a read in flight takes it when it can; the
      owed read brings the tool details with it. *)
-  begin
+  if paced then begin
     Option.iter
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
@@ -21338,12 +21342,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       ~full_refresh_inflight:!refresh_inflight
       ~scoped_refresh_inflight:!scoped_refresh_inflight
       !scoped_refresh_followup;
-  (* While [/health] keeps failing, a pass the TUI asks for by itself waits
-     for the one the failure owes, which revalidates everything this one
-     would (RFC tui-one-screen-grammar §2). *)
-  if not !refresh_inflight
-     && Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace
-  then begin
+  if not !refresh_inflight && paced then begin
     refresh_inflight := true;
     scoped_refresh_followup := No_scoped_followup;
     let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in

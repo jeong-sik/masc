@@ -3,7 +3,7 @@ rfc: "0515"
 title: "Keepers 목록에 보기 탭 · 한 축 줄 · Story 창을 올리고 맥박을 30분 칸으로 저장한다"
 status: Draft
 created: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-18
 author: claude
 supersedes: []
 superseded_by: null
@@ -210,7 +210,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 
 - lag 막대는 바탕이 `·` 다. lag 이 0 보다 크면 앞에서부터 `█` 를 `round(lag ÷ 분모 × 폭)` 개 그린다. 적어도 1개다. lag 을 모르면 띠 첫 칸에 `?` 를 쓴다.
 - Librarian 패스 끝 낱말은 `mkh_librarian.mlh_state` 에서 온다(V6). 기억 행이나 스냅숏이 없으면 `no data` 다. 이 서버 프로세스가 아직 패스를 보지 못했으면 `?` 다.
-- 지금 낱말은 `Keeper_list_model.primary_activity_of_row` 의 낱말 하나다. 도는 턴은 기존 running 표지(`◐◓◑◒`, 150ms 걸음)를 그대로 쓴다. 새 움직임은 만들지 않는다.
+- 지금 낱말은 `Keeper_list_model.primary_activity_of_row` 의 낱말 하나다. 도는 턴은 움직이지 않는 `◐` 이다([한 화면 문법 RFC](RFC-tui-one-screen-grammar.md) §7.2). 상태 기호를 돌리지 않는다.
 - Mode · S · AGE · LIFECYCLE 은 Story 창으로 옮긴다.
 - runtime 보기는 V5 전까지 상태별과 같은 열 값을 쓴다.
 

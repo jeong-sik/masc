@@ -15,12 +15,13 @@ stay at the bottom. Each area answers one question.
 
 - Use the terminal's own foreground for names and content. Recede separators,
   counts, metadata and hints through the existing theme tokens.
-- Separate adjacent panes with one quiet edge. Full-screen content needs no
-  enclosing box. Overlays can retain a frame so they remain recognisable.
-  A screen that shows several independent readings side by side, such as
-  Dashboard, titles each reading with a card. The card is a box with its title
-  in the top edge; it is not a frame around the screen, and a screen with one
-  reading still has no box.
+- A body with two or more independent readings divides them into
+  rounded cards: Dashboard's readings, a list beside its detail, one card per
+  account in plan usage. The Activity pane is always a card. The top edge
+  carries the card's title, status and count; the bottom edge carries its
+  `N more`. The card holds data only. A body with one other reading has no box,
+  and overlays keep their frame so they remain recognisable
+  ([one-screen grammar](../../rfc/RFC-tui-one-screen-grammar.md) §2).
 - Only the row that owns keyboard focus gets a full selection band. With a
   known palette it is a quiet neutral tint; without colours or a usable palette
   it uses reverse video. Keep a caret on the open selection in both modes.
@@ -66,7 +67,7 @@ terminal palettes supply the neutral sidebar band.
 
 | Surface | Main reading | Layout emphasis |
 | --- | --- | --- |
-| Dashboard | Decisions and a place to continue | A calm full-width body; no compulsory sidebar or metrics grid |
+| Dashboard | Decisions and a place to continue | Decisions first, then titled cards; a graph writes its scale at its top-left, its card's edges carry the title and counts, and no column of numbers sits beside it |
 | Work | Selected Goal, its criterion and linked work | Compact index on the left; outcome and evidence in the body |
 | Keepers | A Keeper and its conversation | Keeper rail, conversation, composer; selected and current target stay distinct |
 | Usage | One account/window or history reading | Separate identity, measurement and observation time; no dashboard of unrelated totals |
@@ -93,11 +94,16 @@ list labels retain their ends where grapheme boundaries are known and mark
 omissions, bounded by the viewport; the account chooser retains the full
 selected account name. The bar and percentage describe the provider's last
 report, and `other use` identifies
-windows that do not block model calls without relying on colour alone.
+windows that do not block model calls without relying on colour alone. A
+window that blocks model calls when full is a declared limit: each filled cell
+takes the colour of its position, success near zero, warning in the middle and
+danger near the limit. Other-use windows do not block calls, so their bars keep
+the receding token. The percentage still states the value.
 
 Keeper usage keeps the recorded amount, reporting coverage and comparison bar
 together when space allows. Each metric's bar is relative to its largest
-complete reading, not to a quota. Missing and partial readings remain explicit.
+complete reading, not to a quota, so it keeps the foreground colour. Missing
+and partial readings remain explicit.
 Other-use windows use the terminal-aware receding token rather than forcing dim
 text. These choices follow the [GitHub CLI accessibility guidance](https://primer.style/accessibility/foundations/cli-accessibility/)
 and [Shopify CLI colour guidance](https://shopify.github.io/cli/cli-kit/ui-kit/guidelines.html).
@@ -127,8 +133,9 @@ health, completed-work and Candle summaries follow using spare rows. The same
 typed selection and cursor window determine which requests remain visible.
 Candle uses either full rows or one compact reading, without repeating both.
 
-Work uses the same wrapped Goal/Backlog summary rows at every width. Extra width
-does not add framed statistics cards. The baseline/current snapshot timestamps
+Work uses the same wrapped Goal/Backlog summary rows at every width. When the
+width holds the list beside its preview, they are two cards; Work adds no card
+that holds only statistics. The baseline/current snapshot timestamps
 and change since baseline remain together; they are measured source times,
 distinct from the wall clock removed from Dashboard, Work and Task titles.
 
@@ -136,8 +143,8 @@ distinct from the wall clock removed from Dashboard, Work and Task titles.
 `bin/masc_tui_render_prim.ml` are now shared by the Keeper rail and
 `write_list_sidebar_selection`. The latter reaches the Tasks, Work, Schedules,
 Task Review, Verdicts, Board, Approvals and Fusion detail indexes. The change
-preserves their row budgets and label-folding width, while aligning labels,
-moving counts right and replacing enclosing boxes with one edge.
+preserves their row budgets and label-folding width, while aligning labels and
+moving counts right. A list beside its detail now follows the card rule above.
 
 The seven-screen preview records the wider direction. Bespoke Code, Resources,
 Usage and System panels keep their own implementations in this change; this

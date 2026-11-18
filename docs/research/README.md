@@ -15,6 +15,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | — | [표와 차트를 편집하는 문서 왕복](artifact-office-roundtrip.md) |
 | — | [표 너비와 편집 반복 비용 조사](artifact-office-fidelity.md) |
 | — | [기존 HWP의 표와 차트 데이터를 가져온다](artifact-hwp-import.md) |
+| 2026-11-18 | [btop 의 화면 문법과 쉬는 TUI 가 쓰는 비용](2026-11-18-tui-btop-visual-grammar-and-idle-cost.md) |
 | 2026-11-17 | [사람이 자기 API key 로 Claude Code 를 쓰게 하려면 — 공식 문서, CLI 측정, 지금 코드](2026-11-17-person-api-key-for-claude-code.md) |
 | 2026-11-16 | [librarian 이 정해진 날에 쓸 기억을 미리 지우는가 — 판정 시각과 쓸 날 문장을 넣어 잰 값](2026-11-16-librarian-dated-records-and-pass-time.md) |
 | 2026-11-13 | [OpenMAIC 메커니즘 조사와 Lane Add-on 으로 가져올 것](2026-11-13-openmaic-mechanisms-and-lane-addon-absorption.md) |

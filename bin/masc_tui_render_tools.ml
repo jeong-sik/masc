@@ -1109,7 +1109,14 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                     | Some previous -> is_normal previous <> instruction) in
                  if not first_in_group then [] else
                    [Ansi.bold, Printf.sprintf "   %s (%d)"
-                     (if instruction then "Normal Skills · instructions" else "Composition Skills · executable plans")
+                     (* Headings follow the screen language and are not
+                        written in capitals only (RFC tui-one-screen-grammar
+                        section 5.1); Skill and Composition are product
+                        nouns and stay as they are. *)
+                     (if instruction
+                      then ui_text state ~ko:"지침 Skill" ~en:"Normal Skills · instructions"
+                      else ui_text state ~ko:"Composition Skill · 실행 계획"
+                          ~en:"Composition Skills · executable plans")
                      (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles))] in
                heading @ [ ( (if index = state.tools_skill_cursor
                   then Theme.selection
@@ -1415,7 +1422,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
           | Some profile ->
             let rows = match profile.esp_io with
               | Masc.Tui_decode_tools.Model_orchestrated ->
-                  [ Ansi.dim, "Normal Skill · 지침 텍스트에는 executor 실행 시간이 없습니다"
+                  [ Ansi.dim, ui_text state ~ko:"지침 Skill · 지침 텍스트에는 executor 실행 시간이 없습니다"
+                      ~en:"Normal Skill · instructions have no executor run time"
                   ; Theme.info (), "f: Composition 선택 + 실측 불러오기 · J/K: Skill 선택" ]
               | Composition_io _ -> selected_skill_statistics_lines in
             let pending = match state.tools_evidence_reference, state.tools_evidence_request with
@@ -1423,13 +1431,16 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                   [ Theme.info (), "실측 조회 중 · 이전 관측이 있으면 함께 표시합니다" ]
               | Some _, Some _ | Some _, None | None, Some _ | None, None -> [] in
             skill_usage_box ~cols
-              ((Ansi.bold, "SKILL PERFORMANCE · " ^ Terminal_text.single_line profile.esp_name)
+              ((Ansi.bold, ui_text state ~ko:"Skill 실측 · " ~en:"Skill performance · "
+                             ^ Terminal_text.single_line profile.esp_name)
                :: pending @ rows)
         in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%s)"
             (Terminal_text.single_line ets_keeper_name)
-            (Masc_tui_message_layout.count_noun (List.length ets_tools) "tool") ]
+            (if state.ui_language = Lang_ko
+             then Printf.sprintf "도구 %d개" (List.length ets_tools)
+             else Masc_tui_message_layout.count_noun (List.length ets_tools) "tool") ]
         @ performance_card
         @ [ delivery_tone, "   Runtime 도구 전달: " ^ delivery ]
         @ diagnostics_lines

@@ -384,6 +384,6 @@ module Position = struct
     if total <= shown then None
     else if shown <= 0 then Some (Window { first = 0; last = 0; total })
     else
-      let first = Int.max 0 (Int.min first (total - shown)) in
-      Some (Window { first = first + 1; last = first + shown; total })
+      let first = Int.max 0 (Int.min first (total - 1)) in
+      Some (Window { first = first + 1; last = Int.min total (first + shown); total })
 end

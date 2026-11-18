@@ -285,6 +285,7 @@ module Position : sig
   val window : first:int -> shown:int -> total:int -> t option
   (** The window of [shown] rows from index [first] over [total] rows.
       [None] when [total] fits in [shown]: a reading with nothing hidden
-      hands no position. [first] is held where the window still shows
-      [shown] rows. *)
+      hands no position. [first] is held inside the list, and the window
+      ends at the last row there is, so it names the rows a body that
+      starts at [first] draws. *)
 end

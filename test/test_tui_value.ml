@@ -130,8 +130,10 @@ let test_a_window_is_handed_only_when_it_hides_rows () =
   check "a short reading hands nothing" None ~first:4 ~shown:10 ~total:3;
   check "an empty reading hands nothing" None ~first:0 ~shown:10 ~total:0;
   check "a middle window counts from one" (Some (6, 15, 30)) ~first:5 ~shown:10 ~total:30;
-  check "a window past the end is held at the last full window"
-    (Some (21, 30, 30)) ~first:99 ~shown:10 ~total:30;
+  check "a window near the end ends at the last row" (Some (26, 30, 30))
+    ~first:25 ~shown:10 ~total:30;
+  check "a window past the end is held at the last row" (Some (30, 30, 30))
+    ~first:99 ~shown:10 ~total:30;
   check "a window above the top starts at the top" (Some (1, 10, 30))
     ~first:(-4) ~shown:10 ~total:30;
   check "a window with no rows shows none of them" (Some (0, 0, 3))

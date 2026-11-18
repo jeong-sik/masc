@@ -2205,6 +2205,45 @@ let test_compare_month_entries () =
   check int "equal names compare equal" 0
     (Dated_jsonl.Layout.compare_month_entries "2026-11" "2026-11")
 
+(* ── facts in a process that does not write the stores ──── *)
+
+(* This executable never says [keep_facts_in_this_process]: it stands for a
+   process that reads stores another process appends to, as the TUI does.
+   Each [read_fact] is the strict read, so a row that reached the file
+   without this process's [append] is the next answer. *)
+let test_a_process_that_does_not_write_the_stores_keeps_no_fact () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let store = Dated_jsonl.open_store (temp_store "dated_jsonl_reader_process") in
+  Dated_jsonl.append store (`Assoc [ "i", `Int 1 ]);
+  let newest () =
+    match Dated_jsonl.read_fact store Dated_jsonl.last_row with
+    | Fact_cell.Read_not_kept (Some (Dated_jsonl.Parsed json)) ->
+      Printf.sprintf "read row %d" (json_i json)
+    | Fact_cell.Read_not_kept (Some (Dated_jsonl.Malformed_json _)) ->
+      "read a row that is not JSON"
+    | Fact_cell.Read_not_kept None -> "read no row"
+    | Fact_cell.Held _ -> "held"
+    | Fact_cell.Read_and_kept _ -> "read and kept"
+    | Fact_cell.Read_failed error -> "failed: " ^ Dated_jsonl.read_error_to_string error
+  in
+  check string "the files are read" "read row 1" (newest ());
+  check string "and read again: nothing was kept" "read row 1" (newest ());
+  let day_file =
+    match Dated_jsonl.month_dir_paths_newest_first_result store with
+    | Ok (month :: _) ->
+      (match Dated_jsonl.day_file_paths_newest_first_result month with
+       | Ok (day_file :: _) -> day_file
+       | Ok [] | Error _ -> fail "the store has no day file")
+    | Ok [] | Error _ -> fail "the store has no month directory"
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 day_file
+    (fun channel -> output_string channel "{\"i\":2}\n");
+  check string "a row another process appended is the next answer" "read row 2" (newest ());
+  (* An append of this process does not start the keeping either. *)
+  Dated_jsonl.append store (`Assoc [ "i", `Int 3 ]);
+  check string "after an append of this process" "read row 3" (newest ())
+
 let () =
   run "Dated_jsonl"
     [
@@ -2418,6 +2457,11 @@ let () =
       ( "empty",
         [
           test_case "empty store" `Quick test_empty_store;
+        ] );
+      ( "facts",
+        [
+          test_case "a process that does not write the stores keeps no fact" `Quick
+            test_a_process_that_does_not_write_the_stores_keeps_no_fact;
         ] );
       ( "layout",
         [

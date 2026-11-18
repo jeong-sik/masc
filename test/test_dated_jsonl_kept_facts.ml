@@ -4,6 +4,10 @@
     read of the files it stands for, [read_recent_result t 1], and looks at
     how the answer was come by: [Held] means no file was read.
 
+    This executable stands for the server: it says it is the one process
+    that writes the stores before any test runs. What a process that has not
+    said so reads is pinned in [test_dated_jsonl].
+
     What is pinned:
 
     1. A reader fills the fact and later readers open no file. A reader
@@ -669,6 +673,7 @@ let test_an_append_and_a_reader_together () =
 ;;
 
 let () =
+  D.keep_facts_in_this_process ();
   run
     "dated_jsonl_kept_facts"
     [ ( "a reader fills the fact"

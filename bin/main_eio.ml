@@ -467,6 +467,10 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
     acquire_base_path_lock ~previous_owner
       ~lease_root:(Host_config.host ()).base_path_lease_root canonical_base_path
   in
+  (* This is now the one process that appends to the workspace's stores. A
+     process without the lease (the TUI, a command line tool) cannot say
+     this and reads the files each time. *)
+  Server_startup_takeover.keep_store_facts base_path_lease;
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
      same-process exec before any thread, sampler, or scheduler.

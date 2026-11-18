@@ -340,9 +340,21 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     {!append_rotating} move a kept value over the row they wrote, and
     {!prune}, {!prune_listed_stores_bound}, an append's own byte-budget prune
     and any append that fails forget the store's facts. A change made any
-    other way is told with {!directories_removed}. *)
+    other way is told with {!directories_removed}.
+
+    That holds for the appends of one process. A row another process appends
+    moves nothing here, so a fact is kept only by the process that has said
+    it is the one that writes the stores ({!keep_facts_in_this_process}). *)
 
 type 'a fact
+
+val keep_facts_in_this_process : unit -> unit
+(** From now on {!read_fact} keeps what it reads. Said once by the one
+    process that appends to the stores whose facts it reads: the server, when
+    it holds the BasePath writer lease. It is not taken back.
+
+    A process that has not said it (the TUI, a command line tool) reads the
+    files on every {!read_fact}, as it did before there were facts. *)
 
 val last_row : recent_entry option fact
 (** The store's newest physical row, as [read_recent_result t 1] reads it:
@@ -358,6 +370,10 @@ val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 
     A store whose directory does not exist yet is asked about each time, as
     for a write.
+
+    In a process that has not said {!keep_facts_in_this_process} the strict
+    read runs on every call and nothing is kept: the answer is
+    {!Fact_cell.Read_not_kept} or {!Fact_cell.Read_failed}.
 
     Each call is counted in
     [Otel_builtin_metric_names.metric_dated_jsonl_fact_reads] by the kind of

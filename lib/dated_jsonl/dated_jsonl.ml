@@ -2608,6 +2608,13 @@ let last_row : recent_entry option fact =
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
   }
 
+(* Whether this process keeps what [read_fact] reads. A cell is moved by the
+   appends of the process it lives in and by no other, so only the one
+   process that appends to the stores may keep their facts. It says so once
+   and does not take it back. *)
+let keeping_facts = Atomic.make false
+let keep_facts_in_this_process () = Atomic.set keeping_facts true
+
 let fact_read_outcome = function
   | Fact_cell.Held _ -> "held"
   | Fact_cell.Read_and_kept _ -> "read_and_kept"
@@ -2615,7 +2622,6 @@ let fact_read_outcome = function
   | Fact_cell.Read_failed _ -> "read_failed"
 
 let read_fact t fact =
-  let cell = cell_of_entry (resolve t.location).entry fact in
   let value_of = function
     | Fact_cell.Held held -> Fact_cell.Held held.value
     | Fact_cell.Read_and_kept held -> Fact_cell.Read_and_kept held.value
@@ -2623,15 +2629,24 @@ let read_fact t fact =
     | Fact_cell.Read_failed _ as failed -> failed
   in
   let answer =
-    match Fact_cell.held cell with
-    | Some held -> Fact_cell.Held held.value
-    | None ->
-      (* The cell is seen and the files are read in one job. A cell seen
-         before the wait for a worker would lose to every append that lands
-         during the wait. *)
-      off_fiber ~name:(job_name t) (fun () ->
-        Fact_cell.fill cell ~read:(fun () -> fact.read t))
-      |> value_of
+    if not (Atomic.get keeping_facts)
+    then (
+      (* Another process appends to this store. The files are read as they
+         were before there were facts, and no cell is made. *)
+      match fact.read t with
+      | Ok held -> Fact_cell.Read_not_kept held.value
+      | Error error -> Fact_cell.Read_failed error)
+    else (
+      let cell = cell_of_entry (resolve t.location).entry fact in
+      match Fact_cell.held cell with
+      | Some held -> Fact_cell.Held held.value
+      | None ->
+        (* The cell is seen and the files are read in one job. A cell seen
+           before the wait for a worker would lose to every append that
+           lands during the wait. *)
+        off_fiber ~name:(job_name t) (fun () ->
+          Fact_cell.fill cell ~read:(fun () -> fact.read t))
+        |> value_of)
   in
   Otel_metric_store_core.inc_counter
     Otel_builtin_metric_names.metric_dated_jsonl_fact_reads

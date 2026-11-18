@@ -341,8 +341,8 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
        not run -- one that declares another relay version, or none -- would
        give the new guest the hello the old one was refused for, so it is
        refused here, before any guest is stopped or booted. Provisioning
-       verifies again after teardown, as before. *)
-    let* () = verify_microvm_shim ~base_path:t.config.base_path ~backend ~guest_name:container_name
+       takes the result and verifies again after teardown. *)
+    let* shim = verify_microvm_shim_before_teardown t ~backend
       |> Result.map_error (fun error -> Guest_shim_unready error) in
     (* Refuse before stopping or replacing any existing guest when a legacy
        helper is present or its owner is unknown. Provisioning reads again
@@ -392,7 +392,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
     else
       let* () = Keeper_sandbox_microvm.image_present_for backend ~name:t.meta.sandbox_image
           ~image ~timeout_sec |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* _provisions = microvm_guest_provisions t ~backend ~timeout_sec
+      let* _provisions = microvm_guest_provisions t ~backend ~shim ~timeout_sec
         |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
       let* gateway = ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode
         |> Result.map_error (fun detail -> Policy_network_unavailable detail) in

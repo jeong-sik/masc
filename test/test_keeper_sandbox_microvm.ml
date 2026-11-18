@@ -4143,6 +4143,8 @@ esac
     @@ fun () ->
     Eio.Switch.run @@ fun sw ->
     Eio_context.set_switch sw;
+    (* The shim is checked before any guest is removed (#52968). *)
+    initialize_fixture_shim ~base:dir;
     let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
     (match Turn.microvm_remote_endpoint runtime with
      | Error _ -> ()
@@ -4465,6 +4467,111 @@ esac
   ignore (attempt ());
   Alcotest.(check bool) "a current shim lets the replacement stop the old guest" true
     (List.mem ("stop " ^ guest) (calls ()))
+;;
+
+(* #52968, the process-bound runtimes. A boot on Nerdctl_kata or
+   Microsandbox removes the guest it finds before provisioning reads the
+   shim, so the shim is checked first: a stopped guest and a running one
+   this process cannot adopt both stay where they are while the mounted shim
+   declares relay 1. With the shim built from this source mounted, the same
+   start goes on to stop the old guest. The Apple runtime is pinned by
+   [test_a_stale_relay_shim_refuses_the_replacement]. *)
+let test_a_stale_relay_shim_removes_no_process_bound_guest () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let module Ready = Masc.Keeper_microvm_shim_readiness in
+  let case backend state =
+    let label = Printf.sprintf "%s %s" (Backend.to_string backend) state in
+    let context = Eio_context.snapshot_state () in
+    let dir = temp_dir "stale-relay-process-bound-" in
+    let bin = Filename.concat dir "bin" in
+    let base = Filename.concat dir "base" in
+    List.iter (fun path -> Unix.mkdir path 0o755) [ bin; base ];
+    let log = Filename.concat dir "calls" in
+    let keeper_name = "stale-relay-bound" in
+    let config = Masc.Workspace.default_config base in
+    let meta =
+      { (microvm_meta ~name:keeper_name) with
+        microvm_backend = Some backend; network_mode = Profile.Network_none } in
+    let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name
+        ~network_mode:meta.network_mode in
+    let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
+    Fs_compat.mkdir_p shim_dir;
+    let shim = Filename.concat shim_dir M.shim_binary_name in
+    let install contents =
+      Out_channel.with_open_bin shim (fun out -> output_string out contents);
+      Unix.chmod shim 0o755;
+      Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name) (fun out ->
+        output_string out
+          (Agent_core_sha256.(to_hex (digest_string contents)) ^ "  masc-exec-shim-linux-arm64\n")) in
+    install "#!/bin/sh\nexit 0\n# MASC_EXEC_SHIM_RELAY_VERSION=1;\n";
+    (* nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+       answers a literal; msb inspect NAME --format json answers a status. *)
+    let script = match backend with
+      | Backend.Nerdctl_kata ->
+        Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  inspect) if [ "$6" = %s ]; then printf '%%s\n' %s; exit 0; fi; exit 1 ;;
+  ps) exit 0 ;;
+  *) exit 2 ;;
+esac
+|} (Filename.quote log) (Filename.quote guest)
+          (Filename.quote (if String.equal state "running" then "true" else "false"))
+      | Backend.Microsandbox ->
+        Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  inspect) if [ "$2" = %s ]; then printf '{"status":"%%s"}\n' %s; exit 0; fi; exit 1 ;;
+  list) printf '[]\n'; exit 0 ;;
+  *) exit 2 ;;
+esac
+|} (Filename.quote log) (Filename.quote guest) (Filename.quote state)
+      | Backend.Apple_container -> Alcotest.fail "the Apple runtime has its own test" in
+    let cli = Filename.concat bin (Backend.cli_name backend) in
+    Out_channel.with_open_bin cli (fun out -> output_string out script);
+    Unix.chmod cli 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+    Fun.protect ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      remove_snapshot_fixture dir)
+    @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.set_switch sw;
+    let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+    (match Ready.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Ready.error_message error));
+    let calls () =
+      if Sys.file_exists log
+      then In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n'
+      else [] in
+    let effects lines = List.filter (fun line ->
+      List.exists (fun prefix -> String.starts_with ~prefix line)
+        [ "stop "; "rm "; "remove "; "run "; "volume "; "image "; "network " ])
+      lines in
+    let refusal = Ready.error_message
+        (Ready.Verification_failed
+           (Ready.Shim_relay_version_mismatch
+              { installed = M.Relay_version 1; required = Exec_ssh_protocol.Relay.version })) in
+    let attempt () =
+      Turn.microvm_remote_endpoint ~timeout_sec:5.
+        (Turn.create ~config ~meta ~image:(Ok "fixture:image") ~network_mode:meta.network_mode ()) in
+    (match attempt () with
+     | Error detail ->
+       Alcotest.(check bool) (label ^ ": the start names the relay refusal") true
+         (Astring.String.is_infix ~affix:refusal detail)
+     | Ok _ -> Alcotest.fail (label ^ ": a relay-1 shim was given an endpoint"));
+    Alcotest.(check (list string)) (label ^ ": nothing is stopped, removed or booted") []
+      (effects (calls ()));
+    install current_shim_fixture;
+    ignore (attempt ());
+    Alcotest.(check bool) (label ^ ": a current shim lets the boot stop the old guest") true
+      (List.mem ("stop " ^ guest) (calls ())) in
+  List.iter (fun backend -> List.iter (case backend) [ "stopped"; "running" ])
+    [ Backend.Nerdctl_kata; Backend.Microsandbox ]
 ;;
 
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
@@ -6056,6 +6163,8 @@ let () =
             test_the_shim_declares_its_relay_version
         ; Alcotest.test_case "a stale relay shim refuses the replacement" `Quick
             test_a_stale_relay_shim_refuses_the_replacement
+        ; Alcotest.test_case "a stale relay shim removes no process-bound guest" `Quick
+            test_a_stale_relay_shim_removes_no_process_bound_guest
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick

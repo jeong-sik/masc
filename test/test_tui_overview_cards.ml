@@ -33,7 +33,7 @@ let entries prefix count =
     (action, action))
 
 let draw ~rows ~selected ~decisions ~continuation ~actions =
-  Cards.draw ~ko:true ~edges ~empty_decisions:"none" ~inner ~rows
+  Cards.draw ~ko:true ~edges ~inner ~rows
     ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
     ~decisions ~decisions_whole:true ~continuation
     ~status:(fun ~cells:_ -> [ "status" ])

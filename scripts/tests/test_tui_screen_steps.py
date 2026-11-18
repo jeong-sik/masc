@@ -8,6 +8,7 @@ No TUI, relay or MASC server runs here.
 """
 from collections import Counter
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -25,6 +26,54 @@ NEVER = frozenset({b'\r', b'\n', b'y', b'\x1b'})
 # keeper_actions, keeper_detail_tab_bindings), and toggle a Services provider.
 KEEPER_ACTS = frozenset({b'p', b'w', b's', b'x', b'g', b'U', b't', b'T'})
 KEEPER_PLACES = frozenset({Destination.KEEPERS, Reached.KEEPER_ROW, Reached.KEEPER_DETAIL})
+
+# Keys no move may send from any screen, whatever MOVES says: on the Keeper
+# screens p w s x g U pause, wake, shut down, delete, toggle the gate and
+# unbind all channels; on Requests w and e set the approval gate and y and n
+# answer the ask under the cursor; Enter runs and a lone Esc leaves a chat.
+# KEEPER_ACTS above is checked only on the Keeper screens, so a w added from
+# Requests would pass it.
+FORBIDDEN_EVERYWHERE = frozenset({b'p', b'w', b's', b'x', b'g', b'U', b'e', b'y', b'n', b'\r', b'\n', b'\x1b'})
+# The pairs allowed to send a key of that set anyway. On Usage, p is a
+# Navigate binding (metrics_bindings) that switches to Telemetry; the
+# usage_telemetry step is older than this table.
+FORBIDDEN_KEY_EXCEPTIONS = frozenset({(Destination.USAGE, Move.TELEMETRY)})
+# On the Keeper list and detail most letters act on the selected Keeper
+# (bin/masc_tui_keys.ml keeper_actions and keeper_detail_tab_bindings: b and
+# B requeue Board partitions on Info, d m s set the Sandbox backend, L P and
+# the digits start GitHub and Services logins, b e u U change channel
+# bindings). A hand list of those keys misses some, so these screens accept
+# only the moves named here.
+KEEPER_MOVES = frozenset({Move.OPEN, Move.NEXT_TAB, Move.PREVIOUS_TAB})
+
+REPO = Path(__file__).resolve().parent.parent.parent
+PALETTE_SOURCE = REPO / 'bin' / 'masc_tui_palette.ml'
+TYPES_SOURCE = REPO / 'bin' / 'masc_tui_types.ml'
+SURFACE_RING = re.compile(r'let surface_ring : \(surface \* string\) list =\s*\[(.*?)\]', re.S)
+CONFIG_PANES = re.compile(r'let config_panes =\s*\[(.*?)\]', re.S)
+RING_LABEL = re.compile(r', "([^"]+)"\)')
+PANE_LABEL = re.compile(r'\(Config_\w+, "([^"]+)"\)')
+GO_LITERAL = re.compile(r'"(go [^"]+)",\s*Palette_')
+MAIN_PREFIX = 'go '
+CONFIG_PREFIX = 'go System / '
+
+
+def palette_go_labels() -> frozenset[str] | str:
+    """The whole `go` labels the palette offers in every state: main_entries
+    (surface_ring), the literal entries of palette_entries, and the
+    config_panes entries. A string says why they could not be read."""
+    try:
+        palette = PALETTE_SOURCE.read_text(encoding='utf-8')
+        types = TYPES_SOURCE.read_text(encoding='utf-8')
+    except OSError as exc:
+        return f'{type(exc).__name__}: {exc}'
+    ring = SURFACE_RING.search(types)
+    panes = CONFIG_PANES.search(types)
+    if ring is None or panes is None:
+        return 'surface_ring or config_panes is not in bin/masc_tui_types.ml'
+    return frozenset({MAIN_PREFIX + label for label in RING_LABEL.findall(ring.group(1))}
+                     | {CONFIG_PREFIX + label for label in PANE_LABEL.findall(panes.group(1))}
+                     | set(GO_LITERAL.findall(palette)))
 
 
 def planned(step: Step) -> Planned:
@@ -123,6 +172,44 @@ class TableTest(unittest.TestCase):
                 spelled = tuple(f':{key.entry}' if isinstance(key, Jump) else key.key.decode()
                                 for key in planned(STEP_NAMES[name]).keys)
                 self.assertEqual(spelled, keys)
+
+
+class ActingKeyTest(unittest.TestCase):
+    """Checks that hold when an allowed move is added to MOVES, which the
+    route checks above cannot see: a move in MOVES is allowed by definition."""
+
+    def test_no_move_sends_a_forbidden_key_outside_its_exception(self) -> None:
+        for (place, move) in MOVES:
+            if move_bytes(move) in FORBIDDEN_EVERYWHERE:
+                with self.subTest(place=place.name, move=move.name):
+                    self.assertIn((place, move), FORBIDDEN_KEY_EXCEPTIONS)
+
+    def test_every_exception_is_still_in_moves(self) -> None:
+        for pair in FORBIDDEN_KEY_EXCEPTIONS:
+            with self.subTest(place=pair[0].name, move=pair[1].name):
+                self.assertIn(pair, MOVES)
+
+    def test_keeper_screens_take_only_open_and_the_tab_keys(self) -> None:
+        for (place, move) in MOVES:
+            if place in KEEPER_PLACES:
+                with self.subTest(place=place.name, move=move.name):
+                    self.assertIn(move, KEEPER_MOVES)
+
+
+class PaletteLabelTest(unittest.TestCase):
+    def test_every_destination_is_a_whole_palette_label(self) -> None:
+        # A label the palette does not offer ranks no entry as the whole
+        # query, so Enter runs whichever entry starts with, contains or
+        # spells the text in order -- or nothing, and the moves after it are
+        # typed into the palette's query.
+        labels = palette_go_labels()
+        if isinstance(labels, str):
+            self.fail(labels)
+        self.assertIn('go Operations', labels)
+        self.assertIn('go System / runtime.toml', labels)
+        for destination in Destination:
+            with self.subTest(destination.name):
+                self.assertIn(destination.value, labels)
 
 
 if __name__ == '__main__':

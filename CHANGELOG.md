@@ -3523,6 +3523,12 @@
 - The chat turn's progress row is built from a list of facts instead of a joined string, and the context-checkpoint note becomes its own clause (#52650).
 - Read paths that no longer poll drop `poll` from their names: `msx_poll_view`/`invalidate_msx_poll` became `machine_view`/`retire_machine_view`, `launch_dos_live_poll` became `launch_dos_live_read`, `keeper_turns_poll_error` became `keeper_turns_read_error`, and `Poll_failed`/`Poll_kept_back`/`poll_error` became `Read_failed`/`Read_kept_back`/`read_error`. The one visible change is the English `poll failed:` sentence, now `read failed:` (#52726).
 
+### Known issues
+
+- main 전체 회귀(Test 워크플로)가 실패 상태다. 기준선 run #8045(head 261695fc)에서 실패 표시 배치 블록 40(자기 suite 통과 2 포함 — suite 단위 집계 아님). 확정 귀속: task-3733 exact_output_catalog_binding 골든 누락줄(#52932), task-3734 keeper constitution remove fixture(#52933), task-3743 judge_operands 7 시험 전제(#52940), task-3751 artifacts_endpoint 401→403(#52939 — 외부 출처 403·same-origin 401 새 계약). 잔여 귀속 진행 중(현 main tip 전수 재측정 #8058 진행 중 — 숫자 변동 가능).
+- RC 빌드 로그의 opam 색인 리비전 기록이 `unknown` 으로 남는다(task-3735).
+- RC 빌드가 `--locked` 와 달리 dune 3.25.0·dune-build-info 3.25.0 을 설치한다(lock 은 3.24.1·3.22.2, task-3740). 산출물 기능 검증에는 영향이 없다.
+
 ## [0.72.0] - 2026-11-12
 
 ### 요약

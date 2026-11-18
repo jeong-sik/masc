@@ -70,6 +70,7 @@ module Keeper_waiting_read : sig
   val in_flight : t -> bool
   val change_pending : t -> bool
   val awaiting_age : t -> int64 option
+  val awaiting_since : t -> int64 option
   val needs_revalidation : t -> bool
   val poll_receipt : t -> (int * int) option
   val accepts_poll : t -> (int * int) option -> bool
@@ -96,10 +97,9 @@ end = struct
     { t with pending = true; awaiting = true; awaiting_since; revision = t.revision + 1 }
   let in_flight t = Snapshot_read.in_flight t.reading
   let change_pending t = t.pending
+  let awaiting_since t = if t.awaiting then t.awaiting_since else None
   let awaiting_age t =
-    if t.awaiting then
-      Option.map (fun since -> Int64.sub (Mtime_clock.elapsed_ns ()) since) t.awaiting_since
-    else None
+    Option.map (fun since -> Int64.sub (Mtime_clock.elapsed_ns ()) since) (awaiting_since t)
   let needs_revalidation t = t.pending || t.active_after_change
   let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
   let accepts_poll t = function
@@ -9809,6 +9809,53 @@ type goal_action_receipt = {
   gar_result : (string, request_failure) result;
 }
 
+(* What an applied async answer did to what the screen draws (RFC
+   tui-one-screen-grammar §8). The loop asks for a Background frame only
+   when some answer it applied says [Drawn_changed]. *)
+type drawn_effect = Drawn_changed | Drawn_unchanged
+
+(* The values a reader that answers the same read again writes and a frame
+   draws. A frame records them when it is built ([drawn_reads]), and the
+   reader's next answer is compared with that record, not with the answer
+   before it: a frame may have drawn a failure the answer clears, or drawn
+   the read in progress. *)
+
+(* The Tools inventory reader: the reading and the Keeper it is for, its
+   failure, the Skill the cursor is on, and the Keeper reads in flight, which
+   a frame draws as a refresh. *)
+type tools_inventory_view = {
+  tiv_inventory : Masc.Tui_decode_tools.tool_snapshot option;
+  tiv_keeper : string option;
+  tiv_error : request_failure option;
+  tiv_skill_cursor : int;
+  tiv_reading : tools_read_inflight option;
+}
+
+(* The Keeper turns reader. Metrics draws [ktv_observed_at] as an age. *)
+type keeper_turns_view = {
+  ktv_rows : Tui_decode.keeper_turn_row list;
+  ktv_observed_at : float option;
+  ktv_error : request_failure option;
+  ktv_finishes : (string * float) list;
+  ktv_reading : bool;
+}
+
+(* The Keeper waiting reader. A frame draws the read in progress from the
+   time the screen started waiting for it ([kwv_awaiting_since]). *)
+type keeper_waiting_view = {
+  kwv_rows : Tui_decode.keeper_waiting_row list;
+  kwv_failure : Tui_decode.keeper_waiting_failure option;
+  kwv_unverified : string list;
+  kwv_error : request_failure option;
+  kwv_awaiting_since : int64 option;
+}
+
+type drawn_reads = {
+  dr_tools_inventory : tools_inventory_view;
+  dr_keeper_turns : keeper_turns_view;
+  dr_keeper_waiting : keeper_waiting_view;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -9966,6 +10013,9 @@ type state = {
      keeper_turns reads; read by the answering overlay's ✓ rows. *)
   mutable keeper_turn_finishes: (string * float) list;
   mutable keeper_turns_observed_at: float option;
+  (* The readers' views as the last built frame drew them; [None] until a
+     frame is built. *)
+  mutable drawn_reads: drawn_reads option;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -13990,6 +14040,127 @@ let keeper_turns_read_error (state : state) =
           (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
              ~request:Masc_tui_words.Kept_request.Turn_observation_read refusal))
     state.keeper_turns_error
+
+let equal_workspace_refusal a b =
+  match a, b with
+  | Workspace_authority_withdrawn, Workspace_authority_withdrawn
+  | Workspace_identity_not_confirmed, Workspace_identity_not_confirmed
+  | Workspace_identity_changed, Workspace_identity_changed -> true
+  | Workspace_authority_withdrawn, (Workspace_identity_not_confirmed | Workspace_identity_changed)
+  | Workspace_identity_not_confirmed, (Workspace_authority_withdrawn | Workspace_identity_changed)
+  | Workspace_identity_changed, (Workspace_authority_withdrawn | Workspace_identity_not_confirmed) ->
+      false
+
+let equal_request_failure a b =
+  match a, b with
+  | Request_withdrawn a, Request_withdrawn b -> equal_workspace_refusal a b
+  | Request_failed a, Request_failed b -> String.equal a b
+  | Request_withdrawn _, Request_failed _ | Request_failed _, Request_withdrawn _ -> false
+
+let equal_tools_read_part a b =
+  match a, b with
+  | Tools_inventory_read, Tools_inventory_read
+  | Tools_catalog_read, Tools_catalog_read
+  | Tools_activations_read, Tools_activations_read
+  | Tools_async_read, Tools_async_read -> true
+  | Tools_usage_read a, Tools_usage_read b -> String.equal a b
+  | Tools_inventory_read, (Tools_catalog_read | Tools_activations_read | Tools_usage_read _ | Tools_async_read)
+  | Tools_catalog_read, (Tools_inventory_read | Tools_activations_read | Tools_usage_read _ | Tools_async_read)
+  | Tools_activations_read, (Tools_inventory_read | Tools_catalog_read | Tools_usage_read _ | Tools_async_read)
+  | Tools_usage_read _, (Tools_inventory_read | Tools_catalog_read | Tools_activations_read | Tools_async_read)
+  | Tools_async_read, (Tools_inventory_read | Tools_catalog_read | Tools_activations_read | Tools_usage_read _) ->
+      false
+
+let equal_tools_read_inflight a b =
+  Int.equal a.tri_generation b.tri_generation
+  && Option.equal String.equal a.tri_keeper b.tri_keeper
+  && List.equal equal_tools_read_part a.tri_pending b.tri_pending
+
+(* Decoded readings compare by identity. A 304 answers with the very value
+   the last read decoded (Masc_tui_loader), so an answer that changed nothing
+   holds the same values. A fresh body with the same content compares as
+   changed, which costs one frame and never hides a change. *)
+let equal_tools_inventory_view a b =
+  Option.equal ( == ) a.tiv_inventory b.tiv_inventory
+  && Option.equal String.equal a.tiv_keeper b.tiv_keeper
+  && Option.equal equal_request_failure a.tiv_error b.tiv_error
+  && Int.equal a.tiv_skill_cursor b.tiv_skill_cursor
+  && Option.equal equal_tools_read_inflight a.tiv_reading b.tiv_reading
+
+let equal_keeper_turns_view a b =
+  List.equal ( == ) a.ktv_rows b.ktv_rows
+  && Option.equal Float.equal a.ktv_observed_at b.ktv_observed_at
+  && Option.equal equal_request_failure a.ktv_error b.ktv_error
+  && List.equal (fun (name, at) (other, other_at) -> String.equal name other && Float.equal at other_at)
+       a.ktv_finishes b.ktv_finishes
+  && Bool.equal a.ktv_reading b.ktv_reading
+
+let equal_keeper_waiting_view a b =
+  List.equal ( == ) a.kwv_rows b.kwv_rows
+  && Option.equal ( == ) a.kwv_failure b.kwv_failure
+  && List.equal String.equal a.kwv_unverified b.kwv_unverified
+  && Option.equal equal_request_failure a.kwv_error b.kwv_error
+  && Option.equal Int64.equal a.kwv_awaiting_since b.kwv_awaiting_since
+
+let tools_inventory_view (state : state) =
+  { tiv_inventory = state.tools_inventory
+  ; tiv_keeper = state.tools_inventory_keeper
+  ; tiv_error = state.tools_error
+  ; tiv_skill_cursor = state.tools_skill_cursor
+  ; tiv_reading = state.tools_read_inflight }
+
+let keeper_turns_view (state : state) =
+  { ktv_rows = state.keeper_turns
+  ; ktv_observed_at = state.keeper_turns_observed_at
+  ; ktv_error = state.keeper_turns_error
+  ; ktv_finishes = state.keeper_turn_finishes
+  ; ktv_reading = state.keeper_turns_inflight }
+
+let keeper_waiting_view (state : state) =
+  { kwv_rows = state.keeper_waiting
+  ; kwv_failure = state.keeper_waiting_failure
+  ; kwv_unverified = state.keeper_waiting_unverified
+  ; kwv_error = state.keeper_waiting_error
+  ; kwv_awaiting_since = Keeper_waiting_read.awaiting_since state.keeper_waiting_read }
+
+(* Called where a frame is built: what it drew is what the next answer is
+   compared with. *)
+let note_drawn_reads (state : state) =
+  state.drawn_reads <- Some
+    { dr_tools_inventory = tools_inventory_view state
+    ; dr_keeper_turns = keeper_turns_view state
+    ; dr_keeper_waiting = keeper_waiting_view state }
+
+(* With no frame built yet there is nothing to compare with, so the answer
+   is drawn. *)
+let effect_against_drawn ~equal ~drawn view =
+  match drawn with
+  | Some drawn when equal drawn view -> Drawn_unchanged
+  | Some _ | None -> Drawn_changed
+
+let either_drawn_changed a b =
+  match a, b with
+  | Drawn_unchanged, Drawn_unchanged -> Drawn_unchanged
+  | Drawn_changed, (Drawn_changed | Drawn_unchanged) | Drawn_unchanged, Drawn_changed -> Drawn_changed
+
+let tools_inventory_effect (state : state) =
+  effect_against_drawn ~equal:equal_tools_inventory_view
+    ~drawn:(Option.map (fun drawn -> drawn.dr_tools_inventory) state.drawn_reads)
+    (tools_inventory_view state)
+
+let keeper_waiting_effect (state : state) =
+  effect_against_drawn ~equal:equal_keeper_waiting_view
+    ~drawn:(Option.map (fun drawn -> drawn.dr_keeper_waiting) state.drawn_reads)
+    (keeper_waiting_view state)
+
+(* A turns answer also carries the waiting rows, so it is drawn when either
+   view moved. *)
+let keeper_turns_effect (state : state) =
+  either_drawn_changed
+    (effect_against_drawn ~equal:equal_keeper_turns_view
+       ~drawn:(Option.map (fun drawn -> drawn.dr_keeper_turns) state.drawn_reads)
+       (keeper_turns_view state))
+    (keeper_waiting_effect state)
 
 let supersede_live_context_read (state : state) cancel =
   let previous = state.live_context_cancel in
@@ -21030,6 +21201,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  drawn_reads = None;
   account_login = None;
   account_login_detached = [];
   account_login_readings = [];

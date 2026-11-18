@@ -3354,6 +3354,121 @@ let test_unreadable_original_inventory_keeps_spent_deliveries () =
     check_delivery_kept ~base_path approval_id)
 ;;
 
+(* #38541: a delivery is the decision's only durable copy until its
+   [Resolved] row is confirmed on the audit ledger. *)
+let durable_delivery_ledger ~base_path approval_id =
+  match AQ.For_testing.durable_snapshot_json ~base_path with
+  | Error detail -> Alcotest.fail detail
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    json
+    |> member "deliveries"
+    |> to_list
+    |> List.find_map (fun delivery ->
+      if String.equal (delivery |> member "entry" |> member "id" |> to_string) approval_id
+      then Some (delivery |> member "ledger" |> to_string)
+      else None)
+;;
+
+(* The durable state a process leaves when it stops after the [Resolved]
+   append and before the delivery was stored as recorded. *)
+let forget_ledger_confirmation ~base_path approval_id =
+  match AQ.For_testing.durable_snapshot_json ~base_path with
+  | Error detail -> Alcotest.fail detail
+  | Ok (`Assoc fields) ->
+    let open Yojson.Safe.Util in
+    let unconfirm delivery =
+      if String.equal (delivery |> member "entry" |> member "id" |> to_string) approval_id
+      then
+        match delivery with
+        | `Assoc delivery_fields ->
+          `Assoc (("ledger", `String "append_pending") :: List.remove_assoc "ledger" delivery_fields)
+        | _ -> Alcotest.fail "delivery must be an object"
+      else delivery
+    in
+    let deliveries = List.assoc "deliveries" fields |> to_list |> List.map unconfirm in
+    write_pending_snapshot
+      ~base_path
+      (`Assoc (("deliveries", `List deliveries) :: List.remove_assoc "deliveries" fields))
+  | Ok _ -> Alcotest.fail "snapshot must be an object"
+;;
+
+let fail_audit_appends () =
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Keeper_approval.Audit.For_testing.set_append_jsonl (fun _path _json ->
+    raise (Sys_error "audit disk full"))
+;;
+
+let test_install_confirms_an_appended_resolution_without_a_second_row () =
+  Keeper_approval.Audit.For_testing.reset_store ();
+  with_spent_fixture "queue-ledger-crash-after-append" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "ledger-crash" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    Alcotest.(check (option string)) "a confirmed append is stored as recorded"
+      (Some "recorded") (durable_delivery_ledger ~base_path approval_id);
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    acknowledge_wake ~base_path ~keeper_name;
+    forget_ledger_confirmation ~base_path approval_id;
+    Alcotest.(check int) "the crashed attempt left one row" 1
+      (resolved_rows_for_approval ~base_path approval_id);
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "retry found the row" 0 (List.length report.ledger_retry_failures);
+    Alcotest.(check int) "retry did not append a second row" 1
+      (resolved_rows_for_approval ~base_path approval_id);
+    Alcotest.(check int) "confirmed spent delivery retired" 1 report.retired_deliveries;
+    check_delivery_retired ~base_path approval_id)
+;;
+
+let test_unrecorded_resolution_is_never_retired_until_appended_once () =
+  Fun.protect ~finally:Keeper_approval.Audit.For_testing.reset_store (fun () ->
+    Keeper_approval.Audit.For_testing.reset_store ();
+    with_spent_fixture "queue-ledger-append-failed" (fun ~base_path ~keeper_name ->
+      let input = `Assoc [ "target", `String "ledger-failed" ] in
+      let approval_id = submit ~base_path ~keeper_name ~input in
+      fail_audit_appends ();
+      (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+      Keeper_approval.Audit.For_testing.reset_store ();
+      Alcotest.(check (option string)) "a failed append stays unconfirmed"
+        (Some "append_pending") (durable_delivery_ledger ~base_path approval_id);
+      Alcotest.(check int) "the failed append wrote no row" 0
+        (resolved_rows_for_approval ~base_path approval_id);
+      consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+      acknowledge_wake ~base_path ~keeper_name;
+      (match
+         Masc.Keeper_meta_store.remove_snapshot
+           (Masc.Workspace.default_config base_path)
+           ~name:keeper_name
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      (* Spent on every other count, and its Keeper is gone, but the ledger
+         still lacks the decision. *)
+      fail_audit_appends ();
+      let failed = reinstall_exn ~base_path in
+      Keeper_approval.Audit.For_testing.reset_store ();
+      Alcotest.(check (list string)) "the failed retry is reported" [ approval_id ]
+        (List.map
+           (fun (failure : Masc.Keeper_approval_queue_result.delivery_replay_failure) ->
+              failure.approval_id)
+           failed.ledger_retry_failures);
+      Alcotest.(check int) "an unconfirmed delivery is not retired" 0 failed.retired_deliveries;
+      check_delivery_kept ~base_path approval_id;
+      Alcotest.(check (option string)) "it stays unconfirmed"
+        (Some "append_pending") (durable_delivery_ledger ~base_path approval_id);
+      let recovered = reinstall_exn ~base_path in
+      Alcotest.(check int) "the retry succeeded" 0 (List.length recovered.ledger_retry_failures);
+      Alcotest.(check int) "the retry appended the row once" 1
+        (resolved_rows_for_approval ~base_path approval_id);
+      Alcotest.(check int) "only then is the delivery retired" 1 recovered.retired_deliveries;
+      check_delivery_retired ~base_path approval_id;
+      let again = reinstall_exn ~base_path in
+      Alcotest.(check int) "a later install writes nothing more" 1
+        (resolved_rows_for_approval ~base_path approval_id);
+      Alcotest.(check int) "nothing left to retire" 0 again.retired_deliveries))
+;;
+
 (* A Keeper whose meta exists but whose queue has no durable state cannot say
    whether a wake is queued, so the row is kept. Once the meta is gone too the
    delivery has no reader, the same rule [Hitl_recipient_absent] applies. *)
@@ -7881,6 +7996,14 @@ let () =
             test_linked_original_keeps_consumed_delivery_for_gone_keeper
         ; Alcotest.test_case "unreadable original inventory keeps spent deliveries" `Quick
             test_unreadable_original_inventory_keeps_spent_deliveries
+        ; Alcotest.test_case
+            "install confirms an appended resolution without a second row"
+            `Quick
+            test_install_confirms_an_appended_resolution_without_a_second_row
+        ; Alcotest.test_case
+            "unrecorded resolution is never retired until appended once"
+            `Quick
+            test_unrecorded_resolution_is_never_retired_until_appended_once
         ; Alcotest.test_case
             "absent queue keeps the delivery until the Keeper is gone"
             `Quick

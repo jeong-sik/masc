@@ -58,6 +58,15 @@ let of_count count =
   | Some value -> Value value
   | None -> if count = 0 then Zero else Absent
 
+let microseconds_per_ms = 1000.0
+
+let of_milliseconds ms =
+  if not (Float.is_finite ms) then Absent
+  else
+    let microseconds = Float.ceil (ms *. microseconds_per_ms) in
+    if microseconds >= Float.of_int max_int then of_count max_int
+    else of_count (Float.to_int microseconds)
+
 type graph =
   | Never_read
   | Too_narrow

@@ -362,6 +362,15 @@
  (modules masc_tui_braille)
  (libraries masc_tui_message_layout masc_tui_theme zarith))
 
+;; The engine screen's samples for its time graphs (RFC tui-one-screen-grammar
+;; 5.6): when a /health sample is due, which answer it takes, and the ring the
+;; graphs draw. Pure, so the loop and the tests drive it with their own clock.
+(library
+ (name masc_tui_engine_samples)
+ (wrapped false)
+ (modules masc_tui_engine_samples)
+ (libraries masc masc_tui_braille))
+
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
 (library

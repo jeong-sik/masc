@@ -59,6 +59,12 @@ val of_count : int -> sample
     below zero is no reading, so it is [Absent], the blank a failed read
     draws. *)
 
+val of_milliseconds : float -> sample
+(** A measured duration in milliseconds, as a count of whole microseconds
+    rounded up, so a duration above zero stays above zero on the scale. A
+    duration that is not a number is no reading ([Absent]); one past the
+    integer range stands at the top. *)
+
 (** {1 Graphs} *)
 
 (** What a graph draws. *)

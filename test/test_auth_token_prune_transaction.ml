@@ -24,9 +24,26 @@ let with_workspace f =
 (* A fixed clock leaves issuance's live bearers far from the expired fixture. *)
 let read path = In_channel.with_open_bin path In_channel.input_all
 
-let rec waitpid child =
-  try Unix.waitpid [] child with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid child
+let poll_interval_s = 0.02
+
+(* Poll instead of blocking in [Unix.waitpid []]. A blocking wait here was one
+   of the two unbounded waits in this suite: when the forked child never
+   exited, nothing in the test could end it and only the harness deadline
+   stopped the run (#8056: 5400 s, the parent and child still alive together at
+   66 minutes, while #8045 ran this same case 21/21 in 0.73 s). A stuck child
+   now fails this one case with a named reason and the rest keeps running.
+   [reaped] is set before the kill so [finally] never waits on a child it has
+   already given up on. *)
+let reap_within child ~seconds =
+  let started = Unix.gettimeofday () in
+  let rec loop () =
+    match Unix.waitpid [ Unix.WNOHANG ] child with
+    | 0, _ ->
+      if Unix.gettimeofday () -. started >= seconds then None
+      else (Unix.sleepf poll_interval_s; loop ())
+    | _reaped_pid, status -> Some status
+  in
+  loop ()
 
 let now = 1_735_689_600.
 let expired = "2000-01-01T00:00:00Z"
@@ -212,16 +229,21 @@ let test_fifo_refusal_releases_publishers () =
       Fun.protect
         ~finally:(fun () ->
           if not !reaped then (
+            reaped := true;
             (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-            ignore (waitpid child));
+            ignore (reap_within child ~seconds:5.));
           Fs_compat.remove_tree base_path)
         (fun () ->
-          let _, status = waitpid child in
-          reaped := true;
-          match status with
-          | Unix.WEXITED 0 -> ()
-          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-              fail "isolated FIFO prune scenario failed")
+          match reap_within child ~seconds:60. with
+          | None ->
+              reaped := true;
+              fail "the FIFO prune child did not finish within 60 s; it is stuck"
+          | Some status ->
+              reaped := true;
+              match status with
+              | Unix.WEXITED 0 -> ()
+              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+                  fail "isolated FIFO prune scenario failed")
 
 let test_regular_symlink_refuses_plan () =
   with_workspace @@ fun base_path ->

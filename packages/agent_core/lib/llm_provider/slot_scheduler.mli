@@ -100,6 +100,30 @@ val with_permit_until
   -> (unit -> 'a)
   -> ('a, [> `Permit_wait_expired ]) result
 
+(** {2 A slot held across calls}
+
+    A caller that decides which of several schedulers to use before it runs
+    anything takes the slot first and returns it with {!release} when the
+    work is over. *)
+
+(** Take a free slot without waiting. [true] when a slot was under the
+    allowance and no request was queued, so a request taken here never
+    passes a waiter; [false] queues nothing. *)
+val try_acquire : t -> bool
+
+(** Wait for a slot as {!with_permit} does and return once the caller owns
+    it. [on_queue] is called as {!with_permit} calls it. A cancelled wait,
+    or a raise from [on_queue], leaves no slot held and no waiter queued. *)
+val acquire_held
+  :  ?on_queue:(unit -> wait_end -> unit)
+  -> admission_class:Admission_class.t
+  -> t
+  -> unit
+
+(** Return a slot taken by {!try_acquire} or {!acquire_held}. A freed slot
+    goes to the next waiter as it does when {!with_permit} ends. *)
+val release : t -> unit
+
 (** {2 Capacity Query} *)
 
 (** Point-in-time snapshot of scheduler state.

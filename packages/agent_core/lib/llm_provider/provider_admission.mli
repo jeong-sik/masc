@@ -180,6 +180,38 @@ val with_admission_and_work_for
   -> (unit -> 'a)
   -> ('a, deadline_expiry) result
 
+(** {2 A seat taken before the work}
+
+    A caller with several endpoints to choose from takes a seat first and
+    then runs its work on the endpoint that gave it. *)
+
+(** One endpoint's permit, held until {!release_seat}. A config that
+    declares no [max_concurrent_requests] gives a seat that holds nothing. *)
+type seat
+
+(** [take_first_seat first rest] takes a seat on one of the endpoints of
+    [first :: rest] and returns the seat with the value the caller paired
+    with that endpoint's config.
+
+    It asks each endpoint in order and takes the first seat it can take
+    without waiting: an endpoint with no declaration, or one with a permit
+    free and no request queued. When every endpoint is full, the request
+    queues on all of them at once, each as its config's [admission_class],
+    and keeps the first permit granted. A permit granted to it after that one
+    goes straight back to its endpoint. The wait has no deadline: it ends
+    with a seat or with cancellation, and a cancelled wait leaves no permit
+    held and no request queued.
+
+    The allowance and conflict rules are those of {!with_admission}. *)
+val take_first_seat
+  :  'owner * Provider_config.t
+  -> ('owner * Provider_config.t) list
+  -> 'owner * seat
+
+(** Return the seat's permit to its endpoint. Returning a seat twice returns
+    it once. *)
+val release_seat : seat -> unit
+
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or
     [None] when no dispatch has declared admission for it yet.
     Diagnostics only. *)

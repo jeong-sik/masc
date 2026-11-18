@@ -995,6 +995,142 @@ let test_a_bounded_wait_writes_its_callers_cell_on_every_path () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
+(* Seats taken before the work: each test names its own endpoints. *)
+let seat_config base_url = make_config ~base_url ~max_concurrent_requests:1 ()
+
+let active config =
+  match Provider_admission.snapshot_for ~config with
+  | Some snapshot -> snapshot.Slot_scheduler.active
+  | None -> 0
+;;
+
+let queued config =
+  match Provider_admission.snapshot_for ~config with
+  | Some snapshot -> snapshot.Slot_scheduler.queue_length
+  | None -> 0
+;;
+
+let test_a_seat_is_taken_at_the_first_endpoint_free_now () =
+  Eio_main.run
+  @@ fun _env ->
+  let a = seat_config "http://seat-first-free-a.test:1" in
+  let b = seat_config "http://seat-first-free-b.test:1" in
+  let index_a, seat_a = Provider_admission.take_first_seat (0, a) [ 1, b ] in
+  check int "the first endpoint has a free permit" 0 index_a;
+  let index_b, seat_b = Provider_admission.take_first_seat (0, a) [ 1, b ] in
+  check int "a full first endpoint is passed for a free one" 1 index_b;
+  check int "nothing queued on the full endpoint" 0 (queued a);
+  Provider_admission.release_seat seat_a;
+  Provider_admission.release_seat seat_b;
+  check (pair int int) "both permits returned" (0, 0) (active a, active b)
+;;
+
+let test_an_endpoint_without_a_declaration_gives_a_seat_at_once () =
+  Eio_main.run
+  @@ fun _env ->
+  let a = seat_config "http://seat-undeclared-a.test:1" in
+  let undeclared = make_config ~base_url:"http://seat-undeclared-u.test:1" () in
+  let _, seat_a = Provider_admission.take_first_seat (0, a) [] in
+  let index, seat = Provider_admission.take_first_seat (0, a) [ 1, undeclared ] in
+  check int "the endpoint without a declaration" 1 index;
+  check int "nothing queued on the full endpoint" 0 (queued a);
+  Provider_admission.release_seat seat;
+  Provider_admission.release_seat seat_a;
+  check int "the held permit returned" 0 (active a)
+;;
+
+let test_a_full_walk_waits_in_every_queue_and_keeps_the_first_permit () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let a = seat_config "http://seat-every-queue-a.test:1" in
+  let b = seat_config "http://seat-every-queue-b.test:1" in
+  let _, seat_a = Provider_admission.take_first_seat (0, a) [] in
+  let _, seat_b = Provider_admission.take_first_seat (0, b) [] in
+  let taken =
+    Eio.Fiber.pair
+      (fun () -> Provider_admission.take_first_seat (0, a) [ 1, b ])
+      (fun () ->
+        await_queued ~clock ~config:a 1;
+        await_queued ~clock ~config:b 1;
+        Provider_admission.release_seat seat_b)
+    |> fst
+  in
+  let index, seat = taken in
+  check int "the endpoint that freed first" 1 index;
+  check int "the wait left the other queue" 0 (queued a);
+  check (pair int int) "one permit on each endpoint" (1, 1) (active a, active b);
+  Provider_admission.release_seat seat;
+  Provider_admission.release_seat seat_a;
+  check (pair int int) "every permit returned" (0, 0) (active a, active b)
+;;
+
+let test_a_permit_granted_after_the_first_goes_back () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let a = seat_config "http://seat-second-grant-a.test:1" in
+  let b = seat_config "http://seat-second-grant-b.test:1" in
+  let _, seat_a = Provider_admission.take_first_seat (0, a) [] in
+  let _, seat_b = Provider_admission.take_first_seat (0, b) [] in
+  let taken =
+    Eio.Fiber.pair
+      (fun () -> Provider_admission.take_first_seat (0, a) [ 1, b ])
+      (fun () ->
+        await_queued ~clock ~config:a 1;
+        await_queued ~clock ~config:b 1;
+        (* Both grants are made before the waiting fibers run again. *)
+        Provider_admission.release_seat seat_a;
+        Provider_admission.release_seat seat_b)
+    |> fst
+  in
+  let _, seat = taken in
+  check int "one permit held across both endpoints" 1 (active a + active b);
+  check (pair int int) "nothing left queued" (0, 0) (queued a, queued b);
+  Provider_admission.release_seat seat;
+  check (pair int int) "every permit returned" (0, 0) (active a, active b)
+;;
+
+let test_a_cancelled_seat_wait_leaves_nothing_held_or_queued () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let a = seat_config "http://seat-cancelled-a.test:1" in
+  let b = seat_config "http://seat-cancelled-b.test:1" in
+  let _, seat_a = Provider_admission.take_first_seat (0, a) [] in
+  let _, seat_b = Provider_admission.take_first_seat (0, b) [] in
+  let outcome =
+    Eio.Fiber.first
+      (fun () ->
+        let (_ : int * Provider_admission.seat) =
+          Provider_admission.take_first_seat (0, a) [ 1, b ]
+        in
+        `Seated)
+      (fun () ->
+        await_queued ~clock ~config:a 1;
+        await_queued ~clock ~config:b 1;
+        `Cancelled_the_wait)
+  in
+  check bool "the wait was cancelled" true (outcome = `Cancelled_the_wait);
+  check (pair int int) "nothing left queued" (0, 0) (queued a, queued b);
+  Provider_admission.release_seat seat_a;
+  Provider_admission.release_seat seat_b;
+  check (pair int int) "every permit returned" (0, 0) (active a, active b)
+;;
+
+let test_returning_a_seat_twice_returns_it_once () =
+  Eio_main.run
+  @@ fun _env ->
+  let a = seat_config "http://seat-returned-twice.test:1" in
+  let _, seat = Provider_admission.take_first_seat (0, a) [] in
+  Provider_admission.release_seat seat;
+  Provider_admission.release_seat seat;
+  check int "the permit returned once" 0 (active a);
+  let _, again = Provider_admission.take_first_seat (0, a) [] in
+  check int "the permit can be taken again" 1 (active a);
+  Provider_admission.release_seat again
+;;
+
 let () =
   run
     "provider_admission"
@@ -1057,6 +1193,32 @@ let () =
             "Complete.complete dispatch is admitted"
             `Quick
             test_complete_dispatch_is_admitted
+        ] )
+    ; ( "seat"
+      , [ test_case
+            "a seat is taken at the first endpoint free now"
+            `Quick
+            test_a_seat_is_taken_at_the_first_endpoint_free_now
+        ; test_case
+            "an endpoint without a declaration gives a seat at once"
+            `Quick
+            test_an_endpoint_without_a_declaration_gives_a_seat_at_once
+        ; test_case
+            "a full walk waits in every queue and keeps the first permit"
+            `Quick
+            test_a_full_walk_waits_in_every_queue_and_keeps_the_first_permit
+        ; test_case
+            "a permit granted after the first goes back"
+            `Quick
+            test_a_permit_granted_after_the_first_goes_back
+        ; test_case
+            "a cancelled seat wait leaves nothing held or queued"
+            `Quick
+            test_a_cancelled_seat_wait_leaves_nothing_held_or_queued
+        ; test_case
+            "returning a seat twice returns it once"
+            `Quick
+            test_returning_a_seat_twice_returns_it_once
         ] )
     ; ( "call_deadline"
       , [ test_case

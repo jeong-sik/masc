@@ -94,6 +94,8 @@ let runtime_root_of ~base_path = function
        Ok (private_child accounts (Filename.basename root))
      with Unix.Unix_error _ | Sys_error _ -> Error account_failure)
 
+let person_runtime_root person ~base_path = runtime_root_of ~base_path (Person person)
+
 let person_reference_refused =
   "In multi-account mode a login makes a new account, and account_ref is not read."
 

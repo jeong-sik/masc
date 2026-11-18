@@ -62,6 +62,29 @@ let finish (_ : Login.in_call) (person : Login.person) ~base_path id =
       ~then_:(Error (Files_not_removed failed_stage))
 ;;
 
+let remove_in_call in_call ~(person : Login.person) ~base_path id =
+  let finish () = finish in_call person ~base_path id in
+  let start () =
+    match Authz_purge.start person.zone ~user_id:person.user_id (target person id) with
+    | Ok () -> finish ()
+    | Error error ->
+      (* The published state tells whether the record went into the log: a
+         commit can answer an error after its record went in, as when the
+         store did not take the end of the commit. *)
+      (match status_of person id with
+       | Some Purges.Account_pending ->
+         logged id "its start was recorded, and the commit answered" (Authz_purge.error_detail error);
+         finish ()
+       | Some (Purges.Account_failed { failed_stage = _ } | Purges.Account_purged) | None ->
+         logged id "it was not started" (Authz_purge.error_detail error);
+         Error (Not_started error))
+  in
+  match status_of person id with
+  | None | Some (Purges.Account_failed { failed_stage = _ }) -> start ()
+  | Some Purges.Account_pending -> finish ()
+  | Some Purges.Account_purged -> Error Not_found
+;;
+
 let remove ~(person : Login.person) ~base_path id =
   (* Asked before the call is taken, so whether a call of another person's
      account runs is not told. *)
@@ -70,27 +93,7 @@ let remove ~(person : Login.person) ~base_path id =
     (match kind with
      | Authz_provider_account_state.Login -> Error Not_a_key_account
      | Authz_provider_account_state.Key { integration_id = _; generation = _ } ->
-       Login.one_call_of id ~busy:Account_busy (fun in_call ->
-         let finish () = finish in_call person ~base_path id in
-         let start () =
-           match Authz_purge.start person.zone ~user_id:person.user_id (target person id) with
-           | Ok () -> finish ()
-           | Error error ->
-             (* The published state tells whether the record went into the
-                log: a commit can answer an error after its record went in,
-                as when the store did not take the end of the commit. *)
-             (match status_of person id with
-              | Some Purges.Account_pending ->
-                logged id "its start was recorded, and the commit answered" (Authz_purge.error_detail error);
-                finish ()
-              | Some (Purges.Account_failed { failed_stage = _ } | Purges.Account_purged) | None ->
-                logged id "it was not started" (Authz_purge.error_detail error);
-                Error (Not_started error))
-         in
-         match status_of person id with
-         | None | Some (Purges.Account_failed { failed_stage = _ }) -> start ()
-         | Some Purges.Account_pending -> finish ()
-         | Some Purges.Account_purged -> Error Not_found))
+       Login.one_call_of id ~busy:Account_busy (fun in_call -> remove_in_call in_call ~person ~base_path id))
   | Some (_ : Authz_provider_account_state.account) | None -> Error Not_found
 ;;
 

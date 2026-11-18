@@ -34,3 +34,39 @@ val remove
   -> base_path:string
   -> provider_account_id:string
   -> Login_routes.answer
+
+(** [POST /api/v1/setup/accounts/key] with [{"integration_id":...,"key":...}]:
+    registers the key as a new key account of the person
+    ({!Server_key_account_registration.register}, RFC
+    a-persons-api-key-is-their-own-provider-account 3.3). No client is
+    called, so the answer does not say whether the vendor takes the key: a
+    verification of the account does. The request carries no idempotency
+    key, and a second request makes a second account.
+
+    [body] holds the key. Nothing of it is in an answer or in the log.
+
+    - 200 [{"provider_account_id":...,"kind":"key"}]: the record, the home
+      and the key file of the account are there.
+    - 400 [invalid_request]: the body is not the two members, each a string,
+      with an id as [integration_id].
+    - 400 [not_a_key]: the key is empty, holds a control character, or is a
+      JSON document.
+    - 400 [unknown_integration]: runtime.toml declares no provider of the
+      id.
+    - 400 [integration_takes_no_key]: the provider is not one whose key this
+      stage takes.
+    - 403 [registration_refused]: the person is not active.
+    - 503 [configuration_unavailable]: runtime.toml was not read.
+    - 503 [registration_not_recorded]: the record was not written, and
+      nothing of the key was stored.
+    - 503 [key_not_stored]: the files were not made, and the account was
+      removed in the same request. Nothing of the key stays.
+    - 503 [account_not_removed] with [provider_account_id]: the files were
+      not made, and the removal of the account did not go through. The
+      person removes the account ({!remove}). *)
+val register
+  :  person:Server_setup_account_login.person
+  -> base_path:string
+  -> body:string
+  -> Login_routes.answer
+

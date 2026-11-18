@@ -26,7 +26,19 @@ type shim_provenance =
   | Shim_verified of { sha256 : string }
   | Shim_unverified
 
-val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
+type relay_declaration =
+  | Relay_version of int
+  | No_relay_version
+  | Several_relay_versions of int list
+
+type shim_inspection =
+  { provenance : shim_provenance
+  ; relay : relay_declaration
+  }
+
+val relay_declaration_of_bytes : string -> relay_declaration
+
+val inspect_shim : dir:string -> (shim_inspection, string) result
 
 val shim_guest_path : string
 

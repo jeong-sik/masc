@@ -78,6 +78,21 @@ let prepare_microvm_shim_dir (t : t) ~backend =
   |> Result.map_error Keeper_microvm_shim_readiness.error_message
 ;;
 
+(* #52968: the guest's agent is the mounted shim, and a boot replaces the
+   guest it finds. A shim this server refuses must be refused while that guest
+   is still there, on every backend, so the order is carried by a value: a
+   boot can reach provisioning only through this check, and only this check
+   makes the value. Provisioning verifies again after teardown, because
+   [Keeper_microvm_shim_readiness.forget] drops the earlier result with the
+   old guest. *)
+type boot_shim = Boot_shim_verified
+
+let verify_microvm_shim_before_teardown (t : t) ~backend =
+  verify_microvm_shim ~base_path:t.config.base_path ~backend
+    ~guest_name:(keeper_vm_name t)
+  |> Result.map (fun () -> Boot_shim_verified)
+;;
+
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
@@ -139,7 +154,8 @@ let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
 
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
-let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
+let microvm_guest_provisions (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
+  let Boot_shim_verified = shim in
   (* Until helper and volume ownership are bound to a workspace, boot must
      neither launch a name-scoped trim helper nor delete a possible peer's
      helper. A present or unreadable helper inventory refuses provisioning.
@@ -321,8 +337,12 @@ module For_testing_microvm = struct
   let ensure_work_volume_mounted = ensure_microvm_work_volume_mounted
   let ensure_keeper_work_root = ensure_microvm_keeper_work_root
 
+  (* Provisioning internals only: no guest is torn down here, so there is no
+     teardown for the boot-time check to precede. Provisioning still verifies
+     the shim itself. *)
   let provision_guest t ~backend ~timeout_sec =
-    microvm_guest_provisions t ~backend ~timeout_sec |> Result.map (fun _ -> ())
+    microvm_guest_provisions t ~backend ~shim:Boot_shim_verified ~timeout_sec
+    |> Result.map (fun _ -> ())
 end
 
 (** Apple build-link preparation. Its caller admits execution only after the

@@ -567,7 +567,7 @@ let initialize_apple_attached_read_fixture ~sw ~net
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
   Fs_compat.mkdir_p shim_dir;
   let binary = Filename.concat shim_dir Keeper_sandbox_microvm.shim_binary_name in
-  write_file binary "#!/bin/sh\nexit 0\n";
+  write_file binary ("#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n");
   Unix.chmod binary 0o700;
   let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
   (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with

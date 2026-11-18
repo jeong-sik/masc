@@ -15,6 +15,14 @@ ARM64 = "masc-exec-shim-linux-arm64"
 AMD64 = "masc-exec-shim-linux-amd64"
 OLD_SHIM = b"shim of an older release\n"
 NEW_SHIM = b"shim of the build's release\n"
+# The relay version the fixture build speaks. Its own number, so a test cannot
+# pass by agreeing with this checkout's Exec_ssh_protocol.Relay.version.
+BUILD_RELAY = 5
+
+
+# The literal a binary built from a source with [relay] carries (#52968).
+def declaring(relay):
+    return f"MASC_EXEC_SHIM_RELAY_VERSION={relay};".encode()
 
 
 def sha256(content):
@@ -24,22 +32,33 @@ def sha256(content):
 # What the release ships for [asset]: the architecture is part of the content,
 # so a test can tell which of the two was installed.
 def shipped(asset):
-    return NEW_SHIM + asset.encode()
+    return NEW_SHIM + declaring(BUILD_RELAY) + b"\n" + asset.encode()
 
 
-def server_naming(build, version):
+# A release cut before the build's relay version: its shim declares [relay],
+# or nothing when [relay] is None.
+def shipped_with_relay(relay):
+    def ships(asset):
+        return NEW_SHIM + (b"" if relay is None else declaring(relay) + b"\n") + asset.encode()
+    return ships
+
+
+# The server binary links the same Relay as the shim, so it carries the same
+# declaration; [relay] None is a build that carries none.
+def server_naming(build, version, relay=BUILD_RELAY):
     server = build / "main_eio.exe"
-    server.write_text(f'#!/bin/sh\nif [ "$1" = --version ]; then echo {version}; fi\n')
+    declaration = "" if relay is None else f"# {declaring(relay).decode()}\n"
+    server.write_text(f'#!/bin/sh\n{declaration}if [ "$1" = --version ]; then echo {version}; fi\n')
     server.chmod(0o755)
 
 
 # A build whose server names [version] the way masc --version does.
 # [unnamed_workspace] is what the helper answers when --base-path is not given.
-def build_naming(root, version=VERSION, unnamed_workspace=None):
+def build_naming(root, version=VERSION, unnamed_workspace=None, relay=BUILD_RELAY):
     build = root / "build"
     build.mkdir()
     local_build.binaries(build)
-    server_naming(build, version)
+    server_naming(build, version, relay)
     local_build.preflight_helper(build, unnamed_workspace=unnamed_workspace)
     return build
 
@@ -49,15 +68,16 @@ def build_naming(root, version=VERSION, unnamed_workspace=None):
 # content SHA256SUMS vouches for when that is not what the asset holds;
 # [unlisted] names assets SHA256SUMS leaves out; [absent] names assets it
 # lists but the release does not serve.
-def release_base(root, listed=None, unlisted=(), absent=()):
+# [ships] gives what the release holds for an asset.
+def release_base(root, listed=None, unlisted=(), absent=(), ships=shipped):
     directory = root / "releases" / f"v{VERSION}"
     directory.mkdir(parents=True)
     lines = [f"{sha256(b'another asset')}  masc-macos-arm64"]
     for asset in (ARM64, AMD64):
         if asset not in absent:
-            (directory / asset).write_bytes(shipped(asset))
+            (directory / asset).write_bytes(ships(asset))
         if asset not in unlisted:
-            vouched = (listed or {}).get(asset, shipped(asset))
+            vouched = (listed or {}).get(asset, ships(asset))
             lines.append(f"{sha256(vouched)}  {asset}")
     (directory / "SHA256SUMS").write_text("\n".join(lines) + "\n")
     return (root / "releases").as_uri()
@@ -257,8 +277,9 @@ class GuestShim(unittest.TestCase):
                 self.assertTrue((root / "prefix/masc").is_file())
 
     # No network, a mirror without the release, a version built before its
-    # tag was published. The server and the shim keep working one release
-    # apart, so the install goes ahead, and the one line says what curl said.
+    # tag was published. The shim in place stays, and the server checks its
+    # relay version before booting a guest with it, so the install goes ahead,
+    # and the one line says what curl said.
     def test_a_release_that_cannot_be_read_leaves_the_shim_and_installs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -326,6 +347,56 @@ class GuestShim(unittest.TestCase):
             self.assertEqual(shim_directory(shim), PAIR)
             self.assertFalse((root / "prefix").exists(),
                              "the server was replaced beside a refused shim")
+
+    # #52968: the server refuses a shim whose relay version differs from its
+    # own. A release cut before this build's relay version ships such a shim,
+    # checksum and all, so it is refused like a shim the release did not ship,
+    # and the refusal names the source build that fits.
+    def test_a_release_shim_of_another_relay_installs_nothing(self):
+        for label, relay in (("an older relay", BUILD_RELAY - 1), ("no declaration", None)):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                base, shim, sidecar = workspace_with_shim(root)
+                releases = release_base(root, ships=shipped_with_relay(relay))
+                result = install(root, build_naming(root), releases, base)
+                self.assertNotEqual(result.returncode, 0)
+                declared = "none" if relay is None else str(relay)
+                self.assertIn(f"declares relay version {declared}", result.stderr)
+                self.assertIn(f"speaks relay version {BUILD_RELAY}", result.stderr)
+                self.assertIn("nothing installed", result.stderr)
+                self.assertIn("scripts/remote-ssh/build-shim.sh --arch arm64", result.stderr)
+                self.assertEqual(shim.read_bytes(), OLD_SHIM)
+                self.assertEqual(sidecar.read_text(), sidecar_line(OLD_SHIM))
+                self.assertEqual(shim_directory(shim), PAIR)
+                self.assertFalse((root / "prefix").exists(),
+                                 "the server was replaced beside a shim it refuses")
+
+    # The installed shim is already the release asset, so nothing is
+    # downloaded, but its relay version is still not the build's.
+    def test_a_current_release_shim_of_another_relay_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            stale = shipped_with_relay(BUILD_RELAY - 1)(ARM64)
+            base, shim, sidecar = workspace_with_shim(root, content=stale, sidecar=sidecar_line(stale))
+            releases = release_base(root, ships=shipped_with_relay(BUILD_RELAY - 1), absent=(ARM64,))
+            result = install(root, build_naming(root), releases, base)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"declares relay version {BUILD_RELAY - 1}", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertEqual(shim.read_bytes(), stale)
+            self.assertFalse((root / "prefix").exists())
+
+    # Without its own declaration the build gives nothing to match a release
+    # shim against, so no release is asked.
+    def test_a_build_that_declares_no_relay_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            base, shim, _ = workspace_with_shim(root)
+            result = install(root, build_naming(root, relay=None), release_base(root), base)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not declare exactly one relay version (found: none)", result.stderr)
+            self.assertEqual(shim.read_bytes(), OLD_SHIM)
+            self.assertFalse((root / "prefix").exists())
 
     def test_help_prints_the_usage_block_and_nothing_else(self):
         result = subprocess.run(["bash", str(SCRIPT), "--help"], capture_output=True, text=True)

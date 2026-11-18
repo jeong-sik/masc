@@ -288,6 +288,63 @@ let test_a_reading_holds_the_two_card_numbers () =
           (Samples.reading_of_server
              (Ok (Decode.Account_server { account_server_version = "1" })))))
 
+let count_sampled steps =
+  List.length (List.filter (fun decision -> decision = Samples.Sampled) steps)
+
+(* The loader records every [/health] answer as the newest before the loop
+   applies the read's own message, and the loop ticks in between. That one
+   answer is one sample. *)
+let test_the_own_answer_seen_early_is_one_sample () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let asked, decision = Samples.tick opened ~now:0. ~newest:None in
+  Alcotest.check step "the first sample asks" Samples.Read decision;
+  let newest = Some { Samples.at = 0.02; reading = answered_point } in
+  let between, early = Samples.tick asked ~now:0.025 ~newest in
+  let applied, on_apply, _ = Samples.answered between ~now:0.03 answered_point in
+  let after, late = Samples.tick applied ~now:0.035 ~newest in
+  Alcotest.(check int) "one sample for one answer" 1 (count_sampled [ early; on_apply; late ]);
+  Alcotest.(check int) "one time held" 1
+    (List.length (Samples.samples Samples.Live_heap after));
+  let _, next = Samples.tick after ~now:2.0 ~newest in
+  Alcotest.check step "the answer taken is not taken again" Samples.Read next
+
+(* Another reader's answer while the sampler's own read is out sends no
+   second read. *)
+let test_another_answer_while_the_read_is_out_sends_no_read () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let refresh = Some { Samples.at = 0.5; reading = answered_point } in
+  let waiting, first = Samples.tick asked ~now:0.6 ~newest:refresh in
+  let _, second = Samples.tick waiting ~now:1.9 ~newest:refresh in
+  Alcotest.(check bool) "no read while one is out" false
+    (List.exists (fun decision -> decision = Samples.Read) [ first; second ])
+
+(* A read still out when the view closed does not hold the next opening's
+   reads: its answer takes no sample, and the next due sample reads. *)
+let test_a_read_out_when_the_view_closed_does_not_hold_the_next () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let answered, decision, _ =
+    Samples.answered (Samples.hidden asked) ~now:0.03 answered_point
+  in
+  Alcotest.check step "a closed view takes no sample" Samples.Nothing decision;
+  Alcotest.(check int) "and holds none" 0
+    (List.length (Samples.samples Samples.Live_heap answered));
+  let reopened = Samples.shown answered ~now:10. ~capacity in
+  let newest = Some { Samples.at = 0.03; reading = answered_point } in
+  let _, decision = Samples.tick reopened ~now:10. ~newest in
+  Alcotest.check step "the next opening reads" Samples.Read decision
+
+(* A view opened again within two seconds of an answer takes that answer. *)
+let test_a_view_reopened_within_two_seconds_takes_the_answer () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let read, _, _ = Samples.answered asked ~now:0.03 answered_point in
+  let newest = Some { Samples.at = 0.03; reading = answered_point } in
+  let reopened = Samples.shown (Samples.hidden read) ~now:1.0 ~capacity in
+  let _, decision = Samples.tick reopened ~now:1.0 ~newest in
+  Alcotest.check step "taken without a read" Samples.Sampled decision
+
 let () =
   Alcotest.run "tui_engine_samples"
     [ ( "requests"
@@ -300,7 +357,16 @@ let () =
         ; Alcotest.test_case "an answer older than two seconds is read again" `Quick
             test_an_answer_older_than_two_seconds_is_read_again
         ; Alcotest.test_case "one read is out at a time" `Quick test_one_read_is_out_at_a_time
+        ; Alcotest.test_case "the own answer seen early is one sample" `Quick
+            test_the_own_answer_seen_early_is_one_sample
+        ; Alcotest.test_case "another answer while the read is out sends no read" `Quick
+            test_another_answer_while_the_read_is_out_sends_no_read
+        ; Alcotest.test_case "a read out when the view closed does not hold the next" `Quick
+            test_a_read_out_when_the_view_closed_does_not_hold_the_next
+        ; Alcotest.test_case "a view reopened within two seconds takes the answer" `Quick
+            test_a_view_reopened_within_two_seconds_takes_the_answer
         ] )
+
     ; ( "samples"
       , [ Alcotest.test_case "the ring keeps the graph width and drops the oldest" `Quick
             test_the_ring_keeps_the_graph_width_and_drops_the_oldest

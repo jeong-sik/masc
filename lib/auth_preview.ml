@@ -554,19 +554,20 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
           | None -> []
           | Some removal -> [ "removal", `String (removal_code removal) ]
         in
-        account, integration, of_kind @ of_removal)
+        account, integration, Option.is_none removal, of_kind @ of_removal)
       (Authz_provider_account.shown state user_id)
   in
   (* A Runtime is made only on an account its maker owns (the log refuses
      [Account_not_theirs]). One whose account is not shown, because its
-     removal is pending or went through, is not shown either: its record
-     stays, and every turn of it is refused. *)
+     removal is pending or went through, is not shown either, and neither is
+     one on an account a removal was left on: its record stays, and every
+     turn of it is refused. *)
   let runtimes =
     List.filter_map
       (fun (id, (runtime : Authz_runtime_state.runtime)) ->
         List.find_map
-          (fun (account, integration, (_ : (string * Yojson.Safe.t) list)) ->
-            if Provider_account_id.equal account runtime.provider_account_id
+          (fun (account, integration, in_use, (_ : (string * Yojson.Safe.t) list)) ->
+            if in_use && Provider_account_id.equal account runtime.provider_account_id
             then Some (id, runtime, integration)
             else None)
           accounts)
@@ -577,7 +578,7 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
     [ ( "provider_accounts"
       , `List
           (List.map
-             (fun (account, integration, facts) ->
+             (fun (account, integration, (_ : bool), facts) ->
                `Assoc
                  ((("provider_account_id", `String (Provider_account_id.to_string account)) :: facts)
                   @ fact "integration_id" integration_unread_code integration))

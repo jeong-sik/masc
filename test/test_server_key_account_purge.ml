@@ -277,7 +277,27 @@ let test_login_account =
     let carol = { person; account } in
     removes "an account that holds a login" ~base_path ~by:carol ~of_:carol "not_a_key_account";
     stands "its purge" carol "none";
-    spent "the account" carol true)
+    spent "the account" carol true;
+    (* Nor by a caller that holds the call of the account, as a registration
+       holds the call of the account it made: the removal reads the kind of
+       the account itself, and the home of a login is not its to remove. *)
+    let in_the_call (who : someone) ~of_ =
+      result_name
+        (Login.one_call_of of_ ~busy:Purge.Account_busy (fun in_call ->
+           Purge.remove_in_call in_call ~person:who.person ~base_path of_))
+    in
+    Alcotest.(check string)
+      "an account that holds a login, inside its call"
+      "not_a_key_account"
+      (in_the_call carol ~of_:account);
+    stands "its purge, after that" carol "none";
+    spent "the account, after that" carol true;
+    let dave = { person = admit zone ~name:"dave" ~hex:'d'; account } in
+    Alcotest.(check string)
+      "the account of another person, inside its call"
+      "not_found"
+      (in_the_call dave ~of_:account);
+    stands "its purge, after another asked" carol "none")
 ;;
 
 (* A removal that leaves the key says so in the log, nothing spends the

@@ -70,13 +70,16 @@ val remove
     exceptions of a process that cannot go on are raised. *)
 val resume : zone:Authz_zone.t -> base_path:string -> unit
 
-(** {!remove} for a caller that holds the call of the account and knows it
-    to be a key account of [person]: the registration whose files were not
-    made removes the account it had just recorded, in the same call (RFC
+(** {!remove} for a caller that holds the call of the account: the
+    registration whose files were not made removes the account it had just
+    recorded, in the same call (RFC
     a-persons-api-key-is-their-own-provider-account 3.3,
-    {!Server_key_account_registration}). The steps and the errors are those
-    of {!remove} from its second step on; [Not_a_key_account] and
-    [Account_busy] are not answered. *)
+    {!Server_key_account_registration}). It reads whose the account is and
+    of which kind itself, as {!remove} does, so an id of a login account or
+    of another person is answered [Not_a_key_account] or [Not_found] and
+    nothing is removed. [in_call] is not tied to [id] by its type: the
+    caller hands the witness of the call of that account. [Account_busy] is
+    not answered. *)
 val remove_in_call
   :  Server_setup_account_login.in_call
   -> person:Server_setup_account_login.person

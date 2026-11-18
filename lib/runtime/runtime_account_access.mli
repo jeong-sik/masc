@@ -283,7 +283,10 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     again inside the call, on the state of that time, with the account.
 
     [Ok ()] for a request that is no [Keeper_turn], and in a single-user
-    process: {!authorize} judges those whole. *)
+    process: {!authorize} judges those whole. So [Ok ()] is no promise that
+    {!authorize} lets the request through: in a multi-account process it
+    refuses an operator's call and a turn of an operator's Keeper, which
+    [admit] does not judge. *)
 val admit : request -> (unit, refusal) result
 
 (** Authorizes a Muse account for [request] by the access the process

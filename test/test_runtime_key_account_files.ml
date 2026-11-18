@@ -142,13 +142,18 @@ let test_made =
       "the key reads back from the file of its generation"
       ("key:" ^ the_key)
       (read_name (key_file_of ~runtime_root account));
-    (* A second registration of the id: its key file is taken, and the first
-       key stays the one in place. *)
+    (* A second making of an account that has its files: the place of its
+       key is taken. The call wrote no key and changed nothing that was
+       there, so nothing is to be removed after it. *)
     made "the same account again" ~runtime_root account "sk-test-another" "key_not_written:generation_taken";
-    Alcotest.(check string)
-      "the first key is the one in place"
-      ("key:" ^ the_key)
-      (read_name (key_file_of ~runtime_root account)))
+    let key_file = key_file_of ~runtime_root account in
+    Alcotest.(check string) "the first key is the one in place" ("key:" ^ the_key) (read_name key_file);
+    Alcotest.(check (list string))
+      "the folder of the key holds the file of the generation and nothing the refused call left"
+      [ Filename.basename key_file ]
+      (Array.to_list (Sys.readdir (Filename.dirname key_file)));
+    Alcotest.(check int) "the home is as it was" 0o700 (mode home);
+    key_state "a list reads the key of the account" ~runtime_root account "readable")
 ;;
 
 let test_no_root () =
@@ -241,10 +246,24 @@ let test_link =
     made "the other account" ~runtime_root other_account "sk-test-the-other-key" "made";
     Unix.symlink (keys_of ~runtime_root other_account) (keys_of ~runtime_root account);
     removed "an account whose key folder is a link" ~runtime_root account "removed";
+    (match Unix.lstat (keys_of ~runtime_root account) with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+     | (_ : Unix.stats) -> Alcotest.fail "the link is still there");
     Alcotest.(check string)
       "what the link led to is in place"
       "key:sk-test-the-other-key"
       (read_name (key_file_of ~runtime_root other_account)))
+;;
+
+(* A file where the folder of the keys would be holds no key of any account.
+   The removal ends there, as the reading of what is present does: were it to
+   fail, no later removal would end either. *)
+let test_not_a_folder =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    let keys = Filename.dirname (keys_of ~runtime_root account) in
+    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 keys (fun (_ : out_channel) -> ());
+    removed "an account under a file in place of the folder of the keys" ~runtime_root account "removed";
+    Alcotest.(check bool) "the file is left" true (Sys.file_exists keys))
 ;;
 
 (* The modes that keep a folder from being removed do not keep the superuser
@@ -303,6 +322,7 @@ let () =
       , [ Alcotest.test_case "the keys and the home of the account alone" `Quick test_removed
         ; Alcotest.test_case "an account with no files" `Quick test_nothing_made
         ; Alcotest.test_case "a link is not followed" `Quick test_link
+        ; Alcotest.test_case "a file in place of the folder of the keys" `Quick test_not_a_folder
         ; Alcotest.test_case "the key that does not go" `Quick test_key_stays
         ; Alcotest.test_case "the home that does not go" `Quick test_home_stays
         ] )

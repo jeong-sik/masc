@@ -55,7 +55,10 @@ val remove
       id.
     - 400 [integration_takes_no_key]: the provider is not one whose key this
       stage takes.
-    - 403 [registration_refused]: the person is not active.
+    - 403 [registration_refused]: the person is not active, or a reduction
+      of theirs that was started is not ended.
+    - 500 [internal_error]: the log refused the record for a reason no
+      request of a person leads to.
     - 503 [configuration_unavailable]: runtime.toml was not read.
     - 503 [registration_not_recorded]: the record was not written, and
       nothing of the key was stored.

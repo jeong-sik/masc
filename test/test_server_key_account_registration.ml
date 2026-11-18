@@ -107,6 +107,28 @@ let folder path mode =
 (* A zone a fresh bootstrap made, opened as a server opens it. [root] holds
    everything the case writes: the base path, the store and the
    configuration of the bootstrap. *)
+(* The seq of the newest line of the log ring, or the seq before the first
+   line of an empty ring ([Log.Ring.recent ~since_seq] gives the lines after
+   a seq). *)
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The lines of the log ring written after [since_seq], of every module. The
+   cases of this file write far fewer than the limit. *)
+let ring_lines_limit = 1_000
+
+let lines_since since_seq =
+  List.map
+    (fun (entry : Log.Ring.entry) -> entry.Log.Ring.message)
+    (Log.Ring.recent ~limit:ring_lines_limit ~since_seq ())
+;;
+
+(* Every key of this file begins with these characters. *)
+let key_prefix = "sk-test"
+
 let with_zone work () =
   Eio_main.run (fun _env ->
     let root = Unix.realpath (Filename.temp_dir "server-key-account-registration-" "") in
@@ -135,7 +157,18 @@ let with_zone work () =
          | Ok (_ : B.completed) -> ()
          | Error error -> Alcotest.failf "bootstrap refused: %s" (B.error_to_string error));
         match Z.open_at_start ~now_ms ~log_path:(Authz_log.path_of_base_path ~base_path) ~store_path:store with
-        | Ok zone -> work ~zone ~root ~base_path
+        | Ok zone ->
+          (* No line the server logs while a case runs holds a key or a part
+             of one (RFC a-persons-api-key-is-their-own-provider-account
+             3.3): the lines of every module are read, those of a
+             registration that failed among them. *)
+          let before = latest_ring_seq () in
+          work ~zone ~root ~base_path;
+          List.iter
+            (fun line ->
+              if String_util.contains_substring line key_prefix
+              then Alcotest.failf "a log line of the case holds a key: %d bytes" (String.length line))
+            (lines_since before)
         | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)))
 ;;
 
@@ -453,8 +486,15 @@ let test_files_not_made =
     let runtime_root = runtime_root_of ~base_path alice in
     let not_stored label =
       let before = List.map fst (removals alice) in
+      let logged_before = latest_ring_seq () in
       let answer = register alice ~base_path (key_body the_key) in
       answered label answer ~status:503 ~code:(Some "key_not_stored");
+      (* The failure is logged, so the reading of the log at the end of the
+         case reads lines of a registration. *)
+      Alcotest.(check bool)
+        (label ^ ": the server logged the failure")
+        true
+        (lines_since logged_before <> []);
       says_nothing_of label ~key:the_key answer;
       (match
          List.filter

@@ -84,6 +84,7 @@ let contains ~needle text =
 
 let forged_hello () : Relay.hello =
   { Relay.relay_version = Relay.version
+  ; source_identity = Source_identity.current
   ; root_read_only = true
   ; uid = expected.Keeper_guest_socket.uid
   ; gid = expected.Keeper_guest_socket.gid

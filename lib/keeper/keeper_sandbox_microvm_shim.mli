@@ -26,17 +26,10 @@ type shim_provenance =
   | Shim_verified of { sha256 : string }
   | Shim_unverified
 
-type relay_declaration =
-  | Relay_version of int
-  | No_relay_version
-  | Several_relay_versions of int list
-
 type shim_inspection =
   { provenance : shim_provenance
-  ; relay : relay_declaration
+  ; source : Source_identity.scan
   }
-
-val relay_declaration_of_bytes : string -> relay_declaration
 
 val inspect_shim : dir:string -> (shim_inspection, string) result
 

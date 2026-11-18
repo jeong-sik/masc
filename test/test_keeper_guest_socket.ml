@@ -69,10 +69,21 @@ let start_agent dir =
     agent := Some { socket; root };
     pid
 
-let version_only (hello : Relay.hello) =
-  if hello.Relay.relay_version = Relay.version
-  then None
-  else Some (Guest.Other_relay_version { agent = hello.Relay.relay_version })
+(* The real agent runs as this test's user, so only its source is checked. *)
+let source_only (hello : Relay.hello) =
+  let refused () =
+    Some
+      (Guest.Other_source
+         { server = Source_identity.current
+         ; agent = hello.Relay.source_identity
+         ; agent_relay = hello.Relay.relay_version
+         }) in
+  match Source_identity.current, hello.Relay.source_identity with
+  | Some server, Some agent -> if Source_identity.equal server agent then None else refused ()
+  | Some _, None | None, (Some _ | None) -> refused ()
+
+(* A source this test build is not: no git object name is all zeros. *)
+let other_source = { Source_identity.commit = String.make 40 '0'; state = Source_identity.Clean }
 
 let frame ~root argv =
   match
@@ -113,9 +124,9 @@ let describe = function
   | Guest.Timed_out _ -> "timed out"
   | Guest.Broken { reason; _ } -> "broken: " ^ reason
 
-let hello ?(relay_version = Relay.version) ?(root_read_only = true) ?(uid = 502)
+let hello ?(source_identity = Source_identity.current) ?(root_read_only = true) ?(uid = 502)
       ?(gid = 20) ?(no_new_privs = true) () : Relay.hello =
-  { Relay.relay_version; root_read_only; uid; gid; no_new_privs }
+  { Relay.relay_version = Relay.version; source_identity; root_read_only; uid; gid; no_new_privs }
 
 let contains ~needle haystack =
   let needle_length = String.length needle in
@@ -158,15 +169,21 @@ let test_refusal_checks_every_fact () =
   List.iter
     (fun (label, hello, want) ->
        check bool label true (refusal hello = Some want))
-    [ "another relay version", hello ~relay_version:(Relay.version + 1) (),
-      Guest.Other_relay_version { agent = Relay.version + 1 }
+    [ "another source", hello ~source_identity:(Some other_source) (),
+      Guest.Other_source
+        { server = Source_identity.current; agent = Some other_source; agent_relay = Relay.version }
+    ; "no source", hello ~source_identity:None (),
+      Guest.Other_source
+        { server = Source_identity.current; agent = None; agent_relay = Relay.version }
     ; "a writable root", hello ~root_read_only:false (), Guest.Root_writable
     ; "another uid", hello ~uid:501 (), Guest.Other_owner { uid = 501; gid = 20 }
     ; "another gid", hello ~gid:0 (), Guest.Other_owner { uid = 502; gid = 0 }
     ; "no no_new_privs", hello ~no_new_privs:false (), Guest.New_privileges_allowed
-    ; "the version is read first",
-      hello ~relay_version:0 ~root_read_only:false ~uid:0 ~no_new_privs:false (),
-      Guest.Other_relay_version { agent = 0 } ]
+    ; "the source is read first",
+      hello ~source_identity:(Some other_source) ~root_read_only:false ~uid:0
+        ~no_new_privs:false (),
+      Guest.Other_source
+        { server = Source_identity.current; agent = Some other_source; agent_relay = Relay.version } ]
 
 let test_run_reaches_the_real_shim () =
   let { socket; root } = the_agent () in
@@ -174,7 +191,7 @@ let test_run_reaches_the_real_shim () =
   with_eio @@ fun ~net ~clock ->
   match
     Guest.run ~net ~clock ~on_stdout_chunk:(Buffer.add_string streamed_out)
-      ~on_stderr_chunk:(Buffer.add_string streamed_err) ~accept:version_only ~socket
+      ~on_stderr_chunk:(Buffer.add_string streamed_err) ~accept:source_only ~socket
       ~connect_budget_sec ~budget_sec
       (Guest.Run { frame = frame ~root [ "sh"; "-c"; "echo out; echo err >&2; exit 3" ] })
   with
@@ -198,7 +215,7 @@ let test_probe_reaches_the_real_shim () =
   let { socket; _ } = the_agent () in
   with_eio @@ fun ~net ~clock ->
   match
-    Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+    Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
       Guest.Probe
   with
   | Guest.Exited { code = 0; stdout; _ } ->
@@ -231,7 +248,7 @@ let test_a_spent_budget_cancels_the_payload () =
   with_eio @@ fun ~net ~clock ->
   let started = Eio.Time.now clock in
   (match
-     Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec:3.0
+     Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec:3.0
        (Guest.Run
           { frame =
               frame ~root
@@ -257,7 +274,7 @@ let test_no_listener_is_unreachable () =
   with_temp_dir @@ fun dir ->
   with_eio @@ fun ~net ~clock ->
   match
-    Guest.run ~net ~clock ~accept:version_only ~socket:(Filename.concat dir "absent.sock")
+    Guest.run ~net ~clock ~accept:source_only ~socket:(Filename.concat dir "absent.sock")
       ~connect_budget_sec:1.0 ~budget_sec
       (Guest.Run { frame = "unused" })
   with
@@ -284,7 +301,7 @@ let test_a_silent_connection_is_replaced () =
   let started = Eio.Time.now clock in
   (match
      within ~clock 10.0 (fun () ->
-       Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec:2.5 ~budget_sec
+       Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec:2.5 ~budget_sec
          (Guest.Run { frame = "unused" }))
    with
    | Guest.Not_sent (Guest.Unreachable { attempts; _ }) ->
@@ -323,7 +340,7 @@ let test_ended_connections_are_replaced () =
     serve ());
   (match
      within ~clock budget_sec (fun () ->
-       Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+       Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
          (Guest.Run
             { frame = frame ~root [ "sh"; "-c"; "echo ran >> " ^ Filename.quote counter ] }))
    with
@@ -347,7 +364,7 @@ let test_an_agent_that_leaves_is_broken () =
     Eio.Flow.close client;
     `Stop_daemon);
   match
-    Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+    Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
       (Guest.Run { frame = "a request" })
   with
   | Guest.Broken _ -> ()
@@ -362,7 +379,7 @@ let test_failed_connections_hold_no_descriptor () =
   Eio.Fiber.both
     (fun () ->
       match
-        Guest.run ~net ~clock ~accept:version_only ~socket:(Filename.concat dir "absent.sock")
+        Guest.run ~net ~clock ~accept:source_only ~socket:(Filename.concat dir "absent.sock")
           ~connect_budget_sec:1.5 ~budget_sec (Guest.Run { frame = "unused" })
       with
       | Guest.Not_sent (Guest.Unreachable { attempts; _ }) ->
@@ -407,7 +424,7 @@ let incompatible_first_chunk ~label first_chunk () =
   in
   let started = Eio.Time.now clock in
   (match
-     Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+     Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
        (Guest.Run { frame = "a request" })
    with
    | Guest.Not_sent (Guest.Incompatible _) -> ()
@@ -434,7 +451,7 @@ let answered_by ~rest =
       await_request client;
       rest ~clock client)
   in
-  Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+  Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
     (Guest.Run { frame = "a request" })
 
 let test_a_signalled_shim_is_broken () =
@@ -468,7 +485,7 @@ let test_a_hello_split_across_reads_is_read () =
       Eio.Flow.copy_string (Relay.encode (Relay.Exit (Relay.Exited 0))) client)
   in
   match
-    Guest.run ~net ~clock ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+    Guest.run ~net ~clock ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
       (Guest.Run { frame = "a request" })
   with
   | Guest.Exited { code = 0; _ } -> ()
@@ -499,7 +516,7 @@ let test_output_is_bounded_and_streamed_whole () =
   in
   match
     Guest.run ~net ~clock ~on_stdout_chunk:(fun bytes -> streamed := !streamed + String.length bytes)
-      ~accept:version_only ~socket ~connect_budget_sec ~budget_sec
+      ~accept:source_only ~socket ~connect_budget_sec ~budget_sec
       (Guest.Run { frame = "a request" })
   with
   | Guest.Exited { code = 0; stdout; _ } ->
@@ -516,7 +533,7 @@ let test_a_budget_that_is_not_a_number_tries_nothing () =
   with_temp_dir @@ fun dir ->
   with_eio @@ fun ~net ~clock ->
   match
-    Guest.run ~net ~clock ~accept:version_only ~socket:(Filename.concat dir "any.sock")
+    Guest.run ~net ~clock ~accept:source_only ~socket:(Filename.concat dir "any.sock")
       ~connect_budget_sec ~budget_sec:Float.nan (Guest.Run { frame = "unused" })
   with
   | Guest.Not_sent (Guest.Bad_budget _) -> ()
@@ -580,7 +597,7 @@ let test_stdio_checks_actual_hello_before_request () =
     check bool "no request byte" false !got_byte;
     check bool "no owner dispatch" false !dispatched;
     check bool "no attempted write" false !wrote)
-    [hello ~relay_version:1 (); hello ~uid:501 (); hello ~root_read_only:false ()]
+    [hello ~source_identity:None (); hello ~uid:501 (); hello ~root_read_only:false ()]
 
 let test_stdio_decline_sends_no_request () =
   with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
@@ -744,18 +761,22 @@ let test_stdio_budget_after_write_closes_connection () =
   check int "timed-out request was not replayed" 1 !connections;
   check bool "budget expiry closed the owned connection" true !closed
 
-(* #52968: the host reads the relay version out of the mounted shim's bytes
-   before booting a guest with it. The executable dune built from this source
-   carries the declaration, and it names the relay this host speaks. *)
-let test_the_built_shim_declares_this_relay () =
+(* #52968, RFC host-and-shim-share-one-build-identity: the host reads the
+   source identity out of the mounted shim's bytes before booting a guest
+   with it. The executable dune built from this source carries one
+   declaration, and it is the identity this test binary links from the same
+   generated module, so host and shim cannot be stamped apart. *)
+let test_the_built_shim_declares_this_source () =
   let bytes = In_channel.with_open_bin !shim_binary In_channel.input_all in
-  match Masc.Keeper_sandbox_microvm.relay_declaration_of_bytes bytes with
-  | Masc.Keeper_sandbox_microvm.Relay_version version ->
-    check int "the built shim declares this host's relay" Relay.version version
-  | Masc.Keeper_sandbox_microvm.No_relay_version ->
-    Alcotest.fail "the built shim carries no relay declaration"
-  | Masc.Keeper_sandbox_microvm.Several_relay_versions _ ->
-    Alcotest.fail "the built shim declares several relay versions"
+  match Source_identity.current, Source_identity.scan bytes with
+  | None, _ -> Alcotest.fail "this test build has no source identity"
+  | Some this, Source_identity.Declared shim ->
+    check string "the built shim declares this build's source"
+      (Source_identity.to_string this) (Source_identity.to_string shim)
+  | Some _, Source_identity.Undeclared ->
+    Alcotest.fail "the built shim carries no source identity declaration"
+  | Some _, Source_identity.Several _ ->
+    Alcotest.fail "the built shim declares several source identities"
 
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected the masc-exec-shim binary path";
@@ -781,8 +802,8 @@ let () =
         ; test_case "cancellation releases backpressured decoder" `Quick test_stdio_cancellation_releases_blocked_decoder
         ; test_case "post-write budget closes without replay" `Quick test_stdio_budget_after_write_closes_connection ] )
     ; ( "real shim"
-      , [ test_case "the built shim declares this relay" `Quick
-            test_the_built_shim_declares_this_relay
+      , [ test_case "the built shim declares this source" `Quick
+            test_the_built_shim_declares_this_source
         ; test_case "a request reaches the shim" `Quick test_run_reaches_the_real_shim
         ; test_case "a probe reaches the shim" `Quick test_probe_reaches_the_real_shim
         ; test_case "a refused agent gets nothing" `Quick test_a_refused_agent_gets_nothing

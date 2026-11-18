@@ -178,6 +178,7 @@ let start ~socket ~owner =
 
 let hello () : Relay.hello =
   { Relay.relay_version = Relay.version
+  ; source_identity = Source_identity.current
   ; root_read_only = root_read_only ()
   ; uid = Unix.geteuid ()
   ; gid = Unix.getegid ()

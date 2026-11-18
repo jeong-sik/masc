@@ -424,7 +424,8 @@ let test_guest_mcp_uses_socket_without_process_runtime () =
   let listening = Eio.Net.listen ~sw ~backlog:4 net (`Unix socket) in
   let answer peer =
     let send chunk = Eio.Flow.copy_string (Relay.encode chunk) peer in
-    send (Relay.Hello {relay_version=Relay.version;root_read_only=true;
+    send (Relay.Hello {relay_version=Relay.version;
+      source_identity=Source_identity.current;root_read_only=true;
       uid=expected.uid;gid=expected.gid;no_new_privs=true});
     match Relay.request_kind_of_byte (read_exact peer 1).[0] with
     | Some Relay.Probe ->

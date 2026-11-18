@@ -169,6 +169,15 @@ if [ -z "$build_commit" ]; then
   exit 2
 fi
 build_commit_unix_ts="$(git -C "$repo_root" show -s --format=%ct "$build_commit" 2>/dev/null || true)"
+# The source identity the binaries declare (RFC
+# host-and-shim-share-one-build-identity): the same probe, run here, so a
+# server built in the container runs only the shim of this working tree.
+build_source_state="$(cd "$repo_root" && sh lib/build_commit/probe-commit.sh --print-env \
+  | sed -n 's/^MASC_BUILD_SOURCE_STATE=//p')"
+if [ -z "$build_source_state" ]; then
+  echo "build-linux-release: no source identity here; release binaries must carry one" >&2
+  exit 2
+fi
 
 # Content comes from the working tree (see the header), so an edited checkout
 # produces binaries that name a commit they were not built from. CI cannot
@@ -368,6 +377,7 @@ echo "== build"
 docker exec \
   -e MASC_BUILD_COMMIT="$build_commit" \
   -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" \
+  -e MASC_BUILD_SOURCE_STATE="$build_source_state" \
   "$container" bash -lc '
   set -e
   cd /src
@@ -478,7 +488,8 @@ if [ -n "$lifecycle_out" ]; then
   echo "== lifecycle evidence begin"
   lifecycle_status=0
   docker exec -e MASC_BUILD_COMMIT="$build_commit" \
-    -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" "$container" bash -lc '
+    -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" \
+    -e MASC_BUILD_SOURCE_STATE="$build_source_state" "$container" bash -lc '
     set -e
     cd /src
     eval "$(opam env --switch=masc)"

@@ -9,13 +9,15 @@ type initialization_failure =
 type verification_failure =
   | Guest_shim_missing of Unix.error
   | Sidecar_rejected of string
-  | Shim_relay_version_mismatch of
-      { installed : Keeper_sandbox_microvm.relay_declaration
-      ; required : int  (** {!Exec_ssh_protocol.Relay.version} *)
+  | Shim_from_other_source of
+      { shim : Source_identity.scan  (** the declarations in the shim's bytes *)
+      ; server : Source_identity.t option  (** {!Source_identity.current} *)
       }
-      (** #52968: the mounted shim is the guest's agent, so a guest booted
-          with it would send this relay version in its hello and be refused;
-          replacing the guest mounts the same bytes again. Nothing is booted,
+      (** #52968, RFC host-and-shim-share-one-build-identity: the mounted shim
+          is the guest's agent, so a guest booted with it would name another
+          source (or none) in its hello and be refused; replacing the guest
+          mounts the same bytes again. It passes only when it declares exactly
+          one identity and that equals this server's. Nothing is booted,
           adopted or replaced until the shim is reinstalled. *)
 
 type config_failure =

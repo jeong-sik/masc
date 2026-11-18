@@ -34,9 +34,16 @@ let install_built base bytes =
   let digest = Agent_core_sha256.(digest_string bytes |> to_hex) in
   write (sidecar base) (digest ^ "  " ^ Shim.shim_binary_name ^ "\n")
 
-(* A shim built from this source carries its relay declaration (#52968). *)
+(* This test binary's source identity, which the server under test compares
+   a mounted shim with (RFC host-and-shim-share-one-build-identity). *)
+let this_source =
+  match Source_identity.current with
+  | Some identity -> identity
+  | None -> failwith "this test build has no source identity"
+
+(* A shim built from this source carries its source declaration. *)
 let install base bytes =
-  install_built base (bytes ^ "\000" ^ Exec_ssh_protocol.Relay.version_declaration ^ "\000")
+  install_built base (bytes ^ "\000" ^ Source_identity.declaration this_source ^ "\000")
 
 let corrupt base =
   write (sidecar base) (String.make 64 '0' ^ "  " ^ Shim.shim_binary_name ^ "\n")
@@ -340,26 +347,38 @@ let test_cancellation_during_failed_recovery_propagates () = with_fixture (fun ~
   Alcotest.(check bool) "cancellation survives recovery error" true cancelled;
   value (verify fs base))
 
-(* #52968: the 0.73.1 release shim speaks relay 1 and declares nothing; a
-   shim declaring relay 1 is the same refusal with the version named. Both
-   are refused with the sidecar verified and without one, and the refusal is
-   not cached: reinstalling the current shim is observed by the next call. *)
-let expect_relay_refused ~installed = function
-  | Error (Ready.Verification_failed (Ready.Shim_relay_version_mismatch {installed = got; required})) ->
-    Alcotest.(check int) "required is this host's relay" Exec_ssh_protocol.Relay.version required;
-    Alcotest.(check bool) "installed is what the bytes declare" true (got = installed)
+(* #52968: the 0.73.1 release shim declares nothing; a shim built from
+   another commit, or from this commit with other edits, declares another
+   source; a shim that carries two declarations is neither. All are refused
+   with the sidecar verified and without one, and the refusal is not cached:
+   reinstalling this source's shim is observed by the next call. *)
+let expect_other_source ~shim = function
+  | Error (Ready.Verification_failed (Ready.Shim_from_other_source {shim = got; server})) ->
+    Alcotest.(check bool) "server is this build's source" true (server = Some this_source);
+    Alcotest.(check bool) "shim is what the bytes declare" true (got = shim)
   | Error error -> Alcotest.fail (Ready.error_message error)
-  | Ok () -> Alcotest.fail "a shim speaking another relay authorized the endpoint"
+  | Ok () -> Alcotest.fail "a shim of another source authorized the endpoint"
 
-let test_stale_relay_shim_is_refused_until_reinstalled () = with_fixture (fun ~fs base ->
+let test_shim_of_another_source_is_refused_until_reinstalled () = with_fixture (fun ~fs base ->
+  let other_commit = { this_source with Source_identity.commit = String.make 40 '0' } in
+  let other_edits =
+    { this_source with
+      Source_identity.state = Source_identity.Modified { digest = String.make 40 'f' } } in
   install_built base "release shim from before the declaration";
   value (initialize fs base);
-  expect_relay_refused ~installed:Shim.No_relay_version (verify fs base);
-  install_built base "relay-1 shim MASC_EXEC_SHIM_RELAY_VERSION=1; bytes";
-  expect_relay_refused ~installed:(Shim.Relay_version 1) (verify fs base);
+  expect_other_source ~shim:Source_identity.Undeclared (verify fs base);
+  install_built base ("shim " ^ Source_identity.declaration other_commit ^ " bytes");
+  expect_other_source ~shim:(Source_identity.Declared other_commit) (verify fs base);
   Unix.unlink (sidecar base);
-  expect_relay_refused ~installed:(Shim.Relay_version 1) (verify fs base);
-  install base "reinstalled current shim";
+  expect_other_source ~shim:(Source_identity.Declared other_commit) (verify fs base);
+  install_built base ("shim " ^ Source_identity.declaration other_edits ^ " bytes");
+  expect_other_source ~shim:(Source_identity.Declared other_edits) (verify fs base);
+  install_built base
+    (Source_identity.declaration this_source ^ Source_identity.declaration other_commit);
+  expect_other_source ~shim:(Source_identity.Several [ this_source; other_commit ]) (verify fs base);
+  install_built base "relay-2 shim MASC_EXEC_SHIM_RELAY_VERSION=2; bytes";
+  expect_other_source ~shim:Source_identity.Undeclared (verify fs base);
+  install base "reinstalled shim of this source";
   value (verify fs base))
 
 let () = Alcotest.run "microvm startup and endpoint shim readiness"
@@ -381,6 +400,6 @@ let () = Alcotest.run "microvm startup and endpoint shim readiness"
     Alcotest.test_case "guest backend and base isolate cache authority" `Quick test_cache_key_includes_guest_backend_and_base;
     Alcotest.test_case "forget invalidates every matching base" `Quick test_forget_clears_matching_guest_across_bases;
     Alcotest.test_case "hand-built shim remains allowed" `Quick test_hand_built_unverified_policy_is_preserved;
-    Alcotest.test_case "stale relay shim refused until reinstalled" `Quick test_stale_relay_shim_is_refused_until_reinstalled;
+    Alcotest.test_case "shim of another source refused until reinstalled" `Quick test_shim_of_another_source_is_refused_until_reinstalled;
     Alcotest.test_case "cached readiness preserves caller cancellation" `Quick test_cancelled_caller_cannot_reuse_cached_success;
     Alcotest.test_case "failed recovery preserves caller cancellation" `Quick test_cancellation_during_failed_recovery_propagates]]

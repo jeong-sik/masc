@@ -9,7 +9,11 @@ type expected =
   }
 
 type refusal =
-  | Other_relay_version of { agent : int }
+  | Other_source of
+      { server : Source_identity.t option
+      ; agent : Source_identity.t option
+      ; agent_relay : int
+      }
   | Root_writable
   | Other_owner of
       { uid : int
@@ -17,22 +21,44 @@ type refusal =
       }
   | New_privileges_allowed
 
+(* RFC host-and-shim-share-one-build-identity: the source identity comes
+   first and stands for the relay version, because one source speaks one
+   relay. Neither side knowing its identity is a refusal too: nothing says the
+   two are the same build. *)
 let refusal ~(expected : expected) (hello : Relay.hello) =
-  if hello.Relay.relay_version <> Relay.version
-  then Some (Other_relay_version { agent = hello.Relay.relay_version })
-  else if not hello.Relay.root_read_only
-  then Some Root_writable
-  else if hello.Relay.uid <> expected.uid || hello.Relay.gid <> expected.gid
-  then Some (Other_owner { uid = hello.Relay.uid; gid = hello.Relay.gid })
-  else if not hello.Relay.no_new_privs
-  then Some New_privileges_allowed
-  else None
+  let other_source () =
+    Some
+      (Other_source
+         { server = Source_identity.current
+         ; agent = hello.Relay.source_identity
+         ; agent_relay = hello.Relay.relay_version
+         })
+  in
+  match Source_identity.current, hello.Relay.source_identity with
+  | None, (Some _ | None) | Some _, None -> other_source ()
+  | Some server, Some agent ->
+    if not (Source_identity.equal server agent)
+    then other_source ()
+    else if not hello.Relay.root_read_only
+    then Some Root_writable
+    else if hello.Relay.uid <> expected.uid || hello.Relay.gid <> expected.gid
+    then Some (Other_owner { uid = hello.Relay.uid; gid = hello.Relay.gid })
+    else if not hello.Relay.no_new_privs
+    then Some New_privileges_allowed
+    else None
+;;
+
+let identity_to_string = function
+  | Some identity -> Source_identity.to_string identity
+  | None -> "no source identity"
 ;;
 
 let refusal_to_string = function
-  | Other_relay_version { agent } ->
-    Printf.sprintf "the agent speaks relay version %d and this host speaks %d" agent
-      Relay.version
+  | Other_source { server; agent; agent_relay } ->
+    Printf.sprintf
+      "microvm_shim_other_source: the agent was built from %s (relay version %d) \
+       and this server from %s (relay version %d)"
+      (identity_to_string agent) agent_relay (identity_to_string server) Relay.version
   | Root_writable -> "the agent left the guest root filesystem writable"
   | Other_owner { uid; gid } ->
     Printf.sprintf "the agent runs as %d:%d, not as the Keeper's uid and gid" uid gid

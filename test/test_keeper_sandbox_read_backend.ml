@@ -539,7 +539,8 @@ let serve_fake_apple_agent ~sw ~net ~host_socket =
   in
   let answer flow =
     let send chunk = Eio.Flow.copy_string (Relay.encode chunk) flow in
-    send (Relay.Hello { Relay.relay_version = Relay.version; root_read_only = true;
+    send (Relay.Hello { Relay.relay_version = Relay.version;
+      source_identity = Source_identity.current; root_read_only = true;
       uid = Unix.getuid (); gid = Unix.getgid (); no_new_privs = true });
     match Relay.request_kind_of_byte (read flow 1).[0] with
     | Some Relay.Probe ->
@@ -562,12 +563,19 @@ let serve_fake_apple_agent ~sw ~net ~host_socket =
     in
     serve ())
 
+(* This test binary's source identity: the server under test runs only a
+   shim that declares it (RFC host-and-shim-share-one-build-identity). *)
+let this_source_declaration =
+  match Source_identity.current with
+  | Some identity -> Source_identity.declaration identity
+  | None -> failwith "this test build has no source identity"
+
 let initialize_apple_attached_read_fixture ~sw ~net
     ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
   Fs_compat.mkdir_p shim_dir;
   let binary = Filename.concat shim_dir Keeper_sandbox_microvm.shim_binary_name in
-  write_file binary ("#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n");
+  write_file binary ("#!/bin/sh\nexit 0\n# " ^ this_source_declaration ^ "\n");
   Unix.chmod binary 0o700;
   let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
   (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with

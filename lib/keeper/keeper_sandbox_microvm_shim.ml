@@ -26,56 +26,15 @@ type shim_provenance =
   | Shim_verified of { sha256 : string }
   | Shim_unverified
 
-(* #52968. The guest's agent is the mounted binary, not the image's, so the
-   relay version a guest will speak is fixed by these bytes. Every shim built
-   from a source that knows the declaration carries
-   {!Exec_ssh_protocol.Relay.version_declaration} as a literal; reading it
-   needs no Linux to run the binary on. *)
-type relay_declaration =
-  | Relay_version of int
-  | No_relay_version
-  | Several_relay_versions of int list
-
+(* #52968, RFC host-and-shim-share-one-build-identity. The guest's agent is
+   the mounted binary, not the image's, so the source every guest booted with
+   it was built from is fixed by these bytes. Every shim carries its
+   {!Source_identity} declaration as a literal; reading it needs no Linux to
+   run the binary on. *)
 type shim_inspection =
   { provenance : shim_provenance
-  ; relay : relay_declaration
+  ; source : Source_identity.scan
   }
-
-(* The declaration's grammar: this prefix, one to four decimal digits, ';'.
-   The host keeps the prefix; the shim binary carries only whole
-   declarations, so every match is one the shim's source wrote. *)
-let relay_declaration_prefix = "MASC_EXEC_SHIM_RELAY_VERSION="
-let relay_declaration_terminator = ';'
-let relay_declaration_max_digits = 4
-
-let is_digit c = c >= '0' && c <= '9'
-
-let declared_version_at bytes ~digits_start =
-  let length = String.length bytes in
-  let rec digits_end index =
-    if index < length && is_digit bytes.[index] then digits_end (index + 1) else index in
-  let stop = digits_end digits_start in
-  let count = stop - digits_start in
-  if count >= 1 && count <= relay_declaration_max_digits
-     && stop < length && Char.equal bytes.[stop] relay_declaration_terminator
-  then Some (int_of_string (String.sub bytes digits_start count))
-  else None
-
-let relay_declaration_of_bytes bytes =
-  let prefix_length = String.length relay_declaration_prefix in
-  let rec collect from found =
-    match String_util.find_substring ~pos:from bytes relay_declaration_prefix with
-    | None -> found
-    | Some at ->
-      let digits_start = at + prefix_length in
-      let found = match declared_version_at bytes ~digits_start with
-        | Some version when not (List.mem version found) -> version :: found
-        | Some _ | None -> found in
-      collect (at + 1) found in
-  match List.sort Int.compare (collect 0 []) with
-  | [] -> No_relay_version
-  | [ version ] -> Relay_version version
-  | (_ :: _ :: _) as versions -> Several_relay_versions versions
 
 (* Integrity follows current bytes, not metadata that an in-place writer
    can preserve. The boot edge offloads this read and hash to its executor. *)
@@ -122,7 +81,7 @@ let inspect_shim ~dir =
   | Error detail -> Error (Printf.sprintf "microvm_shim_unreadable: %s: %s" binary detail)
   | Ok contents ->
     Result.map
-      (fun provenance -> { provenance; relay = relay_declaration_of_bytes contents })
+      (fun provenance -> { provenance; source = Source_identity.scan contents })
       (sidecar_provenance ~sidecar ~binary contents)
 ;;
 

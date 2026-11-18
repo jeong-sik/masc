@@ -213,3 +213,9 @@ memory/
 # gh CLI cache. `gh run view --log` writes here when XDG_CACHE_HOME points
 # into the tree; a keeper cache is not repository content.
 /.ghcache/
+
+# The linux-x64-probe workflow checks its probe driver out here, inside the
+# candidate checkout. Ignored so it does not count as an untracked change in
+# the candidate's source identity (lib/build_commit/probe-commit.sh), which
+# the probe requires to be clean.
+/probe-driver/

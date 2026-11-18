@@ -264,6 +264,13 @@ let empty_listing = function
   | Backend.Nerdctl_kata -> ""
 ;;
 
+(* This test binary's source identity: the server under test runs only a
+   shim that declares it (RFC host-and-shim-share-one-build-identity). *)
+let this_source_declaration =
+  match Source_identity.current with
+  | Some identity -> Source_identity.declaration identity
+  | None -> failwith "this test build has no source identity"
+
 (* A runtime CLI on PATH that logs each call's argv and answers inspect and
    the listing from the mode file, so one test can move it between modes.
    [after_boot] names the mode the runtime moves to once a guest's
@@ -301,7 +308,7 @@ let with_fake_cli backend f =
     ; List.fold_left Filename.concat base [ ".masc"; "microvm" ]
     ; shim_dir
     ];
-  let shim_contents = "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n" in
+  let shim_contents = "#!/bin/sh\nexit 0\n# " ^ this_source_declaration ^ "\n" in
   let shim = Filename.concat shim_dir M.shim_binary_name in
   write shim shim_contents;
   Unix.chmod shim 0o755;

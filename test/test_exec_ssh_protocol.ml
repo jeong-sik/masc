@@ -751,6 +751,7 @@ let relay_decode_all bytes =
 
 let relay_hello =
   Relay.{ relay_version = Relay.version
+        ; source_identity = Source_identity.current
         ; root_read_only = true
         ; uid = 502
         ; gid = 20
@@ -841,6 +842,91 @@ let test_relay_request_kinds_are_closed () =
   check int "interactive relay contract has its own version" 2 Relay.version;
   check bool "another byte is no kind" true (Relay.request_kind_of_byte 'X' = None)
 
+(* RFC host-and-shim-share-one-build-identity. *)
+let sha1 c = String.make 40 c
+
+let test_relay_hello_without_identity_reads_as_none () =
+  match
+    Relay.decode
+      (relay_frame '\001'
+         {|{"relay_version":1,"root_read_only":true,"uid":502,"gid":20,"no_new_privs":true}|})
+      ~pos:0
+  with
+  | Ok (Relay.Chunk { chunk = Relay.Hello { Relay.source_identity = None; relay_version = 1; _ }; _ }) -> ()
+  | Ok _ | Error _ -> fail "a hello that names no source did not read as one"
+
+let test_relay_hello_identity_is_strict () =
+  List.iter
+    (fun (label, identity) ->
+       let payload =
+         Printf.sprintf
+           {|{"relay_version":2,"source_identity":%s,"root_read_only":true,"uid":502,"gid":20,"no_new_privs":true}|}
+           identity in
+       match Relay.decode (relay_frame '\001' payload) ~pos:0 with
+       | Error (Relay.Malformed_hello _) -> ()
+       | Ok _ | Error _ -> failf "%s was read as a hello" label)
+    [ "a number", "1"
+    ; "a commit without a state", Printf.sprintf "%S" (sha1 'a')
+    ; "upper-case hex", Printf.sprintf "%S" (String.make 40 'A' ^ "/clean")
+    ; "a short commit", Printf.sprintf "%S" (String.make 39 'a' ^ "/clean") ]
+
+let test_relay_hello_identity_roundtrips () =
+  let identity = { Source_identity.commit = sha1 'b'; state = Source_identity.Modified { digest = sha1 'c' } } in
+  let hello = { relay_hello with Relay.source_identity = Some identity } in
+  match Relay.decode (Relay.encode (Relay.Hello hello)) ~pos:0 with
+  | Ok (Relay.Chunk { chunk = Relay.Hello decoded; _ }) ->
+    check bool "the identity reads back" true
+      (match decoded.Relay.source_identity with
+       | Some got -> Source_identity.equal got identity
+       | None -> false)
+  | Ok _ | Error _ -> fail "the hello did not read back"
+
+let test_source_identity_grammar () =
+  let clean = { Source_identity.commit = sha1 'a'; state = Source_identity.Clean } in
+  let modified = { Source_identity.commit = sha1 'a'; state = Source_identity.Modified { digest = sha1 'd' } } in
+  let sha256 = { Source_identity.commit = String.make 64 'e'; state = Source_identity.Clean } in
+  List.iter
+    (fun identity ->
+       check bool "an identity reads back from its string" true
+         (match Source_identity.of_string (Source_identity.to_string identity) with
+          | Some got -> Source_identity.equal got identity
+          | None -> false))
+    [ clean; modified; sha256 ];
+  check bool "clean and modified of one commit differ" false (Source_identity.equal clean modified);
+  List.iter
+    (fun text ->
+       check bool (text ^ " is no identity") true (Source_identity.of_string text = None))
+    [ ""; sha1 'a'; sha1 'a' ^ "/"; sha1 'a' ^ "/dirty"; sha1 'a' ^ "/modified:"
+    ; sha1 'a' ^ "/modified:" ^ String.make 41 'd'; String.make 40 'g' ^ "/clean" ]
+
+let test_source_identity_scan () =
+  let a = { Source_identity.commit = sha1 'a'; state = Source_identity.Clean } in
+  let b = { Source_identity.commit = sha1 'b'; state = Source_identity.Clean } in
+  let declared bytes =
+    match Source_identity.scan bytes with
+    | Source_identity.Declared got -> Some got
+    | Source_identity.Undeclared | Source_identity.Several _ -> None in
+  check bool "one declaration among other bytes" true
+    (match declared ("\000ELF..." ^ Source_identity.declaration a ^ "\000tail") with
+     | Some got -> Source_identity.equal got a
+     | None -> false);
+  check bool "a repeated declaration is one" true
+    (match declared (Source_identity.declaration a ^ Source_identity.declaration a) with
+     | Some got -> Source_identity.equal got a
+     | None -> false);
+  check bool "two sources are several, in byte order" true
+    (match Source_identity.scan (Source_identity.declaration b ^ Source_identity.declaration a) with
+     | Source_identity.Several [ first; second ] ->
+       Source_identity.equal first b && Source_identity.equal second a
+     | Source_identity.Several _ | Source_identity.Declared _ | Source_identity.Undeclared -> false);
+  List.iter
+    (fun bytes ->
+       check bool "no declaration" true (Source_identity.scan bytes = Source_identity.Undeclared))
+    [ ""; "MASC_SOURCE_IDENTITY="; "MASC_SOURCE_IDENTITY=\000\000\002;"
+    ; "MASC_SOURCE_IDENTITY=" ^ sha1 'a' ^ "/clean"
+    ; "MASC_SOURCE_IDENTITY=" ^ sha1 'a' ^ "/clean" ^ String.make 200 'x' ^ ";"
+    ; "MASC_EXEC_SHIM_RELAY_VERSION=2;" ]
+
 let () =
   run "exec ssh protocol"
     [ "frame", [ test_case "roundtrip" `Quick test_frame_roundtrip
@@ -852,6 +938,13 @@ let () =
                ; test_case "mode strings are closed" `Quick test_mode_strings_are_closed
                ; test_case "stdin_len mismatch is transport error" `Quick
                    test_frame_stdin_len_mismatch_is_transport_error ]
+    ; "source identity",
+      [ test_case "a hello without one reads as none" `Quick
+          test_relay_hello_without_identity_reads_as_none
+      ; test_case "a hello identity is strict" `Quick test_relay_hello_identity_is_strict
+      ; test_case "a hello identity roundtrips" `Quick test_relay_hello_identity_roundtrips
+      ; test_case "the grammar" `Quick test_source_identity_grammar
+      ; test_case "scan" `Quick test_source_identity_scan ]
     ; "interactive stdin",
       [ test_case "the header leaves live bytes outside the frame" `Quick
           test_interactive_header_keeps_live_bytes_outside_the_frame

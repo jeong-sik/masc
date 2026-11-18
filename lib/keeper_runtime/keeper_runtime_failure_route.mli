@@ -126,9 +126,14 @@ type rotate_class =
           [InputCapacity], [Json_parse_error] and a [Retry.Attempt_rejected]
           policy refusal — a reasoning-effort ladder, an explicit disable —
           are all [Admission], a fact about this candidate's binding, not the
-          request); the driver's [attempt_rejected_should_try_next] /
-          [candidate_access_should_try_next] move the lane to its next
-          declared candidate, and the route names that rotation *)
+          request), as is an official-client task reference this candidate's
+          client cannot carry
+          ({!Keeper_official_client_session_refusal.Next_candidate}); the
+          driver's [attempt_rejected_should_try_next] /
+          [candidate_access_should_try_next] /
+          {!Keeper_official_client_session_refusal.should_try_next} move the
+          lane to its next declared candidate, and the route names that
+          rotation *)
   | Provider_reported_failure
       (** the provider itself reported a structured failure for this attempt
           ([Llm_provider.Error.ProviderReportedError]: a CLI-adapter turn
@@ -184,8 +189,13 @@ type terminal_class =
       (** a request body that did not parse, or an input past a declared
           serving bound; no candidate accepts it *)
   | Session_claim_refused
-      (** an official client refused its durable session claim before provider
-          dispatch; the held recovery requires explicit operator resolution *)
+      (** an official client refused its durable session before provider
+          dispatch: a held recovery that requires explicit operator
+          resolution, a claim another turn of this process still holds, or a
+          Gate continuation or task reference bound to a vendor session that
+          no longer matches
+          ({!Keeper_official_client_session_refusal.Stop_lane}). Every
+          candidate of the turn meets the same session. *)
   | Transcript_refused
       (** the turn's history was refused before provider dispatch: its tool
           transcript is incomplete or structurally broken, so no request

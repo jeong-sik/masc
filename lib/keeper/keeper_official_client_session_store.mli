@@ -437,7 +437,10 @@ val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 (** Compare only a [Canonical_source_guard] acknowledged by the exact settled
     turn. Other delivery provenance cannot prove unchanged canonical source. *)
-val context_admission_error_to_string : context_admission_error -> string
+val gate_context_refusal :
+  context_admission_error -> Keeper_official_client_session_refusal.t
+(** The refusal a Gate continuation ends with when
+    {!validate_unchanged_context} refuses its session (#38402). *)
 
 val held_context_for_resume : claim_plan -> expected:t option -> held_context list
 (** The carried context the session a claim plan resumes already holds: the
@@ -648,13 +651,26 @@ val revert_claim :
     must not disturb a settled session; failures after a thread request keep
     {!release_transient} or {!require_recovery}. *)
 
+type process_restart_error =
+  | Claim_held_by_current_epoch
+      (** the incomplete claim belongs to this process epoch: another turn of
+          this process holds it *)
+  | Restart_recovery_unrecorded of string
+      (** the claim belongs to an earlier epoch and its recovery could not be
+          validated or written *)
+
+val process_restart_error_to_core_error : process_restart_error -> Agent_core.Error.t
+(** [Claim_held_by_current_epoch] is the session refusal
+    {!Keeper_official_client_session_refusal.Claim_held_by_this_process};
+    [Restart_recovery_unrecorded] is an internal error of the store. *)
+
 val reconcile_process_restart :
   base_path:string ->
   keeper_name:string ->
   expected:t ->
   current_owner_epoch:string ->
   required_at:float ->
-  (t, string) result
+  (t, process_restart_error) result
 (** Convert an incomplete claim owned by a different process epoch into an
     explicit ambiguous recovery. Same-epoch claims remain occupied. *)
 

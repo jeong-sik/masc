@@ -994,8 +994,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ~current_owner_epoch:owner_epoch
           ~required_at:(Time_compat.now ())
         |> Result.map Option.some
-        |> Result.map_error (fun detail ->
-          config_error ~field:"official_client_session.phase" detail)
+        |> Result.map_error Session_store.process_restart_error_to_core_error
       | None | Some { phase = Ready | Recovery_required _ | Settled _; _ } ->
         Ok stored_session
     in
@@ -1025,7 +1024,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       | Some reference -> Keeper_official_task_reference.message
           ~current:official_client_continuation reference
         |> Result.map Option.some
-        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+        |> Result.map_error Keeper_official_client_session_refusal.core_error in
     let preparation_messages = Option.to_list historical_task_message @ initial_messages in
     (* Freeze the host attempt ordinal before hooks compose the context. A
        changed composition can restart the vendor session at 1, but its tool
@@ -1065,7 +1064,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ~client_kind:Muse
           ~runtime_id
           ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
+        |> Result.map_error (fun (_ : string) ->
+          Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Gate_continuation_unresumable)
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
     (* MSP offers no replaceable configuration channel for the root, and this
@@ -1094,9 +1094,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ]
     in
     let admission_error reason =
-      config_error
-        ~field:"official_client_session.context_admission"
-        (Session_store.context_admission_error_to_string reason)
+      Keeper_official_client_session_refusal.core_error (Session_store.gate_context_refusal reason)
     in
     (* A Gate continuation is bound to its original host session: completion
        requires that session to settle again, so a fresh one would run the
@@ -1229,7 +1227,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
-      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+      (* The host's own model-input projection removed the reference it was
+         given: a MASC contract break, not a setting or a session state. *)
+      |> Result.map_error internal_error in
     (* Original returned results survive history projection and range shrinking.
        Only their completed consumer, after delivery, may acknowledge them. *)
     let prepared = {prepared with Host.messages = prepared.messages

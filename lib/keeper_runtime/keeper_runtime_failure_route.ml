@@ -450,7 +450,19 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
        as the turn's terminal reason says (#31131). *)
     (match Keeper_task_skill_resolution_error.of_core_error internal with
      | Some (_ : Keeper_task_skill_resolution_error.t) -> exhaust Config_mismatch
-     | None -> exhaust Internal_opaque)
+     | None ->
+       (* An official-client session refusal routes by what the lane walk
+          does with it (#38402): a task reference this client cannot carry
+          is a fact about this candidate, and the walk moves on; every other
+          refusal is a fact about the durable session, which every candidate
+          of the turn meets. *)
+       (match Keeper_official_client_session_refusal.of_core_error internal with
+        | Some refusal ->
+          (match Keeper_official_client_session_refusal.lane_step refusal with
+           | Keeper_official_client_session_refusal.Next_candidate -> rotate Admission
+           | Keeper_official_client_session_refusal.Stop_lane ->
+             exhaust Session_claim_refused)
+        | None -> exhaust Internal_opaque))
 ;;
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =

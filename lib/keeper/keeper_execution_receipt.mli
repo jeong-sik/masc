@@ -200,6 +200,16 @@ type operator_disposition_reason =
       dispatch and remains held until explicit recovery resolution. Paired
       with [Disp_operator_action_required]; no runtime continuation or
       fallback is claimed. *)
+  | Reason_official_client_session_refused
+  (** An official-client runtime refused the turn before provider dispatch
+      because of its vendor session's state
+      ({!Keeper_terminal_reason.Official_client_session_refused}), not a
+      setting. The terminal reason code names which refusal. A Gate
+      continuation or task reference bound to a session that no longer
+      matches pairs with [Disp_operator_action_required]; a claim another
+      turn of this process holds pairs with [Disp_retry_later]; a task
+      reference this client cannot carry pairs with
+      [Disp_fail_open_next_runtime]. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
       with [Disp_effect_review_required]: the Keeper keeps running and a

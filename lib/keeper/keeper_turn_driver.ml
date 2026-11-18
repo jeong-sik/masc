@@ -773,6 +773,12 @@ let lane_should_retry
     false
   else if Keeper_required_tools.should_try_next error then
     true
+  else if Keeper_official_client_session_refusal.should_try_next error then
+    (* A task reference this candidate's client cannot carry; the next
+       candidate may carry it. Every other session refusal stops the lane,
+       and [core_error_to_http_error] below already answers [None] for its
+       [Internal_carried] (#38402). *)
+    true
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry

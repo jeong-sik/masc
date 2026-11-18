@@ -65,6 +65,7 @@ type thinking_request_refusal =
 type exact_lane_cli_slot_unservable_reason =
   | Not_an_official_client
   | Client_without_output_schema
+  | Seats_undeclared
 
 type exact_lane_cli_slot_unservable =
   { owner : Runtime_schema.exact_lane_owner
@@ -311,6 +312,21 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       (Runtime_schema.exact_lane_table_name owner)
       slot_id
       provider_id
+  | Exact_lane_cli_slot_unservable
+      { owner; slot_id; provider_id; reason = Seats_undeclared } ->
+    Printf.sprintf
+      "%s: [%s].cli_slots entry %S is an official client of provider %S \
+       whose binding declares no %s. Each call starts a client process on \
+       this machine and nothing stops an overflow, so an Exact lane runs a \
+       CLI slot only within its declared seats: add %s = <seats> to the \
+       binding table of runtime %S"
+      config_path
+      (Runtime_schema.exact_lane_table_name owner)
+      slot_id
+      provider_id
+      max_concurrent_key
+      max_concurrent_key
+      slot_id
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse

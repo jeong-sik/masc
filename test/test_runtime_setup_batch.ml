@@ -264,6 +264,9 @@ let test_named_default_lane () = fixture (fun base runtime binary spec original 
     |> table "other-lane" [first] in
   let configured = Toml_line_editor.edit_table_scalar configured
     ~path:"runtime.assignments" ~key:"imp" ~value:(Some "other-lane") in
+  (* A cli slot's binding declares its seats, or the file does not load. *)
+  let configured = Toml_line_editor.edit_table_int configured
+    ~path:first ~key:"max-concurrent" ~value:2 in
   let configured = Toml_line_editor.edit_table_multiline_array configured
     ~path:"runtime.exact_output_lanes.hitl_auto_judge" ~key:"cli_slots" ~values:[first] in
   save runtime configured;

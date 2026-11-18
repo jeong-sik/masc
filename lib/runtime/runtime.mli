@@ -1001,7 +1001,10 @@ val first_run_runtime_text :
     for the same reason as {!runtime_default_text}. [Error] when an id is
     blank, repeated or spans lines, or names no enabled, materialized runtime
     of the text, with the model catalog this process loaded. The validation
-    of the whole file is the writer's, on commit. *)
+    of the whole file is the writer's, on commit. An official client whose
+    binding declares no [max-concurrent] becomes the default but is not
+    written into any exact-output lane's [cli_slots]: the operator declares
+    its seats first, then runs setup again. *)
 
 val set_first_run_runtime :
   ?runtime_config_path:string ->

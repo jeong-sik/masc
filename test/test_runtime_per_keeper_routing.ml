@@ -383,6 +383,7 @@ api-name = "gpt-5.6-sol"
 max-context = 400000
 
 [codex.codex]
+max-concurrent = 2
 
 [runtime]
 default = "codex.codex"
@@ -1414,6 +1415,39 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
        | Ok _ -> Alcotest.fail "offline setup unexpectedly published a live registry")))
 ;;
 
+(* A cli slot runs within the seats its binding declares, and setup does not
+   know how many client processes the account takes. An official client with
+   no [max-concurrent] becomes the default and is written into no
+   exact-output list, so the file setup saves still loads; the operator
+   declares the seats and runs setup again. *)
+let test_first_run_writes_an_official_client_without_declared_seats_into_no_slot () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-cli-first-run-no-seats" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      let undeclared =
+        String.concat "" (String.split_on_char '\n' codex_runtime_config
+          |> List.filter (fun line -> not (String.equal line "max-concurrent = 2"))
+          |> List.map (fun line -> line ^ "\n"))
+      in
+      write_file path undeclared;
+      (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      match Runtime_toml.parse_string (read_file path) with
+      | Error _ -> Alcotest.fail "first-run configuration must parse"
+      | Ok config ->
+        Alcotest.(check (option string)) "selected default" (Some "codex.codex")
+          config.default_runtime_id;
+        List.iter
+          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+             Alcotest.(check bool)
+               (Runtime_schema.exact_lane_key lane.owner ^ " does not list the undeclared client")
+               false
+               (List.mem "codex.codex" (lane.slot_ids @ lane.cli_slot_ids)))
+          config.exact_output_lane_decls))
+;;
+
 (* Every exact-output call hands its client a JSON Schema, and Muse Code has
    no channel for one. Setup makes it the default and its lane, and writes it
    into no exact-output list. *)
@@ -2127,6 +2161,21 @@ let exact_lane_cli_slots path lane =
      | None -> Alcotest.failf "the file declares no exact lane %s" lane)
 ;;
 
+(* An official client whose binding declares no [max-concurrent]. *)
+let undeclared_claude_code_bindings =
+  {|[providers.claude_cli]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[models.sonnet]
+api-name = "claude-sonnet-5-5"
+max-context = 400000
+
+[claude_cli.sonnet]
+|}
+;;
+
 (* Two official-client bindings beside the HTTP ones the base file declares. *)
 let official_client_bindings =
   {|[providers.codex]
@@ -2143,8 +2192,10 @@ api-name = "gpt-5.6-sol"
 max-context = 400000
 
 [codex.codex]
+max-concurrent = 2
 
 [codex.mini]
+max-concurrent = 2
 |}
 ;;
 
@@ -2419,6 +2470,21 @@ let test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots () =
        ["cli_slots = ["] does not match a needle that starts at a line. *)
     Alcotest.(check bool) "no slots key was written" false
       (string_contains (read_file path) "\nslots = ["))
+;;
+
+(* The lane editor writes the slot and the whole file is validated before it
+   is saved, so an official client whose binding declares no seats is refused
+   there, naming the key to add, and the file stays as it was. *)
+let test_a_cli_append_whose_binding_declares_no_seats_is_refused () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.concat "\n\n"
+         [ String.trim (read_file path); String.trim undeclared_claude_code_bindings ]);
+    lane_write_refused "append an undeclared official client" ~path
+      ~names:[ "claude_cli.sonnet"; "max-concurrent" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"claude_cli.sonnet" ()))
 ;;
 
 (* [drop] and [move] find a slot in the list that declares it and edit only
@@ -4323,6 +4389,78 @@ let test_an_addon_lane_cli_slot_without_an_output_schema_channel_is_refused () =
   | Ok _ -> Alcotest.fail "an add-on cli_slots entry naming Muse Code loaded"
 ;;
 
+(* RFC exact-request-waits-only-for-a-seat §3.2: a cli slot is a client process
+   on this machine and no provider stops an overflow, so its binding declares
+   the seats the lane may take. A builtin and an add-on lane are held to it
+   alike, and the refusal names the lane table and the runtime to fix. The
+   same runtime in [slots] is not a cli slot and stays out of the rule. *)
+let test_a_cli_slot_whose_binding_declares_no_seats_is_refused () =
+  List.iter
+    (fun table ->
+       let config =
+         String.concat
+           "\n\n"
+           [ String.trim runtime_config
+           ; String.trim undeclared_claude_code_bindings
+           ; Printf.sprintf "[%s]\ncli_slots = [\"claude_cli.sonnet\"]" table
+           ]
+       in
+       with_temp_dir "runtime-cli-slot-seats" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path config;
+       match Runtime.load_list ~config_path:path with
+       | Error
+           (Runtime_config_error.Exact_lane_cli_slot_unservable
+              ({ reason = Runtime_config_error.Seats_undeclared; _ } as unservable)) ->
+         Alcotest.(check string) "the refusal names the lane" table
+           (Runtime_schema.exact_lane_table_name unservable.owner);
+         Alcotest.(check string) "the offending entry" "claude_cli.sonnet" unservable.slot_id;
+         let text =
+           Runtime_config_error.to_diagnostic_text ~config_path:path
+             (Runtime_config_error.Exact_lane_cli_slot_unservable unservable)
+         in
+         Alcotest.(check bool) "the refusal names the table" true
+           (string_contains text (Printf.sprintf "[%s]" table));
+         Alcotest.(check bool) "the refusal names the key to add" true
+           (string_contains text "max-concurrent = <seats>")
+       | Error failure ->
+         Alcotest.failf "%s refused for another reason: %s" table
+           (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+       | Ok _ -> Alcotest.failf "%s loaded a cli slot with no declared seats" table)
+    [ "runtime.exact_output_lanes.librarian_exact"
+    ; "runtime.addon_exact_lanes.operator-quiz.author"
+    ]
+;;
+
+let test_a_cli_slot_whose_binding_declares_seats_loads () =
+  let declared = String.trim undeclared_claude_code_bindings ^ "\nmax-concurrent = 2" in
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim declared
+      ; "[runtime.exact_output_lanes.librarian_exact]\ncli_slots = [\"claude_cli.sonnet\"]"
+      ]
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a cli slot with declared seats must load: %s" msg
+  | Ok _ -> ()
+;;
+
+let test_an_undeclared_official_client_in_slots_is_not_held_to_seats () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim undeclared_claude_code_bindings
+      ; "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"claude_cli.sonnet\"]"
+      ]
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a slots entry is not a cli slot and must load: %s" msg
+  | Ok _ -> ()
+;;
+
 let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
   let config =
     String.concat
@@ -4499,6 +4637,9 @@ let () =
         ; Alcotest.test_case
             "first run writes a client without an output-schema channel into no slot" `Quick
             test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot
+        ; Alcotest.test_case
+            "first run writes an official client without declared seats into no slot" `Quick
+            test_first_run_writes_an_official_client_without_declared_seats_into_no_slot
         ; Alcotest.test_case
             "unknown default route is rejected before runtime.toml write"
             `Quick
@@ -4740,6 +4881,9 @@ let () =
             `Quick
             test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots
         ; Alcotest.test_case
+            "a CLI append whose binding declares no seats is refused" `Quick
+            test_a_cli_append_whose_binding_declares_no_seats_is_refused
+        ; Alcotest.test_case
             "an exact drop and move edit the CLI slots"
             `Quick
             test_an_exact_drop_and_move_edit_the_cli_slots
@@ -4769,6 +4913,15 @@ let () =
             "a sibling lane's CLI slot naming an official client is accepted"
             `Quick
             test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted
+        ; Alcotest.test_case
+            "a cli slot whose binding declares no seats is refused" `Quick
+            test_a_cli_slot_whose_binding_declares_no_seats_is_refused
+        ; Alcotest.test_case
+            "a cli slot whose binding declares seats loads" `Quick
+            test_a_cli_slot_whose_binding_declares_seats_loads
+        ; Alcotest.test_case
+            "an undeclared official client in slots is not held to seats" `Quick
+            test_an_undeclared_official_client_in_slots_is_not_held_to_seats
         ; Alcotest.test_case
             "a sibling lane's slots entry may be catalog-only"
             `Quick

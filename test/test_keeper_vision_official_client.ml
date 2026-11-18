@@ -75,7 +75,9 @@ tools-support = true
 [models.vision.capabilities]
 supports-image-input = true
 [official.vision]
+max-concurrent = 2
 [fallback.vision]
+max-concurrent = 2
 [runtime]
 default = "official.vision"
 media_failover = %s

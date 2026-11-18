@@ -134,7 +134,11 @@ let exact_lane_cli_slot_references
    the run-time message this closes ("is not an official-client runtime",
    conflating unknown and wrong-kind) misdescribed an unknown id.
    A resolved official client lacking the schema channel is equally invalid
-   in [slots]. Other [slots] targets remain owned by the catalog path. *)
+   in [slots]. Other [slots] targets remain owned by the catalog path.
+   A [cli_slots] official client must also declare [max-concurrent] on its
+   binding: every call starts a client process here and no provider stops an
+   overflow, so the lane counts its seats (RFC exact-request-waits-only-for-a-seat
+   §3.2). *)
 let exact_lane_cli_slot_gaps
       ~(runtimes : t list)
       (decls : Runtime_schema.exact_output_lane_decl list)
@@ -159,7 +163,10 @@ let exact_lane_cli_slot_gaps
               , Runtime_schema.api_format_output_schema_channel
                   r.provider.Runtime_schema.api_format )
             with
-            | Runtime_execution.Official_client, Runtime_schema.Holds_output_schema -> None
+            | Runtime_execution.Official_client, Runtime_schema.Holds_output_schema ->
+              (match cli_slot, r.binding.Runtime_schema.max_concurrent with
+               | true, None -> gap Seats_undeclared
+               | true, Some (_ : int) | false, (Some _ | None) -> None)
             | Runtime_execution.Official_client, Runtime_schema.No_output_schema_channel ->
               gap Client_without_output_schema
             | ( Runtime_execution.Masc_agent_core
@@ -3360,7 +3367,14 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
     let slots, cli_slots =
       match Lane_edit.exact_slot_list_admitting runtime.provider.api_format with
       | Some Lane_edit.Catalog_slots -> [ runtime_id ], []
-      | Some Lane_edit.Cli_slots -> [], [ runtime_id ]
+      (* A cli slot runs within the seats its binding declares, and only the
+         operator knows how many client processes the account takes, so an
+         official client whose binding declares no [max-concurrent] becomes
+         the default without being written into any slot, as below. *)
+      | Some Lane_edit.Cli_slots ->
+        (match runtime.binding.Runtime_schema.max_concurrent with
+         | Some (_ : int) -> [], [ runtime_id ]
+         | None -> [], [])
       (* A client with no output-schema channel (Muse Code) becomes the
          default and its lane without being written into any slot. *)
       | None -> [], []

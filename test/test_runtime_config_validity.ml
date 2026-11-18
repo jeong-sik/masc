@@ -4582,6 +4582,7 @@ let exact_deadline_runtime_toml ~body_timeout ~lane =
      [local.sample]\n\
      \n\
      [subscription.seeded]\n\
+     max-concurrent = 2\n\
      \n\
      [runtime]\n\
      default = \"local.sample\"\n\

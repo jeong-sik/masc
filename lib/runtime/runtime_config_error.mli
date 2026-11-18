@@ -71,6 +71,11 @@ type exact_lane_cli_slot_unservable_reason =
   | Client_without_output_schema
       (** An official client that cannot hold an answer to a JSON Schema
           ({!Runtime_schema.api_format_output_schema_channel}). *)
+  | Seats_undeclared
+      (** An official client whose binding declares no [max-concurrent]. Each
+          call starts a client process on this machine and no provider stops
+          an overflow, so an Exact lane walks a CLI slot only by its declared
+          seats. Only [cli_slots] entries are held to this. *)
 
 type exact_lane_cli_slot_unservable =
   { owner : Runtime_schema.exact_lane_owner

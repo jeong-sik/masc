@@ -4902,7 +4902,7 @@
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_memory_usage masc_tui_surface_search
+ (libraries masc_tui_memory_usage masc_tui_surface_search masc_tui_value
   masc_tui_pick_list
   alcotest
   masc
@@ -4976,7 +4976,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -5473,6 +5473,7 @@
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_value.inc)
+(include stanzas/test_tui_position_source.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -7016,7 +7017,7 @@
  (name test_tui_account_login)
  (modules test_tui_account_login)
  (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_message_layout
-  masc_tui_sgr_text masc_tui_terminal_palette masc_tui_theme yojson))
+  masc_tui_sgr_text masc_tui_terminal_palette masc_tui_theme masc_tui_value yojson))
 
 (test
  (name test_runtime_setup_login_session)

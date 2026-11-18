@@ -310,8 +310,8 @@ let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
    phase runs turns. Matches [Tui_decode.keeper_path_rest] with no wildcards.
    [Stated_by_provider] vs [Bounded_by_masc] distinguishes whether the reset
    time came from the provider or is MASC's upper bound.
-   Times are rendered as relative spans via [Message_layout.span_text]; if
-   already in the past, time is omitted. *)
+   A reset time reads as a countdown ([Masc_tui_value.Ongoing.until]); one
+   already in the past is omitted. *)
 type path_rest =
   | Path_serving of string  (* The runtime the next dispatch goes to. *)
   | Path_resting of string  (* The rest the next dispatch waits out. *)
@@ -328,7 +328,7 @@ let keeper_path_rest ~ko ?now (row : Keeper_list_model.row) =
        | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis })) ->
            let now_val = match now with Some t -> t | None -> Unix.gettimeofday () in
            let time_clause =
-             if release_at > now_val then " ~" ^ Message_layout.span_text (release_at -. now_val)
+             if release_at > now_val then " ~" ^ Masc_tui_value.Ongoing.until ~now:now_val release_at
              else ""
            in
            let basis_word =
@@ -443,15 +443,9 @@ let keeper_row_name ~width ~yolo (row : Keeper_list_model.row) =
   in
   if yolo then Theme.bad () ^ name ^ Ansi.reset else name
 
-type keeper_primary_row = { text : string; motion : Masc_tui_answering.motion }
-let still_row text = { text; motion = Masc_tui_answering.Still }
-let shift_motion ~prefix = function
-  | Masc_tui_answering.Still -> Masc_tui_answering.Still
-  | Moving through -> Moving (Message_layout.display_width prefix + through)
-
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
-let keeper_now_cell ~ko ?(padded = true) ~frame (row : Keeper_list_model.row) =
+let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   let runtime = keeper_row_runtime row in
   let operator_disposition =
@@ -473,33 +467,19 @@ let keeper_now_cell ~ko ?(padded = true) ~frame (row : Keeper_list_model.row) =
   let glyph =
     match operator_disposition with
     | Some _ -> Masc_tui_keeper_mark.activity_glyph Held_call
-    | None ->
-      (match activity with
-       | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
-       | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
-       | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
-       | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity)
+    | None -> Masc_tui_keeper_mark.activity_glyph activity
   in
   let status_word =
     match operator_disposition with
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
     | None -> keeper_activity_word ~ko activity
   in
-  let text = status_color ^ glyph ^ " "
-    ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
-    ^ Ansi.reset in
-  let motion = match operator_disposition, activity with
-    | None, (Preparing | Running) -> Masc_tui_answering.Moving (Message_layout.display_width glyph)
-    | Some _, (Preparing | Running | Held_call | Question | Confirmation | Attempt_failed
-        | Streaming | Async_working _ | Deferred | Tool_waiting | Model_waiting | Delegate_result
-        | Verifying | External_waiting | Idle | Paused | Offline | Unknown)
-    | None, (Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
-        | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
-        | Idle | Paused | Offline | Unknown) -> Masc_tui_answering.Still in
-  { text; motion }
+  status_color ^ glyph ^ " "
+  ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
+  ^ Ansi.reset
 
 let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
-    ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
+    ~now ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
     keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
@@ -512,10 +492,10 @@ let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
   in
   let prefix = keeper_row_marker ~selected
     ^ keeper_row_name ~width:columns.kcol_name ~yolo row ^ " " in
-  let now_cell = keeper_now_cell ~ko ~frame row in
-  let text = String.concat ""
+  let now_cell = keeper_now_cell ~ko row in
+  String.concat ""
     [ prefix
-    ; now_cell.text
+    ; now_cell
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; " " ^ Theme.recede ()
       ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
@@ -531,8 +511,7 @@ let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
                   ~show_runtime:columns.kcol_show_runtime failure_context)
              row
        else "")
-    ] in
-  { text; motion = shift_motion ~prefix now_cell.motion }
+    ]
 
 let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
   let fault_clause =
@@ -699,7 +678,7 @@ type grid_cells =
   { gutter : string
   ; name : string
   ; pulse : string
-  ; now_cell : keeper_primary_row
+  ; now_cell : string
   ; strip : string
   ; due : string
   ; right : string
@@ -709,18 +688,14 @@ let grid_line (grid : Grid.t) cells =
   let side = grid.side_cells > 0 in
   let prefix = String.concat ""
     [ cells.gutter; cells.name; (if side then " " ^ cells.pulse else ""); " " ] in
-  let text = String.concat ""
+  String.concat ""
     [ prefix
-    ; grid_band cells.now_cell.text
+    ; grid_band cells.now_cell
     ; " "
     ; (if side then cells.strip ^ " " else "")
     ; cells.due
     ; (if grid.mem_cells > 0 then " " ^ cells.right else "")
-    ] in
-  (* The band's style/background sequences take no cells. Its left line and
-     following space precede the source NOW cell. *)
-  { text; motion = shift_motion ~prefix:(prefix ^ Keeper_mark.grid_now_line ^ " ")
-      cells.now_cell.motion }
+    ]
 
 (* The cells before the band: the gutter, the name and the pulse. *)
 let grid_lead_cells (grid : Grid.t) =
@@ -893,7 +868,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
 let grid_digest ~now memory =
   let text =
     match Memory_reading.digest_at memory with
-    | Memory_reading.Measured at -> Grid.short_span (now -. at)
+    | Memory_reading.Measured at -> Masc_tui_value.Ongoing.Narrow.since ~now at
     | Memory_reading.Unmeasured -> Masc_tui_theme.Glyph.no_value
     | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
     | Memory_reading.Row_refused -> ""
@@ -965,7 +940,9 @@ let grid_fact_ages (grid : Grid.t) memory =
 let grid_saved ~now memory =
   match Memory_reading.updated_at memory with
   | Memory_reading.Measured at ->
-      fit_width (Keeper_mark.grid_saved_mark ^ " " ^ Grid.short_span (now -. at)) Grid.now_cells
+      fit_width
+        (Keeper_mark.grid_saved_mark ^ " " ^ Masc_tui_value.Ongoing.Narrow.since ~now at)
+        Grid.now_cells
   | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
       grid_fitted Grid.now_cells
         (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
@@ -998,7 +975,7 @@ let grid_facts (grid : Grid.t) ~peak_facts memory =
   | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
   | Memory_reading.Row_refused -> String.make grid.mem_cells ' '
 
-let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~now ~frame ~yolo
+let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~now ~yolo
     (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let verdict = Grid.verdict ~now runtime in
@@ -1016,7 +993,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) ~frame row
+         ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) row
          ; strip = grid_wake_strip state grid ~now verdict ~keeper_name
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
@@ -1025,7 +1002,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = still_row (grid_librarian memory)
+         ; now_cell = grid_librarian memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_digest ~now memory
          ; right = grid_gap grid memory
@@ -1034,7 +1011,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = grid_fact_ages grid memory
-         ; now_cell = still_row (grid_saved ~now memory)
+         ; now_cell = grid_saved ~now memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_stale memory
          ; right = grid_facts grid ~peak_facts memory
@@ -1060,7 +1037,7 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
       if Message_layout.display_width worded <= room then worded else clock
   | Masc_tui_keeper_pulse.Failing_unrecorded, Keeper_trail.Trail_failed { ended_at = Some at; _ }
     when at <= now ->
-      Grid.short_span (now -. at) ^ " " ^ Keeper_mark.grid_ago_word
+      Masc_tui_value.Ongoing.since ~now at ^ " " ^ Keeper_mark.grid_ago_word
   | ( (Masc_tui_keeper_pulse.Failing_unrecorded | Masc_tui_keeper_pulse.Not_failing)
     , (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ) -> ""
 
@@ -1869,7 +1846,8 @@ let matrix_keeper_row matrix ~now row =
       | Keeper_trail.Matrix_unknown -> Theme.recede () ^ "?" in
     fit_width (failure ^ head ^ Ansi.reset) matrix.matrix_cell_cells) matrix.matrix_ids in
   let last = match Keeper_list_model.trail_of_row row with
-    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now -> Grid.short_span (now -. at)
+    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now ->
+        Masc_tui_value.Ongoing.Narrow.since ~now at
     | Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound -> "?" in
   let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
@@ -1932,11 +1910,14 @@ let keeper_waiting_refresh_line state =
   match keeper_waiting_refresh_slow state with
   | None -> ""
   | Some age ->
-      let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+      (* A length still going reads in whole seconds, then whole minutes
+         (RFC tui-one-screen-grammar §6.2). *)
+      let elapsed = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
+          (Int64.to_float age /. 1e9) in
       Theme.warn ()
       ^ ui_text state
-          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
-          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed ^ "s")
+          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed)
+          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed)
       ^ Ansi.reset
 
 (* One row above the list that is always drawn, so a reading going stale or
@@ -2201,29 +2182,22 @@ let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_
        | Some fleet ->
            [(grid_line grid
              { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
-             ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
-             ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text]))
+             ; pulse = fleet.pulse; now_cell = grid_blank_now; strip = fleet.strip
+             ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' })]))
 
 let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
   let keeper_name = row.keeper.Tui_decode.k_name in
   let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko)
-      ~padded:false ~frame:state.activity_frame row in
-  let text = Masc_tui_keeper_strip.selected_summary ~now
-    ~activity_cell:now_cell.text
+      ~padded:false row in
+  Masc_tui_keeper_strip.selected_summary ~now
+    ~activity_cell:now_cell
     ~next_run:(match state.schedules_agenda_error with
       | Some _ -> Masc_tui_keeper_next_run.Unknown
       | None -> Masc_tui_keeper_axis.next_run state ~keeper_name)
     ~recurrence:(Masc_tui_keeper_axis.next_recurrence state ~keeper_name)
-    ~memory:(keeper_memory_reading state row) row in
-  { text; motion = shift_motion
-      ~prefix:(Terminal_text.single_line keeper_name ^ " ") now_cell.motion }
+    ~memory:(keeper_memory_reading state row) row
 
-let draw_keeper_selected_summary buf ~cols summary =
-  (match summary.motion with
-   | Masc_tui_answering.Still -> ()
-   | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
-       ~text:summary.text ~width:(framed_inner_width cols) ~through_cell);
-  box_line buf cols summary.text
+let draw_keeper_selected_summary buf ~cols summary = box_line buf cols summary
 
 let keeper_plain_fleet_lines (state : state) ~now ~inner =
   let text ko en = ui_text state ~ko ~en in
@@ -2386,7 +2360,7 @@ type keeper_plain_projection =
   ; kpp_count : int
   ; kpp_density : Keeper_list_model.density
   ; kpp_selected_reading : Keeper_control.reading option
-  ; kpp_selected_summary : keeper_primary_row option
+  ; kpp_selected_summary : string option
   }
 
 let keeper_plain_entry_height density = function
@@ -2511,15 +2485,8 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
         let yolo = List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names in
         let prefix = keeper_row_marker ~selected
           ^ keeper_row_name ~width:name_width ~yolo row ^ " " in
-        let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko)
-            ~frame:state.activity_frame row in
-        let primary = prefix ^ now_cell.text in
-        (match shift_motion ~prefix now_cell.motion with
-         | Masc_tui_answering.Still -> ()
-         | Moving through_cell ->
-             if projection.kpp_list_rows > 0 then
-               Render_schedule.Activity_tick.note_motion_if_visible
-                 ~text:primary ~width ~through_cell);
+        let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) row in
+        let primary = prefix ^ now_cell in
         let emit value =
           let value = fit_width value width in
           let value =
@@ -2805,14 +2772,17 @@ let render_keeper_axes (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   (* Measured over every reading rather than the rows on screen, so the
-     columns do not move while a reader scrolls. *)
+     columns do not move while a reader scrolls. The measured sentence is not
+     drawn, so the ages it reads ask for no redraw; the rows drawn below note
+     their own. *)
   let failure_sentence_cells (row : Keeper_list_model.row) =
-    let age ended_at =
-      Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
-    in
-    match keeper_row_trail_sentence ~age row with
-    | Some sentence -> Message_layout.display_width sentence
-    | None -> 0
+    Masc_tui_value.Redraw.measuring (fun () ->
+      let age ended_at =
+        Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
+      in
+      match keeper_row_trail_sentence ~age row with
+      | Some sentence -> Message_layout.display_width sentence
+      | None -> 0)
   in
   let has_failing_keeper =
     List.exists (fun row -> failure_sentence_cells row > 0) model_rows
@@ -3056,10 +3026,10 @@ let render_keeper_axes (state : state) =
                 | Masc_tui_keeper_world.Ledger_and_briefing ->
                     fit_width "ledger + briefing" grid.side_cells
                 | Masc_tui_keeper_world.Fact_ages bins -> grid_age_ladder_reading grid bins)
-            ; now_cell = still_row (fit_width world.now_cell Grid.now_cells)
+            ; now_cell = fit_width world.now_cell Grid.now_cells
             ; strip = fit_width world.strip (Grid.strip_cells grid)
             ; due = fit_width world.due Grid.due_cells
-            ; right = Message_layout.pad_left world.right grid.mem_cells }).text in
+            ; right = Message_layout.pad_left world.right grid.mem_cells }) in
           let text = pressable Press_keeper_world (fit_width text inner) in
           if keeper_entry_selected stop entry then
             selected_line (Masc_tui_theme.strip_sgr text)
@@ -3088,17 +3058,17 @@ let render_keeper_axes (state : state) =
           let primary =
             match matrix, shape with
             | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
-                still_row (matrix_keeper_row matrix ~now:now_unix row)
+                matrix_keeper_row matrix ~now:now_unix row
             | None, Axis_row.Wall_columns ->
-                still_row (Masc_tui_keeper_wall.row ~ko:(state.ui_language = Lang_ko)
+                Masc_tui_keeper_wall.row ~ko:(state.ui_language = Lang_ko)
                   ~cols:inner ~now:now_unix
-                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
+                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
             | None, Axis_row.List_columns ->
-                keeper_row_content ~ko:(state.ui_language = Lang_ko) ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
+                keeper_row_content ~ko:(state.ui_language = Lang_ko) ~columns ~now:now_unix ~yolo
                   ~selected row
             | None, Axis_row.Grid grid_columns ->
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
-                  ~peak_facts ~now:now_unix ~frame:state.activity_frame ~yolo row
+                  ~peak_facts ~now:now_unix ~yolo row
           in
           let press text =
             pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
@@ -3109,11 +3079,7 @@ let render_keeper_axes (state : state) =
               selected_line (press (Masc_tui_theme.strip_sgr text))
             else box_line buf cols (press text)
           in
-          (match primary.motion with
-           | Masc_tui_answering.Still -> ()
-           | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
-               ~text:primary.text ~width:inner ~through_cell);
-          emit primary.text;
+          emit primary;
           (* Only a row that draws a second line builds one. *)
           (match second_line row with
            | Axis_row.No_second_line -> ()
@@ -4192,7 +4158,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let loading_row ?started_ns what =
       Ansi.dim ^ "  "
       ^ Masc_tui_types.loading_notice
-          ?elapsed_s:(Masc_tui_types.pending_elapsed_s ~now_ns started_ns)
+          ?elapsed:(Masc_tui_types.pending_elapsed ~now_ns started_ns)
           what
       ^ Ansi.reset
     in

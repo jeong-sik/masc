@@ -707,7 +707,7 @@ let render_section_resources ~cols (state : state) =
           ; in_status Done current.completed
           ; in_status Cancelled current.cancelled
           ; Printf.sprintf (if ko then "스냅샷 %s 전" else "snapshot %s ago")
-              (age_text (now -. flow.observed_at)) ]
+              (Masc_tui_value.Ongoing.since ~now flow.observed_at) ]
       ; say "    가장 오래된 열린 작업: " "    Oldest open task registration: "
         ^ Option.fold ~none:(say "등록 시각을 아는 작업 없음" "none with a known timestamp")
             ~some:(fun at ->
@@ -855,7 +855,7 @@ let render_section_resources ~cols (state : state) =
           (if ko then "    실행 중 %s · 대기 중 %s · 확인 불가 %s · %s 전 조회"
            else "    %s running · %s idle · %s unavailable · observed %s ago")
           (Count.grouped (List.length running)) (Count.grouped idle)
-          (Count.grouped unavailable) (age_text (now -. observed_at))
+          (Count.grouped unavailable) (Masc_tui_value.Ongoing.since ~now observed_at)
       ; say "    턴 시간은 키퍼가 알린 시작 시각부터 잽니다."
           "    Turn age = since owner-reported start." ]
       @ List.map
@@ -863,7 +863,7 @@ let render_section_resources ~cols (state : state) =
               Printf.sprintf
                 (if ko then "    %s  턴 %8s  레인 %s" else "    %s  turn %8s  lane %s")
                 (Layout.fit_width name 18)
-                (age_text (now -. started_at_unix))
+                (Masc_tui_value.Ongoing.since ~now started_at_unix)
                 (Masc_tui_answering.lane_word ~ko lane))
           running
   in

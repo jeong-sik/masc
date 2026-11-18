@@ -842,6 +842,12 @@ val progress_facts :
     Joined with {!Masc_tui_chat_facts.line} they are that row's text. A pane
     lays them out itself so the row wraps between two clauses. *)
 
+val quiet_after_s : float
+(** How long the model stays quiet before the progress row says for how long.
+    A frame drawn sooner notes the instant the quiet reaches it
+    ({!Masc_tui_value.Redraw.holds}), since the row changes then with no new
+    data. *)
+
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->
   ?compact:bool -> ?show_timing:bool -> ko:bool -> now:float -> t -> (status_kind * string) list

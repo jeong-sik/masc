@@ -31,6 +31,10 @@ val quit_authorized :
 val empty : t
 val ordinary : t -> (string * float) option
 val ordinary_visible : t -> now:float -> window:float -> (string * float) option
+(** The ordinary notice while its [window] lasts. While it shows, the end of
+    the window is noted ({!Masc_tui_value.Redraw.holds}), since the footer
+    loses it then with no new input or data. {!rejection} notes the end of a
+    presented rejection's window the same way. *)
 val set_ordinary : t -> (string * float) option -> t
 val csi_active : t -> bool
 val start_csi : t -> t

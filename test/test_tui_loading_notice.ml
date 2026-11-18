@@ -16,12 +16,13 @@ let second = 1_000_000_000L
 let ns seconds = Int64.mul (Int64.of_int seconds) second
 
 let test_the_elapsed_needs_a_start () =
-  check (option int) "a read nobody asked for measures nothing" None
-    (Types.pending_elapsed_s ~now_ns:(ns 100) None);
-  check (option int) "ten seconds since this read began" (Some 10)
-    (Types.pending_elapsed_s ~now_ns:(ns 100) (Some (ns 90)));
-  check (option int) "whole seconds, so a part of one is none of one" (Some 0)
-    (Types.pending_elapsed_s ~now_ns:(Int64.add (ns 90) 999_999_999L)
+  check (option (float 1e-9)) "a read nobody asked for measures nothing" None
+    (Types.pending_elapsed ~now_ns:(ns 100) None);
+  check (option (float 1e-9)) "ten seconds since this read began" (Some 10.)
+    (Types.pending_elapsed ~now_ns:(ns 100) (Some (ns 90)));
+  check (option (float 1e-9)) "a part of a second is kept, so a notice is never a second late"
+    (Some 0.999_999_999)
+    (Types.pending_elapsed ~now_ns:(Int64.add (ns 90) 999_999_999L)
        (Some (ns 90)))
 
 let start state ~tab ~keeper ~now_ns =
@@ -38,23 +39,23 @@ let test_a_background_read_does_not_reset_the_visible_one () =
   start state ~tab:Types.Detail_identity
     ~keeper:"analyst" ~now_ns:(ns 99);
   state.detail_tab <- Types.Detail_instructions;
-  check (option int) "the tab on screen keeps its own start" (Some 90)
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "the tab on screen keeps its own start" (Some 90.)
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:state.detail_tab ~keeper:"analyst"));
-  check (option int) "and the one that finished behind it keeps its own" (Some 1)
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "and the one that finished behind it keeps its own" (Some 1.)
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"));
-  check (option int) "a tab nobody asked for measures nothing" None
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "a tab nobody asked for measures nothing" None
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_sandbox ~keeper:"analyst"));
   (* Asking again does not restart the count. The Identity tab polls while an
      OAuth attachment settles, and the wait being measured is the operator's,
      which those polls do not interrupt. *)
   start state ~tab:Types.Detail_instructions
     ~keeper:"analyst" ~now_ns:(ns 96);
-  check (option int) "asking again keeps the first start" (Some 90)
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "asking again keeps the first start" (Some 90.)
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_instructions
           ~keeper:"analyst"))
 
@@ -63,22 +64,22 @@ let test_the_wait_ends_when_the_answer_arrives () =
   let state = fresh () in
   start state ~tab:Types.Detail_identity
     ~keeper:"analyst" ~now_ns:(ns 10);
-  check (option int) "waiting" (Some 90)
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "waiting" (Some 90.)
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"));
   let request = Option.get
       (Types.pending_detail_read state ~tab:Types.Detail_identity ~keeper:"analyst") in
   check bool "the terminal answer retires its wait" true
     (Types.finish_detail_read state request);
-  check (option int) "answered, so nothing is being waited for" None
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "answered, so nothing is being waited for" None
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"));
   start state ~tab:Types.Detail_identity
     ~keeper:"analyst" ~now_ns:(ns 100);
-  check (option int) "and the next wait starts from the next ask" (Some 0)
-    (Types.pending_elapsed_s ~now_ns:(ns 100)
+  check (option (float 1e-9)) "and the next wait starts from the next ask" (Some 0.)
+    (Types.pending_elapsed ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"))
 
@@ -93,16 +94,16 @@ let test_the_same_tab_for_two_keepers_is_timed_apart () =
   start state ~tab:Types.Detail_identity
     ~keeper:"polisher" ~now_ns:(ns 99);
   let now_ns = ns 100 in
-  check (option int) "the Keeper on screen keeps its own start" (Some 90)
-    (Types.pending_elapsed_s ~now_ns
+  check (option (float 1e-9)) "the Keeper on screen keeps its own start" (Some 90.)
+    (Types.pending_elapsed ~now_ns
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"));
-  check (option int) "and the one that landed behind it keeps its own" (Some 1)
-    (Types.pending_elapsed_s ~now_ns
+  check (option (float 1e-9)) "and the one that landed behind it keeps its own" (Some 1.)
+    (Types.pending_elapsed ~now_ns
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"polisher"));
-  check (option int) "a Keeper nobody read for measures nothing" None
-    (Types.pending_elapsed_s ~now_ns
+  check (option (float 1e-9)) "a Keeper nobody read for measures nothing" None
+    (Types.pending_elapsed ~now_ns
        (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"critic"))
 
@@ -119,16 +120,16 @@ let test_two_reads_are_timed_apart () =
       ; slr_started_ns = ns 98
       };
   let now_ns = ns 100 in
-  check (option int) "the tab read has been waiting ninety seconds" (Some 90)
-    (Types.pending_elapsed_s ~now_ns
+  check (option (float 1e-9)) "the tab read has been waiting ninety seconds" (Some 90.)
+    (Types.pending_elapsed ~now_ns
        (Types.detail_read_started state ~tab:Types.Detail_sandbox ~keeper:"analyst"));
   let logs_started =
     Option.map
       (fun (request : Types.sandbox_logs_request) -> request.slr_started_ns)
       state.keeper_sandbox_logs_inflight
   in
-  check (option int) "and the log read, two" (Some 2)
-    (Types.pending_elapsed_s ~now_ns logs_started)
+  check (option (float 1e-9)) "and the log read, two" (Some 2.)
+    (Types.pending_elapsed ~now_ns logs_started)
 
 let test_offscreen_completion_and_late_poll_do_not_age_a_new_wait () =
   List.iter (fun tab ->
@@ -141,8 +142,8 @@ let test_offscreen_completion_and_late_poll_do_not_age_a_new_wait () =
       (first.drr_generation <> poll.drr_generation);
     check bool "a superseded response cannot finish the outstanding read" false
       (Types.finish_detail_read state first);
-    check (option int) "rereading does not reset accumulated elapsed time" (Some 3)
-      (Types.pending_elapsed_s ~now_ns:(ns 13)
+    check (option (float 1e-9)) "rereading does not reset accumulated elapsed time" (Some 3.)
+      (Types.pending_elapsed ~now_ns:(ns 13)
          (Types.detail_read_started state ~tab ~keeper:"analyst"));
     (* Completion is independent of the current tab, Keeper, or visible view.
        Both success and error callbacks use it before checking selection. *)
@@ -155,8 +156,8 @@ let test_offscreen_completion_and_late_poll_do_not_age_a_new_wait () =
       (fresh.drr_generation <> first.drr_generation);
     check bool "a late answer from the old poll cannot end the new wait" false
       (Types.finish_detail_read state poll);
-    check (option int) "the new wait has its own elapsed time" (Some 2)
-      (Types.pending_elapsed_s ~now_ns:(ns 102)
+    check (option (float 1e-9)) "the new wait has its own elapsed time" (Some 2.)
+      (Types.pending_elapsed ~now_ns:(ns 102)
          (Types.detail_read_started state ~tab ~keeper:"analyst"));
     check bool "only the new wait may finish" true
       (Types.finish_detail_read state fresh);
@@ -165,21 +166,21 @@ let test_offscreen_completion_and_late_poll_do_not_age_a_new_wait () =
     [Types.Detail_instructions; Types.Detail_sandbox; Types.Detail_github;
      Types.Detail_identity; Types.Detail_automation]
 
-let test_logs_keep_repainting_after_status_arrives () =
+let test_logs_keep_the_tab_waiting_after_status_arrives () =
   let state = fresh () in
   let status = Types.mark_detail_read_started state ~tab:Types.Detail_sandbox
       ~keeper:"analyst" ~now_ns:(ns 10) in
   ignore (Types.finish_detail_read state status);
   state.keeper_sandbox_logs_inflight <- Some
     { Types.slr_keeper = "analyst"; slr_generation = 2; slr_started_ns = ns 20 };
-  check bool "matching logs need timed repaints without a status request" true
+  check bool "matching logs keep the tab waiting without a status request" true
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"analyst");
-  check bool "another Keeper's logs do not animate this tab" false
+  check bool "another Keeper's logs leave this tab alone" false
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"polisher");
-  check bool "hidden Sandbox logs do not animate Identity" false
+  check bool "hidden Sandbox logs leave Identity alone" false
     (Types.detail_read_waiting state ~tab:Types.Detail_identity ~keeper:"analyst");
   state.keeper_sandbox_logs_inflight <- None;
-  check bool "finished logs stop requesting repaints" false
+  check bool "finished logs end the wait" false
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"analyst")
 
 let test_sandbox_partial_results_follow_authority_and_generation () =
@@ -506,6 +507,61 @@ let test_schedule_agenda_suspends_with_workspace_authority () =
   check bool "the retired response cannot fill the next read" false
     (Types.Snapshot_read.is_current state.schedules_agenda_read ticket)
 
+module Redraw = Masc_tui_value.Redraw
+
+(* The earliest instant the frame noted must fall [least] to [most] seconds
+   after the wall clock read around the call. [tolerance] absorbs the rounding
+   of adding seconds to an epoch reading. *)
+let tolerance = 1e-6
+
+let check_noted label ~before ~after ~least ~most =
+  match Redraw.next_change () with
+  | None -> fail (label ^ ": the text changes with time, so the frame notes when")
+  | Some at ->
+      check bool label true (at >= before +. least && at <= after +. most)
+
+(* RFC tui-one-screen-grammar §8: without new data a pending read's notice
+   changes only with time. Below the floor it shows no seconds, and they
+   appear when the read reaches the floor, so the frame notes that instant;
+   past the floor the seconds it shows note their next change. Nothing else
+   redraws the notice now that no clock ticks while a read is pending. *)
+let test_a_pending_read_notes_when_time_changes_its_notice () =
+  let noted label elapsed ~least ~most =
+    Redraw.begin_frame ();
+    let before = Unix.gettimeofday () in
+    ignore (Types.loading_notice ?elapsed "status");
+    let after = Unix.gettimeofday () in
+    check_noted label ~before ~after ~least ~most
+  in
+  let noted_at label elapsed seconds =
+    noted label elapsed ~least:(seconds -. tolerance) ~most:(seconds +. tolerance)
+  in
+  (* A read 0.6 s old shows its seconds 1.4 s later, not two whole seconds
+     later: the notice is handed the read's exact pending time. *)
+  noted_at "below the floor: at the instant the seconds appear" (Some 0.6) 1.4;
+  noted_at "past the floor: at the next whole second of the read" (Some 2.25) 0.75;
+  noted_at "past a minute: at the next minute, not the next second" (Some 125.) 55.;
+  Redraw.begin_frame ();
+  ignore (Types.loading_notice "status");
+  check (option (float 1e-9)) "a read with no start changes nothing with time" None
+    (Redraw.next_change ())
+
+(* The same for the pending display bar: a read inside it draws its row when
+   it crosses the bar, with no new data, so that crossing is noted. *)
+let test_a_read_inside_the_display_bar_notes_its_crossing () =
+  Redraw.begin_frame ();
+  let before = Unix.gettimeofday () in
+  check bool "a read at 0.4 s is inside the bar" false
+    (Types.past_pending_display_bar 400_000_000L);
+  let after = Unix.gettimeofday () in
+  check_noted "the crossing is noted for when the read reaches the bar" ~before ~after
+    ~least:0. ~most:0.6;
+  Redraw.begin_frame ();
+  check bool "a read at 2 s is past the bar" true
+    (Types.past_pending_display_bar 2_000_000_000L);
+  check (option (float 1e-9)) "a read past the bar has nothing left to cross" None
+    (Redraw.next_change ())
+
 let () =
   run "tui loading notice"
     [ ( "a read in flight"
@@ -515,8 +571,8 @@ let () =
             test_schedule_agenda_suspends_with_workspace_authority
         ; test_case "offscreen completion and late polls preserve a fresh wait" `Quick
             test_offscreen_completion_and_late_poll_do_not_age_a_new_wait
-        ; test_case "logs keep repainting after status arrives" `Quick
-            test_logs_keep_repainting_after_status_arrives
+        ; test_case "logs keep the tab waiting after status arrives" `Quick
+            test_logs_keep_the_tab_waiting_after_status_arrives
         ; test_case "sandbox results follow authority and generation" `Quick
             test_sandbox_partial_results_follow_authority_and_generation
         ; test_case "the elapsed needs a start" `Quick
@@ -529,5 +585,9 @@ let () =
             test_the_same_tab_for_two_keepers_is_timed_apart
         ; test_case "the wait ends when the answer arrives" `Quick
             test_the_wait_ends_when_the_answer_arrives
+        ; test_case "a pending read notes when time changes its notice" `Quick
+            test_a_pending_read_notes_when_time_changes_its_notice
+        ; test_case "a read inside the display bar notes its crossing" `Quick
+            test_a_read_inside_the_display_bar_notes_its_crossing
         ] )
     ]

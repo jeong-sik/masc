@@ -12,13 +12,6 @@ module Rows = Masc_tui_rows
 module Memory_category = Masc.Keeper_memory_os_types
 module Memory_usage = Masc_tui_memory_usage
 
-let keeper_lane_idle_text seconds =
-  let seconds = max 0 seconds in
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
-  else Printf.sprintf "%dd" (seconds / 86400)
-
 let librarian_failure_words ~ko kind =
   let text korean english = if ko then korean else english in
   match kind with
@@ -148,7 +141,7 @@ let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
     |> List.map (fun row -> "  " ^ row)) lines
 
 let memory_fact_age_label ts =
-  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
+  Masc_tui_value.Ongoing.Narrow.since ~now:(Unix.gettimeofday ()) ts
 
 let memory_date ts =
   let tm = Unix.localtime ts in

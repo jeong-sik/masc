@@ -1,4 +1,4 @@
-(* Key ownership of overlays and the shared pace of moving marks. *)
+(* Key ownership of overlays. *)
 
 open Alcotest
 module Types = Masc_tui_types
@@ -222,13 +222,6 @@ let test_retained_chat_origin_recovers_quarantined_cards () =
   check bool "restored cards leave no second quarantine copy" true
     (Option.is_none state.Types.play_invite_quarantine)
 
-let test_moving_marks_share_one_pace () =
-  check (float 1e-9) "not started" 0.0 (Types.motion_elapsed_seconds (-1));
-  check (float 1e-9) "the first step" 0.0 (Types.motion_elapsed_seconds 0);
-  check (float 1e-9) "ten steps"
-    (10.0 *. Int64.to_float Types.motion_step_ns /. 1e9)
-    (Types.motion_elapsed_seconds 10)
-
 let () =
   run "tui_emblem_state"
     [ ( "overlays"
@@ -253,6 +246,4 @@ let () =
         ; test_case "retained chat origin recovers quarantined cards" `Quick
             test_retained_chat_origin_recovers_quarantined_cards
         ] )
-    ; ( "motion"
-      , [ test_case "moving marks share one pace" `Quick test_moving_marks_share_one_pace ] )
     ]

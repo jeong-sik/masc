@@ -1638,11 +1638,13 @@ let schedule_list_freshness (state : state) =
 
 (* A refused create or modify form, wrapped to the frame, for as long as the
    last-action window lasts; the action line alone is lost under a workspace
-   warning. *)
+   warning. The rows leave when the window ends, with no new data, so a frame
+   that draws them notes that instant (RFC tui-one-screen-grammar §8). *)
 let schedule_form_refusal_rows (state : state) ~cols =
   match state.schedule_form_refusal with
   | Some ({ sfr_at; _ } as refusal)
-    when Unix.gettimeofday () -. sfr_at <= Masc_tui_types.last_action_window_s ->
+    when Masc_tui_value.Redraw.holds ~now:(Unix.gettimeofday ())
+           ~until:(sfr_at +. Masc_tui_types.last_action_window_s) ->
       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
         (Terminal_text.single_line
            (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) refusal))

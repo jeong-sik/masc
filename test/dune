@@ -5202,7 +5202,8 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout
+  masc_tui_value))
 
 (test
  (name test_tui_approval_detail)
@@ -5296,7 +5297,8 @@
   masc_tui_render_prim
   masc_tui_render_schedule
   masc_tui_roster_pane
-  masc_tui_table))
+  masc_tui_table
+  masc_tui_value))
 
 (test
  (name test_tui_terminal_write_repair)
@@ -5485,7 +5487,7 @@
 (test
  (name test_tui_action_notice)
  (modules test_tui_action_notice)
- (libraries masc_tui_action_notice))
+ (libraries masc_tui_action_notice masc_tui_value))
 
 (test
  (name test_tui_rejection_evidence)
@@ -5823,9 +5825,15 @@
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity masc_tui_owed_read))
 
 (test
+ (name test_tui_chat_schedule_proximity)
+ (modules test_tui_chat_schedule_proximity)
+ (libraries alcotest masc_tui_types masc_tui_value unix))
+
+(test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox))
+ (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox
+  masc_tui_value unix))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -7240,7 +7248,8 @@
  (modules test_tui_model_content_activity)
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
   native_tool_outcome_fixture masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_value))
 
 (test
  (name test_tui_child_content)

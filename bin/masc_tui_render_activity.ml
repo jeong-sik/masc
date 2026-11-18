@@ -473,9 +473,9 @@ let render_keeper_calls (state : state) =
           match snapshot.Masc.Tui_decode.kcs_latest_age_s with
           | Some age ->
               Printf.sprintf
-                (if state.ui_language = Lang_ko then "%s · 최근 기록 %.0f초 전%s"
-                 else "%s · latest %.0fs ago%s")
-                health age reason
+                (if state.ui_language = Lang_ko then "%s · 최근 기록 %s 전%s"
+                 else "%s · latest %s ago%s")
+                health (Masc_tui_value.Ongoing.text age) reason
           | None -> health ^ reason
         in
         heading

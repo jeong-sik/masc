@@ -1,4 +1,5 @@
 module Notice = Masc_tui_action_notice
+module Redraw = Masc_tui_value.Redraw
 
 let require condition description = if not condition then failwith description
 let visible state now = Notice.rejection state ~now ~window:12.
@@ -12,10 +13,26 @@ let () =
     "ordinary notice retains its existing time window";
   require (Notice.ordinary_visible initial ~now:22.1 ~window:12. = None)
     "ordinary notice expires normally";
+  (* The footer loses the notice when its window ends, with no input or data,
+     so a frame that draws it notes that instant (RFC tui-one-screen-grammar
+     §8), and a frame past the window notes nothing for it. *)
+  Redraw.begin_frame ();
+  ignore (Notice.ordinary_visible initial ~now:15. ~window:12.);
+  require (Redraw.next_change () = Some 22.)
+    "a shown ordinary notice notes the end of its window";
+  Redraw.begin_frame ();
+  ignore (Notice.ordinary_visible initial ~now:22.1 ~window:12.);
+  require (Redraw.next_change () = None) "an expired ordinary notice notes nothing";
   let failed = Notice.reject initial Paste_rejected ~now:10. ~window:12. in
   let first = some (visible failed 1000.) in
   require (Option.get (Notice.ordinary failed) == csi)
     "adding a rejection preserves the CSI tuple identity";
+  let shown_rejection = Notice.presented failed first ~at:10. ~input_pending:false in
+  Redraw.begin_frame ();
+  require (Option.is_some (Notice.rejection shown_rejection ~now:15. ~window:12.))
+    "a presented rejection shows inside its window";
+  require (Redraw.next_change () = Some 22.)
+    "a presented rejection notes the end of its window";
   let csi_held = Notice.start_csi failed in
   require (Notice.ordinary_is_csi csi_held)
     "the original CSI ordinary tuple retains its identity";

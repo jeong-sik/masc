@@ -100,49 +100,17 @@ let collapse_consecutive ~key items =
   in
   List.rev (List.fold_left fold [] items)
 
-module Activity_tick = struct
-  type t = {
-    motion_interval_ns : int64;
-    mutable last_step_ns : int64;
-    mutable advanced : bool;
-  }
-  type decision = Quiet | Advance | Stop
-
-  (* Age/read notices are displayed in whole seconds. Keep that clock even
-     when no moving mark is visible; the 150ms motion clock is more expensive. *)
-  let clock_interval_ns = 1_000_000_000L
-
-  let create ~motion_interval_ns ~now_ns =
-    if Int64.compare motion_interval_ns 0L <= 0 then
-      invalid_arg "activity motion interval must be positive";
-    { motion_interval_ns; last_step_ns = now_ns; advanced = false }
-
-  let take tick ~now_ns ~running ~motion_visible =
-    if not running then
-      if tick.advanced then begin tick.advanced <- false; Stop end else Quiet
-    else
-      let interval = if motion_visible then tick.motion_interval_ns else clock_interval_ns in
-      if Int64.compare (Int64.sub now_ns tick.last_step_ns) interval < 0 then Quiet
-      else begin
-        tick.last_step_ns <- now_ns;
-        tick.advanced <- true;
-        Advance
-      end
-
-  let observed_motion = Domain.DLS.new_key (fun () -> false)
-  let begin_frame () = Domain.DLS.set observed_motion false
-  let note_motion () = Domain.DLS.set observed_motion true
-  let motion_visible () = Domain.DLS.get observed_motion
-  let note_motion_if_visible ~text ~width ~through_cell =
-    if through_cell > 0 && width >= through_cell then begin
-      (* The fitting helper owns unstyled semantic source; SGR changes no
-         cells, so the moving span keeps its original cell endpoint. *)
-      let text = Masc_tui_theme.strip_sgr text in
-      let bytes = Masc_tui_message_layout.fitted_source_bytes text width in
-      if bytes = String.length text
-         || Masc_tui_message_layout.display_width (String.sub text 0 bytes) >= through_cell
-      then note_motion ()
-    end
+module Time_redraw = struct
+  let due ~now = function
+    | None -> None
+    | Some change ->
+        let second = Float.ceil change in
+        (* A change the frame noted at or before [now] has already happened,
+           or its text reads differently only just after its instant (a
+           countdown): the next second boundary draws it. Either way the
+           render is in the future, so time alone renders at most once a
+           second. *)
+        Some (if second > now then second else Float.floor now +. 1.)
 end
 
 module Input_wait = struct
@@ -1767,7 +1735,7 @@ let board_cells ?(styles = board_no_styles) ~ko ~age_header
    no such time. Which of a post's two times that is belongs to the sort, not
    to this cell. *)
 let board_age_text ~now = function
-  | Some at -> Masc_tui_message_layout.span_text (now -. at)
+  | Some at -> Masc_tui_value.Ongoing.since ~now at
   | None -> Masc_tui_theme.Glyph.no_value
 
 (* A list pane's row label: what the row is about, then the reading that

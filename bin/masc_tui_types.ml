@@ -3349,14 +3349,40 @@ type chat_schedule_proximity =
   | Schedule_elapsed | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown
   | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled
 
+let chat_schedule_soon_band_s = 3600.
+
+(* The local midnight that starts the day [at] falls on. [Unix.mktime] reads
+   the zone's own day, so a day that gains or loses an hour still starts at
+   its midnight. A breakdown it cannot turn back into an instant has no start
+   to give. *)
+let local_day_start at =
+  let day = Unix.localtime at in
+  match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
+  | start, _ -> Some start
+  | exception Unix.Unix_error _ -> None
+
+(* A row moves to the next band as the clock runs, with no new data: Later
+   becomes Today at the start of the due day, both become Soon an hour before
+   the due moment, and Soon becomes Elapsed at it. Each band notes the instant
+   it ends, so the frame that draws the row is redrawn then (RFC
+   tui-one-screen-grammar §8). *)
 let chat_schedule_proximity ~now = function
   | None -> Schedule_unknown
   | Some due when due <= now -> Schedule_elapsed
-  | Some due when due -. now <= 3600. -> Schedule_soon (* one-hour display band *)
   | Some due ->
-      let today = Unix.localtime now and day = Unix.localtime due in
-      if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
-      else Schedule_later
+      Masc_tui_value.Redraw.note_change_at due;
+      if due -. now <= chat_schedule_soon_band_s then Schedule_soon
+      else begin
+        Masc_tui_value.Redraw.note_change_at (due -. chat_schedule_soon_band_s);
+        let today = Unix.localtime now and day = Unix.localtime due in
+        if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
+        else begin
+          (match local_day_start due with
+           | Some start when start > now -> Masc_tui_value.Redraw.note_change_at start
+           | Some _ | None -> ());
+          Schedule_later
+        end
+      end
 
 (* The Keepers whose event queue a schedule row reads: its target, the
    Keeper its reaction names, the one a transferred occurrence waits with,
@@ -9932,15 +9958,6 @@ type state = {
   mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
-  (* Derived display phase for the selected long name in the narrow roster.
-     The main loop advances it only while that roster is visible. *)
-  mutable roster_marquee_frame: int;
-  (* The frame the running-turn mark is on. The main loop advances it only
-     while some turn is actually running, so a screen with nothing running
-     is a screen that stops repainting -- the animation costs nothing when
-     there is nothing to say. [-1] is "not animating": the mark falls back
-     to its still form rather than freezing on an arbitrary quarter. *)
-  mutable activity_frame: int;
   (* The candle's step. The main loop advances it only while the last frame
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
@@ -12675,7 +12692,16 @@ let board_census_values (state : state) =
    age and the elapsed seconds say how long it has been stuck. *)
 let pending_display_bar_ns = 1_000_000_000L
 
-let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+(* A read inside the bar draws its row when it crosses the bar, with no new
+   data, so the crossing is when time next changes the frame (RFC
+   tui-one-screen-grammar §8). *)
+let past_pending_display_bar age =
+  let past = Int64.compare age pending_display_bar_ns >= 0 in
+  if not past then
+    Masc_tui_value.Redraw.note_change_at
+      (Unix.gettimeofday ()
+       +. Int64.to_float (Int64.sub pending_display_bar_ns age) /. 1e9);
+  past
 
 (* Totals stay borrowable while an ordinary poll is in flight -- the census
    on screen is the last reading until a newer one lands, and dropping the
@@ -18120,39 +18146,43 @@ let selected_acting_entry state =
    tab's status took between five and sixteen seconds (measured 2026-09-12),
    which is long enough to be read as a stall and keyed at. The footer's
    answering badge spends its elapsed seconds for the same reason. *)
-let pending_seconds_floor = 2
+let pending_seconds_floor = 2.
 
-let loading_notice ?elapsed_s what =
-  match elapsed_s with
+(* [elapsed] is the read's own pending time, to the nanosecond: a count
+   already cut to whole seconds would put both the floor's instant and the
+   next change up to a second late. *)
+let loading_notice ?elapsed what =
+  match elapsed with
   | Some seconds when seconds >= pending_seconds_floor ->
-      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
-  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+      Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
+        (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) seconds)
+  | Some seconds ->
+      (* The seconds appear when the read reaches the floor, with no new
+         data, so that is when time next changes this text (RFC
+         tui-one-screen-grammar §8). *)
+      Masc_tui_value.Redraw.note_change_at
+        (Unix.gettimeofday () +. (pending_seconds_floor -. seconds));
+      Printf.sprintf "(%s\xe2\x80\xa6)" what
+  | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
 
-let nanoseconds_per_second = 1_000_000_000L
-
-(* One step of every moving thing on a masc screen: the running-turn mark,
-   the roster marquee and the /about candle. Four steps turn the mark once
-   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
-   and one pace for all three keeps them moving together. *)
+(* The /about candle steps once this often. It is the one thing on a masc
+   screen that moves without new data, and it arrives at a still final frame,
+   so it costs nothing once it has arrived. State marks do not move and time
+   text changes on second boundaries (RFC tui-one-screen-grammar §7.2, §8). *)
 let motion_step_ns = 150_000_000L
 
-(* How far the moving marks have gone after [frame] steps; a negative frame
-   is one that has not started. *)
-let motion_elapsed_seconds frame =
-  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
-  /. Int64.to_float nanoseconds_per_second
+let nanoseconds_per_second = 1e9
 
-(* How long a read has been pending, in whole seconds. [now_ns] is an argument
-   so the answer is the same every time it is asked with the same reading, and
-   the stamp is the read's own rather than the state's: the Sandbox tab's status
-   and its container logs are two reads and can be pending at once.
+(* How long a read has been pending, in seconds. [now_ns] is an argument so
+   the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's
+   status and its container logs are two reads and can be pending at once.
 
    No clamp, because a monotonic reading cannot go backwards. A wall clock can,
    and the clamp that used to be here turned that into a silent zero. *)
-let pending_elapsed_s ~now_ns started_ns =
+let pending_elapsed ~now_ns started_ns =
   Option.map
-    (fun since ->
-      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    (fun since -> Int64.to_float (Int64.sub now_ns since) /. nanoseconds_per_second)
     started_ns
 
 let pending_detail_read (state : state) ~tab ~keeper =
@@ -20900,8 +20930,6 @@ let create_state
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
-  roster_marquee_frame = 0;
-  activity_frame = -1;
   emblem_frame = -1;
   about_reduce_motion = false;
   about_open = false;
@@ -27357,9 +27385,9 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
               ^ say " · 진행 중" " · in progress"
-          ; motion = Masc_tui_answering.Still; keys = "" } ]
+          ; keys = "" } ]
       | None ->
-        Masc_tui_answering.chat_activity ~frame:state.activity_frame
+        Masc_tui_answering.chat_activity
           ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
@@ -27379,7 +27407,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
     let retained = keeper_input_retained state keeper_name in
-    let plain text = { Masc_tui_answering.lead = text; rest = ""; motion = Masc_tui_answering.Still; keys = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -27403,7 +27431,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = say "다음 대기 줄" "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
-              ; motion = Masc_tui_answering.Still; keys = "" } ] in
+              ; keys = "" } ] in
         let auto_tag =
           match state.user_input_priority_next, ko with
           | true, true -> "자동 다음 순서:켬"
@@ -27416,7 +27444,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         [ { Masc_tui_answering.lead =
               Printf.sprintf (if ko then "내 메시지 %d건 대기" else "Queue (%d pending)") waiting_count
           ; rest = " · " ^ auto_tag
-          ; motion = Masc_tui_answering.Still; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
+          ; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
         @ count_row keeper_queued (say "처리 대기 · /queue" "queued at Keeper · /queue")
         @ count_row awaiting_receipt (say "전송 중" "awaiting receipt")
         @ count_row rechecking (say "전송 확인 중" "rechecking delivery")
@@ -27428,7 +27456,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
          then say " · 중단 뒤" " · after stop" else say " · 보내기 전" " · before sending")
-       ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+       ; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -27448,8 +27476,7 @@ let keeper_message_activity_rows (state : state) =
           let provisional = provisional_requests () in
           let request_id request =
             Masc_tui_keeper_chat_projection.terminal_safe_text request.Masc_tui_keeper_chat_projection.request_id in
-          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest;
-            motion = Masc_tui_answering.Still; keys = "" } in
+          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest; keys = "" } in
           let pending_lead request =
             ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) " ^ request_id request in
           let kept_back refusal = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -27593,12 +27620,12 @@ let keeper_message_activity_rows (state : state) =
           [{ Masc_tui_answering.lead = say "보류" "Held"
            ; rest = (if retained_after_stop then say " · 중단 뒤" " · after stop"
                      else say " · 보내기 전" " · before sending")
-           ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+           ; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with
         | [] -> []
         | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-            rest = ""; motion = Masc_tui_answering.Still; keys }] in
+            rest = ""; keys }] in
       held_rows @ activity_rows
 ;;
 

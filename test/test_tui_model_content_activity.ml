@@ -661,6 +661,26 @@ let test_owned_text_protocol () =
      ["response",owner;"response",owner];["stream_scope",`Int (-1)];
      ["stream_scope",`Int 9_007_199_254_740_992]]
 
+(* RFC tui-one-screen-grammar §8: the progress row adds how long the model has
+   been quiet once it has been quiet for [quiet_after_s], with no new data.
+   A frame drawn before then notes that instant, so time alone redraws the row
+   when the clause appears, not when the turn's minute next turns. *)
+let test_a_quiet_stream_notes_when_its_silence_is_said () =
+  let module Redraw = Masc_tui_value.Redraw in
+  let t = create () in
+  T.apply ~now:100. t (L.Text {text="A"; response=Unobserved_scope (None)});
+  T.apply ~now:100. t (observed ());
+  Redraw.begin_frame ();
+  ignore (T.status_rows ~ko:false ~now:101. t);
+  check (option (float 1e-9)) "the frame notes when the quiet reaches the threshold"
+    (Some (100. +. T.quiet_after_s)) (Redraw.next_change ());
+  Redraw.begin_frame ();
+  ignore (T.status_rows ~show_timing:false ~ko:false ~now:101. t);
+  check bool "without timing the threshold is not noted" true
+    (match Redraw.next_change () with
+     | Some at -> at > 100. +. T.quiet_after_s
+     | None -> true)
+
 let () = run "model content activity"
   ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
     test_case "owned text protocol" `Quick test_owned_text_protocol;
@@ -683,4 +703,6 @@ let () = run "model content activity"
     test_case "poisoned scope retires only observed activity" `Quick test_poisoned_scope_retires_observed_activity;
     test_case "cut scope keeps its activity until legal close" `Quick test_cut_scope_still_accepts_observed_content;
     test_case "fresh workers in the same journal" `Quick test_fresh_worker_generation_in_same_journal;
-    test_case "strict shared codec" `Quick test_strict_shared_codec]]
+    test_case "strict shared codec" `Quick test_strict_shared_codec;
+    test_case "a quiet stream notes when its silence is said" `Quick
+      test_a_quiet_stream_notes_when_its_silence_is_said]]

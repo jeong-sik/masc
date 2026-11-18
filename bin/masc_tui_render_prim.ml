@@ -69,7 +69,10 @@ let local_source_pending_note state source =
       let name = match source with
         | Local_keepers -> ui_text state ~ko:"Keeper 메타데이터" ~en:"Keeper metadata"
         | Local_work -> ui_text state ~ko:"작업 목록" ~en:"Work" in
-      let seconds = Printf.sprintf "%.1f" (Int64.to_float age_ns /. 1e9) ^ ui_text state ~ko:"초" ~en:"s" in
+      (* A length still going reads in whole seconds, then whole minutes
+         (RFC tui-one-screen-grammar §6.2). *)
+      let seconds = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
+          (Int64.to_float age_ns /. 1e9) in
       let lead = match phase with
         | Local_read_observation.Read_failed _ | Read_not_started -> name
         | Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
@@ -1171,7 +1174,8 @@ let surface_strip (state : state) ~cols =
      how the operator moves. The mark and its word are always drawn, because
      a screen that draws nothing is explained by them. *)
   let connection_style, connection = strip_connection_reading state in
-  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:(Unix.gettimeofday ()) in
+  let clock_now = Unix.gettimeofday () in
+  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:clock_now in
   let ring_cells =
     let cells = ref 0 in
     Array.iteri
@@ -1191,7 +1195,10 @@ let surface_strip (state : state) ~cols =
     if 1 + ring_cells + badge_reserved + strip_reading_gap_cells
        + Message_layout.display_width connection + strip_reading_gap_cells
        + Message_layout.display_width wall_clock <= cols
-    then Some wall_clock
+    then begin
+      Masc_tui_value.Redraw.note_change_at (Masc_tui_value.Instant.next_minute ~now:clock_now);
+      Some wall_clock
+    end
     else None
   in
   let reading_cells =
@@ -2613,8 +2620,11 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     match Rows.at window (first + i) with
     | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Masc_tui_roster_pane.name_window ~selected
-          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+        (* A long name keeps its family and its deciding end, the middle
+           folded (docs/design/tui/LAYOUT-LANGUAGE.md). The selected row does
+           not scroll its name: a screen with no new data changes only its
+           time text (RFC tui-one-screen-grammar §8). *)
+        let name = Message_layout.fit_middle (max 0 (cols - 7))
           (Terminal_text.single_line keeper.k_name) in
         let reading = keeper_reading state keeper in
         let glyph = keeper_state_glyph ~paused:reading.paused
@@ -3864,7 +3874,7 @@ let fusion_run_clock run =
 
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
-  | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
+  | Fusion_running, _ -> Masc_tui_value.Ongoing.since ~now run.fur_started_at ^ " running"
   | (Fusion_completed | Fusion_failed _), Some finished ->
       Message_layout.span_text (finished -. run.fur_started_at)
   | (Fusion_completed | Fusion_failed _), None -> "not recorded"

@@ -169,21 +169,6 @@ let requeue_all ~send ~classify ~progress items =
   loop initial [] items
 ;;
 
-let seconds_per_minute = 60
-let seconds_per_hour = 3600
-let seconds_per_day = 86400
-
-(* The same span words the roster uses for an idle lane. *)
-let span_words seconds =
-  let seconds = max 0 seconds in
-  if seconds < seconds_per_minute then Printf.sprintf "%ds" seconds
-  else if seconds < seconds_per_hour then
-    Printf.sprintf "%dm" (seconds / seconds_per_minute)
-  else if seconds < seconds_per_day then
-    Printf.sprintf "%dh" (seconds / seconds_per_hour)
-  else Printf.sprintf "%dd" (seconds / seconds_per_day)
-;;
-
 let unreadable_rows (quarantines : t) =
   List.filter_map
     (function
@@ -249,7 +234,7 @@ let lines ~ko ~now fetched ~keeper_name =
       List.map
         (fun { oldest; members } ->
              let age =
-               span_words (Float.to_int (now -. oldest.Command.quarantined_at))
+               Masc_tui_value.Ongoing.Narrow.since ~now oldest.Command.quarantined_at
              in
              let asked =
                List.length

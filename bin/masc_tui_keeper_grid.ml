@@ -112,7 +112,7 @@ let due_text ~now ~localtime = function
   | Masc_tui_keeper_next_run.No_schedule -> ""
   | Masc_tui_keeper_next_run.Scheduled_at at ->
       if at -. now < day_seconds then clock_text ~localtime at
-      else Masc_tui_message_layout.span_text (at -. now)
+      else Masc_tui_value.Ongoing.Narrow.until ~now at
   | Masc_tui_keeper_next_run.Late_since _ -> Mark.grid_late_word
   | Masc_tui_keeper_next_run.Held_current _ -> Mark.grid_held_word
   | Masc_tui_keeper_next_run.Held_as_of _ -> Mark.grid_held_word ^ Mark.unknown_mark

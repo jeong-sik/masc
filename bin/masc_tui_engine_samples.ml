@@ -258,7 +258,7 @@ type step =
   | Sampled
   | Read
 
-let tick t ~now ~newest =
+let tick ?(allow_read = true) t ~now ~newest =
   match t.session with
   | None -> (t, Nothing)
   | Some session ->
@@ -278,6 +278,8 @@ let tick t ~now ~newest =
               Some (take session ~slot ~seen_until:answer.at (point_of_reading answer.reading))
           }
         , Sampled )
+      | (Some _ | None) when not allow_read && not t.read_out ->
+        ({ t with session = Some (take session ~slot ~seen_until:now blank) }, Sampled)
       | Some _ | None ->
         (* Every answer up to now was considered for this sample and is too
            old; the read this asks for, or one already out, answers it. *)

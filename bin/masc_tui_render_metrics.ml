@@ -472,10 +472,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   (* The probe's state is the card's status, on its edge, so the body does
      not write the probe again. A stopped probe's reason is data, the last
-     row of the body. With no samples it has the second row to itself. With
-     samples still in the producer window it is the third, which the card
-     cuts and counts on its bottom edge; a stopped probe takes no new
-     samples, so the window empties and the reason moves up. *)
+     row of the body, after the sample summary and graph when those are
+     drawn. The card counts the reason on its bottom edge if it is cut.
+     A stopped probe takes no new samples, so the window empties and the
+     reason moves up. *)
   let stop_reason =
     Option.to_list
       (scheduler_stop_reason (Option.bind sched_opt (fun s -> s.ssch_probe)))
@@ -483,7 +483,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let c2_l1, c2_rest, c2_tone, c2_status, c2_number = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
-        stop_reason,
+        [],
         Theme.recede (),
         scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe,
         Unknown.(glyph Unreported) )
@@ -492,9 +492,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
-       Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
-         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls)
-       :: stop_reason,
+       [ Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
+           (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls) ],
        tone,
        scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe,
        Printf.sprintf "%.3fms" s.ssch_p95_ms)
@@ -610,7 +609,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
           @ graph_row ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis))
       (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
          ((c2_l1 :: c2_rest)
-          @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis))
+          @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis
+          @ stop_reason))
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   | Compact ->

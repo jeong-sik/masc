@@ -133,6 +133,21 @@ let test_an_answer_older_than_two_seconds_is_read_again () =
   let _, decision = Samples.tick opened ~now:0. ~newest in
   Alcotest.check step "too old to stand for now" Samples.Read decision
 
+let test_retry_wait_keeps_sample_slots_without_starting_a_read () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let blank, decision = Samples.tick ~allow_read:false opened ~now:0. ~newest:None in
+  Alcotest.check step "the first slot is recorded without a read" Samples.Sampled decision;
+  Alcotest.(check (list sample)) "the slot is blank" [ Braille.Absent ]
+    (Samples.samples Samples.Live_heap blank);
+  let newest = Some { Samples.at = 1.5; reading = answered_point } in
+  let recorded, decision = Samples.tick ~allow_read:false blank ~now:2. ~newest in
+  Alcotest.check step "an existing answer fills a due slot" Samples.Sampled decision;
+  Alcotest.(check (list sample)) "the blank and the measured slot are kept"
+    [ Braille.Absent; Braille.of_count a_heap ]
+    (Samples.samples Samples.Live_heap recorded);
+  let _, decision = Samples.tick recorded ~now:4. ~newest:None in
+  Alcotest.check step "a new read starts once the wait is over" Samples.Read decision
+
 let test_one_read_is_out_at_a_time () =
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
   let asked, decision = Samples.tick opened ~now:0. ~newest:None in
@@ -582,6 +597,8 @@ let () =
             test_an_answer_within_two_seconds_is_taken_without_a_read
         ; Alcotest.test_case "an answer older than two seconds is read again" `Quick
             test_an_answer_older_than_two_seconds_is_read_again
+        ; Alcotest.test_case "retry wait keeps the slots without new reads" `Quick
+            test_retry_wait_keeps_sample_slots_without_starting_a_read
         ; Alcotest.test_case "one read is out at a time" `Quick test_one_read_is_out_at_a_time
         ; Alcotest.test_case "the own answer seen early is one sample" `Quick
             test_the_own_answer_seen_early_is_one_sample

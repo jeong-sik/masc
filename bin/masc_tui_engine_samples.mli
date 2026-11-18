@@ -99,13 +99,14 @@ type step =
           can be taken: send one [/health] read now and hand its reading to
           {!answered}. The sampler counts it as out from here. *)
 
-val tick : t -> now:float -> newest:answer option -> t * step
+val tick : ?allow_read:bool -> t -> now:float -> newest:answer option -> t * step
 (** What the view's samples do at [now], given the newest [/health] answer
     the TUI received. A due sample takes the newest answer if it arrived
     within {!interval_s} seconds before the sample's time and was not taken
     already; otherwise it waits for a read, and nothing else is due until
-    that read answers ({!answered}). Times that passed with no sample, while
-    the loop did not run or a read took long, are blank. *)
+    that read answers ({!answered}). With [allow_read=false], an existing
+    read can still finish, and a slot that would start a new read is blank.
+    Times passed while the loop or a read was held are also blank. *)
 
 type report =
   | Quiet

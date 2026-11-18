@@ -10454,8 +10454,9 @@ let launch_engine_sample_read state ~mailbox =
    on every loop iteration, as the owed reads do, and sets no timer of its
    own. Off the engine view its samples go and nothing is due. On it, a due
    sample takes the newest [/health] answer of the last two seconds, whoever
-   asked for it, or asks [/health] itself, one read at a time. A sample taken
-   is new data, so it is drawn as any answer is (section 8).
+   asked for it, or asks [/health] itself, one read at a time. When the
+   refresh pass is backing off, times without any answer stay blank. A
+   sample changes the graphs and requests a frame (section 8).
    The view is on screen only while the surface is the frame: the help sheet,
    a reader, the account server's screen or the too-small notice draws over
    the whole terminal, and the graphs under it are not sampled. *)
@@ -10480,8 +10481,11 @@ let step_engine_samples state ~mailbox ~render_schedule =
   match capacity with
   | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
   | Some capacity ->
+    let allow_read =
+      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+    in
     let samples, step =
-      Masc_tui_engine_samples.tick
+      Masc_tui_engine_samples.tick ~allow_read
         (Masc_tui_engine_samples.shown state.engine_samples ~now ~capacity)
         ~now ~newest:(Masc_tui_loader.health_answer ())
     in

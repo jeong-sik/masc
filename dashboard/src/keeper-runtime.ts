@@ -21,6 +21,7 @@ export {
   dispatchKeeperInterjectAction,
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
+  hydrateKeeperToolApprovals,
   hydrateKeeperToolOutputs,
   loadFullKeeperHistory,
   noteKeeperChatAppended,

@@ -540,7 +540,13 @@ async function hydrateAfterReconnect(): Promise<void> {
   // knows a gap may exist. This covers previously visited and open panels on
   // any route.
   void import('./keeper-runtime')
-    .then(mod => mod.refreshKnownKeeperChatHistories())
+    .then(mod => {
+      // A held tool call that ended during the gap sent its change to nobody
+      // here. The listing is every wait the server holds now. It is asked
+      // first, so a transcript refresh that fails does not skip it.
+      void mod.hydrateKeeperToolApprovals()
+      return mod.refreshKnownKeeperChatHistories()
+    })
     .catch(err =>
       console.warn('[server-push] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
     )
@@ -808,6 +814,19 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
           console.debug('[server-push] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
         })
     }
+    return true
+  }
+
+  // A held tool call was asked, answered, timed out, or ended with its turn.
+  // The chat stream settles a card only for the view that is reading that
+  // turn, and says nothing when the turn itself ends, so the cards are read
+  // again from the listing of the waits the server holds.
+  if (event.type === 'keeper_tool_approval_waits_changed') {
+    void import('./keeper-runtime')
+      .then(mod => mod.hydrateKeeperToolApprovals())
+      .catch(err => {
+        console.debug('[server-push] tool approval re-read unavailable', err instanceof Error ? err.message : '')
+      })
     return true
   }
 

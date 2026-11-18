@@ -334,6 +334,11 @@ function pendingToolApproval(row: KeeperToolApprovalRow): KeeperToolApprovalPend
   }
 }
 
+/** One held call across the fleet: an approval id is unique within its Keeper. */
+function toolApprovalKey(keeper: string, approvalId: string): string {
+  return JSON.stringify([keeper, approvalId])
+}
+
 function sameToolApprovalCallRows(
   before: Record<string, KeeperToolApprovalPending> | undefined,
   after: Record<string, KeeperToolApprovalPending> | undefined,
@@ -345,9 +350,11 @@ function sameToolApprovalCallRows(
     && beforeRows.every(row => after?.[row.approvalId] === row)
 }
 
-// Re-hydrates waits whose REQUESTED event this view never saw: the listing is
-// public-read, so a dashboard opened after the gate fired still draws the
-// card instead of discovering the wait only as a 180s timeout.
+// Brings the cards in line with the waits the server holds. It draws a wait
+// whose REQUESTED event this view never saw: the listing is public-read, so a
+// dashboard opened after the gate fired still draws the card instead of
+// discovering the wait only as a 180s timeout. And it retires a card whose
+// wait is gone, when no settlement told this view.
 export async function hydrateKeeperToolApprovals(): Promise<void> {
   const beforeRead = keeperToolApprovals.value
   const workspace = executionWorkspaceAuthority.peek()
@@ -381,6 +388,30 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
       }
     }
     upsertKeeperToolApproval(row.keeper, pendingToolApproval(row))
+  }
+  // The listing is every wait the server holds. A card that was on screen
+  // before the read and is not in it has no wait behind it any more: the call
+  // was answered elsewhere, timed out, or its turn ended. The stream's
+  // settlement never reached this view, or there was none: a wait that ends
+  // with its turn sends no settlement. A card the stream drew or changed while
+  // the read was on the wire is newer than the listing and stays. The cards of
+  // a call whose answer is in flight stay too. That answer compares the call's
+  // cards with the ones it started from, and a card retired under it would
+  // read to it as someone else's change. A card that was answered here stays as
+  // the record that it was: a request that is delivered again finds it and
+  // draws nothing.
+  const listed = new Set(rows.map(row => toolApprovalKey(row.keeper, row.approval_id)))
+  for (const [keeper, beforeKeeper] of Object.entries(beforeRead)) {
+    const currentKeeper = afterRead[keeper]
+    const answeringCalls = new Set(Object.values(currentKeeper ?? {})
+      .filter(row => row.answering)
+      .map(row => row.toolCallId))
+    for (const held of Object.values(beforeKeeper)) {
+      if (held.settled || answeringCalls.has(held.toolCallId)) continue
+      if (currentKeeper?.[held.approvalId] !== held) continue
+      if (listed.has(toolApprovalKey(keeper, held.approvalId))) continue
+      dropKeeperToolApproval(keeper, held.toolCallId, held.approvalId)
+    }
   }
 }
 

@@ -285,7 +285,7 @@ let maybe_rotate_file path =
 let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
-  Fs_compat.append_file path line
+  Fs_compat.append_lines path line
 
 (* The runtime history reads every Keeper's decision log, so a row written
    moves it. *)

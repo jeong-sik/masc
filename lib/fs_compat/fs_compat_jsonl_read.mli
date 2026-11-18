@@ -25,6 +25,6 @@ val invalidate_cached_writer : string -> unit
 
 val reset_fd_cache_for_testing : unit -> unit
 
-val with_cached_writer_for_testing : string -> (out_channel -> 'a) -> 'a
+val with_cached_writer_for_testing : string -> (Unix.file_descr -> 'a) -> 'a
 
 val read_fd_chunks : Unix.file_descr -> string

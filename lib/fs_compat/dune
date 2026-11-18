@@ -39,6 +39,7 @@
   execution_context
   systhread_host
   fd_write_all
+  fd_append_whole
   atomic_orphan_size_class
   durable_file_identity)
  (private_modules

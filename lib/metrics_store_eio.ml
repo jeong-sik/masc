@@ -283,7 +283,7 @@ let append_bound config ~agent_id file bytes =
   let* bound = check_store_layout config |> Result.map_error (record_source_error file) in
   let* () = if bound then Ok () else Error (Metric_store_failure {path=file;message="metric store binding disappeared"}) in
   let* () = check_agent_identity config agent_id |> Result.map_error (record_source_error file) in
-  Fs_compat.append_file file bytes;
+  Fs_compat.append_lines file bytes;
   Ok ()
 
 (** Get current month's file path *)

@@ -400,7 +400,7 @@ let append_record_unlocked ~path record =
     Fs_compat.mkdir_p (Filename.dirname path);
     truncate_incomplete_tail_unlocked ~path;
     let line = record_to_json_line record ^ "\n" in
-    Fs_compat.append_file path line;
+    Fs_compat.append_lines path line;
     Ok ())
 
 let append_record ~path record =
@@ -515,7 +515,7 @@ let append_batch
         let payload =
           String.concat "\n" (List.map record_to_json_line records) ^ "\n"
         in
-        Fs_compat.append_file path payload;
+        Fs_compat.append_lines path payload;
         Ok final_seq))
 
 let abort_incomplete_batches ~path ~aborted_at ~reason (report : recovery_report) =

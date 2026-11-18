@@ -1,15 +1,21 @@
-(** Per-path bounded LRU [out_channel] cache for the JSONL append
+(** Per-path bounded LRU descriptor cache for the JSONL append
     write-path. RFC-0162 §3.4.
 
-    Each path keeps one [Stdlib.open_out_gen] writer in
-    [O_APPEND | O_CREAT | O_WRONLY] mode, reused across calls. The
+    Each path keeps one descriptor opened by
+    {!Fd_append_whole.open_target}, reused across calls: a regular
+    file [O_APPEND | O_CREAT | O_RDWR | O_CLOEXEC], readable because
+    a line append reads the file's last byte through it, and
+    anything else (a FIFO, a device) write-only.
+    The cache holds a descriptor and not an [out_channel]: a channel
+    keeps the bytes of a failed write in its buffer and writes them
+    with the next append or when it is closed. The
     cache is bounded by [max_entries=32] with last-used eviction so
     fd count stays bounded regardless of how many paths the process
     appends to. A [Stdlib.at_exit] hook closes every cached writer
     on process exit; production code relies on process-lifetime
     persistence between exits.
 
-    Boundary: this module owns *only* the bounded LRU [out_channel]
+    Boundary: this module owns *only* the bounded LRU descriptor
     cache. It is intentionally unaware of mkdir, write
     serialization, or test-isolation guards — those stay with the
     [Fs_compat] append site, which composes them around
@@ -22,21 +28,23 @@
     changes between leases, not a concurrent external rename during [f].
     Evicts the least-recently-used inactive writer when
     the bound is exceeded. Active writers are leased until [f] returns,
-    so LRU eviction cannot close an [out_channel] while a caller is
-    still writing or flushing it. *)
-val with_writer : string -> (out_channel -> 'a) -> 'a
+    so LRU eviction cannot close a descriptor while a caller is
+    still writing to it.
+    @raise Sys_error when the path cannot be examined or opened. The
+    message starts with the path. *)
+val with_writer : string -> (Fd_append_whole.target -> 'a) -> 'a
 
-(** [invalidate path] flushes, closes, and drops the cached writer for
+(** [invalidate path] closes and drops the cached writer for
     [path] when present (a no-op otherwise). Call it after the inode at
     [path] is replaced (e.g. an atomic-rename save) so a later
     [with_writer] reopens the new file rather than appending to the
     orphaned pre-replacement inode. This module only guards cache state;
     callers that compose [invalidate] with append operations must hold
     the same per-path append mutex used around [with_writer] and
-    [output_string]/[flush]. *)
+    the write. *)
 val invalidate : string -> unit
 
-(** Flush and close every cached writer. Active writers are removed from
+(** Close every cached writer. Active writers are removed from
     the cache and closed when their current lease returns; a subsequent
     [with_writer] opens fresh. Registered at [Stdlib.at_exit]. *)
 val close_all : unit -> unit

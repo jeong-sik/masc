@@ -1223,8 +1223,32 @@ val cleanup_atomic_orphans
   -> unit
   -> atomic_orphan_cleanup_report
 
-(** Append string to file. *)
+(** Append string to file, right after the file's last byte, whatever
+    that byte is. A writer of lines uses {!append_lines}.
+
+    When the append fails, nothing is kept to be written later. Bytes a
+    write had already put in a regular file are removed again, with two
+    exceptions that the [Sys_error] message names: removing them failed,
+    or another writer changed the file during the call, in which case
+    they are left so that nothing of the other writer's is removed. The
+    two gaps left against a writer in another process are described in
+    [Fd_append_whole].
+    @raise Sys_error when the path cannot be examined, opened or
+    written. The message starts with the path. *)
 val append_file : string -> string -> unit
+
+(** Append whole lines to file: [lines] is one or more lines, each ending
+    in a newline. As {!append_file}, and the lines start at a line start.
+    When the file ends in the middle of a line (a writer died part-way, or
+    raw bytes were appended), a newline is written before the lines, so
+    the unfinished bytes stay a line of their own and every appended line
+    is read whole. The file's last byte is read on each call to decide
+    that. Bytes a failed {!append_file} or {!append_lines} left in place
+    are such unfinished bytes. A FIFO or another non-regular file has no
+    last byte to read, and the lines are written to it as they are.
+    @raise Sys_error when the path cannot be examined, opened, read or
+    written. *)
+val append_lines : string -> string -> unit
 
 (** Check if file exists. *)
 val file_exists : string -> bool
@@ -2411,12 +2435,17 @@ val append_fd_durable_for_testing :
     In an Eio fiber, directory preparation, encoding and the complete
     per-path writer critical section run on a joined system thread.
     Other execution contexts run inline. A successful return means the
-    record was flushed; cancellation does not imply that no record was
+    record reached the kernel; cancellation does not imply that no record was
     written. There is no additional cancellation check after the writer
     returns, so callers can record their commit acknowledgement first.
 
+    The record starts at a line start. When the file ends in the middle
+    of a line (a writer died part-way, or raw bytes were appended), a
+    newline is written before the record, so the unfinished bytes stay a
+    line of their own and the record is read whole.
+
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).
-    Each path keeps one cached [out_channel] reused across appends;
+    Each path keeps one cached descriptor reused across appends;
     cross-domain serialization is provided by the same per-path
     mutex registry as [append_file_unix], preserving RFC-0108 §3.2's
     Record-interleave-0 guarantee. The cache is bounded by
@@ -2425,7 +2454,8 @@ val append_fd_durable_for_testing :
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
-    in a single lock+flush cycle. More efficient than calling [append_jsonl]
+    under one hold of the path lock, as one append that is rolled back
+    as a whole when it fails. More efficient than calling [append_jsonl]
     repeatedly when batching pending entries. Uses the same joined-thread
     and commit acknowledgement boundary as {!append_jsonl}.
     No-op if [jsons] is empty. *)
@@ -2434,7 +2464,7 @@ val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]
     writer for [path] (a no-op if none is cached). Call it after
     replacing the inode at [path] with [save_file_atomic]: the cached
-    [O_APPEND] channel still points at the pre-rename inode, so without
+    [O_APPEND] descriptor still points at the pre-rename inode, so without
     this a later [append_jsonl] would write to the orphaned file.
     Serialization with concurrent [append_jsonl] calls is handled by the
     same per-path append mutex used by the append path. *)
@@ -2448,7 +2478,18 @@ val reset_fd_cache_for_testing : unit -> unit
     should use {!append_jsonl} / {!append_jsonl_batch} so directory
     creation, HOME guards, and per-path write serialization stay composed
     at the public append boundary. *)
-val with_cached_writer_for_testing : string -> (out_channel -> 'a) -> 'a
+val with_cached_writer_for_testing : string -> (Unix.file_descr -> 'a) -> 'a
+
+(** The plain append with its descriptor operations supplied by the
+    caller, on the same per-path mutex and cached descriptor as
+    {!append_file}. Test-only — lets a test make the write fail after a
+    chosen number of bytes. *)
+val append_file_unix_with_io_for_testing
+  :  io:Fs_compat_internal.Fd_append_whole.io
+  -> start:Fs_compat_internal.Fd_append_whole.start
+  -> string
+  -> string
+  -> unit
 
 (** Current number of live entries in the per-path append mutex table.
     Test-only — verifies refcounted cleanup leaves zero leaked entries. *)

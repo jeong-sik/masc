@@ -1,20 +1,37 @@
 open Fs_compat_internal
 open Fs_compat_base_io
 
-(** Append string to file.
-    Appended on a system thread inside Eio, inline otherwise; both go
-    through the per-path mutex of [append_file_unix], so two appends to one
-    path from two threads stay whole.
-    @raises Sys_error on all I/O failures. *)
-let append_file (path : string) (content : string) : unit =
-  test_exec_home_guard ~op:"append_file" path;
+(* Appended on a system thread inside Eio, inline otherwise; both go
+   through the per-path mutex of [append_file_unix], so two appends to one
+   path from two threads stay whole. *)
+let append_through ~op ~label ~write (path : string) (content : string) : unit =
+  test_exec_home_guard ~op path;
   with_fs_or_fallback
     ~path
-    ~fallback:(fun () -> append_file_unix path content)
-    (fun _fs ->
-       on_systhread
-         ~label:(labelled "fs-compat-append-file" path)
-         (fun () -> append_file_unix path content))
+    ~fallback:(fun () -> write path content)
+    (fun _fs -> on_systhread ~label:(labelled label path) (fun () -> write path content))
+;;
+
+(** Append string to file, right after the file's last byte.
+    @raises Sys_error on all I/O failures. *)
+let append_file (path : string) (content : string) : unit =
+  append_through
+    ~op:"append_file"
+    ~label:"fs-compat-append-file"
+    ~write:append_file_unix
+    path
+    content
+;;
+
+(** Append whole lines to file, starting at a line start.
+    @raises Sys_error on all I/O failures. *)
+let append_lines (path : string) (lines : string) : unit =
+  append_through
+    ~op:"append_lines"
+    ~label:"fs-compat-append-lines"
+    ~write:append_lines_unix
+    path
+    lines
 ;;
 
 (** Check if file exists.

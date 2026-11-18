@@ -167,7 +167,7 @@ let remember_many ~base_dir ~connector ~scope entries =
                  ])
              ^ "\n"
            in
-           Fs_compat.append_file file_path (String.concat "" (List.map row fresh));
+           Fs_compat.append_lines file_path (String.concat "" (List.map row fresh));
            List.iter (fun (id, name) -> Hashtbl.replace directory id name) fresh;
            Hashtbl.remove sorted_directories file_path
          with

@@ -306,13 +306,57 @@ let append_path_mutex_count_for_testing () =
 
 let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
-let append_file_unix (path : string) (content : string) : unit =
+(* No byte of a failed append reaches the file later: the cached descriptor
+   holds no buffer that a later append or a close could write out (#52980).
+   [Fd_append_whole.run] removes the bytes a partial write added when they
+   are the file's last and nobody else's, and says so when it left them.
+   With [~start:At_line_start] the content does not join onto a line an
+   earlier writer left unfinished (#52974). *)
+let append_file_unix_with_io ~io ~start (path : string) (content : string) : unit =
   let canonical = canonical_append_mutex_path path in
   with_append_path_mutex canonical (fun () ->
-    Fd_cache.with_writer canonical (fun oc ->
-      Stdlib.output_string oc content;
-      Stdlib.flush oc))
+    Fd_cache.with_writer canonical (fun target ->
+      match Fd_append_whole.run ~io ~start target content with
+      | Ok () -> ()
+      | Error
+          (Fd_append_whole.Write_failed
+            { write_failure =
+                Fd_write_all.Operation_failed
+                  { exception_; backtrace; bytes_written = _ }
+            ; rollback = _
+            }) ->
+        (* Not an I/O failure of the file: an exception the write
+           operation itself raised. Callers see it unchanged. *)
+        Printexc.raise_with_backtrace exception_ backtrace
+      | Error
+          (( Fd_append_whole.End_unreadable _
+           | Fd_append_whole.End_moved
+           | Fd_append_whole.Write_failed
+               { write_failure =
+                   Fd_write_all.No_progress _ | Fd_write_all.Unix_error _
+               ; rollback = _
+               } ) as failure) ->
+        raise
+          (Sys_error (canonical ^ ": " ^ Fd_append_whole.failure_to_string failure))))
 ;;
+
+let append_file_unix (path : string) (content : string) : unit =
+  append_file_unix_with_io
+    ~io:Fd_append_whole.unix_io
+    ~start:Fd_append_whole.Anywhere
+    path
+    content
+;;
+
+let append_lines_unix (path : string) (lines : string) : unit =
+  append_file_unix_with_io
+    ~io:Fd_append_whole.unix_io
+    ~start:Fd_append_whole.At_line_start
+    path
+    lines
+;;
+
+let append_file_unix_with_io_for_testing = append_file_unix_with_io
 
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =

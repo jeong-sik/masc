@@ -168,7 +168,10 @@ let test_disabled_rotation_preserves_backups () =
   Fs_compat.save_file (path ^ ".1") "retained";
   Keeper_types_support.append_jsonl_line path (`Null);
   check string "zero size disables retention cleanup" "retained" (Fs_compat.load_file (path ^ ".1"));
-  check int "disabled rotation still appends" 22 (file_size path)
+  (* The 17 fixture bytes end in the middle of a line, so the row starts on a
+     new line (#52974). *)
+  check string "disabled rotation still appends, on a new line"
+    (String.make 17 'x' ^ "\nnull\n") (Fs_compat.load_file path)
 
 let with_fs_mode use_eio f () =
   let previous = Fs_compat.get_fs_opt () in

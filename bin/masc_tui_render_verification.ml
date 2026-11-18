@@ -172,11 +172,14 @@ let render_verification_list (state : state) =
     | None -> None
     | Some _ when shown = 0 -> None
     | Some snapshot ->
-        let selected = Some state.verification_cursor in
+        (* Counted in the server's list, not the page: on a later page the
+           selected row and the rows read run on from the rows before it. *)
+        let offset = max 0 snapshot.Masc.Tui_decode.vs_offset in
+        let selected = Some (offset + state.verification_cursor) in
         let total = snapshot.Masc.Tui_decode.vs_total in
-        if total > shown then
-          Some (Masc_tui_value.Position.partial ~selected ~loaded:shown ~total)
-        else Some (Masc_tui_value.Position.row ~selected ~total:shown)
+        if total > offset + shown then
+          Some (Masc_tui_value.Position.partial ~selected ~loaded:(offset + shown) ~total)
+        else Some (Masc_tui_value.Position.row ~selected ~total:(offset + shown))
   in
   box_top buf cols;
   box_line buf cols (titled_row ~cols state ~title:header ~position);
@@ -421,10 +424,12 @@ let verification_evidence_index state request ~width observation =
         request.vr_submitted_by (workspace_name ~ko) in
     let ko = state.ui_language = Lang_ko in
     let say korean english = if ko then korean else english in
+    (* The selected item carries its own number below; this row counts the
+       items, it does not say which is read. *)
     judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf
-        (if ko then "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
-         else "  Evidence %d / %d · e/E next/previous · i list · o open · s save")
-        (if count = 0 then 0 else index + 1) count]
+        (if ko then "  증거 %s · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
+         else "  Evidence %s · e/E next/previous · i list · o open · s save")
+        (Masc_tui_value.Count.grouped count)]
       @ rows @ [Theme.recede (), location]
       @ List.filter_map (fun (key, saved_index, progress) ->
           if key.vek_request_id = request.vr_request_id

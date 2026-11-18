@@ -3521,9 +3521,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Item_account.item_name item) facts (if is_worn item then equipped_word else "")
     in
     let headline =
-      [ Printf.sprintf "  Items · %s · %d/%d · %s"
+      [ Printf.sprintf "  Items · %s · %s · %s"
           (Item_account.filter_name state.item_filter)
-          (if items = [] then 0 else cursor + 1) (List.length items)
+          (Masc_tui_value.Count.grouped (List.length items))
           (if state.item_preview && selected_item <> None then "try on" else "current outfit")
       ; account_line ]
     in

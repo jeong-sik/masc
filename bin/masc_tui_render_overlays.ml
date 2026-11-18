@@ -233,6 +233,16 @@ let render_context_inspector state =
               Masc_tui_scroll.normalize ~count:(List.length right - 1)
                 ~height:body_height state.context_inspector_detail_scroll
             in
+            (* The pane that hears j/k says where its reader is: the
+               selected item, or the window over the detail. *)
+            (match state.context_inspector_focus with
+             | Left_pane ->
+                 if items > 0 then
+                   c.position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:items)
+             | Right_pane ->
+                 Option.iter c.position
+                   (Masc_tui_value.Position.window ~first:right_offset ~shown:body_height
+                      ~total:(List.length right - 1)));
             context_split_lines ~cols ~left_width:(context_split_width cols)
               ~left:
                 (context_split_window ~height:body_height ~offset:left_offset
@@ -536,19 +546,20 @@ let render_palette (state : state) =
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell
        through to the cell cut, where [Esc] survived only when the budget
        happened to reach it. test_a_row_in_another_grammar_loses_its_door
-       measures that across widths. The count keeps no colon on purpose --
-       it is not a key, and it is the first thing a narrow row should give
-       up. *)
+       measures that across widths. The selected row is the title row's
+       position, not a footer item. *)
     ~hints:
       (if Masc_tui_palette.command_enter_has_nothing state then
          (* Nothing is listed, so Enter, the arrows and Home/End have no row to
             act on. The key handler reads the same answer. *)
-         "0/0  Ctrl-U:clear  Esc:close"
+         "Ctrl-U:clear  Esc:close"
        else
-         Printf.sprintf "%d/%d  Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
-           (if total = 0 then 0 else cursor + 1)
-           total action)
+         Printf.sprintf "Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
+           action)
     ~body:(fun ~budget c ->
+      c.position
+        (Masc_tui_value.Position.row
+           ~selected:(if total = 0 then None else Some cursor) ~total);
       List.iter (fun note -> c.push ("   " ^ note)) finder_notes;
       match explicit_question with
       | Some (question, symbol) ->
@@ -675,12 +686,14 @@ let render_link_preview_modal (state : state) =
           (Masc_tui_link_preview.modal_hints ~total_links
              ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
         ~body:(fun ~budget:_ c ->
-          if total_links > 1 then begin
-            c.push_styled ~style:(Theme.warn ())
-              (Printf.sprintf "  link %d of %d" (state.link_modal_cursor + 1)
-                 total_links);
-            c.push_divider ()
-          end;
+          (* Which link of several is the position; a preview taller than
+             its rows is read through a window, which then is. *)
+          if total_links > 1 then
+            c.position
+              (Masc_tui_value.Position.row ~selected:(Some state.link_modal_cursor)
+                 ~total:total_links);
+          Option.iter c.position
+            (Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total);
           List.iteri
             (fun index line ->
               if index >= scroll && index < scroll + content_height then
@@ -767,6 +780,14 @@ let render_keeper_deletions (state : state) =
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
+      (* The record among the records is the position until its text runs
+         past the rows, and then the window over that text is. *)
+      (match state.keeper_deletions with
+       | Some (Ok inventory) when inventory.Keeper_control.operations <> [] ->
+           c.position
+             (Masc_tui_value.Position.row ~selected:(Some state.keeper_deletions_cursor)
+                ~total:(List.length inventory.Keeper_control.operations))
+       | Some (Ok _ | Error _) | None -> ());
       List.iteri
         (fun index text ->
           if index >= scroll && index < scroll + height then c.push text)
@@ -1510,6 +1531,7 @@ let render_collab state view =
     ~surface_key:"collab" ~title:(screen_title " MASC Collab")
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
+      Option.iter c.position (Masc_tui_collab.position view);
       Masc_tui_collab.lines ~height:budget ~width:(framed_inner_width cols) view
       |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
 
@@ -1530,6 +1552,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~body:(fun ~budget c ->
       let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));
       lines
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)

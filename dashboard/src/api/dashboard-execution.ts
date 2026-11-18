@@ -15,6 +15,12 @@ export function fetchDashboardExecution(opts?: DashboardExecutionRequestOptions)
   return get(`/api/v1/dashboard/execution${query}`, { signal: opts?.signal })
 }
 
+/** The projection a ready `execution_snapshot` alert names, as the server
+ *  announced it. The server never computes on this read. */
+export function fetchDashboardExecutionPublication(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
+  return get('/api/v1/dashboard/execution/publication', { signal: opts?.signal })
+}
+
 export type DashboardExecutionTrustKeeper = Record<string, unknown> & {
   name?: string
   agent_name?: string | null

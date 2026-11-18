@@ -4,6 +4,19 @@ open Masc
 module Owner = Server_dashboard_operator_digest_observation
 module Cache = Server_dashboard_http_cache
 
+(* A ready execution alert names a publication and carries no projection;
+   read the publication it names, as the web does. An invalidation alert is
+   its own content. *)
+let announced_execution ~state payload =
+  match Yojson.Safe.Util.member "execution_invalidated" payload with
+  | `Bool false ->
+      let module E = Server_dashboard_http_execution_surfaces in
+      let request = Httpun.Request.create `GET "/api/v1/dashboard/execution/publication" in
+      (match E.execution_publication_of_request (E.execution_http_request ~state request) with
+       | Some published -> Yojson.Safe.from_string published.Dashboard_cache.raw_json
+       | None -> Alcotest.fail "a ready execution alert named no publication")
+  | `Null | `Bool true | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> payload
+
 let () =
   Dashboard_projection_cache.register_operator_snapshot_json {snapshot = Operator_control.snapshot_read};
   Dashboard_projection_cache.register_operator_digest_observer {observe_digest = Operator_control.observe}
@@ -554,7 +567,8 @@ let test_execution_partial_read_retries_after_quiet_repair () =
       ~callback:(fun event ->
         match Yojson.Safe.Util.member "type" event.Sse.ext_payload with
         | `String "execution_snapshot" ->
-            Eio.Stream.add frames (Yojson.Safe.Util.member "payload" event.ext_payload)
+            Eio.Stream.add frames
+              (announced_execution ~state (Yojson.Safe.Util.member "payload" event.ext_payload))
         | `String "project_snapshot" ->
             Eio.Stream.add namespace_frames (Yojson.Safe.Util.member "payload" event.ext_payload)
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ()) ();

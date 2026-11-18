@@ -1,5 +1,18 @@
 open Alcotest
 open Masc
+(* A ready execution alert names a publication and carries no projection;
+   read the publication it names, as the web does. An invalidation alert is
+   its own content. *)
+let announced_execution ~state payload =
+  match Yojson.Safe.Util.member "execution_invalidated" payload with
+  | `Bool false ->
+      let module E = Server_dashboard_http_execution_surfaces in
+      let request = Httpun.Request.create `GET "/api/v1/dashboard/execution/publication" in
+      (match E.execution_publication_of_request (E.execution_http_request ~state request) with
+       | Some published -> Yojson.Safe.from_string published.Dashboard_cache.raw_json
+       | None -> Alcotest.fail "a ready execution alert named no publication")
+  | `Null | `Bool true | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> payload
+
 
 module Input = Server_observation_input
 module Refresh = Server_observation_refresh
@@ -242,7 +255,7 @@ let subscribe_execution_frames ~state ~sw ~id consume =
       | `String "execution_snapshot" ->
           let payload = Yojson.Safe.Util.member "payload" event.ext_payload in
           if Yojson.Safe.Util.member "execution_invalidated" payload = `Bool false
-          then consume `Execution payload
+          then consume `Execution (announced_execution ~state payload)
       | `String "project_snapshot" -> consume `Project
           (Yojson.Safe.Util.member "payload" event.ext_payload)
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ()) ();

@@ -668,6 +668,19 @@ let add_routes ~sw ~clock router =
                 ~extra_headers:(headers @ Server_timing.extra_header timing)
                 (fun () -> body) reqd)
        )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/execution/publication" (fun state req reqd ->
+         (* What a ready execution alert names: the last announced projection,
+            served as sent. A read never computes the projection, so an alert
+            and the read it causes cannot start another publication. *)
+         match execution_publication_of_request (execution_http_request ~state req) with
+         | Some payload ->
+             let body, headers = Dashboard_cache.select_http_representation
+               ~accept_encoding:(Httpun.Headers.get req.headers "accept-encoding") payload in
+             Http.Response.json_lazy ~compress:false ~request:req ~etag:payload.etag
+               ~extra_headers:headers (fun () -> body) reqd
+         | None ->
+             Http.Response.json_value ~status:`Not_found ~request:req
+               (`Assoc [ "error", `String "no execution projection has been announced yet" ]) reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/execution-trust" (fun state req reqd ->
          let request = req in let json =
            dashboard_execution_trust_http_json ~state ~sw ~clock request

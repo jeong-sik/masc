@@ -370,29 +370,43 @@ let read_budget_lines ~keepers_dir ~keeper_id =
    the same backend Read uses; a tree shared with the host (a Docker mount)
    is read on the host as before.
 
-   The endpoint reports a missing path, a non-file and a file it could not
-   read by exit status. Only head's own failure status (1) becomes the
-   unreadable exit; any other status (126/127: no head on the endpoint,
-   128+n: head was signalled) passes through undeclared, because it is about
-   the endpoint, not the file. Every answer about the file is a declared exit, so
-   the caller's mistake (wrong path) and one unreadable file stay apart from
-   an endpoint that did not answer at all, without parsing its stderr. *)
-let endpoint_source_missing_exit = 3
-let endpoint_source_not_regular_exit = 4
-let endpoint_source_unreadable_exit = 5
-
-let endpoint_source_argv ~path ~max_bytes =
+   The endpoint reports a missing path, a non-file, a file it could not
+   read and a file outside the sandbox by exit status, through the same
+   confined open Read uses (#35934): the path is opened once, the opened file
+   is checked against the root that admitted the path, and head reads that
+   same descriptor. Only head's own failure status (1) becomes the open-failed
+   exit; any other status (126/127: no head on the endpoint, 128+n: head was
+   signalled) passes through undeclared, because it is about the endpoint,
+   not the file. Every answer about the file is a declared exit, so the
+   caller's mistake (wrong path) and one unreadable file stay apart from an
+   endpoint that did not answer at all, without parsing its stderr. *)
+let endpoint_source_argv ~(confined : Keeper_sandbox_read_backend.confined_path) ~max_bytes =
   [ "sh"
   ; "-c"
-  ; Printf.sprintf
-      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; head -c "$2" "$1"; s=$?; if [ "$s" -eq 1 ]; then exit %d; fi; exit "$s"|}
-      endpoint_source_missing_exit
-      endpoint_source_not_regular_exit
-      endpoint_source_unreadable_exit
+  ; Keeper_sandbox_read_backend.confined_open_prelude
+    ^ Printf.sprintf
+        {|head -c "$3"; s=$?; if [ "$s" -eq 1 ]; then exit %d; fi; exit "$s"|}
+        (Keeper_sandbox_read_backend.confined_open_exit Keeper_sandbox_read_backend.Open_failed)
   ; "sh"
-  ; path
+  ; confined.root
+  ; confined.path
   ; string_of_int max_bytes
   ]
+;;
+
+let source_failure_of_refusal = function
+  | Keeper_sandbox_read_backend.Path_missing -> Source_missing
+  | Keeper_sandbox_read_backend.Not_a_regular_file -> Source_not_a_regular_file
+  | Keeper_sandbox_read_backend.Open_failed ->
+    Source_io_failed "the endpoint could not read source_path"
+  | Keeper_sandbox_read_backend.Outside_root ->
+    Source_path_rejected "source_path resolves outside the sandbox through a symlink"
+  | Keeper_sandbox_read_backend.Root_moved ->
+    Source_path_rejected "the sandbox root no longer resolves to its configured directory"
+  (* The endpoint cannot say which file it opened: that holds for every
+     source it would read, so it is the endpoint's answer, not this file's. *)
+  | Keeper_sandbox_read_backend.Opened_file_unresolved ->
+    Source_endpoint_unanswered "the endpoint could not resolve the opened source_path"
 ;;
 
 let endpoint_source_read_of_outcome = function
@@ -400,19 +414,20 @@ let endpoint_source_read_of_outcome = function
      transport failed, the guest is absent, the read timed out, or the
      process was signalled. None of that is an answer about this file. *)
   | Error detail -> Error (Source_endpoint_unanswered detail)
-  | Ok (Unix.WEXITED code, _) when code = endpoint_source_missing_exit ->
-    Error Source_missing
-  | Ok (Unix.WEXITED code, _) when code = endpoint_source_not_regular_exit ->
-    Error Source_not_a_regular_file
-  | Ok (Unix.WEXITED code, _) when code = endpoint_source_unreadable_exit ->
-    Error (Source_io_failed "the endpoint could not read source_path")
   | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
     Error (Source_over_limit { max_bytes = max_source_bytes })
   | Ok (Unix.WEXITED 0, content) -> Ok content
-  (* Not produced by the backend, which returns [Ok] only for a status in
-     [ok_exit_codes] and turns every other status into [Error]; kept because
-     the status type is wider than that contract. *)
-  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+  | Ok (Unix.WEXITED code, _) ->
+    (match Keeper_sandbox_read_backend.confined_open_refusal_of_exit code with
+     | Some refusal -> Error (source_failure_of_refusal refusal)
+     (* Not produced by the backend, which returns [Ok] only for a status in
+        [ok_exit_codes]. *)
+     | None ->
+       Error
+         (Source_endpoint_unanswered "endpoint source read ended outside its declared exits"))
+  (* Not produced by the backend either; the status type is wider than its
+     contract. *)
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
     Error
       (Source_endpoint_unanswered "endpoint source read ended outside its declared exits")
 ;;
@@ -421,22 +436,17 @@ let read_endpoint_source ~config ~meta ~resolved =
   let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
   (* One byte past the limit tells an over-limit source from one exactly at it. *)
   let fetch_bytes = max_source_bytes + 1 in
-  match Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path:resolved with
+  match Keeper_sandbox_read_backend.confined_path_of_host ~config ~meta ~host_path:resolved with
   | Error detail -> Error (Source_io_failed detail)
-  | Ok path ->
+  | Ok confined ->
     (* Raw bytes: the text capture rewrites the endpoint root to the host
        path, which would hash text the file does not hold and could grow a
        file past the limit. The command bounds its own output with head -c. *)
     Keeper_sandbox_read_backend.run_command_with_capture
-      ~ok_exit_codes:
-        [ 0
-        ; endpoint_source_missing_exit
-        ; endpoint_source_not_regular_exit
-        ; endpoint_source_unreadable_exit
-        ]
+      ~ok_exit_codes:(0 :: Keeper_sandbox_read_backend.confined_open_exits)
       ~config
       ~meta
-      ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
+      ~command_argv:(endpoint_source_argv ~confined ~max_bytes:fetch_bytes)
       ~max_bytes:None
       ~timeout_sec
       ()

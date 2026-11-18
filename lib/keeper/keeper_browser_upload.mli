@@ -13,6 +13,12 @@ type staging_error =
   | File_too_large of string
   | Staging_failed of string
 
+val chunk_argv :
+  confined:Keeper_sandbox_read_backend.confined_path -> offset:int -> count:int -> string list
+(** The [sh] argv that hex-dumps [count] bytes of [confined.path] from
+    [offset] through {!Keeper_sandbox_read_backend.confined_open_prelude}:
+    a file outside [confined.root] exits with its refusal and dumps nothing. *)
+
 val with_staged_paths :
   ?read_file:(host_path:string -> max_bytes:int -> (string, string) result) ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->

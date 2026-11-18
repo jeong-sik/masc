@@ -29,6 +29,10 @@ module Mock_backend = struct
     Calls.push ("container_path:" ^ host_path);
     Ok ("/container" ^ host_path)
 
+  let confined_path_of_host ~config:_ ~meta:_ ~host_path =
+    Calls.push ("confined_path:" ^ host_path);
+    Ok { Masc.Keeper_sandbox_read_backend.path = "/container" ^ host_path; root = "/container" }
+
   let read_complete_file ~config:_ ~meta:_ ~host_path ~timeout_sec:_ () =
     Calls.push ("read_complete_file:" ^ host_path);
     Ok "mock complete file body"

@@ -8,8 +8,9 @@ loopback port that records every request it receives, starts
 scripts/harness/tui/readonly_proxy.py in front of it, and sends writes the
 relay must refuse: REST verbs, POST outside /mcp, a tools/call of a mutating
 tool, a batch with one, a JSON-RPC response, a body that names `method` or the
-tool name twice, a chunked body and a websocket upgrade. None of them may
-reach the upstream. A GET and a tools/call of a read
+tool name twice, a chunked body, a websocket upgrade, and requests whose body
+framing a server could read differently from the relay (Content-Length twice,
+not plain digits, or on a GET). None of them may reach the upstream. A GET and a tools/call of a read
 tool must reach it.
 """
 from collections.abc import Mapping
@@ -19,6 +20,7 @@ import http.server
 import json
 from pathlib import Path
 import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -126,6 +128,28 @@ REFUSED: tuple[Case, ...] = (
          {'Upgrade': 'websocket', 'Connection': 'Upgrade', 'Sec-WebSocket-Version': '13',
           'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ=='}),
 )
+PING = encoded(rpc('ping'))
+
+
+def raw_request(head: str, body: bytes) -> bytes:
+    return head.replace('\n', '\r\n').encode() + b'\r\n' + body
+
+
+# Sent byte for byte: http.client cannot send a header twice.
+RAW_REFUSED: tuple[tuple[str, bytes], ...] = (
+    ('Content-Length twice', raw_request(
+        f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\n'
+        f'Content-Length: {len(PING)}\nContent-Length: 5\n', PING)),
+    ('Content-Length with an underscore', raw_request(
+        f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\n'
+        f'Content-Length: {str(len(PING))[0]}_{str(len(PING))[1:]}\n', PING)),
+    ('Content-Length with a sign', raw_request(
+        f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: +{len(PING)}\n',
+        PING)),
+    ('GET with a body', raw_request('GET /health HTTP/1.1\nHost: relay\nContent-Length: 5\n', b'hello')),
+    ('HEAD with a chunked body', raw_request(
+        'HEAD /health HTTP/1.1\nHost: relay\nTransfer-Encoding: chunked\n', b'5\r\nhello\r\n0\r\n\r\n')),
+)
 ALLOWED: tuple[Case, ...] = (
     Case('GET', 'GET', '/health', b'', {}),
     Case('read tool', 'POST', '/mcp', encoded(tool_call(READ_TOOL)), JSON),
@@ -181,6 +205,12 @@ class ReadonlyProxyTest(unittest.TestCase):
         finally:
             connection.close()
 
+    def send_raw(self, request: bytes) -> int:
+        with socket.create_connection((LOOPBACK, self.relay_port), timeout=REQUEST_TIMEOUT_S) as connection:
+            connection.sendall(request)
+            status_line = connection.makefile('rb').readline().decode()
+        return int(status_line.split()[1])
+
     def received(self) -> list[Received]:
         with self.upstream.lock:
             return list(self.upstream.received)
@@ -191,6 +221,20 @@ class ReadonlyProxyTest(unittest.TestCase):
                 before = len(self.received())
                 self.assertEqual(self.send(case), FORBIDDEN)
                 self.assertEqual(self.received()[before:], [])
+
+    def test_ambiguous_body_framing_is_refused_and_never_reaches_the_upstream(self) -> None:
+        for name, request in RAW_REFUSED:
+            with self.subTest(name):
+                before = len(self.received())
+                self.assertEqual(self.send_raw(request), FORBIDDEN)
+                self.assertEqual(self.received()[before:], [])
+
+    def test_a_get_declaring_no_body_reaches_the_upstream(self) -> None:
+        # The TUI sends Content-Length: 0 on its GETs.
+        before = len(self.received())
+        request = raw_request('GET /health HTTP/1.1\nHost: relay\nContent-Length: 0\nConnection: close\n', b'')
+        self.assertEqual(self.send_raw(request), OK)
+        self.assertEqual(self.received()[before:], [Received('GET', '/health', b'')])
 
     def test_reads_reach_the_upstream(self) -> None:
         for case in ALLOWED:

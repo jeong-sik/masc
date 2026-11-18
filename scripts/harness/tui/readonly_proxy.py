@@ -231,19 +231,40 @@ class Relay(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
         self.close_connection = True
 
+    def declared_length(self) -> int | Refused:
+        """The one body length this relay and the server both read. Two
+        Content-Length headers, or one that is not plain ASCII digits, may be
+        framed one way here and another way upstream (int() takes '+5', ' 5',
+        '4_5' and non-ASCII digits), so such a request is refused."""
+        values = self.headers.get_all('Content-Length') or []
+        if len(values) > 1:
+            return Refused('content-length-twice')
+        if not values:
+            return 0
+        value = values[0]
+        if not (value.isascii() and value.isdigit()):
+            return Refused('bad-content-length')
+        return int(value)
+
     def read_body(self) -> bytes | Refused:
         if self.headers.get('Transfer-Encoding') is not None:
             return Refused('body-without-content-length')
-        declared = self.headers.get('Content-Length')
-        if declared is None:
-            return b''
-        try:
-            length = int(declared)
-        except ValueError:
-            return Refused('bad-content-length')
-        if length < 0:
-            return Refused('bad-content-length')
-        return self.rfile.read(length)
+        length = self.declared_length()
+        if isinstance(length, Refused):
+            return length
+        return self.rfile.read(length) if length > 0 else b''
+
+    def body_on_a_read(self) -> Refused | None:
+        """Why a GET or HEAD cannot go on, if it declares a body. The relay does
+        not read one, so its bytes would be framed as the next request on the
+        server's connection. `Content-Length: 0`, which the TUI sends on its
+        GETs, declares no body."""
+        if self.headers.get('Transfer-Encoding') is not None:
+            return Refused('body-on-a-read')
+        length = self.declared_length()
+        if isinstance(length, Refused):
+            return length
+        return Refused('body-on-a-read') if length > 0 else None
 
     def refuse_write(self) -> None:
         body = self.read_body()
@@ -254,8 +275,10 @@ class Relay(http.server.BaseHTTPRequestHandler):
         arrived = round(time.time(), 3)
         target = self.path
         connection = http.client.HTTPConnection(LOOPBACK, server.upstream_port, timeout=None)
+        # Content-Length is not copied: http.client sets it from the body this
+        # relay judged, so the server frames exactly those bytes.
         headers = {name: value for name, value in self.headers.items()
-                   if name.lower() not in HOP_BY_HOP and name.lower() != 'host'}
+                   if name.lower() not in HOP_BY_HOP and name.lower() not in ('host', 'content-length')}
         # The server answers 400 when Host does not name its own bind port.
         headers['Host'] = f'{LOOPBACK}:{server.upstream_port}'
         try:
@@ -341,9 +364,15 @@ class Relay(http.server.BaseHTTPRequestHandler):
         if (self.headers.get('Upgrade') or '').lower() == 'websocket':
             self.refuse('websocket-upgrade')
             return
+        if (refused := self.body_on_a_read()) is not None:
+            self.refuse(refused.why)
+            return
         self.forward(b'', 'get')
 
     def do_HEAD(self) -> None:
+        if (refused := self.body_on_a_read()) is not None:
+            self.refuse(refused.why)
+            return
         self.forward(b'', 'head')
 
     def do_POST(self) -> None:

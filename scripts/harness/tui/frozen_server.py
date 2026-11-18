@@ -188,8 +188,13 @@ class Frozen(http.server.BaseHTTPRequestHandler):
         self.send_answer(answer.status, answer.headers, answer.body)
 
     def do_POST(self) -> None:
-        declared = self.headers.get('Content-Length') or '0'
-        body = self.rfile.read(int(declared)) if declared.isdigit() else b''
+        declared = self.headers.get_all('Content-Length') or ['0']
+        if len(declared) > 1 or not (declared[0].isascii() and declared[0].isdigit()):
+            # The body's end is unknown, so the connection cannot be read on.
+            self.close_connection = True
+            self.send_json(HTTPStatus.BAD_REQUEST, {'error': 'one plain Content-Length expected'})
+            return
+        body = self.rfile.read(int(declared[0]))
         if path_of(self.path) != MCP_PATH:
             self.send_json(HTTPStatus.METHOD_NOT_ALLOWED, {'error': 'the frozen server takes no writes'})
             return

@@ -9333,6 +9333,10 @@ let owe_push_owned_revalidation state =
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
+  | Masc.Workspace_dataset_event.Backlog ->
+      (* The feed handler reads Backlog's six reads itself: Work needs its
+         mailbox, and the other five go with it. *)
+      ()
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> owe_keeper_log_read state keeper
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
@@ -10133,7 +10137,7 @@ let unanswered_read owed =
     ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()) owed
 
 (* The Planning screen's Goals and their tree read again when
-   [goal_projection_changed] or [execution_snapshot] arrives while Planning is
+   [goal_projection_changed] or [Backlog] arrives while Planning is
    on screen, and after a failed read (RFC-0480 §3.1). The read on entering
    Planning and a revalidation ride the surface refresh. *)
 let owe_planning_reads state =
@@ -25705,7 +25709,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Fusion_list -> None in
       let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
       let observer_source_loss_seen = ref false in
-      let execution_snapshot_seen = ref false in
+      let backlog_changed = ref false in
       (* The local Keeper list reads each Keeper's meta, which a row change
          announces; hand edits to a declaration show on arrival or [r]. *)
       let local_keepers_changed = ref false in
@@ -25799,7 +25803,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.transport_health_measured event then
                 transport_measured := true;
               (match Masc_tui_observer.dataset_owed event with
-               | Some dataset -> datasets_owed := dataset :: !datasets_owed
+               | Some dataset ->
+                   (match Masc.Workspace_dataset_event.kind dataset with
+                    | Masc.Workspace_dataset_event.Kind.Backlog -> backlog_changed := true
+                    | Masc.Workspace_dataset_event.Kind.(
+                        Repositories | Verification_requests | Keeper_metrics | Harness_verdicts
+                        | Goals | Runtime_config | Connectors | Keeper_oauth_attempts
+                        | Skill_activations | Skill_catalog | Clients | Account_emails
+                        | Provider_usage | Provider_standing | Keeper_costs | Workspace_health
+                        | Runtime_probe | Runtime_metrics | Lanes | Machine_live | Memory_health
+                        | World_memory | Play_seats | Dashboard_observation | Play_room
+                        | Lane_addons | Browser_observation) -> ());
+                   datasets_owed := dataset :: !datasets_owed
                | None -> ());
               if Masc_tui_observer.gate_connector_changed event then connectors_changed := true;
               if Masc_tui_observer.goal_projection_changed event then goals_changed := true;
@@ -25879,7 +25894,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                         (selected_keeper state) ->
                    (* The approval mode sets the native tool posture. *)
                    tools_inventory_changed := true
-               | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true
+               | Masc_tui_observer.Execution_snapshot ->
+                   (* The execution projection is the web's. A task write is
+                      announced to the TUI as [Backlog]. *)
+                   ()
                | Masc_tui_observer.Agent_core
                    { kind = Masc_tui_observer.Relay_subscription_loss
                        { source_id; sequence; _ }; _ } ->
@@ -25960,10 +25978,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           end)
         decoded;
       (* The local work read also lists the Goals waiting for confirmation. *)
-      if !execution_snapshot_seen || !observer_source_loss_seen || !goals_changed then
-        (* Both the compact invalidation and the complete snapshot use this
-           type. Work reads its own local source; it does not trust either
-           payload. A read already in flight queues one newer follow-up. *)
+      if !backlog_changed || !observer_source_loss_seen || !goals_changed || !local_keepers_changed then
+        (* Work reads its own local source. Its agenda says whether a Task's
+           assignee is a Keeper, so a Keeper appearing or leaving owes it
+           too. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       (* The local Keeper list is the metadata files and the Keepers runtime
          config declares without one. While the server or the feed is down
@@ -26045,7 +26063,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if !turn_state_keepers <> [] && not !observer_source_loss_seen then
          owe_keeper_story_turns_read_for state ~keepers:!turn_state_keepers);
-      (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
+      (if !backlog_changed && not !observer_source_loss_seen then begin
          owe_verification_read state;
          owe_goal_projection_reads state;
          (* The call scope reads the selected Keeper's current Task. *)
@@ -26087,8 +26105,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !board_changed && not !observer_source_loss_seen && state.view = Board then
          owe_board_list_read state);
       (* The planning payload carries the task backlog, which a task write
-         announces as [execution_snapshot]. *)
-      (if (!goals_changed || !execution_snapshot_seen) && not !observer_source_loss_seen
+         announces as [Backlog]. *)
+      (if (!goals_changed || !backlog_changed) && not !observer_source_loss_seen
           && state.view = Planning then
          owe_planning_reads state);
       (if !gate_changed && not !observer_source_loss_seen then begin
@@ -26115,13 +26133,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          configuration, its approval mode, the skill catalog, the backlog's
          task skills, the runtime catalogue and the Lane Add-on exports. *)
       (if (!tools_inventory_changed || !skill_catalog_published || !runtime_config_changed
-           || !execution_snapshot_seen
+           || !backlog_changed
            || !lane_addon_exports_changed)
           && not !observer_source_loss_seen then
          owe_tools_inventory_read state);
       (* An open source Task reads its body from the task backlog, which a
-         task write announces as [execution_snapshot]. *)
-      (if !execution_snapshot_seen && not !observer_source_loss_seen then
+         task write announces as [Backlog]. *)
+      (if !backlog_changed && not !observer_source_loss_seen then
          owe_tools_async_task_read state);
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);

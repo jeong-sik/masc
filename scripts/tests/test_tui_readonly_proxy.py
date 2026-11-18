@@ -11,8 +11,9 @@ tool, a batch with one, a JSON-RPC response, a body that names `method` or the
 tool name twice, a chunked body, a websocket upgrade, and requests whose body
 framing a server could read differently from the relay (Content-Length twice,
 not plain digits, or on a GET). None of them may reach the upstream. A
-Content-Length too long for int() is refused too, with a line in the log. A
-GET and a tools/call of a read tool must reach it.
+Content-Length past the relay's body cap is refused too, with a line in the
+log, also when it is too long for int(). A GET and a tools/call of a read
+tool must reach it.
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ import unittest
 
 RELAY = Path(__file__).resolve().parent.parent / 'harness' / 'tui' / 'readonly_proxy.py'
 sys.path.insert(0, str(RELAY.parent))
-from readonly_proxy import CONTENT_LENGTH_DIGITS  # noqa: E402
+from readonly_proxy import MAX_BODY_BYTES  # noqa: E402
 LOOPBACK = '127.0.0.1'
 START_TIMEOUT_S = 10.0
 REQUEST_TIMEOUT_S = 5.0
@@ -133,7 +134,8 @@ REFUSED: tuple[Case, ...] = (
           'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ=='}),
 )
 PING = encoded(rpc('ping'))
-PAST_DIGIT_CAP = 'Content-Length past the digit cap'
+PAST_INT_DIGITS = 'Content-Length too long for int()'
+PAST_BODY_CAP = 'Content-Length one past the body cap'
 
 
 def raw_request(head: str, body: bytes) -> bytes:
@@ -151,10 +153,14 @@ RAW_REFUSED: tuple[tuple[str, bytes], ...] = (
     ('Content-Length with a sign', raw_request(
         f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: +{len(PING)}\n',
         PING)),
-    # int() refuses a string past 4300 digits with ValueError, which would end
-    # the handler with no answer and no refused line in the log.
-    (PAST_DIGIT_CAP, raw_request(
+    # int() refuses a string past 4300 digits with ValueError, and reading a
+    # body past 2**31 - 1 bytes raises OSError on macOS. Either would end the
+    # handler with no answer and no refused line in the log.
+    (PAST_INT_DIGITS, raw_request(
         f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: {"9" * 4301}\n',
+        PING)),
+    (PAST_BODY_CAP, raw_request(
+        f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\nContent-Length: {MAX_BODY_BYTES + 1}\n',
         PING)),
     ('GET with a body', raw_request('GET /health HTTP/1.1\nHost: relay\nContent-Length: 5\n', b'hello')),
     ('HEAD with a chunked body', raw_request(
@@ -252,21 +258,26 @@ class ReadonlyProxyTest(unittest.TestCase):
                 self.assertEqual(self.send_raw(request), FORBIDDEN)
                 self.assertEqual(self.received()[before:], [])
 
-    def test_a_content_length_past_the_digit_cap_is_logged_as_refused(self) -> None:
-        request = dict(RAW_REFUSED)[PAST_DIGIT_CAP]
-        self.assertEqual(self.send_raw(request), FORBIDDEN)
-        # The relay logs a refusal before it answers, so the line is there now.
-        self.assertIn('bad-content-length', refusal_reasons(self.log_path))
+    def test_a_content_length_past_the_body_cap_is_logged_as_refused(self) -> None:
+        for name in (PAST_INT_DIGITS, PAST_BODY_CAP):
+            with self.subTest(name):
+                before = len(refusal_reasons(self.log_path))
+                self.assertEqual(self.send_raw(dict(RAW_REFUSED)[name]), FORBIDDEN)
+                # The relay logs a refusal before it answers, so the line is there now.
+                self.assertEqual(refusal_reasons(self.log_path)[before:], ['body-too-large'])
 
-    def test_the_digit_cap_counts_digits_not_the_value(self) -> None:
-        # Leading zeros keep the declared length equal to the body's, so the
-        # two requests differ only in how many digits declare it.
-        at_cap = str(len(PING)).zfill(CONTENT_LENGTH_DIGITS)
-        for digits, status, reached in ((at_cap, OK, [Received('POST', '/mcp', PING)]), ('0' + at_cap, FORBIDDEN, [])):
-            with self.subTest(len(digits)):
+    def test_the_body_cap_counts_the_value_not_the_digits(self) -> None:
+        # A body of exactly the cap reaches the upstream, declared with more
+        # leading zeros than int() takes. One byte more is refused before the
+        # relay reads the body, so that request sends only the ping.
+        at_cap = PING + b' ' * (MAX_BODY_BYTES - len(PING))
+        padded = str(MAX_BODY_BYTES).zfill(4400)
+        for length, body, status, reached in ((padded, at_cap, OK, [Received('POST', '/mcp', at_cap)]),
+                                              (str(MAX_BODY_BYTES + 1), PING, FORBIDDEN, [])):
+            with self.subTest(length[-8:]):
                 before = len(self.received())
                 request = raw_request(f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\n'
-                                      f'Content-Length: {digits}\nConnection: close\n', PING)
+                                      f'Content-Length: {length}\nConnection: close\n', body)
                 self.assertEqual(self.send_raw(request), status)
                 self.assertEqual(self.received()[before:], reached)
 

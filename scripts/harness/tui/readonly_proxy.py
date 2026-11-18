@@ -11,8 +11,8 @@ for a method in READ_METHODS or a tools/call of a tool in READ_TOOLS. The
 relay answers 403 to every other request and never forwards it: other POSTs,
 PUT, PATCH, DELETE, OPTIONS, TRACE, CONNECT, websocket upgrades, JSON-RPC
 responses, bodies that name a member twice in one object, and request bodies
-without a Content-Length. A method the HTTP library does not know is answered
-501, also without reaching the server.
+without a Content-Length or longer than MAX_BODY_BYTES. A method the HTTP
+library does not know is answered 501, also without reaching the server.
 
 The relay listens on 127.0.0.1, prints `listening PORT` on stdout once it
 accepts connections, and writes one JSON line per decision to --log:
@@ -71,11 +71,13 @@ EVENT_STREAM = 'text/event-stream'
 READ_BYTES = 65536
 PROGRESS_S = 1.0
 LISTEN_BACKLOG = 256
-# int() raises ValueError on a string of more than 4300 digits
-# (sys.int_info.default_max_str_digits), which would end the handler with no
-# answer and no refused line. 18 digits allow a body just under 10**18 bytes,
-# far past anything a TUI posts, and int() reads them at once.
-CONTENT_LENGTH_DIGITS = 18
+# The relay holds a request body in memory to judge it. The TUI posts JSON-RPC
+# requests and preference picks of a few kilobytes, so 1 MiB covers any real
+# one. A longer body is refused before it is read: reading one past
+# 2**31 - 1 bytes raises OSError on macOS, a large one can raise MemoryError,
+# and either ends the handler with no answer and no refused line.
+MAX_BODY_BYTES = 1024 * 1024
+MAX_BODY_DIGITS = len(str(MAX_BODY_BYTES))
 RECORDED_STATUSES = frozenset({HTTPStatus.OK, HTTPStatus.NOT_FOUND})
 BODYLESS_STATUSES = frozenset({HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED})
 HOP_BY_HOP = frozenset({
@@ -240,17 +242,23 @@ class Relay(http.server.BaseHTTPRequestHandler):
         """The one body length this relay and the server both read. Two
         Content-Length headers, or one that is not plain ASCII digits, may be
         framed one way here and another way upstream (int() takes '+5', ' 5',
-        '4_5' and non-ASCII digits), so such a request is refused, and so is
-        one with more than CONTENT_LENGTH_DIGITS digits."""
+        '4_5' and non-ASCII digits), so such a request is refused. So is one
+        that declares more than MAX_BODY_BYTES."""
         values = self.headers.get_all('Content-Length') or []
         if len(values) > 1:
             return Refused('content-length-twice')
         if not values:
             return 0
         value = values[0]
-        if not (value.isascii() and value.isdigit()) or len(value) > CONTENT_LENGTH_DIGITS:
+        if not (value.isascii() and value.isdigit()):
             return Refused('bad-content-length')
-        return int(value)
+        # int() raises ValueError past 4300 digits, leading zeros included
+        # (sys.int_info.default_max_str_digits). A value with more significant
+        # digits than MAX_BODY_BYTES is larger than it, so int() never sees one.
+        significant = value.lstrip('0') or '0'
+        if len(significant) > MAX_BODY_DIGITS or int(significant) > MAX_BODY_BYTES:
+            return Refused('body-too-large')
+        return int(significant)
 
     def read_body(self) -> bytes | Refused:
         if self.headers.get('Transfer-Encoding') is not None:

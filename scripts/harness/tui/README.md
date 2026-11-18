@@ -14,7 +14,7 @@ These tools measure what each TUI screen costs while nobody presses a key. They 
 
 ## The relay
 
-`readonly_proxy.py` forwards GET and HEAD. It forwards a POST to `/mcp` only when every JSON-RPC message in it is a request for a read method (`initialize`, `ping`, the `*/list` methods, `resources/read`) or a `tools/call` of a tool in `READ_TOOLS`. `READ_TOOLS` lists tools that `lib/tool/tool_catalog.ml` registers as read-only. The relay answers 403 to everything else and does not forward it: other POSTs, PUT, PATCH, DELETE, websocket upgrades, JSON-RPC responses and bodies that name a member twice in one object (`json.loads` would judge the last `method` or tool name, while a server may run the first). A refused request shows in the log with its path and reason, so a run also shows which writes a screen tried. The TUI posts `/api/v1/tui/preferences` when it starts, and the relay refuses that, so a measured run leaves the server's stored TUI preferences as they were.
+`readonly_proxy.py` forwards GET and HEAD. It forwards a POST to `/mcp` only when every JSON-RPC message in it is a request for a read method (`initialize`, `ping`, the `*/list` methods, `resources/read`) or a `tools/call` of a tool in `READ_TOOLS`. `READ_TOOLS` lists tools that `lib/tool/tool_catalog.ml` registers as read-only. The relay answers 403 to everything else and does not forward it: other POSTs, PUT, PATCH, DELETE, websocket upgrades, JSON-RPC responses, bodies that name a member twice in one object (`json.loads` would judge the last `method` or tool name, while a server may run the first), and bodies that declare more than 1 MiB (`body-too-large`, `MAX_BODY_BYTES`), which the relay does not read. A refused request shows in the log with its path and reason, so a run also shows which writes a screen tried. The TUI posts `/api/v1/tui/preferences` when it starts, and the relay refuses that, so a measured run leaves the server's stored TUI preferences as they were.
 
 Each `done` line in the log is one answer: its path with the query, status, bytes and arrival time. An event stream also gets `progress` lines, about once a second, with its events and bytes so far per event name. Events are named by `scripts/harness/perf/tui_request_events.py`, the same parser [the TUI request probe](../perf/README-tui-requests.md) uses.
 
@@ -137,7 +137,7 @@ Keep them in a directory outside the repository.
 - CPU comes from `ps` and RSS from one `ps` reading when the window ends. On Linux, `ps` reports CPU time in whole seconds, so a short window there reads as 0 or 100%.
 - The window is placed in the TUI's frame report by the time since the fork, so the exec delay is the error.
 - The emulator reads rows of text. It knows the cursor addressing, erase, SGR and query answers the TUI's presenter uses. It does not implement scroll regions, insert or delete line, or autowrap.
-- The relay speaks HTTP/1.1, answers each request on its own connection, and needs a request body to come with `Content-Length`. A compressed event stream is counted in bytes, not events.
+- The relay speaks HTTP/1.1, answers each request on its own connection, and needs a request body to come with `Content-Length` and to be at most 1 MiB. A compressed event stream is counted in bytes, not events.
 - After the first frame, `idle.py` waits up to 12 s for 2 s without output before it types a screen's keys. A screen that redraws at least every 2 s uses the whole 12 s.
 
 ## Self-test

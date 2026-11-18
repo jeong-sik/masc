@@ -2457,6 +2457,13 @@ val append_fd_durable_for_testing :
     them at [at_exit] ([Fd_cache]). *)
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
+(** [append_jsonl_rows path rows] is {!append_jsonl} for rows the caller has
+    rendered already: [rows] is one or more whole rows, each ended by its
+    newline. A caller that also has to know the exact text on disk renders
+    once and passes it here. The directory, the writer, the line start and the
+    commit acknowledgement boundary are {!append_jsonl}'s. *)
+val append_jsonl_rows : string -> string -> unit
+
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
     under one hold of the path lock, as one append. When it fails and its
     bytes cannot be taken back (see {!append_file}), the entries written

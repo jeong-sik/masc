@@ -607,6 +607,117 @@ describe('ScheduleSurface', () => {
     expect(mocks.replaceRoute).toHaveBeenCalledWith('schedule', { view: 'calendar' })
   })
 
+  describe('a selected schedule outside the page when the projection is refreshed', () => {
+    // #52962: the detail was read once, when the schedule was selected.
+    const outside: DashboardScheduledAutomationRequest = {
+      ...sampleAutomation().requests[0]!,
+      schedule_id: 'sched-outside-page',
+      payload_summary: 'payload before the refresh',
+    }
+    const panel = () => container.querySelector('[data-schedule-detail-panel="sched-outside-page"]')
+    const lookupStatus = () => container.querySelector('[data-testid="schedule-exact-lookup-status"]')
+    const openOutsidePage = async () => {
+      setAutomation(sampleAutomation())
+      mocks.route.value = {
+        tab: 'schedule',
+        params: { schedule_id: outside.schedule_id, view: 'calendar' },
+        postId: null,
+      }
+      render(html`<${ScheduleSurface} />`, container)
+      await flush()
+    }
+    // The projection is a signal in the app and a plain object here, so a
+    // changed prop stands in for the signal telling the surface to draw again.
+    let drawn = 0
+    const drawAgain = async () => {
+      drawn += 1
+      render(html`<${ScheduleSurface} drawn=${drawn} />`, container)
+      await flush()
+    }
+    // The observation refresh publishes a new projection; the selected id is still not on its page.
+    const refreshProjection = async () => {
+      setAutomation(sampleAutomation())
+      await drawAgain()
+    }
+
+    it('reads the schedule again and shows its new state', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockResolvedValueOnce({
+          status: 'found',
+          scheduleId: outside.schedule_id,
+          request: { ...outside, status: 'cancelled', payload_summary: 'payload after the refresh' },
+        })
+      await openOutsidePage()
+      expect(panel()?.textContent).toContain('payload before the refresh')
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(2)
+      expect(panel()?.textContent).toContain('payload after the refresh')
+    })
+
+    it('closes the detail of a schedule the refresh no longer finds', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockResolvedValueOnce({ status: 'not_found', scheduleId: outside.schedule_id })
+      await openOutsidePage()
+      expect(panel()).not.toBeNull()
+
+      await refreshProjection()
+
+      expect(panel()).toBeNull()
+      expect(lookupStatus()).not.toBeNull()
+    })
+
+    it('keeps the detail on screen while it is being read again', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockImplementationOnce(() => new Promise(() => {}))
+      await openOutsidePage()
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(2)
+      expect(panel()?.textContent).toContain('payload before the refresh')
+      expect(lookupStatus()).toBeNull()
+    })
+
+    it('keeps the last answer open and says it was not read again when the read fails', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockRejectedValueOnce(new Error('fixture: lookup timed out'))
+        .mockResolvedValueOnce({
+          status: 'found',
+          scheduleId: outside.schedule_id,
+          request: { ...outside, payload_summary: 'payload after the second refresh' },
+        })
+      await openOutsidePage()
+
+      await refreshProjection()
+
+      // One failed read does not close a detail the operator is reading.
+      expect(panel()?.textContent).toContain('payload before the refresh')
+      expect(lookupStatus()?.textContent).toContain('fixture: lookup timed out')
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(3)
+      expect(panel()?.textContent).toContain('payload after the second refresh')
+      expect(lookupStatus()).toBeNull()
+    })
+
+    it('does not read again when the same projection is drawn again', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValue({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+      await openOutsidePage()
+
+      await drawAgain()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('uses an in-page route row without issuing a redundant exact lookup', async () => {
     setAutomation(sampleAutomation())
     mocks.route.value = {

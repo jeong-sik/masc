@@ -158,8 +158,8 @@ let with_writer path f =
         w.last_used <- Unix.gettimeofday ();
         if w.active = 0 && w.close_on_release then close_silently w;
         (* More than [max_entries] places are held only while that many
-           writers were lent at once. The cache comes back to its bound as
-           they are returned. *)
+           are lent or held by opens in flight at once. The cache comes
+           back to its bound as writers are returned and opens end. *)
         evict_down_to_locked max_entries))
     (fun () -> f w.target)
 ;;

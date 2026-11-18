@@ -172,7 +172,7 @@ let test_reset_then_continue_writing () =
 let test_lru_evict_preserves_data () =
   Fs_compat.reset_fd_cache_for_testing ();
   let dir = tmpdir "fd_cache_lru" in
-  (* Slightly above fd_cache_max (=32) to force at least a few evictions. *)
+  (* Slightly above the cache's 32 places to force at least a few evictions. *)
   let n_paths = 40 in
   let paths = List.init n_paths (fun i ->
     Filename.concat dir (Printf.sprintf "p_%03d.jsonl" i))
@@ -850,6 +850,52 @@ let wait_until condition =
   poll ()
 ;;
 
+let listed_descriptors () =
+  Sys.readdir "/dev/fd" |> Array.to_list |> List.filter_map int_of_string_opt
+;;
+
+(* Waits until [count] opens of this process are inside the system call, and
+   says whether that came about.
+
+   An open takes its descriptor number, the lowest one free, before it
+   waits, and [/dev/fd] lists the number only once the open is over. A
+   listing is read through a descriptor of its own, taken the same way, so
+   every number below that one is taken: it is listed, or an open still in
+   the call holds it. The listing's own number is the largest one that the
+   listing before it did not hold.
+
+   Each round keeps one more descriptor open. It takes the number the last
+   listing gave back. Without it an open that started during a listing
+   would sit above a free number, where no later listing counts it. *)
+let wait_for_opens_in_the_call count =
+  let kept = ref [] in
+  Fun.protect
+    ~finally:(fun () -> List.iter Unix.close !kept)
+    (fun () ->
+      let deadline = Unix.gettimeofday () +. 10.0 in
+      let rec poll before delay =
+        kept := Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 :: !kept;
+        let now = listed_descriptors () in
+        let own =
+          List.filter (fun number -> not (List.mem number before)) now
+          |> List.fold_left max 0
+        in
+        let waiting =
+          List.init own Fun.id
+          |> List.filter (fun number -> not (List.mem number now))
+          |> List.length
+        in
+        if waiting = count
+        then true
+        else if Unix.gettimeofday () > deadline
+        then false
+        else (
+          Thread.delay delay;
+          poll now (Float.min 0.1 (delay *. 2.0)))
+      in
+      poll (listed_descriptors ()) 0.001)
+;;
+
 (* A FIFO is opened for writing only, so the open waits for a reader. That
    wait belongs to the FIFO's path: an append to another file goes through. *)
 let test_fifo_open_waits_and_holds_up_no_other_path () =
@@ -873,8 +919,7 @@ let test_fifo_open_waits_and_holds_up_no_other_path () =
   in
   let finished result = Option.is_some (Atomic.get result) in
   let fifo_writer = appending fifo row_a fifo_result in
-  Thread.delay 0.2;
-  let fifo_waited = not (finished fifo_result) in
+  let fifo_waited = wait_for_opens_in_the_call 1 && not (finished fifo_result) in
   let other_writer = appending other row_b other_result in
   let other_went_through = wait_until (fun () -> finished other_result) in
   (* Opening the reader lets the FIFO writer go on, whatever was seen above.
@@ -898,12 +943,16 @@ let test_fifo_open_waits_and_holds_up_no_other_path () =
 ;;
 
 (* A signal the process handles interrupts the open that waits for a FIFO's
-   reader. The open is made again and the append goes on waiting. *)
+   reader. The open is made again and the append goes on waiting, each time
+   a signal comes. *)
 let test_interrupted_fifo_open_is_made_again () =
   Fs_compat.reset_fd_cache_for_testing ();
   let fifo = Filename.concat (tmpdir "fd_cache_fifo_interrupted") "out.fifo" in
   Unix.mkfifo fifo 0o600;
-  let previous = Sys.signal Sys.sigusr1 (Sys.Signal_handle (fun _ -> ())) in
+  let handled = Atomic.make 0 in
+  let previous =
+    Sys.signal Sys.sigusr1 (Sys.Signal_handle (fun _ -> Atomic.incr handled))
+  in
   (* Only the appending thread takes the signal. *)
   let (_ : int list) = Thread.sigmask Unix.SIG_BLOCK [ Sys.sigusr1 ] in
   let outcome = Atomic.make None in
@@ -919,10 +968,19 @@ let test_interrupted_fifo_open_is_made_again () =
               | exception Sys_error message -> Error message)))
       ()
   in
-  Thread.delay 0.2;
-  Unix.kill (Unix.getpid ()) Sys.sigusr1;
-  Thread.delay 0.2;
-  let still_waiting = Option.is_none (Atomic.get outcome) in
+  (* The signal is sent while the append is inside the open. Its handler
+     runs in the appending thread, which is back in OCaml code only once
+     that open has returned. *)
+  let interrupt_the_open nth =
+    let waiting = wait_for_opens_in_the_call 1 in
+    Unix.kill (Unix.getpid ()) Sys.sigusr1;
+    waiting && wait_until (fun () -> Atomic.get handled = nth)
+  in
+  let interrupted_once = interrupt_the_open 1 in
+  let interrupted_twice = interrupt_the_open 2 in
+  let still_waiting =
+    wait_for_opens_in_the_call 1 && Option.is_none (Atomic.get outcome)
+  in
   let reader = Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
   Fun.protect
     ~finally:(fun () ->
@@ -931,7 +989,9 @@ let test_interrupted_fifo_open_is_made_again () =
       Sys.set_signal Sys.sigusr1 previous)
     (fun () ->
       Thread.join writer;
-      check bool "the append still waited after the signal" true still_waiting;
+      check bool "a signal interrupted the open" true interrupted_once;
+      check bool "a second signal interrupted the open made again" true interrupted_twice;
+      check bool "the append still waited after the signals" true still_waiting;
       check
         (option (result unit string))
         "the append succeeded"
@@ -1023,6 +1083,18 @@ let stream_ended reader =
        | (_ : int) -> drain ())
   in
   drain ()
+;;
+
+(* What is in the FIFO now, without waiting for more. *)
+let read_available reader =
+  let buffer = Bytes.create 4096 in
+  let rec read received =
+    match Unix.read reader buffer 0 (Bytes.length buffer) with
+    | 0 -> received
+    | length -> read (received ^ Bytes.sub_string buffer 0 length)
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> received
+  in
+  read ""
 ;;
 
 let hold_until release =
@@ -1140,25 +1212,34 @@ let test_eviction_takes_the_least_recently_used_writer () =
 
 (* Several callers open one path at the same time: the FIFO has no reader,
    so each of them waits in an open of its own. One of the descriptors is
-   cached and the others are closed. *)
+   cached and the others are closed. Every caller is lent the cached one and
+   writes its row through it: a caller left with a descriptor that was
+   closed under it could not. *)
 let test_callers_opening_one_path_together_share_one_writer () =
   Fs_compat.reset_fd_cache_for_testing ();
   let fifo = Filename.concat (tmpdir "fd_cache_shared_open") "out.fifo" in
   Unix.mkfifo fifo 0o600;
   let callers = 6 in
+  let row_of caller = Printf.sprintf "caller-%d" caller in
   let before = open_descriptors () in
   let lent = Atomic.make 0 in
   let release = Atomic.make false in
+  let write_failures = Array.make callers None in
   let holders =
-    List.init callers (fun _ ->
+    List.init callers (fun caller ->
       Thread.create
         (fun () ->
-          Fs_compat.with_cached_writer_for_testing fifo (fun _ ->
+          Fs_compat.with_cached_writer_for_testing fifo (fun descriptor ->
             Atomic.incr lent;
-            hold_until release))
+            hold_until release;
+            let line = row_of caller ^ "\n" in
+            match Unix.single_write_substring descriptor line 0 (String.length line) with
+            | (_ : int) -> ()
+            | exception Unix.Unix_error (error, _, _) ->
+              write_failures.(caller) <- Some (Unix.error_message error)))
         ())
   in
-  Thread.delay 0.2;
+  let all_waiting = wait_for_opens_in_the_call callers in
   let none_lent_without_a_reader = Atomic.get lent = 0 in
   let reader = Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
   Fun.protect
@@ -1169,11 +1250,28 @@ let test_callers_opening_one_path_together_share_one_writer () =
       Atomic.set release true;
       List.iter Thread.join holders;
       let after = open_descriptors () - before in
+      let rows =
+        read_available reader
+        |> String.split_on_char '\n'
+        |> List.filter (fun row -> not (String.equal row ""))
+        |> List.sort String.compare
+      in
       Fs_compat.reset_fd_cache_for_testing ();
+      check bool "every caller waited in an open of its own" true all_waiting;
       check bool "the opens waited for the reader" true none_lent_without_a_reader;
       check bool "every caller got the writer" true all_lent;
       check int "the reader and one writer, while every caller holds it" 2 while_lent;
       check int "the reader and one writer, after they returned" 2 after;
+      check
+        (list (option string))
+        "no caller's write failed"
+        (List.init callers (fun _ -> None))
+        (Array.to_list write_failures);
+      check
+        (list string)
+        "every caller's row reached the reader"
+        (List.init callers row_of)
+        rows;
       check
         bool
         "no writer is open once the cache is emptied"
@@ -1184,8 +1282,10 @@ let test_callers_opening_one_path_together_share_one_writer () =
 (* Two callers wait in the open of one FIFO. Then its directory can no
    longer be searched, so the caller that finds the other's writer cached
    cannot check that writer against the path, and fails. The descriptor it
-   opened itself is closed. (A superuser can still search the directory;
-   both callers then succeed and nothing is left open either.) *)
+   opened itself is closed, and the place its open held is given back: the
+   cache keeps its full number of writers afterwards. (A superuser can still
+   search the directory; both callers then succeed, and nothing is left open
+   and no place is lost either.) *)
 let test_open_that_cannot_be_cached_is_closed () =
   Fs_compat.reset_fd_cache_for_testing ();
   let dir = tmpdir "fd_cache_unsearchable" in
@@ -1194,31 +1294,45 @@ let test_open_that_cannot_be_cached_is_closed () =
   let other_name = Filename.concat (tmpdir "fd_cache_other_name") "out.fifo" in
   Unix.mkfifo fifo 0o600;
   Unix.link fifo other_name;
+  let failed = Atomic.make 0 in
   let holders =
     List.init 2 (fun _ ->
       Thread.create
         (fun () ->
           match Fs_compat.with_cached_writer_for_testing fifo (fun _ -> ()) with
           | () -> ()
-          | exception Sys_error _ -> ())
+          | exception Sys_error _ -> Atomic.incr failed)
         ())
   in
-  Thread.delay 0.2;
+  (* Both callers are past the search of the directory before it is closed
+     to them. A caller that came later would fail in its open, and the
+     second lookup would never be reached. *)
+  let both_waiting = wait_for_opens_in_the_call 2 in
   Unix.chmod dir 0o000;
-  Fun.protect
-    ~finally:(fun () -> Unix.chmod dir 0o755)
-    (fun () ->
-      let reader = Unix.openfile other_name [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
-      Fun.protect
-        ~finally:(fun () -> Unix.close reader)
-        (fun () ->
-          List.iter Thread.join holders;
-          Fs_compat.reset_fd_cache_for_testing ();
-          check
-            bool
-            "no writer is open once the cache is emptied"
-            true
-            (stream_ended reader)))
+  let no_writer_left =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod dir 0o755)
+      (fun () ->
+        let reader = Unix.openfile other_name [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+        Fun.protect
+          ~finally:(fun () -> Unix.close reader)
+          (fun () ->
+            List.iter Thread.join holders;
+            Fs_compat.reset_fd_cache_for_testing ();
+            stream_ended reader))
+  in
+  let before = open_descriptors () in
+  fill_cache (tmpdir "fd_cache_place_back");
+  let kept = open_descriptors () - before in
+  Fs_compat.reset_fd_cache_for_testing ();
+  check bool "both callers waited in the open" true both_waiting;
+  check
+    int
+    "the caller that could not check the cached writer failed"
+    (if Unix.getuid () = 0 then 0 else 1)
+    (Atomic.get failed);
+  check bool "no writer is open once the cache is emptied" true no_writer_left;
+  check int "the place of the open that failed came back" cache_bound kept
 ;;
 
 let descriptor_limit = 100

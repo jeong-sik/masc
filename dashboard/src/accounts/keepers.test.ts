@@ -15,6 +15,7 @@ import { assign, assignPath, keepersPath, make, readAssigned, readKeepers, readM
 import type { Assign, Keeper, KeepersModel, ListView, Make } from './keepers'
 import { createChecks } from './check'
 import { createConnect } from './connect'
+import { createRemovals } from './key-remove'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
 import type { TalkModel, TalkView } from './talk'
 import { csrfHeader } from './wire'
@@ -432,6 +433,7 @@ const subscriptionsShowing = (panel: PanelView): SubscriptionsModel => ({
   retry: vi.fn(() => Promise.resolve()),
   connecting: createConnect({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   checking: createChecks({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  removing: createRemovals({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   stop: vi.fn(),
 })
 const readPanel = (mine: Owned = owned): PanelView => ({ kind: 'read', forUser: 'usr_first', integrations: [claude, codex], owned: mine })

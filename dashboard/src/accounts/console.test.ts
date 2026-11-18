@@ -10,6 +10,7 @@ import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { createChecks } from './check'
 import { createConnect } from './connect'
+import { createRemovals } from './key-remove'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
 import { createSubscriptions, follow } from './subscriptions'
@@ -93,6 +94,7 @@ const waitingPanel = (): SubscriptionsModel => ({
   retry: vi.fn(() => Promise.resolve()),
   connecting: createConnect({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   checking: createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  removing: createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   stop: vi.fn(),
 })
 

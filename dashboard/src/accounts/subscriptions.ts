@@ -19,8 +19,10 @@ import type { ConnectModel } from './connect'
 import { ConnectArea } from './connect-area'
 import type { View } from './console'
 import { AccountList } from './account-rows'
-import { ProblemNote, Retry, fell, sessionEndedWords, slowAfterMs } from './notes'
+import { ProblemNote, Retry, fell, idTail, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
+import { createRemovals } from './key-remove'
+import type { Gone, RemovalsModel } from './key-remove'
 import { checkable, integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
 import type { Integration, Owned, Problem, Send, Session } from './wire'
 
@@ -56,6 +58,8 @@ export interface SubscriptionsModel {
   readonly connecting: ConnectModel
   /** The checks of a model of an account by the person the panel shows. */
   readonly checking: ChecksModel
+  /** The removals of a key account by the person the panel shows. */
+  readonly removing: RemovalsModel
   /** Forgets what was read once the console shows no one signed in: the
       account changed, or the browser leaves. A reading still under way then
       changes nothing, and the next `load` reads again, for the same person
@@ -132,6 +136,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   const token = (): string | null => session?.csrfToken ?? null
   const connecting = createConnect({ send, leave, token, refresh })
   const checking = createChecks({ send, leave, token, refresh })
+  const removing = createRemovals({ send, leave, token, refresh })
 
   // The methods read the state with peek(): a caller inside an effect does
   // not come to depend on the panel's state.
@@ -143,6 +148,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       person = next.userId
       connecting.reset()
       checking.reset()
+      removing.reset()
     }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
@@ -161,7 +167,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     view.value = { kind: 'waiting' }
   }
 
-  return { view, load, retry, connecting, checking, stop }
+  return { view, load, retry, connecting, checking, removing, stop }
 }
 
 /** Reads the subscriptions of each person the console comes to show
@@ -187,10 +193,17 @@ function Offer({ integrations }: { readonly integrations: readonly Integration[]
   return html`<p class="hint">지금 새로 연결해서 Keeper를 실행할 수 있는 구독: ${names.join(', ')}</p>`
 }
 
-function PanelBody({ view, connecting, checking, onRetry }: {
+/** What the line of the panel says of the account the latest removal took out of the list. */
+function goneWords(gone: Gone | null): string {
+  if (gone === null) return ''
+  return gone.already ? `계정 ${idTail(gone.accountId)}은 이미 없는 계정이에요.` : `계정 ${idTail(gone.accountId)}을 없앴어요. 이 서버에 그 key 는 없어요.`
+}
+
+function PanelBody({ view, connecting, checking, removing, onRetry }: {
   readonly view: PanelView
   readonly connecting: ConnectModel
   readonly checking: ChecksModel
+  readonly removing: RemovalsModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -209,8 +222,8 @@ function PanelBody({ view, connecting, checking, onRetry }: {
       return html`
         <${Offer} integrations=${view.integrations} />
         ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
-        <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} />
-        <p class="hint" role="status"></p>
+        <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} />
+        <p class="hint" role="status">${goneWords(removing.gone.value)}</p>
       `
   }
 }
@@ -229,11 +242,17 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     const hadControls = before === 'failed' || before === 'read'
     if (before !== view.kind && hadControls && fell()) heading.current?.focus()
   }, [view.kind])
+  // An account that was removed takes its card away, and the pressed button
+  // with it. The focus goes to the heading of the panel in the same way.
+  const gone = model.removing.gone.value
+  useEffect(() => {
+    if (gone !== null && fell()) heading.current?.focus()
+  }, [gone])
   return html`
     <section aria-labelledby="subscriptions-heading">
       <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
       <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} onRetry=${() => { void model.retry() }} />
+      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} removing=${model.removing} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

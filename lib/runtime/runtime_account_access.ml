@@ -139,7 +139,7 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
-      ; defect : Authz_decision.resource_defect
+      ; reason : Authz_provider_account.unavailable
       }
   | Host_account of host_client
   | Off_keeper of Authz_types.Keeper_id.t
@@ -175,11 +175,11 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-  | Account_unavailable { provider_account_id; defect } ->
+  | Account_unavailable { provider_account_id; reason } ->
     Printf.sprintf
-      "the account %s is not read: it is %s"
+      "the account %s is not read: %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-      (Authz_decision.resource_defect_to_string defect)
+      (Authz_provider_account.unavailable_to_string reason)
   | Host_account
       (( Api_provider
        | Model_list
@@ -271,16 +271,12 @@ let multi_account ~zone ~base_path ~now request claim =
       match Ps.find state.Authz_state.principals user_id with
       | Some { Ps.status = Ps.Active; _ } ->
         Result.bind (own_home ~base_path state user_id provider_account_id claim) (fun () ->
-          (* The status of the account, as a turn reads it. The home is
-             checked first, so the answer says nothing of an account
+          (* What the log says of the account, as a turn reads it. The home
+             is checked first, so the answer says nothing of an account
              captured from another home. *)
-          match
-            Option.bind
-              (Authz_state.provider_account_status state provider_account_id)
-              Authz_decision.resource_defect
-          with
-          | None -> Ok ()
-          | Some defect -> Error (Account_unavailable { provider_account_id; defect }))
+          Result.map_error
+            (fun reason -> Account_unavailable { provider_account_id; reason })
+            (Authz_provider_account.availability state ~user_id provider_account_id))
       | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
   | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->

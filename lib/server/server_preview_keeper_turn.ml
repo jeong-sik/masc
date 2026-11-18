@@ -111,12 +111,17 @@ let refusal_error (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.Off_person_home
   | Runtime_account_access.Off_own_account _
   | Runtime_account_access.Turn_refused Authz_keeper_turn.Not_bootstrapped ->
-    (* The preview publishes its access before it listens, a turn is no
-       operator call and no turn of an operator Keeper, an admission
-       makes the membership, the runtime declares its home, the status of
-       the account of a turn comes back as a denied turn, the preview
-       starts no host client, its access is multi-account and not a single
-       user after Off, and the zone opened on a bootstrapped log. *)
+    (* None of these reaches a turn of the preview:
+       - it publishes its access before it listens;
+       - a turn is no operator call and no turn of an operator Keeper;
+       - an admission makes the membership;
+       - the runtime declares its home;
+       - [Account_unavailable] answers a check of a person's own account. A
+         turn on such an account is denied by its decision, and comes back
+         as [Turn_refused (Denied _)];
+       - the preview starts no host client;
+       - its access is multi-account, and not a single user after Off;
+       - the zone opened on a bootstrapped log. *)
     Log.Server.warn "A Keeper turn was refused: %s" text;
     E.Internal unexpected_refusal
 ;;

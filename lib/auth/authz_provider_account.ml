@@ -42,3 +42,34 @@ let link_key zone ~user_id ~provider_account_id ~integration_id =
 let owned (state : Authz_state.t) user_id =
   Authz_provider_account_state.owned_by state.Authz_state.provider_accounts user_id
 ;;
+
+type unavailable =
+  | Linked_to_another
+  | Defect of Authz_decision.resource_defect
+  | Reduction_given_up
+
+let unavailable_to_string = function
+  | Linked_to_another -> "it is another person's"
+  | Defect defect -> "it is " ^ Authz_decision.resource_defect_to_string defect
+  | Reduction_given_up -> "a reduction of it was given up and blocks it"
+;;
+
+(* The owner is compared before anything of the account is read, so the answer
+   to a person who names another's account does not change with that
+   account. *)
+let availability (state : Authz_state.t) ~user_id provider_account_id =
+  match Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id with
+  | Some { Authz_provider_account_state.owner; kind = _ } when not (User_id.equal owner user_id) ->
+    Error Linked_to_another
+  | Some (_ : Authz_provider_account_state.account) | None ->
+    (match
+       Option.bind
+         (Authz_state.provider_account_status state provider_account_id)
+         Authz_decision.resource_defect
+     with
+     | Some defect -> Error (Defect defect)
+     | None ->
+       (match Authz_state.revocation state (Subject.Credential provider_account_id) with
+        | Revocation_state.Pending -> Error Reduction_given_up
+        | Revocation_state.Not_pending -> Ok ()))
+;;

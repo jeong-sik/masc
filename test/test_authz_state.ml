@@ -1591,6 +1591,26 @@ let test_key_accounts () =
      (match Pae.of_body body with
       | Ok event -> Alcotest.(check bool) "read back" true (Pae.equal event (key_linked ~by:user))
       | Error error -> Alcotest.failf "its own body is refused: %s" (Pae.error_to_string error)));
+  (* A login account keeps the body it had before a key account was a kind:
+     the logs on disk hold these bytes, and a log that holds them is read. *)
+  (match Pae.to_body (linked ~by:user) with
+   | Error _ -> Alcotest.fail "fixture login account body refused"
+   | Ok body ->
+     Alcotest.(check string)
+       "the body of a login account on disk"
+       {|{"event":"linked","provider_account_id":"claude-code-user","user_id":"user-1"}|}
+       (Authz_body.to_string body));
+  (match
+     Pae.of_body
+       (body_of_json
+          (`Assoc
+              [ "event", `String "linked"
+              ; "provider_account_id", `String "claude-code-user"
+              ; "user_id", `String "user-1"
+              ]))
+   with
+   | Ok event -> Alcotest.(check bool) "a login body of a log on disk is read" true (Pae.equal event (linked ~by:user))
+   | Error error -> Alcotest.failf "a login body of a log on disk is refused: %s" (Pae.error_to_string error));
   refused_as
     "a key linked twice"
     state
@@ -2037,6 +2057,20 @@ let account_status_word state provider_account_id =
       Authz_records.Resource_status.(Disabled | Blocked | Quarantined) -> "another status"
 ;;
 
+(* Whether a person spends an account now, as a check outside a turn reads
+   it. *)
+let availability_word state ~by provider_account_id =
+  match Authz_provider_account.availability state ~user_id:by provider_account_id with
+  | Ok () -> "spent"
+  | Error Authz_provider_account.Linked_to_another -> "another's"
+  | Error (Authz_provider_account.Defect Authz_decision.Resource_purged) -> "purged"
+  | Error
+      (Authz_provider_account.Defect
+         Authz_decision.(Resource_disabled | Resource_blocked | Resource_quarantined)) ->
+    "another defect"
+  | Error Authz_provider_account.Reduction_given_up -> "blocked"
+;;
+
 let account_purge_word state account =
   match Pgs.find_account state.S.purges account with
   | None -> "none"
@@ -2071,6 +2105,27 @@ let test_account_purges () =
   in
   Alcotest.(check string) "an account before its purge" "active" (account_status_word state key_account);
   Alcotest.(check string) "an account no record linked" "not linked" (account_status_word state first_account);
+  let spent_by label state ~owner ~another =
+    Alcotest.(check string) (label ^ ", by its owner") owner (availability_word state ~by:user key_account);
+    Alcotest.(check string) (label ^ ", by another") another (availability_word state ~by:bob key_account)
+  in
+  spent_by "an account before its purge" state ~owner:"spent" ~another:"another's";
+  Alcotest.(check string)
+    "an account no record linked, by whoever asks"
+    "spent"
+    (availability_word state ~by:bob first_account);
+  (* The start of a purge that wrote its intent and no record (design 8.3):
+     the log has no purge of the account, and its owner does not spend it. *)
+  spent_by
+    "an account whose purge start was given up"
+    (S.hold_revocations
+       state
+       [ held
+           ~event:Authz_external_store.Change.Purge
+           (Authz_records.Subject.Credential key_account)
+       ])
+    ~owner:"blocked"
+    ~another:"another's";
   refused_as
     "another's account"
     state
@@ -2082,6 +2137,14 @@ let test_account_purges () =
     state
     (purge_record ~author:(human bob) (Pg.Purge_pending { target = as_bobs }))
     (S.Purge (Pgs.Not_the_owner { target = as_bobs; author = bob }));
+  (* The owner of the account names it as another's. The log links the
+     account to them and not to the owner the target names, so no purge
+     starts under that name, and the account is read as before. *)
+  refused_as
+    "one's own account, named as another's"
+    state
+    (purge_record ~author:(human user) (Pg.Purge_pending { target = as_bobs }))
+    (S.Purge (Pgs.Not_the_owner { target = as_bobs; author = user }));
   let never_linked = Pg.Provider_account { owner = user; provider_account_id = first_account } in
   refused_as
     "an account no record linked"
@@ -2091,10 +2154,12 @@ let test_account_purges () =
   refused_as "an end before a start" state purged (S.Purge (Pgs.Not_started target));
   let state = applied_change "a start" state start intent in
   Alcotest.(check string) "an account whose purge is pending" "purged" (account_status_word state key_account);
+  spent_by "an account whose purge is pending" state ~owner:"purged" ~another:"another's";
   refused_as "a second start" state start (S.Purge (Pgs.Already_pending target));
   let state = applied_change "a failure" state (failed Pg.Key_not_removed) None in
   Alcotest.(check string) "the stage that failed" "failed, key" (account_purge_word state account);
   Alcotest.(check string) "an account whose purge failed" "purged" (account_status_word state key_account);
+  spent_by "an account whose purge failed" state ~owner:"purged" ~another:"another's";
   refused_as "an end after a failure" state purged (S.Purge (Pgs.Not_started target));
   let state = applied_change "a start after the failure" state start intent in
   let state = applied_change "another failure" state (failed Pg.Home_not_removed) None in
@@ -2102,6 +2167,7 @@ let test_account_purges () =
   let state = applied_change "a third start" state start intent in
   let state = applied_change "the end" state purged None in
   Alcotest.(check string) "an account whose purge went through" "purged" (account_status_word state key_account);
+  spent_by "an account whose purge went through" state ~owner:"purged" ~another:"another's";
   refused_as "a start once purged" state start (S.Purge (Pgs.Already_purged target));
   let state = applied_change "the end once more, after a restore" state purged None in
   Alcotest.(check string) "the last end" "purged" (account_purge_word state account)

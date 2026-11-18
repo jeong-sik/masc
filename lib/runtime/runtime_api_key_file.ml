@@ -176,7 +176,8 @@ let write_all descriptor text =
 
 (* The file that was not put in place holds the key, so it does not stay. A
    failure to remove it is dropped: the failure that led here is the one
-   reported, and the purge of the account removes the folder. *)
+   reported, and whoever asked for the write removes the folder of the
+   account. *)
 let remove_unplaced path =
   try Unix.unlink path with
   | Unix.Unix_error _ -> ()

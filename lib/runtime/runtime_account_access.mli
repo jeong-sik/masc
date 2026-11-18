@@ -234,13 +234,17 @@ type refusal =
           account of the person. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
-      ; defect : Authz_decision.resource_defect
+      ; reason : Authz_provider_account.unavailable
       }
-      (** A person's own account that the log links and no longer reads: its
-          purge began. A turn on such an account is a [Turn_refused] with
-          [Provider_account_unavailable] of the same defect. It comes after
-          the check of the home, so it says nothing of an account captured
-          from another home. *)
+      (** An account the person asked for as their own and does not spend now
+          ({!Authz_provider_account.availability}): the log links it to
+          another person, its purge began, or the start of its purge was
+          given up. A turn on an account whose purge began is a
+          [Turn_refused] with [Provider_account_unavailable] of the same
+          defect, and one on an account whose start was given up is a
+          [Turn_refused] with [Revocation_pending]. It comes after the check
+          of the home, so it says nothing of an account captured from
+          another home. *)
   | Host_account of host_client
       (** A host client in a multi-account process, which shares no account
           of its host. *)

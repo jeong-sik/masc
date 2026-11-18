@@ -345,7 +345,12 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      stopped server left end beside the routes. The access is published, and
      each takes the call of its account, as its owner's request does. That
      call does not wait, so the two run one after the other in one fiber:
-     side by side, one would skip an account the other holds. *)
+     side by side, one would skip an account the other holds. The
+     conversations go first: the deletion of a conversation of a key account
+     reads the key of the account, and after the removal of the account it
+     is recorded as one whose copy may remain at the vendor (issue #53044).
+     A removal that waits for them leaves its key on disk for that long, in
+     an account every use of which is refused. *)
   Eio.Fiber.fork ~sw (fun () ->
     Server_keeper_conversation_purge.resume ~env ~zone ~base_path;
     Server_key_account_purge.resume ~zone ~base_path);

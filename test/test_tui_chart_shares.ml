@@ -219,6 +219,162 @@ let braille_mirror_minimum_dot () =
   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
     Alcotest.failf "a one-row half draws two rows: %a" (Alcotest.pp graph_t) other
 
+(* The 50% and 80% steps hold at widths other than ten: the band follows the
+   share of the limit a cell reaches, not its index. *)
+let declared_limit_steps_at_other_widths () =
+  let bands width =
+    List.map
+      (function
+        | Theme.Cell_band band -> band
+        | (Theme.Cell_plain | Theme.Cell_blend _) as other ->
+          Alcotest.failf "a sixteen-colour cell drew %a" (Alcotest.pp cell_colour_t) other)
+      (cells (declared_limit Theme.Colors_16) ~width)
+  in
+  let check name expected width =
+    Alcotest.(check (list string)) name (List.map band_name expected)
+      (List.map band_name (bands width))
+  in
+  check "four cells: a cell reaching exactly half is midway"
+    Theme.[ Near_zero; Midway; Midway; Near_limit ] 4;
+  let twenty = bands 20 in
+  Alcotest.(check string) "cell 9 of 20 reaches 45%: success" "Near_zero"
+    (band_name (List.nth twenty 8));
+  Alcotest.(check string) "cell 10 of 20 reaches 50%: warning" "Midway"
+    (band_name (List.nth twenty 9));
+  Alcotest.(check string) "cell 15 of 20 reaches 75%: warning" "Midway"
+    (band_name (List.nth twenty 14));
+  Alcotest.(check string) "cell 16 of 20 reaches 80%: danger" "Near_limit"
+    (band_name (List.nth twenty 15))
+
+(* Where a blend cannot be drawn (no palette was reported), a 256-colour or
+   truecolor cell draws its band's colour, the same bytes a sixteen-colour
+   cell draws. A plain cell draws no SGR even with colours on. *)
+let meter_cell_fallbacks () =
+  let paint depth = { Theme.depth; surface = Theme.Page; palette = None } in
+  let readable depth cell =
+    Theme.For_testing.meter_cell_readable ~colors_enabled:true
+      ~project:(fun _ -> None) (paint depth) cell
+  in
+  List.iter
+    (fun band ->
+      List.iter
+        (fun depth ->
+          Alcotest.(check string)
+            (Printf.sprintf "%s blend without a palette draws the band" (band_name band))
+            (readable Theme.Colors_16 (Theme.Cell_band band))
+            (readable depth (Theme.Cell_blend { band; position = 0.5 })))
+        Theme.[ Colors_256; Truecolor ])
+    Theme.[ Near_zero; Midway; Near_limit ];
+  Alcotest.(check string) "a plain cell draws no SGR with colours on" ""
+    (readable Theme.Truecolor Theme.Cell_plain)
+
+(* A relative bar puts no colour codes in its fill or track, so it takes the
+   foreground or the colour its caller drew around it. *)
+let relative_meter_bar_has_no_sgr () =
+  let bar = Chart.meter_bar ~width:10 ~value:7 ~max_value:10 ~scale:Chart.Relative () in
+  Alcotest.(check bool) "a relative bar with no track style has no escape" false
+    (String.contains bar '\027')
+
+let braille_level_edges () =
+  let level ?(dots = 4) ~maximum sample = Chart.braille_level ~dots ~maximum sample in
+  Alcotest.(check int) "a Value of zero sits on the baseline" 1 (level ~maximum:10 (Chart.Value 0));
+  Alcotest.(check int) "a negative Value sits on the baseline" 1
+    (level ~maximum:10 (Chart.Value (-5)));
+  Alcotest.(check int) "a value on an axis with no height fills the column" 4
+    (level ~maximum:0 (Chart.Value 3));
+  Alcotest.(check int) "zero on an axis with no height stays on the baseline" 1
+    (level ~maximum:0 Chart.Zero);
+  Alcotest.(check int) "the axis maximum fills a two-row column" 8
+    (level ~dots:8 ~maximum:10 (Chart.Value 10));
+  Alcotest.(check int) "the largest Value is the axis top" 7
+    (Chart.graph_maximum
+       Chart.[ Unread; Absent; Zero; Value 3; Value 7; Value 2 ]);
+  Alcotest.(check int) "no Value leaves the axis top at zero" 0
+    (Chart.graph_maximum Chart.[ Unread; Absent; Zero ])
+
+(* Narrower than four cells is no graph, whatever the axis text. *)
+let narrow_graphs_are_numbers () =
+  List.iter
+    (fun width ->
+      List.iter
+        (fun axis ->
+          Alcotest.(check graph_t)
+            (Printf.sprintf "width %d with axis %S is too narrow" width axis)
+            Chart.Too_narrow
+            (Chart.braille_graph ~width ~rows:1 ~axis ~maximum:5 [ Chart.Value 5 ]);
+          Alcotest.(check graph_t)
+            (Printf.sprintf "a mirror of width %d with axis %S is too narrow" width axis)
+            Chart.Too_narrow
+            (Chart.braille_mirror ~width ~half_rows:1 ~axis ~maximum:5
+               ~up:[ Chart.Value 5 ] ~down:[ Chart.Zero ]))
+        [ ""; "5" ])
+    [ 0; 1; 2; 3 ];
+  match Chart.braille_graph ~width:6 ~rows:1 ~axis:"5" ~maximum:5 [ Chart.Value 5 ] with
+  | Chart.Drawn _ -> ()
+  | (Chart.Never_read | Chart.Too_narrow) as other ->
+    Alcotest.failf "four cells of dots draw a graph: %a" (Alcotest.pp graph_t) other
+
+let only_row = function
+  | Chart.Drawn [ row ] -> row
+  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+    Alcotest.failf "one row expected: %a" (Alcotest.pp graph_t) other
+
+(* A time not read, or whose read failed, inside a graph with readings is a
+   blank half-cell beside the baseline of a measured zero. *)
+let missing_times_are_blank () =
+  let graph samples = Chart.braille_graph ~width:6 ~rows:1 ~axis:"9" ~maximum:9 samples in
+  Alcotest.(check string) "an unread time after a zero is blank" (Chart.braille_cell ~mask:0x40)
+    (last_cell (only_row (graph [ Chart.Zero; Chart.Unread ])));
+  Alcotest.(check string) "a failed read after a zero is blank" (Chart.braille_cell ~mask:0x40)
+    (last_cell (only_row (graph [ Chart.Zero; Chart.Absent ])))
+
+(* A small value in a two-row graph lifts the bottom row only; the row above
+   stays blank. *)
+let small_value_in_two_rows () =
+  match
+    Chart.braille_graph ~width:7 ~rows:2 ~axis:"1K" ~maximum:1000
+      [ Chart.Absent; Chart.Value 1 ]
+  with
+  | Chart.Drawn [ top; bottom ] ->
+    Alcotest.(check string) "the top row is blank" (Chart.braille_cell ~mask:0x00)
+      (last_cell top);
+    Alcotest.(check string) "the bottom row shows the baseline and one dot above it"
+      (Chart.braille_cell ~mask:(0x80 lor 0x20)) (last_cell bottom)
+  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+    Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other
+
+(* Both halves of a mirror read one axis: equal values reach equally far from
+   the middle, zero is each half's baseline, and a side never read draws no
+   dots while the other side draws. *)
+let mirror_shared_axis_and_baselines () =
+  let mirror ~up ~down =
+    Chart.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000 ~up ~down
+  in
+  (match mirror ~up:[ Chart.Zero; Chart.Zero ] ~down:[ Chart.Zero; Chart.Zero ] with
+   | Chart.Drawn [ upper; lower ] ->
+     Alcotest.(check string) "the upper zero is the bottom dots" (Chart.braille_cell ~mask:0xc0)
+       (last_cell upper);
+     Alcotest.(check string) "the lower zero is the top dots" (Chart.braille_cell ~mask:0x09)
+       (last_cell lower)
+   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+     Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other);
+  (match mirror ~up:[ Chart.Value 1000 ] ~down:[ Chart.Value 1000 ] with
+   | Chart.Drawn [ upper; lower ] ->
+     Alcotest.(check string) "the upper maximum fills its half" (Chart.braille_cell ~mask:0xb8)
+       (last_cell upper);
+     Alcotest.(check string) "the lower maximum fills its half" (Chart.braille_cell ~mask:0xb8)
+       (last_cell lower)
+   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+     Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other);
+  match mirror ~up:[ Chart.Value 3 ] ~down:[ Chart.Unread ] with
+  | Chart.Drawn [ upper; lower ] ->
+    Alcotest.(check bool) "the read side draws dots" true
+      (not (String.equal (last_cell upper) (Chart.braille_cell ~mask:0x00)));
+    Alcotest.(check string) "the unread side draws none" (Chart.braille_cell ~mask:0x00)
+      (last_cell lower)
+  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+    Alcotest.failf "one side read still draws: %a" (Alcotest.pp graph_t) other
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -233,11 +389,22 @@ let () =
       [ Alcotest.test_case "declared limit cells by colour depth" `Quick
           declared_limit_cells_by_depth
       ; Alcotest.test_case "relative bars draw plain cells" `Quick relative_cells_are_plain
+      ; Alcotest.test_case "declared limit steps at other widths" `Quick
+          declared_limit_steps_at_other_widths
+      ; Alcotest.test_case "blend and plain fallbacks" `Quick meter_cell_fallbacks
+      ; Alcotest.test_case "a relative bar carries no SGR" `Quick relative_meter_bar_has_no_sgr
       ]
     ; "braille graph",
       [ Alcotest.test_case "levels for zero, small, absent and unread" `Quick braille_levels
       ; Alcotest.test_case "unread, narrow and baseline rules" `Quick braille_graph_rules
       ; Alcotest.test_case "the mirrored smaller side shows a dot" `Quick
           braille_mirror_minimum_dot
+      ; Alcotest.test_case "level edges and the axis top" `Quick braille_level_edges
+      ; Alcotest.test_case "narrower than four cells is a number" `Quick
+          narrow_graphs_are_numbers
+      ; Alcotest.test_case "missing times are blank" `Quick missing_times_are_blank
+      ; Alcotest.test_case "a small value in two rows" `Quick small_value_in_two_rows
+      ; Alcotest.test_case "mirror shares one axis and two baselines" `Quick
+          mirror_shared_axis_and_baselines
       ]
     ]

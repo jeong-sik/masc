@@ -31,8 +31,10 @@ type why_not =
   | Not_valid_alone
   (** The answer saw one item and no Memory, and tried to remove a fact. *)
   | Successor_unsupported
-  (** The fact the op stated did not stay in Memory: it was a derived fact
-      whose premises the same answer removed. *)
+  (** The fact the op stated is not in Memory after the answer: it is a
+      derived fact, and its premises are not there. Usually the same answer
+      removed them. A fact whose premises were already gone before the
+      answer is recorded the same way when an op states it. *)
 
 type t =
   { added : fact list

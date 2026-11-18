@@ -165,6 +165,7 @@ let event_of_string = function
 
 type write_stage =
   | Store_create
+  | Presence_read
   | Append
   | Append_cleanup
 
@@ -181,6 +182,7 @@ type receipt =
 
 let write_stage_to_string = function
   | Store_create -> "store_create"
+  | Presence_read -> "presence_read"
   | Append -> "append"
   | Append_cleanup -> "append_cleanup"
 ;;
@@ -376,6 +378,174 @@ let get_audit_store ~base_path () =
   Result.map fst (get_audit_store_with_root ~base_path ())
 ;;
 
+let row_json
+      ~timestamp
+      ~event_type
+      ~id
+      ~keeper_name
+      ~tool_name
+      ~turn_id
+      ~task_id
+      ~goal_id
+      ~rule_match
+      ~source_approval_id
+      ~actor
+      ~decision_source
+      ~authorization_source
+      ~decision
+      ~summary_status
+      ~exact_attempt
+      ~summary_attempt_disposition
+      ~extra_fields
+  =
+  let decision, decision_kind, decision_reason =
+    match decision with
+    | None -> "", None, None
+    | Some decision ->
+      let kind, reason = approval_decision_kind_and_reason decision in
+      approval_decision_to_string decision, Some kind, reason
+  in
+  `Assoc
+    ([ "ts", `Float timestamp
+     ; "event", `String (event_to_string event_type)
+     ; "id", `String id
+     ; "keeper", `String keeper_name
+     ; "tool", `String tool_name
+     ; "decision", `String decision
+     ; "turn_id", Json_util.int_opt_to_json turn_id
+     ; "task_id", Json_util.string_opt_to_json task_id
+     ; "goal_id", Json_util.string_opt_to_json goal_id
+     ; "actor", Json_util.string_opt_to_json actor
+     ; ( "decision_source"
+       , match decision_source with
+         | Some source -> `String (decision_source_to_string source)
+         | None -> `Null )
+       (* Which standing authority allowed this. Without it every blanket
+          allow is indistinguishable from an operator approving one exact
+          request: both land as decision_source=always_allowed. *)
+     ; ( "authorization_source"
+       , match authorization_source with
+         | Some source -> `String (authorization_source_to_string source)
+         | None -> `Null )
+     ; ( "rule_match"
+       , match rule_match with
+         | Some matched -> rule_match_to_yojson matched
+         | None -> `Null )
+     ; "source_approval_id", Json_util.string_opt_to_json source_approval_id
+     ; ( "decision_kind"
+       , match decision_kind with
+         | Some kind -> `String (decision_kind_to_string kind)
+         | None -> `Null )
+     ; "decision_reason", Json_util.string_opt_to_json decision_reason
+     ; ( "summary_status"
+       , match summary_status with
+         | Some status -> summary_status_to_yojson status
+         | None -> `Null )
+     ; ( "exact_attempt"
+       , match exact_attempt with
+         | Some attempt -> exact_attempt_state_to_yojson attempt
+         | None -> `Null )
+     ; ( "summary_attempt_disposition"
+       , match summary_attempt_disposition with
+         | Some disposition ->
+           summary_attempt_disposition_to_yojson disposition
+         | None -> `Null )
+     ]
+     @ extra_fields)
+;;
+
+(* The day file a [Resolved] row belongs to is the one its own [ts] names, so
+   a retry that holds only the decision time can find the file an earlier
+   attempt wrote to (#38541). *)
+let audit_day_path ~base_path ~ts =
+  let location = audit_location ~base_path in
+  let dated = Dated_jsonl.Store.dated_path location ~ts in
+  Fs_compat.mkdir_p
+    (Filename.concat (Dated_jsonl.Store.dir location) dated.Dated_jsonl.Store.month_dir);
+  dated.Dated_jsonl.Store.path
+;;
+
+(* Whether [path] already holds a [Resolved] row for [id]. A line that is not
+   a JSON object is not a row: the torn tail a failed append leaves behind did
+   not record anything, so it neither proves nor hides the decision. *)
+let resolved_row_in_file ~path ~id =
+  let resolved = event_to_string Resolved in
+  let row_is_resolution line =
+    match Yojson.Safe.from_string line with
+    | exception Yojson.Json_error _ -> false
+    | `Assoc fields ->
+      (match List.assoc_opt "event" fields, List.assoc_opt "id" fields with
+       | Some (`String event), Some (`String row_id) ->
+         String.equal event resolved && String.equal row_id id
+       | (None | Some _), (None | Some _) -> false)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+    | `Tuple _ | `Variant _ -> false
+  in
+  if not (Sys.file_exists path)
+  then Ok false
+  else
+    try
+      Ok
+        (In_channel.with_open_bin path (fun channel ->
+           let rec scan () =
+             match In_channel.input_line channel with
+             | None -> false
+             | Some line -> row_is_resolution line || scan ()
+           in
+           scan ()))
+    with
+    | Sys_error _ as exn -> Error (sanitized_write_failure_detail exn)
+;;
+
+let receipt_of_append ~canonical_masc_root ~keeper_name ~id ~event_type append_result =
+  (match append_result with
+   | Ok (Append_recorded | Append_recorded_with_settlement_failure _) ->
+     notify_written { canonical_masc_root; keeper_name; event_type }
+   | Error _ -> ());
+  match append_result with
+  | Ok Append_recorded ->
+    { event_type; write_result = Ok (); cleanup_failure = None }
+  | Ok (Append_recorded_with_settlement_failure failure) ->
+    record_failure
+      ~keeper_name
+      ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+      ~id
+      ~event_type:(event_to_string event_type)
+      (Sys_error failure.detail);
+    { event_type
+    ; write_result = Ok ()
+    ; cleanup_failure = Some failure
+    }
+  | Error exn ->
+    record_failure
+      ~keeper_name
+      ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+      ~id
+      ~event_type:(event_to_string event_type)
+      exn;
+    { event_type
+    ; write_result =
+        Error
+          { stage = Append
+          ; detail = sanitized_write_failure_detail exn
+          }
+    ; cleanup_failure = None
+    }
+;;
+
+let under_audit_lock step =
+  try Ok (Cross_context_mutex.with_durable_lock audit_io_mutex step) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error exn
+;;
+
+let store_create_failure ~event_type detail =
+  { event_type
+  ; write_result = Error { stage = Store_create; detail }
+  ; cleanup_failure = None
+  }
+;;
+
 let record
       ~base_path
       ~event_type
@@ -398,120 +568,105 @@ let record
       ?(extra_fields = [])
       ()
   =
-  let decision, decision_kind, decision_reason =
-    match decision with
-    | None -> "", None, None
-    | Some decision ->
-      let kind, reason = approval_decision_kind_and_reason decision in
-      approval_decision_to_string decision, Some kind, reason
-  in
   let timestamp =
     match timestamp with
     | Some timestamp -> timestamp
     (* NDT-OK: the audit append boundary owns an omitted event timestamp. *)
     | None -> Unix.gettimeofday ()
   in
+  let json =
+    row_json ~timestamp ~event_type ~id ~keeper_name ~tool_name ~turn_id ~task_id
+      ~goal_id ~rule_match ~source_approval_id ~actor ~decision_source
+      ~authorization_source ~decision ~summary_status ~exact_attempt
+      ~summary_attempt_disposition ~extra_fields
+  in
   match get_audit_store_with_root ~base_path () with
-  | Error detail ->
-    { event_type
-    ; write_result = Error { stage = Store_create; detail }
-    ; cleanup_failure = None
-    }
+  | Error detail -> store_create_failure ~event_type detail
   | Ok ((_ : Dated_jsonl.t), canonical_masc_root) ->
-    let json =
-      `Assoc
-        ([ "ts", `Float timestamp
-         ; "event", `String (event_to_string event_type)
-         ; "id", `String id
-         ; "keeper", `String keeper_name
-         ; "tool", `String tool_name
-         ; "decision", `String decision
-         ; "turn_id", Json_util.int_opt_to_json turn_id
-         ; "task_id", Json_util.string_opt_to_json task_id
-         ; "goal_id", Json_util.string_opt_to_json goal_id
-         ; "actor", Json_util.string_opt_to_json actor
-         ; ( "decision_source"
-           , match decision_source with
-             | Some source -> `String (decision_source_to_string source)
-             | None -> `Null )
-           (* Which standing authority allowed this. Without it every blanket
-              allow is indistinguishable from an operator approving one exact
-              request: both land as decision_source=always_allowed. *)
-         ; ( "authorization_source"
-           , match authorization_source with
-             | Some source -> `String (authorization_source_to_string source)
-             | None -> `Null )
-         ; ( "rule_match"
-           , match rule_match with
-             | Some matched -> rule_match_to_yojson matched
-             | None -> `Null )
-         ; "source_approval_id", Json_util.string_opt_to_json source_approval_id
-         ; ( "decision_kind"
-           , match decision_kind with
-             | Some kind -> `String (decision_kind_to_string kind)
-             | None -> `Null )
-         ; "decision_reason", Json_util.string_opt_to_json decision_reason
-         ; ( "summary_status"
-           , match summary_status with
-             | Some status -> summary_status_to_yojson status
-             | None -> `Null )
-         ; ( "exact_attempt"
-           , match exact_attempt with
-             | Some attempt -> exact_attempt_state_to_yojson attempt
-             | None -> `Null )
-         ; ( "summary_attempt_disposition"
-           , match summary_attempt_disposition with
-             | Some disposition ->
-               summary_attempt_disposition_to_yojson disposition
-             | None -> `Null )
-         ]
-         @ extra_fields
-         )
+    under_audit_lock (fun () ->
+      (Atomic.get append_jsonl) (audit_today_path ~base_path) json)
+    |> receipt_of_append ~canonical_masc_root ~keeper_name ~id ~event_type
+;;
+
+type resolved_attempt =
+  | First_resolved_append
+  | Retry_unconfirmed_resolved_append
+
+type resolved_receipt =
+  | Resolved_append_attempted of receipt
+  | Resolved_row_already_present
+
+(* A row a retry found is on the ledger, the same fact a successful append
+   reports, so it serializes as one. *)
+let resolved_receipt_to_yojson = function
+  | Resolved_append_attempted receipt -> receipt_to_yojson receipt
+  | Resolved_row_already_present ->
+    receipt_to_yojson { event_type = Resolved; write_result = Ok (); cleanup_failure = None }
+;;
+
+type resolved_step =
+  | Resolved_step_appended of append_outcome
+  | Resolved_step_present
+  | Resolved_step_read_failed of string
+
+let record_resolved
+      ~base_path
+      ~attempt
+      ~resolved_at
+      ~id
+      ~keeper_name
+      ~tool_name
+      ?turn_id
+      ?task_id
+      ?goal_id
+      ?actor
+      ~decision_source
+      ~decision
+      ~summary_status
+      ~exact_attempt
+      ~extra_fields
+      ()
+  =
+  let event_type = Resolved in
+  let json =
+    row_json ~timestamp:resolved_at ~event_type ~id ~keeper_name ~tool_name ~turn_id
+      ~task_id ~goal_id ~rule_match:None ~source_approval_id:None ~actor
+      ~decision_source:(Some decision_source) ~authorization_source:None
+      ~decision:(Some decision) ~summary_status:(Some summary_status)
+      ~exact_attempt:(Some exact_attempt) ~summary_attempt_disposition:None
+      ~extra_fields
+  in
+  match get_audit_store_with_root ~base_path () with
+  | Error detail -> Resolved_append_attempted (store_create_failure ~event_type detail)
+  | Ok ((_ : Dated_jsonl.t), canonical_masc_root) ->
+    let append path = Resolved_step_appended ((Atomic.get append_jsonl) path json) in
+    let step () =
+      let path = audit_day_path ~base_path ~ts:resolved_at in
+      match attempt with
+      | First_resolved_append -> append path
+      | Retry_unconfirmed_resolved_append ->
+        (match resolved_row_in_file ~path ~id with
+         | Error detail -> Resolved_step_read_failed detail
+         | Ok true -> Resolved_step_present
+         | Ok false -> append path)
     in
-    let append_result =
-      try
-        Ok
-          (Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-             (Atomic.get append_jsonl)
-               (audit_today_path ~base_path)
-               json))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error exn
-    in
-    (match append_result with
-     | Ok (Append_recorded | Append_recorded_with_settlement_failure _) ->
-         notify_written { canonical_masc_root; keeper_name; event_type }
-     | Error _ -> ());
-    (match append_result with
-     | Ok Append_recorded ->
-       { event_type; write_result = Ok (); cleanup_failure = None }
-     | Ok (Append_recorded_with_settlement_failure failure) ->
+    let receipt_of = receipt_of_append ~canonical_masc_root ~keeper_name ~id ~event_type in
+    (match under_audit_lock step with
+     | Ok (Resolved_step_appended outcome) -> Resolved_append_attempted (receipt_of (Ok outcome))
+     | Error exn -> Resolved_append_attempted (receipt_of (Error exn))
+     | Ok Resolved_step_present -> Resolved_row_already_present
+     | Ok (Resolved_step_read_failed detail) ->
        record_failure
          ~keeper_name
          ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
          ~id
          ~event_type:(event_to_string event_type)
-         (Sys_error failure.detail);
-       { event_type
-       ; write_result = Ok ()
-       ; cleanup_failure = Some failure
-       }
-     | Error exn ->
-       record_failure
-         ~keeper_name
-         ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
-         ~id
-         ~event_type:(event_to_string event_type)
-         exn;
-       { event_type
-       ; write_result =
-           Error
-             { stage = Append
-             ; detail = sanitized_write_failure_detail exn
-             }
-       ; cleanup_failure = None
-       })
+         (Sys_error detail);
+       Resolved_append_attempted
+         { event_type
+         ; write_result = Error { stage = Presence_read; detail }
+         ; cleanup_failure = None
+         })
 ;;
 
 let record_rule ~base_path ~event_type ?actor (rule : approval_rule) =

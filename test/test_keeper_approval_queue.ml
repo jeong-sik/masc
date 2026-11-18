@@ -1052,6 +1052,8 @@ let delivery_json ~entry ~resolution_sequence ~remember_rule =
     ; "rule_expires_at", `Null
     ; "created_by", `Null
     ; "grant_consumed", `Bool false
+    ; "resolved_at", `Float 1.0
+    ; "ledger", `String "recorded"
     ]
 ;;
 
@@ -1171,7 +1173,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 13
+             [ "version", `Int 14
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -5316,7 +5318,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 13
+            [ "version", `Int 14
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -5353,7 +5355,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 13
+               [ "version", `Int 14
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -6097,7 +6099,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 13
+             [ "version", `Int 14
             ; "generation", `Int 1
             ; "next_sequence", `Int 3
             ; "pending", `List []
@@ -6111,6 +6113,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
                       ; "remember_rule", `Bool false
                       ; "created_by", `Null
                       ; "grant_consumed", `Bool false
+                      ; "resolved_at", `Float 1.0
+                      ; "ledger", `String "recorded"
                       ]
                   ] )
             ]);
@@ -6420,7 +6424,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 13
+             [ "version", `Int 14
             ; "generation", `Int 1
             ; "next_sequence", `Int 7
             ; "pending", `List []

@@ -3230,12 +3230,11 @@ let semantic_status_color status =
   match String.trim status with
   | "running" | "executing" | "active" | "in_progress" -> (Theme.info ())
   | "scheduled" | "due" | "pending" | "waiting" | "verifying"
-  | "fallback" | "unknown" | "queued" | "degraded" | "matched_pending" ->
+  | "fallback" | "unknown" | "queued" | "degraded" ->
       (Theme.warn ())
   | "failed" | "failure" | "rejected" | "reject" | "refuted"
   | "unreadable" | "blocked" | "error" | "deny" | "denied" | "read_error"
-  | "not_found" | "unrecognized_detail" | "unrecognized_receipt"
-  | "missing_stimulus_id" | "invalid_stimulus_id" -> (Theme.bad ())
+  | "not_found" | "unrecognized_detail" -> (Theme.bad ())
   | "succeeded" | "success" | "completed" | "complete" | "proven"
   | "approve" | "approved" | "answered" | "recorded" | "applied" | "ok"
   | "ready" | "pass" | "passed" | "allowed" | "matched_recorded"

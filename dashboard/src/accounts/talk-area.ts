@@ -25,6 +25,7 @@ const mayHaveReadWords = 'Keeper는 이 말을 읽었을 수 있어요. 다음 �
 function failureWords(failure: TurnFailure): string {
   switch (failure) {
     case 'not_signed_in': return '이 모델의 구독 계정이 로그인돼 있지 않았어요.'
+    case 'key_refused': return '구독 쪽이 이 모델의 API key 를 받지 않았어요.'
     case 'no_quota': return '구독에 남은 사용량이 없었어요.'
     case 'silent': return 'Keeper가 한동안 아무것도 보내지 않아서 멈췄어요.'
     case 'not_started': return 'Keeper를 시작하지 못했어요.'
@@ -60,6 +61,7 @@ function refusalWords(code: TalkRefusal): string | null {
     case 'not_signed_in':
     case 'key_missing':
     case 'key_unreadable':
+    case 'key_refused':
     case 'no_quota':
     case 'silent':
     case 'not_started':

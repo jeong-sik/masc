@@ -11,7 +11,7 @@ import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
 import { Callout, ProblemNote, fell, idTail, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
-import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime, Withheld } from './wire'
+import type { CallRefusal, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -41,8 +41,12 @@ export type KeeperOn =
   | { readonly kind: 'refused'; readonly refusal: CallRefusal }
   /** The account's subscription is not known, or the server no longer offers it. */
   | { readonly kind: 'not_offered' }
+  /** A removal of the account did not go through. The server refuses every
+      use of it, whatever its subscription lets a Keeper do. */
+  | { readonly kind: 'removal_left' }
 
-function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
+function keeperOn(account: ProviderAccount, offered: Integration | null, checked: boolean): KeeperOn {
+  if (account.removal !== null) return { kind: 'removal_left' }
   if (offered === null) return { kind: 'not_offered' }
   if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
   if (checked) return { kind: 'can_run' }
@@ -50,17 +54,15 @@ function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
 }
 
 /** The facts of each account, in the order the server lists the accounts.
-    No Runtime is left out: an account is never unlinked
-    (lib/auth/authz_provider_account.ml has only `link`), and a Runtime is
-    made only on an account its maker owns (lib/auth/authz_runtime_state.ml
-    refuses it with `Account_not_theirs`). */
+    No Runtime the server lists is left out: it lists a Runtime only with
+    its account (wire.ts, `readOwned`). */
 export function accountFacts(integrations: readonly Integration[], owned: Owned): readonly AccountFacts[] {
   return owned.accounts.map((account) => {
     const integration = account.integration
     const runtimes = owned.runtimes.filter((runtime) => runtime.accountId === account.id)
     const offered = integration.read ? integrations.find((one) => one.id === integration.value) ?? null : null
     const checked = runtimes.some((runtime) => runtime.model.read)
-    return { account, offered, runtimes, checked, keeper: keeperOn(offered, checked) }
+    return { account, offered, runtimes, checked, keeper: keeperOn(account, offered, checked) }
   })
 }
 
@@ -79,6 +81,33 @@ function integrationUnreadWords(unread: IntegrationUnread | 'unrecognised'): str
     case 'login_receipt_missing': return '이 계정의 로그인 기록이 없어요.'
     case 'login_receipt_unreadable': return '이 계정의 로그인 기록을 읽지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.'
     case 'unrecognised': return '서버가 이 계정의 구독을 알려 주지 않았어요.'
+  }
+}
+
+/** What the server found of the key file of a key account, when a use of
+    the account would not read a key. It is what was there when the list was
+    read: the file of an account whose registration is under way is not
+    there yet. */
+function keyWords(key: KeyState): string | null {
+  switch (key) {
+    case 'readable': return null
+    case 'key_missing':
+      return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요.'
+    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. ${operatorWords}`
+    case 'not_looked_at': return `이 서버가 이 계정의 key 파일을 확인하지 못했어요. ${operatorWords}`
+    case 'unrecognised': return '서버가 이 계정의 key 상태를 알려 주지 않았어요.'
+  }
+}
+
+/** What a removal that did not go through left on the server
+    (lib/auth_preview.ml, `removal_code`). */
+function removalWords(removal: Removal): string {
+  const unused = '이 계정으로는 아무것도 실행되지 않아요.'
+  switch (removal) {
+    case 'key_not_removed': return `이 계정을 없애다가 멈췄어요. key 가 아직 이 서버에 있어요. ${unused}`
+    case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. key 는 지워졌고, 계정의 다른 파일이 이 서버에 남아 있어요. ${unused}`
+    case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요. key 가 아직 이 서버에 있어요. ${unused}`
+    case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요. ${unused}`
   }
 }
 
@@ -114,6 +143,8 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
 /** Why a call of a model did not pass, and what the person can do next. */
 function checkFailureWords(failure: CheckFailure): string {
   switch (failure) {
+    case 'key_refused':
+      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 이 계정을 없애고 key 를 다시 넣어 주세요.'
     case 'rate_limited': return '구독 쪽이 요청 한도나 사용 시간대에 걸렸다며 막았어요. 한도가 풀린 뒤 다시 확인해 주세요.'
     case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
     case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'
@@ -168,9 +199,12 @@ function checkWords(check: Check): string {
     nothing can be done with it here. */
 function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
   const { keeper, checked } = facts
-  if (keeper.kind === 'not_offered') return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
+  const held = facts.account.held.kind === 'key' ? html`<span class="chip">API key 로 연결</span>` : null
+  if (keeper.kind === 'removal_left') return html`<p class="chips">${held}<span class="chip chip-todo">없애기가 끝나지 않음</span></p>`
+  if (keeper.kind === 'not_offered') return html`<p class="chips">${held}<span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
   return html`
     <p class="chips">
+      ${held}
       <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : keeper.kind === 'no_model' ? '확인할 모델 없음' : '모델 확인 필요'}</span>
       ${keeper.kind === 'can_run' ? html`<span class="chip">Keeper 실행 가능</span>` : null}
       ${keeper.kind === 'refused' ? html`<span class="chip chip-todo">Keeper 실행 불가</span>` : null}
@@ -255,11 +289,37 @@ function CheckArea({ accountId, models, withheld, check, checks, card }: {
   `
 }
 
+/** What the card of an account says and offers while no removal is left on
+    it: what stands in the way of its use, the models checked on it, and the
+    check of one. */
+function InUse({ facts, name, checks, card }: {
+  readonly facts: AccountFacts
+  readonly name: string
+  readonly checks: ChecksModel
+  readonly card: string
+}): VNode {
+  const { account, offered } = facts
+  const key = account.held.kind === 'key' ? keyWords(account.held.key) : null
+  return html`
+    ${account.integration.read
+      ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
+      : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
+    ${key === null ? null : html`<p class="hint">${key}</p>`}
+    ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
+    <${Models} runtimes=${facts.runtimes} />
+    ${offered !== null && offered.calls.kind === 'allowed'
+      ? html`<${CheckArea} accountId=${account.id} models=${offered.models} withheld=${offered.withheld} check=${checks.checks.value.get(account.id)}
+          checks=${checks} card=${card} />`
+      : null}
+  `
+}
+
 function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly checks: ChecksModel }): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const canCheck = offered !== null && checkable(offered)
+  const removal = account.removal
+  const canCheck = removal === null && offered !== null && checkable(offered)
   const couldCheck = useRef(canCheck)
   // A reading after a check can find the subscription with no model to
   // check, or its calls refused, which takes the pressed button away. The focus then
@@ -277,15 +337,7 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
       <h3 ref=${title} id=${titleId} class="row-title" tabindex="-1">${name}</h3>
       <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
-      ${account.integration.read
-        ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
-        : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
-      ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
-      <${Models} runtimes=${facts.runtimes} />
-      ${offered !== null && offered.calls.kind === 'allowed'
-        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} withheld=${offered.withheld} check=${checks.checks.value.get(account.id)}
-            checks=${checks} card=${`${titleId} ${accountLine}`} />`
-        : null}
+      ${removal !== null ? html`<p class="hint">${removalWords(removal)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
     </li>
   `
 }

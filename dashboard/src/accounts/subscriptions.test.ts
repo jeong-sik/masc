@@ -460,6 +460,18 @@ describe('what the panel knows of each account', () => {
     expect(kinds(integrations.map((one) => ({ ...one, models: [] })))).toEqual([['acct_checked', 'can_run'], ['acct_new', 'no_model']])
   })
 
+  it('says a removal that was left on an account before anything else of it', () => {
+    const kinds = accountFacts(integrations, {
+      accounts: [
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
+        { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, removal: 'start_given_up' },
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
+      ],
+      runtimes: [],
+    }).map((one) => [one.account.id, one.keeper.kind])
+    expect(kinds).toEqual([['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_key', 'needs_model']])
+  })
+
   it('counts a model as checked only while the server still finds it in its settings', () => {
     expect(byAccount((one) => one.checked)).toEqual([
       ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_unknown', false], ['acct_new', false],
@@ -504,10 +516,18 @@ describe('the panel', () => {
         { id: 'acct_odd.y', accountId: 'acct_odd', model: { read: false, unread: 'unrecognised' } },
       ],
     })],
+    // The first holds a key the server did not find, and the second has a removal left on it.
+    ['key accounts', read({
+      accounts: [
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
+      ],
+      runtimes: [],
+    })],
   ]
   const named = (...names: string[]) => views.map(([name]) => [name, names.includes(name) ? 1 : 0])
   /** The states with a subscription to connect. */
-  const connectable = ['nothing connected', 'accounts of each kind']
+  const connectable = ['nothing connected', 'accounts of each kind', 'key accounts']
 
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
@@ -544,8 +564,15 @@ describe('the panel', () => {
   })
 
   it('offers to check a model only on an account of a subscription with a model to check', () => {
-    expect(count('.check button')).toEqual(named('accounts of each kind'))
-    expect(count('.check select')).toEqual(named('accounts of each kind'))
+    expect(count('.check button')).toEqual(named('accounts of each kind', 'key accounts'))
+    expect(count('.check select')).toEqual(named('accounts of each kind', 'key accounts'))
+  })
+
+  it('offers a check on a key account whose key the server did not find, and none on an account a removal was left on', () => {
+    const view = views.find(([name]) => name === 'key accounts')?.[1]
+    if (view === undefined) throw new Error('no view of the key accounts')
+    const rows = [...drawn(view).container.querySelectorAll('li.row')]
+    expect(rows.map((row) => [row.querySelectorAll('.check button').length, row.querySelectorAll('.models, .check').length > 0])).toEqual([[1, true], [0, false]])
   })
 
   it('names, before anything is connected, only the subscriptions with a model to check', () => {

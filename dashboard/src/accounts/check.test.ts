@@ -73,6 +73,7 @@ describe('reading the answer of a check', () => {
   it.each([
     ['rate_limited', 'failed'],
     ['timed_out', 'failed'],
+    ['key_refused', 'failed'],
     ['tool_result_not_consumed', 'failed'],
     ['client_not_authenticated', 'unavailable'],
     ['account_not_authorized', 'unavailable'],

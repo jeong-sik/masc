@@ -279,6 +279,81 @@ let with_admission_and_work_for ?wait ~clock ~timeout_s ~config f =
   with_admission_and_work_until ?wait ~clock ~deadline_at ~config f
 ;;
 
+type seat =
+  | Unadmitted
+  | Held of
+      { scheduler : Slot_scheduler.t
+      ; returned : bool Atomic.t
+      }
+
+let held scheduler = Held { scheduler; returned = Atomic.make false }
+
+let release_seat = function
+  | Unadmitted -> ()
+  | Held { scheduler; returned } ->
+    if Atomic.compare_and_set returned false true then Slot_scheduler.release scheduler
+;;
+
+let scheduler_of (config : Provider_config.t) =
+  match config.max_concurrent_requests with
+  | None -> None
+  | Some max ->
+    Some (entry_for ~key:(key_of_config config) ~allowance:(allowance_of_config config ~max))
+;;
+
+(* Every endpoint is full, so the request waits in each queue at once. The
+   first wait granted keeps its seat. A wait granted after it, in the moment
+   before it is cancelled, returns its seat and waits to be cancelled, so no
+   fiber that holds a seat ever returns a result [Fiber.any] could drop. *)
+let wait_for_first_seat first_full rest_full =
+  let won = Atomic.make None in
+  let wait (index, (config : Provider_config.t), scheduler) () =
+    Slot_scheduler.acquire_held
+      ?on_queue:(on_queue_for config)
+      ~admission_class:config.admission_class
+      scheduler;
+    let seat = held scheduler in
+    if Atomic.compare_and_set won None (Some seat)
+    then index, seat
+    else (
+      release_seat seat;
+      Eio.Fiber.await_cancel ())
+  in
+  (* [won] also covers a cancellation that reaches this call after the
+     winner returned but before [Fiber.any] handed its result on. *)
+  match Eio.Fiber.any (wait first_full :: List.map wait rest_full) with
+  | taken -> taken
+  | exception exn ->
+    Option.iter release_seat (Atomic.get won);
+    raise exn
+;;
+
+(* A seat taken at once, or the full endpoint to wait on. *)
+let ask_now index (config : Provider_config.t) =
+  match scheduler_of config with
+  | None -> Ok (index, Unadmitted)
+  | Some scheduler ->
+    if Slot_scheduler.try_acquire scheduler
+    then Ok (index, held scheduler)
+    else Error (index, config, scheduler)
+;;
+
+let take_first_seat first rest =
+  let rec ask_rest index full = function
+    | [] -> Error (List.rev full)
+    | config :: configs ->
+      (match ask_now index config with
+       | Ok taken -> Ok taken
+       | Error endpoint -> ask_rest (index + 1) (endpoint :: full) configs)
+  in
+  match ask_now 0 first with
+  | Ok taken -> taken
+  | Error first_full ->
+    (match ask_rest 1 [] rest with
+     | Ok taken -> taken
+     | Error rest_full -> wait_for_first_seat first_full rest_full)
+;;
+
 let snapshot_for ~(config : Provider_config.t) =
   let key = key_of_config config in
   let snapshot = Stdlib.Mutex.protect state_mutex (fun () -> !state) in

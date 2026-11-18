@@ -393,6 +393,31 @@ let with_permit_until ?wait ?on_queue ~clock ~deadline_at ~admission_class t f =
   | Ok finish -> Ok (release_after t (run_granted finish f))
 ;;
 
+(* A slot is free here on the terms [request_slot] takes one at once: under
+   the allowance and nobody queued, so a request taken here never passes a
+   waiter. Nothing is queued when there is none. *)
+let try_acquire t =
+  Stdlib.Mutex.protect t.mutex (fun () ->
+    if t.active < t.max_slots && queued t = 0
+    then (
+      t.active <- t.active + 1;
+      true)
+    else false)
+;;
+
+(* The wait's finisher runs as the slot is granted. A raise from it hands the
+   slot back, so the caller holds a slot only when this returns. *)
+let acquire_held ?on_queue ~admission_class t =
+  let finish = acquire ?on_queue t ~admission_class in
+  match Option.iter (fun finish -> finish Wait_granted) finish with
+  | () -> ()
+  | exception exn ->
+    release_slot t;
+    raise exn
+;;
+
+let release = release_slot
+
 let queue_length t = Stdlib.Mutex.protect t.mutex (fun () -> queued t)
 
 (* ── Capacity Query ───────────────────────────── *)

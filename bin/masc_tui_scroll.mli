@@ -94,6 +94,17 @@ val cursor_last : count:int -> int
 (** The last row a cursor can name, and 0 for an empty list. What End lands
     on. *)
 
+val cursor_apply : count:int -> page:int -> key_move -> int -> int
+(** The row [move] puts a cursor on in a list of [count] rows (RFC
+    tui-one-screen-grammar §3.1). [Line_down] and [Line_up] move one row,
+    [Page_down] and [Page_up] move [page] rows (at least one), [To_top] is
+    the first row and [To_end] {!cursor_last}. Every landing is held inside
+    the list, and an empty list answers 0. Only the page moves read [page].
+
+    A list whose j and k land on more than its data rows, such as group
+    headings, counts those places here too, so Home and End reach the same
+    first and last place j and k reach. Folding is not a move. *)
+
 val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 (** Like {!ensure_visible} for a cursor that names a run of lines [start] to
     [stop] (inclusive). A window that already shows some line of the run is

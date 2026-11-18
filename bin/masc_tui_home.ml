@@ -390,8 +390,12 @@ type body = {
   hb_selection_changed : bool; hb_rows : (home_action * string) list;
   hb_first : int; hb_total : int; hb_spare : int;
 }
+(* The rows the list draws and the move keys walk, in one order. *)
+let destinations prepared =
+  prepared.decisions @ prepared.operator_rows @ prepared.continuation
+
 let home_body prepared ~scroll ~budget =
-  let destinations = prepared.decisions @ prepared.operator_rows @ prepared.continuation in
+  let destinations = destinations prepared in
   let budget = max 0 budget in
   let reserve = if destinations = [] then 0 else min 1 budget in
   let extra = max 0 (budget - reserve) in
@@ -416,15 +420,24 @@ let home_body prepared ~scroll ~budget =
    hb_rows=List.drop first destinations |> List.take height;
    hb_first=first;hb_total;hb_spare=room-height}
 
-let home_step state ~backwards =
+(* Only j and k moved this list: it had no row list, so PgDn, PgUp, Home and
+   End reached no handler and did nothing (RFC tui-one-screen-grammar §3.1).
+   A selection the list no longer holds starts again from the first row, or
+   from the last for End. *)
+let home_move state ~page move =
   let prepared = prepare state in
-  let actions = List.map fst (prepared.decisions @ prepared.operator_rows @ prepared.continuation) in
-  let current = prepared.selected in
+  let actions = List.map fst (destinations prepared) in
+  let count = List.length actions in
   let index =
-    match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with
-    | None -> 0
-    | Some index ->
-        if backwards then max 0 (index - 1)
-        else min (List.length actions - 1) (index + 1)
+    match
+      List.find_index
+        (fun action -> Option.equal equal_home_action (Some action) prepared.selected)
+        actions
+    with
+    | Some index -> Masc_tui_scroll.cursor_apply ~count ~page move index
+    | None ->
+        (match move with
+         | Masc_tui_scroll.To_end -> Masc_tui_scroll.cursor_last ~count
+         | Line_down | Line_up | Page_down | Page_up | To_top -> 0)
   in
   state.home_selected <- List.nth_opt actions index

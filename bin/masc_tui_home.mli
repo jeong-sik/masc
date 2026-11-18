@@ -35,4 +35,7 @@ type body = private {
 val home_body : prepared -> scroll:int -> budget:int -> body
 (** Renderer and loop share this body allocation. A positive available body
     reserves a selected destination row before optional chrome and notices. *)
-val home_step : Masc_tui_types.state -> backwards:bool -> unit
+val home_move : Masc_tui_types.state -> page:int -> Masc_tui_scroll.key_move -> unit
+(** Select the destination a move key lands on, over the rows {!home_body}
+    draws in the order it draws them. Every move key of the list goes
+    through here; [page] is read by the page keys alone. *)

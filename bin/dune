@@ -1621,7 +1621,8 @@
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict))
+ (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict
+  masc_tui_scroll))
 
 (library
  (name masc_tui_keeper_story)
@@ -2200,7 +2201,7 @@
  (wrapped false)
  (modules masc_tui_home)
  (libraries masc_tui_credential_preparation masc_tui_types masc_tui_ask_projection masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
-  masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
+  masc_tui_message_layout masc_tui_config masc.keeper_registry masc masc_tui_scroll))
 
 (library
  (name masc_tui_surface_navigation)

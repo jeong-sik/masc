@@ -331,6 +331,40 @@ let test_the_list_height_is_the_rows_that_are_left () =
     (Masc_tui_scroll.content_height ~rows:3 ~chrome:10 ~count:5
        ~preview_keep:None ~overflow_takes_row:false)
 
+(* Every move key over a cursor, for an empty list, a list of one and a
+   list of six, from the first row, a middle row and the last row. The
+   expected rows are written out rather than derived, so the table is the
+   specification of RFC tui-one-screen-grammar §3.1 for cursors. *)
+let test_every_move_key_lands_inside_the_list () =
+  let open Masc_tui_scroll in
+  let cases =
+    (* count, page, move, from, expected *)
+    [ 0, 2, Line_down, 0, 0; 0, 2, Line_up, 0, 0; 0, 2, Page_down, 0, 0
+    ; 0, 2, Page_up, 0, 0; 0, 2, To_top, 0, 0; 0, 2, To_end, 0, 0
+    ; 1, 2, Line_down, 0, 0; 1, 2, Line_up, 0, 0; 1, 2, Page_down, 0, 0
+    ; 1, 2, Page_up, 0, 0; 1, 2, To_top, 0, 0; 1, 2, To_end, 0, 0
+    ; 6, 2, Line_down, 0, 1; 6, 2, Line_up, 0, 0; 6, 2, Page_down, 0, 2
+    ; 6, 2, Page_up, 0, 0; 6, 2, To_top, 0, 0; 6, 2, To_end, 0, 5
+    ; 6, 2, Line_down, 3, 4; 6, 2, Line_up, 3, 2; 6, 2, Page_down, 3, 5
+    ; 6, 2, Page_up, 3, 1; 6, 2, To_top, 3, 0; 6, 2, To_end, 3, 5
+    ; 6, 2, Line_down, 5, 5; 6, 2, Line_up, 5, 4; 6, 2, Page_down, 5, 5
+    ; 6, 2, Page_up, 5, 3; 6, 2, To_top, 5, 0; 6, 2, To_end, 5, 5
+    (* A page longer than the list holds at the ends. *)
+    ; 6, 9, Page_down, 1, 5; 6, 9, Page_up, 4, 0
+    (* A page of zero rows still moves one row. *)
+    ; 6, 0, Page_down, 1, 2; 6, 0, Page_up, 1, 0
+    (* A cursor left past the end by a list that shrank answers from the
+       last row. *)
+    ; 3, 2, Line_up, 7, 1; 3, 2, Line_down, 7, 2
+    ]
+  in
+  List.iter
+    (fun (count, page, move, from, expected) ->
+      Alcotest.(check int)
+        (Printf.sprintf "count %d page %d from %d" count page from)
+        expected (cursor_apply ~count ~page move from))
+    cases
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -365,6 +399,8 @@ let () =
             test_a_page_sized_move_travels_its_whole_size
         ; Alcotest.test_case "the edges are reachable in one move" `Quick
             test_the_edges_of_a_list_are_reachable_in_one_move
+        ; Alcotest.test_case "every move key lands inside the list" `Quick
+            test_every_move_key_lands_inside_the_list
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "the list height is the rows that are left" `Quick

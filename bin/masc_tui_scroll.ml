@@ -98,6 +98,20 @@ let cursor_move ~count ~delta cursor =
 let cursor_down ~count cursor = cursor_move ~count ~delta:1 cursor
 let cursor_up ~count cursor = cursor_move ~count ~delta:(-1) cursor
 
+(* The six move keys over a cursor, in one match. Lists used to spell the
+   line keys in one place and the edge and page keys in another, each over
+   its own count, and the two could walk different lists: the Keeper list's
+   j and k stepped over its headings while Home counted only Keepers and
+   landed inside a folded group. *)
+let cursor_apply ~count ~page move cursor =
+  match move with
+  | Line_down -> cursor_move ~count ~delta:1 cursor
+  | Line_up -> cursor_move ~count ~delta:(-1) cursor
+  | Page_down -> cursor_move ~count ~delta:(Int.max 1 page) cursor
+  | Page_up -> cursor_move ~count ~delta:(-Int.max 1 page) cursor
+  | To_top -> 0
+  | To_end -> cursor_last ~count
+
 let ensure_span_visible ~start ~stop ~height scroll =
   if stop < scroll then start
   else if start >= scroll + height then start - height + 1

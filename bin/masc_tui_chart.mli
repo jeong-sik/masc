@@ -60,12 +60,19 @@ type meter_scale =
           state colour the caller drew around the bar. *)
 
 val meter_cell_colour :
-  meter_scale -> index:int -> width:int -> Masc_tui_theme.meter_cell_colour
-(** The colour filled cell [index] of a [width]-cell bar takes:
-    {!Masc_tui_theme.limit_cell_colour} at the paint's depth for a declared
-    limit, [Cell_plain] for a relative bar at every depth. *)
+  meter_scale ->
+  index:int ->
+  width:int ->
+  value:int ->
+  max_value:int ->
+  Masc_tui_theme.meter_cell_colour
+(** The colour filled cell [index] of a [width]-cell bar drawing [value]
+    against [max_value] takes: {!Masc_tui_theme.limit_cell_colour} at the
+    paint's depth for a declared limit, [Cell_plain] for a relative bar at
+    every depth. *)
 
-val meter_cell_style : meter_scale -> index:int -> width:int -> string
+val meter_cell_style :
+  meter_scale -> index:int -> width:int -> value:int -> max_value:int -> string
 (** The SGR drawn before that cell's glyph: {!meter_cell_colour} through
     {!Masc_tui_theme.meter_cell_readable}, and [""] for a relative bar. *)
 

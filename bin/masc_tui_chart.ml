@@ -170,19 +170,19 @@ type meter_scale =
   | Declared_limit of Masc_tui_theme.limit_paint
   | Relative
 
-let meter_cell_colour scale ~index ~width =
+let meter_cell_colour scale ~index ~width ~value ~max_value =
   match scale with
   | Declared_limit paint ->
     Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
-      ~width
+      ~width ~value ~limit:max_value
   | Relative -> Masc_tui_theme.Cell_plain
 ;;
 
-let meter_cell_style scale ~index ~width =
+let meter_cell_style scale ~index ~width ~value ~max_value =
   match scale with
   | Declared_limit paint ->
     Masc_tui_theme.meter_cell_readable paint
-      (meter_cell_colour scale ~index ~width)
+      (meter_cell_colour scale ~index ~width ~value ~max_value)
   | Relative -> ""
 ;;
 
@@ -200,7 +200,8 @@ let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
         | Declared_limit _ ->
           String.concat ""
             (List.init filled (fun index ->
-               meter_cell_style scale ~index ~width ^ meter_fill))
+               meter_cell_style scale ~index ~width ~value ~max_value
+               ^ meter_fill))
           ^ reset
     in
     let track_part =

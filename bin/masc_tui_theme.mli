@@ -189,15 +189,23 @@ type meter_cell_colour =
   | Cell_band of limit_band  (** The band's status colour. *)
   | Cell_blend of { band : limit_band; position : float }
       (** A colour between success, warning and danger at [position], the
-          cell's reach as a share of the limit in [(0, 1]]. [band] is what the
+          cell's reach as a share of the limit in [[0, 1]]. [band] is what the
           cell draws when the blend cannot be drawn. *)
 
 val limit_cell_colour :
-  depth:color_depth -> index:int -> width:int -> meter_cell_colour
+  depth:color_depth ->
+  index:int ->
+  width:int ->
+  value:int ->
+  limit:int ->
+  meter_cell_colour
 (** The colour cell [index] (from 0) of a [width]-cell meter takes when the
-    meter is against a declared limit. The cell reaches [(index + 1) / width]
-    of the limit. Under one half is [Near_zero], under four fifths [Midway],
-    the rest [Near_limit]. [No_color] draws [Cell_plain], [Colors_16] the band,
+    meter draws [value] against a declared [limit]. The cell reaches the
+    smaller of its far edge, [(index + 1) / width], and [value / limit]
+    ([value] clamped into [[0, limit]]), so a cell the value only enters, or
+    the one cell a small value is rounded up to, takes the value's band. Under
+    one half is [Near_zero], under four fifths [Midway], the rest
+    [Near_limit]. [No_color] draws [Cell_plain], [Colors_16] the band,
     [Colors_256] and [Truecolor] a blend. *)
 
 (** What a declared-limit meter needs to draw its cells: the terminal's depth,

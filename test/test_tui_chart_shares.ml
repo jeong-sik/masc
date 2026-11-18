@@ -104,8 +104,10 @@ let cell_colour_t =
 let declared_limit depth =
   Chart.Declared_limit { Theme.depth; surface = Theme.Page; palette = None }
 
+(* Every cell of a full bar: each reaches its own far edge. *)
 let cells scale ~width =
-  List.init width (fun index -> Chart.meter_cell_colour scale ~index ~width)
+  List.init width (fun index ->
+    Chart.meter_cell_colour scale ~index ~width ~value:width ~max_value:width)
 
 (* Ten cells reach 10%, 20%, ... 100% of the limit. Under 50% is success,
    under 80% warning, the rest danger (RFC tui-one-screen-grammar 7.3). *)
@@ -141,7 +143,8 @@ let relative_cells_are_plain () =
     (cells Chart.Relative ~width:10);
   Alcotest.(check string) "a relative bar's cells carry no SGR" ""
     (String.concat ""
-       (List.init 10 (fun index -> Chart.meter_cell_style Chart.Relative ~index ~width:10)))
+       (List.init 10 (fun index ->
+          Chart.meter_cell_style Chart.Relative ~index ~width:10 ~value:10 ~max_value:10)))
 
 let graph_t =
   Alcotest.testable
@@ -245,6 +248,43 @@ let declared_limit_steps_at_other_widths () =
     (band_name (List.nth twenty 14));
   Alcotest.(check string) "cell 16 of 20 reaches 80%: danger" "Near_limit"
     (band_name (List.nth twenty 15))
+
+(* A cell the value only enters takes the value's band, not its far edge's:
+   the one cell a small value is rounded up to, and the partial last cell of
+   a bar that draws eighths. *)
+let declared_limit_cell_stops_at_the_value () =
+  let check name expected ~index ~width ~value ~limit =
+    Alcotest.(check cell_colour_t) name expected
+      (Theme.limit_cell_colour ~depth:Theme.Colors_16 ~index ~width ~value ~limit)
+  in
+  check "one cell at 0.1% of the limit is success" (Theme.Cell_band Theme.Near_zero)
+    ~index:0 ~width:1 ~value:1 ~limit:1000;
+  check "two cells at 0.1%: the first is success" (Theme.Cell_band Theme.Near_zero)
+    ~index:0 ~width:2 ~value:1 ~limit:1000;
+  check "two cells at 60%: the first reaches its half-way edge, warning"
+    (Theme.Cell_band Theme.Midway) ~index:0 ~width:2 ~value:600 ~limit:1000;
+  check "one cell at 95% is danger" (Theme.Cell_band Theme.Near_limit)
+    ~index:0 ~width:1 ~value:950 ~limit:1000;
+  check "the partial fifth of ten cells at 45% is success"
+    (Theme.Cell_band Theme.Near_zero) ~index:4 ~width:10 ~value:45 ~limit:100;
+  check "the partial eighth of ten cells at 79% is warning"
+    (Theme.Cell_band Theme.Midway) ~index:7 ~width:10 ~value:79 ~limit:100;
+  check "the eighth of ten cells at exactly 80% is danger"
+    (Theme.Cell_band Theme.Near_limit) ~index:7 ~width:10 ~value:80 ~limit:100;
+  check "a value past the limit stops at the cell's edge"
+    (Theme.Cell_band Theme.Near_zero) ~index:0 ~width:10 ~value:500 ~limit:100;
+  Alcotest.(check cell_colour_t) "a blend sits at the value, not the edge"
+    (Theme.Cell_blend { band = Theme.Near_zero; position = 0.45 })
+    (Theme.limit_cell_colour ~depth:Theme.Truecolor ~index:4 ~width:10 ~value:45
+       ~limit:100);
+  Alcotest.(check cell_colour_t) "the edges hold at limits past the integer products"
+    (Theme.Cell_band Theme.Midway)
+    (Theme.limit_cell_colour ~depth:Theme.Colors_16 ~index:0 ~width:1
+       ~value:(max_int / 2 + 1) ~limit:max_int);
+  Alcotest.(check cell_colour_t) "four fifths of max_int is danger"
+    (Theme.Cell_band Theme.Near_limit)
+    (Theme.limit_cell_colour ~depth:Theme.Colors_16 ~index:0 ~width:1
+       ~value:(max_int - max_int / 5) ~limit:max_int)
 
 (* Where a blend cannot be drawn (no palette was reported), a 256-colour or
    truecolor cell draws its band's colour, the same bytes a sixteen-colour
@@ -391,6 +431,8 @@ let () =
       ; Alcotest.test_case "relative bars draw plain cells" `Quick relative_cells_are_plain
       ; Alcotest.test_case "declared limit steps at other widths" `Quick
           declared_limit_steps_at_other_widths
+      ; Alcotest.test_case "a cell stops at the value it draws" `Quick
+          declared_limit_cell_stops_at_the_value
       ; Alcotest.test_case "blend and plain fallbacks" `Quick meter_cell_fallbacks
       ; Alcotest.test_case "a relative bar carries no SGR" `Quick relative_meter_bar_has_no_sgr
       ]

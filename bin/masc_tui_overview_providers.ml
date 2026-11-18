@@ -149,45 +149,6 @@ let meter ~cells share =
   let fill, track = meter_glyphs ~cells share in
   String.concat "" (fill @ track)
 
-(* How a window's bar fill is coloured (RFC tui-one-screen-grammar section
-   7.3, LAYOUT-LANGUAGE Usage). *)
-type bar_fill =
-  | Limit_fill
-      (** The window refuses model calls when full, a declared limit: each
-          filled cell takes the colour of its place against the limit. *)
-  | Foreground_fill
-      (** The server could not classify the window, so no one confirmed it is
-          a limit: the fill draws in the terminal's text colour, whatever tone
-          its row takes. *)
-  | Row_tone_fill
-      (** The window counts use that refuses no model call: the fill recedes
-          with its row. *)
-
-let bar_fill = function
-  | Masc.Tui_decode_usage.Role_gates_model_calls -> Limit_fill
-  | Masc.Tui_decode_usage.Role_unclassified_limit -> Foreground_fill
-  | Masc.Tui_decode_usage.Role_counts_other_use -> Row_tone_fill
-
-(* The meter in its colours. [around] is the colour the row draws in; the
-   track and whatever follows the fill go back to it. *)
-let coloured_meter ~cells ~fill:bar ~around share =
-  let fill, track = meter_glyphs ~cells share in
-  let width = max 0 cells in
-  let drawn_fill =
-    match bar with
-    | Limit_fill ->
-        let scale = Masc_tui_chart.Declared_limit (Theme.limit_paint ()) in
-        String.concat ""
-          (List.mapi
-             (fun index glyph -> Masc_tui_chart.meter_cell_style scale ~index ~width ^ glyph)
-             fill)
-        ^ Masc_tui_theme.Sgr.default_fg ^ around
-    | Foreground_fill ->
-        Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
-    | Row_tone_fill -> String.concat "" fill
-  in
-  drawn_fill ^ String.concat "" track
-
 (* ---- the provider's own values ---------------------------------------- *)
 
 let percent_of_full = 100
@@ -219,6 +180,54 @@ let percent_of_fraction value =
     float_of_string (Printf.sprintf "%.*g" percent_digits (value *. float_of_int percent_of_full))
   in
   int_of_float (Float.floor hundredths)
+
+(* How a window's bar fill is coloured (RFC tui-one-screen-grammar section
+   7.3, LAYOUT-LANGUAGE Usage). *)
+type bar_fill =
+  | Limit_fill
+      (** The window refuses model calls when full, a declared limit: each
+          filled cell takes the colour of its place against the limit. *)
+  | Foreground_fill
+      (** The server could not classify the window, so no one confirmed it is
+          a limit: the fill draws in the terminal's text colour, whatever tone
+          its row takes. *)
+  | Row_tone_fill
+      (** The window counts use that refuses no model call: the fill recedes
+          with its row. *)
+
+let bar_fill = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls -> Limit_fill
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> Foreground_fill
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Row_tone_fill
+
+(* The meter in its colours. [around] is the colour the row draws in; the
+   track and whatever follows the fill go back to it. A limit's cells are
+   coloured against the whole percent written beside the bar, floored the same
+   way, so the colour and the figure agree at each band's edge. A fill exists
+   only for a finite share above zero, which is the share the percent is taken
+   of. *)
+let coloured_meter ~cells ~fill:bar ~around share =
+  let fill, track = meter_glyphs ~cells share in
+  let width = max 0 cells in
+  let drawn_fill =
+    match bar, fill with
+    | Limit_fill, [] -> ""
+    | Limit_fill, (_ :: _ as fill) ->
+        let scale = Masc_tui_chart.Declared_limit (Theme.limit_paint ()) in
+        let value = percent_of_fraction share in
+        String.concat ""
+          (List.mapi
+             (fun index glyph ->
+               Masc_tui_chart.meter_cell_style scale ~index ~width ~value
+                 ~max_value:percent_of_full
+               ^ glyph)
+             fill)
+        ^ Masc_tui_theme.Sgr.default_fg ^ around
+    | Foreground_fill, fill ->
+        Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
+    | Row_tone_fill, fill -> String.concat "" fill
+  in
+  drawn_fill ^ String.concat "" track
 
 let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_fraction value when Float.is_finite value ->

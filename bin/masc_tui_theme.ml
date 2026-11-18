@@ -430,26 +430,41 @@ let limit_band_status = function
   | Near_limit -> Bad
 ;;
 
-(* A cell stands for the far edge of its span: cell [index] of [width]
-   reaches (index + 1) / width of the limit. That edge is what the fill has
-   reached once the cell is drawn, so the last filled cell never claims a band
-   past the value. The edges between bands are the sixteen-colour steps of RFC
+(* Whether [part / whole] is under one half, and under four fifths, for
+   [0 <= part <= whole]. In integers, so a share exactly on an edge lands on
+   the same side at every width, and rearranged so no product overflows:
+   2p < w is p < w - p, and 5p < 4w is 4 (w - p) > p, which for integers is
+   w - p > p / 4. *)
+let under_half ~part ~whole = part < whole - part
+let under_four_fifths ~part ~whole = whole - part > part / 4
+
+(* A cell reaches the far edge of its span, (index + 1) / width of the limit,
+   unless the value stops short of that edge: a bar rounds a small value up to
+   one cell, and a partial glyph draws a cell the value only enters. So the
+   cell reaches the smaller of its edge and [value / limit], and the bar's
+   last cell takes the band of the value it draws, never a band past it. The
+   edges between bands are the sixteen-colour steps of RFC
    tui-one-screen-grammar section 7.3: under one half is near zero, under four
-   fifths is midway. They are compared in integers, so a cell sitting exactly
-   on an edge lands on the same side at every width. *)
-let limit_cell_colour ~depth ~index ~width =
+   fifths is midway. A smaller of two shares is under an edge exactly when
+   either share is. *)
+let limit_cell_colour ~depth ~index ~width ~value ~limit =
   let width = max 1 width in
-  let reached = max 1 (min width (index + 1)) in
+  let edge = max 1 (min width (index + 1)) in
+  let limit = max 1 limit in
+  let value = max 0 (min limit value) in
+  let under test = test ~part:edge ~whole:width || test ~part:value ~whole:limit in
   let band =
-    if 2 * reached < width then Near_zero
-    else if 5 * reached < 4 * width then Midway
+    if under under_half then Near_zero
+    else if under under_four_fifths then Midway
     else Near_limit
   in
   match depth with
   | No_color -> Cell_plain
   | Colors_16 -> Cell_band band
   | Colors_256 | Truecolor ->
-    Cell_blend { band; position = float_of_int reached /. float_of_int width }
+    let share part whole = float_of_int part /. float_of_int whole in
+    Cell_blend
+      { band; position = Float.min (share edge width) (share value limit) }
 ;;
 
 (* A blended cell walks success -> warning over the first half of the limit

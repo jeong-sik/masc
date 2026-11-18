@@ -57,9 +57,8 @@
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — nothing is held back here ----
 ; This header used to say that files were withheld until their bodies compiled.
-; Every file it named has since been fixed and moved into a stanza, so no file
-; follows: nothing is withheld for a compile failure today.  Keep this header
-; as the place to record one if it returns, and say so in a sentence.
+; No file is named below: nothing is withheld for a compile failure today.
+; Keep this header as the place to record one if it returns, and say so.
 ;
 ; ---- (2) pre-existing runtime failures — wired, and running ----
 ; The suites named below are NOT excluded.  They sit in the tests stanza that

@@ -10,7 +10,7 @@ import {
   BoardSurface,
   normalizeBoardDetailWidth,
 } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
+import { boardPosts, boardLoading, boardListReadFailed, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
@@ -259,6 +259,7 @@ describe('BoardSurface Component', () => {
     })
     boardPosts.value = []
     boardLoading.value = false
+    boardListReadFailed.value = false
     boardHasMore.value = false
     boardLoadingMore.value = false
     boardSortMode.value = 'recent'
@@ -510,6 +511,30 @@ describe('BoardSurface Component', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))
     expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
+  })
+
+  it('says the list could not be read, and reads it again, where an empty board would be drawn', () => {
+    boardListReadFailed.value = true
+    render(h(BoardSurface, null))
+
+    const failure = within(screen.getByTestId('error-state'))
+    expect(failure.getByText('게시판을 불러오지 못했습니다')).toBeInTheDocument()
+    expect(screen.queryByText('아직 게시글이 없습니다')).toBeNull()
+    // "전체 0개" would count a board that was never read.
+    expect(screen.queryByText('전체 0개')).toBeNull()
+
+    vi.mocked(refreshBoard).mockClear()
+    fireEvent.click(failure.getByRole('button', { name: '다시 시도' }))
+    expect(refreshBoard).toHaveBeenCalledOnce()
+  })
+
+  it('shows the read in progress while a failed list is read again', () => {
+    boardListReadFailed.value = true
+    boardLoading.value = true
+    render(h(BoardSurface, null))
+
+    expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
+    expect(screen.queryByTestId('error-state')).toBeNull()
   })
 
   it('renders article category for a tech exploration post', () => {

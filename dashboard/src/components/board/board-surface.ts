@@ -7,7 +7,7 @@ import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
-import { EmptyState, LoadingState } from '../state-surfaces'
+import { EmptyState, ErrorState, LoadingState } from '../state-surfaces'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
@@ -66,6 +66,7 @@ import {
   boardFlairs,
   boardLoading,
   boardLoadingMore,
+  boardListReadFailed,
   boardHasMore,
   boardTotal,
   boardHiddenCategories,
@@ -1387,7 +1388,13 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
     [filteredPosts, boardHiddenCategories.value],
   )
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
-  const countLabel = isFiltering
+  // The list the operator is on could not be read. Nothing on screen answers
+  // it, so the feed says that and offers the read again; a count or "no posts
+  // yet" would describe a board that was never read.
+  const readFailed = boardListReadFailed.value && !boardLoading.value
+  const countLabel = readFailed
+    ? '불러오지 못함'
+    : isFiltering
     ? `${visiblePosts.length}개 표시`
     : boardTotal.value !== null
       ? `전체 ${boardTotal.value}개`
@@ -1418,7 +1425,13 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         onMentions=${onMentions}
       />
       <div class="bd-list">
-        ${isFiltering && visiblePosts.length === 0 && posts.length > 0
+        ${readFailed
+          ? html`<${ErrorState}
+              compact
+              title="게시판을 불러오지 못했습니다"
+              onAction=${() => { void refreshBoard() }}
+            />`
+          : isFiltering && visiblePosts.length === 0 && posts.length > 0
           ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
           : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`

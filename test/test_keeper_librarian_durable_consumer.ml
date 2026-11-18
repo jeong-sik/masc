@@ -460,6 +460,55 @@ let test_observed_unread_reuses_only_unchanged_count_inputs () =
    | Ok _ -> fail "a changed trace reused the old count");
   check int "non-current progress stops before checkpoint loading" 6 !loads
 
+let test_observed_unread_refreshes_replaced_headers_without_loading_history () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-observed-header" in
+  ignore (unread_fixture config trace_id);
+  let loads = ref 0 in
+  let previous = observed_unread config loads ~atoms:2 ~official:0 in
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let expect_current_witness observation =
+    let reads = ref 0 in
+    (match Consumer.For_testing.revalidate_unread_observation_after_object_read
+        ~after_object_read:(fun _digest -> incr reads) observation with
+     | Store.Read_observation.Unchanged -> ()
+     | Refreshed _ | Changed | Unavailable _ ->
+       fail "the consumer returned the old witness instead of its refreshed observation");
+    check int "the returned observation needs no further header-body read" 0 !reads in
+  let replace bytes = match Fs_compat.save_file_atomic path bytes with
+    | Ok () -> () | Error detail -> fail detail in
+  replace (Fs_compat.load_file path);
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  expect_current_witness previous;
+  check int "identical head replacement avoids another history load" 1 !loads;
+  let snapshot = match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    | Ok snapshot -> snapshot | Error error -> fail (Store.checkpoint_ref_load_error_to_string error) in
+  let checkpoint = Store.exact_snapshot_checkpoint snapshot in
+  let context = Agent_core.Context.copy checkpoint.context in
+  Agent_core.Context.set context "execution_scope" (`String "restored-operation");
+  (match Store.save_agent_core_if_source ~session_dir
+      ~expected_source_ref:(Store.exact_snapshot_reference snapshot)
+      ~boundary:Agent_core.Checkpoint_objects.Turn_continues {checkpoint with context}
+      |> Store.require_confirmed_installation with
+   | Ok _ -> () | Error _ -> fail "the context-only CAS did not install");
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  expect_current_witness previous;
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  check int "context-only CAS and subsequent reuse avoid history loads" 1 !loads;
+  let malformed = match Yojson.Safe.from_string (Fs_compat.load_file path) with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "checkpoint", `Assoc header ->
+          "checkpoint", `Assoc (("context", `List []) :: List.remove_assoc "context" header)
+        | pair -> pair) fields)
+    | _ -> fail "fixture has no checkpoint head" in
+  replace (Yojson.Safe.to_string malformed);
+  (match observe_unread ~previous config loads, Consumer.unread_turns ~config ~keeper_name with
+   | Error observed, Error expected ->
+     check bool "refused refresh preserves the strict reader's header error" true (observed = expected)
+   | _ -> fail "malformed header reused the old positive count");
+  check int "refused refresh falls through the full reader" 2 !loads
+
 let test_observed_unread_rechecks_object_integrity_and_head_errors () =
   with_workspace @@ fun config ->
   let trace_id = "trace-observed-corruption" in
@@ -5447,6 +5496,8 @@ let () =
             test_unread_turns_counts_what_a_pass_has_left
         ; test_case "observed unread count reuses only unchanged inputs" `Quick
             test_observed_unread_reuses_only_unchanged_count_inputs
+        ; test_case "observed unread count refreshes header-only changes" `Quick
+            test_observed_unread_refreshes_replaced_headers_without_loading_history
         ; test_case "observed unread count preserves object and head errors" `Quick
             test_observed_unread_rechecks_object_integrity_and_head_errors
         ; test_case "observed unread count follows boundary rewrite and restart" `Quick

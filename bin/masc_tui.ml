@@ -12850,18 +12850,22 @@ let stage_accepted_spill state ~keeper_name ~prefix ~prepared
            | None -> Error "accepted input disappeared while staging the paste")
 ;;
 
-let launch_waiting_keeper_input state ~mailbox ~keeper_name =
+(* Hands the Keeper's next authorised queued input to the server. An input
+   found to hand off leaves the queue and the waiting marks the chat draws,
+   so that is [Drawn_changed]; finding none is [Drawn_unchanged]. *)
+let dispatch_waiting_keeper_input state ~mailbox ~keeper_name =
   if state.workspace_identity = Workspace_identity_match
      && keeper_available_for_new_message state keeper_name
      && not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then begin
     (* Every Enter send, including one without a control token, waits for the
        previous server acceptance. Concurrent HTTP fibers may otherwise reach
        the durable queue in the opposite order. *)
-    if not (keeper_admission_pending state keeper_name) then
+    if keeper_admission_pending state keeper_name then Drawn_unchanged
+    else
       let generation = keeper_chat_control_generation state keeper_name in
       let ready = next_authorized_keeper_input state keeper_name in
       match ready with
-      | None -> ()
+      | None -> Drawn_unchanged
       | Some (item, target) ->
         let request_id = item.Chat_queue.request.request_id in
         let explicitly_queued = List.exists (fun (name, id, _) ->
@@ -12900,8 +12904,15 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
                  when String.equal name keeper_name && held.generation = generation ->
                  Awaiting_control {held with generation = next_generation}
                | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
-             name, id, intervention) state.keeper_interactive_waiting)
-  end
+             name, id, intervention) state.keeper_interactive_waiting);
+        Drawn_changed
+  end else Drawn_unchanged
+;;
+
+(* For callers whose own arm already asks for a frame. *)
+let launch_waiting_keeper_input state ~mailbox ~keeper_name =
+  let (_ : drawn_effect) = dispatch_waiting_keeper_input state ~mailbox ~keeper_name in
+  ()
 ;;
 
 let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
@@ -29767,14 +29778,21 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Keepers (Keeper_message), None)
             | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _)
             | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _) -> ());
-           List.iter (fun row -> launch_waiting_keeper_input state ~mailbox
-             ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh;
+           let dispatched =
+             List.fold_left (fun drawn row ->
+               Masc_tui_types.either_drawn_changed drawn
+                 (dispatch_waiting_keeper_input state ~mailbox
+                    ~keeper_name:row.Tui_decode.ktr_keeper_name))
+               Drawn_unchanged fresh in
            if reconcile_waiting then
-             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox
+             launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox;
+           (* A queued input handed to the server leaves the chat's queue,
+              which no view holds (RFC tui-one-screen-grammar §8). *)
+           Masc_tui_types.either_drawn_changed dispatched (Masc_tui_types.keeper_turns_effect state)
        | Error detail ->
            state.keeper_turns_owed <- failed_read state.keeper_turns_owed;
-           refuse_keeper_turn_observation state detail);
-      Masc_tui_types.keeper_turns_effect state
+           refuse_keeper_turn_observation state detail;
+           Masc_tui_types.keeper_turns_effect state)
   | Gate_msg (Gate_snapshot_loaded (request, expected_workspace, result)) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
        | None -> ()
@@ -45425,6 +45443,7 @@ Use relative paths for resources already held in the package. -->
                ~tag:(fun (frame, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_value.Redraw.begin_frame ();
+                 Masc_tui_types.begin_drawn_reads ();
                  Masc_tui_message_layout.begin_frame ();
                  Masc_tui_approval_detail.begin_frame ();
                  Masc_tui_approvals_model.reconcile_value_reading state;

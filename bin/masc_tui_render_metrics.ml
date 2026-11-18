@@ -1049,6 +1049,9 @@ let render_section_resources ~cols (state : state) =
           "    Previous rows are not counted as current running turns." ]
     | None, None -> [ "    " ^ field_unread ~ko ]
     | Some observed_at, None ->
+      (* The age below is drawn from the observation time, which every
+         successful turns answer moves (RFC tui-one-screen-grammar §8). *)
+      note_turn_observation_age_drawn ();
       let running = List.filter_map
           (fun (row : Decode.keeper_turn_row) -> match row.ktr_state with
             | Keeper_turn_running { lane; started_at_unix; _ } ->

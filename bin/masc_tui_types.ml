@@ -9818,7 +9818,13 @@ type drawn_effect = Drawn_changed | Drawn_unchanged
    draws. A frame records them when it is built ([drawn_reads]), and the
    reader's next answer is compared with that record, not with the answer
    before it: a frame may have drawn a failure the answer clears, or drawn
-   the read in progress. *)
+   the read in progress.
+
+   Renderers read the state fields, not these views, so a drawn value the
+   reader's branch starts to write is added here too; one left out is never
+   redrawn by an answer that changes only it. Each [equal_*_view] names
+   every field with warning 9 on, so a field added to a view does not build
+   until it is compared. *)
 
 (* The Tools inventory reader: the reading and the Keeper it is for, its
    failure, the Skill the cursor is on, and the Keeper reads in flight, which
@@ -9831,10 +9837,19 @@ type tools_inventory_view = {
   tiv_reading : tools_read_inflight option;
 }
 
-(* The Keeper turns reader. Metrics draws [ktv_observed_at] as an age. *)
+(* When the Keeper turns were last observed, as a frame drew it. Every
+   successful turns answer moves that time, but only Metrics and the
+   answering overlay draw its age, so a frame that drew no age holds only
+   whether a read has answered at all. *)
+type turn_observation_view =
+  | Turns_never_observed
+  | Turns_observed
+  | Turns_observed_at of float
+
+(* The Keeper turns reader. *)
 type keeper_turns_view = {
   ktv_rows : Tui_decode.keeper_turn_row list;
-  ktv_observed_at : float option;
+  ktv_observation : turn_observation_view;
   ktv_error : request_failure option;
   ktv_finishes : (string * float) list;
   ktv_reading : bool;
@@ -14071,36 +14086,64 @@ let equal_tools_read_part a b =
   | Tools_async_read, (Tools_inventory_read | Tools_catalog_read | Tools_activations_read | Tools_usage_read _) ->
       false
 
-let equal_tools_read_inflight a b =
-  Int.equal a.tri_generation b.tri_generation
-  && Option.equal String.equal a.tri_keeper b.tri_keeper
-  && List.equal equal_tools_read_part a.tri_pending b.tri_pending
+let[@warning "+9"] equal_tools_read_inflight
+    { tri_generation; tri_keeper; tri_pending }
+    { tri_generation = other_generation; tri_keeper = other_keeper; tri_pending = other_pending } =
+  Int.equal tri_generation other_generation
+  && Option.equal String.equal tri_keeper other_keeper
+  && List.equal equal_tools_read_part tri_pending other_pending
 
 (* Decoded readings compare by identity. A 304 answers with the very value
    the last read decoded (Masc_tui_loader), so an answer that changed nothing
    holds the same values. A fresh body with the same content compares as
    changed, which costs one frame and never hides a change. *)
-let equal_tools_inventory_view a b =
-  Option.equal ( == ) a.tiv_inventory b.tiv_inventory
-  && Option.equal String.equal a.tiv_keeper b.tiv_keeper
-  && Option.equal equal_request_failure a.tiv_error b.tiv_error
-  && Int.equal a.tiv_skill_cursor b.tiv_skill_cursor
-  && Option.equal equal_tools_read_inflight a.tiv_reading b.tiv_reading
+let[@warning "+9"] equal_tools_inventory_view
+    { tiv_inventory; tiv_keeper; tiv_error; tiv_skill_cursor; tiv_reading }
+    { tiv_inventory = other_inventory; tiv_keeper = other_keeper; tiv_error = other_error;
+      tiv_skill_cursor = other_skill_cursor; tiv_reading = other_reading } =
+  Option.equal ( == ) tiv_inventory other_inventory
+  && Option.equal String.equal tiv_keeper other_keeper
+  && Option.equal equal_request_failure tiv_error other_error
+  && Int.equal tiv_skill_cursor other_skill_cursor
+  && Option.equal equal_tools_read_inflight tiv_reading other_reading
 
-let equal_keeper_turns_view a b =
-  List.equal ( == ) a.ktv_rows b.ktv_rows
-  && Option.equal Float.equal a.ktv_observed_at b.ktv_observed_at
-  && Option.equal equal_request_failure a.ktv_error b.ktv_error
+let equal_turn_observation_view a b =
+  match a, b with
+  | Turns_never_observed, Turns_never_observed | Turns_observed, Turns_observed -> true
+  | Turns_observed_at at, Turns_observed_at other -> Float.equal at other
+  | Turns_never_observed, (Turns_observed | Turns_observed_at _)
+  | Turns_observed, (Turns_never_observed | Turns_observed_at _)
+  | Turns_observed_at _, (Turns_never_observed | Turns_observed) -> false
+
+let[@warning "+9"] equal_keeper_turns_view
+    { ktv_rows; ktv_observation; ktv_error; ktv_finishes; ktv_reading }
+    { ktv_rows = other_rows; ktv_observation = other_observation; ktv_error = other_error;
+      ktv_finishes = other_finishes; ktv_reading = other_reading } =
+  List.equal ( == ) ktv_rows other_rows
+  && equal_turn_observation_view ktv_observation other_observation
+  && Option.equal equal_request_failure ktv_error other_error
   && List.equal (fun (name, at) (other, other_at) -> String.equal name other && Float.equal at other_at)
-       a.ktv_finishes b.ktv_finishes
-  && Bool.equal a.ktv_reading b.ktv_reading
+       ktv_finishes other_finishes
+  && Bool.equal ktv_reading other_reading
 
-let equal_keeper_waiting_view a b =
-  List.equal ( == ) a.kwv_rows b.kwv_rows
-  && Option.equal ( == ) a.kwv_failure b.kwv_failure
-  && List.equal String.equal a.kwv_unverified b.kwv_unverified
-  && Option.equal equal_request_failure a.kwv_error b.kwv_error
-  && Option.equal Int64.equal a.kwv_awaiting_since b.kwv_awaiting_since
+let[@warning "+9"] equal_keeper_waiting_view
+    { kwv_rows; kwv_failure; kwv_unverified; kwv_error; kwv_awaiting_since }
+    { kwv_rows = other_rows; kwv_failure = other_failure; kwv_unverified = other_unverified;
+      kwv_error = other_error; kwv_awaiting_since = other_awaiting_since } =
+  List.equal ( == ) kwv_rows other_rows
+  && Option.equal ( == ) kwv_failure other_failure
+  && List.equal String.equal kwv_unverified other_unverified
+  && Option.equal equal_request_failure kwv_error other_error
+  && Option.equal Int64.equal kwv_awaiting_since other_awaiting_since
+
+(* Whether the frame being built drew the age of the Keeper turns
+   observation. The place that draws the age notes it; the frame's turns
+   view holds the time only when it did. *)
+let turn_observation_age_drawn = Domain.DLS.new_key (fun () -> false)
+
+let begin_drawn_reads () = Domain.DLS.set turn_observation_age_drawn false
+
+let note_turn_observation_age_drawn () = Domain.DLS.set turn_observation_age_drawn true
 
 let tools_inventory_view (state : state) =
   { tiv_inventory = state.tools_inventory
@@ -14109,9 +14152,12 @@ let tools_inventory_view (state : state) =
   ; tiv_skill_cursor = state.tools_skill_cursor
   ; tiv_reading = state.tools_read_inflight }
 
-let keeper_turns_view (state : state) =
+let keeper_turns_view ~age_drawn (state : state) =
   { ktv_rows = state.keeper_turns
-  ; ktv_observed_at = state.keeper_turns_observed_at
+  ; ktv_observation =
+      (match state.keeper_turns_observed_at with
+       | None -> Turns_never_observed
+       | Some observed_at -> if age_drawn then Turns_observed_at observed_at else Turns_observed)
   ; ktv_error = state.keeper_turns_error
   ; ktv_finishes = state.keeper_turn_finishes
   ; ktv_reading = state.keeper_turns_inflight }
@@ -14123,12 +14169,13 @@ let keeper_waiting_view (state : state) =
   ; kwv_error = state.keeper_waiting_error
   ; kwv_awaiting_since = Keeper_waiting_read.awaiting_since state.keeper_waiting_read }
 
-(* Called where a frame is built: what it drew is what the next answer is
-   compared with. *)
+(* Called where a frame is built, after it is drawn: what it drew is what the
+   next answer is compared with. *)
 let note_drawn_reads (state : state) =
   state.drawn_reads <- Some
     { dr_tools_inventory = tools_inventory_view state
-    ; dr_keeper_turns = keeper_turns_view state
+    ; dr_keeper_turns =
+        keeper_turns_view ~age_drawn:(Domain.DLS.get turn_observation_age_drawn) state
     ; dr_keeper_waiting = keeper_waiting_view state }
 
 (* With no frame built yet there is nothing to compare with, so the answer
@@ -14153,14 +14200,24 @@ let keeper_waiting_effect (state : state) =
     ~drawn:(Option.map (fun drawn -> drawn.dr_keeper_waiting) state.drawn_reads)
     (keeper_waiting_view state)
 
-(* A turns answer also carries the waiting rows, so it is drawn when either
-   view moved. *)
+(* The answer's view holds the observation time exactly when the drawn one
+   does, so a moved time counts only on a frame that drew its age. A turns
+   answer also carries the waiting rows, so it is drawn when either view
+   moved. *)
 let keeper_turns_effect (state : state) =
-  either_drawn_changed
-    (effect_against_drawn ~equal:equal_keeper_turns_view
-       ~drawn:(Option.map (fun drawn -> drawn.dr_keeper_turns) state.drawn_reads)
-       (keeper_turns_view state))
-    (keeper_waiting_effect state)
+  let turns =
+    match state.drawn_reads with
+    | None -> Drawn_changed
+    | Some { dr_keeper_turns = drawn; _ } ->
+        let age_drawn =
+          match drawn.ktv_observation with
+          | Turns_observed_at _ -> true
+          | Turns_never_observed | Turns_observed -> false
+        in
+        effect_against_drawn ~equal:equal_keeper_turns_view ~drawn:(Some drawn)
+          (keeper_turns_view ~age_drawn state)
+  in
+  either_drawn_changed turns (keeper_waiting_effect state)
 
 let supersede_live_context_read (state : state) cancel =
   let previous = state.live_context_cancel in

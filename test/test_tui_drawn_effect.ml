@@ -24,6 +24,14 @@ let drawn =
 
 let state () = T.create_state ~workspace:"drawn-effect" ~port:8935 ()
 
+(* A frame as the loop builds one: it begins, the drawing notes what it drew
+   from the turns observation time (Metrics and the answering overlay draw
+   its age), and the drawn views are recorded. *)
+let draw_frame ?(age_drawn = false) state =
+  T.begin_drawn_reads ();
+  if age_drawn then T.note_turn_observation_age_drawn ();
+  T.note_drawn_reads state
+
 let snapshot freshness =
   { Tools.ts_tools = [];
     ts_count = 0;
@@ -63,7 +71,7 @@ let test_unchanged_answer () =
   (* A 304 answers with the very value the last read decoded. *)
   let warming = snapshot Tools.Warming in
   answer_inventory state warming;
-  T.note_drawn_reads state;
+  draw_frame state;
   start_inventory_read state;
   answer_inventory state warming;
   check drawn "a 304 that moves nothing" T.Drawn_unchanged (T.tools_inventory_effect state)
@@ -74,7 +82,7 @@ let test_answer_after_drawn_failure () =
   answer_inventory state warming;
   start_inventory_read state;
   fail_inventory state "read failed";
-  T.note_drawn_reads state;
+  draw_frame state;
   start_inventory_read state;
   answer_inventory state warming;
   check drawn "a 304 clears the drawn failure" T.Drawn_changed (T.tools_inventory_effect state)
@@ -85,7 +93,7 @@ let test_answer_after_drawn_progress () =
   answer_inventory state warming;
   start_inventory_read state;
   (* A frame built while the read runs draws it in progress. *)
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_inventory state warming;
   check drawn "only the answer's frame clears the progress" T.Drawn_changed
     (T.tools_inventory_effect state)
@@ -95,11 +103,11 @@ let test_frame_in_between () =
   let warming = snapshot Tools.Warming in
   answer_inventory state warming;
   start_inventory_read state;
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_inventory state warming;
   check drawn "the answer clears the drawn progress" T.Drawn_changed (T.tools_inventory_effect state);
   (* The frame that answer asked for is built and recorded. *)
-  T.note_drawn_reads state;
+  draw_frame state;
   start_inventory_read state;
   answer_inventory state warming;
   check drawn "the next 304 compares with that frame" T.Drawn_unchanged
@@ -108,11 +116,11 @@ let test_frame_in_between () =
 let test_fresh_body () =
   let state = state () in
   answer_inventory state (snapshot Tools.Warming);
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_inventory state (snapshot Tools.Warming);
   check drawn "a fresh body is drawn even when it reads the same" T.Drawn_changed
     (T.tools_inventory_effect state);
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_inventory state (snapshot Tools.Settled);
   check drawn "a built inventory replaces the placeholder" T.Drawn_changed
     (T.tools_inventory_effect state)
@@ -121,7 +129,7 @@ let test_skill_cursor () =
   let state = state () in
   let warming = snapshot Tools.Warming in
   answer_inventory state warming;
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_inventory state warming;
   state.tools_skill_cursor <- state.tools_skill_cursor + 1;
   check drawn "the answer moved the Skill cursor" T.Drawn_changed (T.tools_inventory_effect state)
@@ -134,32 +142,32 @@ let answer_waiting (state : T.state) =
 let test_waiting () =
   let state = state () in
   answer_waiting state;
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_waiting state;
   check drawn "an incomplete projection read again" T.Drawn_unchanged (T.keeper_waiting_effect state);
   state.keeper_waiting_error <- Some (T.Request_failed "waiting read failed");
-  T.note_drawn_reads state;
+  draw_frame state;
   answer_waiting state;
   check drawn "a 304 clears the drawn waiting failure" T.Drawn_changed (T.keeper_waiting_effect state);
-  T.note_drawn_reads state;
+  draw_frame state;
   T.note_keeper_waiting_change state T.Waiting_all;
   check drawn "a change the screen now waits for" T.Drawn_changed (T.keeper_waiting_effect state)
 
 let test_turns () =
   let state = state () in
   state.keeper_turns_inflight <- true;
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_turns_inflight <- false;
   check drawn "the frame drew the turn read in progress" T.Drawn_changed (T.keeper_turns_effect state);
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_turns_inflight <- true;
   state.keeper_turns_inflight <- false;
   check drawn "a turn read that moved nothing" T.Drawn_unchanged (T.keeper_turns_effect state);
   state.keeper_turns_error <- Some (T.Request_failed "turns read failed");
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_turns_error <- None;
   check drawn "a 304 clears the drawn turn failure" T.Drawn_changed (T.keeper_turns_effect state);
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_waiting_error <- Some (T.Request_failed "waiting read failed");
   check drawn "the turn answer carries waiting rows too" T.Drawn_changed (T.keeper_turns_effect state)
 
@@ -188,7 +196,7 @@ let test_tools_other_keeper () =
   let state = state () in
   state.tools_inventory_keeper <- Some "alpha";
   state.tools_error <- Some (T.Request_failed "HTTP 503");
-  T.note_drawn_reads state;
+  draw_frame state;
   (* The read for the Keeper now selected fails the same way. *)
   state.tools_inventory_keeper <- Some "beta";
   state.tools_error <- Some (T.Request_failed "HTTP 503");
@@ -199,16 +207,38 @@ let test_turns_success_moves_observation_time () =
   let rows = [ turn "alpha" ] in
   let observed = Decode.Keeper_waiting_observed [ waiting_row "alpha" ] in
   T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:10.;
-  T.note_drawn_reads state;
+  draw_frame state;
   (* The same decoded rows again, as a 304 hands them back: the answer
-     still stamps a new observation time, which Metrics draws as an age. *)
+     stamps a new observation time, which this frame drew no age from. *)
   T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:40.;
-  check drawn "a later observation time" T.Drawn_changed (T.keeper_turns_effect state)
+  check drawn "a later time no frame drew" T.Drawn_unchanged (T.keeper_turns_effect state);
+  (* Metrics draws the age from that time. *)
+  draw_frame ~age_drawn:true state;
+  T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:70.;
+  check drawn "a later time the frame drew an age from" T.Drawn_changed
+    (T.keeper_turns_effect state);
+  (* The next frame is on a screen without the age; the note does not
+     carry over from the frame before. *)
+  draw_frame state;
+  T.accept_keeper_turn_observation state ~rows ~waiting:observed ~observed_at:100.;
+  check drawn "the age is no longer drawn" T.Drawn_unchanged (T.keeper_turns_effect state)
+
+let test_turns_first_observation () =
+  let state = state () in
+  draw_frame state;
+  (* The first answer turns "not read yet" into rows read, on any screen. *)
+  T.accept_keeper_turn_observation state ~rows:[]
+    ~waiting:(Decode.Keeper_waiting_observed []) ~observed_at:10.;
+  check drawn "the first observation" T.Drawn_changed (T.keeper_turns_effect state);
+  draw_frame ~age_drawn:true state;
+  T.accept_keeper_turn_observation state ~rows:[]
+    ~waiting:(Decode.Keeper_waiting_observed []) ~observed_at:10.;
+  check drawn "the drawn age's time again" T.Drawn_unchanged (T.keeper_turns_effect state)
 
 let test_turns_repeated_failure () =
   let state = state () in
   T.refuse_keeper_turn_observation state (T.Request_failed "HTTP 503");
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_turns_inflight <- true;
   state.keeper_turns_inflight <- false;
   T.refuse_keeper_turn_observation state (T.Request_failed "HTTP 503");
@@ -220,7 +250,7 @@ let test_turns_fresh_rows () =
   let state = state () in
   state.keeper_turns <- [ turn "alpha" ];
   state.keeper_turns_observed_at <- Some 10.;
-  T.note_drawn_reads state;
+  draw_frame state;
   (* A fresh body decodes new rows; the observation time is held still so
      only the rows differ. *)
   state.keeper_turns <- [ turn "alpha" ];
@@ -228,14 +258,14 @@ let test_turns_fresh_rows () =
 
 let test_turns_finish_glow () =
   let state = state () in
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_turn_finishes <- [ ("alpha", 10.) ];
   check drawn "a turn that just finished" T.Drawn_changed (T.keeper_turns_effect state)
 
 let test_turns_settle_awaited_waiting () =
   let state = state () in
   T.note_keeper_waiting_change state T.Waiting_all;
-  T.note_drawn_reads state;
+  draw_frame state;
   (* The turns answer completes the waiting projection the screen waited for. *)
   state.keeper_waiting_read <- T.Keeper_waiting_read.settle_poll state.keeper_waiting_read ~success:true;
   check drawn "the wait the frame drew ends" T.Drawn_changed (T.keeper_turns_effect state)
@@ -245,7 +275,7 @@ let test_waiting_304_through_merge () =
   let rows = [ turn "alpha" ] in
   let observed = Decode.Keeper_waiting_observed [ waiting_row "alpha" ] in
   T.accept_keeper_waiting_observation state ~rows ~waiting:observed;
-  T.note_drawn_reads state;
+  draw_frame state;
   T.accept_keeper_waiting_observation state ~rows ~waiting:observed;
   check drawn "the same decoded answer" T.Drawn_unchanged (T.keeper_waiting_effect state);
   T.accept_keeper_waiting_observation state ~rows
@@ -258,7 +288,7 @@ let test_waiting_failure_cleared () =
   let held = waiting_row "alpha" in
   T.accept_keeper_waiting_observation state ~rows ~waiting:(Decode.Keeper_waiting_observed [ held ]);
   state.keeper_waiting_failure <- Some (Decode.Keeper_waiting_invalid "fleet scan failed");
-  T.note_drawn_reads state;
+  draw_frame state;
   (* Every Keeper on screen is observed again with the rows already held. *)
   T.accept_keeper_waiting_observation state ~rows ~waiting:(Decode.Keeper_waiting_observed [ held ]);
   check drawn "the fleet failure the frame drew is gone" T.Drawn_changed (T.keeper_waiting_effect state)
@@ -266,14 +296,14 @@ let test_waiting_failure_cleared () =
 let test_waiting_unverified_resolved () =
   let state = state () in
   state.keeper_waiting_unverified <- [ "alpha"; "beta" ];
-  T.note_drawn_reads state;
+  draw_frame state;
   state.keeper_waiting_unverified <- [ "beta" ];
   check drawn "a Keeper read again" T.Drawn_changed (T.keeper_waiting_effect state)
 
 let test_waiting_read_settles_the_wait () =
   let state = state () in
   T.note_keeper_waiting_change state T.Waiting_all;
-  T.note_drawn_reads state;
+  draw_frame state;
   let reading, request = T.Keeper_waiting_read.start state.keeper_waiting_read in
   state.keeper_waiting_read <- reading;
   (* Starting the read changes nothing the frame drew. *)
@@ -285,7 +315,7 @@ let test_waiting_read_settles_the_wait () =
         | None -> fail "the read in flight settles"
         | Some (reading, _follow_up) -> state.keeper_waiting_read <- reading));
   check drawn "the answer ends the drawn wait" T.Drawn_changed (T.keeper_waiting_effect state);
-  T.note_drawn_reads state;
+  draw_frame state;
   let reading, request = T.Keeper_waiting_read.start state.keeper_waiting_read in
   state.keeper_waiting_read <- reading;
   (match request with
@@ -317,6 +347,7 @@ let () =
         [ test_case "turn answers" `Quick test_turns;
           test_case "success moves the observation time" `Quick
             test_turns_success_moves_observation_time;
+          test_case "first observation" `Quick test_turns_first_observation;
           test_case "repeated failure" `Quick test_turns_repeated_failure;
           test_case "fresh rows" `Quick test_turns_fresh_rows;
           test_case "finish glow" `Quick test_turns_finish_glow;

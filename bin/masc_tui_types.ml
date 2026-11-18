@@ -5317,7 +5317,7 @@ end
 
 type asks_observation = {
   asks_request: Snapshot_read.request;
-  asks_result: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+  asks_result: (Masc.Tui_decode_asks.asks_snapshot, request_failure) result;
 }
 
 type early_asks_observation = {
@@ -11920,6 +11920,16 @@ let dismiss_latest_preset_save_receipt (state : state) =
 
 let set_last_action (state : state) action =
   state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
+
+(* A background read's answer, for zone 4 (RFC tui-one-screen-grammar §2): a
+   failure adds to that read's run and an answer ends it. A read the
+   workspace guard kept back never left, so it is neither. The caller passes
+   only the read's own answer, never an error put in place of one. *)
+let note_read_answer (state : state) read ~at = function
+  | Ok _ -> state.read_failures <- Masc_tui_read_failure.succeeded state.read_failures read
+  | Error (Request_failed _) ->
+      state.read_failures <- Masc_tui_read_failure.failed state.read_failures read ~at
+  | Error (Request_withdrawn _) -> ()
 
 let quit_inflight_snapshot (state : state) =
   List.map (fun (entry : inflight) ->

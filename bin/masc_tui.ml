@@ -36584,7 +36584,7 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
-        start_http_refresh state ~host ~port ~intent:Refresh_key
+        start_http_refresh state ~host ~port ~intent:Operator_key
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
@@ -36715,7 +36715,7 @@ Use relative paths for resources already held in the package. -->
            else (match k with
              | "r" ->
                  start_http_refresh state ~host:server_peer_host ~port:state.port
-                   ~intent:Refresh_key ~refresh_inflight:http_refresh_inflight
+                   ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                    ~scoped_refresh_inflight:http_scoped_refresh_inflight
                    ~scoped_refresh_followup ~mailbox:async_messages
              | _ -> ())
@@ -39197,7 +39197,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
                      start_http_refresh state ~host:server_peer_host ~port:state.port
-                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_board_post post_id) ->
@@ -39876,7 +39876,7 @@ Use relative paths for resources already held in the package. -->
               authority even when retained rows cannot authorize that read.
               Do not refresh the live browser hidden underneath history. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
@@ -42430,7 +42430,7 @@ Use relative paths for resources already held in the package. -->
               end)
        | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
            let read_candle goal_id =
-             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Operator_key
                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                ~scoped_refresh_followup ~mailbox:async_messages;
              clear_goal_candle_revalidation state ~goal_id;
@@ -43926,7 +43926,7 @@ Use relative paths for resources already held in the package. -->
               | None -> "Board: every hearth"
               | Some hearth -> "Board hearth: " ^ hearth);
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
         | Some "f" | Some "F" when state.view = Planning ->
@@ -44596,7 +44596,7 @@ Use relative paths for resources already held in the package. -->
                        ("Board order: "
                         ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
-                       ~port:state.port ~intent:Revalidate
+                       ~port:state.port ~intent:Operator_key
                        ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup

@@ -5303,7 +5303,7 @@ end
    failing waits for the one the failure owes (RFC tui-one-screen-grammar §2). *)
 type full_refresh_intent = Masc_tui_refresh_pace.ask =
   | Revalidate
-  | Refresh_key
+  | Operator_key
   | Owed_pass
 
 (* Full and scoped bundles share one authority order. A later dispatch
@@ -5750,10 +5750,10 @@ type scoped_refresh_followup =
 let note_full_refresh_intent ~intent ~full_refresh_inflight
     ~scoped_refresh_inflight followup =
   match intent with
-  | (Revalidate | Refresh_key | Owed_pass)
+  | (Revalidate | Operator_key | Owed_pass)
     when full_refresh_inflight || scoped_refresh_inflight ->
       Revalidate_after_scoped
-  | Revalidate | Refresh_key | Owed_pass -> followup
+  | Revalidate | Operator_key | Owed_pass -> followup
 
 let take_scoped_refresh_followup ~full_refresh_inflight
     ~scoped_refresh_inflight = function

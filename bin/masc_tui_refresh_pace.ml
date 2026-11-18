@@ -3,7 +3,7 @@ type t =
   | Failing of { failures : int; retry_at : float }
   | Recovered
 
-type ask = Revalidate | Refresh_key | Owed_pass
+type ask = Revalidate | Operator_key | Owed_pass
 
 let answering = Answering
 
@@ -27,7 +27,7 @@ let due ~now = function
 
 let starts ~now ask t =
   match ask, t with
-  | Refresh_key, (Answering | Failing _ | Recovered) -> true
+  | Operator_key, (Answering | Failing _ | Recovered) -> true
   | Revalidate, (Answering | Recovered) -> true
   | Revalidate, Failing _ -> false
   | Owed_pass, (Answering | Failing _ | Recovered) -> due ~now t

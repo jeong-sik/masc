@@ -32,9 +32,10 @@ type ask =
       (** Something the TUI observed asks for a pass: a server push, a
           reopened stream, the answer to a request it sent. Waits while the
           probe is failing; the owed pass covers it. *)
-  | Refresh_key
-      (** The operator's refresh key. Starts at once and keeps the failures
-          in a row, so a failure after it waits longer. *)
+  | Operator_key
+      (** An operator's key: the refresh key, or a key that changes what a
+          screen shows and reads it again. Starts at once and keeps the
+          failures in a row, so a failure after it waits longer. *)
   | Owed_pass  (** The pass a failing probe owes, once its wait is over. *)
 
 val answering : t

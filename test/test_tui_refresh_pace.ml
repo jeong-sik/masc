@@ -73,10 +73,10 @@ let test_no_pass_starts_before_its_wait () =
   check bool "an answering probe starts what the TUI asks for" true
     (P.starts ~now:0.0 P.Revalidate P.answering)
 
-let test_the_refresh_key_skips_the_wait_and_keeps_the_count () =
+let test_an_operator_key_skips_the_wait_and_keeps_the_count () =
   let t = failed ~now:10.0 P.answering in
   check bool "the operator's key starts during the wait" true
-    (P.starts ~now:10.1 P.Refresh_key t);
+    (P.starts ~now:10.1 P.Operator_key t);
   check (float 1e-9) "a failure after it waits one step longer" 4.0
     (wait_after ~now:10.2 (failed ~now:10.2 t))
 
@@ -101,8 +101,8 @@ let () =
             test_a_pass_that_answers_resets_the_wait
         ; test_case "no pass starts before its wait" `Quick
             test_no_pass_starts_before_its_wait
-        ; test_case "the refresh key skips the wait and keeps the count" `Quick
-            test_the_refresh_key_skips_the_wait_and_keeps_the_count
+        ; test_case "an operator key skips the wait and keeps the count" `Quick
+            test_an_operator_key_skips_the_wait_and_keeps_the_count
         ; test_case "a screen answer ends the wait and the owed pass starts now" `Quick
             test_a_screen_answer_ends_the_wait_and_the_owed_pass_starts_now
         ] )

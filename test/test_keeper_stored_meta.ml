@@ -472,29 +472,116 @@ let test_owner_hands_out_the_file_read () =
     keepers
 ;;
 
+(* What a reader is handed while the Owner stands for the file. *)
+let handed config name =
+  Stored_meta.read config name ~read_file:(fun () ->
+    Alcotest.failf "the file of %s was read while its Owner stands for it" name)
+;;
+
+let handed_meta config name : Meta.keeper_meta =
+  match handed config name with
+  | Ok (Some meta) -> meta
+  | Ok None -> Alcotest.failf "no meta was handed out for %s" name
+  | Error detail -> Alcotest.failf "the read of %s failed: %s" name detail
+;;
+
+(* One commit of the Keeper's Owner, which publishes a new meta. *)
+let take_the_task config name =
+  match
+    Registry.apply_meta
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+      (Reducer.Set_current_task { task_id = Some held_task; updated_at = "task taken" })
+  with
+  | Ok _ -> ()
+  | Error error ->
+    Alcotest.failf "the commit failed: %s" (Registry.command_error_to_string error)
+;;
+
 let test_handed_meta_follows_the_owner_commits () =
   with_three_keepers
   @@ fun config ->
   let name = declared in
-  let handed () =
-    Stored_meta.read config name ~read_file:(fun () ->
-      Alcotest.fail "the file was read while the Owner stands for it")
-  in
-  Alcotest.(check (option string)) "no task is held at first" None (held_task_of (handed ()));
-  (match
-     Registry.apply_meta
-       ~base_path:config.Workspace.base_path
-       ~keeper_name:name
-       (Reducer.Set_current_task { task_id = Some held_task; updated_at = "task taken" })
-   with
-   | Ok _ -> ()
-   | Error error ->
-     Alcotest.failf "the commit failed: %s" (Registry.command_error_to_string error));
+  Alcotest.(check (option string))
+    "no task is held at first"
+    None
+    (held_task_of (handed config name));
+  take_the_task config name;
   Alcotest.(check (option string))
     "the task of the commit is handed out"
     (Some held_task_name)
-    (held_task_of (handed ()));
-  check_same_read "after the commit" (Store.read_meta config name) (handed ())
+    (held_task_of (handed config name));
+  check_same_read "after the commit" (Store.read_meta config name) (handed config name)
+;;
+
+(* {1 The read-back is kept}
+
+   The snapshot is printed and parsed once for a meta the Owner published,
+   not once for a read. Two reads of one published meta are told apart from
+   two read-backs by the value they hand out: a read-back builds a new one. *)
+
+let test_read_back_is_made_once_for_a_published_meta () =
+  with_three_keepers
+  @@ fun config ->
+  let name = declared in
+  let first = handed_meta config name in
+  Alcotest.(check bool)
+    "the next read hands out the value of the first"
+    true
+    (handed_meta config name == first);
+  take_the_task config name;
+  let after_the_commit = handed_meta config name in
+  Alcotest.(check bool)
+    "a commit of the Owner ends it"
+    false
+    (after_the_commit == first);
+  Alcotest.(check bool)
+    "the read-back of the committed meta is kept in its turn"
+    true
+    (handed_meta config name == after_the_commit)
+;;
+
+(* Reads [name] and keeps only a weak pointer to what was handed out. Never
+   inlined: the caller's frame must not hold the value. *)
+let[@inline never] weakly_handed config name =
+  let kept = Weak.create 1 in
+  Weak.set kept 0 (Some (handed_meta config name));
+  kept
+;;
+
+(* A Keeper whose Owner is gone is not read through it again, so no read of
+   that Keeper replaces what was kept for it. The next read-back kept for any
+   Keeper lets it go. *)
+let test_read_back_is_let_go_with_its_owner () =
+  with_three_keepers
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let kept = weakly_handed config declared in
+  Gc.full_major ();
+  Alcotest.(check bool)
+    "kept while the Owner stands for the file"
+    true
+    (Weak.check kept 0);
+  let owner =
+    match Registry.get ~base_path ~keeper_name:declared with
+    | Ok owner -> owner
+    | Error error ->
+      Alcotest.failf
+        "no Owner to take away for %s: %s"
+        declared
+        (Registry.lookup_error_to_string error)
+  in
+  Projection.remove ~base_path ~keeper_name:declared owner;
+  Fun.protect
+    ~finally:(fun () -> Projection.install ~base_path ~keeper_name:declared owner)
+    (fun () ->
+      take_the_task config key_removed;
+      ignore (handed_meta config key_removed : Meta.keeper_meta);
+      Gc.full_major ();
+      Alcotest.(check bool)
+        "let go once another Keeper's read-back is kept"
+        false
+        (Weak.check kept 0))
 ;;
 
 (* The consumers of a Keeper whose Owner stands for its file do not open the
@@ -768,6 +855,16 @@ let () =
             "the row of an owned Keeper needs no meta file"
             `Quick
             test_row_of_an_owned_keeper_needs_no_meta_file
+        ] )
+    ; ( "the read-back is kept"
+      , [ Alcotest.test_case
+            "made once for a published meta"
+            `Quick
+            test_read_back_is_made_once_for_a_published_meta
+        ; Alcotest.test_case
+            "let go with its Owner"
+            `Quick
+            test_read_back_is_let_go_with_its_owner
         ] )
     ; ( "the file is read"
       , [ Alcotest.test_case

@@ -35,3 +35,33 @@ val link_key
 
 (** The accounts the person owns, in the order of their ids. *)
 val owned : Authz_state.t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list
+
+(** Why a person does not spend an account now. *)
+type unavailable =
+  | Linked_to_another
+      (** The log links the account to another person. Nothing of the account
+          is read for the person who asked: the answer is the same whatever
+          became of the account. *)
+  | Defect of Authz_decision.resource_defect
+      (** The status of the account is not [Active]: its purge began
+          ({!Authz_state.provider_account_status}). *)
+  | Reduction_given_up
+      (** A reduction of the account wrote its intent and no record: the start
+          of a purge that was given up. It blocks the account until its owner
+          asks for the purge again (design 8.3). *)
+
+val unavailable_to_string : unavailable -> string
+
+(** Whether [user_id] spends [provider_account_id] now, read as a turn of a
+    Keeper reads the account ({!Authz_decision}): its status, and a reduction
+    of it that was given up. A check outside a turn stands on this, so that it
+    and a turn refuse the same accounts.
+
+    An account no record links is spent by whoever asks: it is the account of
+    a login the official client has not confirmed yet, and nothing of the log
+    names it. The caller decides whose home it is. *)
+val availability
+  :  Authz_state.t
+  -> user_id:Authz_types.User_id.t
+  -> Authz_types.Provider_account_id.t
+  -> (unit, unavailable) result

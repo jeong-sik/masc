@@ -916,6 +916,30 @@ let test_multi_account () =
         let erin = person zone ~base_path ~name:"erin" ~hex:'e' in
         let erin_account = captured erin.home in
         allowed "a turn before the purge of its account" (turn dave ()) dave_account;
+        (* The home the layout spells for the id of dave's account under the
+           namespace of erin: what a caller that did not compare the owner
+           would claim. The log links the account to dave, so erin gets one
+           answer for it, before the purge and after. *)
+        let dave_id_under_erin =
+          let home =
+            get_text
+              (Layout.home
+                 ~runtime_root:erin.runtime_root
+                 Layout.Claude_home
+                 ~account_id:(Provider_account_id.to_string dave.account))
+          in
+          Fs_compat.mkdir_p home;
+          captured home
+        in
+        let anothers label =
+          refused label (own erin ~account:dave.account ()) dave_id_under_erin (fun refusal ->
+            refusal
+            = Access.Account_unavailable
+                { provider_account_id = dave.account
+                ; reason = Authz_provider_account.Linked_to_another
+                })
+        in
+        anothers "the account of another person, on a home of one's own namespace";
         allowed "the person's own account before its purge" (own dave ()) dave_account;
         (match
            Authz_purge.start
@@ -930,26 +954,26 @@ let test_multi_account () =
           "a turn once the purge of its account started"
           (turn dave ())
           dave_account
-          (denied (function
-             | Authz_decision.Provider_account_unavailable Authz_decision.Resource_purged -> true
-             | _ -> false));
+          (denied (fun reason ->
+             reason = Authz_decision.Provider_account_unavailable Authz_decision.Resource_purged));
         refused
           "the person's own account once its purge started"
           (own dave ())
           dave_account
-          (function
-            | Access.Account_unavailable { provider_account_id; defect = Authz_decision.Resource_purged } ->
-              Provider_account_id.equal provider_account_id dave.account
-            | _ -> false);
+          (fun refusal ->
+            refusal
+            = Access.Account_unavailable
+                { provider_account_id = dave.account
+                ; reason = Authz_provider_account.Defect Authz_decision.Resource_purged
+                });
+        anothers "the same account once its purge started";
         (* The home is checked before the status: another person learns
            nothing of the purge from the id of the account. *)
         refused
           "the purged account of another person"
           (own erin ~account:dave.account ())
           dave_account
-          (function
-            | Access.Not_the_account_home _ -> true
-            | _ -> false);
+          (fun refusal -> refusal = Access.Not_the_account_home dave.account);
         allowed "a turn on an account no purge names" (turn erin ()) erin_account;
         allowed "the own account no purge names" (own erin ()) erin_account;
         (* Bytes another writer added to the log: the next commit finds the

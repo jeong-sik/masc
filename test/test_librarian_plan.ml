@@ -257,12 +257,16 @@ let test_alone () =
     (not_applied result);
   check (list string) "the add applies" (claims memory @ [ "the build is green" ])
     (claims result.facts);
-  check bool "the working state is kept" true (result.working_state = Answer.Keep)
+  check bool "the attempt on the working state is its own case" true
+    (result.working_state = Plan.Not_valid_alone);
+  let kept = plan ~shown [ Add (stated "the build is green") ] in
+  check bool "an answer that left it alone" true (kept.working_state = Plan.Kept)
 ;;
 
 let test_working_state_passes_through () =
   let result = plan ~working_state:(Answer.Set "next: rerun the probe") [] in
-  check bool "set" true (result.working_state = Answer.Set "next: rerun the probe");
+  check bool "set" true (result.working_state = Plan.Replaced "next: rerun the probe");
+  check bool "keep" true ((plan []).working_state = Plan.Kept);
   check (list string) "an answer with no ops changes nothing" (claims memory)
     (claims result.facts)
 ;;
@@ -300,6 +304,73 @@ let test_successor_unsupported () =
   check (list string) "a withdrawn op touches nothing" [] result.effects.touched
 ;;
 
+(* Several ops state one new claim from different units: one fact, and the
+   units of all of them. *)
+let test_two_ops_state_one_claim () =
+  let result =
+    plan
+      [ Add (stated ~from_units:[ "u2" ] "the build is green")
+      ; Add (stated ~from_units:[ "u1"; "u2" ] "the build is green")
+      ; Add (stated ~from_units:[ "u1" ] "the build is green")
+      ]
+  in
+  check (list string) "one fact" (claims memory @ [ "the build is green" ]) (claims result.facts);
+  check int "added once" 1 (List.length result.effects.added);
+  check (list (pair string (list int))) "the units of every op, ascending, none twice"
+    [ id_of_claim "the build is green", [ 10; 20 ] ]
+    result.effects.sources;
+  check refusals "every op applied" [] (not_applied result)
+;;
+
+(* Withdrawing one op can take the ground from under another.
+
+   The first merge states a lesson derived from the port and removes the
+   port, so it is withdrawn. While it was live it had also removed the second
+   lesson, which let the second merge add that claim as a new observed fact.
+   With the first merge gone the second lesson is back as the derived fact it
+   was, and the second merge removes its only premise. *)
+let test_withdrawal_runs_until_nothing_changes () =
+  let port_lesson = derived "the probe must call 8935" [ port ] in
+  let owner_lesson = derived "ask the release team first" [ owner ] in
+  let facts = memory @ [ port_lesson; owner_lesson ] in
+  let result =
+    plan ~facts
+      [ Merge { refs = [ "m5"; "m1" ]; into = stated port_lesson.claim }
+      ; Merge { refs = [ "m2" ]; into = stated owner_lesson.claim }
+      ]
+  in
+  check refusals "both merges are withdrawn"
+    [ 0, "successor unsupported", Some port_lesson.claim
+    ; 1, "successor unsupported", Some owner_lesson.claim
+    ]
+    (not_applied result);
+  check pairs "nothing is removed" [] (removed result);
+  check (list string) "Memory is as it was" (claims facts) (claims result.facts);
+  check int "nothing is added" 0 (List.length result.effects.added)
+;;
+
+(* An add that states a held derived fact, in an answer that also drops the
+   fact's premise. The fact leaves, and the add is on the line as an op that
+   did not take: it is not counted as having seen the fact again. *)
+let test_support_lost_takes_a_stated_fact () =
+  let lesson = derived "the probe must call 8935" [ port ] in
+  let facts = memory @ [ lesson ] in
+  let result =
+    plan ~facts
+      [ Drop { ref_ = "m1"; reason = "the port moved" }
+      ; Add (stated ~from_units:[ "u1" ] lesson.claim)
+      ]
+  in
+  check pairs "the premise and the derived fact leave"
+    [ port.claim, "dropped: the port moved"; lesson.claim, "support lost: " ^ id port ]
+    (removed result);
+  check refusals "the add is recorded with its op number"
+    [ 1, "successor unsupported", Some lesson.claim ]
+    (not_applied result);
+  check (list string) "a fact that left is not touched" [] result.effects.touched;
+  check (list (pair string (list int))) "and has no source" [] result.effects.sources
+;;
+
 let test_dropped_and_stated_again () =
   let result =
     plan [ Drop { ref_ = "m1"; reason = "stale" }; Add (stated port.claim) ]
@@ -334,6 +405,7 @@ let () =
         ; test_case "merge into one of the sources" `Quick test_merge_into_one_of_the_sources
         ; test_case "revise" `Quick test_revise
         ; test_case "dropped and stated again" `Quick test_dropped_and_stated_again
+        ; test_case "two ops state one claim" `Quick test_two_ops_state_one_claim
         ] )
     ; ( "screening"
       , [ test_case "one flawed op leaves the others" `Quick
@@ -346,6 +418,10 @@ let () =
         ] )
     ; ( "support"
       , [ test_case "a derived fact loses its premise" `Quick test_support_lost
+        ; test_case "a stated fact loses its premise" `Quick
+            test_support_lost_takes_a_stated_fact
+        ; test_case "withdrawing one op withdraws another" `Quick
+            test_withdrawal_runs_until_nothing_changes
         ; test_case "a merge that would lose its own successor" `Quick
             test_successor_unsupported
         ] )

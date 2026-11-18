@@ -10,10 +10,15 @@ type shown =
   ; units : (string * int) list
   }
 
+type working_state =
+  | Kept
+  | Replaced of string
+  | Not_valid_alone
+
 type t =
   { facts : fact list
   ; effects : Effects.t
-  ; working_state : Answer.working_state
+  ; working_state : working_state
   }
 
 (* An op that passed screening, in Memory ids. *)
@@ -191,10 +196,9 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
     let lost_successor =
       List.filter
         (fun op ->
-           match op.removes, op.states with
-           | _ :: _, Some (id, (_ : Answer.new_fact), (_ : int list)) ->
-             not (Ids.mem id supported_ids)
-           | [], (Some _ | None) | _ :: _, None -> false)
+           match op.states with
+           | Some (id, (_ : Answer.new_fact), (_ : int list)) -> not (Ids.mem id supported_ids)
+           | None -> false)
         live
     in
     match lost_successor with
@@ -266,7 +270,8 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   ; effects
   ; working_state =
       (match shown.memory, answer.working_state with
-       | None, (Keep | Set _) -> Keep
-       | Some _, state -> state)
+       | (None | Some _), Keep -> Kept
+       | None, Set (_ : string) -> Not_valid_alone
+       | Some _, Set text -> Replaced text)
   }
 ;;

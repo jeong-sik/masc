@@ -1089,7 +1089,10 @@ let config_with_boundary_response_capture
       after_turn =
         Some
           (function
-            | Agent_core.Hooks.AfterTurn { response; _ } ->
+            | Agent_core.Hooks.AfterTurn { response; _ }
+            | Agent_core.Hooks.AfterRestoredTurn { response; _ } ->
+              (* A turn restored after a restart yields at the same boundary
+                 with the same provider response. *)
               response_ref := Some response;
               Agent_core.Hooks.Continue
             | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _

@@ -2335,6 +2335,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
         observed_provider_turn_ordinal := Some turn;
         Agent_core.Hooks.Continue
+      (* A restored turn is a replay: it emits no new AfterTurn witness. *)
+      | Agent_core.Hooks.AfterRestoredTurn _
       | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
       | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
       | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
@@ -2501,6 +2503,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                         line)
                  | None -> ());
                 Agent_core.Hooks.Continue
+              | Agent_core.Hooks.AfterRestoredTurn _
               | Agent_core.Hooks.BeforeTurn _
               | Agent_core.Hooks.BeforeTurnParams _
               | Agent_core.Hooks.PreToolUse _

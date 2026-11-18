@@ -1537,7 +1537,7 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
           extra_system_context=assembly.extra_system_context;
           system_prompt_override=Keeper_context_assembly.system_prompt_override
             ~previous:current_params.system_prompt_override assembly}
-      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let result = prepare_prompt ~hooks:(Some hooks)
         ~composed_context:(Some (fun () -> !issued)) initial in
@@ -2945,7 +2945,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
         Agent_core.Hooks.AdjustParams {current_params with
           extra_system_context=assembly.extra_system_context;
           system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
-      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let prepared = match Host.prepare_turn ~runtime_label:"held-goal-fixture"
         ~composed_context:(Some (fun () -> Some assembly))
@@ -3057,7 +3057,7 @@ let test_direct_operation_source_reaches_official_start_and_resume () =
         Agent_core.Hooks.AdjustParams {current_params with
           extra_system_context=assembly.extra_system_context;
           system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
-      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let prepared = match Host.prepare_turn ~runtime_label:"direct-input-source-fixture"
         ~composed_context:(Some (fun () -> Some assembly)) ~keeper_name:"source-recipient"
@@ -3206,7 +3206,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
           extra_system_context=assembly.A.extra_system_context;
           system_prompt_override=A.system_prompt_override
             ~previous:current_params.system_prompt_override assembly}
-      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let prepared = match Host.prepare_turn ~runtime_label:"carrier-authority-fixture"
         ~composed_context:(Some (fun () -> incr reads; issuer assembly))
@@ -3312,7 +3312,7 @@ let prepare_authority_turn ~system_prompt assembly =
         extra_system_context=assembly.A.extra_system_context;
         system_prompt_override=A.system_prompt_override
           ~previous:current_params.system_prompt_override assembly}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
   match Host.prepare_turn ~runtime_label:"carrier-authority-fixture"
       ~composed_context:(Some (fun () -> Some assembly))

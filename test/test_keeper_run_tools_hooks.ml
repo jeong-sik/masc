@@ -1134,6 +1134,83 @@ let test_the_turn_observation_names_its_keeper_turn () =
   | observations -> failf "expected one observation, got %d" (List.length observations)
 ;;
 
+(* A run resumed in a new process restores its turn from the durable
+   execution journal and fires [AfterRestoredTurn] before any tool runs
+   (#30728). The keeper hook used to send it as [Turn_collected], which the
+   collector seals only against streamed blocks; a fresh collector holds none,
+   so the seal failed and the resume failed before its first tool. The hook
+   now hands the journaled admission over as [Turn_restored], and a second
+   delivery of the same turn is a no-op. *)
+let test_a_restored_turn_seals_a_fresh_collector () =
+  with_temp_base_path @@ fun base_path ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  let accum = Masc.Keeper_stream_tool_accum.create () in
+  let observe (observation : Masc.Keeper_hooks_agent_core.tool_stream_observation) =
+    match observation with
+    | Masc.Keeper_hooks_agent_core.Turn_restored { turn; response; tool_source_map } ->
+      (match
+         Masc.Keeper_stream_tool_accum.seal_restored_turn accum ~turn ~response
+           ~tool_source_map
+       with
+       | Ok () -> ()
+       | Error detail -> failwith ("tool stream occurrence mapping rejected: " ^ detail))
+    | Masc.Keeper_hooks_agent_core.Turn_collected _
+    | Masc.Keeper_hooks_agent_core.Turn_closed_without_sources _
+    | Masc.Keeper_hooks_agent_core.Provider_retry_observed _
+    | Masc.Keeper_hooks_agent_core.Runtime_attempt_started _
+    | Masc.Keeper_hooks_agent_core.Child_content_observed _
+    | Masc.Keeper_hooks_agent_core.Native_task_observed _
+    | Masc.Keeper_hooks_agent_core.Native_tool_progress _
+    | Masc.Keeper_hooks_agent_core.Native_tool_completion _
+    | Masc.Keeper_hooks_agent_core.Official_tool_result _ ->
+      fail "a restored turn reports only its journaled admission"
+  in
+  let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+      ~config:(Masc.Workspace.default_config base_path)
+      ~meta_ref:(ref (make_meta "restored-keeper"))
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~trace_id:"restored-trace" ~keeper_turn_id:1
+      ~on_tool_stream_observation:observe () in
+  let after_turn = match hooks.Agent_core.Hooks.after_turn with
+    | Some hook -> hook | None -> fail "after_turn hook missing" in
+  let response : Agent_core.Types.api_response =
+    { id = "resp-restored"; model = "model"; unreadable_tool_uses = []
+    ; stop_reason = Agent_core.Types.StopToolUse
+    ; content =
+        [ Llm_provider.Types.ToolUse { id = "call-a"; name = "read"; input = `Assoc [] }
+        ; Llm_provider.Types.ToolUse { id = "call-b"; name = "write"; input = `Assoc [] } ]
+    ; usage = None; telemetry = None } in
+  let tool_source_map : Agent_core.Hooks.admitted_tool_source_map =
+    { admitted_tool_sources =
+        [ { planned_index = 0; source_tool_use_ordinal = 0
+          ; name_resolution = Agent_core.Hooks.Registered_name }
+        ; { planned_index = 1; source_tool_use_ordinal = 1
+          ; name_resolution = Agent_core.Hooks.Registered_name } ]
+    ; source_tool_use_count = 2 } in
+  let deliver () =
+    check bool "the restored turn continues" true
+      (Agent_core.Hooks.classify_decision
+         (after_turn (Agent_core.Hooks.AfterRestoredTurn { turn = 5; response; tool_source_map }))
+       = Agent_core.Hooks.K_Continue)
+  in
+  let call_ids () =
+    List.map (fun (call : Masc.Keeper_chat_store.tool_call) -> call.call_id)
+      (Masc.Keeper_stream_tool_accum.to_tool_calls accum)
+  in
+  deliver ();
+  check (list string) "each admitted call is a row" [ "call-a"; "call-b" ] (call_ids ());
+  (match
+     Masc.Keeper_stream_tool_accum.record_execution_id accum ~tool_call_id:"call-b"
+       ~turn:5 ~planned_index:1 ~execution_id:(Ids.Execution_id.of_string "exec-restored-b")
+   with
+   | Ok occurrence -> check int "the execution joins its provider call place" 1 occurrence.block_index
+   | Error detail -> fail detail);
+  deliver ();
+  check (list string) "a second delivery adds no row" [ "call-a"; "call-b" ] (call_ids ())
+;;
+
 (* What the completion hook writes to the cost ledger for each kind of
    attempt. An official client that already reported on its stream is
    repeated by a response with usage, so no row; a response without usage
@@ -2507,6 +2584,8 @@ let () =
     ; ( "turn observation"
       , [ test_case "the turn observation names its keeper turn" `Quick
             test_the_turn_observation_names_its_keeper_turn
+        ; test_case "a restored turn seals a fresh collector" `Quick
+            test_a_restored_turn_seals_a_fresh_collector
         ; test_case "the completion hook rows by attempt" `Quick
             test_the_completion_hook_rows_by_attempt
         ; test_case "a client report row records the report" `Quick

@@ -947,10 +947,10 @@ let record_provider_request_provenance provider provenance =
   |> Result.map ignore
 ;;
 
-let record_provider_response provider response =
+let record_provider_response provider snapshot =
   transact
     provider.turn.scope.writer
-    (Tx.update_node ~node:provider.node (Event.Provider_response_snapshot response))
+    (Tx.update_node ~node:provider.node (Event.Provider_response_snapshot snapshot))
   |> Result.map ignore
 ;;
 

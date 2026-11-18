@@ -74,6 +74,25 @@ val seal_turn :
     emit no duplicate events. Official producers use {!record_official_execution_id} with their explicit
     active block and committed invocation instead. *)
 
+val seal_restored_turn :
+  t ->
+  turn:int ->
+  response:Agent_core.Types.api_response ->
+  tool_source_map:Agent_core.Hooks.admitted_tool_source_map ->
+  (unit, string) result
+(** Seal a turn that a new process restored from the durable execution journal,
+    before any of its tools run. The journaled admission is the authority:
+    no streamed tool block is required, since none was replayed. Each admitted
+    ToolUse of [response] becomes a row in a scope of its own, at block index
+    [source_tool_use_ordinal], so {!record_execution_id} joins the turn's
+    executions as it does for a streamed turn. A source whose ordinal falls
+    outside [source_tool_use_count], a source list that does not match the
+    response's ToolUse blocks, or a scope holding unsealed provider output is
+    an error. The same restored turn delivered again returns [Ok ()] with no
+    effect, including after {!start_runtime_attempt} moved the scope; a
+    different admission for that turn, or a turn already closed from a stream,
+    is an error. *)
+
 val close_turn_without_sources : t -> turn:int -> (unit, string) result
 (** Close the current scope for an official-client producer that cannot expose
     a whole-response pre-execution sidecar. Calls without a producer-bound

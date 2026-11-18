@@ -101,7 +101,7 @@ let sdk_hook state ~on_error event =
    | PostToolUseFailure {invocation;tool_name;stage=Validation_before_execution;_} ->
      ignore (take_pending state ~invocation ~tool_name)
    | PostToolUseFailure {stage=Execution | Cancelled_during_execution;_}
-   | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | OnStop _ | OnError _ | OnToolError _ -> ());
+   | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | OnStop _ | OnError _ | OnToolError _ -> ());
   Agent_core.Hooks.Continue
 let native_started state ~runtime_id ~official_turn ~identity ~tool_name =
   let scope = state.snapshot.scope in

@@ -103,6 +103,18 @@ type hook_event =
             tools while consuming their own protocol use [None] and expose
             scheduling through their PreToolUse invocations instead. *)
       }
+  | AfterRestoredTurn of
+      { turn : int
+      ; response : Types.api_response
+      ; tool_source_map : admitted_tool_source_map
+      }
+      (** A durable turn resumed after its process ended, before any of its
+          tools run. [response] is the admitted response restored from
+          durable execution and [tool_source_map] the admission recorded with
+          it. The response's usage was counted by the [AfterTurn] that
+          collected it, so hosts that account usage or cost ignore this event;
+          hosts that join tool occurrences to provider calls seal the turn
+          from it. Delivered to the [after_turn] hook. *)
   | PreToolUse of
       { invocation : Tool_contract.Invocation.t
         (** Exact run-scoped model-tool occurrence. @since 0.216.0 *)

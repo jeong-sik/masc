@@ -11,6 +11,36 @@ module Internal_runtime = Internal.Execution_runtime
 module Internal_codec = Internal.Execution_codec_executor
 module Internal_writer = Internal.Execution_lane_writer
 module Internal_scope = Internal.Execution_agent_scope
+
+(* A durable response whose every tool call was admitted under its registered
+   name, in provider order. *)
+let all_admitted_snapshot (response : Llm_provider.Types.api_response)
+  : Agent_core__.Execution_provider_response_snapshot.t =
+  let count =
+    List.length
+      (List.filter
+         (function
+           | Llm_provider.Types.ToolUse _ -> true
+           | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+         response.content)
+  in
+  { Agent_core__.Execution_provider_response_snapshot.response
+  ; admission =
+      { Agent_core__.Execution_provider_response_snapshot.source_map =
+          { Agent_core.Hooks.admitted_tool_sources =
+              List.init count (fun index ->
+                { Agent_core.Hooks.planned_index = index
+                ; source_tool_use_ordinal = index
+                ; name_resolution = Agent_core.Hooks.Registered_name
+                })
+          ; source_tool_use_count = count
+          }
+      ; unavailable_names = []
+      ; unreadable = []
+      }
+  }
+;;
 module Internal_binding = Binding_identity
 module Internal_settlement = Internal.Execution_tool_settlement
 
@@ -428,7 +458,7 @@ let test_turn_scoped_lane_retains_the_canonical_carrier () =
           Hooks.AdjustParams
             { current_params with
               extra_system_context = Some (Printf.sprintf "world state %d" turn) }
-        | Hooks.BeforeTurn _ | Hooks.AfterTurn _ | Hooks.PreToolUse _ | Hooks.PostToolUse _
+        | Hooks.BeforeTurn _ | Hooks.AfterTurn _ | Hooks.AfterRestoredTurn _ | Hooks.PreToolUse _ | Hooks.PostToolUse _
         | Hooks.PostToolUseFailure _ | Hooks.OnStop _ | Hooks.OnError _ | Hooks.OnToolError _ ->
           Hooks.Continue) }
   in
@@ -3223,7 +3253,7 @@ let durable_tool_response
 ;;
 
 let record_durable_provider_response provider response =
-  match Internal_scope.record_provider_response provider response with
+  match Internal_scope.record_provider_response provider (all_admitted_snapshot response) with
   | Ok () -> ()
   | Error error -> Alcotest.fail (Internal_scope.error_to_string error)
 ;;
@@ -3523,6 +3553,270 @@ let test_agent_run_resumes_tool_without_duplicate_effects
              ~outcome:"failed"
              ~recovery:"operator_repair:effect_outcome_unknown"
              !terminal_disposition))
+;;
+
+(* #30728, #32715: the provider asked for [missing_tool] and then
+   [durable_tool]; admission refused the first and kept the second. The
+   process ends after that response is durable. The resumed process must hand
+   hosts the original source map -- the kept call was the provider's second
+   call, not its first -- and answer the refused call after the kept call's
+   result, exactly as the fresh turn would. [settled] places the crash after
+   the kept call's result settled but before the checkpoint held it. *)
+let test_resume_restores_tool_admission ~settled () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun runtime_sw ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let runtime =
+    match Agent.create_execution_runtime ~sw:runtime_sw ~domain_mgr ~domain_count:1 with
+    | Ok runtime -> runtime
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  let internal_runtime =
+    match Internal_runtime.create ~sw:runtime_sw ~domain_mgr ~domain_count:1 with
+    | Ok runtime -> runtime
+    | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
+  in
+  let codec = Internal_codec.of_runtime internal_runtime in
+  let native_path = Filename.temp_file "agent_core-admission-resume-" ".dir" in
+  Sys.remove native_path;
+  let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
+  Fun.protect
+    ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir)
+    (fun () ->
+       Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+       let config =
+         { (Types.default_config ~model:"test-model") with
+           name = "admission-resume-test"
+         }
+       in
+       let tool_input = `Assoc [ "value", `Int 7 ] in
+       let tool_use_id = "kept-tool-use" in
+       let source_map : Hooks.admitted_tool_source_map =
+         { Hooks.admitted_tool_sources =
+             [ { Hooks.planned_index = 0
+               ; source_tool_use_ordinal = 1
+               ; name_resolution = Hooks.Registered_name
+               }
+             ]
+         ; source_tool_use_count = 2
+         }
+       in
+       let snapshot : Internal.Execution_provider_response_snapshot.t =
+         { Internal.Execution_provider_response_snapshot.response =
+             durable_tool_response [ tool_use_id, "durable_tool", tool_input ]
+         ; admission =
+             { Internal.Execution_provider_response_snapshot.source_map
+             ; unavailable_names = [ "missing_tool" ]
+             ; unreadable = []
+             }
+         }
+       in
+       let provider_config =
+         Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~model_id:"test-model"
+           ~base_url:"http://resume.invalid"
+           ~api_key:""
+           ~request_path:"/v1/chat/completions"
+           ()
+       in
+       let binding =
+         match
+           Internal_binding.of_provider_config
+             ~transport:Internal_binding.Injected
+             provider_config
+         with
+         | Ok binding -> binding
+         | Error detail -> Alcotest.fail detail
+       in
+       let scope_ok = function
+         | Ok value -> value
+         | Error error -> Alcotest.fail (Internal_scope.error_to_string error)
+       in
+       let locator_json = ref None in
+       (match
+          Internal_writer.run ~codec ~dir (fun ~sw:_ writer ->
+            let scope =
+              scope_ok (Internal_scope.start ~writer ~agent_name:"admission-resume-test")
+            in
+            locator_json
+            := Some
+                 (Internal_scope.scope_locator_to_yojson
+                    (Internal_scope.scope_locator scope));
+            let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:0) in
+            let provider =
+              scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding)
+            in
+            scope_ok (Internal_scope.record_provider_response provider snapshot);
+            if settled
+            then (
+              let invocation =
+                Tool_contract.Invocation.create
+                  ~tool_use_id
+                  ~turn:0
+                  ~schedule:
+                    { Tool_contract.planned_index = 0
+                    ; batch_index = 0
+                    ; batch_size = 1
+                    ; execution_mode = Tool_contract.Serial
+                    }
+                  ~completion:Tool_contract.Continue_after_success
+              in
+              let durable =
+                scope_ok
+                  (Internal_scope.open_invocation
+                     provider
+                     ~invocation
+                     ~tool_name:"durable_tool"
+                     ~input:tool_input)
+              in
+              match
+                Internal_scope.execute
+                  durable
+                  ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ ->
+                    "settled-before-restart", Types.Tool_succeeded)
+              with
+              | Ok (Internal_scope.Executed _) -> ()
+              | Ok (Internal_scope.Replayed _) ->
+                Alcotest.fail "fixture replayed its first tool effect"
+              | Error error -> Alcotest.fail (Internal_scope.error_to_string error)))
+        with
+        | Ok () -> ()
+        | Error failure -> Alcotest.fail (Internal_writer.scope_failure_to_string failure));
+       let locator =
+         match Option.get !locator_json |> Agent.execution_locator_of_yojson with
+         | Ok locator -> locator
+         | Error detail -> Alcotest.fail detail
+       in
+       let response = Provider_mock.text_response "done-after-restart" [] in
+       let transport : Llm_provider.Llm_transport.t =
+         Llm_provider.Llm_transport.custom
+           { complete_sync =
+               (fun _request ->
+                 { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
+           ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
+           }
+       in
+       let effect_count = ref 0 in
+       let restored_turns = ref [] in
+       let collected_turns = ref [] in
+       let tool =
+         Tool.create
+           ~name:"durable_tool"
+           ~description:"the call admission kept"
+           ~parameters:[]
+           (fun _input ->
+              incr effect_count;
+              Ok { Types.content = "ran-after-restart"; content_blocks = None; _meta = None })
+       in
+       let hooks =
+         { Hooks.empty with
+           after_turn =
+             Some
+               (function
+                 | Hooks.AfterRestoredTurn { turn; tool_source_map; response = _ } ->
+                   restored_turns := (turn, tool_source_map) :: !restored_turns;
+                   Hooks.Continue
+                 | Hooks.AfterTurn { turn; _ } ->
+                   collected_turns := turn :: !collected_turns;
+                   Hooks.Continue
+                 | Hooks.BeforeTurn _ | Hooks.BeforeTurnParams _ | Hooks.PreToolUse _
+                 | Hooks.PostToolUse _ | Hooks.PostToolUseFailure _ | Hooks.OnStop _
+                 | Hooks.OnError _ | Hooks.OnToolError _ -> Hooks.Continue)
+         }
+       in
+       let options =
+         { Agent.default_options with
+           transport = Some transport
+         ; provider_config = Some (Provider_mock.to_provider_config ())
+         ; hooks
+         }
+       in
+       let agent =
+         Agent.create
+           ~media_store:(Agent_core.History.Memory_store.create ())
+           ~net:(Eio.Stdenv.net env)
+           ~config
+           ~tools:[ tool ]
+           ~options
+           ()
+       in
+       Agent.set_state
+         agent
+         { provider_binding = None
+         ; config
+         ; messages =
+             [ { origin = Llm_provider.Types.Conversation
+               ; Types.role = User
+               ; content = [ Text "run the tool" ]
+               ; name = None
+               ; tool_call_id = None
+               ; metadata = []
+               }
+             ; { origin = Llm_provider.Types.Conversation
+               ; Types.role = Assistant
+               ; content =
+                   [ ToolUse { id = tool_use_id; name = "durable_tool"; input = tool_input } ]
+               ; name = None
+               ; tool_call_id = None
+               ; metadata = []
+               }
+             ]
+         ; turn_count = 1
+         ; usage = Types.empty_usage
+         };
+       let execution_store =
+         Agent.execution_store
+           ~runtime
+           ~dir
+           ~resume:(Agent.Resume_writer_exit_unproven locator)
+           ()
+       in
+       (match Agent.run ~sw:runtime_sw ~execution_store agent "run the tool" with
+        | Ok response ->
+          Alcotest.(check string)
+            "terminal response"
+            "done-after-restart"
+            (Types.text_of_response response)
+        | Error error -> Alcotest.fail (Error.to_string error));
+       Alcotest.(check int)
+         "the kept call runs once across the restart"
+         (if settled then 0 else 1)
+         !effect_count;
+       Alcotest.(check bool)
+         "hosts receive the recorded source map before the restored tools run"
+         true
+         (!restored_turns = if settled then [] else [ 0, source_map ]);
+       Alcotest.(check (list int))
+         "only the new provider response is collected"
+         [ 1 ]
+         (List.rev !collected_turns);
+       let mentions_refused (message : Types.message) =
+         message.role = Types.User
+         && List.exists
+              (function
+                | Types.Text text ->
+                  let needle = "missing_tool" in
+                  let n = String.length needle and m = String.length text in
+                  let rec scan i = i + n <= m && (String.sub text i n = needle || scan (i + 1)) in
+                  scan 0
+                | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
+                | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+                | Types.Audio _ -> false)
+              message.content
+       in
+       let rec refusal_follows_results = function
+         | (results : Types.message) :: note :: rest ->
+           (results.role = Types.Tool && mentions_refused note)
+           || refusal_follows_results (note :: rest)
+         | [ _ ] | [] -> false
+       in
+       Alcotest.(check bool)
+         "the refused call is answered right after the kept call's result"
+         true
+         (refusal_follows_results (Agent.state agent).messages))
 ;;
 
 let test_agent_run_resumes_settled_tool_without_duplicate_effects () =
@@ -6106,6 +6400,14 @@ let () =
             "Agent.run resumes settled tool without duplicate effects"
             `Quick
             test_agent_run_resumes_settled_tool_without_duplicate_effects
+        ; Alcotest.test_case
+            "resume restores tool admission before running the kept call"
+            `Quick
+            (test_resume_restores_tool_admission ~settled:false)
+        ; Alcotest.test_case
+            "resume restores tool admission when results settled before the checkpoint"
+            `Quick
+            (test_resume_restores_tool_admission ~settled:true)
         ; Alcotest.test_case
             "unattempted legacy invocation requires typed readmission"
             `Quick

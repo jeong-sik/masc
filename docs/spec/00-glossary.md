@@ -2409,8 +2409,8 @@ status: reference
 
 **Agent Core Hook**
 : Agent 실행의 정해진 시점에 호스트가 등록한 동기 판단 콜백. `hook_event`
-  (BeforeTurn·BeforeTurnParams·AfterTurn·PreToolUse·PostToolUse·PostToolUseFailure·
-  OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
+  (BeforeTurn·BeforeTurnParams·AfterTurn·AfterRestoredTurn·PreToolUse·PostToolUse·
+  PostToolUseFailure·OnStop·OnError·OnToolError) 하나를 받아 `hook_decision`
   (Continue·AdjustParams·ElicitInput·ElicitToolApproval·Nudge·HookFailed·Block)을
   돌려주는 함수다(`type hook = hook_event -> hook_decision`). `Block`은
   PreToolUse에서만 정당하고, 호스트는 그 도구를 실행하지 않고 `is_error=true`

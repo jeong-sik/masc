@@ -3001,6 +3001,9 @@ let run_named
                                })
                           observed;
                         Agent_core.Hooks.Continue
+                      (* A restored turn sent no request, so it has no
+                         transmitted model input to observe. *)
+                      | Agent_core.Hooks.AfterRestoredTurn _
                       | Agent_core.Hooks.BeforeTurn _
                       | Agent_core.Hooks.BeforeTurnParams _
                       | Agent_core.Hooks.PreToolUse _

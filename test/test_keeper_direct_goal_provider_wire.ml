@@ -133,7 +133,7 @@ let run_case source () =
       AdjustParams {current_params with extra_system_context = assembled.extra_system_context;
         system_prompt_override = Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override assembled}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let received = ref [] in
   let response = Printf.sprintf
@@ -276,7 +276,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
       AdjustParams {current_params with extra_system_context = issued.extra_system_context;
         system_prompt_override = Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let meta = match Masc_test_deps.meta_of_json_fixture
       (`Assoc ["name", `String "goal-loop-wire"; "trace_id", `String "trace-goal-loop-wire"]) with
@@ -480,7 +480,7 @@ let test_completion_observation_survives_tool_reply approved () =
       AdjustParams {current_params with extra_system_context=issued.extra_system_context;
         system_prompt_override=Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
   let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "authority-wire";
     "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;
@@ -598,7 +598,7 @@ let test_goal_under_proof_survives_tool_reply ~current_norms () =
       AdjustParams {current_params with extra_system_context=issued.extra_system_context;
         system_prompt_override=Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
-    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
   let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "proof-wire";
     "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;

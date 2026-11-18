@@ -60,8 +60,8 @@ jobs:
       #
       # This file is workflow_dispatch only, so the copy here runs when an
       # operator asks for it and on no pull request. The pull-request coverage
-      # is the same step in pr-type-check.yml; keep the two identical, `-I`
-      # included, so which one ran never changes the answer.
+      # is the same step in pr-type-check.yml; keep this step identical in
+      # both files, `-I` included, so which one ran never changes the answer.
       - name: Test the OCaml notice collector's classification table
         run: python3 -I scripts/tests/test_collect_ocaml_notices.py
 

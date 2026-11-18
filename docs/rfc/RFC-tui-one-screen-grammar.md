@@ -898,13 +898,24 @@ unit` 로 줄을 낸다. 옮긴 화면은 새 수집기로 줄을 낸다. 그 �
   `apply_async_message` 는 `Drawn_changed` 나 `Drawn_unchanged` 를 돌려준다.
   지금 있는 갈래는 모두 `Drawn_changed` 에서 시작한다.
   `drain_async_messages` 는 `Drawn_changed` 가 하나라도 있을 때만 Background 프레임을 요청한다.
-- 같은 읽기를 다시 답하는 reader 는 타입 있는 view 를 만든다. view 는 행이 읽는 값과,
-  그 읽기가 진행 중으로 그려지는지를 담는다. 렌더러는 그 view 만 읽는다.
+- 같은 읽기를 다시 답하는 reader 는 타입 있는 view 를 만든다. view 는 그 reader 의 갈래가
+  쓰고 화면이 그리는 값과, 그 읽기가 진행 중으로 그려지는지를 담는다.
+- 렌더러는 view 가 아니라 state 를 읽는다. view 는 `Masc_tui_types` 한 곳이 state 에서 만든다.
+  갈래가 그리는 값을 새로 쓰면 그 값을 view 에도 넣는다. 빠뜨리면 그 값만 바뀐 답은 프레임을
+  요청하지 않는다.
+- view 를 비교하는 함수는 record 의 칸을 모두 이름으로 꺼낸다. view 에 칸을 더하면 비교를
+  고칠 때까지 빌드가 멈춘다.
 - 프레임을 만들 때 그 프레임이 그린 view 를 적어 둔다. 답을 적용한 reader 는 새 view 를
   적어 둔 view 와 비교한다. 같으면 `Drawn_unchanged` 다.
 - 마지막 답과 비교하지 않는다. 실패한 읽기 뒤의 304 는 그려진 오류(`tools_error`,
   `keeper_turns_error`)를 지운다. 읽기를 시작해도 프레임을 요청하지 않는다. 그래도 읽는 동안
   만든 프레임은 진행 중이라고 그리고, 그 표시는 답의 프레임만 지운다.
+- 몇 화면만 그리고 답마다 바뀌는 값은 그 값을 그린 프레임의 view 에만 들어간다.
+  Keeper turns 의 관측 시각이 그렇다. 성공한 답은 매번 그 시각을 옮긴다. 그 나이는 Metrics 와
+  `@`(응답 중) 창만 그린다. 나이를 그리는 곳이 그 프레임에 그렸다고 적는다.
+- 갈래가 view 밖에서 그려진 내용을 바꾸면 그 일의 effect 를 view 의 effect 와 합친다.
+  turns 답이 기다리던 키퍼 입력을 서버로 넘기면 그 입력이 대기열에서 빠진다. 그래서
+  `Drawn_changed` 다.
 - view 를 가진 reader 는 Tools inventory, Keeper turns, Keeper waiting 이다. 답이 304 라는
   것만으로 다시 그리지 않기로 정하지 않는다.
 

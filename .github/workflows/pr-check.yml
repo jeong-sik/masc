@@ -57,8 +57,13 @@ jobs:
       # jobs to dune-build-info.3.25.0). release-build.yml already runs this,
       # but only on macos-arm64 behind workflow_call, so a table regression
       # was first seen a release later. It is pure Python and takes 0.2s.
+      #
+      # This file is workflow_dispatch only, so the copy here runs when an
+      # operator asks for it and on no pull request. The pull-request coverage
+      # is the same step in pr-type-check.yml; keep this step identical in
+      # both files, `-I` included, so which one ran never changes the answer.
       - name: Test the OCaml notice collector's classification table
-        run: python3 scripts/tests/test_collect_ocaml_notices.py
+        run: python3 -I scripts/tests/test_collect_ocaml_notices.py
 
   native-tui:
     if: inputs.native-tui-source-sha != ''

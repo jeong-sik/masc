@@ -17517,15 +17517,27 @@ let take_approval_observation state observation =
 (* A read of the confirmations: what it found, and whether the owed read is
    settled or waits to retry. *)
 let apply_approvals_read state result =
-  (match result with
-   | Ok _ | Error (Request_failed _) -> note_read state Masc_tui_read_failure.Confirmations result
-   | Error (Request_withdrawn _) -> ());
   settle_pending_confirms_read state result;
   apply_approvals_load state result
 
 let apply_approval_observation state observation =
   Option.iter (fun result ->
     apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result))
+    (take_approval_observation state observation)
+
+(* The confirm queue's own answer, which zone 4 also hears about.
+   [apply_approvals_read] alone also takes an error put in place of a read --
+   a booting server, an account server, a refresh that raised -- and that is
+   no failed read; nor is a read the guard kept back (RFC §2). *)
+let apply_approvals_answer state result =
+  (match result with
+   | Ok _ | Error (Request_failed _) -> note_read state Masc_tui_read_failure.Confirmations result
+   | Error (Request_withdrawn _) -> ());
+  apply_approvals_read state result
+
+let apply_approval_answer_observation state observation =
+  Option.iter (fun result ->
+    apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result))
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -17557,7 +17569,7 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
     then
       (* Carried as [request_failure], so a read the guard kept back is drawn
          as kept back and not as a failed read (RFC §2). *)
-      if admit_approval_listing state listing_ticket then apply_approvals_read state result
+      if admit_approval_listing state listing_ticket then apply_approvals_answer state result
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -18509,7 +18521,7 @@ let apply_http_scoped_data state ~datasets results =
       record dataset (if received then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
-  Option.iter (apply_approval_observation state) results.http_approvals;
+  Option.iter (apply_approval_answer_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
   if List.mem Surface_read_order.Board_posts datasets then begin
     (* The terminal reservation already marked missing data unavailable. Only
@@ -19728,7 +19740,7 @@ let apply_http_surfaces state ~mailbox results =
   let roster_refreshed = match admission with
     | Admit_identity_and_data | Admit_data_only ->
         if state.workspace_identity = Workspace_identity_match then
-          Option.iter (apply_approval_observation state) results.http_approvals;
+          Option.iter (apply_approval_answer_observation state) results.http_approvals;
         apply_http_scoped_data state ~datasets results.http_scoped
     | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
@@ -25463,7 +25475,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result);
+        apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result);
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns

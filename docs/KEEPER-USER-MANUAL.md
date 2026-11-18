@@ -1213,6 +1213,9 @@ To investigate a delayed Job, inspect the exact schedule lookup at
 
 - `last_wake.detail` records dispatch-time acceptance. An enqueued wake or an
   `awaiting_ack` value there does not establish current consumption.
+  `masc_schedule_get` returns the same receipt as `last_wake.dispatch_receipt`
+  and, next to it, `last_wake.current_consumption`: the reaction ledger reading
+  the dashboard shows as `keeper_reaction_evidence.projection_status`.
 - `keeper_queue_evidence` binds the current pending/consumed observation to the
   schedule instance, occurrence due time and payload digest.
 - `keeper_reaction_evidence` separates turn start, turn finish and queue ACK.

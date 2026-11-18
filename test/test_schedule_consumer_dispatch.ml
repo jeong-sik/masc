@@ -3937,6 +3937,64 @@ let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
     (evidence |> member "matched_record_count" |> to_int)
 ;;
 
+(* #36054: masc_schedule_get returned only the wake's [detail], which dispatch
+   writes once. After the Keeper consumed the occurrence the tool still said
+   [awaiting_ack]. The receipt keeps saying that, under its own name, and the
+   reading next to it follows the reaction ledger the dashboard reads. *)
+let test_schedule_get_reads_consumption_next_to_the_dispatch_receipt () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request = create_keeper_wake_schedule config in
+  ignore (tick_ok config ~now:201.0 |> single_occurrence_id : string);
+  let ctx : Tool_schedule.context =
+    { config
+    ; caller = Tool_schedule.Operator_caller "dashboard-operator"
+    ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
+    ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    ; result_boundary = Tool_output.Sent_to_client
+    }
+  in
+  let open Yojson.Safe.Util in
+  let last_wake () =
+    let result =
+      Tool_schedule.handle_get
+        ~tool_name:"masc_schedule_get"
+        ~start_time:(Tool_timing.start ())
+        ctx
+        (`Assoc [ "schedule_id", `String request.schedule_id ])
+    in
+    check bool "get succeeds" true (Tool_result.is_success result);
+    Tool_result.data result |> member "last_wake"
+  in
+  let dashboard_reading () =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> member "keeper_reaction_evidence"
+    |> member "projection_status"
+    |> to_string
+  in
+  let check_wake ~stage ~reading wake =
+    check bool (stage ^ ": the stored detail is not returned under its storage name")
+      true (wake |> member "detail" = `Null);
+    check string (stage ^ ": the receipt keeps what dispatch saw") "awaiting_ack"
+      (wake |> member "dispatch_receipt" |> member "occurrence_status" |> to_string);
+    let consumption = wake |> member "current_consumption" in
+    check string (stage ^ ": current consumption") reading
+      (consumption |> member "status" |> to_string);
+    check string (stage ^ ": the dashboard reads the same evidence") (dashboard_reading ())
+      (consumption |> member "status" |> to_string)
+  in
+  check_wake ~stage:"enqueued" ~reading:"matched_stimulus" (last_wake ());
+  pending_selection_exn ~base_path ~keeper_name
+  |> complete_turn ~base_path ~keeper_name ~applied_at:202.0
+  |> check_turn_acked "the turn consumes the occurrence";
+  check_wake ~stage:"consumed" ~reading:"matched_consumed_ack" (last_wake ())
+;;
+
 (* #38205: the runner holds a heartbeat interval back while its keeper still
    carries the previous occurrence. The hold has no signal and no wake, so the
    schedule row is the only place a reader of the list can learn it, and the
@@ -5072,6 +5130,8 @@ let () =
             test_unattributed_ledger_damage_does_not_block_occurrences
         ; test_case "dashboard keeps unattributed damage out of exact evidence" `Quick
             test_dashboard_keeps_unattributed_damage_out_of_exact_evidence
+        ; test_case "schedule get reads consumption next to the dispatch receipt" `Quick
+            test_schedule_get_reads_consumption_next_to_the_dispatch_receipt
         ; test_case "dashboard row names the occurrence the runner holds" `Quick
             test_dashboard_row_names_the_occurrence_the_runner_holds
         ; test_case "dashboard hold keeps the time a failed tick did not refresh"

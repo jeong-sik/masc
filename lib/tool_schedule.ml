@@ -609,6 +609,36 @@ let validate_keeper_wake_target ctx ~keeper_wake_target args =
              detail))
 ;;
 
+(* A wake record's [detail] is the receipt dispatch wrote when it accepted the
+   occurrence; nothing rewrites it afterwards, so its [occurrence_status] says
+   [awaiting_ack] for as long as the record exists (#36054). The tool names it
+   [dispatch_receipt] so a reader does not take it for the present state. *)
+let wake_dispatch_json (wake : Schedule_domain.wake_record) =
+  match Schedule_domain.wake_record_to_yojson wake with
+  | `Assoc fields ->
+    `Assoc
+      (List.remove_assoc "detail" fields
+       @ [ ( "dispatch_receipt"
+           , match wake.detail with
+             | None -> `Null
+             | Some detail -> detail )
+         ])
+  | other -> other
+;;
+
+(* [masc_schedule_get]'s [last_wake]: the dispatch receipt and, next to it,
+   what the target Keeper's reaction ledger shows now. *)
+let last_wake_json
+  ((wake : Schedule_domain.wake_record), consumption)
+  =
+  match wake_dispatch_json wake with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ "current_consumption", Schedule_occurrence_consumption.to_yojson consumption ])
+  | other -> other
+;;
+
 let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request) =
   let next_due_at =
     match request.status with
@@ -680,8 +710,7 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
          ; ( "last_wake"
            , match last_wake with
              | None -> `Null
-             | Some wake -> Schedule_domain.wake_record_to_yojson wake
-           )
+             | Some last_wake -> last_wake_json last_wake )
          ])
   | other -> other
 ;;
@@ -788,7 +817,7 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       ; ( "last_wake"
         , match last_wake with
           | None -> `Null
-          | Some wake -> Schedule_domain.wake_record_to_yojson wake )
+          | Some wake -> wake_dispatch_json wake )
       ]
   | Schedule_service.Store_error
       ( Schedule_store.Schedule_already_exists
@@ -1463,6 +1492,11 @@ let handle_get ~tool_name ~start_time ctx args =
          Schedule_store.last_wake_for_schedule_instance state
            ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
            ~schedule_id:request.Schedule_domain.schedule_id
+         |> Option.map (fun wake ->
+           ( wake
+           , Schedule_occurrence_consumption.read
+               ~base_path:ctx.config.Workspace.base_path
+               wake ))
        in
        ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;

@@ -254,7 +254,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let render_card ?status ?count ~title_style name line1 line2 =
+  let render_card ?status ?count ~title_style name rows =
     let style =
       { Masc_tui_card.border = Theme.recede ()
       ; focused_border = Theme.border_focus ()
@@ -265,7 +265,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
       { Masc_tui_card.edge =
           { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
-      ; body = (fun ~cells:_ -> [ line1; line2 ]) }
+      ; body = (fun ~cells:_ -> rows) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
@@ -314,10 +314,13 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
       (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
   in
-  let c2_l1, c2_l2, c2_tone, c2_status = match sched_opt with
+  (* The probe's state is the card's status, on its edge, so with no samples
+     the body has the one row that says so and does not write the probe
+     again. *)
+  let c2_l1, c2_rest, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
-        say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
+        [],
         Theme.recede (),
         scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
     | Some s ->
@@ -325,8 +328,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
-       Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
-         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
+       [ Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
+           (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls) ],
        tone,
        scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
     (* One condition -- no scheduler reading at all -- so both halves of the
@@ -334,7 +337,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | None ->
       let mark = Unknown.glyph identity_gap in
       ( "p95 " ^ mark,
-        say "표본 " "Samples " ^ mark,
+        [ say "표본 " "Samples " ^ mark ],
         Theme.recede (),
         { Masc_tui_card.symbol = Masc_tui_card.Unknown identity_gap
         ; word = ""
@@ -346,12 +349,15 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let c3_l1, c3_l2, c3_count, c3_status = match kpis.tasks with
     | Some count ->
       let total = Task_flow.total_count count in
+      (* The total is the card's count, on its edge. The meter measures the
+         done tasks against it and writes the done count alone, as the
+         Engine card's meter writes the live size against the heap above. *)
       let done_line =
         if card_cells >= minimum_card_text_cells && total > 0 then
           Chart.meter ~width:card_cells ~value:count.completed
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
-            ~suffix:(Printf.sprintf "%s/%s" (Count.grouped count.completed) (Count.grouped total))
+            ~suffix:(Count.grouped count.completed)
             ~scale:Chart.Relative
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
@@ -426,10 +432,11 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_cells >= minimum_card_text_cells then
     zip4
-      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
-      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
-      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
+      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") [ c1_l1; c1_l2 ])
+      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
+         (c2_l1 :: c2_rest))
+      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
+      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact

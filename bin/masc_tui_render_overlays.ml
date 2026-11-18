@@ -243,22 +243,12 @@ let render_context_inspector state =
             |> List.iter c.push
           end)
 
-(* The height an overlay shows [count] rows in, for the overlays that say
-   which of their lines are showing: one row comes off when they overflow,
-   because the "[lines a-b/n]" row is drawn inside the same body.
-   [Masc_tui_scroll.content_height] owns that rule; the frame supplies the
-   chrome. *)
+(* The height an overlay shows [count] rows in. Where the window stands is
+   on the title row, so the body keeps every row. [Masc_tui_scroll.content_height]
+   owns that rule; the frame supplies the chrome. *)
 let overlay_window_height ~rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
-    ~preview_keep:None ~overflow_takes_row:true
-
-(* The "[lines a-b/n]" ("[줄 a-b/n]") row an overflowing overlay draws under its rows, or
-   nothing when every row fits. The row's height is the one
-   [overlay_window_height] took off. *)
-let overlay_window_row ~ko ~scroll ~height count =
-  Option.map
-    (fun row -> Theme.recede () ^ row ^ Ansi.reset)
-    (Masc_tui_scroll.position_row ~ko ~scroll ~height count)
+    ~preview_keep:None
 
 let detail_reading_action_width cols = max 0 (framed_inner_width cols - 2)
 let detail_reading_width cols = max 1 (detail_reading_action_width cols)
@@ -353,7 +343,9 @@ let render_detail_reading (state : state) reading =
               | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
               | Content text -> c.push ("  " ^ text)
               | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
-      if height > 0 then Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      if height > 0 then
+        Option.iter c.position
+          (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -783,7 +775,8 @@ let render_keeper_deletions (state : state) =
          past every height: at 44 rows it ended mid-object on "kind":
          "delivered", and the footer named the scroll keys without saying how
          far they had to go. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* The sheet's title: its name, then the filter while there is one, or whether
    the hint rows are on. The end of the filter being typed stays in view, the
@@ -872,7 +865,8 @@ let render_help (state : state) =
       (* Which of them these are. The sheet is longer than any terminal --
          at 150x78 the later sections are still off screen -- so a reader
          pressing [j] had no way of telling a page from a hundred. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -953,7 +947,7 @@ let queue_panel_detail_viewport state panel =
   let terminal_rows, cols = get_terminal_size () in
   let count = List.length (queue_panel_detail_lines state panel ~cols) in
   let budget = surface_chrome_budget state ~terminal_rows in
-  let height = queue_panel_window_height ~count ~budget in
+  let height = queue_panel_window_height ~budget in
   count, height
 
 let queue_panel_layout state (panel : queue_panel) =
@@ -999,11 +993,13 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
-        let height = queue_panel_window_height ~count ~budget in
+        let height = queue_panel_window_height ~budget in
         let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_detail_scroll in
         List.iteri (fun index line ->
           if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
-        if budget > 0 then Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+        if budget > 0 then
+          Option.iter c.position
+            (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
   else
   let placement = queue_panel_layout state panel in
   let context_caption =
@@ -1097,8 +1093,10 @@ let render_queue_panel (state : state) (panel : queue_panel) =
             else row in
           c.push row
         end) items;
-      if budget > queue_panel_fixed_rows ~items panel then
-        Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height (List.length items))) in
+      if items <> [] then
+        c.position
+          (Masc_tui_value.Position.row ~selected:selected_index
+             ~total:(List.length items))) in
   (* Shared chrome has three leading rows and two trailing rows. Its body
      copies as separate documents, even though the terminal writes one row. *)
   frame_panes := Masc_tui_queue_layout.panes placement ~cols
@@ -1203,12 +1201,12 @@ let render_answering (state : state) =
       done;
       (* The fixed preview panel: what the cursor's keeper is doing right now,
          from the turns poll's live glance. Drawn empty rather than omitted so
-         the list above never reflows with the cursor. The rule over it says
-         which of the list's rows are showing when they overflow, so it costs
-         the list no row (#38623). *)
-      (match overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height (List.length lines) with
-       | Some row -> c.push row
-       | None -> c.push_divider ());
+         the list above never reflows with the cursor. *)
+      if lines <> [] then
+        c.position
+          (Masc_tui_value.Position.row ~selected:(Some state.answering_cursor)
+             ~total:(List.length lines));
+      c.push_divider ();
       List.iter c.push preview_lines)
 ;;
 
@@ -1259,7 +1257,8 @@ let render_agenda (state : state) =
          rows and 100 columns, the panel drew sixteen of its twenty coming
          rows and neither of the two sections under them, and nothing said
          "Waiting on you" and "Stuck on you" were there. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 ;;
 
 (* The hint names the rows the terminal needs and the key that leaves. The full
@@ -1439,7 +1438,10 @@ let render_account_login state view =
     ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view
+      let lines, position =
+        Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view in
+      Option.iter c.position position;
+      let lines = lines
         |> List.map (function
           | Masc_tui_account_login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
           | Masc_tui_account_login.Terminal line ->

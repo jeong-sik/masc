@@ -302,11 +302,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       for index = scroll to min (scroll + room - 1) (total - 1) do
         c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
       done;
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:room ~total);
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  Text %s • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane"
-           (Masc_tui_scroll.window_text ~scroll ~height:room total)))
+        "  j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane")
 
-let browser_history_fixed_rows = 6
+let browser_history_fixed_rows = 5
 
 let browser_history_scroll_limit state ~terminal_rows ~cols history =
   let view = Browser_history.page_view history in
@@ -331,9 +332,13 @@ let render_browser_history (state : state) (history : Browser_history.t) =
         | List_failed detail -> "Could not read observations: " ^ Terminal_text.single_line detail
         | List_kept_back notice -> Terminal_text.single_line notice
         | Entries {entries;cursor;selection} ->
-          let position = Printf.sprintf "Observation %d/%d · from 100 recent tool calls"
-            (if entries=[] then 0 else cursor+1) (List.length entries) in
-          position ^ (match selection with Loading -> " · loading saved page…"
+          (* The selected observation is the position, on the title row. *)
+          if entries <> [] then
+            c.position
+              (Masc_tui_value.Position.row ~selected:(Some cursor)
+                 ~total:(List.length entries));
+          "Observations from 100 recent tool calls"
+          ^ (match selection with Loading -> " · loading saved page…"
             | Failed detail -> " · " ^ Terminal_text.single_line detail | Observed _ -> "") in
       c.push_styled ~style:(Theme.info ()) ("  " ^ status);
       c.push_styled ~style:(Theme.recede ()) "  Historical read · browser actions and live screenshots are inactive here";
@@ -356,10 +361,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
       let scroll = min history.scroll (max 0 (count-room)) in
       for index=scroll to min (scroll+room-1) (count-1) do
         c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
-      done;
-      c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  Text %s"
-           (Masc_tui_scroll.window_text ~scroll ~height:room count)))
+      done)
 
 type connector_table_column =
   | Connector_name_column | Connector_configured_column
@@ -436,8 +438,7 @@ let render_connectors (state : state) =
       let fixed = 2 + (if Option.is_some read_notice then 1 else 0)
         + (if Option.is_some state.connectors_error then 2 else 0) in
       let room = max 1 (budget - fixed) in
-      let overflowing = shown > room in
-      let content_height = if overflowing then max 1 (room - 1) else room in
+      let content_height = room in
       let max_scroll = max 0 (shown - content_height) in
       let scroll = max 0 (min state.connectors_scroll max_scroll) in
       let connectors_window = Rows.of_list ~first:scroll ~height:content_height connectors in
@@ -495,9 +496,7 @@ let render_connectors (state : state) =
               if idx = state.connectors_cursor then c.push_selected line
               else c.push_styled ~style line
         done;
-        if overflowing then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf
-               (if state.ui_language = Lang_ko then "  [커넥터 %s]" else "  [connectors %s]")
-               (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+        c.position
+          (Masc_tui_value.Position.row ~selected:(Some state.connectors_cursor)
+             ~total:shown)
       end)

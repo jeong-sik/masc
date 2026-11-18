@@ -1088,21 +1088,6 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
              state.fusion_historical_detail
     | Fusion_list | Fusion_detail _ -> state.fusion_detail_stale && Option.is_some detail
   in
-  let header =
-    here_row ~cols state ~path:[ fusion_step; run_id ] ~readings:[]
-      ~position:None
-  in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  if stale then
-    box_line_styled buf cols ~style:(Theme.warn ()) "  Fusion reading may be out of date";
-  (match state.fusion_detail_error with
-   | None -> ()
-   | Some error ->
-       box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text error));
-  if stale || Option.is_some state.fusion_detail_error then box_divider buf cols;
   let chrome_rows =
     5 + (if stale then 1 else 0)
       + (if Option.is_some state.fusion_detail_error then 1 else 0)
@@ -1136,6 +1121,21 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.fusion_scroll max_scroll) in
+  let header =
+    here_row ~cols state ~path:[ fusion_step; run_id ] ~readings:[]
+      ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  if stale then
+    box_line_styled buf cols ~style:(Theme.warn ()) "  Fusion reading may be out of date";
+  (match state.fusion_detail_error with
+   | None -> ()
+   | Some error ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Keeper_chat.terminal_safe_text error));
+  if stale || Option.is_some state.fusion_detail_error then box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (index + scroll) with
@@ -1143,7 +1143,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
-  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height total
+  scroll
 ;;
 
 (* The run list stays beside the run. Opening one used to hide the others, and the others
@@ -1153,7 +1153,7 @@ let render_fusion_detail (state : state) run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
-  let scroll, position =
+  let scroll =
     if cols < keeper_split_threshold_cols then
       fusion_detail_pane state ~rows ~cols run_id buf
     else begin
@@ -1195,7 +1195,7 @@ let render_fusion_detail (state : state) run_id =
     end
   in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~position
+    (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_fusion_detail ~lang:state.ui_language));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf

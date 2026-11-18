@@ -226,7 +226,9 @@ let repository_preview_lines state ~width (repo : Tui_decode.repository) =
     [ ui_text state ~ko:"Git 관측" ~en:"Git observation",
         (match repository_git_observation state repo with
          | Some reading -> reading
-         | None -> ui_text state ~ko:"미관측 · d:조회" ~en:"Not observed · d:read")
+         (* Not read yet: the mark goes where the value goes (RFC
+            tui-one-screen-grammar §6.4), and the read key is zone 5's. *)
+         | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread)
     ; ui_text state ~ko:"키퍼" ~en:"Keeper", (match repo.rp_keepers with
         | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
         | names -> String.concat ", " names)

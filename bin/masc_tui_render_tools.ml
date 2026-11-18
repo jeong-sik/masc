@@ -5,6 +5,11 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+(* The Skills list's name column: at least the width it always had, and no
+   wider than leaves the sizes on an 80-column screen. *)
+let skill_name_min_cells = 22
+let skill_name_max_cells = 32
+
 module Tool_tree = Masc_tui_tool_tree
 module Tool_table = Masc_tui_tool_table
 let json_assoc_member_opt = Masc_tui_json.member_opt
@@ -1045,6 +1050,18 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         let ets_skill_profiles = tools_skill_profiles state in
         let is_normal profile = match profile.Masc.Tui_decode_tools.esp_io with
           | Model_orchestrated -> true | Composition_io _ -> false in
+        (* The name column is as wide as the longest name, up to a cap, so a
+           long name such as [verify-before-claiming-done] no longer pushes
+           its row's execution and sizes past every other row's. *)
+        let skill_name_cells =
+          List.fold_left
+            (fun widest (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
+              max widest
+                (Masc_tui_message_layout.display_width
+                   (Terminal_text.single_line profile.esp_name)))
+            skill_name_min_cells ets_skill_profiles
+          |> min skill_name_max_cells
+        in
         let skill_profile_lines =
           List.mapi
             (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
@@ -1087,9 +1104,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                heading @ [ ( (if index = state.tools_skill_cursor
                   then Theme.selection
                   else Ansi.dim)
-               , Printf.sprintf " %s %-22s %-11s%s discovery=%dB body=%dB"
+               , Printf.sprintf " %s %s %-11s%s discovery=%dB body=%dB"
                    (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
-                   (Terminal_text.single_line profile.esp_name)
+                   (Masc_tui_message_layout.fit_width
+                      (Terminal_text.single_line profile.esp_name) skill_name_cells)
                    (Terminal_text.single_line execution)
                    flow
                    profile.esp_discovery_bytes

@@ -98,12 +98,24 @@ type write_error =
     It makes the two folders [0700] when they are not there. It makes a file
     beside the place of the key, sets it [0600], writes the key, syncs it,
     puts it in place by a rename that replaces nothing, and syncs the folder.
-    On an Eio fiber the calls run on a system thread
-    ({!Fs_compat.Systhread_host}).
+    The path is spelled where the call was made, which reads the real path
+    of the runtime root. On an Eio fiber the calls that make the folders and
+    the file run on a system thread ({!Fs_compat.Systhread_host}).
 
-    After an error the folders may be there, and after [Not_written] the file
-    too: whoever asked removes the folder of the account, as the purge of the
-    account does. *)
+    What an error leaves:
+    - After any error the folders may be there.
+    - After [Not_written] the key may be in place: the sync of the folder
+      failed after the rename.
+    - The file beside the place, [<generation>.tmp], holds the key until the
+      rename. It is removed when a later step fails and when the rename
+      meets a file ([Generation_taken]). A failure to remove it is dropped,
+      and the file stays. It also stays after an exception that is no
+      [Unix.Unix_error], which this function does not catch.
+
+    A generation that got an error is not written again: a second write of
+    it is [Generation_taken]. Whoever asked removes the folder of the account
+    ({!Runtime_account_home_layout.key_dir}). No function of this module
+    removes it. *)
 val write
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

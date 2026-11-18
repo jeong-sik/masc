@@ -36,12 +36,23 @@ let rec remove_tree path =
     -> Sys.remove path
 ;;
 
-(* A base path with the runtime root of one person made, as a login makes it. *)
+(* A base path with the runtime root of one person made, as a login makes it.
+   The umask is 0 while a case runs, so a mode a case reads is the mode that
+   was asked for: under the umask of whoever runs the test, 0755 could come
+   out as 0700, and a folder a case makes open could come out closed. *)
 let with_root work () =
   Eio_main.run (fun _env ->
     let base_path = Unix.realpath (Filename.temp_dir "api-key-file-" "") in
+    let umask = Unix.umask 0 in
     Fun.protect
-      ~finally:(fun () -> remove_tree base_path)
+      ~finally:(fun () ->
+        ignore (Unix.umask umask : int);
+        (* A tree that was not removed is said, and does not take the place
+           of the failure of the case. *)
+        try remove_tree base_path with
+        | Unix.Unix_error (error, call, path) ->
+          Printf.eprintf "the tree of the case stays: %s %s: %s\n" call path (Unix.error_message error)
+        | Sys_error detail -> Printf.eprintf "the tree of the case stays: %s\n" detail)
       (fun () ->
         let runtime_root = Layout.person_runtime_root ~base_path ~namespace in
         let rec make path =

@@ -5197,7 +5197,8 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout
+  masc_tui_value))
 
 (test
  (name test_tui_approval_detail)
@@ -5291,7 +5292,8 @@
   masc_tui_render_prim
   masc_tui_render_schedule
   masc_tui_roster_pane
-  masc_tui_table))
+  masc_tui_table
+  masc_tui_value))
 
 (test
  (name test_tui_terminal_write_repair)
@@ -5819,7 +5821,8 @@
 (test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox))
+ (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox
+  masc_tui_value unix))
 
 (test
  (name test_keeper_composition_async_broker)

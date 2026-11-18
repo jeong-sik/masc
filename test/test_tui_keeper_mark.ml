@@ -115,6 +115,19 @@ let test_shows_operator_disposition_activity_filter () =
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Unknown)
 ;;
 
+(* RFC tui-one-screen-grammar §7.2: work under way wears the still mark the
+   state dictionary gives it, the same on every surface. No frame counter
+   chooses the mark any more; the growing length beside it says the work is
+   going. *)
+let test_work_under_way_wears_the_still_under_way_mark () =
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  List.iter
+    (fun (label, activity) ->
+      Alcotest.(check string) label under_way (Mark.activity_glyph activity))
+    [ "preparing", Masc_tui_keeper_list_model.Preparing
+    ; "running", Masc_tui_keeper_list_model.Running ]
+;;
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -128,5 +141,7 @@ let () =
             test_operator_disposition_words
         ; Alcotest.test_case "operator disposition activity filter" `Quick
             test_shows_operator_disposition_activity_filter
+        ; Alcotest.test_case "work under way wears the still under-way mark" `Quick
+            test_work_under_way_wears_the_still_under_way_mark
         ] )
     ]

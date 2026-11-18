@@ -506,6 +506,54 @@ let test_schedule_agenda_suspends_with_workspace_authority () =
   check bool "the retired response cannot fill the next read" false
     (Types.Snapshot_read.is_current state.schedules_agenda_read ticket)
 
+module Redraw = Masc_tui_value.Redraw
+
+(* The earliest instant the frame noted must fall [least] to [most] seconds
+   after the wall clock read around the call. *)
+let check_noted label ~before ~after ~least ~most =
+  match Redraw.next_change () with
+  | None -> fail (label ^ ": the text changes with time, so the frame notes when")
+  | Some at ->
+      check bool label true (at >= before +. least && at <= after +. most)
+
+(* RFC tui-one-screen-grammar §8: without new data a pending read's notice
+   changes only with time. Below the floor it shows no seconds, and they
+   appear when the read reaches the floor, so the frame notes that instant;
+   past the floor the seconds it shows note their next change. Nothing else
+   redraws the notice now that no clock ticks while a read is pending. *)
+let test_a_pending_read_notes_when_time_changes_its_notice () =
+  let noted label elapsed_s ~least ~most =
+    Redraw.begin_frame ();
+    let before = Unix.gettimeofday () in
+    ignore (Types.loading_notice ?elapsed_s "status");
+    let after = Unix.gettimeofday () in
+    check_noted label ~before ~after ~least ~most
+  in
+  noted "below the floor: by the instant the seconds appear" (Some 1) ~least:0. ~most:1.;
+  noted "on the floor: by the next second" (Some 2) ~least:0. ~most:1.;
+  noted "past a minute: by the next minute, not the next second" (Some 125)
+    ~least:1. ~most:55.;
+  Redraw.begin_frame ();
+  ignore (Types.loading_notice "status");
+  check (option (float 1e-9)) "a read with no start changes nothing with time" None
+    (Redraw.next_change ())
+
+(* The same for the pending display bar: a read inside it draws its row when
+   it crosses the bar, with no new data, so that crossing is noted. *)
+let test_a_read_inside_the_display_bar_notes_its_crossing () =
+  Redraw.begin_frame ();
+  let before = Unix.gettimeofday () in
+  check bool "a read at 0.4 s is inside the bar" false
+    (Types.past_pending_display_bar 400_000_000L);
+  let after = Unix.gettimeofday () in
+  check_noted "the crossing is noted for when the read reaches the bar" ~before ~after
+    ~least:0. ~most:0.6;
+  Redraw.begin_frame ();
+  check bool "a read at 2 s is past the bar" true
+    (Types.past_pending_display_bar 2_000_000_000L);
+  check (option (float 1e-9)) "a read past the bar has nothing left to cross" None
+    (Redraw.next_change ())
+
 let () =
   run "tui loading notice"
     [ ( "a read in flight"
@@ -529,5 +577,9 @@ let () =
             test_the_same_tab_for_two_keepers_is_timed_apart
         ; test_case "the wait ends when the answer arrives" `Quick
             test_the_wait_ends_when_the_answer_arrives
+        ; test_case "a pending read notes when time changes its notice" `Quick
+            test_a_pending_read_notes_when_time_changes_its_notice
+        ; test_case "a read inside the display bar notes its crossing" `Quick
+            test_a_read_inside_the_display_bar_notes_its_crossing
         ] )
     ]

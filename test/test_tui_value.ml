@@ -154,6 +154,32 @@ let test_a_length_past_a_minute_changes_at_most_once_a_minute () =
         (gap >= seconds_per_minute))
     (gaps changes)
 
+(* The same rule read the other way: a countdown ("in 3m", "8h13m 뒤") with
+   more than a minute left changes at most once a minute while what is left
+   shrinks (RFC tui-one-screen-grammar §6.2). *)
+let test_a_countdown_past_a_minute_changes_at_most_once_a_minute () =
+  let at = 1_000_000. and step = 0.25 in
+  let rec walk now previous changes =
+    if now > at -. seconds_per_minute then List.rev changes
+    else
+      let reading = Ongoing.text (at -. now) in
+      walk (now +. step) reading
+        (if String.equal reading previous then changes else now :: changes)
+  in
+  let first = at -. (2. *. seconds_per_day) in
+  let changes = walk first (Ongoing.text (at -. first)) [] in
+  let rec gaps = function
+    | a :: (b :: _ as rest) -> (b -. a) :: gaps rest
+    | [ _ ] | [] -> []
+  in
+  Alcotest.(check bool) "the reading changes while the moment comes" true
+    (List.length changes > 1);
+  List.iter
+    (fun gap ->
+      Alcotest.(check bool) "two changes are at least a minute apart" true
+        (gap >= seconds_per_minute))
+    (gaps changes)
+
 (* [next_change] is the instant the reading next differs: a frame that waits
    for it is neither early (the same reading drawn again) nor late. *)
 let test_next_change_is_the_first_instant_the_reading_differs () =
@@ -244,6 +270,8 @@ let () =
     ; ( "ongoing length",
         [ Alcotest.test_case "past a minute, at most once a minute" `Quick
             test_a_length_past_a_minute_changes_at_most_once_a_minute
+        ; Alcotest.test_case "a countdown past a minute, at most once a minute" `Quick
+            test_a_countdown_past_a_minute_changes_at_most_once_a_minute
         ; Alcotest.test_case "next change is when the reading differs" `Quick
             test_next_change_is_the_first_instant_the_reading_differs
         ; Alcotest.test_case "a countdown changes below its floor" `Quick

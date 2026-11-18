@@ -380,6 +380,102 @@ let test_no_time_text_schedules_nothing () =
   check (option (float 1e-9)) "a frame with no time text" None
     (Schedule.Time_redraw.due ~now:100.2 None)
 
+module Redraw = Masc_tui_value.Redraw
+module Ongoing = Masc_tui_value.Ongoing
+
+(* The two halves the loop joins: what a frame notes while it draws a length
+   that changes with time, and the second [Time_redraw.due] turns that into.
+   [reading t] is the text that length shows at wall-clock [t]. The render
+   must fall on the first whole second at or after the first instant the
+   reading differs: by that second the reading has changed, and a second
+   earlier, unless that is already behind the frame, it had not. A reading of
+   these ladders holds over one stretch of time, so checking the two ends of
+   the wait is enough. [settle] is how long after the render the reading is
+   read: a countdown notes the instant it reaches a reading's floor and shows
+   the next reading only just after it. *)
+let check_first_change_second ~label ~settle ~now ~reading =
+  match Schedule.Time_redraw.due ~now (Redraw.next_change ()) with
+  | None -> failf "%s: a length that changes with time schedules a render" label
+  | Some due ->
+      check bool (label ^ ": the render comes after the frame") true (due > now);
+      check bool (label ^ ": on a whole second") true (Float.is_integer due);
+      check bool (label ^ ": the reading has changed by then") false
+        (String.equal (reading now) (reading (due +. settle)));
+      if due -. 1. >= now then
+        check bool (label ^ ": and had not a second earlier") true
+          (String.equal (reading now) (reading (due -. 1.)))
+
+(* Frames are built at any instant, so the wall clock is taken on a second,
+   a quarter past one and a millisecond before the next. *)
+let frame_instants = [ 1_794_050_000.; 1_794_050_000.25; 1_794_050_059.999 ]
+
+(* RFC tui-one-screen-grammar §10, the second decision test: the render
+   asked of time is the first second boundary after the first visible change
+   of a length still going. *)
+let test_an_ongoing_length_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun span ->
+          let at = now -. span in
+          Redraw.begin_frame ();
+          ignore (Ongoing.since ~now at);
+          check_first_change_second ~settle:0.
+            ~label:(Printf.sprintf "%.3f s ago at %.3f" span now)
+            ~now ~reading:(fun t -> Ongoing.text (t -. at)))
+        [ 0.; 0.3; 1.7; 59.2; 59.999; 60.; 61.5; 119.9; 3_599.2; 3_600.; 3_661.7;
+          86_399.5; 86_400.; 90_061.3; 8_639_999.5; 8_640_000. ])
+    frame_instants
+
+(* The same for a countdown ("in 3m"): what is left shrinks, and its reading
+   turns when what is left drops below the reading's floor. *)
+let test_a_countdown_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun left ->
+          let at = now +. left in
+          Redraw.begin_frame ();
+          ignore (Ongoing.until ~now at);
+          check_first_change_second ~settle:0.001
+            ~label:(Printf.sprintf "%.3f s left at %.3f" left now)
+            ~now ~reading:(fun t -> Ongoing.text (at -. t)))
+        [ 1.; 1.5; 59.9; 60.; 60.4; 125.3; 3_600.; 3_661.7; 86_400.5; 8_726_400.5 ])
+    frame_instants
+
+(* §6.2 and §8: a finished length ([243ms], [29.2s], [3m15s]) does not change
+   while the reader looks, so a frame that draws only finished lengths asks
+   time for nothing. An age drawn beside them does. *)
+let test_finished_lengths_ask_time_for_nothing () =
+  Redraw.begin_frame ();
+  ignore (Masc_tui_message_layout.span_text 195.);
+  ignore (Masc_tui_message_layout.elapsed_text 29.2);
+  ignore (Masc_tui_message_layout.elapsed_text 0.243);
+  check (option (float 1e-9)) "finished lengths schedule nothing" None
+    (Schedule.Time_redraw.due ~now:1000.2 (Redraw.next_change ()));
+  ignore (Masc_tui_message_layout.age_text ~now:1000.2 ~since:900.);
+  check bool "an age beside them schedules a render" true
+    (Option.is_some (Schedule.Time_redraw.due ~now:1000.2 (Redraw.next_change ())))
+
+(* §8 and §10: time alone redraws at most once a second. Whatever a frame
+   noted, even an instant already behind it, the render it asks for is a
+   whole second strictly after the frame, so the frame built for it asks for
+   the following second at the earliest. *)
+let test_time_alone_renders_at_most_once_a_second () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun offset ->
+          match Schedule.Time_redraw.due ~now (Some (now +. offset)) with
+          | None -> fail "a noted change schedules a render"
+          | Some due ->
+              check bool "a whole second" true (Float.is_integer due);
+              check bool "after the frame" true (due > now);
+              check bool "no later than the second after the change" true
+                (due <= Float.max (Float.ceil (now +. offset)) (Float.floor now +. 1.)))
+        [ -5.; -0.001; 0.; 0.001; 0.4; 0.999; 1.; 59.5 ])
+    frame_instants
+
 let () =
   test_terminal_size_retains_raw_resize_signal ();
   test_terminal_size_retains_raw_resize_signal ();
@@ -389,6 +485,14 @@ let () =
             test_time_renders_on_the_second_after_the_first_change
         ; test_case "no time text schedules nothing" `Quick
             test_no_time_text_schedules_nothing
+        ; test_case "an ongoing length renders on the second it changes" `Quick
+            test_an_ongoing_length_renders_on_the_second_it_changes
+        ; test_case "a countdown renders on the second it changes" `Quick
+            test_a_countdown_renders_on_the_second_it_changes
+        ; test_case "finished lengths ask time for nothing" `Quick
+            test_finished_lengths_ask_time_for_nothing
+        ; test_case "time alone renders at most once a second" `Quick
+            test_time_alone_renders_at_most_once_a_second
         ; test_case "idle performs no render work" `Quick
             test_idle_has_no_render_work
         ; test_case "1000 invalidations coalesce" `Quick

@@ -1,13 +1,14 @@
 (* HIGH-RISK-UNREVIEWED: this module writes the records that start and end the
-   deletion of a person's conversation with their Keeper. A wrong record keeps
-   a deleted conversation readable, or deletes one nobody asked to delete. *)
+   deletion of what a person owns: a conversation with their Keeper, or a
+   provider account. A wrong record keeps a deleted target readable, or
+   deletes one nobody asked to delete. *)
 
 (** Writes the purge records of the authorization log (design 8.5, plan
-    S1b-3c). The owner starts the purge of their conversation, and the system
-    maintenance ends it when the folder of the conversation is gone or could
-    not be removed. Each record is judged on the state of the zone first
-    ({!Authz_purge_state.apply}), and the zone judges it again when it
-    commits. *)
+    S1b-3c, RFC a-persons-api-key-is-their-own-provider-account 3.6). The
+    owner starts the purge of their target, and the system maintenance ends it
+    when what the target names is gone or could not be removed. Each record is
+    judged on the state of the zone first ({!Authz_purge_state.apply}), and
+    the zone judges it again when it commits. *)
 
 type error =
   | Body_not_built of Authz_body.error
@@ -32,18 +33,9 @@ val start
   -> Authz_purge_event.target
   -> (unit, error) result
 
-(** The system maintenance ends the purge of [target]: its folder is gone. *)
-val purged
-  :  Authz_zone.t
-  -> Authz_purge_event.target
-  -> vendor_copy:Authz_purge_event.vendor_copy
-  -> (unit, error) result
+(** The system maintenance ends a purge: what its target names is gone. *)
+val purged : Authz_zone.t -> Authz_purge_event.purged -> (unit, error) result
 
-(** The system maintenance ends the purge of [target]: its folder is still
-    there. *)
-val failed
-  :  Authz_zone.t
-  -> Authz_purge_event.target
-  -> failed_stage:Authz_purge_event.failed_stage
-  -> vendor_copy:Authz_purge_event.vendor_copy
-  -> (unit, error) result
+(** The system maintenance ends a purge: what its target names is still
+    there, at the stage the record says. *)
+val failed : Authz_zone.t -> Authz_purge_event.failed -> (unit, error) result

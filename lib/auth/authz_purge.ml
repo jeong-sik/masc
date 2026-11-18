@@ -21,6 +21,7 @@ let check (state : Authz_state.t) ~author event =
     state.Authz_state.purges
     ~author
     ~is_active:(Authz_principal_state.is_active state.Authz_state.principals)
+    ~account_owner:(Authz_provider_account_state.owner state.Authz_state.provider_accounts)
     event
   |> Result.map (fun (_ : Authz_purge_state.t) -> ())
 ;;
@@ -44,13 +45,10 @@ let start zone ~user_id target =
     (Authz_purge_event.Purge_pending { target })
 ;;
 
-let purged zone target ~vendor_copy =
-  write zone ~author:Author.System_maintenance (Authz_purge_event.Purged { target; vendor_copy })
+let purged zone purged =
+  write zone ~author:Author.System_maintenance (Authz_purge_event.Purged purged)
 ;;
 
-let failed zone target ~failed_stage ~vendor_copy =
-  write
-    zone
-    ~author:Author.System_maintenance
-    (Authz_purge_event.Purge_failed { target; failed_stage; vendor_copy })
+let failed zone failed =
+  write zone ~author:Author.System_maintenance (Authz_purge_event.Purge_failed failed)
 ;;

@@ -71,9 +71,7 @@ let runtime_row (state : Authz_state.t) runtime_id =
 ;;
 
 let provider_account (state : Authz_state.t) account_id =
-  Authz_provider_account_state.owner state.provider_accounts account_id
-  |> Option.map (fun (_ : User_id.t) -> Resource_status.Active)
-  |> found_or_absent
+  found_or_absent (Authz_state.provider_account_status state account_id)
 ;;
 
 (* The Self grant of the Runtime, for its owner and no one else. *)

@@ -914,7 +914,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
       check int (label ^ ": cursor follows original source bytes") (String.length rows)
         (int_field "next_since_offset" response))
       ["operation", Api.chat_events_page ~operation_id:call_id ~since_seq:L.Whole_turn ~redact_text;
-       "autonomous", Api.turn_events_page ~turn_ref ~since_seq:L.Whole_turn ~redact_text];
+       "autonomous", Api.turn_events_page ~turn_ref ~turn_state:Api.Turn_ended ~since_seq:L.Whole_turn ~redact_text];
     check string "serving leaves original durable content untouched" rows (rows_of entries))
 ;;
 

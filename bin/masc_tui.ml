@@ -11336,7 +11336,7 @@ let launch_selected_preparation_operation_read state ~mailbox =
    taken then, and the log's seq dedup drops what the live stream has
    meanwhile added. Failures are typed by the fetch and decided in the
    handler, not here. *)
-let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
+let launch_keeper_chat_journal_loads ?(follow = false) state ~mailbox ~keeper_name targets =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -11357,6 +11357,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
           read_keeper_chat_operation ~check_request ~host ~port
             ~keeper_name ~operation_id |> Result.map Option.some
     in
+    let turn_state = ref None in
     let read_journal () =
       try
         Keeper_chat_log.read_whole_journal ~since_seq
@@ -11369,9 +11370,13 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
               Error (Keeper_chat_log.Events_kept_back
                 (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                    ~request:Kept_request.Keeper_journal_read refusal))
-            | Ok () -> Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
-                ~source ~since_seq ~since_offset
-                ~limit:Masc.Keeper_chat_event_log.page_max_limit)
+            | Ok () ->
+                let page = Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
+                    ~source ~since_seq ~since_offset ~follow
+                    ~limit:Masc.Keeper_chat_event_log.page_max_limit in
+                Result.iter (fun (page : Keeper_chat_log.events_page) ->
+                  turn_state := page.turn_state) page;
+                page)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
@@ -11379,7 +11384,8 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
     let operation_state, journal, terminal_replay = Keeper_chat_log.read_with_operation_state
       ~read_operation ~read_journal in
     enqueue_async mailbox
-      (Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay }))
+      (Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; turn_state = !turn_state;
+                                                 journal; operation_state; terminal_replay }))
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
@@ -25865,8 +25871,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               (match event with
                | Masc_tui_observer.Keeper_chat_stream_frame { keeper; operation_id; seq; at; _ } ->
                    observe_journal keeper (Keeper_chat_log.Operation operation_id) seq at
-               | Masc_tui_observer.Keeper_turn_stream_frame { keeper; turn_ref; seq; at } ->
-                   observe_journal keeper (Keeper_chat_log.Autonomous_turn turn_ref) (Some seq) at
                | Masc_tui_observer.Agent_core _
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
@@ -25957,7 +25961,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
-               | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_skill_activations_changed _ | Masc_tui_observer.Keeper_turn_changed _
                | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _
                | Masc_tui_observer.Approval_change
@@ -29817,7 +29820,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.msg_child_content <- (keeper_name,snapshots) :: List.remove_assoc keeper_name state.msg_child_content;
       if List.mem keeper_name state.msg_child_content_audit_pending then
         launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name
-  | Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay }) -> (
+  | Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; turn_state; journal; operation_state; terminal_replay }) -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
@@ -29948,7 +29951,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (* Not sent, so not remembered either: the next load asks again. *)
           add_event state "error"
             (notice ^ " · " ^ Keeper_chat.compact_request_id journal_id));
-      read_again ())
+      read_again ();
+      (* The chat on screen follows its Keeper's running turn: an answer that
+         says the turn still runs asks again, waiting on the server for the
+         next row (RFC an-idle-tui-receives-only-changes-it-draws T2). A
+         failed read is not chained here; the next turns read on this
+         screen starts the journal again. *)
+      (match source, turn_state, journal with
+       | Keeper_chat_log.Autonomous_turn _, Some Keeper_chat_log.Turn_running, Ok _
+         when state.view = Keepers Keeper_message
+              && Option.equal String.equal state.msg_target_keeper_name (Some keeper_name) ->
+           (match journal_follow_for_source state ~keeper_name ~source ~seq:None ~at:started_at with
+            | Follow_nothing | Follow_read_after_inflight -> ()
+            | Follow_read { started_at; since_seq } ->
+                launch_keeper_chat_journal_loads ~follow:true state ~mailbox ~keeper_name
+                  [ (source, started_at, since_seq) ])
+       | Keeper_chat_log.Autonomous_turn _, Some Keeper_chat_log.Turn_running, Ok _
+       | Keeper_chat_log.Autonomous_turn _, (Some Keeper_chat_log.Turn_ended | None), Ok _
+       | Keeper_chat_log.Autonomous_turn _, _, Error _
+       | Keeper_chat_log.Operation _, _, (Ok _ | Error _) -> ()))
   | Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result })) ->
       let current = settle_tools_read state ~generation Tools_inventory_read in
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in

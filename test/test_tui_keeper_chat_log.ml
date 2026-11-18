@@ -774,7 +774,7 @@ let test_journal_final_page_rejects_invalid_event_frontiers () =
     | Some offset -> offset | None -> fail "fixture offset" in
   List.iter (fun (events, next_since_seq) ->
     let fetch ~since_seq:_ ~since_offset:_ = Ok {
-      Log.source=Log.Operation "op"; events; has_more=false;
+      Log.source=Log.Operation "op"; turn_state=None; events; has_more=false;
       next_since_seq; next_since_offset=offset } in
     match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
     | Error (Log.Events_undecodable _) -> ()
@@ -793,7 +793,7 @@ let test_journal_final_page_accepts_valid_resume_and_sequence_gaps () =
     | Some offset -> offset | None -> fail "fixture offset" in
   List.iter (fun (events, next_since_seq) ->
     let fetch ~since_seq:_ ~since_offset:_ = Ok {
-      Log.source=Log.Operation "op"; events; has_more=false;
+      Log.source=Log.Operation "op"; turn_state=None; events; has_more=false;
       next_since_seq; next_since_offset=offset } in
     match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
     | Ok actual -> check bool "valid journal events retain exact bytes and order" true (actual = events)
@@ -806,7 +806,7 @@ let test_journal_empty_page_rejects_unserved_byte_advances () =
   let offset value = match Journal.page_start_of_wire (Some value) with
     | Some offset -> offset | None -> fail "fixture offset" in
   let page ~events ~has_more ~next_since_seq ~next_since_offset = Ok {
-    Log.source=Log.Operation "op"; events; has_more;
+    Log.source=Log.Operation "op"; turn_state=None; events; has_more;
     next_since_seq; next_since_offset=offset next_since_offset } in
   let whole_turn ~since_seq:_ ~since_offset:_ =
     page ~events:[] ~has_more:false ~next_since_seq:Journal.Whole_turn ~next_since_offset:100 in
@@ -837,11 +837,11 @@ let test_journal_page_rejects_cursor_disagreement () =
     fun ~since_seq:_ ~since_offset:_ ->
       incr calls;
       if !calls = 1
-      then Ok { Log.source=Log.Operation "op"; events=[event 2]; has_more=true;
+      then Ok { Log.source=Log.Operation "op"; turn_state=None; events=[event 2]; has_more=true;
                 next_since_seq=Journal.After_seq 2; next_since_offset=offset 100 }
       else Ok (second ()) in
   let second ~events ~has_more ~next_since_seq ~next_since_offset () =
-    { Log.source=Log.Operation "op"; events; has_more; next_since_seq;
+    { Log.source=Log.Operation "op"; turn_state=None; events; has_more; next_since_seq;
       next_since_offset=offset next_since_offset } in
   List.iter (fun (label, page) ->
     match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:(pages ~second:page) with
@@ -872,6 +872,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let page ~events ~has_more ~next_since_seq ~next_since_offset =
     Ok
       { Log.source = Log.Operation "op"
+      ; turn_state = None
       ; events
       ; has_more
       ; next_since_seq

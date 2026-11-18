@@ -17,10 +17,16 @@ type t =
   ; text : Keeper_stream_text_redaction.Scoped.t
   ; redact_text : string -> string
   ; mutex : Eio.Mutex.t
+  ; grew : Eio.Condition.t
   ; mutable stream : stream_state
   }
 
-let current_turns : ((string * string), Ids.Turn_ref.t) Hashtbl.t = Hashtbl.create 16
+(* A running turn and the signal its journal readers wait on. The signal is
+   broadcast after each append and once more when the turn leaves this
+   table, so a waiting reader always reads again after the last change. *)
+type current_turn = { current_ref : Ids.Turn_ref.t; journal_grew : Eio.Condition.t }
+
+let current_turns : ((string * string), current_turn) Hashtbl.t = Hashtbl.create 16
 let current_mutex = Mutex.create ()
 
 let with_current f =
@@ -28,11 +34,20 @@ let with_current f =
   Fun.protect ~finally:(fun () -> Mutex.unlock current_mutex) f
 
 let current ~base_path ~keeper_name =
-  with_current (fun () -> Hashtbl.find_opt current_turns (base_path, keeper_name))
+  with_current (fun () ->
+    Option.map (fun turn -> turn.current_ref)
+      (Hashtbl.find_opt current_turns (base_path, keeper_name)))
+
+let journal_grew ~base_path ~keeper_name ~turn_ref =
+  with_current (fun () ->
+    match Hashtbl.find_opt current_turns (base_path, keeper_name) with
+    | Some turn when Ids.Turn_ref.equal turn.current_ref turn_ref -> Some turn.journal_grew
+    | Some _ | None -> None)
 
 let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
   let journal = Journal.open_turn_journal ~base_dir:base_path ~keeper_name ~turn_ref () in
   let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  let grew = Eio.Condition.create () in
   let events = match Journal.next_sequence journal with
     | Error failure ->
       let detail = match failure with
@@ -45,18 +60,9 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
     Journal.append journal ~seq ~ts
       (Events.public_content
         ~redact_text:(Keeper_secret_redaction.redact_text redaction) event);
-    (* A notification names the canonical journal cursor. Readers fetch the
-       journal rather than racing live frames against replay or exposing
-       reasoning on a general observer connection. *)
-    (try Sse.broadcast_to
-       (Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path))
-       (`Assoc [ "type", `String "keeper_turn_stream_event";
-         "name", `String keeper_name;
-         "turn_ref", `String (Ids.Turn_ref.to_string turn_ref);
-         "seq", `Int seq; "ts_unix", `Float ts ])
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Log.Keeper.warn ~keeper_name "autonomous stream notification failed: %s" (Printexc.to_string exn))) ()) in
+    (* Only the reader following this turn's journal hears the append; no
+       observer is told (RFC an-idle-tui-receives-only-changes-it-draws T3). *)
+    Eio.Condition.broadcast grew) ()) in
   (* This producer has no channel adapter: its only reader is the authenticated
      journal endpoint. Disable queue backpressure while retaining the hook. *)
   Option.iter Events.reader_gone events;
@@ -75,11 +81,13 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
         ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
         ~redact_text:(Keeper_secret_redaction.redact_text redaction);
       redact_text = Keeper_secret_redaction.redact_text redaction;
-      mutex = Eio.Mutex.create ();
+      mutex = Eio.Mutex.create (); grew;
       stream = Open {bridge = Bridge.empty_state ~generation:content_generation ()} }
   in
   Option.iter (fun _ ->
-    with_current (fun () -> Hashtbl.replace current_turns (base_path, keeper_name) turn_ref);
+    with_current (fun () ->
+      Hashtbl.replace current_turns (base_path, keeper_name)
+        { current_ref = turn_ref; journal_grew = grew });
     Keeper_turn_broadcast.changed ~base_path ~keeper_name) events;
   Option.iter (fun events ->
     Events.publish events (Events.Text_message_start { message_id = run_id ^ ":assistant"; role = Events.Assistant })) events;
@@ -196,10 +204,11 @@ let finish t ending =
       Option.iter Events.close t.events;
       let removed = with_current (fun () ->
         match Hashtbl.find_opt current_turns (t.base_path, t.keeper_name) with
-        | Some turn_ref when Ids.Turn_ref.equal turn_ref t.turn_ref ->
+        | Some turn when Ids.Turn_ref.equal turn.current_ref t.turn_ref ->
             Hashtbl.remove current_turns (t.base_path, t.keeper_name);
             true
         | Some _ | None -> false) in
+      Eio.Condition.broadcast t.grew;
       if removed then
         Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name) (fun () ->
       flush t stream;

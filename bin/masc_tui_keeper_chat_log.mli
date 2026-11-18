@@ -120,8 +120,15 @@ val decode_operation_state :
 (** Decode the operation API's state only after checking its schema and exact
     operation identity. Unknown states and malformed terminal facts fail. *)
 
+type turn_state = Turn_running | Turn_ended
+(** Whether an autonomous turn was running when its page read began. A
+    [Turn_ended] page holds every row the turn wrote past the cursor. *)
+
 type events_page =
   { source : journal_source
+  ; turn_state : turn_state option
+        (** [Some] on an autonomous turn's page (required there), [None] on
+            an operation's. *)
   ; events : Masc.Keeper_chat_event_log.journaled_event list
   ; has_more : bool
   ; next_since_seq : Masc.Keeper_chat_event_log.replay_position
@@ -142,7 +149,10 @@ val decode_events_page : Yojson.Safe.t -> (events_page, string) result
 val journal_path :
   encode_value:(string -> string) -> keeper_name:string -> source:journal_source ->
   since_seq:Masc.Keeper_chat_event_log.replay_position ->
-  since_offset:Masc.Keeper_chat_event_log.page_start -> limit:int -> string
+  since_offset:Masc.Keeper_chat_event_log.page_start -> limit:int -> follow:bool -> string
+(** [follow] asks an autonomous turn's read to wait, up to the server's bound,
+    for a row past the cursor or the turn's end. An operation's path ignores
+    it. *)
 
 (** Why a v2 events request did not return a page. The codes are the
     endpoint's ([unknown_operation] 404, [journal_pruned] 410,

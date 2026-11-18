@@ -60,7 +60,7 @@ let visible filter (event : Observer.event) =
       (* A reply sends one stream frame per token, and a queue-size change is
          state rather than something a keeper did. Both belong with the
          heartbeat: shown under [Everything], never counted as an action. *)
-      | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+      | Observer.Keeper_chat_stream_frame _
       | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
       (* A memory journal row follows a memory write whose tool call is
          already its own action row. *)
@@ -113,7 +113,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
@@ -456,7 +456,6 @@ let actor_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_memory_journal_appended { keeper; _ }
   | Observer.Keeper_runtime_journal_appended { keeper; _ }
   | Observer.Keeper_chat_stream_frame { keeper; _ }
-  | Observer.Keeper_turn_stream_frame { keeper; _ }
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Keeper_async_requests_changed { keeper }
   | Observer.Keeper_skill_activations_changed { keeper }
@@ -524,7 +523,7 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Keeper_memory_journal_appended _ -> say "메모리" "memory"
   | Observer.Keeper_runtime_journal_appended { journal = Observer.Native_tasks_journal; _ } -> "native tasks"
   | Observer.Keeper_runtime_journal_appended { journal = Observer.Child_content_journal; _ } -> "child content"
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> say "채팅 스트림" "chat stream"
+  | Observer.Keeper_chat_stream_frame _ -> say "채팅 스트림" "chat stream"
   | Observer.Keeper_waiting_inventory_changed _ -> say "대기열" "waiting queue"
   | Observer.Keeper_async_requests_changed _ -> say "비동기 요청" "async requests"
   | Observer.Keeper_skill_activations_changed _ -> say "스킬 활성화" "skill activations"
@@ -689,7 +688,6 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       ; label
       ; detail = Option.value ~default:"" frame
       }
-  | Observer.Keeper_turn_stream_frame { keeper; _ }
   | Observer.Keeper_memory_journal_appended { keeper; _ }
   | Observer.Keeper_runtime_journal_appended { keeper; _ }
   | Observer.Keeper_async_requests_changed { keeper }
@@ -1041,7 +1039,7 @@ let member_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_turn_observation _
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Snapshot _ | Observer.Execution_snapshot
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Other _ ->
@@ -1214,7 +1212,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
@@ -1358,7 +1356,7 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+  | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _
   | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Snapshot _ | Observer.Execution_snapshot
   | Observer.Other _ ->
@@ -1552,7 +1550,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
-          | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
+          | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
           | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
           | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
@@ -1645,7 +1643,7 @@ let evidence_fields ~ko (entry : entry) =
       ; some (say "입출력" "Input/output") (say "이 관찰 이벤트에 실려 오지 않음" "not carried by this observer event")
       ; some (say "호출 근거" "Call evidence") (say "이 이벤트는 도구 호출 그 자체가 아님" "this event is not an exact tool invocation")
       ]
-  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko ~at:entry.ae_at ~duration_ms:None event in
       [ some (say "출처" "Source") (say "관찰 이벤트" "observer event")
       ; some (say "이벤트" "Event") row.label
       ; some (say "상세" "Detail") row.detail

@@ -6,6 +6,13 @@ type t
 val create : base_path:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> t
 val current : base_path:string -> keeper_name:string -> Ids.Turn_ref.t option
 (** In-flight autonomous journal, absent once its producer closes. *)
+
+val journal_grew :
+  base_path:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> Eio.Condition.t option
+(** The signal broadcast after each append to [turn_ref]'s journal and once
+    when the turn closes; [None] unless [turn_ref] is the Keeper's running
+    turn. A reader that waits with {!Eio.Condition.loop_no_mutex} reads the
+    journal again after every change, including the last. *)
 (** Root callbacks arriving after [finish] are ignored under the publication
     mutex. Bound child/task persistence remains independent of root closure. *)
 val on_event : t -> Agent_core.Types.sse_event -> unit

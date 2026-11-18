@@ -331,6 +331,8 @@ type keeper_msg =
       { keeper_name : string
       ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; turn_state : Masc_tui_keeper_chat_log.turn_state option
+            (** The last page's: whether the autonomous turn still ran. *)
       ; terminal_replay : Masc_tui_keeper_chat_log.terminal_replay
       ; operation_state : (Keeper_chat_operation.state option, Masc_tui_types.request_failure) result
       ; journal :

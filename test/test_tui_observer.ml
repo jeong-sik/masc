@@ -137,8 +137,6 @@ let summary = function
          | Observer.Child_content_journal -> "child_content")
   | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
       Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
-  | Observer.Event (Observer.Keeper_turn_stream_frame { keeper; turn_ref; _ }) ->
-      "turn_stream(" ^ keeper ^ "," ^ Ids.Turn_ref.to_string turn_ref ^ ")"
   | Observer.Event (Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ })
     ->
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)

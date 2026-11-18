@@ -2,8 +2,8 @@
     tui-one-screen-grammar section 5.6).
 
     A cell is two dots wide and four tall, so it holds two times, oldest on the
-    left. Graphs carry no colour: a caller colours the rows only for an
-    anomaly (section 7.3).
+    left. A graph takes its colours from a tint, the colour a height share
+    draws in (section 7.3).
 
     Pure by construction: no terminal I/O, no mutation, no unhandled
     exceptions. *)
@@ -77,15 +77,30 @@ val braille_level : dots:int -> maximum:int -> sample -> int
     [dots]: at least one dot above the baseline however small it is, and
     [dots] at or past [maximum]. *)
 
+(** The SGR a cell draws at a height share in [[0, 1]], from a picture ramp
+    ([Masc_tui_ansi.Theme.series_tint]). A tint that returns [""] draws no colour. *)
+type tint = float -> string
+
 val braille_graph :
+  tint:tint ->
   width:int -> rows:int -> axis:string -> maximum:int -> sample list -> graph
 (** A graph [width] cells wide and [rows] text rows tall, growing up from its
     baseline. [maximum] is the top of the axis: the largest sample
     ({!graph_maximum}) or a declared limit. [axis] is that top written with its
     unit ([123K]), placed at the graph's top-left. The newest [2 * cells]
-    samples are drawn; a time before the first sample is blank. *)
+    samples are drawn; a time before the first sample is blank.
+
+    A graph more than one row tall colours each row by its height, from [0]
+    at the base row to [1] at the top; a one-row graph colours each cell by
+    the taller of its two times, from [0] at the baseline to [1] at the top.
+    A colour code goes out only where it changes, a blank cell opens none, an
+    empty tint after a colour resets to the foreground, and each row that
+    opened a colour ends with a reset. The axis text draws in the
+    foreground. *)
 
 val braille_mirror :
+  up_tint:tint ->
+  down_tint:tint ->
   width:int ->
   half_rows:int ->
   axis:string ->
@@ -98,4 +113,5 @@ val braille_mirror :
     down from it in as many. Both sides scale to the same [maximum], and each
     follows {!braille_level}, so a smaller side above zero still shows a dot
     past its baseline. The lower half's baseline is its top row of dots
-    ([⠉] for two zeros). [Never_read] only when neither side has been read. *)
+    ([⠉] for two zeros). [Never_read] only when neither side has been read.
+    Each half takes its own tint, by distance from the middle. *)

@@ -247,16 +247,29 @@ let plot ~width trend row =
           | Some { above = false; _ } | None -> None)
         points
     in
+    (* Each band takes the usage hue at its height, deep near 0% and bright
+       near 100%, the way btop colours a graph's rows (RFC
+       tui-one-screen-grammar section 7.3). The trend does not know whether
+       the window refuses calls, so it does not borrow the limit ramp. *)
+    let tint = Masc_tui_ansi.Theme.series_tint Masc_tui_theme.Usage in
     let bands =
       List.init plot_height (fun index ->
           let band = plot_height - index - 1 in
           let buf = Buffer.create (cells * 3) in
+          let style = tint (float_of_int (band + 1) /. float_of_int plot_height) in
+          let opened = ref false in
           for cx = 0 to cells - 1 do
+            let marked = (index = 0 && List.mem cx above_cells) || grid.(index).(cx) <> 0 in
+            if marked && not !opened && not (String.equal style "") then begin
+              Buffer.add_string buf style;
+              opened := true
+            end;
             if index = 0 && List.mem cx above_cells then Buffer.add_string buf "↑"
             else
               Buffer.add_string buf
                 (Masc_tui_braille.braille_cell ~mask:grid.(index).(cx))
           done;
+          if !opened then Buffer.add_string buf Masc_tui_theme.Sgr.reset;
           Printf.sprintf "%3d%% │ %s" ((band + 1) * 100 / plot_height)
             (Buffer.contents buf))
     in

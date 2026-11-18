@@ -211,9 +211,10 @@ let totals_line ~calls ~failures ~deferred =
 (* One glyph per bucket, scaled to the row's own largest value. A bucket in
    which every call failed is red top to bottom, so an outage reads as one
    column across the three rows. The row's largest value is not a limit, so
-   every other bucket draws in the foreground (RFC tui-one-screen-grammar
-   section 7.3). *)
-let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) buckets =
+   every other bucket walks the row's own hue by its height, deep for a short
+   column and bright for the tallest (RFC tui-one-screen-grammar section
+   7.3). *)
+let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) ~series buckets =
   let maximum =
     Braille.graph_maximum
       (List.filter_map
@@ -223,6 +224,7 @@ let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) buckets =
            | Series.Series_active active -> Some (sample active))
          buckets)
   in
+  let tint = Theme.series_tint series in
   let cells =
     List.map
       (fun (bucket : Series.tool_series_bucket) ->
@@ -235,7 +237,14 @@ let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) buckets =
               else
                 match reading with
                 | Braille.Zero -> Theme.recede ()
-                | Braille.Value _ | Braille.Absent | Braille.Unread -> ""
+                | Braille.Value _ ->
+                    (* A value stands at least one level above the
+                       baseline, so its levels run from 2 to the top. *)
+                    tint
+                      (float_of_int
+                         (Braille.braille_level ~dots:column_dots ~maximum reading - 2)
+                       /. float_of_int (column_dots - 2))
+                | Braille.Absent | Braille.Unread -> ""
             in
             (mark ~maximum reading, style))
       buckets
@@ -248,12 +257,31 @@ let spacings = [ (3, 1); (2, 1); (1, 1); (1, 0) ]
 
 let spacing_span ~count (stretch, gap) = (count * stretch) + ((count - 1) * gap)
 
+(* A colour code goes out only where the colour changes; a gap is blank, so
+   the colour open across it does not show. *)
 let draw_cells ~stretch ~gap cells =
-  String.concat (String.make gap ' ')
-    (List.map
-       (fun (glyph, style) ->
-         style ^ String.concat "" (List.init stretch (fun _ -> glyph)) ^ Ansi.reset)
-       cells)
+  let buffer = Buffer.create 256 in
+  let separator = String.make gap ' ' in
+  let open_style =
+    List.fold_left
+      (fun (open_style, first) (glyph, style) ->
+        if not first then Buffer.add_string buffer separator;
+        let open_style =
+          if String.equal style open_style then open_style
+          else begin
+            (* An empty style is the foreground, which only a reset gives
+               back. *)
+            Buffer.add_string buffer (if String.equal style "" then Ansi.reset else style);
+            style
+          end
+        in
+        for _ = 1 to stretch do Buffer.add_string buffer glyph done;
+        (open_style, false))
+      ("", true) cells
+    |> fst
+  in
+  if not (String.equal open_style "") then Buffer.add_string buffer Ansi.reset;
+  Buffer.contents buffer
 
 (* The oldest and the newest bucket named at the two ends of a rule. *)
 let ruler ~span ~series_width buckets =
@@ -277,9 +305,9 @@ let chart_lines ~cells t =
   let series_width = t.series.Series.tsr_width in
   let count = List.length buckets in
   let per = unit_suffix series_width in
-  let calls_maximum, calls_cells = chart_cells ~sample:calls_sample buckets in
-  let failed_maximum, failed_cells = chart_cells ~sample:failures_sample buckets in
-  let _, p95_cells = chart_cells ~sample:p95_sample buckets in
+  let calls_maximum, calls_cells = chart_cells ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets in
+  let failed_maximum, failed_cells = chart_cells ~sample:failures_sample ~series:Masc_tui_theme.Failures buckets in
+  let _, p95_cells = chart_cells ~sample:p95_sample ~series:Masc_tui_theme.Latency buckets in
   let count_note maximum =
     if maximum <= 0 then "none" else Printf.sprintf "max %d%s" maximum per
   in
@@ -377,13 +405,17 @@ let load_bar ~cells ~maximum_calls reading =
       ^ String.concat "" (List.init (max 0 cells) (fun _ -> "\xc2\xb7"))
       ^ Ansi.reset
   | Series.Series_active active ->
-      (* Calls against the busiest bucket are a size, not a limit. *)
-      let bar =
-        Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls
-          ~max_value:(max 1 maximum_calls) ~scale:Masc_tui_chart.Relative
-          ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+      (* Calls against the busiest bucket are a size, not a limit, so the
+         fill walks the calls hue. A bucket in which every call failed is the
+         anomaly, and its colour comes first. *)
+      let scale =
+        if every_call_failed active then
+          Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Bad }
+        else Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls }
       in
-      if every_call_failed active then Theme.bad () ^ bar ^ Ansi.reset else bar
+      Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls
+        ~max_value:(max 1 maximum_calls) ~scale
+        ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
 
 (* The newest bucket first: what the operator came to read is at the top, and
    the chart above already runs oldest to newest. *)
@@ -513,7 +545,7 @@ let summary_line ~cells t =
     in
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
-      let _, drawn = chart_cells ~sample:calls_sample buckets in
+      let _, drawn = chart_cells ~sample:calls_sample ~series:Masc_tui_theme.Calls buckets in
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
       ^ draw_cells ~stretch:1 ~gap:0 drawn
       ^ summary_gap ^ figures

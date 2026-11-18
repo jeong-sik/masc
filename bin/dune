@@ -360,7 +360,7 @@
  (name masc_tui_braille)
  (wrapped false)
  (modules masc_tui_braille)
- (libraries masc_tui_message_layout zarith))
+ (libraries masc_tui_message_layout masc_tui_theme zarith))
 
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
@@ -368,7 +368,14 @@
  (name masc_tui_usage_trend)
  (wrapped false)
  (modules masc_tui_usage_trend)
- (libraries masc masc_tui_braille masc_tui_chart masc_tui_message_layout unix))
+ (libraries
+  masc
+  masc_tui_ansi
+  masc_tui_braille
+  masc_tui_chart
+  masc_tui_message_layout
+  masc_tui_theme
+  unix))
 
 ;; Usage's Calls section: the tool-call series of one window, kept to the
 ;; buckets the window draws when its answer arrives.
@@ -384,6 +391,7 @@
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_table
+  masc_tui_theme
   unix))
 
 (library

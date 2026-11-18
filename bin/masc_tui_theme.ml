@@ -265,7 +265,7 @@ type meter_cell_colour =
   | Cell_band of limit_band
   | Cell_blend of { band : limit_band; position : float }
 
-type limit_paint = {
+type paint = {
   depth : color_depth;
   surface : surface;
   palette : Terminal_palette.t option;
@@ -513,6 +513,213 @@ let meter_cell_readable_for ~colors_enabled ~project paint cell =
      | Some _ | None -> band_colour band)
 ;;
 
+(* Picture ramps (RFC tui-one-screen-grammar section 7.3). btop paints every
+   box with a gradient: a meter's cells by their place along the bar, a
+   graph's rows by their height. A declared limit keeps the status colours of
+   [limit_cell_colour]; every other picture walks one hue from deep to bright,
+   one hue per quantity, the way btop's memory and network boxes do. *)
+type series =
+  | Calls
+  | Failures
+  | Latency
+  | Memory
+  | Completion
+  | Capacity
+  | Backlog
+  | Usage
+
+type hue = Green | Yellow | Blue | Magenta | Cyan
+
+(* One place says which hue a quantity draws in. Red is left to status: a
+   bucket in which every call failed is red across every row and the Calls
+   legend says so, so the failures row walks magenta instead. Latency and
+   backlog share yellow because both are waiting. *)
+let series_hue = function
+  | Calls -> Cyan
+  | Failures -> Magenta
+  | Latency -> Yellow
+  | Memory -> Magenta
+  | Completion -> Green
+  | Capacity -> Blue
+  | Backlog -> Yellow
+  | Usage -> Blue
+;;
+
+(* The bright palette entry of each hue, the top of its ramp. *)
+let bright_index = function
+  | Green -> 10
+  | Yellow -> 11
+  | Blue -> 12
+  | Magenta -> 13
+  | Cyan -> 14
+;;
+
+let bright_code = function
+  | Green -> Sgr.bright_green
+  | Yellow -> Sgr.bright_yellow
+  | Blue -> Sgr.bright_blue
+  | Magenta -> Sgr.bright_magenta
+  | Cyan -> Sgr.bright_cyan
+;;
+
+let ramp_steps = 100
+
+(* A dot or a bar cell is a graphical object, so the deep end of a series
+   clears WCAG 2's 3:1 for non-text contrast, and the bright end the 4.5:1 text
+   gets. Every hue then spans at least that band: a palette blue at 3.5:1 on a
+   dark ground would otherwise leave a ramp too short to see. btop's own deep
+   stops go down to about 1.5:1, which a Braille dot does not survive. *)
+let picture_contrast_floor = 3.0
+
+(* How far toward the ground the deep end of a series steps before the floor
+   stops it. *)
+let series_deep_ratio = 0.6
+
+(* The table entry a position reads: the step at or below it, so a cell never
+   takes a colour from past the reach it draws. *)
+let step_index position =
+  let position =
+    if Float.is_nan position then 0.0 else Float.max 0.0 (Float.min 1.0 position)
+  in
+  int_of_float (Float.floor (position *. float_of_int ramp_steps))
+;;
+
+(* Every step of one hue's ramp blended in Oklab, or [None] where the ramp
+   cannot be drawn whole: no palette, lifting off, a depth without blends, or
+   one step whose projection misses the floor. A ramp is blended whole or not
+   at all, so a 256-colour terminal never mixes a palette code into a run of
+   cube codes. *)
+let series_blends ~colors_enabled ~project paint hue =
+  match paint.depth, paint.palette with
+  | (Colors_256 | Truecolor), Some palette when colors_enabled && !lift_enabled -> (
+    match Terminal_palette.ansi palette (bright_index hue) with
+    | None -> None
+    | Some bright ->
+      let background = surface_background paint.surface palette in
+      let top = Color.lift_for_contrast ~background ~floor:status_contrast_floor bright in
+      let deep =
+        match
+          Color.recede_toward ~background ~floor:picture_contrast_floor
+            ~max_ratio:series_deep_ratio top
+        with
+        | Some deep -> deep
+        | None -> top
+      in
+      let step index =
+        let blended =
+          Color.lerp_oklab ~background ~floor:picture_contrast_floor
+            ~t:(float_of_int index /. float_of_int ramp_steps)
+            deep top
+        in
+        match project blended with
+        | Some projected ->
+          let contrast =
+            Color.contrast_ratio (Terminal_palette.estimated_rgb projected) background
+          in
+          if contrast >= picture_contrast_floor then
+            Some (projected_foreground ~colors_enabled (Some projected), contrast)
+          else None
+        | None -> None
+      in
+      (* Rounding a blend to eight bits a channel can leave a step a hair
+         darker than the one before it (cyan 0.10 to 0.11 drops 3.208 to
+         3.205 on xterm). A step that would darken keeps the colour before
+         it, so the ramp never steps back toward the ground. *)
+      let rec collect index (previous_code, previous_contrast) steps =
+        if index > ramp_steps then Some (Array.of_list (List.rev steps))
+        else
+          match step index with
+          | None -> None
+          | Some (code, contrast) ->
+            let kept =
+              if contrast < previous_contrast then (previous_code, previous_contrast)
+              else (code, contrast)
+            in
+            collect (index + 1) kept (fst kept :: steps)
+      in
+      collect 0 ("", 0.0) [])
+  | (No_color | Colors_16 | Colors_256 | Truecolor), (Some _ | None) -> None
+;;
+
+(* Without a blend the whole ramp is the hue's bright code. base16 schemes
+   fill a hue's normal and bright entries with the same colour, so a
+   normal-then-bright step would be one colour there anyway, and a normal
+   entry is often the unreadable one (xterm's blue is 2.2:1 on black). *)
+let series_table ~colors_enabled ~project paint series =
+  match paint.depth with
+  | No_color -> Array.make (ramp_steps + 1) ""
+  | Colors_16 | Colors_256 | Truecolor ->
+    let hue = series_hue series in
+    (match series_blends ~colors_enabled ~project paint hue with
+     | Some table -> table
+     | None -> Array.make (ramp_steps + 1) (if colors_enabled then bright_code hue else ""))
+;;
+
+let ramp_style_for ~colors_enabled ~project paint series ~position =
+  (series_table ~colors_enabled ~project paint series).(step_index position)
+;;
+
+(* A ramp's colours for one paint, kept until the palette, depth, ground or
+   lift switch changes. A palette is compared by identity: the process palette
+   is replaced, never edited, when the terminal answers again. *)
+type ramp_key = {
+  key_depth : color_depth;
+  key_surface : surface;
+  key_palette : Terminal_palette.t option;
+  key_lift : bool;
+  key_series : series;
+}
+
+let same_ramp_key left right =
+  left.key_depth = right.key_depth
+  && left.key_surface = right.key_surface
+  && left.key_lift = right.key_lift
+  && left.key_series = right.key_series
+  && (match left.key_palette, right.key_palette with
+      | None, None -> true
+      | Some left, Some right -> left == right
+      | None, Some _ | Some _, None -> false)
+;;
+
+(* Eight series on two grounds is sixteen tables; the rest leaves room for a
+   palette change without ever building a table per frame. *)
+let ramp_table_capacity = 32
+
+let ramp_tables : (ramp_key * string array) list Atomic.t = Atomic.make []
+
+let ramp_table paint series =
+  let key =
+    { key_depth = paint.depth;
+      key_surface = paint.surface;
+      key_palette = paint.palette;
+      key_lift = !lift_enabled;
+      key_series = series }
+  in
+  let rec find = function
+    | [] -> None
+    | (cached, table) :: rest -> if same_ramp_key cached key then Some table else find rest
+  in
+  match find (Atomic.get ramp_tables) with
+  | Some table -> table
+  | None ->
+    let table =
+      series_table ~colors_enabled ~project:Terminal_palette.best_color paint series
+    in
+    let rec add () =
+      let previous = Atomic.get ramp_tables in
+      let kept = List.filteri (fun index _ -> index < ramp_table_capacity - 1) previous in
+      if not (Atomic.compare_and_set ramp_tables previous ((key, table) :: kept)) then add ()
+    in
+    add ();
+    table
+;;
+
+let ramp_style paint series ~position =
+  match paint.depth with
+  | No_color -> ""
+  | Colors_16 | Colors_256 | Truecolor -> (ramp_table paint series).(step_index position)
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
@@ -525,6 +732,7 @@ module For_testing = struct
   let ansi_readable = ansi_readable_for
   let status_text_readable = status_text_readable_for
   let meter_cell_readable = meter_cell_readable_for
+  let ramp_style = ramp_style_for
 end
 
 let ansi_readable ~surface palette color =

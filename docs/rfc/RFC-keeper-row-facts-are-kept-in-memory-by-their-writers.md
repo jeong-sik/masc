@@ -136,7 +136,7 @@ Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `op
 - append 뒤 바이트 prune: `on_committed` 다음에 같은 잠금 안에서 돈다. metrics 저장소에는 `max_bytes` 가 있다(`keeper_metrics_storage.ml:6-11`). 설정 `metrics.store_max_bytes` 의 기본값은 0 이라 지금은 돌지 않는다.
 - 대시보드 purge(`server_dashboard_http_delete_actions.ml:672`, `:805`)와 runtime 디렉터리 지우기(`:865-870`). 뒤의 것은 receipt, TurnRecord, metrics 를 지운다(`:350-355`). 둘 다 저장소 잠금을 잡지 않는다. purge 는 지우기 전에 쓰는 descriptor 를 닫는다. Keeper root 의 로그 파일은 파일마다 닫고(`server_dashboard_http_delete_actions.ml:698-707`), metrics 저장소는 writer 와 캐시를 같이 닫는다(`:802-810`, `dated_jsonl.ml:1544-1550`). runtime 디렉터리 지우기는 닫지 않고, 지운 뒤 디렉터리 캐시만 비운다(`:868-870`). 지워진 경로는 다음 쓰기가 다시 연다(`lib/fs_compat/fd_cache.mli`).
 
-저장소 디렉터리에 날짜 파일이 아닌 것이 있는 곳이 하나 있다. 도구 호출 원장 디렉터리에는 읽기 색인이 같이 있다. 이름은 `read-index.sqlite3` 와, SQLite 가 곁에 만드는 `-wal`·`-shm`·`-journal` 이다(`common.ml:280-287`, `keeper_tool_call_index.ml:15-16`). 색인은 색인을 읽는 함수가 만든다(`keeper_tool_call_log.ml:1412-1430`). 운영 디렉터리에도 이 파일들이 있다(2026-11-18 에 이름 목록으로 확인). `Dated_jsonl` 의 두 목록 읽기는 이 이름을 다르게 다룬다. 기간 읽기는 낯선 이름을 건너뛴다(`dated_jsonl.ml:1426-1483`). 끝 읽기의 달 목록은 점으로 시작하지 않는 낯선 이름에서 `Error` 를 낸다(`:252-262`, `dated_jsonl_layout.ml:143-155`).
+저장소 디렉터리에 날짜 파일이 아닌 것이 있는 곳이 하나 있다. 도구 호출 원장 디렉터리에는 읽기 색인이 같이 있다. 이름은 `read-index.sqlite3` 와, SQLite 가 곁에 만드는 `-wal`·`-shm`·`-journal` 이다(`lib/core/common.ml:280-287`, `keeper_tool_call_index.ml:15-16`). 색인은 색인을 읽는 함수가 만든다(`keeper_tool_call_log.ml:1412-1430`). 운영 디렉터리에도 이 파일들이 있다(2026-11-18 에 이름 목록으로 확인). `Dated_jsonl` 의 두 목록 읽기는 이 이름을 다르게 다룬다. 기간 읽기는 낯선 이름을 건너뛴다(`dated_jsonl.ml:1426-1483`). 끝 읽기의 달 목록은 점으로 시작하지 않는 낯선 이름에서 `Error` 를 낸다(`:252-262`, `dated_jsonl_layout.ml:143-155`).
 
 서버 밖에서 이 RFC 의 저장소에 쓰는 곳은 없다. `masc-stdio` 와 HTTP 런타임은 base path lease 를 같이 잡는다(`main_stdio_eio.ml:54`, `main_eio.ml:273`). `seed_telemetry_store.py` 는 자기 `--root` 에만 쓴다. 다만 `scripts/migrate-keeper-meta-sandbox.sh` 는 meta 파일을 고친다. 스크립트 머리에는 서버를 멈추라는 말이 없다. 서버가 돌 때 고치면 Owner 의 다음 커밋이 메모리 값으로 파일을 덮는다. 지금도 그렇다.
 
@@ -308,7 +308,7 @@ match step before.slot written with
   - object 가 아닌 줄은 건너뛰고 앞 줄을 찾는다(`keeper_runtime_trust_snapshot.ml:336-366`). 그 결과는 쓴 줄 하나로 알 수 없다.
 - metrics 쓰기는 칸 둘을 맞춘다. `metrics_recent` 에는 쓴 줄을 더하고, 120줄을 넘는 앞 줄을 뺀다. `turn_audit` 은 쓴 행이 Turn tool audit 행이면 그 행으로 바꾸고, 아니면 같은 값으로 세대만 올린다. 행이 Turn tool audit 인지는 읽는 쪽과 같은 `parse_snapshot` 으로 본다(`keeper_status_metrics.ml:205-239`). heartbeat 가 이어져도 `Filled` 인 `turn_audit` 은 비워지지 않는다.
 - 쓰기가 예외로 끝나면 그 저장소의 칸을 모두 비우고 예외를 다시 던진다. 취소도 예외로 온다. 칸을 맞추는 코드가 예외를 던져도 같다.
-- system thread 에 맡긴 쓰기가 도는 동안 부른 fiber 는 깨어나지 않는다. 풀 밖 fiber 는 host 에 일을 넘기고 취소되지 않는 `await` 로 기다린다(`lib/fs_compat/systhread_host.ml:37-48`, `:193-198`). 풀 작업이거나 host 가 없으면 `Eio_unix.run_in_systhread` 로 간다(`:174-178`). Eio 의 thread pool 도 넘긴 일에 취소를 걸지 않는다(Eio `unix/thread_pool.ml` 의 `submit`). 넘기기 전에 이미 취소됐으면 쓰기는 시작하지 않고 `Cancelled` 가 온다(`:180`). 쓰기가 일어나지 않았는데 칸을 비우는 것은 조심이 지나칠 뿐 틀리지 않는다.
+- system thread 에 맡긴 쓰기가 도는 동안 부른 fiber 는 깨어나지 않는다. 풀 밖 fiber 는 host 에 일을 넘기고 취소되지 않는 `await` 로 기다린다(`lib/fs_compat/systhread_host.ml:37-48`, `:193-198`). 풀 작업이거나 host 가 없으면 `Eio_unix.run_in_systhread` 로 간다(`:174-178`). Eio 의 thread pool 도 넘긴 일에 취소를 걸지 않는다(Eio `unix/thread_pool.ml` 의 `submit`). 넘기기 전에 이미 취소됐으면 쓰기는 시작하지 않고 `Cancelled` 가 온다(`lib/fs_compat/systhread_host.ml:180`). 쓰기가 일어나지 않았는데 칸을 비우는 것은 조심이 지나칠 뿐 틀리지 않는다.
 - 실패한 쓰기의 바이트는 나중에 파일에 닿지 않는다(규칙 11). 그래서 칸을 비운 뒤에 채운 값이 그 바이트 때문에 틀리는 일이 없다. 뒤늦게 들어오는 바이트는 어느 칸의 순서도 따르지 않는 변경이다. 칸으로는 막을 수 없어서 쓰는 함수가 막는다.
 - 줄 쓰기(`Fs_compat.append_lines`)는 줄을 쓴 뒤에 취소를 확인한다(`fs_compat_base_io.ml:393-397`). 그래서 줄은 썼는데 칸은 못 고친 채 취소될 수 있다. 쓰는 쪽은 칸을 고치기 전에 끝나는 모든 경로에서 칸을 비운다.
 - `Dated_jsonl.append` 는 append guard 가 막으면 조용히 건너뛴다. `append_notifying_commit` 은 그때 `Append_guard_skipped` 를 던진다(`dated_jsonl.ml:892-905`). 건너뛴 쓰기는 파일을 안 바꾸므로 칸을 그대로 둔다. 부르는 쪽의 동작도 지금과 같게 둔다.
@@ -336,7 +336,7 @@ match step before.slot written with
 - 엄격한 읽기는 `YYYY-MM/DD.jsonl` 모양의 일반 파일만 받는다. symlink 와 낯선 이름은 `Error` 다(`dated_jsonl.mli:267-273`). 그런 저장소의 칸은 채워지지 않고, 행은 지금 reader 로 읽는다. 보이는 값은 그대로다.
 - 도구 호출 원장이 지금 그 경우다. 디렉터리에 읽기 색인 파일이 있어서 달 목록이 `Error` 를 낸다(§1.4). 이대로면 `tool_calls` 칸은 운영에서 한 번도 채워지지 않는다. Keeper 31개가 행마다 원장을 다시 읽는다. 새로 만든 base path 에는 색인이 없어서 시험은 통과한다.
   - L2 는 이것부터 고친다. 저장소 선언(`Dated_jsonl.Store`)이 그 디렉터리의 곁 파일 이름을 갖는다. 도구 호출 원장의 선언은 `Common.tool_call_read_index_filenames` 를 가리킨다. 다른 저장소의 선언은 빈 목록이다.
-  - 엄격한 목록은 선언된 이름을 건너뛴다. 그 밖의 낯선 이름은 지금처럼 `Error` 다. 색인 주인과 scanner 가 이미 그 이름 목록을 같이 쓴다(`common.mli:202-210`, `tool_blob_maintenance.ml:1007`).
+  - 엄격한 목록은 선언된 이름을 건너뛴다. 그 밖의 낯선 이름은 지금처럼 `Error` 다. 색인 주인과 scanner 가 이미 그 이름 목록을 같이 쓴다(`lib/core/common.mli:202-210`, `tool_blob_maintenance.ml:1007`).
 - 점으로 시작하는 이름은 엄격한 목록이 조용히 건너뛴다(`dated_jsonl.ml:255`, `dated_jsonl_layout.ml:143-155`). 이 layout 이 만들 수 없는 이름이라서다. 너그러운 목록은 `.jsonl` 로 끝나면 점으로 시작해도 읽는다(`dated_jsonl.ml:197-200`). 그래서 달 디렉터리에 `._18.jsonl` 같은 파일이 있으면, 엄격한 읽기는 `Ok` 인데 줄이 다르다.
   - 갈리는 reader 는 `latest_json`, `read_latest ~keeper_name`, 최근 활동 5줄이다. TurnRecord 와 tool audit 는 지금도 엄격해서 같다.
   - 이 RFC 는 엄격한 쪽을 따른다. 그 파일은 저장소가 쓴 것이 아니다. 운영 설치의 Keeper 저장소와 도구 호출 원장에는 지금 그런 파일이 없다(2026-11-18 에 `find` 로 확인). 값이 달라지는 경우로 §7 에 적는다.

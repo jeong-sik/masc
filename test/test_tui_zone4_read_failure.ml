@@ -114,6 +114,37 @@ let test_repeating_failure_changes_only_its_count () =
   check_bool "past a minute, the next minute of the run" true
     (Redraw.next_change () = Some 130.)
 
+(* The drawn slot, not only the ranking: [footer_line] is what reaches the
+   screen. The action text is a fixture token, so these check which notice is
+   drawn and whether the waiting count is drawn, never the product wording. *)
+let action_token = "zq-action-result-zq"
+
+let drawn_row ?action failures =
+  let state = state_with failures in
+  Option.iter (fun text ->
+    Masc_tui_types.set_last_action state (Some (text, Unix.gettimeofday ()))) action;
+  Prim.footer_line state ~max_cells:400 ~hints:""
+
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec loop i = i + n <= h && (String.sub haystack i n = needle || loop (i + 1)) in
+  n = 0 || loop 0
+
+let test_drawn_slot_keeps_the_action_result () =
+  check_bool "the action result is drawn while reads fail" true
+    (contains ~needle:action_token (drawn_row ~action:action_token two_failures))
+
+let test_drawn_slot_counts_the_waiting_reads () =
+  (* Behind a visible action result the failing reads change the row (their
+     count); with no failing read the row is the action result alone. *)
+  check_bool "waiting reads are counted on the drawn row" false
+    (String.equal (drawn_row ~action:action_token two_failures)
+       (drawn_row ~action:action_token Failure.empty))
+
+let test_drawn_slot_says_a_failure_when_nothing_outranks_it () =
+  check_bool "a failing read fills an empty slot" false
+    (String.equal (drawn_row two_failures) (drawn_row Failure.empty))
+
 let () =
   Alcotest.run "tui_zone4_read_failure"
     [ ( "zone 4"
@@ -127,5 +158,11 @@ let () =
             test_success_clears_only_that_read
         ; Alcotest.test_case "a repeating failure changes only its count" `Quick
             test_repeating_failure_changes_only_its_count
+        ; Alcotest.test_case "the drawn slot keeps the action result" `Quick
+            test_drawn_slot_keeps_the_action_result
+        ; Alcotest.test_case "the drawn slot counts the waiting reads" `Quick
+            test_drawn_slot_counts_the_waiting_reads
+        ; Alcotest.test_case "the drawn slot says a failure when nothing outranks it" `Quick
+            test_drawn_slot_says_a_failure_when_nothing_outranks_it
         ] )
     ]

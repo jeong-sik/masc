@@ -11,12 +11,12 @@
     it can tell they are the file's last bytes and nobody else's: the file
     must be exactly as long as it was before the call plus the bytes this
     call wrote. Otherwise {!run} removes nothing and the result says so
-    ({!Not_rolled_back}). A file that became shorter is not grown back.
+    ({!Not_rolled_back}).
 
-    The check is on the file's length, not on its bytes. It is exact while
-    every other writer of the file only appends. A writer that cuts the
-    file's tail and appends the same number of bytes during the failed
-    call leaves the expected length, and its bytes are then removed.
+    The check is on the file's length, not on its bytes, and the length
+    is read in one call and the file cut in the next. It is exact while
+    no other descriptor changes the file during the failed call. What
+    another descriptor can do to it is listed under Other writers.
 
     {2 Lines}
 
@@ -26,6 +26,13 @@
     onto bytes an earlier writer left unfinished, including bytes a failed
     write of this module did not remove. The newline belongs to the same
     write as the content and is removed with it when that write fails.
+
+    When the last byte cannot be read, the newline is written too, unless
+    the file is empty by then. That happens when another descriptor cut
+    the file after its length was read, and on a target that reports a
+    length but has no byte there. The appended lines then never join an
+    unfinished line; where the file did end at a line start, they leave
+    an empty line before them, which the readers of these files skip.
 
     The last byte is read from the file on every such call and nothing about
     the file's end is remembered between calls. A remembered end would be
@@ -39,17 +46,25 @@
     covered by it: another process, or this process through another name
     of the file (a hard link, a symlinked file name, a different spelling
     on a file system that folds case or normalizes names). {!run} takes no
-    file lock, so against such a writer two gaps remain, each as wide as
-    the two system calls involved:
+    file lock, so against such a writer two gaps remain:
 
     - between reading the file's length and writing, the other writer may
       leave an unfinished line that this call then joins: the last byte is
       read at the length that was read first;
     - between checking the file's length and truncating, the other writer
-      may append a row that the truncation then removes.
+      may change the file, and the truncation still happens and is
+      reported as {!Rolled_back}. When it appended, its bytes are removed.
+      When it cut the file below the length this call started from (its
+      own failed write taken back), the truncation makes the file longer
+      again, and the bytes it adds are zero bytes. The same holds after
+      an interrupted truncation, between it and the length read that
+      follows.
 
-    Outside those gaps an append by another writer during a failed call is
-    seen in the file's length, and the failed call removes nothing. *)
+    A writer that cuts the file's tail and appends the same number of
+    bytes at any point of the failed call leaves the expected length, and
+    its bytes are then removed. Outside these cases a change by another
+    writer during a failed call is seen in the file's length, and the
+    failed call removes nothing. *)
 
 (** What the append writes to. *)
 type target = private
@@ -67,7 +82,8 @@ type target = private
     for reading too would stop the open from waiting for its reader. The
     kind is taken before the open and checked on the open descriptor;
     when the two differ the open is done again, so the result's kind
-    always matches how its descriptor was opened.
+    always matches how its descriptor was opened. An open that a signal
+    interrupted ([EINTR]) is done again too.
 
     A regular file must be readable as well as writable. This includes a
     path such as [/dev/stdout] on macOS while it is redirected to a
@@ -92,9 +108,9 @@ type io =
     (** Moves the descriptor to the end of the file and returns that
         offset, which is the file's length. *)
   ; last_byte : Unix.file_descr -> size:int -> char option
-    (** The byte at [size - 1], or [None] when the file has no byte there:
-        it became shorter after [size] was read. {!run} then reads the
-        length again. *)
+    (** The byte at [size - 1], or [None] when no byte could be read
+        there. {!run} then reads the length again and, unless it is 0,
+        writes a newline before the content. *)
   ; truncate : Unix.file_descr -> int -> unit
     (** [truncate fd length], as [Unix.ftruncate]. *)
   }
@@ -107,7 +123,8 @@ type start =
     (** Right after the file's last byte, whatever that byte is. *)
   | At_line_start
     (** On a new line. When the file is not empty and its last byte is not
-        a newline, a newline is written before the content. *)
+        a newline or cannot be read, a newline is written before the
+        content. *)
 
 (** Why {!run} did not remove the bytes of a failed write. *)
 type not_rolled_back =
@@ -140,10 +157,8 @@ type failure =
       ; function_name : string
       ; argument : string
       }
-    (** The end of a regular file could not be read. Nothing was written. *)
-  | Last_byte_missing of { size : int }
-    (** The file stayed [size] bytes long and still had no byte at
-        [size - 1]. Nothing was written. *)
+    (** Reading the end of a regular file raised an error. Nothing was
+        written. *)
   | Write_failed of
       { write_failure : Fd_write_all.failure
       ; rollback : rollback
@@ -155,9 +170,10 @@ type failure =
 
     On a regular file a successful {!Anywhere} append costs one
     [end_offset] and the write; an {!At_line_start} append also reads the
-    last byte. The second [end_offset] and the truncation happen only after
-    a failed write. On a stream the append is the write alone and [start]
-    has no effect. *)
+    last byte, and reads the length once more when that byte could not be
+    read. Another [end_offset] and the truncation happen after a failed
+    write. On a stream the append is the write alone and [start] has no
+    effect. *)
 val run : io:io -> start:start -> target -> string -> (unit, failure) result
 
 val failure_to_string : failure -> string

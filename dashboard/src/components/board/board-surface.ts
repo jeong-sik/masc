@@ -1375,6 +1375,37 @@ function UnifiedBoardFeed({
   `
 }
 
+/** The search box filters the posts already loaded. When none of them match
+ *  and the server holds more, the next page is read from here: the feed's own
+ *  pagination is not drawn while the feed has no rows. */
+function BdSearchMiss({ loadedCount, hiddenMatchCount }: { loadedCount: number; hiddenMatchCount: number }) {
+  if (!boardHasMore.value) {
+    return html`<div class="ov-empty">필터 결과 없음 (${loadedCount} items)</div>`
+  }
+  const reading = boardLoadingMore.value || boardLoading.value
+  // The feed is empty either because no loaded post matches, or because every
+  // match is in a category the operator has hidden. A next page finds a post
+  // in the first case only, so the two are not said with one sentence.
+  const searched = hiddenMatchCount > 0
+    ? `불러온 글 ${loadedCount}개 중 일치하는 ${hiddenMatchCount}개는 숨긴 분류에 있습니다`
+    : `불러온 글 ${loadedCount}개 중에는 일치하는 글이 없습니다`
+  return html`
+    <div class="ov-empty flex flex-col items-center gap-2">
+      <span data-testid="bd-search-miss">${searched}</span>
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        disabled=${reading}
+        ariaBusy=${reading}
+        testId="bd-search-more"
+        onClick=${() => { void loadMoreBoardPosts() }}
+      >
+        ${reading ? '불러오는 중...' : '다음 페이지 불러오기'}
+      <//>
+    </div>
+  `
+}
+
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
   const [contentQuery, setContentQuery] = useState('')
   const visibleLimit = feedVisibleLimit.value
@@ -1432,7 +1463,7 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
               onAction=${() => { void refreshBoard() }}
             />`
           : isFiltering && visiblePosts.length === 0 && posts.length > 0
-          ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
+          ? html`<${BdSearchMiss} loadedCount=${posts.length} hiddenMatchCount=${filteredPosts.length} />`
           : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
             : visiblePosts.length === 0

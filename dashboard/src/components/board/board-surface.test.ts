@@ -10,7 +10,7 @@ import {
   BoardSurface,
   normalizeBoardDetailWidth,
 } from './board-surface'
-import { boardPosts, boardLoading, boardListReadFailed, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
+import { boardPosts, boardLoading, boardListReadFailed, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, boardOffset, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
@@ -1352,6 +1352,89 @@ describe('BoardSurface Component', () => {
       .toContain(`${PAGE_SIZE} / ${PAGE_SIZE + 1}`)
     fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
     expect(feedVisibleLimit.value).toBe(PAGE_SIZE * 2)
+  })
+
+  describe('a search that matches none of the loaded posts', () => {
+    const loadedPosts = () => [
+      makePost({ id: 'loaded-1', title: 'first loaded post', body: 'content', author: 'keeper', post_kind: 'direct' }),
+      makePost({ id: 'loaded-2', title: 'second loaded post', body: 'content', author: 'keeper', post_kind: 'direct' }),
+    ]
+    const search = (query: string) => {
+      fireEvent.input(screen.getByRole('searchbox', { name: '게시글 본문 필터' }), { target: { value: query } })
+    }
+
+    it('reads the next page and shows the post found there', async () => {
+      // #52957: the post the operator looks for is on a page that is not loaded yet.
+      boardPosts.value = loadedPosts()
+      boardOffset.value = 2
+      boardHasMore.value = true
+      const older = makePost({ id: 'older-1', title: 'needle in an older post', body: 'content', author: 'keeper', post_kind: 'direct' })
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        const nextPage = url.includes('/api/v1/dashboard/board?') && url.includes('offset=2')
+        return new Response(JSON.stringify(nextPage ? { posts: [older], has_more: false, total: 3 } : { posts: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }))
+
+      render(h(BoardSurface, null))
+      search('needle')
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('bd-search-more'))
+
+      expect(await within(await screen.findByTestId('bd-unified-feed')).findByText('needle in an older post')).toBeInTheDocument()
+      expect(boardPosts.value.map(post => post.id)).toEqual(['loaded-1', 'loaded-2', 'older-1'])
+    })
+
+    it('offers no next page when the server holds no more posts', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = false
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('bd-search-more')).not.toBeInTheDocument()
+    })
+
+    it('holds the next-page button while a page is on the wire', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = true
+      boardLoadingMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.getByTestId('bd-search-more')).toBeDisabled()
+    })
+
+    it('says how many loaded posts were searched when none of them matches', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('불러온 글 2개 중에는 일치하는 글이 없습니다')
+    })
+
+    it('says the match is in a hidden category instead of saying nothing matched', () => {
+      // A loaded post matches, but its category is hidden: "no match" would be false.
+      boardPosts.value = [
+        ...loadedPosts(),
+        makePost({ id: 'status-1', title: 'needle in a status post', body: 'content', author: 'keeper', post_kind: 'automation' }),
+      ]
+      boardHiddenCategories.value = new Set(['system', 'notice'])
+      boardHasMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('불러온 글 3개 중 일치하는 1개는 숨긴 분류에 있습니다')
+    })
   })
 
   it('lets unified feed pagination collapse after expansion', () => {

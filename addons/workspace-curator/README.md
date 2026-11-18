@@ -56,7 +56,13 @@ counts, request identities where they fit, and an explicit individual read path
 otherwise. Finished means the worker retained an Exact terminal; it does not
 mean the host committed its ledger or published a complete briefing.
 
-Build the optional image from the repository root:
+The masc server carries this package. Declare it with `package = "workspace-curator"`,
+then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
+the package under `<base-path>/.masc/packages/` and builds its image
+([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+State that still holds worker record v1 needs the hard cut above before the move.
+A declaration that pins the package with `manifest_path` builds the image from
+the repository root instead:
 
 ```sh
 docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.7 addons

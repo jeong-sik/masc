@@ -314,6 +314,9 @@ type series =
   | Capacity  (** Running against bootable, capacity against a target. Blue. *)
   | Backlog  (** Work behind: a lag, a queue. Yellow. *)
   | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
+  | Wakes
+      (** Scheduled Keeper wakes per half hour ahead. Cyan, the hue of the
+          calls they become. *)
 
 val ramp_steps : int
 (** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)

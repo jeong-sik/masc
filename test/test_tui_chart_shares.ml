@@ -243,7 +243,7 @@ let series_blend_rises () =
       if not (List.hd contrasts +. 1.0 < List.nth contrasts Theme.ramp_steps) then
         Alcotest.failf "the deep end is not darker than the bright end: %s"
           (String.concat " " (List.map (Printf.sprintf "%.2f") contrasts)))
-    Theme.[ Calls; Failures; Latency; Memory; Completion; Capacity; Backlog; Usage ]
+    Theme.[ Calls; Failures; Latency; Memory; Completion; Capacity; Backlog; Usage; Wakes ]
 
 (* A ramp is blended whole or not at all: where one step cannot be projected
    above the floor, every step draws the hue's bright code, so a 256-colour

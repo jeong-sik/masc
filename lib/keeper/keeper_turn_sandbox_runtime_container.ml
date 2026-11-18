@@ -54,22 +54,6 @@ let docker_exec_only (t : t) =
   else Ok ()
 ;;
 
-(* Whether the Docker daemon can see the named container, in any state. A
-   microvm guest is asked through [probe_microvm_container_state], which also
-   tells a missing guest from a runtime that could not be asked. *)
-let inspect_container_exists ?timeout_sec container_name =
-  let inspect_argv =
-    Keeper_sandbox_runtime.docker_command_argv ()
-    @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
-  in
-  let inspect_st, inspect_out =
-    run_argv_with_status ?timeout_sec inspect_argv
-  in
-  match inspect_st with
-  | Unix.WEXITED 0 -> Ok ()
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error inspect_out
-;;
-
 (* An inspect that exits 0 is the whole answer. Any other end -- a missing
    name, an apiserver that stalled before it could look, a timeout -- is
    followed by the runtime's own listing, so [Docker_container_absent] means

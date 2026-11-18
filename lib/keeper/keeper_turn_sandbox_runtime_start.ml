@@ -170,14 +170,25 @@ let start_container ?timeout_sec (t : t) =
               let st, out = run_argv_with_status ?timeout_sec argv in
               match st with
               | Unix.WEXITED 0 ->
-                (* The same probe the start began with. Listed in any state,
-                   it is the container this run made. *)
+                (* The same probe the start began with. A run that exits 0
+                   made the container; only this probe says whether its
+                   process is still up. *)
                 (match probe_state () with
-                 | Ok
-                     ( Keeper_sandbox_runtime.Docker_container_running
-                     | Keeper_sandbox_runtime.Docker_container_stopped ) ->
+                 | Ok Keeper_sandbox_runtime.Docker_container_running ->
                    set_state t (Running { container_name });
                    Ok container_name
+                 | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
+                   (* The process the run started has already ended, so no
+                      exec can run in this container. The start fails here,
+                      where the cause is known, instead of as the exit status
+                      of the first command. t.state stays Not_started and the
+                      container is kept: the next start finds the stable name
+                      stopped and resumes it. *)
+                   sandbox_failed
+                     (Printf.sprintf
+                        "docker_container_stopped_after_run: docker run exited 0 \
+                         and %s is not running"
+                        container_name)
                  | Ok Keeper_sandbox_runtime.Docker_container_absent ->
                    (* The daemon does not list the container its run reported.
                       t.state stays Not_started, so the name is removed here,
@@ -249,17 +260,29 @@ let start_container ?timeout_sec (t : t) =
     in
     if start_st = Unix.WEXITED 0
     then (
-      match
-        inspect_container_exists ?timeout_sec container_name
-      with
-      | Ok () -> adopt_running ()
-      | Error inspect_out ->
+      (* [docker start] exiting 0 says the daemon took the start, not that the
+         process stayed up. Only a container whose process is running is
+         adopted; one that stopped again is kept for the next start, as its
+         filesystem layer is what the persistence exists to keep. *)
+      match probe_state () with
+      | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt_running ()
+      | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
         sandbox_failed
           (Printf.sprintf
-             "docker_container_start_failed: restarted %s but inspect cannot \
-              see it: %s"
-             container_name
-             (Exec_policy.truncate_for_log inspect_out)))
+             "docker_container_stopped_after_start: docker start exited 0 and \
+              %s is not running"
+             container_name)
+      | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+        sandbox_failed
+          (Printf.sprintf
+             "docker_container_absent_after_start: docker start exited 0 and \
+              the daemon does not list %s"
+             container_name)
+      | Error probe_error ->
+        sandbox_failed
+          (Printf.sprintf
+             "docker_container_state_unknown_after_start: %s"
+             (Exec_policy.truncate_for_log probe_error)))
     else (
       let rm_argv =
         Keeper_sandbox_runtime.docker_remove_argv container_name

@@ -6229,7 +6229,7 @@ let test_waiting_since_does_not_replace_a_fresher_turn () =
     ; kwr_waiting_count = 0
     ; kwr_since = Some since
     ; kwr_due_at = None
-    ; kwr_waiting_on = []
+    ; kwr_source_counts = []; kwr_waiting_heads = []
     }
   in
   let open Masc_tui_types in
@@ -6285,7 +6285,7 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     ; kwr_waiting_count = 0
     ; kwr_since = None
     ; kwr_due_at = None
-    ; kwr_waiting_on = []
+    ; kwr_source_counts = []; kwr_waiting_heads = []
     }
   in
   state.keeper_turns <- [ turn "old" ];
@@ -6676,7 +6676,7 @@ let test_keeper_turns_waiting_completeness () =
   let open Tui_decode in
   let turn = { ktr_keeper_name = "alpha"; ktr_chat_control_token = None; ktr_state = Keeper_turn_idle } in
   let row = { kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle; kwr_waiting_count = 0;
-              kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+              kwr_since = None; kwr_due_at = None; kwr_source_counts = []; kwr_waiting_heads = [] } in
   let projection waiting = Ok Masc.Tui_decode.{ rows = [turn]; waiting } in
   let complete = keeper_turns_projection_complete ~current:(fun _ -> true) in
   Alcotest.(check bool) "complete fleet waiting is authoritative" true
@@ -6687,7 +6687,7 @@ let test_keeper_turns_waiting_completeness () =
                 kwi_what = "failed"; kwi_wake_producer = Wake_read_model_reader;
                 kwi_since = None; kwi_due_at = None; kwi_next_action = "retry" } in
   Alcotest.(check bool) "partial keeper read failure is incomplete" false
-    (complete (projection (Keeper_waiting_observed [{row with kwr_waiting_on = [error]}])));
+    (complete (projection (Keeper_waiting_observed [{row with kwr_source_counts = [Waiting_source_read_error, 1]; kwr_waiting_heads = [error]}])));
   Alcotest.(check bool) "retired control generation is incomplete" false
     (keeper_turns_projection_complete ~current:(fun _ -> false)
        (projection (Keeper_waiting_observed [row])));
@@ -6791,7 +6791,7 @@ let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
   let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
                                ktr_state = Keeper_turn_idle } in
   let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
-    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_source_counts = []; kwr_waiting_heads = [] } in
   state.keepers <- [alpha; beta];
   note_keeper_waiting_change state Waiting_all;
   let before = capture_keeper_waiting_snapshot state in
@@ -6880,7 +6880,7 @@ let test_partial_waiting_only_hides_missing_keepers () =
   let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
                                ktr_state = Keeper_turn_idle } in
   let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
-    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_source_counts = []; kwr_waiting_heads = [] } in
   state.keepers <- [alpha; beta];
   state.keeper_turns <- [turn "alpha"; turn "beta"];
   state.keeper_waiting <- [row "alpha"; row "beta"];
@@ -6907,7 +6907,7 @@ let test_waiting_event_does_not_hide_turns () =
   let turn = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
                           ktr_state = Keeper_turn_idle } in
   let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
-    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_source_counts = []; kwr_waiting_heads = [] } in
   state.keepers <- [keeper];
   state.keeper_turns <- [turn];
   state.keeper_waiting <- [waiting];
@@ -6958,7 +6958,7 @@ let test_roster_rows_join_each_reading_by_keeper_name () =
     { id; title = (if title = "" then id else title); status; priority = 3; goal_ids = [] } in
   let waiting name kwr_waiting_count = Tui_decode.{ kwr_keeper_name = name;
     kwr_state = Keeper_waiting_idle; kwr_waiting_count; kwr_since = None; kwr_due_at = None;
-    kwr_waiting_on = [] } in
+    kwr_source_counts = []; kwr_waiting_heads = [] } in
   state.keepers <- [alpha; beta];
   state.keeper_turns <- [turn "alpha" running; turn "beta" Keeper_turn_idle; turn "alpha" Keeper_turn_idle];
   state.keeper_waiting <- [waiting "alpha" 1; waiting "alpha" 2];
@@ -7004,7 +7004,7 @@ let test_continuous_waiting_events_preserve_turn_controls () =
     ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.;
       interrupt_token = token; turn_ref = None; preview = None } } in
   let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
-    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_source_counts = []; kwr_waiting_heads = [] } in
   state.keeper_turns <- [turn "old-token"];
   state.keeper_waiting <- [waiting];
   let reading, first = Keeper_waiting_read.start (Keeper_waiting_read.note_change state.keeper_waiting_read) in

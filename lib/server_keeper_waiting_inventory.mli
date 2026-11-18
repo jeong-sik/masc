@@ -20,12 +20,15 @@ val dashboard_json_for_keeper :
 (** The same typed projection narrowed to one keeper for latency-sensitive
     detail surfaces. It does not overwrite fleet-wide waiting metrics. *)
 
-val keeper_json_by_name :
+val keeper_turns_json_by_name :
   Workspace.config -> ((string * Yojson.Safe.t) list, Yojson.Safe.t list) result
-(** One fleet snapshot's public per-Keeper projections, keyed by Keeper name.
-    The rows have the same shape as [dashboard_json]'s [keepers] entries and
-    the per-Keeper endpoint, so another public-read projection can join them
-    without recomputing the inventory or inventing a second wire contract.
+(** One fleet snapshot's per-Keeper waiting for [GET /api/v1/keepers/turns],
+    keyed by Keeper name. A row carries [keeper_name], [state],
+    [waiting_count], [sources] (rows per source), [since], [due_at] and
+    [waiting_heads]: the first row of each (source, wake producer) pair in
+    inventory order, without [detail]. It carries no value counted from the
+    read's clock, so an unchanged inventory serializes to the same bytes.
+    [dashboard_json] keeps every row and its detail.
     If a fleet-scoped source is unreadable, its deadline observer is
     unavailable, or the schedule ledger is observed only through its recovery
     mirror, return public error rows instead of reporting an incomplete
@@ -122,4 +125,7 @@ module For_testing : sig
     next_action:string ->
     Keeper_event_queue_state.pending_selection list ->
     waiting_row list
+
+  (** One Keeper's row of [keeper_turns_json_by_name]. *)
+  val keeper_turns_json : string -> busy:bool -> waiting_row list -> Yojson.Safe.t
 end

@@ -269,7 +269,14 @@ let test_waiting_read_errors_stay_public () =
     (match member "keepers" recovered, member "waiting_errors" recovered with
      | Some (`List [ row ]), Some (`List []) ->
        (match member "waiting" row with
-        | Some (`Assoc _) -> ()
+        | Some (`Assoc fields as waiting) ->
+          (match member "waiting_heads" waiting, member "sources" waiting with
+           | Some (`List _), Some (`Assoc _) -> ()
+           | _ -> Alcotest.fail "turns waiting carries its heads and per-source counts");
+          Alcotest.(check (list string)) "turns waiting carries nothing counted from the read's clock" []
+            (List.filter_map (fun (name, _) ->
+               if List.mem name [ "current_execution"; "queue_residence"; "waiting_on" ]
+               then Some name else None) fields)
         | _ -> Alcotest.fail "a recovered source must return the observed waiting state")
      | _ -> Alcotest.fail "the recovered observation did not clear the fleet error"))
 ;;

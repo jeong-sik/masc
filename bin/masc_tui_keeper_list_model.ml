@@ -197,10 +197,12 @@ let sort_of_string = function
   | "name" -> Some Name
   | _ -> None
 
-let waiting_items row =
+(* The first row of each (source, wake producer) pair: enough to ask whether
+   a source has rows and which row comes first. *)
+let waiting_heads row =
   match row.waiting with
   | Waiting_unobserved | Waiting_unavailable -> []
-  | Waiting_observed waiting -> waiting.Masc.Tui_decode.kwr_waiting_on
+  | Waiting_observed waiting -> waiting.Masc.Tui_decode.kwr_waiting_heads
 
 let waiting_state row =
   match row.waiting with
@@ -263,7 +265,7 @@ let async_counts requests =
    a failing Keeper that runs a probe turn is streaming, and [group_of_row]
    puts it in [Failing] through its trail. *)
 let primary_activity_of_row row =
-  let items = waiting_items row in
+  let items = waiting_heads row in
   let activity = turn_activity row in
   let health = health_reading row in
   let running, _, queued, cancelling = async_counts row.async_requests in
@@ -306,7 +308,7 @@ type person_wait =
    [primary_activity_of_row]. *)
 let person_wait row =
   let item_of source =
-    List.find_opt (fun item -> item.Masc.Tui_decode.kwi_source = source) (waiting_items row)
+    List.find_opt (fun item -> item.Masc.Tui_decode.kwi_source = source) (waiting_heads row)
   in
   match primary_activity_of_row row with
   | Held_call -> (
@@ -339,7 +341,7 @@ let waiting_failure_reasons items =
     items
 
 let badges_of_row row =
-  let items = waiting_items row in
+  let items = waiting_heads row in
   let running, ownership_unknown, queued, cancelling = async_counts row.async_requests in
   [ (if waiting_has_source Waiting_source_read_error items
         || waiting_has_source Waiting_source_observation_unavailable items

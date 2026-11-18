@@ -288,7 +288,8 @@ let keeper_waiting_failure_reasons ~ko errors =
 
 let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
-  | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
+  | Keeper_list_model.Waiting_observed
+      { Tui_decode.kwr_waiting_heads = (first :: _ as items); kwr_waiting_count; _ } ->
       (* A delegate result's operator sentence includes the other Keeper and
          its outcome. Do not hide that behind an earlier scheduled wake. *)
       let item =
@@ -298,11 +299,11 @@ let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
         | Some result -> result
         | None -> first
       in
+      let others = kwr_waiting_count - 1 in
       Some (keeper_waiting_item_text item
-        ^ (match rest with
-           | [] -> ""
-           | _ -> Printf.sprintf (if ko then " (외 %d)" else " (%d more)") (List.length rest)))
-  | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
+        ^ (if others > 0 then Printf.sprintf (if ko then " (외 %d)" else " (%d more)") others
+           else ""))
+  | Keeper_list_model.Waiting_observed { kwr_waiting_heads = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
 (* The rest of the path the Keeper's next dispatch takes, for a Keeper whose

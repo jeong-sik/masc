@@ -319,6 +319,39 @@ let test_workspace_detail_keeps_one_height () =
         [ 1; 2 ])
     [ 80, 18; 120, 34; 200, 54; 60, 40 ]
 
+(* The shared rule every detail beside or above a list takes its height
+   from: details of three, one and five lines. *)
+let details = [ 3; 1; 5 ]
+let detail_of length = List.init length (fun index -> Printf.sprintf "line %d" index)
+
+let fitted ~budget ~too_tall length =
+  Masc_tui_detail_height.fit ~budget ~rows:details ~detail:detail_of ~too_tall ~blank:"-"
+    (detail_of length)
+
+let test_a_detail_keeps_the_tallest_height () =
+  let cut = Masc_tui_detail_height.Cut_with "more" in
+  List.iter
+    (fun (budget, too_tall, expected) ->
+      List.iter
+        (fun selected ->
+          Alcotest.(check int)
+            (Printf.sprintf "budget %d, the %d-line detail selected" budget selected)
+            expected (List.length (fitted ~budget ~too_tall selected)))
+        details)
+    [ 9, cut, 5; 5, cut, 5; 4, cut, 4; 1, cut, 1; 0, cut, 0
+    ; 9, Masc_tui_detail_height.Fold, 5; 5, Masc_tui_detail_height.Fold, 5
+    ; 4, Masc_tui_detail_height.Fold, 0 ];
+  Alcotest.(check (list string)) "a short detail ends in blank lines"
+    [ "line 0"; "-"; "-"; "-"; "-" ] (fitted ~budget:9 ~too_tall:cut 1);
+  Alcotest.(check (list string)) "a cut detail ends with the overflow line"
+    [ "line 0"; "line 1"; "line 2"; "more" ] (fitted ~budget:4 ~too_tall:cut 5);
+  Alcotest.(check (list string)) "one row keeps the first line, not the overflow line"
+    [ "line 0" ] (fitted ~budget:1 ~too_tall:cut 5);
+  Alcotest.(check (list string)) "a list with nothing loaded keeps the shown detail"
+    [ "only" ]
+    (Masc_tui_detail_height.fit ~budget:9 ~rows:[] ~detail:detail_of ~too_tall:cut ~blank:"-"
+       [ "only" ])
+
 let () =
   Alcotest.run "tui list moves"
     [ ( "keeper list"
@@ -338,6 +371,10 @@ let () =
             test_row_lists_move_their_cursor
         ; Alcotest.test_case "an overlay moves its own rows" `Quick
             test_an_overlay_moves_its_own_rows
+        ] )
+    ; ( "detail height"
+      , [ Alcotest.test_case "a detail keeps the tallest height" `Quick
+            test_a_detail_keeps_the_tallest_height
         ] )
     ; ( "workspace"
       , [ Alcotest.test_case "the detail card keeps one height" `Quick

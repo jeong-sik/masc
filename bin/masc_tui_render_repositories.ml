@@ -311,30 +311,19 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   let list_width = if split then width - detail_width - 2 else width in
   let selected = List.nth_opt repos cursor in
   let preview repo = repository_preview_lines state ~width:(detail_width - 4) repo in
-  let context_lines = match selected with
-    | None -> []
-    | Some repo -> preview repo in
   let context_budget = max 0
       (if split then panel_budget - 2
        else min (panel_budget / 2 - 2) (panel_budget - 6)) in
-  (* The card is as tall as the tallest detail among the loaded repositories
-     (RFC tui-one-screen-grammar §8), so j and k move the selection and not
-     the card's bottom edge. Sized by the selected one, the edge moved a row
-     each time a repository's path or Keepers took one row more. *)
-  let card_rows =
-    min context_budget
-      (List.fold_left (fun tallest repo -> max tallest (List.length (preview repo))) 0 repos) in
-  let truncated = List.length context_lines > context_budget in
-  let show_notice = truncated && context_budget >= 2 in
-  let visible_context = List.take
-      (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
+  (* As tall as the longest detail among the loaded repositories (RFC
+     tui-one-screen-grammar §8), so j and k move the selection and not the
+     card's bottom edge. *)
   let detail = match selected with
     | Some repo when context_budget > 0 ->
-        let lines = visible_context @ if show_notice then
-            [ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context"] else [] in
+        let more = ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context" in
         studio_panel ~width:detail_width
           ~title:(Terminal_text.single_line repo.rp_name)
-          ~lines:(lines @ List.init (max 0 (card_rows - List.length lines)) (fun _ -> ""))
+          ~lines:(Masc_tui_detail_height.fit ~budget:context_budget ~rows:repos ~detail:preview
+                    ~too_tall:(Masc_tui_detail_height.Cut_with more) ~blank:"" (preview repo))
     | Some _ | None -> [] in
   let list_budget = if split then panel_budget else panel_budget - List.length detail in
   let errors = match state.repositories_error with
@@ -448,7 +437,9 @@ let render_repository_list (state : state) =
       end)
 
 type repository_changes_geometry =
-  { rcg_context_lines : string list
+  { rcg_context : string option list
+      (** the selected change's record above the list, one row and its
+          divider each; [None] rows are kept blank so the list does not move *)
   ; rcg_header : bool
   ; rcg_error_rows : int
   ; rcg_list_height : int
@@ -457,12 +448,20 @@ type repository_changes_geometry =
 (* Selection context costs rows before the list. At short heights it is
    folded as a unit, so a partial context never makes a checkout claim and a
    selected file always has a row. Keys and drawing ask this same geometry
-   for the cursor they are about to select. *)
+   for the cursor they are about to select.
+
+   The context keeps the height of the longest record among the listed
+   changes (RFC tui-one-screen-grammar §8). Sized by the selected change, a
+   step from a recorded file to an unrecorded one dropped up to seven lines
+   and pulled the header and every row up fourteen. *)
 let repository_changes_geometry (state : state) ~cols ~budget ~cursor =
   let budget = max 1 budget in
-  let path = Option.bind state.repository_changes (fun snapshot ->
-    List.nth_opt snapshot.rcs_changes cursor |> Option.map (fun row -> row.rc_path)) in
-  let context_lines = build_change_context_lines ~cols (resolve_change_context state ~path_opt:path) in
+  let changes = Option.fold ~none:[] ~some:(fun snapshot -> snapshot.rcs_changes)
+      state.repository_changes in
+  let context_of (row : Tui_decode.repository_change) =
+    build_change_context_lines ~cols (resolve_change_context state ~path_opt:(Some row.rc_path))
+    |> List.map Option.some in
+  let selected = Option.fold ~none:[] ~some:context_of (List.nth_opt changes cursor) in
   let error_rows =
     match state.repository_changes_error with
     | None -> 0
@@ -471,19 +470,20 @@ let repository_changes_geometry (state : state) ~cols ~budget ~cursor =
     | Some _ -> 0 in
   let header = budget - error_rows >= 3 in
   let header_rows = if header then 2 else 0 in
-  let context_lines =
-    if 2 * List.length context_lines <= budget - error_rows - header_rows - 1
-    then context_lines else [] in
+  let context =
+    Masc_tui_detail_height.fit ~budget:((budget - error_rows - header_rows - 1) / 2)
+      ~rows:changes ~detail:context_of ~too_tall:Masc_tui_detail_height.Fold ~blank:None
+      selected in
   let list_height = max 1
-      (budget - error_rows - header_rows - (2 * List.length context_lines)) in
-  { rcg_context_lines = context_lines; rcg_header = header;
+      (budget - error_rows - header_rows - (2 * List.length context)) in
+  { rcg_context = context; rcg_header = header;
     rcg_error_rows = error_rows; rcg_list_height = list_height }
 
 let repository_changes_content_height state ~cols ~budget ~cursor =
   (repository_changes_geometry state ~cols ~budget ~cursor).rcg_list_height
 
 let repository_changes_context_visible state ~cols ~budget ~cursor =
-  (repository_changes_geometry state ~cols ~budget ~cursor).rcg_context_lines <> []
+  List.exists Option.is_some (repository_changes_geometry state ~cols ~budget ~cursor).rcg_context
 
 type repository_change_authority =
   { rca_scope : acting_pane_scope
@@ -596,10 +596,14 @@ let render_repository_changes (state : state) =
           let geometry = repository_changes_geometry state ~cols ~budget
               ~cursor:state.repository_changes_cursor in
           List.iter
-            (fun ctx_line ->
-              c.push ctx_line;
-              c.push_divider ())
-            geometry.rcg_context_lines;
+            (function
+              | Some ctx_line ->
+                  c.push ctx_line;
+                  c.push_divider ()
+              | None ->
+                  c.push_empty ();
+                  c.push_empty ())
+            geometry.rcg_context;
           if geometry.rcg_header then begin
             c.push_styled ~style:(Theme.recede ())
               ("  "
@@ -637,8 +641,8 @@ let render_repository_changes (state : state) =
               | None -> c.push_empty ()
               | Some row ->
                   let attr =
-                    match recorded_changes, geometry.rcg_context_lines with
-                    | Some snap, _ :: _ ->
+                    match recorded_changes, List.exists Option.is_some geometry.rcg_context with
+                    | Some snap, true ->
                         (match
                            List.find_opt
                              (file_change_matches_path ~scope:state.repository_changes_scope row.rc_path)
@@ -652,7 +656,7 @@ let render_repository_changes (state : state) =
                              in
                              " [record:" ^ t ^ "]"
                          | None -> "")
-                    | Some _, [] | None, _ -> ""
+                    | Some _, false | None, _ -> ""
                   in
                   let path = Terminal_text.single_line row.rc_path in
                   let path_cells = Message_layout.display_width path in

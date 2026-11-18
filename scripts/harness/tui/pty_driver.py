@@ -213,5 +213,11 @@ def stop(child: Child, grace_s: float) -> Exit:
     if status is None:
         os.kill(child.pid, signal.SIGKILL)
         _, status = os.waitpid(child.pid, 0)
+    # pty.fork made the TUI a session and process group leader. Anything it
+    # started in that group and left running goes with it.
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
     os.close(child.fd)
     return Exit(os.waitstatus_to_exitcode(status), killed)

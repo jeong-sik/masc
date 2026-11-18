@@ -105,6 +105,9 @@ DEFAULT_IDLE_S = 20.0
 DEFAULT_CELL_WIDTH_PX = 10
 DEFAULT_CELL_HEIGHT_PX = 22
 USAGE_ERROR = 2
+# The run finished, but a screen did not open or reach its keys, or the relay's
+# refusals could not be read: the report holds why.
+INCOMPLETE = 3
 NS_PER_S = 1_000_000_000
 MS_PER_S = 1000
 KIB = 1024
@@ -720,17 +723,34 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def refused_requests(log_path: Path) -> list[dict[str, object]]:
+def refused_requests(log_path: Path) -> list[dict[str, object]] | str:
+    """The relay's refusals, or why they cannot be counted. The count is the
+    evidence that only reads went through, so an unreadable log is not zero."""
     try:
         lines = log_path.read_text(encoding='utf-8').splitlines()
-    except OSError:
-        return []
+    except OSError as exc:
+        return f'{log_path}: {exc.strerror}'
     refused: list[dict[str, object]] = []
-    for line in lines:
+    for lineno, line in enumerate(lines, 1):
         fields = json_fields(line)
-        if fields is not None and fields.get('decision') == 'refused':
+        if fields is None:
+            return f'{log_path}:{lineno}: not a JSON object'
+        if fields.get('decision') == 'refused':
             refused.append({name: fields.get(name) for name in ('t', 'verb', 'path', 'why')})
     return refused
+
+
+def screen_failed(result: Mapping[str, object]) -> bool:
+    return 'error' in result or result.get('opened') is False or result.get('keys_ok') is False
+
+
+def restore_or_why(snapshot: Snapshot) -> str:
+    """restore(), with a failure written down instead of raised, so the
+    report still gets the relay's exit and refusals."""
+    try:
+        return restore(snapshot).value
+    except OSError as exc:
+        return f'not restored: {snapshot.path}: {exc.strerror}'
 
 
 def screen_line(result: Mapping[str, object]) -> str:
@@ -807,12 +827,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 running.stop_tui()
                 relay_exit = stop_relay(relay.process)
                 refused = refused_requests(options.out / RELAY_LOG_NAME)
-                restored = restore(preferences)
-                report |= {'relay': {'exit': relay_exit, 'refused': refused}, 'preferences': restored.value}
+                restored = restore_or_why(preferences)
+                report |= {'relay': {'exit': relay_exit,
+                                     'refused': refused if isinstance(refused, list) else {'error': refused}},
+                           'preferences': restored}
                 write_report(report_path, report)
-            print(f'relay refused {len(refused)}; {PREFERENCES.name} {restored.value}; report {report_path}',
-                  flush=True)
-    return 0 if 'aborted' not in report else USAGE_ERROR
+            refused_text = str(len(refused)) if isinstance(refused, list) else f'? ({refused})'
+            print(f'relay refused {refused_text}; {PREFERENCES.name} {restored}; report {report_path}', flush=True)
+    if 'aborted' in report:
+        return USAGE_ERROR
+    if not isinstance(refused, list) or restored.startswith('not restored') or any(map(screen_failed, screens)):
+        return INCOMPLETE
+    return 0
 
 
 if __name__ == '__main__':

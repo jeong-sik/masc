@@ -172,13 +172,14 @@ def read_log(path: Path) -> list[dict[str, object]] | str:
     except OSError as exc:
         return f'{path}: {exc.strerror}'
     entries: list[dict[str, object]] = []
-    for line in lines:
+    for lineno, line in enumerate(lines, 1):
         try:
             fields = json_object(json.loads(line))
         except (ValueError, RecursionError):
-            continue
-        if fields is not None:
-            entries.append(fields)
+            fields = None
+        if fields is None:
+            return f'{path}:{lineno}: not a JSON object'
+        entries.append(fields)
     return entries
 
 

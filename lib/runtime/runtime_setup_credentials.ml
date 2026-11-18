@@ -11,10 +11,7 @@ let retain pending = pending.retained <- true
 let remove_uncommitted pending =
   if not pending.retained then
     try Unix.unlink pending.path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-let valid_secret secret =
-  secret <> "" && not (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) secret)
-  && (try match Yojson.Safe.from_string secret with `Assoc _ | `List _ -> false | _ -> true
-      with Yojson.Json_error _ -> true)
+let valid_secret secret = Option.is_some (Runtime_api_key_file.key_of_string secret)
 let save ~secret () =
   let secret = String.trim secret in
   if not (valid_secret secret) then Error Invalid_secret else

@@ -7,7 +7,8 @@
     5.4). This is the one place that spells the path of a login home: the
     login that makes it ({!Runtime_setup_login_client}), the verification
     that reads it and {!Runtime_account_access}, which lets a CLI start on it,
-    all compute it here.
+    all compute it here. It spells the path of the key file of a key account
+    too ({!key_file}).
 
     The home of an account is
     [<runtime root>/official-clients/<client>/<account id>], spelled from the
@@ -56,3 +57,28 @@ val persons_remain : base_path:string -> (bool, Unix.error) result
     real path of [runtime_root]. It reads only that real path and makes
     nothing. [runtime_root] is absolute and [account_id] is one path leaf. *)
 val home : runtime_root:string -> client -> account_id:string -> (string, string) result
+
+(** The directory under a runtime root that holds the key files of its key
+    accounts (RFC a-persons-api-key-is-their-own-provider-account 3.2). It is
+    beside {!clients_dir} and not under it: a client writes the home of an
+    account, and only MASC writes its key files. *)
+val api_keys_dir : string
+
+(** The folder of the key files of [account_id] under [runtime_root]:
+    [<runtime root>/api-keys/<account id>], spelled from the real path of
+    [runtime_root] as {!home} is. It reads only that real path and makes
+    nothing. An id of the log is one path leaf ({!Authz_id}). *)
+val key_dir
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (string, string) result
+
+(** The file of the key of [generation] in {!key_dir}:
+    [<runtime root>/api-keys/<account id>/<generation>], the generation as its
+    number. A reader opens the file of the generation the log says, so a key
+    that was replaced is not the one read. *)
+val key_file
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> (string, string) result

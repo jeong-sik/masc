@@ -291,12 +291,10 @@ let reader_after_wheel (reader : clamped_scroll)
   | Resource_scroll _ -> None
 
 
-let navigation_rows = 1
-
-
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
+  ( max 1 (rows - Render_schedule.Viewport.navigation_rows)
+  , max 1 (cols - !acting_pane_reserved_cols) )
 
 
 (* The lines a buffer has ended since [start]: how far down a frame the next

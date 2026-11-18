@@ -1616,7 +1616,6 @@
  (modules masc_tui_composer)
  (libraries
   masc_tui_local_read_observation
-  masc_tui_render_schedule
   masc_tui_value
   masc_tui_words))
 
@@ -2028,6 +2027,8 @@
   masc.runtime
   masc_tui_acting
   masc_tui_composer
+  ; Viewport owns the body's row budget that [surface_body_rows] reads.
+  masc_tui_render_schedule
   masc_tui_audio_device
   masc_tui_agenda
   masc_tui_ask_layout

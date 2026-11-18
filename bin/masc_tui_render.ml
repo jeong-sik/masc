@@ -95,6 +95,15 @@ let notice_requires_full_frame (state : state) ~terminal_cols ~now =
        Message_layout.display_width (Masc_tui_action_notice.rejection_text notice)
        > framed_inner_width content_cols) rejection
 
+(* Whether a surface fits at all, and why not. [terminal_rows] is below the
+   strip, [terminal_cols] the whole terminal. The reason carries the numbers
+   the too-small screen writes, so the screen cannot say other than this. *)
+let too_small (state : state) ~terminal_rows ~terminal_cols ~now =
+  Render_schedule.Viewport.too_small ~terminal_rows ~terminal_cols
+    ~agenda_rows:(Masc_tui_types.agenda_chrome_rows state)
+    ~notice_needs_full_frame:(fun () ->
+      notice_requires_full_frame state ~terminal_cols ~now)
+
 let acting_pane_suppressed (state : state) =
   let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
   base_acting_pane_suppressed state
@@ -110,9 +119,10 @@ let acting_pane_columns (state : state) ~terminal_cols =
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~now =
-  let rows = surface_body_rows state ~terminal_rows:(max 1 (terminal_rows - 1)) in
+  let below_strip =
+    max 1 (terminal_rows - Render_schedule.Viewport.navigation_rows) in
   if acting_pane_columns_at state ~terminal_cols ~now = 0
-     || Render_schedule.Viewport.requires_compact_frame ~rows
+     || Option.is_some (too_small state ~terminal_rows:below_strip ~terminal_cols ~now)
      || state.acting_pane_tab = Masc_tui_acting_pane.Tab_changes
   then None
   else Some (recent_chunk_projection state)
@@ -821,14 +831,12 @@ let frame_choice_after_play (state : state) =
           | None -> `Surface
 
 let compact_frame_required (state : state) ~terminal_rows ~terminal_cols ~now =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  Render_schedule.Viewport.requires_compact_frame ~rows
-  || notice_requires_full_frame state ~terminal_cols ~now
+  Option.is_some (too_small state ~terminal_rows ~terminal_cols ~now)
 
 let frame_choice (state : state) ~terminal_rows ~terminal_cols ~now =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if compact_frame_required state ~terminal_rows ~terminal_cols ~now then `Too_small rows
-  else match state.connection_status with
+  match too_small state ~terminal_rows ~terminal_cols ~now with
+  | Some reason -> `Too_small reason
+  | None -> match state.connection_status with
   (* The account server serves none of the screens below, so its own covers
      them all, the modals included. *)
   | Account_server { version } -> `Account_server version
@@ -901,8 +909,8 @@ let render ~home ~compact_recovery_notice (state : state) =
      lays out fits above it. *)
   let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
   match frame_choice state ~terminal_rows ~terminal_cols ~now with
-  | `Too_small _ ->
-    let frame, clamped = render_terminal_too_small state
+  | `Too_small reason ->
+    let frame, clamped = render_terminal_too_small state reason
         ~recovery_notice:compact_recovery_notice ~rows:terminal_rows ~cols in
     (frame, clamped, None, Overlay_drawn)
   | `Account_server version ->

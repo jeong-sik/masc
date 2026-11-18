@@ -149,7 +149,44 @@ module Viewport = struct
   (* This is the largest fixed-row budget declared by a surface, not a promise
      that every variable section already accounts for the viewport. *)
   let minimum_fixed_chrome_rows = 14
-  let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
+  let navigation_rows = 1
+
+  (* One composer row, and only where the surface above can still meet its own
+     fixed-row budget without it. A surface pushed under the budget shows the
+     too-small screen instead of itself, so a convenience row that costs the
+     surface is worse than no row: the composer yields. *)
+  let composer_rows ~terminal_rows =
+    if terminal_rows > minimum_fixed_chrome_rows then 1 else 0
+
+  let body_rows ~terminal_rows ~agenda_rows =
+    max 1 (terminal_rows - composer_rows ~terminal_rows - agenda_rows)
+
+  let body_fits ~terminal_rows ~agenda_rows =
+    body_rows ~terminal_rows ~agenda_rows >= minimum_fixed_chrome_rows
+
+  type size = { cols : int; rows : int }
+
+  type too_small =
+    | Rows_short of { have : size; need_rows : int }
+    | Notice_needs_full_frame
+
+  (* The fewest rows below the strip that the body fits in, counting up from
+     [terminal_rows] with the predicate the decision itself uses. The body
+     never shrinks as the terminal grows and gains a row for each row past the
+     composer's, so the count stops by
+     [minimum_fixed_chrome_rows + agenda_rows + 1]. *)
+  let rec rows_needed ~agenda_rows terminal_rows =
+    if body_fits ~terminal_rows ~agenda_rows then terminal_rows
+    else rows_needed ~agenda_rows (terminal_rows + 1)
+
+  let too_small ~terminal_rows ~terminal_cols ~agenda_rows ~notice_needs_full_frame =
+    if body_fits ~terminal_rows ~agenda_rows then
+      if notice_needs_full_frame () then Some Notice_needs_full_frame else None
+    else
+      Some
+        (Rows_short
+           { have = { cols = terminal_cols; rows = terminal_rows + navigation_rows }
+           ; need_rows = rows_needed ~agenda_rows terminal_rows + navigation_rows })
 end
 
 (* Keeper roster columns.

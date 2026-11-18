@@ -108,8 +108,6 @@ val reader_after_wheel :
     for the Parameters and Presets documents when they cannot move that way.
     A Presets save warning always takes the notch. *)
 
-val navigation_rows : int
-
 val get_terminal_size : unit -> int * int
 
 val lines_ended_since : Buffer.t -> start:int -> int

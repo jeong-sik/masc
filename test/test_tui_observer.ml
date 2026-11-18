@@ -162,7 +162,7 @@ let summary = function
          | Masc.Workspace_dataset_event.Dashboard_observation _
          | Masc.Workspace_dataset_event.World_memory
          | Masc.Workspace_dataset_event.Play_seats
-         | Masc.Workspace_dataset_event.Repositories
+         | Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Backlog
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
          | Masc.Workspace_dataset_event.Goals
@@ -1078,7 +1078,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
              (match Observer.dataset_owed event with
               | Some Masc.Workspace_dataset_event.Verification_requests -> true
               | Some
-                  ( Masc.Workspace_dataset_event.Repositories
+                  ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Backlog
                   | Masc.Workspace_dataset_event.Keeper_metrics _
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Skill_activations _
@@ -1184,7 +1184,8 @@ let test_a_repository_push_reads_the_list () =
              (match Observer.dataset_owed event with
               | Some Masc.Workspace_dataset_event.Repositories -> true
               | Some
-                  ( Masc.Workspace_dataset_event.Verification_requests
+                  ( Masc.Workspace_dataset_event.Backlog
+                  | Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Keeper_metrics _
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Skill_activations _
@@ -1221,7 +1222,7 @@ let test_a_repository_push_reads_the_list () =
          (match Observer.dataset_owed event with
           | Some Masc.Workspace_dataset_event.Verification_requests -> false
           | Some
-              ( Masc.Workspace_dataset_event.Repositories
+              ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Backlog
               | Masc.Workspace_dataset_event.Keeper_metrics _
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
               | Masc.Workspace_dataset_event.Skill_activations _

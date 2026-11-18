@@ -27,7 +27,7 @@ let observation (event : Sse.external_event) =
   | `Assoc fields ->
       (match Workspace_dataset_event.of_fields fields with
        | Ok (Dashboard_observation payload) -> Some payload
-       | Ok (Repositories | Verification_requests | Harness_verdicts | Goals
+       | Ok (Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
            | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
            | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
            | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes

@@ -44,7 +44,7 @@ let test_actual_writes_keep_independent_and_trailing_read_debt () =
                     (match Dashboard_snapshot.tools_for_config config with
                      | Some prepared -> Eio.Stream.add tool_notices prepared.json
                      | None -> fail "Tools completion preceded its component installation")
-                  | Ok (Repositories | Verification_requests | Harness_verdicts | Goals
+                  | Ok (Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
                       | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
                       | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
                       | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes

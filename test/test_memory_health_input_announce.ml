@@ -16,7 +16,7 @@ let memory_health_keeper (payload : Yojson.Safe.t) =
      | ( Some _ | None )
      , Ok
          Workspace_dataset_event.(
-           ( Repositories | Verification_requests | Harness_verdicts | Goals
+           ( Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
            | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
            | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
            | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes
@@ -633,7 +633,7 @@ let test_world_writes_invalidate_before_announcing () =
       (match Workspace_dataset_event.of_fields fields with
        | Ok Workspace_dataset_event.World_memory -> true
        | Ok Workspace_dataset_event.(
-           ( Repositories | Verification_requests | Harness_verdicts | Goals
+           ( Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
            | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
            | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
            | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes

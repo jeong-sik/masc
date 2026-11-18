@@ -9,7 +9,13 @@ val header :
     Every non-empty group's count is reserved before marks; remaining width
     shows individual marks (with the selected Keeper bold) or [+n] overflow. *)
 
-type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
+type wake_style =
+  | Keeper_wakes
+      (** One Keeper's row: a wake mark per slot, receded like every small
+          graph inside a list. *)
+  | Wake_counts
+      (** A group or the fleet: each slot's count as a level against the
+          busiest slot, on the {!Masc_tui_theme.Wakes} ramp. *)
 
 val wake_summary : ko:bool -> Masc_tui_keeper_next_run.wake_slot list -> string
 (** State-view summary in the same width as the half-hour window. Counts

@@ -23,6 +23,7 @@ related: ["server-carries-its-exact-worker-packages", "microvm-guest-agent-over-
   - D3. shim 은 서버가 준비한다. 소스 빌드는 같은 checkout 에서 Linux 컨테이너로 shim 을 빌드하고, 릴리즈 설치는 같은 태그의 자산을 받아 신원으로 확인한다. 다른 빌드의 shim 을 받는 경로는 모두 지운다.
   - D4. 원격 SSH 엔드포인트도 같은 열쇠를 쓴다. 신원이 다르면 서버가 고정된 SSH 채널로 자기 shim 을 올리고, 올릴 권한이 없으면 typed 거절로 끝난다.
 - 운영자 결정(2026-11-18, 원문 취지): 「정석으로 고친다. 필요하면 전부 하드컷한다. 이런 일이 다시는 없어야 한다.」
+- 출발점은 #52973(병합됨)이다. relay 번호 선언, `Shim_relay_version_mismatch`, 모든 백엔드에서 지우기 전에 확인하는 `boot_shim` 이 이미 main 에 있다. 이 RFC 는 선언과 거절의 열쇠를 relay 번호에서 소스 신원으로 바꾸고, `boot_shim` 경로는 그대로 쓴다(§1.3).
 - 마이그레이션은 없다. 신원을 선언하지 않은 shim 은 모두 거절된다(§6).
 
 ## 1. 지금
@@ -52,11 +53,21 @@ related: ["server-carries-its-exact-worker-packages", "microvm-guest-agent-over-
 - shim 을 만드는 스크립트는 둘이다. `scripts/remote-ssh/build-shim.sh` 는 저장소 dune 으로 컨테이너에서 빌드한다(릴리즈 워크플로가 쓴다). `scripts/build-shim-static.sh` 는 소스를 임시 프로젝트로 복사해 빌드한다(SSH fixture 가 쓴다).
 - 릴리즈 워크플로는 같은 run 에서 런타임과 shim 을 빌드한다(`release-build.yml` 「Build exec shim」). 둘이 같은 commit 인지는 아무도 확인하지 않는다.
 
-### 1.3 열린 PR #52973
+### 1.3 출발점: #52973 (2026-11-18 병합)
 
-- #52973 은 relay 버전 선언 `MASC_EXEC_SHIM_RELAY_VERSION=2;` 를 shim 바이트에 넣고, 부팅 전에 읽어 다르면 거절한다. Boot 갈래가 기존 게스트를 멈추기 전에 readiness 를 먼저 본다.
-- 이 PR 은 증상(교체 반복)을 막는다. 하지만 열쇠가 여전히 사람이 올리는 숫자다. 규약을 바꾸면서 숫자를 안 올리면 같은 사건이 다시 난다. relay 가 같아도 shim 동작(jail, 설정 키, 신호 처리)이 다르면 막지 못한다.
-- 이 RFC 의 L1 은 선언 문법을 신원으로 바꾸고, Boot 갈래 순서는 그대로 가져간다(§8).
+- shim 바이트에 `MASC_EXEC_SHIM_RELAY_VERSION=2;` 를 넣고(`Exec_ssh_protocol.Relay.version_declaration`), readiness 가 마운트한 shim 에서 읽어 다르면 `Shim_relay_version_mismatch` 로 거절한다(`keeper_microvm_shim_readiness.ml` `verify_files`, `keeper_sandbox_microvm_shim.ml` `inspect_shim`).
+- `boot_shim` 은 `verify_microvm_shim_before_teardown` 만 만드는 값이고, 프로비저닝이 그 값을 요구한다. 그래서 Apple·nerdctl/Kata·microsandbox 모두 기존 게스트를 멈추거나 지우기 전에 shim 을 확인한다(`keeper_turn_sandbox_runtime_work_volume.ml`).
+- `install-local-build.sh --refresh-guest-shim` 은 서버 바이너리와 릴리즈 shim 의 relay 선언을 비교해 다르면 아무것도 깔지 않는다. `probe-shim-artifact.py` 는 선언이 정확히 하나인지 본다.
+- 이 PR 은 증상(교체 반복)을 막았다. 하지만 열쇠가 여전히 사람이 올리는 숫자다. 규약을 바꾸면서 숫자를 안 올리면 같은 사건이 다시 난다. relay 가 같아도 shim 동작(jail, 설정 키, 신호 처리)이 다르면 막지 못한다. hello 쪽 검사도 relay 번호만 본다(`Other_relay_version`).
+
+| #52973 이 둔 것 | 이 RFC 에서 |
+|---|---|
+| `Relay.version_declaration`, `relay_declaration` 파서 | 지운다. `Source_identity` 선언과 `Source_identity.scan` 이 대신한다 |
+| `Shim_relay_version_mismatch { installed; required }` | `Shim_from_other_source { shim; server }` 로 바꾼다 |
+| `inspect_shim` 이 바이트를 한 번 읽어 sidecar 와 선언을 같이 본다 | 그대로. 결과 필드만 `relay` → `source` |
+| `boot_shim` / `verify_microvm_shim_before_teardown` | 그대로 쓴다. 새 경로를 만들지 않는다 |
+| hello 의 `Other_relay_version` | `Other_source` 로 바꾼다 |
+| `install-local-build.sh` 의 relay 비교, `probe-shim-artifact.py` 의 선언 확인 | 같은 자리에서 신원을 비교한다. probe 는 commit 이 후보와 같고 `clean` 인지까지 본다 |
 
 ## 2. 규칙
 
@@ -96,7 +107,7 @@ val scan : string -> scan  (* 바이너리 바이트에서 선언을 모두 찾�
 - hello 에 `source_identity` 를 더한다. 필드가 없으면 `None` 으로 읽는다. 옛 shim 의 hello 도 `Malformed_hello` 가 아니라 「신원 없음」으로 읽혀야, 거절 문구가 무엇을 다시 설치할지 말할 수 있다.
 - `Keeper_guest_socket.refusal` 의 `Other_relay_version` 을 `Other_source { server; agent; agent_relay }` 로 바꾼다. 서버와 agent 의 신원이 둘 다 있고 같을 때만 다음 검사(read-only root, owner, no_new_privs)로 간다.
 - 부팅 전: readiness 가 마운트할 shim 바이트를 한 번 읽어 sidecar 해시와 신원 선언을 같이 본다. `Declared t` 이고 `t = current` 일 때만 통과한다. 아니면 `Verification_failed (Shim_from_other_source { shim; server })` 다. 실패는 캐시하지 않는다.
-- Apple Boot 갈래는 기존 게스트를 멈추기 전에 readiness 를 본다(#52973 과 같은 순서). 그래서 `Other_source` 로 교체되는 경우는 「디스크의 shim 은 맞고, 떠 있는 agent 만 옛 바이트로 떠 있던」 경우뿐이다. 교체가 고칠 수 없는 거절은 교체로 가지 않는다.
+- 모든 백엔드의 Boot 는 #52973 의 `boot_shim` 으로 기존 게스트를 멈추기 전에 readiness 를 본다. L1 은 이 경로를 바꾸지 않는다. 그래서 `Other_source` 로 교체되는 경우는 「디스크의 shim 은 맞고, 떠 있는 agent 만 옛 바이트로 떠 있던」 경우뿐이다. 교체가 고칠 수 없는 거절은 교체로 가지 않는다.
 
 ### 3.3 shim 준비는 서버 쪽 일 (D3)
 
@@ -119,6 +130,7 @@ val scan : string -> scan  (* 바이너리 바이트에서 선언을 모두 찾�
 - 테스트: dune 이 이 소스로 빌드한 `masc_exec_shim.exe` 바이트의 선언이 테스트 바이너리의 `Source_identity.current` 와 같다(L1).
 - `probe-shim-artifact.py` 는 shim 바이트에서 선언을 정확히 하나 찾고, 그 commit 이 `--source-commit` 과 같고 state 가 `clean` 인지 본다.
 - 릴리즈 워크플로는 runtime tarball 의 `masc` 바이너리와 두 shim 자산의 선언이 모두 같은지 보고, 다르면 게시하지 않는다.
+- 릴리즈 잡은 모두 `clean` 신원을 내야 한다. 잡이 checkout 안에 추적하지 않는 파일을 만들면(예: probe 워크플로의 `probe-driver/`, L1 에서 `.gitignore` 에 넣었다) 그 잡의 바이너리는 `modified` 가 되고, 다른 잡의 shim 과 맞지 않는다. L4 의 비교가 이 경우를 게시 전에 잡는다. L4 는 L1 뒤 첫 릴리즈 전에 들어가야 한다.
 
 ## 4. 왜 닫히나
 
@@ -166,7 +178,7 @@ val scan : string -> scan  (* 바이너리 바이트에서 선언을 모두 찾�
 | 선언 없는 shim(0.73.1 이하 릴리즈 자산, L1 전 checkout 빌드) 전부 | L1 | L2 전: `scripts/remote-ssh/build-shim.sh --arch arm64` 결과를 `<base>/.masc/microvm/shim/masc-exec-shim` 에 넣고 `.sha256` 을 지운다. L2 뒤: `install-local-build.sh` 가 한다 |
 | 옛 shim 으로 떠 있는 게스트 | L1 | 없음. 디스크 shim 이 맞으면 다음 턴에 교체된다 |
 | `MASC_BUILD_COMMIT` 만 넘기는 빌드(`Dockerfile.oneclick`, `docker-compose.yml`) | L1 | `MASC_BUILD_SOURCE_STATE` 도 넘긴다. 안 넘기면 그 서버는 shim 을 하나도 쓰지 않는다 |
-| hello 거절 `Other_relay_version` | L1 | 없음 |
+| hello 거절 `Other_relay_version`, #52973 의 relay 선언과 `microvm_shim_relay_version_mismatch` | L1 | 없음 |
 | `--refresh-guest-shim`, sha256 sidecar | L2 | `<base>/.masc/microvm/shim/masc-exec-shim.sha256` 를 지운다 |
 | `Shim_build_id`, `remote_shim_outdated`, 원격 `/usr/local/share/masc/exec-shim.version` | L3 | 엔드포인트의 version 파일은 지워도 되고 남아도 읽지 않는다 |
 | `build-shim-static.sh` | L2 | 없음 |
@@ -175,7 +187,7 @@ val scan : string -> scan  (* 바이너리 바이트에서 선언을 모두 찾�
 
 | 층 | 내용 | 수용 시험 |
 |---|---|---|
-| L1 | `Source_identity` 생성, shim hello·바이트 선언, `Other_source` 거절, readiness `Shim_from_other_source`, Boot 갈래 순서, `build-shim*.sh` 가 신원을 넘김 | (1) dune 빌드 shim 바이트의 선언 = `current`. (2) 선언 없는 shim·다른 commit·다른 state·선언 둘 → readiness 거절, 다시 설치하면 통과. (3) 다른 신원 hello → `Other_source`, 신원 없는 hello → `Other_source { agent = None }`. (4) 다른 신원 shim 이 마운트된 Apple 게스트를 두 턴 요청해도 stop·delete·run 0회. (5) 선언 문법: 접두어만, 종료 문자 없음, 대문자 hex, 길이 틀림은 선언이 아니다 |
+| L1 (#52978) | `Source_identity` 생성, shim hello·바이트 선언, `Other_source` 거절, readiness `Shim_from_other_source`(#52973 의 relay 선언 대체), `build-shim*.sh`·`build-linux-release.sh` 가 신원을 넘김 | (1) dune 빌드 shim 바이트의 선언 = `current`. (2) 선언 없는 shim·다른 commit·다른 state·선언 둘 → readiness 거절, 다시 설치하면 통과. (3) 다른 신원 hello → `Other_source`, 신원 없는 hello → `Other_source { agent = None }`. (4) 다른 신원 shim 이 마운트된 Apple 게스트를 두 턴 요청해도 stop·delete·run 0회. (5) 선언 문법: 접두어만, 종료 문자 없음, 대문자 hex, 길이 틀림은 선언이 아니다 |
 | L2 | `install-local-build.sh` 가 같은 checkout 에서 shim 을 빌드·확인·설치. `install.sh` 가 같은 태그 자산을 신원으로 확인. `--refresh-guest-shim`·sidecar·`build-shim-static.sh` 삭제. `masc microvm-shim-check` 하위 명령 | (1) 하위 명령: 같은 신원 0, 다른 신원·선언 없음 0 이 아닌 종료. (2) 설치 스크립트 dry-run 이 서버와 shim 을 같은 checkout 에서 빌드하는 명령을 낸다. (3) 다른 신원 shim 이면 설치가 바이너리를 바꾸기 전에 멈춘다 |
 | L3 | probe 에 신원, 서버의 원격 shim 올리기, `Remote_shim_other_source`, `Shim_build_id`·WARN 삭제 | (1) SSH fixture 에서 다른 신원 shim 엔드포인트 → 서버가 올린 뒤 probe 신원 같음 → dispatch. (2) 권한 없는 엔드포인트 → 거절, 요청 0. (3) `Docker_exec` → 거절 |
 | L4 | `probe-shim-artifact.py` 선언 확인, 릴리즈 워크플로 신원 비교 | (1) 다른 commit 으로 빌드한 shim 을 넣으면 probe 가 실패. (2) 릴리즈 dry-run 이 runtime 과 shim 선언이 다르면 실패 |
@@ -185,8 +197,8 @@ val scan : string -> scan  (* 바이너리 바이트에서 선언을 모두 찾�
 
 ## 8. #52973 과의 관계
 
-- #52973 의 Boot 갈래 순서와 `Guest_shim_unready` 는 L1 에 그대로 들어간다. relay 선언과 `relay_declaration` 은 신원 선언으로 바뀐다.
-- 권고: L1 이 리뷰를 통과하면 #52973 은 L1 에 흡수된 것으로 닫는다. L1 전에 운영 복구가 급하면 #52973 을 먼저 병합하고, L1 을 그 위로 다시 올려 relay 선언을 지운다.
+- #52973 은 병합된 출발점이다. 되돌리지 않는다.
+- L1(#52978)은 그 위에 얹는다. 선언 문법과 거절 타입을 신원으로 바꾸고(§1.3 표), `inspect_shim`·`boot_shim`·readiness 캐시 규칙은 그대로 쓴다.
 
 ## 9. 검증
 

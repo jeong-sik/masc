@@ -1280,6 +1280,71 @@ let test_source_uninitialized_only_when_both_files_absent () =
   check bool "reading did not create goals.json" false
     (Sys.file_exists (Goal_store.goals_path config))
 
+(* RFC a-goal-states-its-measure-as-a-typed-value §6, RFC-0444 §2.7: a store
+   written before the typed measure holds rows with free-text [metric] and
+   [target_value]. Every phase is present, the mirror holds the same bytes,
+   and one row was hand-edited to carry a measure but no procedure. Reading
+   refuses the store, names the field and repair step, and writes nothing,
+   however many times the server boots. *)
+let rows_before_the_measure_cut config ~edit =
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1;
+      updated_at = iso_now ();
+      goals = List.mapi (fun index phase ->
+        { (make_goal (Printf.sprintf "pre-cut-%d" index) "Pre-cut Goal") with phase })
+        Goal_phase.all };
+  let path = Goal_store.goals_path config in
+  let document = match Yojson.Safe.from_file path with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          match key, value with
+          | "goals", `List rows ->
+              key, `List (List.map (function
+                | `Assoc row -> `Assoc (edit row)
+                | other -> other) rows)
+          | _ -> key, value) fields)
+    | _ -> fail "goals.json is not an object" in
+  let bytes = Yojson.Safe.to_string document in
+  write_raw path bytes;
+  write_raw (goals_recovery_path config) bytes
+
+let free_text_criterion row =
+  List.filter (fun (key, _) -> key <> "measure" && key <> "procedure") row
+  @ [ "metric", `String "passing checks"; "target_value", `String "5" ]
+
+let hand_edited_without_procedure row =
+  List.filter (fun (key, _) -> key <> "procedure") row
+
+let check_cut_refusal config ~field =
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let digests () = file_digest primary, file_digest mirror in
+  let before = digests () in
+  let refuse boot =
+    match unavailable config with
+    | { reason = Goal_store.Schema_rejected { field = actual; _ };
+        mirror = Goal_store.Mirror_rejected (Goal_store.Schema_rejected { field = mirror_field; _ });
+        reset_step = Goal_store.Repair_field step_field; _ } ->
+        check string (boot ^ ": rejected field") field actual;
+        check string (boot ^ ": mirror rejects the same field") field mirror_field;
+        check string (boot ^ ": the repair step names the field") field step_field
+    | u -> fail (boot ^ ": expected a schema rejection with a rejected mirror: "
+                 ^ Goal_store.unavailable_to_string u) in
+  refuse "first boot";
+  refuse "second boot";
+  check bool "two boots leave goals.json and its mirror byte-identical" true
+    (before = digests ())
+
+let test_rows_written_before_the_measure_cut_are_refused () =
+  with_workspace @@ fun config ->
+  rows_before_the_measure_cut config ~edit:free_text_criterion;
+  check_cut_refusal config ~field:"metric"
+
+let test_a_hand_edited_row_without_procedure_is_refused () =
+  with_workspace @@ fun config ->
+  rows_before_the_measure_cut config ~edit:hand_edited_without_procedure;
+  check_cut_refusal config ~field:"procedure"
+
 let test_source_missing_after_init () =
   with_workspace @@ fun config ->
   let stamp = "2026-09-08T16:20:13Z" in
@@ -2221,6 +2286,10 @@ let () =
         [ test_case "blank criterion edits preserve every phase and outbox" `Quick
             test_blank_criterion_edits_preserve_store_and_outbox;
           test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
+          test_case "rows written before the measure cut are refused in every phase" `Quick
+            test_rows_written_before_the_measure_cut_are_refused;
+          test_case "a hand-edited row without procedure is refused" `Quick
+            test_a_hand_edited_row_without_procedure_is_refused;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "duplicate identity refuses Goal writers and preserves independent work" `Quick test_duplicate_identity_refuses_goal_writers;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );

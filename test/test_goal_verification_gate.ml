@@ -354,6 +354,40 @@ let test_unknown_ledger_field_is_a_decode_error () =
       (String_util.contains_substring msg "surprise_field")
 ;;
 
+(* RFC a-goal-states-its-measure-as-a-typed-value §6: a proof record written
+   before the typed measure binds a criterion with free-text [metric] and
+   [target_value]. The ledger refuses it and names the shape it reads; it is
+   not read as a criterion with no measure. *)
+let test_a_proof_record_from_before_the_measure_cut_is_refused () =
+  with_workspace
+  @@ fun config ->
+  (match
+     Goal_verification.mark_proof_pending config ~goal_id:"goal-pre-cut" ~criterion:isolated_criterion
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let rec free_text = function
+    | `Assoc fields when List.mem_assoc "measure" fields && List.mem_assoc "procedure" fields ->
+      `Assoc
+        (List.filter (fun (key, _) -> key <> "measure" && key <> "procedure") fields
+         @ [ "metric", `String "passing checks"; "target_value", `String "5" ])
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, free_text value) fields)
+    | `List items -> `List (List.map free_text items)
+    | other -> other
+  in
+  let path = Goal_verification.verifications_path config in
+  let pre_cut = free_text (Yojson.Safe.from_file path) in
+  check bool "the fixture holds a free-text criterion" true
+    (String_util.contains_substring (Yojson.Safe.to_string pre_cut) "\"target_value\"");
+  Yojson.Safe.to_file path pre_cut;
+  Yojson.Safe.to_file (path ^ ".last-good") pre_cut;
+  match Goal_verification.get_record_authoritative config ~goal_id:"goal-pre-cut" with
+  | Ok _ -> fail "a free-text criterion decoded"
+  | Error msg ->
+    check bool "the refusal names the criterion shape it reads" true
+      (String_util.contains_substring msg "criterion: expected exactly revision, title, measure and procedure")
+;;
+
 let test_human_confirmation_requires_bound_verdict () =
   with_workspace
   @@ fun config ->
@@ -2844,6 +2878,8 @@ let () =
             test_unknown_ledger_field_is_a_decode_error
         ; test_case "human confirmation requires a bound verdict" `Quick
             test_human_confirmation_requires_bound_verdict
+        ; test_case "a proof record from before the measure cut is refused" `Quick
+            test_a_proof_record_from_before_the_measure_cut_is_refused
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick

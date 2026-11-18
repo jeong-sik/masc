@@ -15,6 +15,7 @@ let owner_error_means_absent : Keeper_owner.error -> bool = function
       | Keeper_owner_reducer.Snapshot_changed )
   | Keeper_owner.Operation_rejected _
   | Keeper_owner.Store_unavailable _
+  | Keeper_owner.Store_fenced _
   | Keeper_owner.Owner_stopping
   | Keeper_owner.Owner_closed -> false
 ;;

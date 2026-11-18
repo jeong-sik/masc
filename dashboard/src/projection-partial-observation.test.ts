@@ -17,6 +17,14 @@ const namespace = (project: string, diagnostics: Record<string, unknown> = compl
   root: { status: { project, workspace_root: '/projection-workspace' } },
 })
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve() }
+// The projection a ready alert names; the publication route serves it and
+// every other path goes to the test's own fetch.
+let publishedExecution: unknown = null
+const PUBLICATION_PATH = '/api/v1/dashboard/execution/publication'
+const stubFetch = (fetch: (path: string, init?: unknown) => Promise<Response>) => {
+  vi.stubGlobal('fetch', vi.fn((path: string, init?: unknown) =>
+    String(path).includes(PUBLICATION_PATH) ? Promise.resolve(json(publishedExecution)) : fetch(path, init)))
+}
 const disposals: Array<() => void> = []
 
 beforeEach(() => {
@@ -40,7 +48,18 @@ async function surface() {
     if (event === null) throw new Error('actual projection event was refused')
     push.hydrateServerPushEvent(event)
   }
-  return { store, actions, state, publish }
+  let publication = 0
+  const publishExecution = async (body: { execution_publication_generation?: number }) => {
+    publishedExecution = body
+    publication += 1
+    publish('execution_snapshot', {
+      observer_instance_id: 'projection-workspace', execution_publication_epoch: 'projection-process',
+      execution_publication_generation: body.execution_publication_generation ?? 1,
+      execution_invalidated: false, execution_publication: publication,
+    })
+    await flush()
+  }
+  return { store, actions, state, publish, publishExecution }
 }
 
 describe('partial projection outcomes through HTTP and the real SSE dispatcher', () => {
@@ -49,8 +68,8 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
       shell: { status: { project: 'booting' }, counts: {}, providers: {} },
       execution: { status: 'initializing' }, namespace_truth: { status: 'initializing' },
     }))
-    vi.stubGlobal('fetch', fetch)
-    const { store, state, publish } = await surface()
+    stubFetch(fetch)
+    const { store, state, publish, publishExecution } = await surface()
     await store.refreshDashboard({ force: true })
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(store.executionLoaded.value).toBe(false)
@@ -58,7 +77,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
     expect(state.namespaceTruthInitializing.value).toBe(true)
     await vi.advanceTimersByTimeAsync(300_000)
     expect(fetch).toHaveBeenCalledTimes(1)
-    publish('execution_snapshot', execution('ready'))
+    await publishExecution(execution('ready'))
     publish('project_snapshot', namespace('ready'))
     expect(store.executionLoaded.value).toBe(true)
     expect(state.namespaceTruthInitializing.value).toBe(false)
@@ -72,7 +91,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
     const fetch = vi.fn((path: string) => path.includes('/bootstrap')
       ? Promise.resolve(json({ shell: { status: {}, counts: {}, providers: {} }, execution: execution('current'),
           namespace_truth: namespace('bootstrap partial', partial) })) : held)
-    vi.stubGlobal('fetch', fetch)
+    stubFetch(fetch)
     const { store, actions, state, publish } = await surface()
     const older = actions.refreshNamespaceTruth({ force: true })
     await flush()
@@ -94,15 +113,15 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it('keeps a same-generation canonical Execution completion when an older bootstrap returns partial', async () => {
     let resolve!: (value: Response) => void
     const fetch = vi.fn().mockReturnValue(new Promise<Response>(yes => { resolve = yes }))
-    vi.stubGlobal('fetch', fetch)
-    const { store, publish } = await surface()
+    stubFetch(fetch)
+    const { store, publishExecution } = await surface()
     const body = (agent: string, diagnostics: Record<string, unknown> = complete) => ({ ...execution('same-project', 1, diagnostics),
       candle_observation_sequence: 5, agents: [{ name: agent, status: 'active' }] })
-    publish('execution_snapshot', body('original-agent'))
+    await publishExecution(body('original-agent'))
     const older = store.refreshDashboard({ force: true })
     await flush()
     expect(fetch).toHaveBeenCalledTimes(1)
-    publish('execution_snapshot', body('canonical-agent'))
+    await publishExecution(body('canonical-agent'))
     resolve(json({ shell: { status: { project: 'same-project' }, counts: {}, providers: {} },
       execution: { ...body('older-bootstrap-agent', partial), query: { default_light_request: true } } }))
     await older
@@ -116,7 +135,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it('retains Execution partial rows and its exact failure until a quiet HTTP repair', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(execution('partial rows', 1, partial)))
       .mockResolvedValue(json(execution('repaired', 2)))
-    vi.stubGlobal('fetch', fetch)
+    stubFetch(fetch)
     const { store } = await surface()
     await store.refreshExecution({ force: true })
     expect(store.serverStatus.value?.project).toBe('partial rows')
@@ -133,15 +152,15 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
 
   it('lets a canonical Execution partial body own debt and its completion cancel HTTP retry', async () => {
     const fetch = vi.fn().mockResolvedValue(json(execution('private partial', 1, partial)))
-    vi.stubGlobal('fetch', fetch)
-    const { store, publish } = await surface()
+    stubFetch(fetch)
+    const { store, publishExecution } = await surface()
     await store.refreshExecution({ force: true })
-    publish('execution_snapshot', execution('canonical partial', 2, partial))
+    await publishExecution(execution('canonical partial', 2, partial))
     expect(store.serverStatus.value?.project).toBe('canonical partial')
     expect(store.executionError.value).toBe(partial.read_error)
     await vi.advanceTimersByTimeAsync(600_000)
     expect(fetch).toHaveBeenCalledTimes(1)
-    publish('execution_snapshot', execution('canonical complete', 3))
+    await publishExecution(execution('canonical complete', 3))
     expect(store.executionError.value).toBeNull()
     expect(store.serverStatus.value?.project).toBe('canonical complete')
     expect(vi.getTimerCount()).toBe(0)
@@ -150,13 +169,13 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it('waits for the Execution producer after a default canonical HTTP partial response', async () => {
     const fetch = vi.fn().mockResolvedValue(json({ ...execution('canonical HTTP partial', 1, partial),
       query: { actor: null, fixture: null, full: false, light: true, default_light_request: true, force: false } }))
-    vi.stubGlobal('fetch', fetch)
-    const { store, publish } = await surface()
+    stubFetch(fetch)
+    const { store, publishExecution } = await surface()
     await store.refreshExecution({ immediate: true })
     expect(store.executionError.value).toBe(partial.read_error)
     await vi.advanceTimersByTimeAsync(600_000)
     expect(fetch).toHaveBeenCalledTimes(1)
-    publish('execution_snapshot', execution('repaired producer', 2))
+    await publishExecution(execution('repaired producer', 2))
     expect(store.executionError.value).toBeNull()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -164,7 +183,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it('retains Namespace partial rows and its exact failure until a quiet HTTP repair', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(namespace('partial namespace', partial)))
       .mockResolvedValue(json(namespace('repaired namespace')))
-    vi.stubGlobal('fetch', fetch)
+    stubFetch(fetch)
     const { actions, state } = await surface()
     await actions.refreshNamespaceTruth({ force: true })
     expect(state.namespaceTruth.value?.root.status?.project).toBe('partial namespace')
@@ -180,7 +199,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
 
   it('lets canonical Namespace partial and complete bodies settle read debt with zero GETs', async () => {
     const fetch = vi.fn().mockResolvedValue(json(namespace('private partial', partial)))
-    vi.stubGlobal('fetch', fetch)
+    stubFetch(fetch)
     const { actions, state, publish } = await surface()
     await actions.refreshNamespaceTruth({ force: true })
     publish('project_snapshot', namespace('canonical partial', partial))
@@ -197,8 +216,8 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it.each(['execution', 'namespace'] as const)('keeps advancing %s partial-read backoff until a canonical repair', async kind => {
     const fetch = vi.fn().mockImplementation(() => Promise.resolve(json(kind === 'execution'
       ? execution('partial', 1, partial) : namespace('partial', partial))))
-    vi.stubGlobal('fetch', fetch)
-    const { store, actions, publish } = await surface()
+    stubFetch(fetch)
+    const { store, actions, publish, publishExecution } = await surface()
     if (kind === 'execution') await store.refreshExecution({ force: true })
     else await actions.refreshNamespaceTruth({ force: true })
     const { warmRetryDelayFor } = await import('./lib/warm-retry')
@@ -208,7 +227,7 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
     expect(fetch).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     expect(fetch).toHaveBeenCalledTimes(3)
-    if (kind === 'execution') publish('execution_snapshot', execution('repaired', 2))
+    if (kind === 'execution') await publishExecution(execution('repaired', 2))
     else publish('project_snapshot', namespace('repaired'))
     await vi.advanceTimersByTimeAsync(600_000)
     expect(fetch).toHaveBeenCalledTimes(3)
@@ -218,13 +237,13 @@ describe('partial projection outcomes through HTTP and the real SSE dispatcher',
   it('rejects an old HTTP partial after a same-generation canonical Execution completion', async () => {
     let resolve!: (value: Response) => void
     const fetch = vi.fn().mockReturnValue(new Promise<Response>(yes => { resolve = yes }))
-    vi.stubGlobal('fetch', fetch)
-    const { store, publish } = await surface()
+    stubFetch(fetch)
+    const { store, publishExecution } = await surface()
     const request = store.refreshExecution({ force: true })
     const superseded = expect(request).rejects.toThrow('superseded')
     await flush()
     expect(fetch).toHaveBeenCalledTimes(1)
-    publish('execution_snapshot', execution('canonical completion', 1))
+    await publishExecution(execution('canonical completion', 1))
     resolve(json(execution('old partial', 1, partial)))
     await superseded
     expect(store.serverStatus.value?.project).toBe('canonical completion')

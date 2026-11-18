@@ -58,6 +58,10 @@ async function flushAsyncWork(): Promise<void> {
 async function loadSseStore() {
   vi.resetModules()
   vi.doMock('./operator-snapshot-observation', () => ({ hydrateOperatorSnapshot, setupOperatorSnapshotObservation: () => () => {} }))
+  vi.doMock('./api/dashboard-execution', () => ({
+    fetchDashboardExecutionPublication: vi.fn().mockResolvedValue(
+      { agents: [], tasks: [], messages: [], keepers: [] }),
+  }))
   vi.doMock('./store', () => ({
     invalidateDashboardCache,
     hydrateBoardSnapshot,
@@ -1131,7 +1135,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
       { eventType: 'namespace_truth_snapshot', slice: 'namespace',
         payload: { root: { status: { project: 'default' } } } },
       { eventType: 'execution_snapshot', slice: 'execution',
-        payload: { agents: [], tasks: [], messages: [], keepers: [] } },
+        payload: { execution_publication_epoch: 'slice-epoch', execution_publication_generation: 1,
+          execution_invalidated: false, execution_publication: 1 } },
       { eventType: 'operator_snapshot', slice: 'operator', payload: {
         keepers: [],
         snapshot_epoch: 'epoch-table',

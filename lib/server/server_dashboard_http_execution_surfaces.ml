@@ -208,6 +208,15 @@ type execution_completion =
 
 type completion_listener = { completed : execution_completion -> unit }
 
+(* A projection the observer feed announced. [publication] rises only when
+   the bytes differ from the one before, so an alert that names it is never
+   a duplicate of the alert before it. *)
+type published_snapshot = {
+  publication : int;
+  body : string;
+  encoded : Http_response_payload.prepared;
+}
+
 type execution_owner = {
   cache : cached_surface;
   binding : (Mcp_server.server_state * Mcp_server.workspace_scope) option;
@@ -225,6 +234,8 @@ type execution_owner = {
   shell : Yojson.Safe.t option ref;
   shell_light : Yojson.Safe.t option ref;
   namespace_revision : int ref;
+  published : published_snapshot option ref;
+      (* The last projection the observer feed announced, as sent. *)
 }
 
 type execution_attempt = { owner : execution_owner; generation : int; ticket : int; origin : execution_origin }
@@ -247,7 +258,8 @@ let create_execution_owner binding =
     default_light_http = ref Empty; next_ticket = ref 0;
     last_publication = ref No_publication; completion_listeners = Atomic.make [];
     next_deadline_unix = ref None; retained_read = ref None;
-    shell = ref None; shell_light = ref None; namespace_revision = ref 0 }
+    shell = ref None; shell_light = ref None; namespace_revision = ref 0;
+    published = ref None }
 ;;
 
 let execution_owner_is_current owner = match owner.binding with
@@ -1001,6 +1013,46 @@ let refresh_execution_default_light_http_body ~owner ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
+let execution_publication_field = "execution_publication"
+
+let execution_publication_is_unchanged ~owner body =
+  with_execution_publication_lock ~owner (fun () ->
+    match !(owner.published) with
+    | Some previous -> String.equal previous.body body
+    | None -> false)
+;;
+
+(* Keep [body] as the owner's publication when its bytes are new, and say
+   which publication it is. [prepare] compresses on the caller's worker,
+   outside the lock, and only for new bytes; the lock then checks again,
+   since another publication may have landed meanwhile. *)
+let record_execution_publication ~owner ~body ~prepare =
+  if execution_publication_is_unchanged ~owner body then None
+  else
+    let encoded = prepare body in
+    with_execution_publication_lock ~owner (fun () ->
+      match !(owner.published) with
+      | Some previous when String.equal previous.body body -> None
+      | Some _ | None ->
+          let publication = match !(owner.published) with
+            | Some previous -> previous.publication + 1
+            | None -> 1 in
+          owner.published := Some { publication; body; encoded };
+          Some publication)
+;;
+
+(* A ready alert: what changed, never the projection itself. *)
+let execution_ready_alert ~owner ~publication =
+  let generation = current_execution_publication_generation ~owner () in
+  `Assoc
+    [ execution_publication_epoch_field, `String owner.stream_epoch
+    ; execution_publication_generation_field, `Int generation
+    ; execution_invalidated_field, `Bool false
+    ; execution_publication_field, `Int publication
+    ]
+  |> with_execution_observer_instance ~owner
+;;
+
 (* Observe the ledger after cached response preparation, outside the publication
    lock, so a completed purchase/equip is not replaced by an older snapshot. *)
 let prepare_execution_snapshot_broadcast ~owner ~config () =
@@ -1552,10 +1604,22 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
             let still_current () = is_current () && execution_owner_is_current owner
               && snapshot == Server_dashboard_http_cache.snapshot owner.cache in
             let json = prepare_execution_snapshot_broadcast ~owner ~config:scope.config () in
-            broadcast_cached_surface ~target:owner.target
-              ~encoding:(Encode_on_pool {still_current; on_superseded = (fun () -> !enqueue_completion ())})
-              ~event_type:Dashboard_event_slices.execution_snapshot_type json;
-            if still_current () then !broadcast_namespace_truth_ref state)) selected
+            let on_pool work = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work in
+            let body = on_pool (fun () -> Yojson.Safe.to_string json) in
+            if not (still_current ()) then !enqueue_completion ()
+            else begin
+              (* The alert names the publication; the body is read from
+                 [/api/v1/dashboard/execution/publication]. Same bytes as the
+                 last publication announce nothing. *)
+              let prepare body = on_pool (fun () -> Http_response_payload.prepare body) in
+              (match record_execution_publication ~owner ~body ~prepare with
+               | None -> ()
+               | Some publication ->
+                   broadcast_cached_surface ~target:owner.target ~encoding:Encode_inline
+                     ~event_type:Dashboard_event_slices.execution_snapshot_type
+                     (execution_ready_alert ~owner ~publication));
+              !broadcast_namespace_truth_ref state
+            end)) selected
       in
       let enqueue = Execution_completions.start ~sw ~mono_clock
           ~publish:(fun () -> publish_current ()) in
@@ -1629,6 +1693,17 @@ let execution_http_request ~state request =
   let parameters = execution_parameters ~config request in
   { state; config; owner; parameters }
 
+(* The last announced projection and its ETag, never computed here. *)
+let execution_publication_of_request (request : execution_http_request) =
+  let owner = request.owner in
+  with_execution_publication_lock ~owner (fun () ->
+    Option.map (fun published ->
+      { Dashboard_cache.json = `Null; raw_json = published.body;
+        etag = Printf.sprintf "W/\"execution-%s-%d\"" owner.stream_epoch published.publication;
+        origin = Dashboard_cache.Computed; encoded = Some published.encoded })
+      !(owner.published))
+;;
+
 let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
       ~(parameters : execution_parameters) =
   let { fixture = requested_fixture; actor; full_mode; force } = parameters in
@@ -1680,6 +1755,8 @@ module For_testing = struct
     | Shell_installed
   type nonrec execution_attempt = execution_attempt
   let subscribe_completion = subscribe_execution_completion
+  let record_publication ~owner body =
+    record_execution_publication ~owner ~body ~prepare:Http_response_payload.prepare
 
   let create_owner () =
     let owner = create_execution_owner None in

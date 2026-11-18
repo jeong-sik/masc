@@ -691,6 +691,19 @@ let test_task_mutation_wakes_health_before_slow_subscriber ~clock () =
         (Some (generation_before + 1)) !generation_at_health)
 ;;
 
+(* An announcement is owed only by new bytes. A ready alert that carries
+   only identity fields is byte-equal within a generation, so the comparison
+   is on the projection body, never on the alert. *)
+let test_execution_publication_rises_only_for_new_bytes () =
+  let module T = Server_dashboard_http_execution_surfaces.For_testing in
+  let owner = T.create_owner () in
+  let record = T.record_publication ~owner in
+  Alcotest.(check (option int)) "the first projection is publication 1" (Some 1) (record {|{"n":1}|});
+  Alcotest.(check (option int)) "the same bytes announce nothing" None (record {|{"n":1}|});
+  Alcotest.(check (option int)) "new bytes are publication 2" (Some 2) (record {|{"n":2}|});
+  Alcotest.(check (option int)) "returning to older bytes is still new" (Some 3) (record {|{"n":1}|})
+;;
+
 let test_task_mutation_preserves_health_cancellation () =
   let previous_hook = Atomic.get Workspace_hooks.on_task_mutation_fn in
   let previous_buffer = Masc.Sse.event_buffer_events_for_test () in
@@ -2278,6 +2291,8 @@ let () =
             (test_task_mutation_wakes_health_before_slow_subscriber ~clock);
           test_case "task mutation preserves health cancellation" `Quick
             test_task_mutation_preserves_health_cancellation;
+          test_case "execution publication rises only for new bytes" `Quick
+            test_execution_publication_rises_only_for_new_bytes;
           test_case "failed SSE commit does not suppress a retry" `Quick
             test_failed_broadcast_does_not_suppress_retry;
           test_case "reentrant SSE publication preserves commit order" `Quick

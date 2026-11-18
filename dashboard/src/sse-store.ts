@@ -17,7 +17,6 @@ import {
 } from './dashboard-observer-state'
 import type {
   BoardPost,
-  DashboardExecutionResponse,
   KeeperApprovalAuditReceipt,
   SSEEvent,
 } from './types'
@@ -73,6 +72,7 @@ import {
 } from './config/constants'
 import { namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { subscribeStoredTokenChanges } from './api/core'
+import { fetchDashboardExecutionPublication } from './api/dashboard-execution'
 import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
 import { hydrateOperatorDigest, setupOperatorDigestObservation } from './operator-digest-observation'
 import { hydrateOperatorSnapshot, setupOperatorSnapshotObservation } from './operator-snapshot-observation'
@@ -359,7 +359,35 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
   }
 }
 
-/** Hydrate execution signals directly from a push payload — zero HTTP fetch. */
+// A ready alert names a publication; its body is read from the server. One
+// read runs at a time, and an alert that lands during it reads once more
+// after it, so the last publication announced is the last one drawn.
+let executionPublicationEpoch: string | null = null
+let executionPublicationHeld = 0
+let executionPublicationWanted = 0
+let executionPublicationReading = false
+
+function readAnnouncedExecutionPublication(): void {
+  if (executionPublicationReading) return
+  executionPublicationReading = true
+  void (async () => {
+    try {
+      while (executionPublicationWanted > executionPublicationHeld) {
+        const target = executionPublicationWanted
+        const body = await fetchDashboardExecutionPublication()
+        hydrateExecutionSnapshot(body)
+        executionPublicationHeld = Math.max(executionPublicationHeld, target)
+      }
+    } catch (err) {
+      // Left wanted: the next alert reads again.
+      console.warn('[server-push] execution publication read failed', err instanceof Error ? err.message : '')
+    } finally {
+      executionPublicationReading = false
+    }
+  })()
+}
+
+/** A ready alert names the publication to read; an invalidation forces a read. */
 function handleExecutionSnapshot(payload: unknown): void {
   try {
     if (!isRecord(payload)) throw new Error('execution snapshot payload is invalid')
@@ -379,7 +407,26 @@ function handleExecutionSnapshot(payload: unknown): void {
       void refreshExecution({ force: true })
       return
     }
-    hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
+    const epoch = payload.execution_publication_epoch
+    const publication = payload.execution_publication
+    if (
+      typeof epoch !== 'string'
+      || epoch.trim() === ''
+      || typeof publication !== 'number'
+      || !Number.isSafeInteger(publication)
+      || publication < 1
+    ) {
+      throw new Error('execution alert names no publication')
+    }
+    if (epoch !== executionPublicationEpoch) {
+      // A new server process numbers its publications from 1 again.
+      executionPublicationEpoch = epoch
+      executionPublicationHeld = 0
+      executionPublicationWanted = 0
+    }
+    if (publication <= executionPublicationHeld) return
+    executionPublicationWanted = Math.max(executionPublicationWanted, publication)
+    readAnnouncedExecutionPublication()
   } catch (err) {
     console.warn('[server-push] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }

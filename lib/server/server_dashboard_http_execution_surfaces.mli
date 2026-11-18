@@ -119,6 +119,10 @@ module For_testing : sig
     | Cache_patched
     | Shell_installed
   val create_owner : unit -> owner
+  val record_publication : owner:owner -> string -> int option
+  (** Keep [body] as the owner's announced projection. [Some n] names the new
+      publication; [None] means the bytes equal the last one and nothing is
+      announced. *)
   val owner_for_state : state:Mcp_server.server_state -> owner
   val cache : owner -> cached_surface
   val invalidate : owner -> unit
@@ -242,6 +246,14 @@ type execution_http_request
 
 val execution_http_request :
   state:Mcp_server.server_state -> Httpun.Request.t -> execution_http_request
+
+val execution_publication_of_request :
+  execution_http_request -> Dashboard_cache.cached_payload option
+(** The projection the observer feed last announced, with the bytes and
+    encodings prepared once when it was announced and a weak ETag naming its
+    publication. Its [json] is [`Null]: only the bytes are served. The body
+    is the exact JSON a ready alert used to carry; nothing is computed here.
+    [None] before the first publication. *)
 
 val dashboard_execution_cached_http_response :
   execution_http_request ->

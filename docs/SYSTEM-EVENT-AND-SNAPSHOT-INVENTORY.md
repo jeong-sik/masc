@@ -38,7 +38,7 @@ This document is the operator-facing SSOT for:
 | `keeper_heartbeat` | When a heartbeat snapshot is actually written | Lightweight SSE envelope without context numbers | Not emitted on every keepalive cycle. |
 | `operator_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root/summary HTTP path returns cache. |
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
-| `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
+| `execution_snapshot` | Background proactive refresh loop; cache invalidation | Ready alert: epoch, generation, `execution_invalidated: false` and the publication number `execution_publication`, sent only when the projection bytes change. Invalidation alert: `execution_invalidated: true`. Neither carries the projection. | The web reads `GET /api/v1/dashboard/execution/publication` (the announced bytes, never recomputed) after a ready alert and forces an execution read after an invalidation. The TUI uses the type only as a change signal. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
 | `project_snapshot` | After project-snapshot recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Project dashboard snapshot. |
 

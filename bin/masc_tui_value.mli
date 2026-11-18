@@ -106,6 +106,82 @@ module Instant : sig
   (** The instant the local minute next turns over: when {!wall_clock} next
       reads differently. A screen that draws the clock notes it with
       {!Redraw.note_change_at}; one too narrow to draw it does not. *)
+
+  val axis_hour : float -> string option
+  (** The mark a ruler over the last day puts at [at] ([15:00]) when [at]
+      starts a local hour, [None] otherwise. The ruler ends at now, so where a
+      mark stands says which day it is in, and the mark carries no date. In a
+      zone whose hours start between two of the ruler's slots no slot starts
+      an hour, and the ruler has no marks. *)
+
+  val day_start : float -> float option
+  (** The local midnight that starts the day [at] falls on. A day that gains
+      or loses an hour still starts at its midnight. [None] when the zone's
+      breakdown cannot be turned back into an instant. *)
+
+  val file_stamp : float -> string
+  (** The moment as a file name, local and to the minute
+      ([20261119-0428]): names written by one machine sort by time. *)
+end
+
+(** A day of the operator's calendar, in the zone {!Instant} draws in. *)
+module Local_day : sig
+  type t =
+    { year : int
+    ; month : int  (** 1 to 12 *)
+    ; day : int  (** 1 to 31 *)
+    }
+
+  val of_moment : float -> t
+  val text : t -> string
+  (** [2026-11-18]. *)
+end
+
+(** One hour of the operator's calendar: the chat's day rule draws one
+    heading where the hour of the messages changes. Two breakdowns of the
+    same wall-clock hour on either side of a daylight-saving change are two
+    hours, told apart by [is_dst]. *)
+module Local_hour : sig
+  type t = private
+    { year : int
+    ; month : int
+    ; day : int
+    ; hour : int
+    ; is_dst : bool
+    }
+
+  val of_tm : Unix.tm -> t
+  (** The hour of a moment already broken down in the local zone, so a row
+      that also draws the moment's clock breaks it down once. *)
+
+  val equal : t -> t -> bool
+
+  val heading : t -> string
+  (** [2026-11-18 · 15:00], and [ DST] after it during daylight-saving
+      time. *)
+end
+
+(** A day as a server's usage history counts it: midnight to midnight UTC.
+    It is a bucket the server chose, not a moment, so it does not read in
+    the operator's zone: a UTC day starts at 09:00 in Seoul. A screen that
+    draws one says UTC beside it. *)
+module Utc_day : sig
+  type t
+
+  val of_moment : float -> t
+  (** The UTC day [at] falls on. *)
+
+  val month_day : t -> string
+  (** [11-18]. *)
+
+  val date : t -> string
+  (** [2026-11-18]. *)
+
+  val day_of_month : t -> int
+  (** [18], for a row of figures that lists days by their number. *)
+
+  val day_of_month_text : t -> string
+  (** [08]: two cells, for a ruler that marks one column per day. *)
 end
 
 (** The length of something still going, how long ago something happened, or

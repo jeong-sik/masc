@@ -10,6 +10,8 @@ module Hash = Masc_tui_value.Hash
 module Ongoing = Masc_tui_value.Ongoing
 module Redraw = Masc_tui_value.Redraw
 module Position = Masc_tui_value.Position
+module Utc_day = Masc_tui_value.Utc_day
+module Local_hour = Masc_tui_value.Local_hour
 
 (* [Unix.tm] counts years from 1900. *)
 let tm_year_origin = 1900
@@ -95,6 +97,49 @@ let test_only_another_day_adds_a_date () =
     (String.length yesterday > String.length (clock evening_before));
   Alcotest.(check bool) "yesterday: still ends on the clock" true
     (String.ends_with ~suffix:(clock evening_before) yesterday)
+
+(* A UTC day is the server's bucket. 23:59 and 00:00 UTC are two days, and
+   a moment's UTC day does not follow the operator's zone: the day is decided
+   from the epoch, not from a local breakdown. *)
+let test_a_utc_day_turns_at_utc_midnight () =
+  let midnight = 1_763_510_400. (* 2025-11-19T00:00:00Z *) in
+  let before = Utc_day.of_moment (midnight -. 1.) and after = Utc_day.of_moment midnight in
+  Alcotest.(check int) "a second before midnight is the 18th" 18 (Utc_day.day_of_month before);
+  Alcotest.(check int) "midnight starts the 19th" 19 (Utc_day.day_of_month after);
+  Alcotest.(check int) "a whole day later is the next day" 20
+    (Utc_day.day_of_month (Utc_day.of_moment (midnight +. 86_400.)))
+
+(* Two breakdowns of the same wall-clock hour on either side of a
+   daylight-saving change are two hours: the chat draws a heading between
+   them. *)
+let test_a_repeated_hour_is_another_hour () =
+  let tm = Unix.gmtime 1_763_510_400. in
+  let standard = Local_hour.of_tm { tm with Unix.tm_isdst = false }
+  and daylight = Local_hour.of_tm { tm with Unix.tm_isdst = true } in
+  Alcotest.(check bool) "the same breakdown is the same hour" true
+    (Local_hour.equal standard (Local_hour.of_tm { tm with Unix.tm_isdst = false }));
+  Alcotest.(check bool) "daylight time is another hour" false (Local_hour.equal standard daylight)
+
+(* A ruler mark stands only where an hour starts. The test runs with no TZ,
+   so the local zone is UTC and hours start on multiples of 3600 s. *)
+let test_a_ruler_marks_only_the_start_of_an_hour () =
+  let hour = 1_763_510_400. in
+  Alcotest.(check bool) "an hour's start is marked" true
+    (Option.is_some (Instant.axis_hour hour));
+  Alcotest.(check bool) "half past is not" true (Option.is_none (Instant.axis_hour (hour +. 1800.)))
+
+(* The day's start is a local midnight at or before the moment, on the same
+   day. *)
+let test_a_day_starts_at_its_midnight () =
+  let at = 1_763_550_000. in
+  match Instant.day_start at with
+  | None -> Alcotest.fail "a representable moment has a day start"
+  | Some start ->
+      Alcotest.(check bool) "at or before the moment" true (start <= at);
+      Alcotest.check distance "on the moment's day" Instant.Same_day
+        (Instant.day_of ~now:at start);
+      Alcotest.check distance "a second earlier is the day before" Instant.Same_year
+        (Instant.day_of ~now:at (start -. 1.))
 
 (* East of Greenwich the local day turns first. At 00:30 on January 1 in
    UTC+9 it is still December 31 in UTC, in another year with a larger day
@@ -396,6 +441,14 @@ let () =
             test_an_hour_back_before_midnight_is_today
         ; Alcotest.test_case "only another day adds a date" `Quick
             test_only_another_day_adds_a_date
+        ; Alcotest.test_case "a UTC day turns at UTC midnight" `Quick
+            test_a_utc_day_turns_at_utc_midnight
+        ; Alcotest.test_case "a repeated hour is another hour" `Quick
+            test_a_repeated_hour_is_another_hour
+        ; Alcotest.test_case "a ruler marks only the start of an hour" `Quick
+            test_a_ruler_marks_only_the_start_of_an_hour
+        ; Alcotest.test_case "a day starts at its midnight" `Quick
+            test_a_day_starts_at_its_midnight
         ] )
     ; ( "zone",
         [ Alcotest.test_case "offset across new year, east" `Quick

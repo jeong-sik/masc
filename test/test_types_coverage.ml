@@ -1009,17 +1009,21 @@ let test_backlog_rewrite_preserves_unreadable_handoff () =
       check bool "the rewrite reads back to the same backlog" true
         (List.equal Masc_domain.equal_task mutated.tasks reread.tasks)
 
-let test_stated_reason_names_unreadable_handoff () =
+(* An operator cancel with no reason over an unreadable note: the decoder's
+   refusal is about the note, not why the work stopped, so no reason is
+   stated (#52914 review). *)
+let test_stated_reason_unreadable_handoff_states_no_reason () =
   let stored =
     Masc_domain.stored_handoff_context_of_yojson unreadable_handoff_json
   in
-  match
-    Masc_domain.stated_reason ~reason:None ~handoff_context:(Some stored)
-  with
-  | Some reason ->
-    check bool "the reason says the handoff is unreadable" true
-      (String_util.contains_substring reason "unreadable")
-  | None -> fail "an unreadable handoff read as a handoff that states nothing"
+  (match stored with
+   | Masc_domain.Handoff_unreadable _ -> ()
+   | Masc_domain.Handoff_decoded _ -> fail "fixture must be unreadable");
+  check (option string) "no reason is stated" None
+    (Masc_domain.stated_reason ~reason:None ~handoff_context:(Some stored));
+  check (option string) "an explicit reason still wins" (Some "operator stop")
+    (Masc_domain.stated_reason ~reason:(Some "operator stop")
+       ~handoff_context:(Some stored))
 
 let test_backlog_of_yojson_still_propagates_contract () =
   let bad = task_json_for ~extra:[ ("contract", `Int 7) ] "task-bad" in
@@ -1752,8 +1756,8 @@ let () =
         test_task_handoff_unreadable_is_kept;
       test_case "backlog rewrite keeps the unreadable bytes" `Quick
         test_backlog_rewrite_preserves_unreadable_handoff;
-      test_case "stated reason names an unreadable handoff" `Quick
-        test_stated_reason_names_unreadable_handoff;
+      test_case "an unreadable handoff states no reason" `Quick
+        test_stated_reason_unreadable_handoff_states_no_reason;
       test_case "contract corruption still propagates" `Quick
         test_backlog_of_yojson_still_propagates_contract;
     ];

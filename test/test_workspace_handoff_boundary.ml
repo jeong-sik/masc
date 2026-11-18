@@ -299,6 +299,63 @@ let claim_keeps_an_unreadable_note () =
        (Some stored) after_claim.handoff_context)
 ;;
 
+(* #52914 review: every exit-class transition that replaces an unreadable
+   note hands the replaced value to the transition record, from the one
+   executor that decides the replacement. *)
+let exit_records_the_replaced_unreadable_note () =
+  let stored = unreadable_note () in
+  let raw, reason =
+    match stored with
+    | Domain.Handoff_unreadable { raw; reason } -> raw, reason
+    | Domain.Handoff_decoded _ -> Alcotest.fail "fixture must be unreadable"
+  in
+  let held = task ~stored ~status:(in_progress "keeper-b") "task-1" in
+  let update ~action ~handoff_context =
+    Executor.build_backlog_update
+      ~backlog:(backlog_of [ held ])
+      ~task:held
+      ~action
+      ~new_status:Domain.Todo
+      ~handoff_context
+  in
+  List.iter (fun (label, action, handoff_context) ->
+    let result = update ~action ~handoff_context in
+    Alcotest.(check bool)
+      (label ^ " records the replaced raw note and refusal")
+      true
+      (Option.equal Domain.equal_replaced_unreadable_handoff
+         (Some { Domain.replaced_raw = raw; replaced_reason = reason })
+         result.Executor.replaced_unreadable_handoff))
+    [ "release with a note", Domain.Release, Some (handoff ~updated_by:"keeper-b" ())
+    ; "release without a note", Domain.Release, None
+    ; "done", Domain.Done_action, None
+    ; "submit", Domain.Submit_for_verification, Some (handoff ())
+    ; "cancel", Domain.Cancel, None
+    ];
+  let claimed_task = task ~stored ~status:Domain.Todo "task-1" in
+  let claim =
+    Executor.build_backlog_update
+      ~backlog:(backlog_of [ claimed_task ])
+      ~task:claimed_task
+      ~action:Domain.Claim
+      ~new_status:(claimed "keeper-b")
+      ~handoff_context:None
+  in
+  Alcotest.(check bool) "a claim keeps the note and replaces nothing" true
+    (Option.is_none claim.Executor.replaced_unreadable_handoff);
+  let readable = task ~handoff_context:(handoff ()) ~status:(in_progress "keeper-b") "task-1" in
+  let release =
+    Executor.build_backlog_update
+      ~backlog:(backlog_of [ readable ])
+      ~task:readable
+      ~action:Domain.Release
+      ~new_status:Domain.Todo
+      ~handoff_context:None
+  in
+  Alcotest.(check bool) "replacing a readable note records nothing" true
+    (Option.is_none release.Executor.replaced_unreadable_handoff)
+;;
+
 (* The keeper prompt names an unreadable note instead of rendering the task as
    one nobody left a note on. *)
 let render_names_an_unreadable_note () =
@@ -378,6 +435,10 @@ let () =
             "a claim keeps the unreadable value unchanged"
             `Quick
             claim_keeps_an_unreadable_note
+        ; Alcotest.test_case
+            "an exit records the unreadable note it replaced"
+            `Quick
+            exit_records_the_replaced_unreadable_note
         ] )
     ]
 ;;

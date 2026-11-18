@@ -222,6 +222,18 @@ type stored_handoff_context =
 val stored_handoff_context_of_yojson : Yojson.Safe.t -> stored_handoff_context
 val stored_handoff_context_to_yojson : stored_handoff_context -> Yojson.Safe.t
 
+(** A stored [Handoff_unreadable] that a transition overwrote with a new
+    note. The transition's log row carries it, so the replaced value is
+    recorded rather than dropped by the replacement (#38219). *)
+type replaced_unreadable_handoff =
+  { replaced_raw : Yojson.Safe.t
+  ; replaced_reason : string
+  }
+[@@deriving show, eq]
+
+(** [{"raw": <stored value>, "reason": <decoder refusal>}]. *)
+val replaced_unreadable_handoff_to_yojson : replaced_unreadable_handoff -> Yojson.Safe.t
+
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];
     [release_task_r] takes none and forwards only a handoff context.
@@ -232,8 +244,8 @@ val stored_handoff_context_to_yojson : stored_handoff_context -> Yojson.Safe.t
     Single definition on purpose: the committed broadcast and the author wake
     both answer "why did this stop", and resolving it separately let them
     disagree about the same cancellation. [None] when neither carries a
-    non-blank reason. An unreadable stored handoff yields a reason naming it
-    unreadable, never the answer for an absent handoff. *)
+    non-blank reason. An unreadable stored handoff states no reason; the
+    note's own display names it unreadable. *)
 val stated_reason :
   reason:string option -> handoff_context:stored_handoff_context option -> string option
 

@@ -11,6 +11,7 @@ type transition_backlog_update =
   { backlog : Masc_domain.backlog
   ; transitioned_task : Masc_domain.task
   ; persisted_handoff_context : Masc_domain.task_handoff_context option
+  ; replaced_unreadable_handoff : Masc_domain.replaced_unreadable_handoff option
   }
 
 (* RFC-0365. A handoff note is authored on the way out and read on the way in,
@@ -33,9 +34,10 @@ type transition_backlog_update =
    the line "Prior handoff".
 
    An exit-class argument replaces a stored [Handoff_unreadable] the same way
-   it replaces a readable note: the closing owner authors the field. An
-   entry-class action keeps it, raw JSON included, so it is written back
-   unchanged (#38219). *)
+   it replaces a readable note: the closing owner authors the field, and
+   [unreadable_handoff_replaced_by] hands the replaced value to the transition
+   record. An entry-class action keeps it, raw JSON included, so it is written
+   back unchanged (#38219). *)
 let handoff_context_after ~action ~previous ~argument =
   match action with
   | Masc_domain.Release
@@ -44,6 +46,27 @@ let handoff_context_after ~action ~previous ~argument =
   | Masc_domain.Cancel ->
     Option.map (fun context -> Masc_domain.Handoff_decoded context) argument
   | Masc_domain.Claim | Masc_domain.Start -> previous
+;;
+
+(* The value a replacement of [previous] removes from the record, when that
+   value is unreadable. Every path that overwrites the field asks this, so the
+   replaced raw note reaches its transition record by one rule: the exit-class
+   transitions below (agent release/done/submit/cancel and the Keeper shutdown
+   release), the verdict rejection and the unroutable-rejection release. *)
+let unreadable_handoff_replaced previous =
+  match previous with
+  | Some (Masc_domain.Handoff_unreadable { raw; reason }) ->
+    Some { Masc_domain.replaced_raw = raw; replaced_reason = reason }
+  | Some (Masc_domain.Handoff_decoded _) | None -> None
+;;
+
+let unreadable_handoff_replaced_by ~action ~previous =
+  match action with
+  | Masc_domain.Release
+  | Masc_domain.Done_action
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Cancel -> unreadable_handoff_replaced previous
+  | Masc_domain.Claim | Masc_domain.Start -> None
 ;;
 
 (* What *this* transition put on the record, which is a different question from
@@ -99,5 +122,7 @@ let build_backlog_update ~backlog ~task ~action ~new_status ~handoff_context =
   { backlog = { backlog with tasks }
   ; transitioned_task
   ; persisted_handoff_context
+  ; replaced_unreadable_handoff =
+      unreadable_handoff_replaced_by ~action ~previous:task.handoff_context
   }
 ;;

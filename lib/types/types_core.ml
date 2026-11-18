@@ -487,6 +487,20 @@ let stored_handoff_context_to_yojson = function
   | Handoff_decoded context -> task_handoff_context_to_yojson context
   | Handoff_unreadable { raw; reason = _ } -> raw
 
+(** A stored [Handoff_unreadable] that a transition overwrote with a new
+    note. The transition's log row carries it, so the replaced value is
+    recorded rather than dropped by the replacement (#38219). *)
+type replaced_unreadable_handoff =
+  { replaced_raw : Yojson.Safe.t
+  ; replaced_reason : string
+  }
+[@@deriving show, eq]
+
+let replaced_unreadable_handoff_to_yojson
+      { replaced_raw; replaced_reason }
+  =
+  `Assoc [ "raw", replaced_raw; "reason", `String replaced_reason ]
+
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. Two entry points supply it differently: [transition_task_r]
     takes an explicit [reason], while [release_task_r] takes none at all and
@@ -497,8 +511,9 @@ let stored_handoff_context_to_yojson = function
     both answer "why did this stop", and computing the answer twice let them
     disagree about the same cancellation. Returns [None] when neither carries a
     non-blank reason — distinct from a reason that is the empty string. An
-    unreadable stored handoff is named as unreadable, with the decoder's
-    refusal, rather than read as a handoff that states nothing. *)
+    unreadable stored handoff states no reason: the decoder's refusal is a fact
+    about the stored note, not about why the work stopped, and the note's own
+    display names it. *)
 let stated_reason ~(reason : string option)
       ~(handoff_context : stored_handoff_context option) : string option =
   let non_blank value =
@@ -515,8 +530,7 @@ let stated_reason ~(reason : string option)
       (match Option.bind context.reason non_blank with
        | Some _ as reason -> reason
        | None -> non_blank context.summary)
-    | Some (Handoff_unreadable { reason = refusal; raw = _ }) ->
-      Some ("handoff context unreadable: " ^ refusal)
+    | Some (Handoff_unreadable { reason = _; raw = _ }) -> None
   in
   match reason with
   | None -> from_handoff ()

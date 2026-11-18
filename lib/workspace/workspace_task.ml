@@ -150,6 +150,8 @@ let project_task_release_to_todo
       ~actor
       ~reason
       ~(activity_fields : (string * Yojson.Safe.t) list)
+      ~(replaced_unreadable_handoff :
+         Masc_domain.replaced_unreadable_handoff option)
       ~module_name
   =
   let backlog_version = persistence.committed_revision in
@@ -203,6 +205,7 @@ let project_task_release_to_todo
            ~action:(Masc_domain.task_action_to_string Masc_domain.Release)
            ~reason
            ~assignee:previous_assignee
+           ?replaced_unreadable_handoff
            ()))
   ; run_post_commit "task_activity" (fun () ->
       emit_task_activity
@@ -359,6 +362,8 @@ let recover_owned_task_to_todo_r
         ~actor:operator_actor
         ~reason
         ~activity_fields:[ "operator_recovery", `Bool true ]
+        (* The operator recovery keeps the stored note. *)
+        ~replaced_unreadable_handoff:None
         ~module_name:"recover_owned_task_to_todo_r"
     in
     Ok
@@ -516,6 +521,9 @@ let release_unroutable_rejected_task_r
                   [ "unroutable_rejection", `Bool true
                   ; "verification_id", `String verification_id
                   ]
+                ~replaced_unreadable_handoff:
+                  (Workspace_task_transition_executor.unreadable_handoff_replaced
+                     task.handoff_context)
                 ~module_name:"release_unroutable_rejected_task_r"
             in
             Ok

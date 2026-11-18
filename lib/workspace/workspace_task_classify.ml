@@ -282,6 +282,7 @@ let transition_log_event
       ?reason
       ?duration_ms
       ?handoff_context
+      ?replaced_unreadable_handoff
       ?assignee
       ?(now = now_iso ())
       ()
@@ -312,5 +313,12 @@ let transition_log_event
      @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
      @ optional_field
          "handoff_context"
-         (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context))
+         (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context)
+     (* #38219: the stored note this exit replaced because it could not be
+        read. Present only then, so the raw value is recorded, not dropped. *)
+     @ optional_field
+         "replaced_unreadable_handoff"
+         (Option.map
+            Masc_domain.replaced_unreadable_handoff_to_yojson
+            replaced_unreadable_handoff))
 ;;

@@ -365,7 +365,8 @@ let perform_task_transition
           Workspace_task_transition_executor.build_backlog_update
             ~backlog ~task ~action ~new_status ~handoff_context
         in
-        (* An operator stops the Task without authoring its owner's handoff. *)
+        (* An operator stops the Task without authoring its owner's handoff.
+           The stored note stays, so nothing was replaced. *)
         let backlog_update =
           match request with
           | Agent_action _ | Shutdown_release _ -> backlog_update
@@ -376,6 +377,7 @@ let perform_task_transition
             let backlog = backlog_update.backlog in
             { backlog_update with
               transitioned_task;
+              replaced_unreadable_handoff = None;
               backlog = { backlog with tasks =
                 List.map (fun (updated : task) ->
                   if String.equal updated.id task_id then transitioned_task else updated)
@@ -591,6 +593,8 @@ let perform_task_transition
                    ?notes:(trim_opt (Some notes))
                    ?reason:stated_reason
                    ?handoff_context:backlog_update.persisted_handoff_context
+                   ?replaced_unreadable_handoff:
+                     backlog_update.replaced_unreadable_handoff
                    ()));
               run_post_commit "activity" (fun () ->
               (match new_status with
@@ -1044,6 +1048,22 @@ let commit_verdict_r
                { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
                :: backlog.pending_completion_approvals
            in
+           (* A rejection overwrites the stored note; an unreadable one it
+              replaces goes on the verdict audit row (#38219). *)
+           let replaced_unreadable_handoff_fields =
+             match verdict with
+             | Masc_domain.Verdict_approved -> []
+             | Masc_domain.Verdict_rejected _ ->
+               (match
+                  Workspace_task_transition_executor.unreadable_handoff_replaced
+                    task.handoff_context
+                with
+                | Some replaced ->
+                  [ ( "replaced_unreadable_handoff"
+                    , Masc_domain.replaced_unreadable_handoff_to_yojson replaced )
+                  ]
+                | None -> [])
+           in
            let committed_task = { task with task_status = new_status; handoff_context } in
            let new_backlog =
              { backlog with
@@ -1278,7 +1298,8 @@ let commit_verdict_r
                   :: ("from_status", `String (task_status_to_string task.task_status))
                   :: ("to_status", `String (task_status_to_string new_status))
                   :: ("ts", `String now)
-                  :: completion_verdict_fields)));
+                  :: (completion_verdict_fields
+                      @ replaced_unreadable_handoff_fields))));
            Ok
              { message =
                  Printf.sprintf

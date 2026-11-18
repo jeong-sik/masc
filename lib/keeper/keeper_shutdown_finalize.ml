@@ -174,20 +174,19 @@ let append_unique_evidence_ref (refs : string list) (receipt_ref : string)
 ;;
 
 (* The release keeps the previous owner's summary and next step. An unreadable
-   stored handoff cannot be merged, and replacing it would erase the stored
-   value (#38219), so the release is refused for an operator to repair it. *)
+   stored handoff has none to keep, so the release authors its own note like an
+   agent release does. The release is an exit-class transition, and the
+   transition executor records the replaced unreadable value on the
+   transition log row (#38219). *)
 let release_handoff_context
       ~now
       operation
       (previous : Masc_domain.stored_handoff_context option)
-  : (Masc_domain.task_handoff_context, string) result
+  : Masc_domain.task_handoff_context
   =
   let receipt_ref = operation_evidence_ref operation in
   match previous with
-  | Some (Masc_domain.Handoff_unreadable { reason; raw = _ }) ->
-    Error ("stored handoff_context is unreadable: " ^ reason)
-  | None ->
-    Ok
+  | None | Some (Masc_domain.Handoff_unreadable _) ->
     { summary = shutdown_release_summary
     ; reason = Some shutdown_release_reason
     ; next_step = Some shutdown_release_next_step
@@ -207,7 +206,6 @@ let release_handoff_context
       | Some _ as preserved -> preserved
       | None -> Some shutdown_release_next_step
     in
-    Ok
     { summary
     ; reason = Some shutdown_release_reason
     ; next_step
@@ -271,10 +269,8 @@ let shutdown_release_plan ~config ~(meta : Keeper_meta_contract.keeper_meta)
   match receipted with
   | [id] -> Ok (Workspace.Already_receipted (Keeper_id.Task_id.to_string id))
   | [] ->
-    if owned task then
-      (match release_handoff_context ~now:updated_at operation task.handoff_context with
-       | Ok handoff -> Ok (Workspace.Release_with_handoff handoff)
-       | Error detail -> refused detail)
+    if owned task then Ok (Workspace.Release_with_handoff
+      (release_handoff_context ~now:updated_at operation task.handoff_context))
     else refused "snapshotted task changed without shutdown receipt"
   | _ :: _ :: _ -> refused "multiple uncommitted shutdown receipts require operator reconciliation"
 ;;

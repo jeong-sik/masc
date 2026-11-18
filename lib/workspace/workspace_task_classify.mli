@@ -134,6 +134,7 @@ val transition_log_event
   -> ?reason:string
   -> ?duration_ms:int
   -> ?handoff_context:Masc_domain.task_handoff_context
+  -> ?replaced_unreadable_handoff:Masc_domain.replaced_unreadable_handoff
   -> ?assignee:string
   -> ?now:string
   -> unit

@@ -307,6 +307,7 @@ val keeper_world_current_task_row : string
 val keeper_world_current_task_handoff : string
 val keeper_world_current_task_handoff_next_step : string
 val keeper_world_current_task_handoff_evidence : string
+val keeper_world_current_task_handoff_unreadable : string
 val keeper_world_current_task_attribution_full : string
 val keeper_world_current_task_attribution_who : string
 val keeper_world_current_task_attribution_at : string

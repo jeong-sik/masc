@@ -337,6 +337,9 @@ cancelled
 ### world.current_task.handoff_evidence (vars: attribution, refs)
 - Handoff evidence: {{refs}}{{attribution}}
 
+### world.current_task.handoff_unreadable (vars: reason)
+- Prior handoff is stored but unreadable: {{reason}}
+
 ### world.current_task.attribution.full (vars: who, at)
 ({{who}}, {{at}})
 

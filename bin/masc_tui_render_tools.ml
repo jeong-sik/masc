@@ -324,10 +324,10 @@ let async_source_task_lines ~cols state source =
   let content=match Masc_tui_fetched.value body with
     | None -> []
     | Some (detail : Masc.Tui_decode_task_inspection.detail) ->
-      let warnings=List.concat_map (fun (name,outcome) -> match outcome with
-        | Masc_domain.Field_absent | Field_decoded -> []
-        | Field_unreadable reason -> text (Theme.warn ()) (" Task " ^ name ^ " 조회 불가: " ^ reason))
-        ["handoff",detail.diagnostics.handoff_context_outcome] in
+      let warnings=match detail.task.handoff_context with
+        | None | Some (Masc_domain.Handoff_decoded _) -> []
+        | Some (Handoff_unreadable {reason;raw=_}) ->
+          text (Theme.warn ()) (" Task handoff 조회 불가: " ^ reason) in
       warnings @ (task_document_lines state ~cols Masc_tui_task_document.Body
         |> List.map (fun line -> "",line)) in
   text Ansi.bold (" 원본 Task · " ^ source.ats_task_id ^ " · r:본문·이력 재조회 · Esc:원본 요청")

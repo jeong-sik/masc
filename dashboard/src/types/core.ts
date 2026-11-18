@@ -75,6 +75,10 @@ export interface Task {
   predecessor_task_id?: string | null
   contract?: TaskContract | null
   handoff_context?: TaskHandoffContext | null
+  /** True when the server holds a handoff it cannot decode and sends it back
+   *  unchanged (#38219). `handoff_context` is then null: the note exists but
+   *  cannot be read, which differs from a Task nobody left a note on. */
+  handoff_context_unreadable?: boolean
   execution_links?: TaskExecutionLinks | null
 }
 

@@ -685,7 +685,7 @@ let test_current_task_section_renders () =
            { assignee = "wake-context-keeper"; started_at = "2026-07-07T01:00:00Z" })
       ~handoff_context:
         (Some
-           {
+           (Masc_domain.Handoff_decoded {
              summary = "lexer done, parser half-wired";
              reason = None;
              next_step = Some "wire parser to store";
@@ -693,7 +693,7 @@ let test_current_task_section_renders () =
              evidence_refs = [];
              updated_at = None;
              updated_by = None;
-           })
+           }))
       ()
   in
   let user = user_message ~current_task:task base_observation in
@@ -885,7 +885,7 @@ let test_direct_turn_reuses_current_task_context () =
            { assignee = "wake-context-keeper"; started_at = "2026-07-07T01:00:00Z" })
       ~handoff_context:
         (Some
-           {
+           (Masc_domain.Handoff_decoded {
              summary = "parser is ready for a direct reply";
              reason = None;
              next_step = Some "answer with the current parser status";
@@ -893,7 +893,7 @@ let test_direct_turn_reuses_current_task_context () =
              evidence_refs = [];
              updated_at = None;
              updated_by = None;
-           })
+           }))
       ()
   in
   let context =

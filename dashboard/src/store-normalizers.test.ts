@@ -188,6 +188,26 @@ describe('normalizeTaskStatus', () => {
     expect(normalizeTask({ id: 'task-3', title: 'Root task' }))
       .toMatchObject({ predecessor_task_id: null })
   })
+
+  // #38219: the server sends an undecodable stored handoff back unchanged.
+  it('marks a handoff that breaks the wire contract as unreadable', () => {
+    expect(normalizeTask({ id: 'task-4', title: 'Task', handoff_context: { summary: 7 } }))
+      .toMatchObject({ handoff_context: null, handoff_context_unreadable: true })
+    expect(normalizeTask({ id: 'task-5', title: 'Task', handoff_context: 'note' }))
+      .toMatchObject({ handoff_context: null, handoff_context_unreadable: true })
+    expect(normalizeTask({ id: 'task-6', title: 'Task', handoff_context: { summary: 'ok', evidence_refs: [1] } }))
+      .toMatchObject({ handoff_context: null, handoff_context_unreadable: true })
+  })
+
+  it('reads a handoff that keeps the wire contract', () => {
+    expect(normalizeTask({ id: 'task-7', title: 'Task', handoff_context: { summary: 'ok', reason: null } }))
+      .toMatchObject({
+        handoff_context: { summary: 'ok', reason: null, evidence_refs: [] },
+        handoff_context_unreadable: false,
+      })
+    expect(normalizeTask({ id: 'task-8', title: 'Task' }))
+      .toMatchObject({ handoff_context: null, handoff_context_unreadable: false })
+  })
 })
 
 describe('normalizeMessage', () => {

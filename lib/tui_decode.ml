@@ -8210,7 +8210,9 @@ type task_history_event = {
   th_from_status : string option;
   th_to_status : string option;
   th_actor : string option;
-  th_note : string option;  (** handoff_context.summary when present *)
+  th_note : string option;
+      (** handoff_context.summary when present, plus the refusal of a stored
+          handoff the transition replaced because it was unreadable *)
 }
 
 let decode_task_history json =
@@ -8235,12 +8237,38 @@ let decode_task_history json =
           th_to_status = str "to_status";
           th_actor = (match str "agent" with Some a -> Some a | None -> str "actor");
           th_note =
-            (match member "handoff_context" row with
-             | `Assoc _ as handoff ->
-                 (match member "summary" handoff with
-                  | `String s when String.trim s <> "" -> Some s
-                  | _ -> None)
-             | _ -> None);
+            (let summary =
+               match member "handoff_context" row with
+               | `Assoc _ as handoff ->
+                   (match member "summary" handoff with
+                    | `String s when String.trim s <> "" -> Some s
+                    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _
+                    | `Float _ | `Assoc _ | `List _ ->
+                        None)
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+               | `List _ ->
+                   None
+             in
+             (* #38219: an exit that replaced a stored note the server could
+                not read records that note; the row says so with the refusal. *)
+             let replaced =
+               match member "replaced_unreadable_handoff" row with
+               | `Assoc _ as replaced ->
+                   (match member "reason" replaced with
+                    | `String reason ->
+                        Some ("replaced unreadable handoff: " ^ reason)
+                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                    | `Assoc _ | `List _ ->
+                        Some "replaced unreadable handoff")
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+               | `List _ ->
+                   None
+             in
+             match summary, replaced with
+             | Some summary, Some replaced ->
+                 Some (summary ^ " (" ^ replaced ^ ")")
+             | Some note, None | None, Some note -> Some note
+             | None, None -> None);
         }
       in
       Ok (List.map event_of_row rows)

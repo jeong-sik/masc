@@ -8,6 +8,10 @@
       "root": "scripts/tinker/librarian"
     },
     {
+      "root": "scripts/harness/tui",
+      "extraPaths": ["scripts/harness/perf"]
+    },
+    {
       "root": "scripts",
       "extraPaths": ["test", "scripts/lib"]
     }

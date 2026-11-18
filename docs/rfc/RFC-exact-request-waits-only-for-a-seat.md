@@ -150,7 +150,9 @@ Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴�
 - Keeper 턴은 허가를 한도 안에서 기다린다(`complete.ml` 316행·693행). 줄에서 뒤로 밀리면 허가 시간 초과로 실패한다(§1.2 의 84건).
 - `admission-priority-run-limit` 는 이것을 막아 주지 않는다. 한도는 준 자리 수를 세고, 자리를 쥔 시간은 세지 않는다(`slot_scheduler.mli` 20~29행).
   - GLM 에서 Librarian 호출 하나는 Keeper 턴 호출보다 자리를 약 14배 오래 쥔다(413초 대 29.5초).
-  - 그래서 이 비보다 작은 한도는 선언이 없을 때보다 Keeper 턴을 오래 기다리게 한다. 7일 재생(모형)에서 한도 1 이면 900초 넘게 기다린 GLM Keeper 턴 호출이 1,228건이다. 선언이 없으면 0건이다.
+  - 그래서 이 비보다 작은 한도는 선언이 없을 때보다 Keeper 턴을 오래 기다리게 한다.
+  - 7일 재생(모형)에서 한도 1 이면 900초 넘게 기다린 GLM Keeper 턴 호출이 1,228건이다. 선언이 없으면 0건이다. 이 값은 tinker 4자리가 든 lane 에서 모든 slot 을 GLM 속도로 둔 것이다.
+  - Keeper 턴과 계정을 나누지 않는 slot(tinker)이 lane 에 없으면 선언이 없어도 Keeper 턴이 기다린다. 같은 재생에서 GLM 8 + ollama 4 lane 은 900초 넘게 기다린 Keeper 턴 호출이 GLM 283건, ollama 1,189건이다.
   - 이 RFC 는 이 키를 요구하지 않는다. 선언과 값은 운영자가 계정마다 잰 시간 비를 보고 정한다.
 - 쉬는 slot 은 provider 가 밝힌 때까지 부르지 않는다. 지금과 같다.
 - HTTP slot 과 CLI slot 은 층이 다르다. CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. HTTP 자리가 꽉 찬 것만으로는 CLI 로 가지 않는다.

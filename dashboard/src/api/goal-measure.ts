@@ -80,6 +80,10 @@ export function goalMeasureEqual(left: GoalMeasure, right: GoalMeasure): boolean
   }
 }
 
+/** What a screen shows where a row's measure did not read. The server always
+ *  writes one, so this is a decoding failure made visible, not an empty Goal. */
+export const MEASURE_UNREADABLE = '측정 조건을 읽을 수 없음'
+
 /** One line for a screen: `14 층`, `≤ 100 ms`, or the condition itself.
  *  String(number) is the shortest text that reads back as the same number,
  *  so a target such as 1048576 is shown whole. */

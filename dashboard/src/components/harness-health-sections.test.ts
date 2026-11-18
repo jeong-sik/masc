@@ -18,7 +18,9 @@ import {
   GateChart,
   verdictAim,
   goalsByTaskFromTree,
+  type GoalAim,
 } from './harness-health-sections'
+import { countMeasure } from '../api/fixtures/goal-criterion'
 import type {
   HarnessHealthData,
   HarnessVerdictItem,
@@ -398,26 +400,19 @@ describe('harness section components render v2 lab markers', () => {
 })
 
 describe('verdictAim', () => {
-  const goals = new Map([
-    ['task-1', { title: 'raise SSIM to 0.95', metric: 'SSIM', target_value: '0.95' }],
-    ['task-2', { title: 'ship the migration', metric: null, target_value: null }],
-    ['task-3', { title: 'cut p95', metric: 'p95', target_value: null }],
-    ['task-4', { title: 'hit the number', metric: null, target_value: '12' }],
+  const goals = new Map<string, GoalAim>([
+    ['task-1', { title: 'raise SSIM', measure: { kind: 'quantity', unit: 'SSIM', direction: 'at_least', target: 0.95 } }],
+    ['task-2', { title: 'ship the migration', measure: null }],
   ])
 
-  it('reads the metric and the target the goal declared', () => {
-    expect(verdictAim('task-1', goals)).toBe('raise SSIM to 0.95 · SSIM → 0.95')
+  it('reads the measure the goal declared', () => {
+    expect(verdictAim('task-1', goals)).toBe('raise SSIM · 목표 ≥ 0.95 SSIM')
   })
 
-  it('still answers when the goal declared no metric', () => {
-    // The title is what the task is for, metric or not. Saying nothing would
-    // hide a link that exists.
+  it('still answers when the goal measure did not read', () => {
+    // The title is what the task is for. Saying nothing would hide a link
+    // that exists.
     expect(verdictAim('task-2', goals)).toBe('ship the migration')
-  })
-
-  it('takes whichever half the goal declared', () => {
-    expect(verdictAim('task-3', goals)).toBe('cut p95 · p95')
-    expect(verdictAim('task-4', goals)).toBe('hit the number · 목표 12')
   })
 
   it('says nothing when the chain has nothing to say', () => {
@@ -436,15 +431,13 @@ describe('goalsByTaskFromTree', () => {
       {
         id: 'g-1',
         title: 'top goal',
-        metric: 'SSIM',
-        target_value: '0.95',
+        measure: countMeasure,
         tasks: [{ id: 'task-a' }],
         children: [
           {
             id: 'g-2',
             title: 'nested goal',
-            metric: 'p95',
-            target_value: null,
+            measure: null,
             tasks: [{ id: 'task-b' }],
             children: [],
           },
@@ -452,8 +445,8 @@ describe('goalsByTaskFromTree', () => {
       },
     ]
     const map = goalsByTaskFromTree(tree)
-    expect(map.get('task-a')).toEqual({ title: 'top goal', metric: 'SSIM', target_value: '0.95' })
-    expect(map.get('task-b')).toEqual({ title: 'nested goal', metric: 'p95', target_value: null })
+    expect(map.get('task-a')).toEqual({ title: 'top goal', measure: countMeasure })
+    expect(map.get('task-b')).toEqual({ title: 'nested goal', measure: null })
     expect(map.size).toBe(2)
   })
 

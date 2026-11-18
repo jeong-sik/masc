@@ -379,6 +379,7 @@ import {
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
+import { decodeGoalMeasure } from './api/goal-measure'
 
 const agentCoreAgentEventsRing = new RingBuffer<AgentCoreAgentEvent>(AGENT_CORE_AGENT_EVENT_BUFFER)
 export const agentCoreAgentEvents = signal<AgentCoreAgentEvent[]>([])
@@ -866,8 +867,8 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         resume_phase: decodeGoalResumePhase(phase, row.resume_phase),
         id,
         title,
-        metric: asString(row.metric) ?? null,
-        target_value: asString(row.target_value) ?? null,
+        measure: decodeGoalMeasure(row.measure),
+        procedure: asString(row.procedure) ?? null,
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         phase,

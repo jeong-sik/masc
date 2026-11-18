@@ -207,6 +207,11 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(tree.tree[1]?.measurement).toEqual({
       state: 'unavailable', reason: 'goal_measurement: store read failed',
     })
+    // The criterion in the shape Goal_document.goal_to_yojson writes.
+    expect(measured.measure).toEqual({ kind: 'count', noun: 'passed cases', total: 10 })
+    expect(measured.procedure).toBe('Count the passing cases in the CI summary.')
+    expect(measured.children[0]?.measure).toEqual({ kind: 'done_when', condition: 'the current criterion reads back' })
+    expect(tree.tree[1]?.measure).toEqual({ kind: 'quantity', unit: 'runs', direction: 'at_least', target: 5 })
 
     getMock.mockResolvedValueOnce({
       approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
@@ -214,6 +219,8 @@ describe('fetchDashboardGoalsTree decoding', () => {
     })
     const detail = await fetchDashboardGoalDetail(measured.id)
     expect(detail.goal.measurement).toEqual(measured.measurement)
+    expect(detail.goal.measure).toEqual(measured.measure)
+    expect(detail.goal.procedure).toBe(measured.procedure)
   })
 
   it('refuses a stale or unknown measurement instead of losing it silently', async () => {

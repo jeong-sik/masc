@@ -112,6 +112,7 @@ import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
 import { doneWhenMeasure } from '../api/fixtures/goal-criterion'
+import { MEASURE_UNREADABLE } from '../api/goal-measure'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -157,8 +158,8 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
       activity_observation: 'goal_metadata',
     },
     priority: 1,
-    metric: null,
-    target_value: null,
+    measure: doneWhenMeasure,
+    procedure: 'Read the fixture.',
     due_date: null,
     criterion_revision: 'revision-default',
     measurement: { state: 'not_recorded' },
@@ -1913,8 +1914,8 @@ describe('Work', () => {
             created_at: '2026-01-01',
             updated_at: '2026-01-04',
             last_review_note: 'metric 미충족 — merged PR은 1건뿐',
-            metric: 'merged PR count',
-            target_value: '5 PRs',
+            measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+            procedure: 'Count merged PRs linked to the Goal.',
           },
         ]
         tasks.value = []
@@ -1926,8 +1927,8 @@ describe('Work', () => {
               priority: 5,
               phase: 'executing',
               last_review_note: 'metric 미충족 — merged PR은 1건뿐',
-              metric: 'merged PR count',
-              target_value: '5 PRs',
+              measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+              procedure: 'Count merged PRs linked to the Goal.',
               task_summary: {
                 total: 4,
                 done: 3,
@@ -1989,17 +1990,17 @@ describe('Work', () => {
 
         // What counts as done is declared once, in the card header, next to the
         // progress bar it qualifies.
-        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
-          .toBe('merged PR count · 5 PRs')
-        expect(text).not.toContain('merged PR count')
+        expect(goalCard.querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe('5 merged PRs')
+        expect(text).not.toContain('5 merged PRs')
       })
 
-      it('declares the metric once in the header and never a second task tally', () => {
+      it('declares the measure once in the header and never a second task tally', () => {
         goals.value = [
           {
             id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked',
             created_at: '2026-01-01', updated_at: '2026-01-04',
-            metric: 'merged PR count', target_value: '5 PRs',
+            measure: { kind: 'count', noun: 'merged PRs', total: 5 }, procedure: 'Count merged PRs linked to the Goal.',
           },
         ]
         // Six done, one cancelled. The header excludes cancelled from the
@@ -2015,8 +2016,8 @@ describe('Work', () => {
             goalTreeNode({
               id: 'G-1',
               phase: 'blocked',
-              metric: 'merged PR count',
-              target_value: '5 PRs',
+              measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+              procedure: 'Count merged PRs linked to the Goal.',
               task_count: 7,
               task_done_count: 6,
               // task_summary keeps cancelled in `total`. The panel used to
@@ -2037,14 +2038,13 @@ describe('Work', () => {
         expandGoalCard(goalCard)
 
         // The declaration sits next to the bar it qualifies, stated once.
-        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
-          .toBe('merged PR count · 5 PRs')
+        expect(goalCard.querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe('5 merged PRs')
         expect(goalCard.querySelector('.wk-prog-lbl')?.textContent).toContain('6/6')
 
         const dossier = screen.getByTestId('goal-dossier')
         const text = dossier.textContent ?? ''
-        expect(text).not.toContain('merged PR count')
-        expect(text).not.toContain('5 PRs')
+        expect(text).not.toContain('5 merged PRs')
         expect(text).not.toContain('전체 7')
         expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
         expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
@@ -2063,27 +2063,21 @@ describe('Work', () => {
         expect(text).not.toContain('달성')
       })
 
-      it('shows no metric chip at all when the goal declares none', () => {
+      it('says the Goal measure is unreadable instead of drawing nothing', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
         tasks.value = []
         goalTreeData.value = {
-          tree: [goalTreeNode({ id: 'G-1' })],
+          tree: [goalTreeNode({ id: 'G-1', measure: null })],
           summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
         }
 
         render(html`<${Work} />`)
-        const goalCard = screen.getByTestId('goal-card')
-        expandGoalCard(goalCard)
-
-        // A goal with nothing declared gets no chip. There is no "정해진 지표가
-        // 없어요" row any more — a placeholder telling the operator a field is
-        // empty costs a line and settles nothing.
-        expect(goalCard.querySelector('[data-goal-metric]')).toBeNull()
-        const dossier = screen.getByTestId('goal-dossier')
-        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
-        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+        // The server writes a measure for every Goal, so a missing one is a
+        // row that did not decode. An empty card would read as "no target".
+        expect(screen.getByTestId('goal-card').querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe(MEASURE_UNREADABLE)
       })
 
       it('drops the goal_fsm projection tokens from the goal detail panel', () => {

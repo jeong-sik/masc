@@ -499,7 +499,7 @@ let render_memory (state : state) =
     ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_body ~cols ~budget state
-        ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
+        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
 let render_memory_changes (state : state) keeper_name =
@@ -515,7 +515,8 @@ let render_memory_changes (state : state) keeper_name =
     ~hints:(Masc_tui_keys.footer_hints_memory_changes ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       Masc_tui_render_keeper_memory.changes_lines state ~cols ~max_lines:budget
-        ~now:(Unix.gettimeofday ()) ~keeper_name |> List.iter c.push)
+        ~now:(Unix.gettimeofday ()) ~keeper_name ~hand_position:c.position
+      |> List.iter c.push)
 
 (* The Memory facts list's [Enter] reading: the whole fact wrapped to this
    overlay's own width and windowed, instead of the narrow block the list
@@ -525,8 +526,8 @@ let render_memory_changes (state : state) keeper_name =
    It wears the shared overlay chrome, [Chrome_overlay], the frame the contract
    names for a surface opened over another one: the box, the title and the
    footer come from there, and the window it clamps to is the frame's own
-   budget rather than a second tally of the same rows. The contract draws the
-   window's "[lines a-b/n]" row under it. *)
+   budget rather than a second tally of the same rows. The contract names the
+   window on the title row. *)
 let render_memory_fact_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
@@ -599,7 +600,7 @@ and render_memory_facts_list (state : state) =
     ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
-        ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
+        ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
 

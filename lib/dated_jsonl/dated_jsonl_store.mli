@@ -110,6 +110,13 @@ type retention =
 
 val retention : t -> retention
 
+val is_side_file : t -> string -> bool
+(** Whether the store's owner keeps the entry named [name] in the store's
+    own directory, beside the month directories. A side file is made from the
+    day files and no reader of the day files reads it. The strict listing of
+    month directories passes over it; any other entry there that is not a
+    month directory still fails the read. *)
+
 val with_retention_root : root -> (Fs_compat.Retention_directory.t -> 'a) -> 'a option
 (** Admit the physical BasePath (allowing its configured aliases), then bind
     the runtime-root entry without following it. No descendant is realpathed.

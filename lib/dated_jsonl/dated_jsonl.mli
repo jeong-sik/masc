@@ -270,7 +270,9 @@ val read_recent_result :
     non-empty JSONL rows, including {!Malformed_json} rows. Missing stores are
     [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
     regular day files; symbolic links, other file kinds, and I/O failures are
-    returned explicitly. Results are chronological (oldest first). *)
+    returned explicitly. In the store's own directory it passes over the
+    entries the store declares as side files ({!Store.is_side_file}).
+    Results are chronological (oldest first). *)
 
 val find_latest_entry_result :
   t -> (recent_entry -> 'a option) -> ('a option, read_error) result

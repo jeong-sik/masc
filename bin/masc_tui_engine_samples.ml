@@ -124,7 +124,10 @@ let measured_value = function
   | Braille.Unread | Braille.Absent -> None
 
 (* The average of the newest [rescale_after] measured times of [series] in
-   [newest_first], the time just taken among them. *)
+   [newest_first], the time just taken among them; blanks are passed over.
+   Each time is divided before it is added, the remainders averaged apart, so
+   times near the integer range do not wrap the sum: the result is the exact
+   floor of the mean. *)
 let recent_average series newest_first ~taken =
   let values =
     List.filteri
@@ -133,7 +136,10 @@ let recent_average series newest_first ~taken =
   in
   match values with
   | [] -> taken
-  | _ :: _ -> List.fold_left ( + ) 0 values / List.length values
+  | _ :: _ ->
+    let count = List.length values in
+    List.fold_left (fun sum value -> sum + (value / count)) 0 values
+    + (List.fold_left (fun sum value -> sum + (value mod count)) 0 values / count)
 
 let scaled_top series ~factor average =
   let top =

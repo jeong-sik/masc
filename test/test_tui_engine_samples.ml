@@ -295,8 +295,6 @@ let test_a_reading_holds_the_two_card_numbers () =
           (Samples.reading_of_server
              (Ok (Decode.Account_server { account_server_version = "1" })))))
 
-(* Feeds one heap per sample, two seconds apart, oldest first, into a ring of
-   [capacity]. *)
 (* One sample every two seconds, each from the newest answer, in order. *)
 let sampled_readings ~capacity readings =
   let sampler, _ =
@@ -566,6 +564,13 @@ let test_how_far_above_the_top_moves_no_dot () =
   Alcotest.(check bool) "four times a little or far above" true
     (graph (steady :: repeat 4 1_400_000) = graph (steady :: repeat 4 10_000_000))
 
+(* Times near the integer range average without wrapping: four at the
+   largest and one in band rescale to the largest, not to a wrapped small
+   sum. *)
+let test_an_average_near_the_integer_range_does_not_wrap () =
+  Alcotest.(check (option int)) "the fifth time above" (Some max_int)
+    (heap_top ([ steady ] @ repeat 4 max_int @ [ steady; max_int ]))
+
 let () =
   Alcotest.run "tui_engine_samples"
     [ ( "requests"
@@ -633,6 +638,8 @@ let () =
             test_the_average_takes_the_five_newest_measured_times
         ; Alcotest.test_case "a top past the integer range stands at the largest" `Quick
             test_a_top_past_the_integer_range_stands_at_the_largest
+        ; Alcotest.test_case "an average near the integer range does not wrap" `Quick
+            test_an_average_near_the_integer_range_does_not_wrap
         ; Alcotest.test_case "a resized graph keeps its top" `Quick
             test_a_resized_graph_keeps_its_top
         ; Alcotest.test_case "a top over blanks only is not written" `Quick

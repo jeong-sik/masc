@@ -143,9 +143,11 @@ val graph :
 
     The top is held, not the largest time drawn (RFC tui-one-screen-grammar
     5.6, btop's network auto scale). The first measured time sets it to 1.3
-    times that time. Five times above it raise it to 1.3 times the average of
-    the five newest measured times; five times under a tenth of it lower it
-    to 3 times that average. A time on one side takes one off the count of
+    times that time. Five times above it set it again to 1.3 times the
+    average of the five newest measured times (blanks passed over); five
+    times under a tenth of it set it to 3 times that average. The average
+    holds the times inside the band too, so, as in btop, a rescale can land
+    on either side of the old top. A time on one side takes one off the count of
     the other, and a blank counts for neither. It never goes under the
     series' floor (1 MiB of heap, 1 ms of p95), and a top at the floor counts
     no time as low. A time above the top draws at the top until it rises.

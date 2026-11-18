@@ -108,7 +108,8 @@ val braille_graph :
   width:int -> rows:int -> axis:string -> maximum:int -> sample list -> graph
 (** A graph [width] cells wide and [rows] text rows tall, growing up from its
     baseline. [maximum] is the top of the axis: the largest sample
-    ({!graph_maximum}) or a declared limit. [axis] is that top written with its
+    ({!graph_maximum}), a declared limit, or a top the caller holds; a sample
+    above it draws at the top. [axis] is that top written with its
     unit ([123K]), placed at the graph's top-left. The newest [2 * cells]
     samples are drawn; a time before the first sample is blank.
 

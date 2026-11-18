@@ -335,9 +335,10 @@ let bytes_per_word = 8.
 let bytes_per_kb = 1024.
 let tenths_per_minute = 600
 
-(* The top of the heap axis: the largest live heap a time drawn held, in
-   bytes, in the smallest binary unit that keeps the figure below a thousand,
-   with tenths below ten. Rounded up, so no time drawn stands above it. At
+(* The top of the heap axis: the held top of the heap graph
+   (Masc_tui_engine_samples.graph), in bytes, in the smallest binary unit that
+   keeps the figure below a thousand, with tenths below ten. Rounded up, so
+   the text is never under the top the dots are scaled to. At
    most five cells ("999KB", "9.9GB"): the largest heap a 63-bit count of
    words can name is 32EB. *)
 let heap_axis words =
@@ -357,11 +358,11 @@ let heap_axis words =
     in
     rung bytes_per_kb "KB" [ "MB"; "GB"; "TB"; "PB"; "EB" ]
 
-(* The top of the p95 axis: the largest p95 a time drawn held, kept in whole
+(* The top of the p95 axis: the held top of the p95 graph, in whole
    microseconds. Hundredths of a millisecond below ten, tenths below a
    hundred, whole milliseconds below a second, tenths of a second below a
    minute, then the two-unit ladder of a finished span (section 6.2). Each
-   rung rounds up, so no time drawn stands above the top. At most six cells
+   rung rounds up, so the text is never under the top. At most six cells
    below a hundred thousand days, longer than a server runs and so than any
    lag it measures. *)
 let p95_axis microseconds =

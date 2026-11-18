@@ -3165,8 +3165,9 @@ describe('GoalTree', () => {
     expect(container_alerts()).toEqual(['goal-store-unavailable', 'goal-create-source-unavailable'])
 
     fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'Recover the store' } })
-    fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'readable goals' } })
-    fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '97' } })
+    fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '97' } })
+    fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'readable goals' } })
+    fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Count goals the store serves.' } })
     const submit = screen.getByTestId('goal-create-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(true)
     fireEvent.click(submit)
@@ -3192,8 +3193,9 @@ describe('GoalTree', () => {
     render(html`<div><${GoalTree} /><${OwnedGoalCreate} /></div>`)
     await waitFor(() => screen.getByTestId('goal-store-unavailable'))
     fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'Recover the store' } })
-    fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'readable goals' } })
-    fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '1' } })
+    fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '1' } })
+    fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'readable goals' } })
+    fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Count goals the store serves.' } })
     hydrateGoalTreeSnapshot({
       approval_queue_state: { state: 'ready' },
       tree: [],
@@ -3259,8 +3261,9 @@ describe('GoalTree', () => {
     render(html`<div><${GoalTree} /><${OwnedGoalCreate} /></div>`)
     await waitFor(() => screen.getByTestId('goal-store-unavailable'))
     fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'Recover the store' } })
-    fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'readable goals' } })
-    fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '1' } })
+    fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '1' } })
+    fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'readable goals' } })
+    fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Count goals the store serves.' } })
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
     await waitFor(() => expect(screen.getByText(/인증 또는 권한이 거부되었습니다/)).toBeTruthy())
     expect(screen.queryByTestId('goal-store-unavailable')).toBeNull()

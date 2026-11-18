@@ -534,8 +534,9 @@ describe('Work', () => {
         showGoalCreate.value = true
         render(html`<${Work} />`)
         fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'A new goal' } })
-        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'metric' } })
-        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: 'target' } })
+        fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '3' } })
+        fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'merged PRs' } })
+        fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Count merged PRs.' } })
         expect(screen.getByTestId('goal-create-source-unconfirmed')).toBeTruthy()
         expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
       },
@@ -989,8 +990,9 @@ describe('Work', () => {
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')
         fireEvent.input(titleInput, { target: { value: 'SLO 400ms 회복' } })
-        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'scheduler p99 over 24 hours' } })
-        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '400 ms or less' } })
+        fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '24' } })
+        fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'hours with scheduler p99 under 400 ms' } })
+        fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Read scheduler p99 over 24 hours.' } })
 
         // Submit
         fireEvent.click(screen.getByTestId('goal-create-submit'))
@@ -1000,8 +1002,8 @@ describe('Work', () => {
 
         expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
           title: 'SLO 400ms 회복',
-          metric: 'scheduler p99 over 24 hours',
-          target_value: '400 ms or less',
+          measure: { kind: 'count', noun: 'hours with scheduler p99 under 400 ms', total: 24 },
+          procedure: 'Read scheduler p99 over 24 hours.',
           priority: expect.any(Number),
           id: expect.stringMatching(/^goal-/), if_absent: true,
           expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },

@@ -866,6 +866,10 @@ type observer_msg =
   | Observer_closed of unit ref * Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
+  (* The recovery's stream opened, the first open of its attempt. Whether an
+     earlier attempt did not open decides whether the [/health] wait ends
+     (RFC tui-one-screen-grammar §2). Sent ahead of what the open reports. *)
+  | Observer_recovery_opened of workspace_authority * unit ref * Masc_tui_refresh_pace.stream_open
   (* An MCP session would not open, and the address answered /health as the
      account server of a multi-account installation. The ref is the owner of
      the observer stream or of the recovery that asked. *)

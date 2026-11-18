@@ -51,15 +51,22 @@ let read_name ~ko = function
   | Asks -> if ko then "질문" else "questions"
   | Confirmations -> if ko then "승인 대기" else "confirmations"
 
-let notice_text ~ko ~now failure =
+let notice_text ~ko ~now ~next_try failure =
   let failed = read_name ~ko failure.read ^ if ko then " 읽기 실패" else " read failed" in
   let at =
     Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now failure.since in
   let started = if ko then at ^ " 부터" else "since " ^ at in
   let separator = " \xc2\xb7 " in
-  if failure.count = 1 then failed ^ separator ^ started
-  else
-    let count = Masc_tui_value.Count.grouped failure.count in
-    failed ^ separator
-    ^ (if ko then count ^ "회 연속" else count ^ " in a row")
-    ^ separator ^ started
+  let run =
+    if failure.count = 1 then failed ^ separator ^ started
+    else
+      let count = Masc_tui_value.Count.grouped failure.count in
+      failed ^ separator
+      ^ (if ko then count ^ "회 연속" else count ^ " in a row")
+      ^ separator ^ started
+  in
+  match next_try with
+  | Some moment when whole_server failure.read ->
+      let at = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second ~now moment in
+      run ^ separator ^ (if ko then "다음 시도 " ^ at else "next try " ^ at)
+  | Some _ | None -> run

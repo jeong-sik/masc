@@ -701,7 +701,8 @@ let zone4_action_text (state : state) ~action_text ~preferred_action =
   | Some { lead = Zone4_action; more } -> Option.map (with_more more) action_text
   | Some { lead = Zone4_read_failure failure; more } ->
       Some (with_more more
-              (Masc_tui_read_failure.notice_text ~ko ~now:(Unix.gettimeofday ()) failure))
+              (Masc_tui_read_failure.notice_text ~ko ~now:(Unix.gettimeofday ())
+                 ~next_try:(Masc_tui_refresh_pace.next_try state.refresh_pace) failure))
 
 let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =

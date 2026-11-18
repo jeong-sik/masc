@@ -45,7 +45,14 @@ val failures : t -> failure list
     within each, the oldest run first, then in declaration order. A failure
     that repeats keeps its place, so the notice drawn first stays the same. *)
 
-val notice_text : ko:bool -> now:float -> failure -> string
+val notice_text : ko:bool -> now:float -> next_try:float option -> failure -> string
 (** [서버 상태 읽기 실패 · 3회 연속 · 15:04 부터]. The run's start is a
     moment, not a length, so the text changes only when the read fails again
-    and asks for no redraw of its own (RFC tui-one-screen-grammar §8). *)
+    and asks for no redraw of its own (RFC tui-one-screen-grammar §8).
+
+    [next_try] is the wall-clock moment the pass that a failing [/health]
+    owes starts ({!Masc_tui_refresh_pace.next_try}). The whole server's reads
+    end with it, to the second:
+    [서버 상태 읽기 실패 · 3회 연속 · 15:04 부터 · 다음 시도 15:04:32]. It is
+    a moment too, never a countdown. Other reads do not wait for that pass,
+    so they do not say it. *)

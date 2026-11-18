@@ -5299,7 +5299,12 @@ end = struct
         | Some query -> board_query_to_yojson query | None -> `Null)]
 end
 
-type full_refresh_intent = Revalidate
+(* Who asks for a full pass, so a pass asked for while [/health] keeps
+   failing waits for the one the failure owes (RFC tui-one-screen-grammar §2). *)
+type full_refresh_intent = Masc_tui_refresh_pace.ask =
+  | Revalidate
+  | Operator_key
+  | Owed_pass
 
 (* Full and scoped bundles share one authority order. A later dispatch
    supersedes an earlier result, including failure and booting results. *)
@@ -5745,9 +5750,10 @@ type scoped_refresh_followup =
 let note_full_refresh_intent ~intent ~full_refresh_inflight
     ~scoped_refresh_inflight followup =
   match intent with
-  | Revalidate when full_refresh_inflight || scoped_refresh_inflight ->
+  | (Revalidate | Operator_key | Owed_pass)
+    when full_refresh_inflight || scoped_refresh_inflight ->
       Revalidate_after_scoped
-  | Revalidate -> followup
+  | Revalidate | Operator_key | Owed_pass -> followup
 
 let take_scoped_refresh_followup ~full_refresh_inflight
     ~scoped_refresh_inflight = function
@@ -10487,6 +10493,9 @@ type state = {
      cannot replace what the operator's last key did. Zone 4 ranks them
      below it (RFC tui-one-screen-grammar §2). *)
   mutable read_failures: Masc_tui_read_failure.t;
+  (* When the next pass may read [/health] after the probe failed
+     (RFC tui-one-screen-grammar §2). *)
+  mutable refresh_pace: Masc_tui_refresh_pace.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -21204,6 +21213,7 @@ let create_state
   quit_armed = None;
   last_action = Masc_tui_action_notice.empty;
   read_failures = Masc_tui_read_failure.empty;
+  refresh_pace = Masc_tui_refresh_pace.answering;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;

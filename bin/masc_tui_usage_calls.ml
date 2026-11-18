@@ -1,4 +1,5 @@
 module Series = Masc.Tui_decode_tool_series
+module Braille = Masc_tui_braille
 module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
 module Layout = Masc_tui_message_layout
@@ -70,24 +71,43 @@ let of_series window (series : Series.tool_series) =
    latency, which is not the same as zero of either. *)
 let no_call_mark = "\xc2\xb7"
 
-(* Braille LED columns: four positive dot-heights (2, 4, 6, 8 dots) and a
-   single baseline dot for a reported zero, so zero and positive remain distinct
-   by shape even under NO_COLOR. *)
-let top_level = 4
+(* Braille LED columns on the graph rules of RFC tui-one-screen-grammar
+   section 5.6, one text row (four dots) tall: a reported zero is the
+   baseline [⣀], and a value above zero stands at least one level above it,
+   so one failed call among thirty is told apart from none by its shape and
+   not by its colour alone. [⣀] means zero here as on every other graph. *)
+let column_dots = 4
 
-let mark level =
-  if level <= 0 then Masc_tui_braille.braille_pair ~left:1 ~right:0
-  else Masc_tui_braille.braille_bar_mark ~level
+let mark ~maximum sample =
+  Braille.braille_bar_mark ~level:(Braille.braille_level ~dots:column_dots ~maximum sample)
 
-(* A value above zero never draws the lowest level, which is what zero draws:
-   one failed call among thirty is told apart from none by its shape and not
-   by its colour alone. *)
-let level_of ~maximum value =
-  if maximum <= 0.0 || value <= 0.0 then 0
+let microseconds_per_ms = 1000.0
+
+(* The p95 as a count of whole microseconds, rounded up so a latency above
+   zero stays above zero on the scale. A latency that is not a number is no
+   reading; one past the integer range stands at the top. *)
+let p95_sample (active : Series.tool_series_calls) =
+  let ms = active.Series.tsc_p95_ms in
+  if not (Float.is_finite ms) then Braille.Absent
   else
-    max 1
-      (min top_level
-         (int_of_float (Float.floor (value /. maximum *. float_of_int top_level))))
+    let microseconds = Float.ceil (ms *. microseconds_per_ms) in
+    if microseconds >= Float.of_int max_int then Braille.of_count max_int
+    else Braille.of_count (Float.to_int microseconds)
+
+let calls_sample (active : Series.tool_series_calls) =
+  Braille.of_count active.Series.tsc_calls
+
+let failures_sample (active : Series.tool_series_calls) =
+  Braille.of_count active.Series.tsc_failures
+
+(* The slowest p95 across the buckets, as reported, for the row's note. *)
+let worst_p95_ms buckets =
+  List.fold_left
+    (fun worst (bucket : Series.tool_series_bucket) ->
+      match bucket.Series.tsb_activity with
+      | Series.Series_idle -> worst
+      | Series.Series_active active -> Float.max worst active.Series.tsc_p95_ms)
+    0.0 buckets
 
 let every_call_failed (calls : Series.tool_series_calls) =
   calls.Series.tsc_failures = calls.Series.tsc_calls
@@ -193,14 +213,15 @@ let totals_line ~calls ~failures ~deferred =
    column across the three rows. The row's largest value is not a limit, so
    every other bucket draws in the foreground (RFC tui-one-screen-grammar
    section 7.3). *)
-let chart_cells ~(value : Series.tool_series_calls -> float) buckets =
+let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) buckets =
   let maximum =
-    List.fold_left
-      (fun largest (bucket : Series.tool_series_bucket) ->
-        match bucket.Series.tsb_activity with
-        | Series.Series_idle -> largest
-        | Series.Series_active active -> Float.max largest (value active))
-      0.0 buckets
+    Braille.graph_maximum
+      (List.filter_map
+         (fun (bucket : Series.tool_series_bucket) ->
+           match bucket.Series.tsb_activity with
+           | Series.Series_idle -> None
+           | Series.Series_active active -> Some (sample active))
+         buckets)
   in
   let cells =
     List.map
@@ -208,13 +229,15 @@ let chart_cells ~(value : Series.tool_series_calls -> float) buckets =
         match bucket.Series.tsb_activity with
         | Series.Series_idle -> (no_call_mark, Theme.recede ())
         | Series.Series_active active ->
-            let v = value active in
+            let reading = sample active in
             let style =
               if every_call_failed active then Theme.bad ()
-              else if v <= 0.0 then Theme.recede ()
-              else ""
+              else
+                match reading with
+                | Braille.Zero -> Theme.recede ()
+                | Braille.Value _ | Braille.Absent | Braille.Unread -> ""
             in
-            (mark (level_of ~maximum v), style))
+            (mark ~maximum reading, style))
       buckets
   in
   (maximum, cells)
@@ -254,26 +277,16 @@ let chart_lines ~cells t =
   let series_width = t.series.Series.tsr_width in
   let count = List.length buckets in
   let per = unit_suffix series_width in
-  let calls_maximum, calls_cells =
-    chart_cells
-      ~value:(fun active -> float_of_int active.Series.tsc_calls) buckets
-  in
-  let failed_maximum, failed_cells =
-    chart_cells
-      ~value:(fun active -> float_of_int active.Series.tsc_failures) buckets
-  in
-  let p95_maximum, p95_cells =
-    chart_cells
-      ~value:(fun active -> active.Series.tsc_p95_ms) buckets
-  in
+  let calls_maximum, calls_cells = chart_cells ~sample:calls_sample buckets in
+  let failed_maximum, failed_cells = chart_cells ~sample:failures_sample buckets in
+  let _, p95_cells = chart_cells ~sample:p95_sample buckets in
   let count_note maximum =
-    if maximum <= 0.0 then "none"
-    else Printf.sprintf "max %d%s" (int_of_float maximum) per
+    if maximum <= 0 then "none" else Printf.sprintf "max %d%s" maximum per
   in
   let rows =
     [ ("Calls", calls_cells, count_note calls_maximum);
       ("Failed", failed_cells, count_note failed_maximum);
-      ("p95", p95_cells, "worst " ^ milliseconds_text p95_maximum) ]
+      ("p95", p95_cells, "worst " ^ milliseconds_text (worst_p95_ms buckets)) ]
   in
   let note_cells =
     List.fold_left
@@ -500,11 +513,7 @@ let summary_line ~cells t =
     in
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
-      let _, drawn =
-        chart_cells
-          ~value:(fun active -> float_of_int active.Series.tsc_calls)
-          buckets
-      in
+      let _, drawn = chart_cells ~sample:calls_sample buckets in
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
       ^ draw_cells ~stretch:1 ~gap:0 drawn
       ^ summary_gap ^ figures

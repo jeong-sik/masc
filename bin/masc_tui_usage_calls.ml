@@ -190,12 +190,10 @@ let totals_line ~calls ~failures ~deferred =
 
 (* One glyph per bucket, scaled to the row's own largest value. A bucket in
    which every call failed is red top to bottom, so an outage reads as one
-   column across the three rows. *)
-type series_ramp =
-  | Ramp_progress
-  | Ramp_pressure
-
-let chart_cells ~ramp ~(value : Series.tool_series_calls -> float) buckets =
+   column across the three rows. The row's largest value is not a limit, so
+   every other bucket draws in the foreground (RFC tui-one-screen-grammar
+   section 7.3). *)
+let chart_cells ~(value : Series.tool_series_calls -> float) buckets =
   let maximum =
     List.fold_left
       (fun largest (bucket : Series.tool_series_bucket) ->
@@ -211,17 +209,10 @@ let chart_cells ~ramp ~(value : Series.tool_series_calls -> float) buckets =
         | Series.Series_idle -> (no_call_mark, Theme.recede ())
         | Series.Series_active active ->
             let v = value active in
-            let t =
-              if maximum <= 0.0 then 0.0
-              else Float.min 1.0 (Float.max 0.0 (v /. maximum))
-            in
             let style =
               if every_call_failed active then Theme.bad ()
               else if v <= 0.0 then Theme.recede ()
-              else
-                match ramp with
-                | Ramp_progress -> Theme.progress ~t
-                | Ramp_pressure -> Theme.pressure ~t
+              else ""
             in
             (mark (level_of ~maximum v), style))
       buckets
@@ -264,15 +255,15 @@ let chart_lines ~cells t =
   let count = List.length buckets in
   let per = unit_suffix series_width in
   let calls_maximum, calls_cells =
-    chart_cells ~ramp:Ramp_progress
+    chart_cells
       ~value:(fun active -> float_of_int active.Series.tsc_calls) buckets
   in
   let failed_maximum, failed_cells =
-    chart_cells ~ramp:Ramp_pressure
+    chart_cells
       ~value:(fun active -> float_of_int active.Series.tsc_failures) buckets
   in
   let p95_maximum, p95_cells =
-    chart_cells ~ramp:Ramp_pressure
+    chart_cells
       ~value:(fun active -> active.Series.tsc_p95_ms) buckets
   in
   let count_note maximum =
@@ -373,12 +364,13 @@ let load_bar ~cells ~maximum_calls reading =
       ^ String.concat "" (List.init (max 0 cells) (fun _ -> "\xc2\xb7"))
       ^ Ansi.reset
   | Series.Series_active active ->
-      Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls
-        ~max_value:(max 1 maximum_calls)
-        ~cell_style:(fun ~index ~width ->
-          if every_call_failed active then Theme.bad ()
-          else Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
-        ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+      (* Calls against the busiest bucket are a size, not a limit. *)
+      let bar =
+        Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls
+          ~max_value:(max 1 maximum_calls) ~scale:Masc_tui_chart.Relative
+          ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+      in
+      if every_call_failed active then Theme.bad () ^ bar ^ Ansi.reset else bar
 
 (* The newest bucket first: what the operator came to read is at the top, and
    the chart above already runs oldest to newest. *)
@@ -509,7 +501,7 @@ let summary_line ~cells t =
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
       let _, drawn =
-        chart_cells ~ramp:Ramp_progress
+        chart_cells
           ~value:(fun active -> float_of_int active.Series.tsc_calls)
           buckets
       in

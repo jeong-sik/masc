@@ -256,9 +256,20 @@ end
 
 type status = Ok | Warn | Bad | Info | Muted
 
-type ramp =
-  | Pressure
-  | Progress
+type color_depth = No_color | Colors_16 | Colors_256 | Truecolor
+
+type limit_band = Near_zero | Midway | Near_limit
+
+type meter_cell_colour =
+  | Cell_plain
+  | Cell_band of limit_band
+  | Cell_blend of { band : limit_band; position : float }
+
+type limit_paint = {
+  depth : color_depth;
+  surface : surface;
+  palette : Terminal_palette.t option;
+}
 
 let status = function
   | Ok -> Sgr.bright_green
@@ -404,60 +415,87 @@ let status_text_readable_for ~colors_enabled ~project ~surface palette state =
     ~project ~surface palette (status_ansi_color state)
 ;;
 
-let ramp_stops = function
-  | Pressure -> Bright_green, Bright_yellow, Bright_red
-  | Progress -> Bright_blue, Bright_cyan, Bright_green
-;;
-
-let ramp_discrete_color ramp t =
-  let low, mid, high = ramp_stops ramp in
-  match ramp with
-  | Pressure ->
-    if t < 0.5 then low else if t < 0.8 then mid else high
-  | Progress ->
-    if t < 0.34 then low else if t < 0.67 then mid else high
-;;
-
-let ramp_readable_for ~colors_enabled ~project ~surface palette ramp ~t =
-  let t =
-    if Float.is_nan t then 0.
-    else Float.max 0. (Float.min 1. t)
-  in
-  let discrete = ramp_discrete_color ramp t in
-  if not colors_enabled then ""
-  else if not !lift_enabled then ansi_color_code discrete
+let color_depth () =
+  if not colors_enabled then No_color
   else
-    match palette with
-    | None -> ansi_color_code discrete
-    | Some palette ->
-      let low, mid, high = ramp_stops ramp in
-      let left_color, right_color, seg_t =
-        if t <= 0.5 then low, mid, t *. 2.
-        else mid, high, (t -. 0.5) *. 2.
-      in
-      (match
-         ( Terminal_palette.ansi palette (ansi_color_index left_color)
-         , Terminal_palette.ansi palette (ansi_color_index right_color) )
-       with
-       | Some left_rgb, Some right_rgb ->
-         let background = surface_background surface palette in
-         let blended =
-           Color.lerp_oklab ~background ~floor:status_contrast_floor ~t:seg_t
-             left_rgb right_rgb
-         in
-         (match project blended with
-          | Some projected
-            when Color.contrast_ratio
-                   (Terminal_palette.estimated_rgb projected)
-                   background
-                 >= status_contrast_floor ->
-            projected_foreground ~colors_enabled (Some projected)
-          | Some _ | None ->
-            ansi_readable_for ~colors_enabled ~project ~surface (Some palette)
-              discrete)
-       | None, _ | _, None ->
-         ansi_readable_for ~colors_enabled ~project ~surface (Some palette)
-           discrete)
+    match Terminal_palette.stdout_color_level () with
+    | Terminal_palette.True_color -> Truecolor
+    | Terminal_palette.Ansi256 -> Colors_256
+    | Terminal_palette.Ansi16 | Terminal_palette.Unknown -> Colors_16
+;;
+
+let limit_band_status = function
+  | Near_zero -> Ok
+  | Midway -> Warn
+  | Near_limit -> Bad
+;;
+
+(* A cell stands for the far edge of its span: cell [index] of [width]
+   reaches (index + 1) / width of the limit. That edge is what the fill has
+   reached once the cell is drawn, so the last filled cell never claims a band
+   past the value. The edges between bands are the sixteen-colour steps of RFC
+   tui-one-screen-grammar section 7.3: under one half is near zero, under four
+   fifths is midway. They are compared in integers, so a cell sitting exactly
+   on an edge lands on the same side at every width. *)
+let limit_cell_colour ~depth ~index ~width =
+  let width = max 1 width in
+  let reached = max 1 (min width (index + 1)) in
+  let band =
+    if 2 * reached < width then Near_zero
+    else if 5 * reached < 4 * width then Midway
+    else Near_limit
+  in
+  match depth with
+  | No_color -> Cell_plain
+  | Colors_16 -> Cell_band band
+  | Colors_256 | Truecolor ->
+    Cell_blend { band; position = float_of_int reached /. float_of_int width }
+;;
+
+(* A blended cell walks success -> warning over the first half of the limit
+   and warning -> danger over the second, in Oklab, lifted to clear the floor
+   against the ground it is drawn on. Where the blend cannot be drawn -- no
+   palette to read the three colours from, lifting turned off, a projection
+   that misses the floor -- the cell draws its band's own colour, which is
+   what a sixteen-colour terminal draws for the same cell. *)
+let meter_cell_readable_for ~colors_enabled ~project paint cell =
+  let band_colour band =
+    status_readable_for ~colors_enabled ~project ~surface:paint.surface
+      paint.palette (limit_band_status band)
+  in
+  match cell with
+  | Cell_plain -> ""
+  | Cell_band band -> band_colour band
+  | Cell_blend { band; position } ->
+    (match paint.palette with
+     | Some palette
+       when colors_enabled && !lift_enabled && not (Float.is_nan position) ->
+       let position = Float.max 0. (Float.min 1. position) in
+       let left, right, segment =
+         if position <= 0.5 then Near_zero, Midway, position *. 2.
+         else Midway, Near_limit, (position -. 0.5) *. 2.
+       in
+       let entry band =
+         Terminal_palette.ansi palette
+           (ansi_color_index (status_ansi_color (limit_band_status band)))
+       in
+       (match entry left, entry right with
+        | Some left_rgb, Some right_rgb ->
+          let background = surface_background paint.surface palette in
+          let blended =
+            Color.lerp_oklab ~background ~floor:status_contrast_floor
+              ~t:segment left_rgb right_rgb
+          in
+          (match project blended with
+           | Some projected
+             when Color.contrast_ratio
+                    (Terminal_palette.estimated_rgb projected)
+                    background
+                  >= status_contrast_floor ->
+             projected_foreground ~colors_enabled (Some projected)
+           | Some _ | None -> band_colour band)
+        | None, _ | _, None -> band_colour band)
+     | Some _ | None -> band_colour band)
 ;;
 
 module For_testing = struct
@@ -471,7 +509,7 @@ module For_testing = struct
   let ansi_color_code = ansi_color_code
   let ansi_readable = ansi_readable_for
   let status_text_readable = status_text_readable_for
-  let ramp_readable = ramp_readable_for
+  let meter_cell_readable = meter_cell_readable_for
 end
 
 let ansi_readable ~surface palette color =
@@ -489,9 +527,9 @@ let status_text_readable ~surface palette state =
     ~surface palette state
 ;;
 
-let ramp_readable ~surface palette ramp ~t =
-  ramp_readable_for ~colors_enabled ~project:Terminal_palette.best_color
-    ~surface palette ramp ~t
+let meter_cell_readable paint cell =
+  meter_cell_readable_for ~colors_enabled ~project:Terminal_palette.best_color
+    paint cell
 ;;
 
 let selection = Sgr.reverse

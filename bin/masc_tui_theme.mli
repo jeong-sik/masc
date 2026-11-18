@@ -161,13 +161,52 @@ end
     names, so one remap moves every reading at once. *)
 type status = Ok | Warn | Bad | Info | Muted
 
-(** Semantic multi-stop Oklab ramps for continuous meters and sparklines.
-    [Pressure] walks [Ok -> Warn -> Bad] for utilization, memory, and saturation;
-    [Progress] walks [Bright_blue -> Info -> Ok] for completion and throughput so
-    100% completion never reads as failure. *)
-type ramp =
-  | Pressure
-  | Progress
+(** How many colours the terminal draws, which is what decides how a meter
+    against a declared limit colours its cells (RFC tui-one-screen-grammar
+    section 7.3). *)
+type color_depth =
+  | No_color  (** Colours are off: the meter draws its glyphs alone. *)
+  | Colors_16  (** The palette's sixteen entries, one per band. *)
+  | Colors_256  (** A colour between the bands, from the 256-colour cube. *)
+  | Truecolor  (** A colour between the bands, as 24-bit RGB. *)
+
+val color_depth : unit -> color_depth
+(** This process's depth: [No_color] when {!colors_enabled} is false,
+    otherwise the stdout capability. A capability the terminal does not state
+    draws sixteen colours, which is what every other colour here sends it. *)
+
+(** Where a cell sits against a declared limit. Each band draws in one status
+    colour: success, warning, danger. *)
+type limit_band =
+  | Near_zero  (** Under half the limit: [Ok]. *)
+  | Midway  (** Under four fifths of the limit: [Warn]. *)
+  | Near_limit  (** The rest, up to the limit: [Bad]. *)
+
+(** The colour one filled meter cell draws in. *)
+type meter_cell_colour =
+  | Cell_plain
+      (** No colour of its own: the glyph takes the colour around it. *)
+  | Cell_band of limit_band  (** The band's status colour. *)
+  | Cell_blend of { band : limit_band; position : float }
+      (** A colour between success, warning and danger at [position], the
+          cell's reach as a share of the limit in [(0, 1]]. [band] is what the
+          cell draws when the blend cannot be drawn. *)
+
+val limit_cell_colour :
+  depth:color_depth -> index:int -> width:int -> meter_cell_colour
+(** The colour cell [index] (from 0) of a [width]-cell meter takes when the
+    meter is against a declared limit. The cell reaches [(index + 1) / width]
+    of the limit. Under one half is [Near_zero], under four fifths [Midway],
+    the rest [Near_limit]. [No_color] draws [Cell_plain], [Colors_16] the band,
+    [Colors_256] and [Truecolor] a blend. *)
+
+(** What a declared-limit meter needs to draw its cells: the terminal's depth,
+    and the ground and palette its colours are measured against. *)
+type limit_paint = {
+  depth : color_depth;
+  surface : surface;
+  palette : Masc_tui_terminal_palette.t option;
+}
 
 (** The ANSI colours masc names. Only the ones something draws a meaning
     through: a colour absent here is one nothing reads a meaning out of. *)
@@ -237,18 +276,14 @@ val status_text_readable
     ANSI colour when the reader has explicitly disabled
     colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
 
-val ramp_readable
-  :  surface:surface
-  -> Masc_tui_terminal_palette.t option
-  -> ramp
-  -> t:float
-  -> string
-(** Continuous Oklab interpolation along [ramp] at normalized position [t]
-    (clamped to [[0.0, 1.0]]), lifted against [surface]'s ground to clear the
-    4.5:1 WCAG floor and projected through [best_color]. Falls back to the
-    corresponding discrete ANSI colour when no palette is reported, colour
-    lifting is disabled, or projection is unavailable, and emits [""] under
-    [NO_COLOR]. *)
+val meter_cell_readable : limit_paint -> meter_cell_colour -> string
+(** The SGR a meter cell draws before its glyph. [Cell_plain] is [""].
+    [Cell_band] is the band's status colour through {!status_readable}.
+    [Cell_blend] is an Oklab interpolation of the palette's success, warning
+    and danger entries, lifted against the paint's ground to clear 4.5:1 and
+    projected through [best_color]. It draws the band's colour instead when no
+    palette is reported, lifting is off, or the projection misses the floor.
+    Under [NO_COLOR] every cell is [""]. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -329,17 +364,15 @@ module For_testing : sig
     -> string
   (** Capability fixture for {!val:status_text_readable}. *)
 
-  val ramp_readable
+  val meter_cell_readable
     :  colors_enabled:bool
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
-    -> surface:surface
-    -> Masc_tui_terminal_palette.t option
-    -> ramp
-    -> t:float
+    -> limit_paint
+    -> meter_cell_colour
     -> string
-  (** Capability fixture for {!val:ramp_readable}. *)
+  (** Capability fixture for {!val:meter_cell_readable}. *)
 
   val recede
     :  colors_enabled:bool

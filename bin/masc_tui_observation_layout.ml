@@ -29,7 +29,10 @@ type context_pressure =
 
 (* The detail row shows one decimal place. Returning that displayed unit keeps
    its label, pressure thresholds, and bar fill on one rounding authority. *)
-let percentage_tenths ratio = int_of_float (Float.round (ratio *. 1000.0))
+let percentage_tenths_full = 1000
+
+let percentage_tenths ratio =
+  int_of_float (Float.round (ratio *. float_of_int percentage_tenths_full))
 
 let context_pressure ratio =
   let percentage_tenths = percentage_tenths ratio in

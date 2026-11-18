@@ -88,6 +88,72 @@ let braille_levels () =
   check "constant positive series uses middle dot level" [2; 2]
     (Chart.braille_levels [7; 7])
 
+module Theme = Masc_tui_theme
+
+let band_name = function
+  | Theme.Near_zero -> "Near_zero"
+  | Theme.Midway -> "Midway"
+  | Theme.Near_limit -> "Near_limit"
+
+let cell_colour_t =
+  Alcotest.testable
+    (fun formatter -> function
+      | Theme.Cell_plain -> Format.pp_print_string formatter "Cell_plain"
+      | Theme.Cell_band band -> Format.fprintf formatter "Cell_band %s" (band_name band)
+      | Theme.Cell_blend { band; position } ->
+        Format.fprintf formatter "Cell_blend %s %.3f" (band_name band) position)
+    (fun left right ->
+      match left, right with
+      | Theme.Cell_plain, Theme.Cell_plain -> true
+      | Theme.Cell_band left, Theme.Cell_band right -> left = right
+      | Theme.Cell_blend left, Theme.Cell_blend right ->
+        left.band = right.band && Float.equal left.position right.position
+      | Theme.Cell_plain, (Theme.Cell_band _ | Theme.Cell_blend _)
+      | Theme.Cell_band _, (Theme.Cell_plain | Theme.Cell_blend _)
+      | Theme.Cell_blend _, (Theme.Cell_plain | Theme.Cell_band _) -> false)
+
+let declared_limit depth =
+  Chart.Declared_limit { Theme.depth; surface = Theme.Page; palette = None }
+
+let cells scale ~width =
+  List.init width (fun index -> Chart.meter_cell_colour scale ~index ~width)
+
+(* Ten cells reach 10%, 20%, ... 100% of the limit. Under 50% is success,
+   under 80% warning, the rest danger (RFC tui-one-screen-grammar 7.3). *)
+let ten_bands =
+  Theme.[ Near_zero; Near_zero; Near_zero; Near_zero; Midway; Midway; Midway;
+          Near_limit; Near_limit; Near_limit ]
+
+let declared_limit_cells_by_depth () =
+  let check = Alcotest.(check (list cell_colour_t)) in
+  check "no colour draws plain glyphs" (List.init 10 (fun _ -> Theme.Cell_plain))
+    (cells (declared_limit Theme.No_color) ~width:10);
+  check "sixteen colours step at 50% and 80%"
+    (List.map (fun band -> Theme.Cell_band band) ten_bands)
+    (cells (declared_limit Theme.Colors_16) ~width:10);
+  let blended =
+    List.mapi
+      (fun index band ->
+        Theme.Cell_blend { band; position = float_of_int (index + 1) /. 10.0 })
+      ten_bands
+  in
+  check "256 colours blend at each cell's reach" blended
+    (cells (declared_limit Theme.Colors_256) ~width:10);
+  check "truecolor blends at each cell's reach" blended
+    (cells (declared_limit Theme.Truecolor) ~width:10);
+  check "a cell reaching exactly four fifths is near the limit at another width"
+    Theme.[ Cell_band Near_zero; Cell_band Near_zero; Cell_band Midway;
+            Cell_band Near_limit; Cell_band Near_limit ]
+    (cells (declared_limit Theme.Colors_16) ~width:5)
+
+let relative_cells_are_plain () =
+  Alcotest.(check (list cell_colour_t)) "a relative bar draws no colour of its own"
+    (List.init 10 (fun _ -> Theme.Cell_plain))
+    (cells Chart.Relative ~width:10);
+  Alcotest.(check string) "a relative bar's cells carry no SGR" ""
+    (String.concat ""
+       (List.init 10 (fun index -> Chart.meter_cell_style Chart.Relative ~index ~width:10)))
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -98,5 +164,10 @@ let () =
       ; Alcotest.test_case "braille scale and integer limits" `Quick braille_levels
       ; Alcotest.test_case "compact number boundaries" `Quick compact_number_boundaries
       ; Alcotest.test_case "bar fill" `Quick bar_filled_cells
+      ]
+    ; "meter colour",
+      [ Alcotest.test_case "declared limit cells by colour depth" `Quick
+          declared_limit_cells_by_depth
+      ; Alcotest.test_case "relative bars draw plain cells" `Quick relative_cells_are_plain
       ]
     ]

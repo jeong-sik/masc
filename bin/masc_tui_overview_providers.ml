@@ -117,7 +117,9 @@ let partial_cell =
 let meter_open = "\xe2\x96\x95" (* U+2595, right one-eighth block *)
 let meter_close = "\xe2\x96\x8f" (* U+258F, left one-eighth block *)
 
-let meter ~cells share =
+(* The glyphs a meter draws, the filled cells apart from the track, so a
+   caller can colour each filled cell. *)
+let meter_glyphs ~cells share =
   let cells = max 0 cells in
   let valid_share = Float.is_finite share && share >= 0.0 && share <= 1.0 in
   let share =
@@ -134,21 +136,57 @@ let meter ~cells share =
   in
   let whole = filled / eighths_per_cell in
   let part = filled mod eighths_per_cell in
-  let buf = Buffer.create (cells * String.length full_cell) in
-  for _ = 1 to whole do
-    Buffer.add_string buf full_cell
-  done;
-  let drawn =
-    if part > 0 then begin
-      Buffer.add_string buf partial_cell.(part);
-      whole + 1
-    end
-    else whole
+  let fill =
+    List.init whole (fun _ -> full_cell)
+    @ if part > 0 then [ partial_cell.(part) ] else []
   in
-  for _ = drawn + 1 to cells do
-    Buffer.add_string buf (if valid_share then "░" else " ")
-  done;
-  Buffer.contents buf
+  let track =
+    List.init (max 0 (cells - List.length fill)) (fun _ -> if valid_share then "░" else " ")
+  in
+  (fill, track)
+
+let meter ~cells share =
+  let fill, track = meter_glyphs ~cells share in
+  String.concat "" (fill @ track)
+
+(* How a window's bar fill is coloured (RFC tui-one-screen-grammar section
+   7.3, LAYOUT-LANGUAGE Usage). *)
+type bar_fill =
+  | Limit_fill
+      (** The window refuses model calls when full, a declared limit: each
+          filled cell takes the colour of its place against the limit. *)
+  | Foreground_fill
+      (** The server could not classify the window, so no one confirmed it is
+          a limit: the fill draws in the terminal's text colour, whatever tone
+          its row takes. *)
+  | Row_tone_fill
+      (** The window counts use that refuses no model call: the fill recedes
+          with its row. *)
+
+let bar_fill = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls -> Limit_fill
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> Foreground_fill
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Row_tone_fill
+
+(* The meter in its colours. [around] is the colour the row draws in; the
+   track and whatever follows the fill go back to it. *)
+let coloured_meter ~cells ~fill:bar ~around share =
+  let fill, track = meter_glyphs ~cells share in
+  let width = max 0 cells in
+  let drawn_fill =
+    match bar with
+    | Limit_fill ->
+        let scale = Masc_tui_chart.Declared_limit (Theme.limit_paint ()) in
+        String.concat ""
+          (List.mapi
+             (fun index glyph -> Masc_tui_chart.meter_cell_style scale ~index ~width ^ glyph)
+             fill)
+        ^ Masc_tui_theme.Sgr.default_fg ^ around
+    | Foreground_fill ->
+        Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
+    | Row_tone_fill -> String.concat "" fill
+  in
+  drawn_fill ^ String.concat "" track
 
 (* ---- the provider's own values ---------------------------------------- *)
 
@@ -614,7 +652,8 @@ let role_tag = function
 
 (* A window that counts something a model call does not need never alarms:
    it being full refuses no model call. A limit the server could not classify
-   is drawn like one that gates, since nothing says it does not. *)
+   alarms like one that gates, since nothing says it does not; its bar still
+   draws as an unconfirmed limit ([bar_fill]). *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
   if not (gates_model_calls window.puw_role) then Some (Theme.recede ())
   else if window_at_limit window then Some (Theme.text_status Masc_tui_theme.Bad)
@@ -644,6 +683,7 @@ type window_line = {
           for. A note that does not fit wraps to its own line. *)
   tone : string option;
   detail_tone : string option;
+  fill : bar_fill;
 }
 
 (* Keep the marker separate from provider text, including on wrapped lines.
@@ -703,6 +743,7 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   ; detail_base = detail_with reset.reset_short []
   ; tone
   ; detail_tone = (match reset.reset_tone with Some _ -> reset.reset_tone | None -> tone)
+  ; fill = bar_fill window.puw_role
   }
 
 type entry_body =
@@ -920,9 +961,10 @@ let draw_entry layout tone entry =
     let gauge =
       match line.share with
       | Some share ->
-          let tone = Option.value ~default:(Theme.info ()) line.tone in
-          tone ^ meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
-          ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
+          let around = match line.tone with Some tone -> tone | None -> "" in
+          around ^ meter_open
+          ^ coloured_meter ~cells:layout.bar_cells ~fill:line.fill ~around share
+          ^ meter_close ^ " " ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
       | None -> String.make gauge_width ' '
     in
     (* A row with no bar has an empty gauge. When the detail does not fit

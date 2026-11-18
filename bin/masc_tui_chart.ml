@@ -166,7 +166,27 @@ let gauge ~width ~value ~max_value ?label () =
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
 ;;
 
-let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.limit_paint
+  | Relative
+
+let meter_cell_colour scale ~index ~width =
+  match scale with
+  | Declared_limit paint ->
+    Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
+      ~width
+  | Relative -> Masc_tui_theme.Cell_plain
+;;
+
+let meter_cell_style scale ~index ~width =
+  match scale with
+  | Declared_limit paint ->
+    Masc_tui_theme.meter_cell_readable paint
+      (meter_cell_colour scale ~index ~width)
+  | Relative -> ""
+;;
+
+let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
@@ -175,11 +195,12 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
     let filled_part =
       if filled <= 0 then ""
       else
-        match cell_style with
-        | None -> repeat meter_fill filled
-        | Some style_at ->
+        match scale with
+        | Relative -> repeat meter_fill filled
+        | Declared_limit _ ->
           String.concat ""
-            (List.init filled (fun index -> style_at ~index ~width ^ meter_fill))
+            (List.init filled (fun index ->
+               meter_cell_style scale ~index ~width ^ meter_fill))
           ^ reset
     in
     let track_part =
@@ -190,7 +211,7 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
     filled_part ^ track_part
 ;;
 
-let meter ~width ~value ~max_value ?label ?suffix ?cell_style
+let meter ~width ~value ~max_value ~scale ?label ?suffix
     ?(track_style = "") ?(suffix_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -232,7 +253,7 @@ let meter ~width ~value ~max_value ?label ?suffix ?cell_style
     if width >= chrome_cells + 3 then
       let bar_width = width - chrome_cells in
       prefix
-      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ?cell_style
+      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ~scale
           ~track_style ~reset ()
       ^ styled_suffix
     else

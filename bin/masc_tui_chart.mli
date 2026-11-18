@@ -45,26 +45,50 @@ val gauge :
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
 
+(** What a meter's maximum is, which decides its colour (RFC
+    tui-one-screen-grammar section 7.3). *)
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.limit_paint
+      (** A cap set in settings or stated by a provider, where reaching it
+          refuses or holds work: a plan window that blocks model calls when
+          full, a context window's used tokens against its maximum. Each
+          filled cell takes the colour of its position against the cap. *)
+  | Relative
+      (** Anything else: a completion ratio, a share of a total, a size
+          against the largest, a cap no one has confirmed is a limit. The fill
+          draws no colour of its own, so it takes the foreground or whatever
+          state colour the caller drew around the bar. *)
+
+val meter_cell_colour :
+  meter_scale -> index:int -> width:int -> Masc_tui_theme.meter_cell_colour
+(** The colour filled cell [index] of a [width]-cell bar takes:
+    {!Masc_tui_theme.limit_cell_colour} at the paint's depth for a declared
+    limit, [Cell_plain] for a relative bar at every depth. *)
+
+val meter_cell_style : meter_scale -> index:int -> width:int -> string
+(** The SGR drawn before that cell's glyph: {!meter_cell_colour} through
+    {!Masc_tui_theme.meter_cell_readable}, and [""] for a relative bar. *)
+
 val meter_bar :
   width:int ->
   value:int ->
   max_value:int ->
-  ?cell_style:(index:int -> width:int -> string) ->
+  scale:meter_scale ->
   ?track_style:string ->
   ?reset:string ->
   unit ->
   string
 (** Bracketless segmented bar of exactly [width] display cells ([""] when
-    [width <= 0]): filled cells draw ["■"] with optional per-cell [cell_style]
-    (for Oklab gradient ramps), and remaining cells draw ["·"] in [track_style]. *)
+    [width <= 0]): filled cells draw ["■"] coloured by [scale] (see
+    {!meter_cell_colour}), and remaining cells draw ["·"] in [track_style]. *)
 
 val meter :
   width:int ->
   value:int ->
   max_value:int ->
+  scale:meter_scale ->
   ?label:string ->
   ?suffix:string ->
-  ?cell_style:(index:int -> width:int -> string) ->
   ?track_style:string ->
   ?suffix_style:string ->
   ?reset:string ->

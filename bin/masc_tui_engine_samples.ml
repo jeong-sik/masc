@@ -71,6 +71,104 @@ end
 
 let interval_s = 2.0
 
+type series =
+  | Live_heap
+  | Scheduler_p95
+
+let pick series point =
+  match series with
+  | Live_heap -> point.live_heap
+  | Scheduler_p95 -> point.scheduler_p95
+
+(* The top of one graph's axis, held against single samples the way btop
+   holds its network graph's (RFC tui-one-screen-grammar 5.6): a run of
+   samples moves it, one sample does not, so the axis text and the dots under
+   it stay still while the value wanders inside the band. *)
+type held =
+  { top : int
+  ; above : int  (** Samples over [top], less those back under a tenth of it. *)
+  ; below : int  (** Samples under a tenth of [top], less those over it. *)
+  }
+
+type scale =
+  | Unscaled  (** Nothing measured since the view opened. *)
+  | Scaled of held
+
+(* btop's rescale: after five samples out of band, the average of the five
+   newest samples times 1.3 going up, or times 3 going down. Kept as whole
+   fractions so a top is exact, rounded up. *)
+type factor =
+  { times : int
+  ; over : int
+  }
+
+let rescale_after = 5
+let raise_factor = { times = 13; over = 10 }
+let lower_factor = { times = 3; over = 1 }
+let band_divisor = 10
+
+(* The lowest top each graph takes, so a heap or a p95 near zero does not
+   blow noise up to the full height. Their units are the samples': words of
+   heap (8 bytes each) and microseconds. *)
+let bytes_per_word = 8
+let heap_floor_words = 1024 * 1024 / bytes_per_word
+let p95_floor_us = 1_000
+
+let floor_of = function
+  | Live_heap -> heap_floor_words
+  | Scheduler_p95 -> p95_floor_us
+
+let measured_value = function
+  | Braille.Zero -> Some 0
+  | Braille.Value value -> Some (value :> int)
+  | Braille.Unread | Braille.Absent -> None
+
+(* The average of the newest [rescale_after] measured times of [series] in
+   [newest_first], the time just taken among them. *)
+let recent_average series newest_first ~taken =
+  let values =
+    List.filteri
+      (fun index _ -> index < rescale_after)
+      (List.filter_map (fun point -> measured_value (pick series point)) newest_first)
+  in
+  match values with
+  | [] -> taken
+  | _ :: _ -> List.fold_left ( + ) 0 values / List.length values
+
+let scaled_top series ~factor average =
+  let top =
+    if average > (max_int - factor.over) / factor.times then max_int
+    else ((average * factor.times) + factor.over - 1) / factor.over
+  in
+  Stdlib.max (floor_of series) top
+
+let rescaled series ~factor newest_first ~taken =
+  Scaled { top = scaled_top series ~factor (recent_average series newest_first ~taken)
+         ; above = 0
+         ; below = 0
+         }
+
+(* [scale] after [series] took [sample]; [newest_first] already holds it. *)
+let next_scale series newest_first scale sample =
+  match measured_value sample with
+  | None -> scale
+  | Some taken ->
+    (match scale with
+     | Unscaled -> rescaled series ~factor:raise_factor newest_first ~taken
+     | Scaled held ->
+       let held =
+         if taken > held.top then
+           { held with above = held.above + 1; below = Stdlib.max 0 (held.below - 1) }
+         else if held.top > floor_of series && taken < held.top / band_divisor then
+           { held with below = held.below + 1; above = Stdlib.max 0 (held.above - 1) }
+         else held
+       in
+       if held.above >= rescale_after then
+         rescaled series ~factor:raise_factor newest_first ~taken
+       else if held.below >= rescale_after then
+         rescaled series ~factor:lower_factor newest_first ~taken
+       else Scaled held)
+
 (* What the sampler's own reads in this view last said, so a failure is said
    once when the reads start failing rather than every two seconds. *)
 type own_answer =
@@ -91,6 +189,8 @@ type session =
         (** Answers that arrived at or before this were taken, or were
             passed over by a due sample. Neither is taken again. *)
   ; own : own_answer
+  ; heap_scale : scale
+  ; p95_scale : scale
   }
 
 type t =
@@ -107,6 +207,8 @@ let open_session ~now ~capacity =
   ; waiting = false
   ; seen_until = Float.neg_infinity
   ; own = Own_unanswered
+  ; heap_scale = Unscaled
+  ; p95_scale = Unscaled
   }
 
 let shown t ~now ~capacity =
@@ -134,8 +236,12 @@ let current_slot session ~now =
 let take session ~slot ~seen_until point =
   let missed = Stdlib.min (Stdlib.max 0 (slot - session.next_slot)) (Ring.capacity session.ring) in
   let rec blanks count ring = if count <= 0 then ring else blanks (count - 1) (Ring.push blank ring) in
+  let ring = Ring.push point (blanks missed session.ring) in
   { session with
-    ring = Ring.push point (blanks missed session.ring)
+    ring
+  ; heap_scale = next_scale Live_heap ring.Ring.newest_first session.heap_scale point.live_heap
+  ; p95_scale =
+      next_scale Scheduler_p95 ring.Ring.newest_first session.p95_scale point.scheduler_p95
   ; next_slot = Stdlib.max session.next_slot slot + 1
   ; waiting = false
   ; seen_until
@@ -198,15 +304,6 @@ let answered t ~now reading =
       ({ t with session = Some { session with own } }, Sampled, report)
     else ({ t with session = Some { session with own } }, Nothing, report)
 
-type series =
-  | Live_heap
-  | Scheduler_p95
-
-let pick series point =
-  match series with
-  | Live_heap -> point.live_heap
-  | Scheduler_p95 -> point.scheduler_p95
-
 let samples series t =
   match t.session with
   | None -> []
@@ -217,22 +314,43 @@ let newest count items =
   let held = List.length items in
   List.filteri (fun index _ -> index >= held - count) items
 
-let measured = function
-  | Braille.Zero | Braille.Value _ -> true
-  | Braille.Unread | Braille.Absent -> false
+let measured sample = Option.is_some (measured_value sample)
+
+let scale_of series session =
+  match series with
+  | Live_heap -> session.heap_scale
+  | Scheduler_p95 -> session.p95_scale
 
 (* The axis column is as wide as the widest top [axis] writes, whatever this
    top is, so the graph draws the same number of times at every top and the
    ring the loop sizes with {!Braille.graph_times} holds exactly those. The
-   top is the largest of the times drawn: a ring wider than the graph for a
-   moment (the terminal narrowed before the loop resized it) cannot lift the
-   axis with a time no column shows. A graph with no time measured has no
-   top to write, and its column stays blank. *)
+   top is the held scale, not the largest time drawn, so it moves only after
+   a run of samples out of its band. A graph with no time measured among
+   those drawn has no top to write, and its column stays blank. *)
+let held_top series t =
+  match t.session with
+  | None -> None
+  | Some session ->
+    (match scale_of series session with
+     | Unscaled -> None
+     | Scaled held -> Some held.top)
+
 let graph ~tint ~width ~axis_cells ~axis series t =
   let samples = samples series t in
   let drawn = newest (Braille.graph_times ~width ~axis_cells) samples in
-  let maximum = Braille.graph_maximum drawn in
-  let top = if List.exists measured drawn then axis maximum else "" in
+  let held = held_top series t in
+  let top =
+    match held with
+    | Some top when List.exists measured drawn -> axis top
+    | Some _ | None -> ""
+  in
+  (* With no top held, nothing was measured since the view opened, so no time
+     draws a dot and the maximum only has to be a number. *)
+  let maximum =
+    match held with
+    | Some top -> top
+    | None -> 0
+  in
   Braille.braille_graph ~tint ~width ~rows:1
     ~axis:(Layout.fit_width top (Stdlib.max 0 axis_cells))
     ~maximum samples

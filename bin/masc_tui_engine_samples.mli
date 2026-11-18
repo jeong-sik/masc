@@ -139,7 +139,18 @@ val graph :
 (** One text row [width] cells wide. Its axis column is [axis_cells] wide
     whatever the top, so it draws {!Masc_tui_braille.graph_times} times, the
     newest, and a ring the loop sizes with that keeps no time it does not
-    draw. [axis] writes the top, the largest time drawn, with its unit, in at
-    most [axis_cells] cells. With no time measured among those drawn (every
-    read failed, or none reported the number) there is no top and the column
-    stays blank. [Never_read] before the view's first sample. *)
+    draw. [axis] writes the top with its unit, in at most [axis_cells] cells.
+
+    The top is held, not the largest time drawn (RFC tui-one-screen-grammar
+    5.6, btop's network auto scale). The first measured time sets it to 1.3
+    times that time. Five times above it raise it to 1.3 times the average of
+    the five newest measured times; five times under a tenth of it lower it
+    to 3 times that average. A time on one side takes one off the count of
+    the other, and a blank counts for neither. It never goes under the
+    series' floor (1 MiB of heap, 1 ms of p95), and a top at the floor counts
+    no time as low. A time above the top draws at the top until it rises.
+    The top lasts while the view stays open.
+
+    With no time measured among those drawn (every read failed, or none
+    reported the number) there is no top to write and the column stays
+    blank. [Never_read] before the view's first sample. *)

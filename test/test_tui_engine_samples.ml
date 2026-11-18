@@ -297,18 +297,20 @@ let test_a_reading_holds_the_two_card_numbers () =
 
 (* Feeds one heap per sample, two seconds apart, oldest first, into a ring of
    [capacity]. *)
-let sampled_heaps ~capacity heaps =
+(* One sample every two seconds, each from the newest answer, in order. *)
+let sampled_readings ~capacity readings =
   let sampler, _ =
     List.fold_left
-      (fun (sampler, at) heap ->
-        let newest =
-          Some { Samples.at; reading = Samples.Answered (point ~heap ~p95:a_p95_us) }
-        in
+      (fun (sampler, at) reading ->
+        let newest = Some { Samples.at; reading } in
         let next, _ = Samples.tick (Samples.shown sampler ~now:at ~capacity) ~now:at ~newest in
         (next, at +. Samples.interval_s))
-      (Samples.stopped, 0.) heaps
+      (Samples.stopped, 0.) readings
   in
   sampler
+
+let heap_reading heap = Samples.Answered (point ~heap ~p95:a_p95_us)
+let sampled_heaps ~capacity heaps = sampled_readings ~capacity (List.map heap_reading heaps)
 
 (* The top the graph hands its axis, or [None] when it asks for none. *)
 let axis_top ~width series sampler =
@@ -319,34 +321,76 @@ let axis_top ~width series sampler =
        series sampler);
   !top
 
-let spike = 1_000_000
-let steady = 10
+let heap_top heaps = axis_top ~width:32 Samples.Live_heap (sampled_heaps ~capacity heaps)
 
-(* The ring sized as the graph draws keeps those times and no more: a spike
-   pushed out of it no longer tops the axis. *)
+(* Heaps, in words, well above the 1 MiB floor (131,072 words). *)
+let steady = 1_000_000
+let first_top = 1_300_000
+let high = 2_000_000
+let low = 100_000
+let heap_floor_words = 131_072
+
+let repeat count value = List.init count (fun _ -> value)
+
+(* The ring sized as the graph draws keeps those times and no more. *)
 let test_a_ring_as_wide_as_the_graph_keeps_only_the_times_drawn () =
   let width = 12 in
   let capacity = Braille.graph_times ~width ~axis_cells in
-  let sampler = sampled_heaps ~capacity (spike :: List.init capacity (fun _ -> steady)) in
+  let sampler = sampled_heaps ~capacity (high :: repeat capacity steady) in
   Alcotest.(check int) "the times the graph draws" capacity
-    (List.length (Samples.samples Samples.Live_heap sampler));
-  Alcotest.(check (option int)) "the spike left with the oldest time" (Some steady)
-    (axis_top ~width Samples.Live_heap sampler)
+    (List.length (Samples.samples Samples.Live_heap sampler))
 
-(* A ring wider than the graph, as one sized before the terminal narrowed,
-   still tops the axis with the largest time drawn, not one no column shows. *)
-let test_the_axis_tops_only_the_times_drawn () =
-  let width = 12 in
-  let drawn = Braille.graph_times ~width ~axis_cells in
-  let capacity = 2 * width in
-  let sampler = sampled_heaps ~capacity (spike :: List.init (capacity - 1) (fun _ -> steady)) in
-  Alcotest.(check bool) "the ring holds more than the graph draws" true
-    (List.length (Samples.samples Samples.Live_heap sampler) > drawn);
-  Alcotest.(check (option int)) "the largest time drawn" (Some steady)
-    (axis_top ~width Samples.Live_heap sampler)
+let test_the_first_time_sets_the_top () =
+  Alcotest.(check (option int)) "1.3 times the first time" (Some first_top) (heap_top [ steady ])
 
-(* A graph whose times were all blank measured nothing, so it has no top; a
-   measured zero is a top of zero. *)
+(* One time above the top draws at the top and leaves the axis where it was. *)
+let test_one_time_above_does_not_move_the_top () =
+  Alcotest.(check (option int)) "four times above" (Some first_top)
+    (heap_top ((steady :: repeat 4 high) @ [ steady ]))
+
+let test_five_times_above_raise_the_top () =
+  Alcotest.(check (option int)) "1.3 times the average of the five newest" (Some 2_600_000)
+    (heap_top (steady :: repeat 5 high))
+
+(* A spike that left the graph does not hold the axis up for ever: five times
+   under a tenth of the top bring it down to three times their average. *)
+let test_five_low_times_lower_the_top () =
+  Alcotest.(check (option int)) "under a tenth, four times" (Some 13_000_000)
+    (heap_top (10_000_000 :: repeat 4 steady));
+  Alcotest.(check (option int)) "3 times the average of the five newest" (Some 3_000_000)
+    (heap_top (10_000_000 :: repeat 5 steady))
+
+(* A time on the other side takes one off the count, so times that swing
+   across the band do not move the axis. *)
+let test_a_time_on_the_other_side_takes_one_off () =
+  let swinging = steady :: (repeat 4 high @ [ low ] @ [ high ]) in
+  Alcotest.(check (option int)) "four above, one low, one above: four" (Some first_top)
+    (heap_top swinging);
+  (* The five newest: four at 2,000,000 and one at 100,000, averaging
+     1,620,000. *)
+  Alcotest.(check (option int)) "the fifth then raises it" (Some 2_106_000)
+    (heap_top (swinging @ [ high ]))
+
+(* A failed read is a blank time, which counts for neither side. *)
+let test_blanks_count_for_neither_side () =
+  let failed = Samples.Failed "server identity load failed: refused" in
+  let readings =
+    heap_reading steady
+    :: List.concat_map (fun _ -> [ heap_reading high; failed ]) (repeat 4 ())
+  in
+  let sampler = sampled_readings ~capacity readings in
+  Alcotest.(check (option int)) "four above among four blanks" (Some first_top)
+    (axis_top ~width:32 Samples.Live_heap sampler)
+
+let test_the_top_never_goes_under_the_floor () =
+  Alcotest.(check (option int)) "a measured zero tops the floor" (Some heap_floor_words)
+    (heap_top [ 0 ]);
+  Alcotest.(check (option int)) "a top at the floor counts no time as low" (Some heap_floor_words)
+    (heap_top (repeat 12 0));
+  Alcotest.(check (option int)) "lowering stops at the floor" (Some heap_floor_words)
+    (heap_top (10_000_000 :: repeat 5 10))
+
+(* A graph whose times were all blank measured nothing, so it has no top. *)
 let test_a_graph_with_nothing_measured_has_no_top () =
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
   let asked, _ = Samples.tick opened ~now:0. ~newest:None in
@@ -362,10 +406,17 @@ let test_a_graph_with_nothing_measured_has_no_top () =
   let asked, _ = Samples.tick failed ~now:2.0 ~newest:None in
   let unreported, _, _ = Samples.answered asked ~now:2.03 unreported in
   Alcotest.(check (option int)) "an unreported p95 asks for no top" None
-    (axis_top ~width:32 Samples.Scheduler_p95 unreported);
-  let zero = sampled_heaps ~capacity [ 0 ] in
-  Alcotest.(check (option int)) "a measured zero is a top" (Some 0)
-    (axis_top ~width:32 Samples.Live_heap zero)
+    (axis_top ~width:32 Samples.Scheduler_p95 unreported)
+
+(* Closing the view forgets the top; the next opening starts from its first
+   time. *)
+let test_a_reopened_view_sets_its_top_again () =
+  let sampler = sampled_heaps ~capacity (repeat 6 10_000_000) in
+  let reopened = Samples.shown (Samples.hidden sampler) ~now:100. ~capacity in
+  let newest = Some { Samples.at = 100.; reading = heap_reading steady } in
+  let reopened, _ = Samples.tick reopened ~now:100. ~newest in
+  Alcotest.(check (option int)) "1.3 times the first time after reopening" (Some first_top)
+    (axis_top ~width:32 Samples.Live_heap reopened)
 
 let count_sampled steps =
   List.length (List.filter (fun decision -> decision = Samples.Sampled) steps)
@@ -459,9 +510,23 @@ let () =
             test_a_reading_holds_the_two_card_numbers
         ; Alcotest.test_case "a ring as wide as the graph keeps only the times drawn" `Quick
             test_a_ring_as_wide_as_the_graph_keeps_only_the_times_drawn
-        ; Alcotest.test_case "the axis tops only the times drawn" `Quick
-            test_the_axis_tops_only_the_times_drawn
         ; Alcotest.test_case "a graph with nothing measured has no top" `Quick
             test_a_graph_with_nothing_measured_has_no_top
+        ] )
+    ; ( "axis"
+      , [ Alcotest.test_case "the first time sets the top" `Quick test_the_first_time_sets_the_top
+        ; Alcotest.test_case "one time above does not move the top" `Quick
+            test_one_time_above_does_not_move_the_top
+        ; Alcotest.test_case "five times above raise the top" `Quick
+            test_five_times_above_raise_the_top
+        ; Alcotest.test_case "five low times lower the top" `Quick test_five_low_times_lower_the_top
+        ; Alcotest.test_case "a time on the other side takes one off" `Quick
+            test_a_time_on_the_other_side_takes_one_off
+        ; Alcotest.test_case "blanks count for neither side" `Quick
+            test_blanks_count_for_neither_side
+        ; Alcotest.test_case "the top never goes under the floor" `Quick
+            test_the_top_never_goes_under_the_floor
+        ; Alcotest.test_case "a reopened view sets its top again" `Quick
+            test_a_reopened_view_sets_its_top_again
         ] )
     ]

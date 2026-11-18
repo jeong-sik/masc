@@ -8,8 +8,9 @@ open Masc_tui_ansi
 (* The Skills list's name column is as wide as its longest name, between
    these two. The floor is the width the column always had. The cap keeps a
    row on an 80-column screen: 32 name cells and an instruction Skill's
-   other fields (mark, execution, sizes) come to about 74 cells. A longer name is cut in
-   the middle, so two names that share a head still differ on screen. *)
+   other fields (mark, execution, sizes) come to about 74 cells. A longer
+   name is cut in the middle, so two names that share a head still differ
+   on screen. *)
 let skill_name_min_cells = 22
 let skill_name_max_cells = 32
 

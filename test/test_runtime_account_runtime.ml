@@ -28,8 +28,8 @@ streaming = true
   | Error _ -> fail "fixture runtime.toml refused"
 ;;
 
-let of_template ~template ~binding home =
-  A.of_template config ~template ~provider_id:"acct-1" ~account_home:home ~binding
+let of_template ?(config = config) ?(account = A.Login) ~template ~binding home =
+  A.of_template config ~template ~provider_id:"acct-1" ~account_home:home ~account ~binding
 ;;
 
 let outcome = function
@@ -90,12 +90,77 @@ let the_binding_of_a_runtime_id () =
         [ "claude_code.claude-sonnet-5"; "acct-2.claude-sonnet-5"; "acct-1"; "acct-1.claude-sonnet" ])
 ;;
 
+(* RFC a-persons-api-key-is-their-own-provider-account 3.4 and 3.5: the
+   credential of the provider of an account is of the account. A key account
+   takes its key file, read before any runtime is made, and a login account
+   takes none, whatever the workspace declared for the template. *)
+let the_credential_is_of_the_account () =
+  let root = Filename.temp_dir ~perms:0o700 "account-runtime-key-" "" |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree root)
+    (fun () ->
+      let home = Filename.concat root "home" in
+      Unix.mkdir home 0o700;
+      let account_id =
+        match Authz_types.Provider_account_id.of_string "acct-1" with
+        | Ok id -> id
+        | Error _ -> fail "fixture account id refused"
+      in
+      let generation = Authz_types.Key_generation.first in
+      let key_file =
+        match Runtime_account_home_layout.key_file ~runtime_root:root ~account_id ~generation with
+        | Ok path -> path
+        | Error detail -> fail detail
+      in
+      let binding = A.Model "claude-sonnet-5" in
+      let code = function
+        | Ok (runtime : Runtime_instance.t) -> "ok " ^ runtime.id
+        | Error error -> A.error_code error
+      in
+      let credentials = function
+        | Ok (runtime : Runtime_instance.t) -> runtime.provider.Runtime_schema.credentials
+        | Error error -> fail (A.error_to_string error)
+      in
+      let credential = option (testable Runtime_schema.pp_credential Runtime_schema.equal_credential) in
+      let on_key () = of_template ~account:(A.Key { key_file }) ~template:"claude_code" ~binding home in
+      check string "a key account whose file is not there" "key_missing" (code (on_key ()));
+      (match Runtime_api_key_file.key_of_string "sk-test-account-runtime" with
+       | None -> fail "fixture key refused"
+       | Some key ->
+         (match Runtime_api_key_file.write ~runtime_root:root ~account_id ~generation key with
+          | Ok () -> ()
+          | Error _ -> fail "fixture key not written"));
+      check
+        credential
+        "a key account runs on its key file"
+        (Some (Runtime_schema.File key_file))
+        (credentials (on_key ()));
+      Unix.chmod key_file 0o640;
+      check string "a key file its group reads" "key_unreadable" (code (on_key ()));
+      Unix.chmod key_file 0o600;
+      let declared =
+        { config with
+          providers =
+            List.map
+              (fun (provider : Runtime_schema.provider) ->
+                { provider with credentials = Some (Runtime_schema.File key_file) })
+              config.providers
+        }
+      in
+      check
+        credential
+        "a login account takes no credential the workspace declared for the template"
+        None
+        (credentials (of_template ~config:declared ~template:"claude_code" ~binding home)))
+;;
+
 let () =
   run
     "runtime_account_runtime"
     [ ( "of_template"
       , [ test_case "the template with the person's home" `Quick the_template_with_the_persons_home
         ; test_case "the binding of a Runtime id" `Quick the_binding_of_a_runtime_id
+        ; test_case "the credential is of the account" `Quick the_credential_is_of_the_account
         ] )
     ]
 ;;

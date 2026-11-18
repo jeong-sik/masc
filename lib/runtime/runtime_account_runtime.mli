@@ -15,6 +15,14 @@ type binding =
           a record of the authorization log names (plan D2-8). The id is
           compared whole with the id each binding makes, never cut apart. *)
 
+(** What the account runs on (RFC
+    a-persons-api-key-is-their-own-provider-account 3.4). *)
+type account =
+  | Login  (** The login a client keeps in the home of the account. *)
+  | Key of { key_file : string }
+      (** The API key in this file
+          ({!Runtime_account_home_layout.key_file}). *)
+
 type error =
   | Template_not_declared of string  (** No provider of the configuration has this id. *)
   | Model_not_bound of
@@ -25,6 +33,12 @@ type error =
       { template : string
       ; runtime_id : string
       }  (** No binding of the template makes this Runtime id on the account. *)
+  | Key_missing
+      (** The key file of a key account is not there
+          ({!Runtime_api_key_file.read}). No client starts. *)
+  | Key_unreadable of Runtime_api_key_file.unreadable
+      (** The key file of a key account is there and gives no key. No client
+          starts. *)
   | Not_materialized of string
       (** The configuration of the one runtime does not load; the diagnostic
           of {!Runtime.runtimes_of_config}. *)
@@ -33,7 +47,7 @@ val error_to_string : error -> string
 
 (** The name of the error in an answer, one per constructor:
     [template_not_declared], [model_not_bound], [runtime_not_bound],
-    [not_materialized]. *)
+    [key_missing], [key_unreadable], [not_materialized]. *)
 val error_code : error -> string
 
 (** The binding of the template that [binding] chooses, moved onto the account
@@ -47,10 +61,22 @@ val binding_of
   -> binding:binding
   -> (Runtime_schema.binding, error) result
 
+(** The runtime of [binding] of [template] on the account [provider_id].
+
+    The provider of the runtime takes its credential from [account] and never
+    from the template: none for a [Login], the key file for a [Key]. So an
+    account of a person runs on no credential the workspace declared for the
+    template.
+
+    The key file of a [Key] is read before the runtime is made, so a file
+    that is missing or gives no key is [Key_missing] or [Key_unreadable] and
+    not a sentence of a diagnostic. The adapter reads it again when it makes
+    the runtime. *)
 val of_template
   :  Runtime_schema.config
   -> template:string
   -> provider_id:string
   -> account_home:string
+  -> account:account
   -> binding:binding
   -> (Runtime_instance.t, error) result

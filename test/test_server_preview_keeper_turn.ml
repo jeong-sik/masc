@@ -796,6 +796,7 @@ let test_turn () =
                ~template:"claude_code"
                ~provider_id:alice.account_id
                ~account_home:(home_of ~base_path alice)
+               ~account:Runtime_account_runtime.Login
                ~binding:(Runtime_account_runtime.Model "claude-notools")
            with
            | Ok runtime -> runtime

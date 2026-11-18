@@ -120,6 +120,15 @@ let codex_configured_keys home =
   with Otoml.Parse_error _ | Otoml.Type_error _ | Sys_error _ | Invalid_argument _ ->
     Error "Cannot read declared Codex provider credential environment names; inspect config.toml"
 
+(* The entries a Claude Code child takes from the environment of the server
+   under [names]. A home the environment chose stays chosen: the child gets
+   the spelling this capture read. *)
+let claude_inherited ~names ~source ~home inherited =
+  List.filter_map (fun name ->
+    let selected = if name = "CLAUDE_CONFIG_DIR" && source = Inherited_directory
+      then Some home else value name inherited in
+    Option.map (fun value -> name ^ "=" ^ value) selected) names
+
 let capture (type owner) ~(client : owner client) ~declaration : (owner t, string) result =
   let inherited = Unix.environment () in
   let ( let* ) = Result.bind in
@@ -128,18 +137,37 @@ let capture (type owner) ~(client : owner client) ~declaration : (owner t, strin
     | Claude_code ->
       let names = Runtime_claude_environment_projection.inherited_names
         ~explicit_account:(Option.is_some declaration) in
-      let inherited = List.filter_map (fun name ->
-        let selected = if name = "CLAUDE_CONFIG_DIR" && source = Inherited_directory
-          then Some home else value name inherited in
-        Option.map (fun value -> name ^ "=" ^ value) selected) names in
       Ok (Runtime_claude_environment_projection.of_inherited
-        ~account_home:(Option.map (fun _ -> home) declaration) inherited)
+        ~account_home:(Option.map (fun _ -> home) declaration)
+        (claude_inherited ~names ~source ~home inherited))
     | Codex ->
       let* configured = codex_configured_keys home in
       Ok (Runtime_codex_environment_projection.project
         ~explicit_account:(Option.is_some declaration) ~home:(Some home) ~configured inherited) in
   let* () = validate_environment environment in
   Ok {client; home; source; environment = Array.copy environment}
+
+let capture_on_key ~declaration ~key =
+  let inherited = Unix.environment () in
+  let ( let* ) = Result.bind in
+  let* source, home =
+    selected_directory ~client:Claude_code ~declaration ~environment:inherited in
+  (* The names a declared account keeps, whether or not a home is declared:
+     no credential, provider choice or endpoint of the server stays beside
+     the key. *)
+  let kept = Runtime_claude_environment_projection.inherited_names ~explicit_account:true in
+  let names = match source with
+    | Inherited_directory -> directory_variable Claude_code :: kept
+    | Declared_directory | Inherited_user_home -> kept in
+  let environment =
+    Array.append
+      (Runtime_claude_environment_projection.of_inherited
+         ~account_home:(Option.map (fun _ -> home) declaration)
+         (claude_inherited ~names ~source ~home inherited))
+      [| Runtime_claude_environment_projection.api_key_variable
+         ^ "=" ^ Runtime_api_key_file.value key |] in
+  let* () = validate_environment environment in
+  Ok {client = Claude_code; home; source; environment}
 
 let private_codex_environment ~home selected =
   let ( let* ) = Result.bind in

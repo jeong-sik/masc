@@ -16,3 +16,8 @@ val inherited_names : explicit_account:bool -> string list
     declared account. [inherited] names neither variable when the account is
     declared ({!inherited_names}). *)
 val of_inherited : account_home:string option -> string list -> string array
+
+(** [ANTHROPIC_API_KEY]: the variable a non-interactive Claude Code session
+    takes its API key from, before the account signed in to its home. It is
+    one of the names a child on a declared account does not inherit. *)
+val api_key_variable : string

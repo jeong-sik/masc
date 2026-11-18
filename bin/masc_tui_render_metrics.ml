@@ -125,17 +125,37 @@ let format_megawords words =
   else if mw >= 1.0 then Printf.sprintf "%.1f MW" mw
   else Printf.sprintf "%.0f kW" (words /. 1000.0)
 
-(* The probe's state in words. A word from a server newer than this build is
-   drawn as it came behind [?] (RFC tui-one-screen-grammar section 7.1). That
-   word and a stopped probe's reason come off the wire, so both are escaped
-   here, where the three rows that ask for them cannot each forget. *)
+(* The probe's state in one word, without a stopped probe's reason: the
+   word a card edge carries (RFC tui-one-screen-grammar section 2). *)
+let scheduler_probe_state_word ~ko = function
+  | Scheduler_lag.Not_started -> if ko then "시작 전" else "not started"
+  | Scheduler_lag.Running -> if ko then "실행 중" else "running"
+  | Scheduler_lag.Stopped _ -> if ko then "멈춤" else "stopped"
+  | Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
+
+(* Why a probe stopped: the exception it raised, as the server sent it. It is
+   data, so a card writes it in its body, where it is not dropped whole when
+   the edge is narrow, as a status word is. *)
+let scheduler_stop_reason = function
+  | Some (Decode.Probe_reported (Scheduler_lag.Stopped reason)) ->
+      Some (Terminal_text.single_line reason)
+  | Some
+      ( Decode.Probe_reported
+          Scheduler_lag.(Not_started | Running | Cancelled)
+      | Decode.Probe_unknown _ )
+  | None -> None
+
+(* The probe's state in words, with a stopped probe's reason. A word from a
+   server newer than this build is drawn as it came behind [?] (RFC
+   tui-one-screen-grammar section 7.1). That word and a stopped probe's
+   reason come off the wire, so both are escaped here, where the rows that
+   ask for them cannot each forget. *)
 let scheduler_probe_word ~ko = function
-  | Decode.Probe_reported Scheduler_lag.Not_started ->
-      if ko then "시작 전" else "not started"
-  | Decode.Probe_reported Scheduler_lag.Running -> if ko then "실행 중" else "running"
-  | Decode.Probe_reported (Scheduler_lag.Stopped reason) ->
-      (if ko then "멈춤: " else "stopped: ") ^ Terminal_text.single_line reason
-  | Decode.Probe_reported Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
+  | Decode.Probe_reported state as probe -> (
+      let word = scheduler_probe_state_word ~ko state in
+      match scheduler_stop_reason (Some probe) with
+      | Some reason -> word ^ ": " ^ reason
+      | None -> word)
   | Decode.Probe_unknown word -> "? " ^ Terminal_text.single_line word
 
 let scheduler_probe_text ~ko = function
@@ -159,18 +179,20 @@ let scheduler_probe_symbol : Decode.scheduler_probe option -> Masc_tui_card.symb
       Masc_tui_card.Mark Masc_tui_value.Mark.Paused
 
 (* The probe as a card's status: the mark says which kind of state it is and
-   the word says which one. A word this build does not know reads [?] and the
-   word as it came (RFC tui-one-screen-grammar section 7.1); no probe at all
-   is the [?] alone. [tone] is the colour the samples give the card. A failed
-   probe takes the colour its mark means instead, so a card with no stalls
-   does not draw a failure in the colour of one that is fine. *)
+   the word says which one. A stopped probe's reason is not a state word; the
+   card's body writes it (scheduler_stop_reason). A word this build does not
+   know reads [?] and the word as it came (RFC tui-one-screen-grammar section
+   7.1); no probe at all is the [?] alone. [tone] is the colour the samples
+   give the card. A failed probe takes the colour its mark means instead, so
+   a card with no stalls does not draw a failure in the colour of one that is
+   fine. *)
 let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
   let symbol = scheduler_probe_symbol probe in
   let word =
     match probe with
     | None -> ""
     | Some (Decode.Probe_unknown word) -> Terminal_text.single_line word
-    | Some (Decode.Probe_reported _ as reported) -> scheduler_probe_word ~ko reported
+    | Some (Decode.Probe_reported state) -> scheduler_probe_state_word ~ko state
   in
   let tone =
     match symbol with
@@ -314,13 +336,20 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
       (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
   in
-  (* The probe's state is the card's status, on its edge, so with no samples
-     the body has the one row that says so and does not write the probe
-     again. *)
+  (* The probe's state is the card's status, on its edge, so the body does
+     not write the probe again. A stopped probe's reason is data, the last
+     row of the body. With no samples it has the second row to itself. With
+     samples still in the producer window it is the third, which the card
+     cuts and counts on its bottom edge; a stopped probe takes no new
+     samples, so the window empties and the reason moves up. *)
+  let stop_reason =
+    Option.to_list
+      (scheduler_stop_reason (Option.bind sched_opt (fun s -> s.ssch_probe)))
+  in
   let c2_l1, c2_rest, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
-        [],
+        stop_reason,
         Theme.recede (),
         scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
     | Some s ->
@@ -328,8 +357,9 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
-       [ Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
-           (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls) ],
+       Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
+         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls)
+       :: stop_reason,
        tone,
        scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
     (* One condition -- no scheduler reading at all -- so both halves of the

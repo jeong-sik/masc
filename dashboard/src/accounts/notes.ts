@@ -55,6 +55,11 @@ export const sessionEndedWords = '세션이 끝났어요. 로그인 화면으로
 
 export const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.'
 
+/** What removing a key account does not do, said where a key is given and
+    where an account is removed: the server takes its own copy of the key
+    away, and the vendor still takes the key (RFC of the key accounts, 3.8). */
+export const keyStaysValidWords = '여기서 없애도 key 는 발급한 곳에서 계속 유효해요. 못 쓰게 하려면 그곳에서 폐기해 주세요.'
+
 /** Why the models the operator bound are left out, a sentence for each reason. */
 function withheldWords(reason: WithheldReason, models: readonly string[]): string {
   const names = models.join(', ')

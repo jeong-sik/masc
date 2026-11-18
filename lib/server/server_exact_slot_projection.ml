@@ -8,19 +8,70 @@ let binding_json (binding:Agent_core.Exact_output.binding_observation) =
     "model_id",`String binding.model_id;
     "provider_kind",`String (Llm_provider.Provider_config.string_of_provider_kind binding.provider_kind);
     "endpoint",`String binding.endpoint]
+
+module Slot_key = struct
+  type t = transport * string
+
+  let equal (left_transport, left_id) (right_transport, right_id) =
+    match left_transport, right_transport with
+    | Http, Http | Official_client, Official_client -> String.equal left_id right_id
+    | Http, Official_client | Official_client, Http -> false
+
+  let hash = Hashtbl.hash
+end
+
+module Slot_table = Hashtbl.Make (Slot_key)
+
+type slot_history =
+  { kind : transport
+  ; slot_id : string
+  ; declared : bool
+  ; mutable reversed_observations : (Exact_lane_run_registry.run * int * Observation.t) list
+  }
+
 let slots_json ~owner ~current_http ~declared_http ~declared_cli ~runs =
+  match declared_http, declared_cli, runs with
+  | [], [], [] -> `List []
+  | (_ :: _, _, _) | ([], _ :: _, _) | ([], [], _ :: _) ->
   let lane_key = Runtime_schema.exact_lane_key owner in
-  let retained=List.concat_map (fun (run:Exact_lane_run_registry.run) ->
-    match run.slot_observations with None | Some (Error _) -> []
-    | Some (Ok observations) -> List.filter_map (fun (index,(observation:Observation.t)) ->
-        if observation.lane_key=Some lane_key then Some (run,index,observation) else None)
-        (List.mapi (fun index observation -> index,observation) observations)) runs in
   let declared=List.map (fun id -> Http,id) declared_http
     @ List.map (fun id -> Official_client,id) declared_cli in
-  let historical=List.map (fun (_,_,(observation:Observation.t)) ->
-    transport observation.binding,observation.slot_id) retained in
-  let slots=List.fold_left (fun seen key -> if List.mem key seen then seen else seen@[key])
-    [] (declared@historical) in
+  (* These records and tables belong to this call. The list alone determines
+     output order: declared HTTP, declared CLI, then first-seen historical
+     keys. Table iteration cannot reorder slots or same-key observations. *)
+  let histories = Slot_table.create (List.length declared) in
+  let reversed_slots = ref [] in
+  let history ~declared ((kind, slot_id) as key) =
+    match Slot_table.find_opt histories key with
+    | Some history -> history
+    | None ->
+      let history = { kind; slot_id; declared; reversed_observations = [] } in
+      Slot_table.add histories key history;
+      reversed_slots := history :: !reversed_slots;
+      history
+  in
+  List.iter (fun key -> ignore (history ~declared:true key)) declared;
+  List.iter
+    (fun (run : Exact_lane_run_registry.run) ->
+       match run.slot_observations with
+       | None | Some (Error _) -> ()
+       | Some (Ok observations) ->
+         List.iteri
+           (fun index (observation : Observation.t) ->
+              if observation.lane_key = Some lane_key then (
+                let history = history ~declared:false
+                    (transport observation.binding, observation.slot_id) in
+                history.reversed_observations <-
+                  (run, index, observation) :: history.reversed_observations))
+           observations)
+    runs;
+  (* Duplicate declarations keep the first current binding, like assoc_opt. *)
+  let current_bindings = Hashtbl.create (List.length current_http) in
+  List.iter
+    (fun (slot_id, binding) ->
+       if not (Hashtbl.mem current_bindings slot_id) then
+         Hashtbl.add current_bindings slot_id binding)
+    current_http;
   let latest ~attempt predicate observations =
     let at (observation:Observation.t) =
       if attempt then observation.started_at else
@@ -38,14 +89,16 @@ let slots_json ~owner ~current_http ~declared_http ~declared_cli ~runs =
     | None -> `Null
     | Some ((run:Exact_lane_run_registry.run),_,observation) ->
       `Assoc ["run_id",`String run.run_id;"observation",Observation.to_yojson observation] in
-  `List (List.map (fun (kind,slot_id) ->
-    let history=List.filter (fun (_,_,(observation:Observation.t)) ->
-      observation.slot_id=slot_id && transport observation.binding=kind) retained in
-    let current_binding=match kind,List.assoc_opt slot_id current_http with
-      | Http,Some binding -> binding_json binding
-      | Http,None | Official_client,(None | Some _) -> `Null in
+  `List (List.map (fun slot ->
+    let kind = slot.kind and slot_id = slot.slot_id in
+    let history = List.rev slot.reversed_observations in
+    let current_binding=match kind with
+      | Official_client -> `Null
+      | Http -> (match Hashtbl.find_opt current_bindings slot_id with
+          | Some binding -> binding_json binding
+          | None -> `Null) in
     `Assoc ["slot_id",`String slot_id;"lane_key",`String lane_key;"transport",`String (transport_string kind);
-      "declared",`Bool (List.mem (kind,slot_id) declared);"current_binding",current_binding;
+      "declared",`Bool slot.declared;"current_binding",current_binding;
       "ordering_scope",`String "dated_only";
       "last_observation",observed_json (latest ~attempt:false (fun _ -> true) history);
       "last_attempt",observed_json (latest ~attempt:true (fun observation -> observation.Observation.started_at<>None) history);
@@ -61,4 +114,4 @@ let slots_json ~owner ~current_http ~declared_http ~declared_cli ~runs =
         match observation.finished_at,observation.outcome with
         | None,(Accepted | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _) ->
           Some (observed_json (Some value))
-        | Some _,_ | None,Unresolved -> None) history)]) slots)
+        | Some _,_ | None,Unresolved -> None) history)]) (List.rev !reversed_slots))

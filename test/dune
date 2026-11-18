@@ -6168,7 +6168,7 @@
 (test
  (name test_tui_collab)
  (modules test_tui_collab)
- (libraries alcotest masc masc_tui_collab))
+ (libraries alcotest masc masc_tui_collab masc_tui_value))
 
 (rule
  (alias runtest-test_install_runtime_setup)

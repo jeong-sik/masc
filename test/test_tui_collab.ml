@@ -140,7 +140,22 @@ let test_explicit_unknown_resolution () =
   let _, action = C.key cancelled "enter" in
   check bool "cancelled resolution cannot be confirmed" true (action = C.Stay)
 
+(* The invites are the list the keys move, so the overlay hands the selected
+   invite among them (RFC tui-one-screen-grammar, section 2), read as the
+   value handed. *)
+let test_position_is_the_selected_invite () =
+  let rows view = match C.position view with
+    | Some (Masc_tui_value.Position.Row { at; total }) -> Some (at, total)
+    | Some (Masc_tui_value.Position.Window _ | Masc_tui_value.Position.Partial _) ->
+        fail "the invite list hands its selected row, not a window"
+    | None -> None in
+  check (option (pair int int)) "nothing listed hands nothing" None (rows (C.create ()));
+  let view = listed (C.create ()) ["a"; "b"; "c"] in
+  let view, _ = C.key view "j" in
+  check (option (pair int int)) "the second of three invites" (Some (2, 3)) (rows view)
+
 let () = run "Collab request ownership" ["operator flows", [
+  test_case "the position is the selected invite" `Quick test_position_is_the_selected_invite;
   test_case "superseded and foreign inventories are ignored" `Quick test_superseded_inventory;
   test_case "removed selections move to surviving invites" `Quick test_removed_selection;
   test_case "refresh retains navigation without admitting row actions" `Quick test_refresh_navigation;

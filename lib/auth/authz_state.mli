@@ -94,6 +94,17 @@ val closable : t -> Authz_external_store.Change.t -> Authz_record.Hash.t list
     [revocation_pending(subject)]). *)
 val revocation : t -> Authz_records.Subject.t -> Authz_records.Revocation_state.t
 
+(** The status of a provider account that a record linked, and [None] for one
+    that none linked. An account is [Purged] from the start of its purge on,
+    whatever became of the purge since: a target is out of reads while its
+    purge is pending, once it went through, and after it failed (design 8.5-2
+    and 8.5-4). Every other account is [Active]: the log has no record that
+    disables, blocks or quarantines one. *)
+val provider_account_status
+  :  t
+  -> Authz_types.Provider_account_id.t
+  -> Authz_records.Resource_status.t option
+
 type refusal =
   | Before_bootstrap of Authz_record.Kind.t
       (** A record of this kind comes before the [Fresh_bootstrap]. *)

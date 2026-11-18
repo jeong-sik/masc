@@ -59,6 +59,20 @@ let revocation state subject =
   else Authz_records.Revocation_state.Not_pending
 ;;
 
+let provider_account_status state provider_account_id =
+  Option.map
+    (fun ({ owner; kind = _ } : Authz_provider_account_state.account) ->
+      match
+        Authz_purge_state.find_account state.purges { Authz_purge_event.owner; provider_account_id }
+      with
+      | None -> Authz_records.Resource_status.Active
+      | Some
+          ( Authz_purge_state.Account_pending
+          | Authz_purge_state.Account_purged
+          | Authz_purge_state.Account_failed _ ) -> Authz_records.Resource_status.Purged)
+    (Authz_provider_account_state.find state.provider_accounts provider_account_id)
+;;
+
 let hold_revocations state helds =
   let revocation_pending =
     List.fold_left
@@ -667,6 +681,7 @@ let purge state (record : R.t) =
          state.purges
          ~author:record.R.author
          ~is_active:(Authz_principal_state.is_active state.principals)
+         ~account_owner:(Authz_provider_account_state.owner state.provider_accounts)
          event
      with
      | Error refusal -> Error (Purge refusal)

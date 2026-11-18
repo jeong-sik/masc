@@ -21,9 +21,13 @@
       is limited by its [turn_scope].
     - [runtime] and [grant]: the Runtime record and its Self grant, with the
       effects the record names. The grant is the owner's only.
-    - Runtime and ProviderAccount status: the log of phase 1 has no record
-      that disables, blocks, quarantines or purges either one, so a Runtime
-      or an account the log has is [Active] (plan D2, D5 adds the records).
+    - Runtime status: the log of phase 1 has no record that disables,
+      blocks, quarantines or purges a Runtime, so a Runtime the log has is
+      [Active] (plan D2, D5 adds the records).
+    - ProviderAccount status: {!Authz_state.provider_account_status}. An
+      account is [Purged] from the start of its purge on (design 8.5-2), so
+      no turn spends an account its owner is removing, and [Active]
+      otherwise.
     - [revocation]: the reductions the state holds
       ({!Authz_state.revocation}).
     - [dependencies]: [Cleared]. Phase 1 has no restore window (F2 is phase 2)

@@ -1530,10 +1530,11 @@ let test_turn () =
         let purges = claude ^ ".purge.jsonl" in
         let purged () = if Sys.file_exists purges then List.length (rows purges) else 0 in
         let status_of (who : someone) id =
-          Authz_purge_state.find
+          Authz_purge_state.find_conversation
             (Z.snapshot zone).Z.state.Authz_state.purges
-            (Authz_purge_event.Keeper_conversation
-               { owner = who.person.user_id; conversation_id = get (Conversation.Conversation_id.of_string id) })
+            { Authz_purge_event.owner = who.person.user_id
+            ; conversation_id = get (Conversation.Conversation_id.of_string id)
+            }
         in
         let listed fields =
           match List.assoc_opt "conversations" fields with

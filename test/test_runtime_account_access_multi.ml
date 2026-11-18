@@ -908,6 +908,31 @@ let test_multi_account () =
          with
          | Error Access.Already_published -> ()
          | Ok () -> Alcotest.fail "a second publication was taken");
+        (* RFC a-persons-api-key-is-their-own-provider-account 3.6: from the
+           start of the purge of an account on, no turn spends it, before
+           anything of it is deleted. *)
+        let dave = person zone ~base_path ~name:"dave" ~hex:'d' in
+        let dave_account = captured dave.home in
+        let erin = person zone ~base_path ~name:"erin" ~hex:'e' in
+        let erin_account = captured erin.home in
+        allowed "a turn before the purge of its account" (turn dave ()) dave_account;
+        (match
+           Authz_purge.start
+             zone
+             ~user_id:dave.user_id
+             (Authz_purge_event.Provider_account
+                { owner = dave.user_id; provider_account_id = dave.account })
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_purge.error_detail error));
+        refused
+          "a turn once the purge of its account started"
+          (turn dave ())
+          dave_account
+          (denied (function
+             | Authz_decision.Provider_account_unavailable Authz_decision.Resource_purged -> true
+             | _ -> false));
+        allowed "a turn on an account no purge names" (turn erin ()) erin_account;
         (* Bytes another writer added to the log: the next commit finds the
            end moved and stops the log. No decision rests on the state of the
            zone from then on, so no client starts for a person or for a turn

@@ -1942,9 +1942,8 @@ let test_keepers () =
 module Pg = Authz_purge_event
 module Pgs = Authz_purge_state
 
-let conversation_of owner =
-  Pg.Keeper_conversation
-    { owner; conversation_id = id_of_string Authz_types.Conversation_id.of_string "conversation-1" }
+let conversation_of owner : Pg.conversation =
+  { owner; conversation_id = id_of_string Authz_types.Conversation_id.of_string "conversation-1" }
 ;;
 
 let purge_record ~author event =
@@ -1959,8 +1958,8 @@ let copy_word = function
   | Pg.May_remain -> "may_remain"
 ;;
 
-let purge_status state target =
-  match Pgs.find state.S.purges target with
+let purge_status state conversation =
+  match Pgs.find_conversation state.S.purges conversation with
   | None -> "none"
   | Some (Pgs.Pending { earlier_vendor_copy = None }) -> "pending"
   | Some (Pgs.Pending { earlier_vendor_copy = Some copy }) -> "pending after " ^ copy_word copy
@@ -1973,14 +1972,19 @@ let purge_status state target =
    start is a Purge intent. The maintenance ends it, and ends a purge that went
    through once more after a restore. Nobody else writes either. *)
 let test_purges_and_their_intent () =
-  let target = conversation_of user in
+  let conversation = conversation_of user in
+  let target = Pg.Keeper_conversation conversation in
   let maintenance = Authz_records.Author.System_maintenance in
   let start = purge_record ~author:(human user) (Pg.Purge_pending { target }) in
-  let purged copy = purge_record ~author:maintenance (Pg.Purged { target; vendor_copy = copy }) in
+  let purged copy =
+    purge_record ~author:maintenance (Pg.Purged (Pg.Conversation_purged { conversation; vendor_copy = copy }))
+  in
   let failed =
     purge_record
       ~author:maintenance
-      (Pg.Purge_failed { target; failed_stage = Pg.Folder_not_removed; vendor_copy = Pg.May_remain })
+      (Pg.Purge_failed
+         (Pg.Conversation_not_purged
+            { conversation; failed_stage = Pg.Folder_not_removed; vendor_copy = Pg.May_remain }))
   in
   let intent = Some "purge of keeper_conversation:user-1/conversation-1" in
   let state = two_admins () in
@@ -1993,7 +1997,9 @@ let test_purges_and_their_intent () =
   refused_as
     "a person who never joined"
     state
-    (purge_record ~author:(human carol) (Pg.Purge_pending { target = conversation_of carol }))
+    (purge_record
+       ~author:(human carol)
+       (Pg.Purge_pending { target = Pg.Keeper_conversation (conversation_of carol) }))
     (S.Purge (Pgs.User_not_active carol));
   refused_as
     "a start by the maintenance"
@@ -2005,7 +2011,9 @@ let test_purges_and_their_intent () =
   refused_as
     "an end by the owner"
     state
-    (purge_record ~author:(human user) (Pg.Purged { target; vendor_copy = Pg.Removed }))
+    (purge_record
+       ~author:(human user)
+       (Pg.Purged (Pg.Conversation_purged { conversation; vendor_copy = Pg.Removed })))
     (S.Purge (Pgs.Ended_by_a_principal user));
   let state = applied_change "a failure" state failed None in
   refused_as "an end after a failure" state (purged Pg.Removed) (S.Purge (Pgs.Not_started target));
@@ -2013,11 +2021,90 @@ let test_purges_and_their_intent () =
   Alcotest.(check string)
     "what the failure wrote of the vendor copy"
     "pending after may_remain"
-    (purge_status state target);
+    (purge_status state conversation);
   let state = applied_change "the end" state (purged Pg.Removed) None in
   refused_as "a start once purged" state start (S.Purge (Pgs.Already_purged target));
   let state = applied_change "the end once more, after a restore" state (purged Pg.No_copy) None in
-  Alcotest.(check string) "the last end" "purged, none" (purge_status state target)
+  Alcotest.(check string) "the last end" "purged, none" (purge_status state conversation)
+;;
+
+let account_status_word state provider_account_id =
+  match S.provider_account_status state provider_account_id with
+  | None -> "not linked"
+  | Some Authz_records.Resource_status.Active -> "active"
+  | Some Authz_records.Resource_status.Purged -> "purged"
+  | Some
+      Authz_records.Resource_status.(Disabled | Blocked | Quarantined) -> "another status"
+;;
+
+let account_purge_word state account =
+  match Pgs.find_account state.S.purges account with
+  | None -> "none"
+  | Some Pgs.Account_pending -> "pending"
+  | Some Pgs.Account_purged -> "purged"
+  | Some (Pgs.Account_failed { failed_stage = Pg.Key_not_removed }) -> "failed, key"
+  | Some (Pgs.Account_failed { failed_stage = Pg.Home_not_removed }) -> "failed, home"
+;;
+
+(* RFC a-persons-api-key-is-their-own-provider-account 3.6: the owner the log
+   links an account to starts its purge, and from the start on the account
+   reads as purged, whatever became of the purge. Its start is a Purge intent
+   on the credential, the subject a turn decision stands on. *)
+let test_account_purges () =
+  let account : Pg.account = { owner = user; provider_account_id = key_account } in
+  let target = Pg.Provider_account account in
+  let maintenance = Authz_records.Author.System_maintenance in
+  let start = purge_record ~author:(human user) (Pg.Purge_pending { target }) in
+  let purged = purge_record ~author:maintenance (Pg.Purged (Pg.Account_purged { account })) in
+  let failed stage =
+    purge_record
+      ~author:maintenance
+      (Pg.Purge_failed (Pg.Account_not_purged { account; failed_stage = stage }))
+  in
+  let intent = Some "purge of credential:claude-code-key-user" in
+  let state =
+    applied_change
+      "a key link"
+      (two_admins ())
+      (account_record ~author:(human user) (key_linked ~by:user))
+      None
+  in
+  Alcotest.(check string) "an account before its purge" "active" (account_status_word state key_account);
+  Alcotest.(check string) "an account no record linked" "not linked" (account_status_word state first_account);
+  refused_as
+    "another's account"
+    state
+    (purge_record ~author:(human bob) (Pg.Purge_pending { target }))
+    (S.Purge (Pgs.Not_the_owner { target; author = bob }));
+  let as_bobs = Pg.Provider_account { owner = bob; provider_account_id = key_account } in
+  refused_as
+    "another's account, named as one's own"
+    state
+    (purge_record ~author:(human bob) (Pg.Purge_pending { target = as_bobs }))
+    (S.Purge (Pgs.Not_the_owner { target = as_bobs; author = bob }));
+  let never_linked = Pg.Provider_account { owner = user; provider_account_id = first_account } in
+  refused_as
+    "an account no record linked"
+    state
+    (purge_record ~author:(human user) (Pg.Purge_pending { target = never_linked }))
+    (S.Purge (Pgs.Not_the_owner { target = never_linked; author = user }));
+  refused_as "an end before a start" state purged (S.Purge (Pgs.Not_started target));
+  let state = applied_change "a start" state start intent in
+  Alcotest.(check string) "an account whose purge is pending" "purged" (account_status_word state key_account);
+  refused_as "a second start" state start (S.Purge (Pgs.Already_pending target));
+  let state = applied_change "a failure" state (failed Pg.Key_not_removed) None in
+  Alcotest.(check string) "the stage that failed" "failed, key" (account_purge_word state account);
+  Alcotest.(check string) "an account whose purge failed" "purged" (account_status_word state key_account);
+  refused_as "an end after a failure" state purged (S.Purge (Pgs.Not_started target));
+  let state = applied_change "a start after the failure" state start intent in
+  let state = applied_change "another failure" state (failed Pg.Home_not_removed) None in
+  Alcotest.(check string) "the later stage" "failed, home" (account_purge_word state account);
+  let state = applied_change "a third start" state start intent in
+  let state = applied_change "the end" state purged None in
+  Alcotest.(check string) "an account whose purge went through" "purged" (account_status_word state key_account);
+  refused_as "a start once purged" state start (S.Purge (Pgs.Already_purged target));
+  let state = applied_change "the end once more, after a restore" state purged None in
+  Alcotest.(check string) "the last end" "purged" (account_purge_word state account)
 ;;
 
 let () =
@@ -2106,6 +2193,7 @@ let () =
     ; "keepers", [ Alcotest.test_case "made by their owner, given their Runtimes" `Quick test_keepers ]
     ; ( "purges"
       , [ Alcotest.test_case "started by the owner, ended by the maintenance" `Quick test_purges_and_their_intent
+        ; Alcotest.test_case "of an account, by the owner the log links it to" `Quick test_account_purges
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

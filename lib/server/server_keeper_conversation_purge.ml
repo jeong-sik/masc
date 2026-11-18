@@ -23,14 +23,16 @@ type error =
   | Not_ended of Authz_purge.error
   | Directory_not_removed of Event.vendor_copy
 
-let target (person : Login.person) conversation_id =
-  Event.Keeper_conversation { owner = person.user_id; conversation_id }
+let conversation_of (person : Login.person) conversation_id : Event.conversation =
+  { owner = person.user_id; conversation_id }
 ;;
 
+let target person conversation_id = Event.Keeper_conversation (conversation_of person conversation_id)
+
 let status_of (person : Login.person) conversation_id =
-  Purges.find
+  Purges.find_conversation
     (Authz_zone.snapshot person.zone).Authz_zone.state.Authz_state.purges
-    (target person conversation_id)
+    (conversation_of person conversation_id)
 ;;
 
 (* A start whose record the zone gave up blocks the conversation (design 8.3)
@@ -38,9 +40,9 @@ let status_of (person : Login.person) conversation_id =
    (Authz_state): it stands as after a deletion that failed. *)
 let standing (person : Login.person) conversation_id =
   let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
-  let target = target person conversation_id in
   match
-    Purges.find state.Authz_state.purges target, Authz_state.revocation state (Event.subject target)
+    ( Purges.find_conversation state.Authz_state.purges (conversation_of person conversation_id)
+    , Authz_state.revocation state (Event.subject (target person conversation_id)) )
   with
   | None, Authz_records.Revocation_state.Not_pending -> Kept
   | ( (None | Some (Purges.Failed { failed_stage = _; vendor_copy = _ }))
@@ -191,7 +193,7 @@ let finish ~env (person : Login.person) ~base_path ~records conversation ~since 
     vendor_copy ~since ~reach ~purge:(fun () ->
       purge_vendor_copy ~env person ~base_path ~records conversation)
   in
-  let target = target person conversation.Conversation.conversation_id in
+  let named = conversation_of person conversation.Conversation.conversation_id in
   let ended written ~then_ =
     match written with
     | Ok () -> then_
@@ -200,11 +202,17 @@ let finish ~env (person : Login.person) ~base_path ~records conversation ~since 
       Error (Not_ended error)
   in
   match Conversation.remove records conversation with
-  | Ok () -> ended (Authz_purge.purged person.zone target ~vendor_copy) ~then_:(Ok vendor_copy)
+  | Ok () ->
+    ended
+      (Authz_purge.purged person.zone (Event.Conversation_purged { conversation = named; vendor_copy }))
+      ~then_:(Ok vendor_copy)
   | Error detail ->
     logged conversation "its directory was not removed" detail;
     ended
-      (Authz_purge.failed person.zone target ~failed_stage:Event.Folder_not_removed ~vendor_copy)
+      (Authz_purge.failed
+         person.zone
+         (Event.Conversation_not_purged
+            { conversation = named; failed_stage = Event.Folder_not_removed; vendor_copy }))
       ~then_:(Error (Directory_not_removed vendor_copy))
 ;;
 
@@ -335,8 +343,7 @@ let resume ~env ~zone ~base_path =
       (Authz_principal_state.find_membership state.Authz_state.principals owner)
   in
   List.iter
-    (fun ((target : Event.target), (status : Purges.status)) ->
-       let (Event.Keeper_conversation { owner; conversation_id }) = target in
+    (fun (({ owner; conversation_id } : Event.conversation), (status : Purges.conversation_status)) ->
        guarded conversation_id @@ fun () ->
        match status, namespace_of owner with
        | Purges.Pending { earlier_vendor_copy = _ }, Some namespace ->
@@ -357,5 +364,5 @@ let resume ~env ~zone ~base_path =
        | Purges.Failed { failed_stage = _; vendor_copy = _ }, (Some _ | None) ->
          (* Its owner asks for the deletion again. *)
          ())
-    (Purges.to_list state.Authz_state.purges)
+    (Purges.conversations state.Authz_state.purges)
 ;;

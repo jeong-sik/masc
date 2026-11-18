@@ -238,8 +238,9 @@ type spawn_refusal =
       }
       (** A [Unix_error] before the child existed, with its errno: the
           fallback's [posix_spawnp] refusing the program ([EACCES], [E2BIG],
-          [ENOEXEC], ...), or pipe, fork or capture-file setup failing on
-          either path. *)
+          [ENOEXEC], ...), pipe, fork or capture-file setup failing on
+          either path, or the eio path's cwd open failing with an errno eio
+          does not map to [Eio.Fs.E] ([ENOTDIR], [ELOOP], [EMFILE], ...). *)
   | Child_setup_failed of
       { executable : string
       ; detail : string
@@ -257,6 +258,62 @@ type spawn_refusal =
           execution paths preserve the backend's directory error here. *)
 
 val spawn_refusal_to_string : spawn_refusal -> string
+
+type spawn_outlook =
+  | Same_input_fails_again
+      (** Spawning the same argv, env and cwd again fails the same way until
+          someone changes them or the host. *)
+  | Resources_may_free
+      (** A shortage the system releases on its own (descriptors, memory,
+          process slots, an interrupted call): a later spawn can succeed. *)
+  | Cause_unknown
+      (** The refusal does not carry a typed cause. [Child_setup_failed] is
+          the one case: eio reports the child's fchdir, dup2 or execve errno
+          only as text, and execve fails both for a request that cannot pass
+          ([E2BIG], [ENOEXEC]) and for a shortage that passes ([ENOMEM],
+          [EAGAIN], [ENFILE], [ETXTBSY] while the binary is replaced). The
+          text is not parsed, so a caller must not treat this as either
+          answer; the keeper keeps it on the retryable path. *)
+
+val unix_error_spawn_outlook : Unix.error -> spawn_outlook
+val spawn_refusal_outlook : spawn_refusal -> spawn_outlook
+
+val spawn_child :
+  sw:Eio.Switch.t ->
+  [> 'tag Eio.Process.mgr_ty ] Eio.Resource.t ->
+  ?cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?stdin:_ Eio.Flow.source ->
+  ?stdout:_ Eio.Flow.sink ->
+  ?stderr:_ Eio.Flow.sink ->
+  ?env:string array ->
+  string list ->
+  ('tag Eio.Process.ty Eio.Resource.t, spawn_refusal) result
+(** [Eio.Process.spawn] with every failure that precedes the child returned as
+    a {!spawn_refusal}: a cwd open failing with an errno eio does not map to
+    [Eio.Fs.E] is a [Spawn_failed] with that errno. Other exceptions,
+    cancellation included, propagate. *)
+
+type 'tag piped_child =
+  { process : 'tag Eio.Process.ty Eio.Resource.t
+  ; to_stdin : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Resource.t
+      (** The parent's write end of the child's stdin. *)
+  ; from_stdout : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+  ; from_stderr : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+  }
+
+val spawn_piped_child :
+  sw:Eio.Switch.t ->
+  [> ([> `Generic ] as 'tag) Eio.Process.mgr_ty ] Eio.Resource.t ->
+  ?cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?env:string array ->
+  string list ->
+  ('tag piped_child, spawn_refusal) result
+(** Three [Eio.Process.pipe]s and {!spawn_child} as one refusal boundary. A
+    pipe that cannot be made ([EMFILE], [ENFILE], [ENOMEM]) is a
+    [Spawn_failed] with its errno, so its outlook comes from
+    {!unix_error_spawn_outlook} like a fork failure's. On [Ok] the child's
+    pipe ends are already closed in the parent; every pipe end belongs to
+    [sw]. *)
 
 type stdio_refusal =
   | Runtime_unavailable of string

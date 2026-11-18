@@ -295,7 +295,11 @@ type denied_result = Protocol.denied_result =
 
 type error = Protocol.error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
+  | Spawn_capacity_busy of
+      { waited_s : float
+      ; limit_s : float
+      }
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -316,7 +320,12 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Antigravity CLI config: " ^ detail
-  | Spawn_failed detail -> "failed to start Antigravity CLI: " ^ detail
+  | Spawn_refused refusal ->
+    "failed to start Antigravity CLI: " ^ Process_eio.spawn_refusal_to_string refusal
+  | Spawn_capacity_busy { waited_s; limit_s } ->
+    Printf.sprintf
+      "CLI capacity busy: no Antigravity spawn slot within %.1fs (limit %.1fs); retry shortly"
+      waited_s limit_s
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
@@ -902,31 +911,29 @@ let child_fd_sampler_key : (unit -> Runtime_cli_spawn_gate.child_fds) Eio.Fiber.
 let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event ~on_terminal_received =
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
-    let proc =
-      try
-        Option.iter (fun callback -> callback ()) before_spawn;
-        Eio.Process.spawn
+    (* The caller's own record that a spawn is about to happen, not part of
+       starting the child: its failure is the host's state write, so it is a
+       [State_callback_failed] and no child is started. *)
+    (match before_spawn with
+     | None -> ()
+     | Some callback ->
+       (match callback () with
+        | Ok () -> ()
+        | Error detail -> raise (Runtime_error (State_callback_failed detail))));
+    let { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } =
+      match
+        Process_eio.spawn_piped_child
           ~sw
           mgr
           ~cwd
           ~env:(official_client_environment ?home_dir ())
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
           (argv config ~conversation_mode)
       with
-      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
+      | Ok child -> child
+      | Error refusal -> raise (Runtime_error (Spawn_refused refusal))
     in
     Option.iter (fun callback -> callback ~pid:(Eio.Process.pid proc)) on_spawned;
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
     (* A prompt longer than the pipe buffer stops until the CLI reads it, and
        a CLI that answers without draining stdin never does. [Switch.run]
        joins an ordinary fiber on the way out of a body that returned a
@@ -1146,17 +1153,9 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
     with
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Runtime_cli_spawn_gate.Slot_timeout { waited_s; limit_s } ->
-      (* Retryable pressure, not a broken turn: the gate was full for the
-         whole budget. Spawn_failed keeps its Transient keeper mapping,
-         which is exactly right for "try again shortly". *)
-      Error
-        (Spawn_failed
-           (Printf.sprintf
-              "CLI capacity busy: no Antigravity spawn slot within %.1fs (limit %.1fs, %d active, %d waiting); retry shortly"
-              waited_s
-              limit_s
-              (Runtime_cli_spawn_gate.active_cli_spawns ())
-              (Runtime_cli_spawn_gate.waiting_cli_spawns ())))
+      (* The gate was full for the whole budget: pressure that passes, not a
+         refusal of this argv. *)
+      Error (Spawn_capacity_busy { waited_s; limit_s })
     | Eio.Time.Timeout as exn -> raise exn
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn

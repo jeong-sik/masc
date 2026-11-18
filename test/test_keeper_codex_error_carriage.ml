@@ -69,7 +69,7 @@ let test_every_variant_lands_in_its_class () =
     (Codex.Context_window_exceeded
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
-  check "spawn_failed" (Codex.Spawn_failed "no exe") "provider:unavailable";
+  check "spawn_refused" (Codex.Spawn_refused (Process_eio.Executable_not_found "codex")) "provider:unavailable";
   check "reasoning effort admission failed"
     (Codex.Reasoning_effort_admission_failed {model="fixture";detail="no advertised tier"})
     "provider:unavailable";

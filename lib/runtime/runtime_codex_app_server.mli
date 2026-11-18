@@ -343,7 +343,8 @@ end
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
+      (** The app-server process could not be started; nothing was sent. *)
   | Reasoning_effort_admission_failed of { model : string; detail : string }
       (* Account metadata refused an explicit effort before history or turn
          input was sent. Retrying this failure cannot replay a model turn. *)

@@ -254,7 +254,7 @@ let panel_failure ~runtime_id = function
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure
       (( Runtime_codex_app_server.Invalid_config _
-       | Runtime_codex_app_server.Spawn_failed _
+       | Runtime_codex_app_server.Spawn_refused _
        | Runtime_codex_app_server.Reasoning_effort_admission_failed _
        | Runtime_codex_app_server.Account_read_failed _
        | Runtime_codex_app_server.Turn_input_write_failed _
@@ -273,7 +273,7 @@ let panel_failure ~runtime_id = function
   | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Fusion_types.Timeout
   | Claude_failure
       (( Runtime_claude_code.Invalid_config _
-       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Spawn_refused _
        | Runtime_claude_code.Protocol_error _
        | Runtime_claude_code.Subscription_required _
        | Runtime_claude_code.Unsupported_control_request _
@@ -287,7 +287,7 @@ let panel_failure ~runtime_id = function
        | Runtime_claude_code.Unhandled_exception _ ) as error)
   | Claude_admission_failure
       (( Runtime_claude_code.Invalid_config _
-       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Spawn_refused _
        | Runtime_claude_code.Protocol_error _
        | Runtime_claude_code.Subscription_required _
        | Runtime_claude_code.Unsupported_control_request _
@@ -303,7 +303,8 @@ let panel_failure ~runtime_id = function
   | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
   | Antigravity_failure
       (( Runtime_antigravity.Invalid_config _
-       | Runtime_antigravity.Spawn_failed _
+       | Runtime_antigravity.Spawn_refused _
+       | Runtime_antigravity.Spawn_capacity_busy _
        | Runtime_antigravity.Protocol_error _
        | Runtime_antigravity.State_callback_failed _
        | Runtime_antigravity.Turn_failed _
@@ -316,7 +317,7 @@ let panel_failure ~runtime_id = function
   | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout
   | Muse_failure
       (( Runtime_muse_serve.Invalid_config _
-       | Runtime_muse_serve.Spawn_failed _
+       | Runtime_muse_serve.Spawn_refused _
        | Runtime_muse_serve.Turn_input_write_failed _
        | Runtime_muse_serve.Protocol_error _
        | Runtime_muse_serve.Rpc_error _
@@ -651,7 +652,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     (match error with
      | Runtime_claude_code.Quota_blocked { block; _ } ->
        observe (claude_quota_standing block)
-     | Runtime_claude_code.Invalid_config _ | Runtime_claude_code.Spawn_failed _
+     | Runtime_claude_code.Invalid_config _ | Runtime_claude_code.Spawn_refused _
      | Runtime_claude_code.Protocol_error _ | Runtime_claude_code.Subscription_required _
      | Runtime_claude_code.Unsupported_control_request _
      | Runtime_claude_code.Turn_transport_interrupted _
@@ -683,7 +684,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             | Response_stream_connection_failed _ | Response_stream_disconnected _
             | Response_too_many_failed_attempts _ | Active_turn_not_steerable _
             | Unrecognized _); _}
-      | Runtime_codex_app_server.Invalid_config _ | Spawn_failed _
+      | Runtime_codex_app_server.Invalid_config _ | Spawn_refused _
       | Reasoning_effort_admission_failed _ | Account_read_failed _
       | Turn_input_write_failed _
       | Protocol_error _ | Rpc_error _ | Subscription_required _
@@ -893,10 +894,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
        ~host
-       ~before_spawn:(fun () ->
-         match Antigravity_panel_root_owner.before_spawn ~root:panel_root with
-         | Ok () -> ()
-         | Error detail -> raise (Sys_error detail))
+       ~before_spawn:(fun () -> Antigravity_panel_root_owner.before_spawn ~root:panel_root)
        ~on_spawned:(fun ~pid ->
          match Antigravity_panel_root_owner.spawned ~root:panel_root ~pid with
          | Ok () -> ()

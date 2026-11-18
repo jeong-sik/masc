@@ -714,7 +714,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
            Error (Unavailable (Invalid_configuration "Muse managed account state could not be prepared"))
          | Error Private_workspace_unavailable ->
            Error (Unavailable (Invalid_configuration "Muse private readiness workspace could not be prepared"))
-         | Error (Client_error (Runtime_muse_serve.Spawn_failed _)) ->
+         | Error (Client_error (Runtime_muse_serve.Spawn_refused _)) ->
            Error (Unavailable (Client_not_started "The Muse executable could not be started"))
          | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
            Error (Unavailable (Invalid_configuration detail))
@@ -791,8 +791,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
          | Ok result -> Ok {model=result.model; text=result.text}
          | Error Runtime_verification_antigravity.Private_home_unavailable ->
            Error (Unavailable (Client_not_authenticated "Antigravity private authentication could not be prepared"))
-         | Error (Client_error (Runtime_antigravity.Spawn_failed _)) ->
+         | Error (Client_error (Runtime_antigravity.Spawn_refused _)) ->
            Error (Unavailable (Client_not_started "The Antigravity executable could not be started"))
+         | Error (Client_error (Runtime_antigravity.Spawn_capacity_busy _ as err)) ->
+           Error (Unavailable (Client_not_started (Runtime_antigravity.error_to_string err)))
          | Error (Client_error (Runtime_antigravity.Invalid_config _)) ->
            Error (Unavailable (Invalid_configuration "Antigravity readiness configuration is invalid"))
          | Error (Client_error (Runtime_antigravity.Timeout _)) -> Error Timed_out
@@ -1008,7 +1010,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
            Error
              (Unavailable
                 (Client_not_authenticated (Runtime_claude_code.error_to_string error)))
-         | Error (Runtime_claude_code.Spawn_failed _ as error) ->
+         | Error (Runtime_claude_code.Spawn_refused _ as error) ->
            Error
              (Unavailable (Client_not_started (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Invalid_config _ as error) ->
@@ -1087,7 +1089,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
              (Unavailable
                 (Client_not_authenticated
                    (Runtime_codex_app_server.error_to_string error)))
-         | Error (Runtime_codex_app_server.Spawn_failed _ as error) ->
+         | Error (Runtime_codex_app_server.Spawn_refused _ as error) ->
            Error
              (Unavailable
                 (Client_not_started (Runtime_codex_app_server.error_to_string error)))

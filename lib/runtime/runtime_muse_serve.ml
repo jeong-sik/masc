@@ -158,7 +158,7 @@ type exit_status =
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
   | Turn_input_write_failed of string
   | Protocol_error of
       { stage : string
@@ -278,7 +278,8 @@ let capability_to_string = function
 
 let error_to_string = function
   | Invalid_config detail -> "Muse Code config: " ^ detail
-  | Spawn_failed detail -> "Muse Code spawn failed: " ^ detail
+  | Spawn_refused refusal ->
+    "Muse Code spawn failed: " ^ Process_eio.spawn_refusal_to_string refusal
   | Turn_input_write_failed detail -> "Muse Code turn input write failed: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Muse Code protocol error at %s: %s" stage detail
@@ -796,26 +797,16 @@ let turn_start_selection =
 let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ())
       ?(trust_workspace = false) ~mgr ~clock ~cwd ~account_home config run =
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     match
-      Eio.Process.spawn
+      Process_eio.spawn_piped_child
         ~sw
         mgr
         ~cwd
         ~env:(client_environment ?storage_root account_home config.prepared_home)
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
         (client_argv config ~trust_workspace)
     with
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Error (Spawn_failed (Printexc.to_string exn))
-    | proc ->
-      Eio.Flow.close stdin_r;
-      Eio.Flow.close stdout_w;
-      Eio.Flow.close stderr_w;
+    | Error refusal -> Error (Spawn_refused refusal)
+    | Ok { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } ->
       let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)
@@ -1920,7 +1911,7 @@ let run_protocol
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
     | Ok response -> Ok response
     | Error
-        (( Invalid_config _ | Spawn_failed _ | Turn_input_write_failed _ | Protocol_error _
+        (( Invalid_config _ | Spawn_refused _ | Turn_input_write_failed _ | Protocol_error _
          | Rpc_error _ | Capability_not_granted _ | Session_not_durable
          | Session_model_mismatch _ | Session_workspace_mismatch _
          | Session_approval_mode_mismatch _ | Auth_required _ | Turn_failed _
@@ -1967,7 +1958,7 @@ let run_protocol
     | Error (Timeout { seconds; turn_accepted = _ }) ->
       Error (Timeout { seconds; turn_accepted = true })
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | (Error (Session_not_durable | (Turn_cancelled | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Capability_not_granted _ | (Session_model_mismatch _ | (Session_workspace_mismatch _ | (Session_approval_mode_mismatch _ | (Auth_required _ | (Turn_failed _ | Unsupported_server_request _)))))))))))))) | Ok _) as outcome -> outcome
+    | (Error (Session_not_durable | (Turn_cancelled | (Runtime_shutting_down | (Invalid_config _ | (Spawn_refused _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Capability_not_granted _ | (Session_model_mismatch _ | (Session_workspace_mismatch _ | (Session_approval_mode_mismatch _ | (Auth_required _ | (Turn_failed _ | Unsupported_server_request _)))))))))))))) | Ok _) as outcome -> outcome
   in
   let text = state.final_text in
   (* The stream terminal closes presentation; durable consumers retain the

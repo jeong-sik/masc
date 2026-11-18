@@ -43,7 +43,7 @@ let failure_to_string = function
 let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Quota_blocked _ -> true
   | Runtime_claude_code.Invalid_config _
-  | Runtime_claude_code.Spawn_failed _
+  | Runtime_claude_code.Spawn_refused _
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Unsupported_control_request _
@@ -85,7 +85,7 @@ let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = funct
     codex_info_is_binding_rest info
   | Runtime_codex_app_server.Turn_failed { codex_error_info = None; detail = _ }
   | Runtime_codex_app_server.Invalid_config _
-  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Spawn_refused _
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Account_read_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
@@ -103,7 +103,8 @@ let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = funct
 
 let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = function
   | Runtime_antigravity.Invalid_config _
-  | Runtime_antigravity.Spawn_failed _
+  | Runtime_antigravity.Spawn_refused _
+  | Runtime_antigravity.Spawn_capacity_busy _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
@@ -120,7 +121,7 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
 let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
   | Runtime_muse_serve.Turn_failed { quota = Some _; _ } -> true
   | Runtime_muse_serve.Invalid_config _
-  | Runtime_muse_serve.Spawn_failed _
+  | Runtime_muse_serve.Spawn_refused _
   | Runtime_muse_serve.Turn_input_write_failed _
   | Runtime_muse_serve.Protocol_error _
   | Runtime_muse_serve.Rpc_error _
@@ -170,7 +171,7 @@ let claude_error_is_input_size : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Context_window_exceeded _ -> true
   | Runtime_claude_code.Quota_blocked _
   | Runtime_claude_code.Invalid_config _
-  | Runtime_claude_code.Spawn_failed _
+  | Runtime_claude_code.Spawn_refused _
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Unsupported_control_request _
@@ -187,7 +188,7 @@ let codex_error_is_input_size : Runtime_codex_app_server.error -> bool = functio
   | Runtime_codex_app_server.Context_window_exceeded _ -> true
   | Runtime_codex_app_server.Turn_failed _
   | Runtime_codex_app_server.Invalid_config _
-  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Spawn_refused _
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Account_read_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
@@ -204,7 +205,8 @@ let codex_error_is_input_size : Runtime_codex_app_server.error -> bool = functio
 
 let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = function
   | Runtime_antigravity.Invalid_config _
-  | Runtime_antigravity.Spawn_failed _
+  | Runtime_antigravity.Spawn_refused _
+  | Runtime_antigravity.Spawn_capacity_busy _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
@@ -218,7 +220,7 @@ let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = functi
 
 let muse_error_is_input_size : Runtime_muse_serve.error -> bool = function
   | Runtime_muse_serve.Invalid_config _
-  | Runtime_muse_serve.Spawn_failed _
+  | Runtime_muse_serve.Spawn_refused _
   | Runtime_muse_serve.Turn_input_write_failed _
   | Runtime_muse_serve.Protocol_error _
   | Runtime_muse_serve.Rpc_error _

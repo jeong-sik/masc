@@ -402,7 +402,7 @@ type api_error_cause =
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -451,7 +451,8 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Claude Code config: " ^ detail
-  | Spawn_failed detail -> "failed to start Claude Code: " ^ detail
+  | Spawn_refused refusal ->
+    "failed to start Claude Code: " ^ Process_eio.spawn_refusal_to_string refusal
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Claude Code protocol error during %s: %s" stage detail
   | Subscription_required detail ->
@@ -506,7 +507,7 @@ let error_to_string = function
 
 let error_kind = function
   | Invalid_config _ -> "invalid_config"
-  | Spawn_failed _ -> "spawn_failed"
+  | Spawn_refused _ -> "spawn_refused"
   | Protocol_error _ -> "protocol_error"
   | Subscription_required _ -> "subscription_required"
   | Unsupported_control_request _ -> "unsupported_control_request"
@@ -651,7 +652,7 @@ let note_cut_document ~bytes = function
       Error (Protocol_error { stage; detail = Printf.sprintf "%s (stdout %d bytes)" detail bytes })
   | ( Ok _
     | Error
-        ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+        ( Invalid_config _ | Spawn_refused _ | Subscription_required _
         | Unsupported_control_request _ | Turn_transport_interrupted _
         | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _
@@ -691,7 +692,7 @@ let probe_auth_status ~mgr ~cwd ~account config =
     | Error (Protocol_error _), None -> false, result
     | ( Ok _
       | Error
-          ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+          ( Invalid_config _ | Spawn_refused _ | Subscription_required _
           | Unsupported_control_request _ | Turn_transport_interrupted _
           | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
           | Stopped_by_host _ | Quota_blocked _ | Process_exited _
@@ -700,21 +701,34 @@ let probe_auth_status ~mgr ~cwd ~account config =
   in
   let environment = client_environment account in
     try
-    let stdout =
+    let spawned =
       Eio.Switch.run (fun sw ->
         let reader, writer = open_stdout_capture ~sw ~cwd in
-        Eio.Process.run
-          mgr
-          ~is_success:(fun code -> code = 0 || code = 1)
-          ~cwd
-          ~stdout:writer
-          ~stderr:(Eio.Flow.buffer_sink stderr_buf)
-          ~env:environment
-          [ config.cli_path
-          ; Runtime_native_tools.claude_setting_sources_arg
-          ; "auth"; "status"; "--json" ];
-        Eio.Buf_read.parse_exn ~max_size:max_int Eio.Buf_read.take_all reader)
+        match
+          Process_eio.spawn_child
+            ~sw
+            mgr
+            ~cwd
+            ~stdout:writer
+            ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+            ~env:environment
+            [ config.cli_path
+            ; Runtime_native_tools.claude_setting_sources_arg
+            ; "auth"; "status"; "--json" ]
+        with
+        | Error _ as refused -> refused
+        | Ok child ->
+          (* [auth status] exits 1 when signed out; both codes print the
+             document. *)
+          (match Eio.Process.await child with
+           | `Exited (0 | 1) -> ()
+           | (`Exited _ | `Signaled _) as status ->
+             raise (Eio.Exn.create (Eio.Process.E (Eio.Process.Child_error status))));
+          Ok (Eio.Buf_read.parse_exn ~max_size:max_int Eio.Buf_read.take_all reader))
     in
+    match spawned with
+    | Error refusal -> Error (Spawn_refused refusal), false
+    | Ok stdout ->
     (* [Process.run] joins its stderr copier before it returns, so the buffer
        is drained here. *)
     let excerpt = subscription_stderr_excerpt stderr_buf in
@@ -739,16 +753,17 @@ let probe_auth_status ~mgr ~cwd ~account config =
   with
   | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Exn.Io
-      (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
-    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable)), false
   | exn ->
-      (* A crashed probe may still have told its stderr why: keep what the
-         copier had drained, best-effort past this point. *)
+      (* The child started: a refusal before it existed returned
+         [Spawn_refused] above. A crashed probe may still have told its stderr
+         why: keep what the copier had drained, best-effort past this point. *)
       let detail = Printexc.to_string exn in
-      (match subscription_stderr_excerpt stderr_buf with
-       | None -> Error (Spawn_failed detail), false
-       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)), false)
+      let detail =
+        match subscription_stderr_excerpt stderr_buf with
+        | None -> detail
+        | Some text -> detail ^ "; stderr: " ^ text
+      in
+      Error (Protocol_error { stage = "auth status"; detail }), false
 ;;
 
 (* [auth status] only reads. A CLI that exits cleanly after writing a cut
@@ -2774,7 +2789,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Ok _ -> Some Input_attribution.Provider_success
       | Error (Quota_blocked _ | Context_window_exceeded _
           | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
-      | Error (Invalid_config _) | Error (Spawn_failed _) | Error (Protocol_error _)
+      | Error (Invalid_config _) | Error (Spawn_refused _) | Error (Protocol_error _)
       | Error (Subscription_required _) | Error (Unsupported_control_request _)
       | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
       | Error (Unhandled_exception _) | Error (Timeout _) -> None in
@@ -2788,7 +2803,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         if !stream_started
         then emit_stream_event on_stream_event (Turn_finished { text = "" });
         Error error
-      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_failed _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_refused _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -3198,27 +3213,11 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
     let environment = client_environment account in
     Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
-    let proc =
-      try
-        Eio.Process.spawn
-          ~sw
-          mgr
-          ~cwd
-          ~env:environment
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
-          argv
-      with
-      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Eio.Exn.Io (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
-        raise (Runtime_error (Invalid_config (Printf.sprintf "executable %S was not found" executable)))
-      | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
+    let { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } =
+      match Process_eio.spawn_piped_child ~sw mgr ~cwd ~env:environment argv with
+      | Ok child -> child
+      | Error refusal -> raise (Runtime_error (Spawn_refused refusal))
     in
     Option.iter (fun callback -> callback ()) on_spawned;
     (* The child was started with the file's path; the file was complete before. *)
@@ -3229,9 +3228,6 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
         ; write = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             Runtime_official_client_write.raw contents) })
       system_prompt;
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
     (* Diagnostics only, so a daemon: the switch cancels it once the body
        returns. A grandchild the CLI leaves behind (an MCP server orphaned
        when the CLI is reaped) inherits this pipe's write end, so EOF may
@@ -3607,7 +3603,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        "Claude Code turn stopped by host: %s"
        (error_to_string stopped)
    | Error
-       (( Invalid_config _ | Spawn_failed _ | Protocol_error _ | Subscription_required _
+       (( Invalid_config _ | Spawn_refused _ | Protocol_error _ | Subscription_required _
         | Unsupported_control_request _ | Turn_transport_interrupted _
         | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _

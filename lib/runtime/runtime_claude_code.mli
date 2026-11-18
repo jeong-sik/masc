@@ -456,7 +456,8 @@ type api_error_cause =
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
+      (** The CLI process could not be started; nothing was sent. *)
   | Protocol_error of
       { stage : string
       ; detail : string

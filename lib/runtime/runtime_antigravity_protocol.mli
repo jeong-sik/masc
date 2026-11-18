@@ -81,7 +81,11 @@ type denied_result =
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
+  | Spawn_capacity_busy of
+      { waited_s : float
+      ; limit_s : float
+      }
   | Protocol_error of
       { stage : string
       ; detail : string

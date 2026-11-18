@@ -678,10 +678,11 @@ let codex_error_to_core_error = function
      Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
-  | Runtime_codex_app_server.Spawn_failed detail ->
+  | Runtime_codex_app_server.Spawn_refused refusal ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
-         { provider = "codex_app_server"; detail })
+         { provider = "codex_app_server"
+         ; detail = Process_eio.spawn_refusal_to_string refusal })
   (* RFC-0454 P2. The client died or its stdout reached EOF. This shared the
      [ProviderUnavailable] above until the chat pane had to tell the two
      apart and could only do it by reading the rendered sentence back
@@ -808,8 +809,8 @@ let recovery_failure_of_client_error = function
        settlement stands and the release path restores it. The refusal of
        the request itself still reaches its caller unchanged. *)
     Keeper_official_client_session_store.Pre_dispatch_failed
-  | Runtime_codex_app_server.Spawn_failed _ ->
-    Keeper_official_client_session_store.Transient_spawn_failed
+  | Runtime_codex_app_server.Spawn_refused refusal ->
+    Keeper_official_client_session_store.recovery_failure_of_spawn_refusal refusal
   | Runtime_codex_app_server.Turn_interrupted
   | Runtime_codex_app_server.Runtime_shutting_down
   | Runtime_codex_app_server.Process_exited _
@@ -858,7 +859,7 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
        then Keeper_official_client_session_store.Activity_observed
        else Keeper_official_client_session_store.No_activity_observed)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Invalid_config _)
-  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_refused _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Reasoning_effort_admission_failed _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Account_read_failed _)
   | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_input_write_failed _)
@@ -922,7 +923,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Account_read_failed _
   | Runtime_codex_app_server.Invalid_config _
-  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Spawn_refused _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Rpc_error _
   | Runtime_codex_app_server.Subscription_required _
@@ -1809,7 +1810,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           Error (codex_error_to_core_error error))
      | Error
          (( Runtime_codex_app_server.Invalid_config _
-          | Runtime_codex_app_server.Spawn_failed _
+          | Runtime_codex_app_server.Spawn_refused _
           | Runtime_codex_app_server.Reasoning_effort_admission_failed _
           | Runtime_codex_app_server.Account_read_failed _
           | Runtime_codex_app_server.Turn_input_write_failed _
@@ -2050,7 +2051,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
             Recovery_required
               { failure =
                   ( Pre_dispatch_failed
-                  | Transient_spawn_failed
+                  | Spawn_resources_busy
+                  | Spawn_refused_same_input
+                  | Spawn_failed_cause_unknown
                   | Owner_stopped_turn
                   | Retryable_turn_failed
                   | Transport_interrupted

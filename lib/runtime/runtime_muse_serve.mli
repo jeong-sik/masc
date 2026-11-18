@@ -178,7 +178,7 @@ type exit_status =
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
   | Turn_input_write_failed of string
       (** The session is ready but the [turn/start] write did not complete,
           so whether the host received the turn is unknown. *)

@@ -5803,7 +5803,7 @@ let test_a_closed_client_connection_is_typed () =
    | Some _ | None -> fail "a closed Claude Code connection did not decode");
   match
     Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
-      (Runtime_claude_code.Spawn_failed "executable not found")
+      (Runtime_claude_code.Spawn_refused (Process_eio.Executable_not_found "claude"))
   with
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
   | other ->

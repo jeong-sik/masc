@@ -443,10 +443,11 @@ let claude_error_to_core_error = function
          { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
          ; phase = None
          })
-  | Runtime_claude_code.Spawn_failed detail ->
+  | Runtime_claude_code.Spawn_refused refusal ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
-         { provider = "claude_code"; detail })
+         { provider = "claude_code"
+         ; detail = Process_eio.spawn_refusal_to_string refusal })
   (* RFC-0454 P2, the twin of the Codex runtime's closed connection: the
      client exited or its stdout reached EOF. Rotation is unchanged —
      [Keeper_runtime_attempt.core_error_to_runtime_outcome] rebuilds the
@@ -512,7 +513,7 @@ let admission_probe_error_to_core_error = function
          { message = Printf.sprintf "%s: %s" stage detail
          ; reason = Llm_provider.Retry.Attempt_rejected
          })
-  | (Runtime_claude_code.Spawn_failed _ | Runtime_claude_code.Timeout _) as error ->
+  | (Runtime_claude_code.Spawn_refused _ | Runtime_claude_code.Timeout _) as error ->
     Agent_core.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message = Runtime_claude_code.error_to_string error
@@ -533,7 +534,8 @@ let admission_probe_error_to_core_error = function
 ;;
 
 let recovery_failure_of_client_error = function
-  | Runtime_claude_code.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Runtime_claude_code.Spawn_refused refusal ->
+    Session_store.recovery_failure_of_spawn_refusal refusal
   | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Timeout _ ->
     Session_store.Transport_interrupted
   | Runtime_claude_code.Turn_transport_interrupted _ ->
@@ -588,7 +590,7 @@ let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
        then Session_store.Activity_observed
        else Session_store.No_activity_observed)
   | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Invalid_config _)
-  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Spawn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Spawn_refused _)
   | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Protocol_error _)
   | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Subscription_required _)
   | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unsupported_control_request _)
@@ -758,7 +760,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
             Recovery_required
               { failure =
                   ( Pre_dispatch_failed
-                  | Transient_spawn_failed
+                  | Spawn_resources_busy
+                  | Spawn_refused_same_input
+                  | Spawn_failed_cause_unknown
                   | Owner_stopped_turn
                   | Retryable_turn_failed
                   | Transport_interrupted
@@ -1570,7 +1574,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
               , None ) -> settle_host_stop ~latest_request_input stop)
          | Error
              (( Runtime_claude_code.Invalid_config _
-              | Runtime_claude_code.Spawn_failed _
+              | Runtime_claude_code.Spawn_refused _
               | Runtime_claude_code.Protocol_error _
               | Runtime_claude_code.Subscription_required _
               | Runtime_claude_code.Unsupported_control_request _
@@ -1601,10 +1605,10 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                 true
               | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
               | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
-              | (Runtime_claude_code.Start, (Some _ | None), (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _)))))))))))))
+              | (Runtime_claude_code.Start, (Some _ | None), (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_refused _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _)))))))))))))
               | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
               | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
-              | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
+              | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_refused _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
            (* A provider can reject after the prompt was sent but before any
               response or MCP tool effect. Preserve the typed no-effect fact so
               failover is allowed for that narrow case.
@@ -1632,7 +1636,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
             | Runtime_claude_code.Context_window_exceeded _
             | Runtime_claude_code.Process_exited { turn_admitted = false; _ }
             | Runtime_claude_code.Invalid_config _
-            | Runtime_claude_code.Spawn_failed _
+            | Runtime_claude_code.Spawn_refused _
             | Runtime_claude_code.Protocol_error _
             | Runtime_claude_code.Subscription_required _
             | Runtime_claude_code.Unsupported_control_request _

@@ -342,7 +342,7 @@ end
 
 type error =
   | Invalid_config of string
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
   | Reasoning_effort_admission_failed of { model : string; detail : string }
   | Turn_input_write_failed of string
       (* The client and thread were initialized, but complete turn-input
@@ -456,7 +456,7 @@ let input_capacity_refusal = function
        when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
      | _ -> None)
   | Account_read_failed _
-  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _
   | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
   | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down | Process_exited _
@@ -465,7 +465,8 @@ let input_capacity_refusal = function
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
-  | Spawn_failed detail -> "failed to start Codex app-server: " ^ detail
+  | Spawn_refused refusal ->
+    "failed to start Codex app-server: " ^ Process_eio.spawn_refusal_to_string refusal
   | Turn_input_write_failed detail -> "Codex turn/start input write failed: " ^ detail
   | Reasoning_effort_admission_failed { model; detail } ->
     Printf.sprintf "Codex reasoning effort admission failed for %s: %s" model detail
@@ -530,7 +531,7 @@ let refused_for_spent_usage = function
      | Codex_error_info.Unrecognized _ -> false)
   | Turn_failed { codex_error_info = None; detail = _ }
   | Invalid_config _
-  | Spawn_failed _
+  | Spawn_refused _
   | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _
   | Protocol_error _
@@ -548,7 +549,7 @@ let refused_for_spent_usage = function
 
 let error_kind = function
   | Invalid_config _ -> "invalid_config"
-  | Spawn_failed _ -> "spawn_failed"
+  | Spawn_refused _ -> "spawn_refused"
   | Reasoning_effort_admission_failed _ -> "reasoning_effort_admission_failed"
   | Turn_input_write_failed _ -> "turn_input_write_failed"
   | Protocol_error _ -> "protocol_error"
@@ -1753,7 +1754,7 @@ type turn_reader_state = Reader_ready | Reader_inflight | Reader_closed
 let host_stop_of_error = function
   | Stopped_by_host stop -> Some stop
   | Account_read_failed _
-  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
   | Subscription_required _ | Unsupported_server_request _
   | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
@@ -2544,7 +2545,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
       (function
         | Rpc_error { code; message; data } ->
             Account_read_failed { code; message; data }
-        | ( Invalid_config _ | Spawn_failed _
+        | ( Invalid_config _ | Spawn_refused _
           | Reasoning_effort_admission_failed _ | Account_read_failed _
           | Turn_input_write_failed _ | Protocol_error _
           | Subscription_required _ | Unsupported_server_request _
@@ -2560,7 +2561,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
     (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
     |> Result.map_error (function
       | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
-      | (Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Account_read_failed _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+      | (Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Account_read_failed _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
   (* New persistent threads are created only after explicit effort is admitted.
      Pin the advertised default when no model was configured, so thread/start
      and the admitted account metadata name the same model. Resume creates no
@@ -2720,7 +2721,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
          the app-server rejected it, so rotating here could duplicate a turn
          that is already executing upstream. *)
       Error (Timeout { seconds; turn_accepted = true })
-    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Account_read_failed _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _)))))))))))))) | Ok _) as response -> response
+    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_refused _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Account_read_failed _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _)))))))))))))) | Ok _) as response -> response
   in
   let* turn_id = parse_turn_start turn in
   let* () =
@@ -2938,19 +2939,12 @@ let context_submission frame json payload =
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd ~account config run =
   let* environment = client_environment ?isolated_home:config.isolated_home account in
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
-    let proc =
-      Eio.Process.spawn ~sw mgr ~cwd
-        ~env:environment
-        ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-        (client_argv config)
-    in
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
+    match
+      Process_eio.spawn_piped_child ~sw mgr ~cwd ~env:environment (client_argv config)
+    with
+    | Error refusal -> Error (Spawn_refused refusal)
+    | Ok { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } ->
     (* Diagnostics only, so a daemon: the switch cancels it once the body
        returns. A grandchild the CLI leaves behind (an MCP server orphaned
        when the CLI is reaped) inherits this pipe's write end, so EOF may
@@ -3186,7 +3180,9 @@ let probe_metadata ~label ~mgr ~clock ~cwd ~account config protocol =
       (* The probe never starts a turn. *)
       Error (Timeout { seconds; turn_accepted = false })
     | Eio.Time.Timeout as exn -> raise exn
-    | exn -> Error (Spawn_failed (Printexc.to_string exn))
+    (* A refusal before the child exists returns [Spawn_refused] from
+       [with_spawned_client]; what reaches here came from a running client. *)
+    | exn -> Error (Protocol_error { stage = "runtime boundary"; detail = Printexc.to_string exn })
   in
   (match result with
    | Ok _ -> Log.Runtime_agent.info "Codex app-server %s completed" label
@@ -3297,7 +3293,10 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
           | Eio.Time.Timeout as exn -> raise exn
           | exn ->
             Llm_provider.Reserved_exn.reraise_if_reserved exn;
-            Error (Spawn_failed (Printexc.to_string exn)))
+            (* Not a spawn refusal: [with_spawned_client] returns those as
+               [Spawn_refused]. This exception came from a running client,
+               possibly after turn/start was accepted (#28072). *)
+            Error (Protocol_error { stage = "runtime boundary"; detail = Printexc.to_string exn }))
        with
        | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
          Error
@@ -3314,7 +3313,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
               { detail
               ; turn_accepted = dispatch_ambiguous || !turn_accepted
               })
-       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Account_read_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _))))))))))))) | Ok _) as other -> other)
+       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_refused _ | (Reasoning_effort_admission_failed _ | (Account_read_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _))))))))))))) | Ok _) as other -> other)
   in
   (match result with
    | Ok turn ->
@@ -3332,7 +3331,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
        "Codex app-server turn stopped by host: %s"
        (error_to_string stopped)
    | Error
-       (( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+       (( Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _
         | Account_read_failed _
         | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
         | Subscription_required _ | Unsupported_server_request _

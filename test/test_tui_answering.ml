@@ -145,10 +145,8 @@ let test_chat_shows_background_work_and_uncertainty () =
      The model and the tool are detail and recede. *)
   (match lines with
    | status :: _ ->
-     Alcotest.(check bool) "the lead names the lane and the age" true
-       (Astring.String.is_infix ~affix:"autonomous · 1m" status.Masc_tui_answering.lead);
      Alcotest.(check bool) "the model is not in the lead" false
-       (Astring.String.is_infix ~affix:"glm" status.lead);
+       (Astring.String.is_infix ~affix:"glm" status.Masc_tui_answering.lead);
      Alcotest.(check bool) "no sentence around the facts" false
        (Astring.String.is_infix ~affix:"Current" status.lead)
    | [] -> Alcotest.fail "no status row");

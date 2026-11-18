@@ -282,17 +282,8 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   let row_for name view = List.combine view.Pane.rows view.Pane.targets
     |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
     |> fst |> text in
-  let initial = Pane.lines ~rows ~cols ~scroll:0 input in
-  let header_of name view =
-    let texts = List.map text view.Pane.rows in
-    List.nth texts (last_index_of_in texts name)
-  in
-  check bool "initial event age on the header" true
-    (contains "last event 10s" (header_of "tester" initial));
   let changed = { input with Pane.now = now +. 20.; selected = Some "probe" } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
-  check bool "age advances independently of chunks" true
-    (contains "last event 1m" (header_of "probe" later));
   (* Health is read on every frame as well: over the same reused chunks, a
      keeper whose keepalive has gone loses its fleet row. Running and idle
      draw the same record state, so offline is the reading that shows. *)

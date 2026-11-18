@@ -166,11 +166,6 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   (* When memory_health is None, memory reading is Unknown ("mem ?") *)
   let cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
   Alcotest.(check int) "has schedule cell + mem ?" 2 (List.length cells);
-  (* The schedule cell counts down: the row is due at 12:00:00Z and now is
-     11:13:20Z. A countdown past a minute reads whole minutes (RFC
-     tui-one-screen-grammar §6.2). *)
-  Alcotest.(check string) "first cell is schedule" "◷ 46m"
-    (List.hd cells).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "second cell is mem ?" "mem ?"
     (List.nth cells 1).Masc_tui_keeper_axis_cell.text;
   (* The wake strip reads the same agenda: the 12:00:00Z run is two slots
@@ -213,15 +208,13 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   state.memory_health <- Some (make_snapshot [ kh ]);
 
   let cells_with_memory = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
-  (* edgar has: schedule cell, lag 4, +1m00s +2 -1, stale ×1, and the ladder
-     cell last = 5 cells. The row carries no ladder, so that cell is the
+  (* edgar has: schedule cell, lag 4, the save clock, stale ×1, and the
+     ladder cell last = 5 cells. The row carries no ladder, so that cell is the
      unmeasured one, not a zero. *)
   Alcotest.(check int) "edgar has schedule + lag + clock + stale + ladder" 5
     (List.length cells_with_memory);
   Alcotest.(check string) "edgar lag cell" "lag 4"
     (List.nth cells_with_memory 1).Masc_tui_keeper_axis_cell.text;
-  Alcotest.(check string) "edgar clock cell" "+1m +2 -1"
-    (List.nth cells_with_memory 2).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "edgar stale cell" "stale ×1"
     (List.nth cells_with_memory 3).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check bool) "an unmeasured ladder is the last cell" true

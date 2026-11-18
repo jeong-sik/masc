@@ -147,7 +147,7 @@ deadline 을 적었더라도 부팅이 그 slot 을 버렸을 것이다.
 1. provider 는 `catalog-provider = "<catalog 행 id>"` 를 적을 수 있다. 적지 않으면 지금처럼 provider id 가 곧 catalog 행 id 다.
 2. catalog 를 찾는 곳은 모두 한 함수에서 catalog 행 id 를 얻는다. 그 함수는 `catalog-provider` 가 있으면 그 값을, 없으면 provider id 를 준다.
 3. 계정을 나누는 곳은 runtime provider id 와 자격을 그대로 쓴다. 자격 materialize, quota scope, runtime id, 쉼 칸, 자리가 그렇다.
-4. `catalog-provider` 를 적은 provider 는 id 가 그 행인 provider 와 같은 규칙을 받는다. `kind` 와 `request-path` 는 catalog 의 몫이라 적지 않는다.
+4. `catalog-provider` 를 적은 provider 는 id 가 그 행인 provider 와 같은 규칙을 받는다. `kind` 는 catalog 의 몫이라 적으면 거절된다. `request-path` 와 `endpoint` 는 지금처럼 적으면 catalog 값 대신 쓰인다.
 5. 설치 검사는 부팅 때 Exact registry 가 버릴 slot 을 까닭과 상관없이 모두 거절한다.
 
 ## 3. 설계
@@ -159,8 +159,9 @@ deadline 을 적었더라도 부팅이 그 slot 을 버렸을 것이다.
 - 거절은 셋이다.
   - **없는 행**: catalog 에 그 id 의 provider 행이 없다. `Runtime_config_error.drop_reason` 에 `Catalog_provider_not_declared of string` 을 더한다. `dangling_reference_reason` 이 이것을 `Some _` 로 돌려주므로 `Runtime.load_list` 에서 로드 오류가 된다. 오타를 binding 하나 빠지는 것으로 넘기지 않는다.
   - **자기 id 가 이미 catalog 행**: provider id 가 catalog 행인데 `catalog-provider` 도 적었다. 한 provider 가 두 행으로 말할 수 없다. `drop_reason` 에 `Catalog_provider_beside_own_row of string` 을 더하고, 이것도 `dangling_reference_reason` 이 `Some _` 로 돌려줘 로드 오류가 된다.
-  - **catalog 의 몫을 적음**: `kind` 나 `request-path` 를 같이 적었다. 지금 id 가 catalog 행인 provider 에 `kind` 를 적었을 때와 같은 경로(`refuse_unread_wire_kind`, 212~216행)로 거절한다.
-- `endpoint` 는 지금 id 가 catalog 행인 provider 에서처럼 적어도 된다. 운영의 `[providers.claude]` 가 이미 `endpoint` 를 적는다.
+  - **catalog 의 몫을 적음**: `kind` 를 같이 적었다. 지금 id 가 catalog 행인 provider 에 `kind` 를 적었을 때와 같은 경로(`refuse_unread_wire_kind`, 212~216행)로 거절한다. 그 binding 은 빠진다.
+- `request-path` 와 `endpoint` 는 지금 id 가 catalog 행인 provider 에서처럼 적어도 된다. 적으면 catalog 값 대신 쓰인다(`runtime_adapter.ml` 324~325행). 운영의 `[providers.claude]` 가 이미 `endpoint` 를 적는다.
+- `catalog-provider` 는 HTTP provider 만 적는다. official client 가 적으면 parse 가 거절한다. official client 는 catalog 의 wire 행으로 말하지 않는다.
 
 ### 3.2 catalog 행 id 는 한 함수로만 읽는다
 
@@ -238,7 +239,7 @@ let catalog_provider_id (provider : provider) =
   - Exact receipt 의 provider 칸도 이미 catalog 행 id 를 싣는다(§1.1). slot id 는 runtime id 라서 계정을 담는다.
 - **같은 모델로 본다.** `Runtime_response_identity.same_model_identity`(`types/runtime_response_identity.ml` 56행)는 `claude_a` 와 `claude_b` 의 같은 모델을 같은 모델로 보게 된다. 지금은 다른 모델로 본다. 모델이 같으니 이쪽이 맞다고 본다.
 - **운영자가 고칠 것이 있다.**
-  - 계정 provider 에서 `kind` 와 `request-path` 를 지우고 `catalog-provider` 를 적는다.
+  - 계정 provider 에서 `kind` 를 지우고 `catalog-provider` 를 적는다. `request-path` 는 catalog 값과 같으면 지워도 된다.
   - Exact slot 으로 쓸 provider 에는 `exact-body-timeout-s` 를 적는다.
   - 고치지 않은 provider 는 지금과 똑같이 돈다. 하드컷이 아니다. 새 키가 없으면 뜻도 없다.
 - **두 가지 적는 법이 남는다.** 손으로 `kind` 를 적는 provider 는 catalog 에 없는 endpoint 에 계속 필요하다. Anthropic 계정은 `catalog-provider` 를 쓰는 쪽이 맞다고 문서에 적는다.

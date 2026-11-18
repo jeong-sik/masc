@@ -851,7 +851,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
       let scale =
         match gap with
         | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
-            Masc_tui_chart.Anomaly (Theme.warn ())
+            Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Warn }
         | Memory_reading.No_gap ->
             Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Backlog }
       in

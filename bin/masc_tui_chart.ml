@@ -169,7 +169,7 @@ let gauge ~width ~value ~max_value ?label () =
 type meter_scale =
   | Declared_limit of Masc_tui_theme.paint
   | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
-  | Anomaly of string
+  | Anomaly of { paint : Masc_tui_theme.paint; status : Masc_tui_theme.status }
 
 (* How far along the bar a filled cell reaches: its far edge, unless the value
    stops short of it, so the last cell takes the colour of the value it draws
@@ -190,9 +190,14 @@ let meter_cell_style scale ~index ~width ~value ~max_value =
       (Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
          ~width ~value ~limit:max_value)
   | Series { paint; series } ->
-    Masc_tui_theme.ramp_style paint (Masc_tui_theme.Series_ramp series)
+    Masc_tui_theme.ramp_style paint series
       ~position:(cell_reach ~index ~width ~value ~max_value)
-  | Anomaly code -> code
+  | Anomaly { paint; status } -> (
+    match paint.Masc_tui_theme.depth with
+    | Masc_tui_theme.No_color -> ""
+    | Masc_tui_theme.Colors_16 | Masc_tui_theme.Colors_256 | Masc_tui_theme.Truecolor ->
+      Masc_tui_theme.status_readable ~surface:paint.Masc_tui_theme.surface
+        paint.Masc_tui_theme.palette status)
 ;;
 
 (* Neighbouring cells of a ramp often round to the same colour; the code goes

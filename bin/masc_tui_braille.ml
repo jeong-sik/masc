@@ -143,7 +143,10 @@ let tinted_row cells =
         let open_style =
           if mask = 0 || String.equal style open_style then open_style
           else begin
-            Buffer.add_string buffer style;
+            (* An empty style is the foreground, which only a reset gives
+               back. *)
+            Buffer.add_string buffer
+              (if String.equal style "" then Masc_tui_theme.Sgr.reset else style);
             style
           end
         in
@@ -156,9 +159,10 @@ let tinted_row cells =
 ;;
 
 (* A cell's height share on a [dots]-dot column: the taller of its two
-   times. *)
+   times, from the baseline (level 1, a zero) at 0 to the top at 1. *)
 let cell_share ~dots (left, right) =
-  float_of_int (Stdlib.max left right) /. float_of_int (Stdlib.max 1 dots)
+  float_of_int (Stdlib.max 0 (Stdlib.max left right - 1))
+  /. float_of_int (Stdlib.max 1 (dots - 1))
 ;;
 
 (* btop's rule: a graph more than one row tall takes its colour from the row,
@@ -169,7 +173,7 @@ let draw_rows ~tint ~rows ~dots ~distance ~mask cell_pairs =
   List.init rows (fun row ->
     let from_base = distance row in
     let row_style =
-      if rows > 1 then tint (float_of_int (from_base + 1) /. float_of_int rows) else ""
+      if rows > 1 then tint (float_of_int from_base /. float_of_int (rows - 1)) else ""
     in
     tinted_row
       (List.map

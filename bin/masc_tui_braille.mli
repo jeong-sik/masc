@@ -78,7 +78,7 @@ val braille_level : dots:int -> maximum:int -> sample -> int
     [dots] at or past [maximum]. *)
 
 (** The SGR a cell draws at a height share in [[0, 1]], from a picture ramp
-    ([Masc_tui_ansi.Theme.tint]). A tint that returns [""] draws no colour. *)
+    ([Masc_tui_ansi.Theme.series_tint]). A tint that returns [""] draws no colour. *)
 type tint = float -> string
 
 val braille_graph :
@@ -90,11 +90,13 @@ val braille_graph :
     unit ([123K]), placed at the graph's top-left. The newest [2 * cells]
     samples are drawn; a time before the first sample is blank.
 
-    A graph more than one row tall colours each row by its height,
-    [(row + 1) / rows] counted from the base; a one-row graph colours each
-    cell by the taller of its two times. A colour code goes out only where it
-    changes, a blank cell opens none, and each row that opened one ends with a
-    reset. The axis text draws in the foreground. *)
+    A graph more than one row tall colours each row by its height, from [0]
+    at the base row to [1] at the top; a one-row graph colours each cell by
+    the taller of its two times, from [0] at the baseline to [1] at the top.
+    A colour code goes out only where it changes, a blank cell opens none, an
+    empty tint after a colour resets to the foreground, and each row that
+    opened a colour ends with a reset. The axis text draws in the
+    foreground. *)
 
 val braille_mirror :
   up_tint:tint ->

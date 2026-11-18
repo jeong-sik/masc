@@ -295,9 +295,10 @@ val meter_cell_readable : paint -> meter_cell_colour -> string
 
 (** {1 Picture ramps}
 
-    Every filled meter cell and every graph dot takes a colour from a ramp,
-    the way btop paints its boxes (RFC tui-one-screen-grammar section 7.3).
-    The position on the ramp is the cell's reach along the bar, or the dot's
+    Every filled meter cell and every graph dot that is not against a
+    declared limit takes a colour from its series' ramp, the way btop paints
+    its memory and network boxes (RFC tui-one-screen-grammar section 7.3). The
+    position on the ramp is the cell's reach along the bar, or the dot's
     height in the graph, in [[0, 1]]. *)
 
 (** The quantity a picture draws. One quantity draws in one hue on every
@@ -314,31 +315,24 @@ type series =
   | Backlog  (** Work behind: a lag, a queue. Yellow. *)
   | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
 
-(** What a ramp walks along. *)
-type ramp =
-  | Limit_ramp
-      (** Success to warning to danger: the reach toward a declared limit. The
-          sixteen-colour steps are the ones {!limit_cell_colour} uses. *)
-  | Series_ramp of series
-      (** One hue, deep at the bottom of the bar or graph and bright at its
-          top. *)
-
 val ramp_steps : int
 (** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)
 
-val ramp_style : paint -> ramp -> position:float -> string
-(** The SGR a cell at [position] draws before its glyph. [position] is clamped
-    into [[0, 1]] and [nan] is [0]. Under [No_color] it is [""].
+val ramp_style : paint -> series -> position:float -> string
+(** The SGR a cell at [position] on [series]' ramp draws before its glyph.
+    [position] is clamped into [[0, 1]] and [nan] is [0]; the colour is the
+    ramp's step at or below it. Under [No_color] it is [""].
 
-    A series ramp interpolates in Oklab from its hue stepped toward the
-    ground, clearing 3:1 (a graphical object), to the palette's bright entry of
-    that hue lifted to clear 4.5:1, so every hue spans at least that band. Where it cannot --
-    sixteen colours, no reported palette, lifting turned off, a projection
-    under the floor -- the lower half draws the hue's normal palette code and
-    the upper half its bright code.
+    With a reported palette, at 256 colours or truecolor and lifting on, the
+    ramp interpolates in Oklab from the hue stepped toward the ground, clearing
+    3:1 (a graphical object), to the palette's bright entry of that hue lifted
+    to clear 4.5:1, so every hue spans at least that band. A ramp is blended
+    whole or not at all: where any step cannot be drawn above the floor -- or
+    at sixteen colours, with no palette, with lifting off -- every step is the
+    hue's bright code.
 
-    The colours of one ramp are computed once per palette, depth and ground and
-    then read from a table, so a frame of graphs costs one array read a cell. *)
+    The colours of one ramp are computed once per palette, depth, ground and
+    lift switch and then read from a table. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -423,7 +417,7 @@ module For_testing : sig
     :  colors_enabled:bool
     -> project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option)
     -> paint
-    -> ramp
+    -> series
     -> position:float
     -> string
   (** {!ramp_style} without the table, with the colour switch and projection

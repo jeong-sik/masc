@@ -238,9 +238,12 @@ let chart_cells ~(sample : Series.tool_series_calls -> Braille.sample) ~series b
                 match reading with
                 | Braille.Zero -> Theme.recede ()
                 | Braille.Value _ ->
+                    (* A value stands at least one level above the
+                       baseline, so its levels run from 2 to the top. *)
                     tint
-                      (float_of_int (Braille.braille_level ~dots:column_dots ~maximum reading)
-                       /. float_of_int column_dots)
+                      (float_of_int
+                         (Braille.braille_level ~dots:column_dots ~maximum reading - 2)
+                       /. float_of_int (column_dots - 2))
                 | Braille.Absent | Braille.Unread -> ""
             in
             (mark ~maximum reading, style))
@@ -406,7 +409,8 @@ let load_bar ~cells ~maximum_calls reading =
          fill walks the calls hue. A bucket in which every call failed is the
          anomaly, and its colour comes first. *)
       let scale =
-        if every_call_failed active then Masc_tui_chart.Anomaly (Theme.bad ())
+        if every_call_failed active then
+          Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Bad }
         else Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls }
       in
       Masc_tui_chart.meter_bar ~width:cells ~value:active.Series.tsc_calls

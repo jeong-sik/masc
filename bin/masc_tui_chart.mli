@@ -58,10 +58,10 @@ type meter_scale =
       (** Anything else: a completion ratio, a share of a total, a size
           against the largest. Each filled cell takes [series]'s hue at its
           position along the bar, deep at the start and bright at the end. *)
-  | Anomaly of string
-      (** The status colour of an anomaly the bar reports -- every call
-          failed, a stalled reader -- which comes before any ramp: every
-          filled cell draws in it. *)
+  | Anomaly of { paint : Masc_tui_theme.paint; status : Masc_tui_theme.status }
+      (** An anomaly the bar reports -- every call failed, a stalled reader
+          -- whose status colour comes before any ramp: every filled cell
+          draws in [status] through {!Masc_tui_theme.status_readable}. *)
 
 val meter_cell_style :
   meter_scale -> index:int -> width:int -> value:int -> max_value:int -> string
@@ -70,7 +70,7 @@ val meter_cell_style :
     {!Masc_tui_theme.limit_cell_colour} through
     {!Masc_tui_theme.meter_cell_readable}; a series draws
     {!Masc_tui_theme.ramp_style} at the cell's reach, the smaller of its far
-    edge and [value / max_value]; an anomaly draws its own code. *)
+    edge and [value / max_value]; an anomaly draws its status colour. *)
 
 val meter_fill_run :
   scale:meter_scale ->

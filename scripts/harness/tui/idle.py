@@ -562,8 +562,13 @@ def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Ma
         window = idle_window(child, vte, options.idle_s)
         result |= window.report()
         result['rss_mb'] = rss_mb(child.pid)
-        closed = False
-        if options.keys:
+        # Keys pressed after the window need an open terminal. When it closed
+        # in the window, the presses asked for are missing, and the error
+        # names the window.
+        closed = window.terminal_closed
+        if closed and (options.keys or options.probes):
+            result['error'] = 'terminal: closed during the idle window, so no key after it was pressed'
+        if options.keys and not closed:
             steps = run_keys(child, vte, options.keys, options.out, step.name, options.png_fonts)
             result['key_steps'] = steps.report()
             closed = steps.closed

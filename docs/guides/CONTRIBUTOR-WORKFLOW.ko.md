@@ -148,11 +148,10 @@ Keeper 메시지와 위임 요청은 운영자의 채팅 화면에도 보입니�
 문장을 다시 쓰고, 단어 사이의 공백을 없애지 마세요. 인용한 원문, 코드, 경로와 식별자는
 그대로 보존합니다.
 
-**Commit 경계.** `.githooks`가 활성화되어 있으면 코드 commit의 pre-commit이 로컬
-Dune 빌드를 실행합니다. 로컬 빌드를 하지 않는 외부 코딩 세션은 해당 commit에
-`git -c core.hooksPath=/dev/null commit -m "your message"`를 사용합니다. 이 명령에서만
-hook을 끄며 이후 push에는 적용되지 않습니다. pre-push의 trace 유출 검사는 유지하고
-독립 소스 리뷰를 받으세요. 빌드를 피하려고 clone의 영구 hook 설정을 바꾸지는 않습니다.
+**Commit 경계.** `.githooks`가 활성화되어 있으면 pre-commit은 `main`·`master`·`develop`에
+하는 commit을 거절하고, pre-push는 Dune 빌드 trace(`trace.csexp`, `_build-*/`)를 더하는
+push를 거절합니다. 두 hook 모두 빌드를 하지 않으므로 worktree 브랜치에서 hook을 켠 채로
+commit합니다. 독립 소스 리뷰는 그대로 받으세요.
 
 Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 독립
 소스 리뷰나 Release/Tag 전체 CI를 대신하지는 않습니다. 세션 권한, MCP 인증의

@@ -2,7 +2,7 @@
 
 Date: 2026-11-07  
 Topic: Json_util Core Field Extractors & Server_timing Request Pipeline Optimization  
-Environment: macOS (Darwin arm64), OCaml 5.5.1 (native `ocamlopt -O3 -unbox-closures`)  
+Environment: macOS (Darwin arm64), OCaml 5.5.1 (native `ocamlopt`)  
 
 ## 1. Background & Problem Analysis
 
@@ -30,7 +30,7 @@ Environment: macOS (Darwin arm64), OCaml 5.5.1 (native `ocamlopt -O3 -unbox-clos
 
 ## 3. Measured Results
 
-Measured with native OCaml 5.5.1 (`-O3 -unbox-closures`).
+Measured with native OCaml 5.5.1 `ocamlopt`.
 
 | Benchmark Scenario | Baseline Latency | Optimized Latency | Speedup | Baseline Minor Alloc | Optimized Minor Alloc | Alloc Reduction |
 |:---|:---|:---|:---|:---|:---|:---|

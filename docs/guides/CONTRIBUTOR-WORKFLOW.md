@@ -157,12 +157,11 @@ as a reply to the user, including natural Korean spacing. To shorten a request,
 remove repetition or rewrite sentences; do not concatenate words. Preserve quoted
 source text, code, paths and identifiers exactly.
 
-**Commit boundary.** If `.githooks` is active, code commits run a local Dune
-build in pre-commit. An external coding session following the no-local-build
-rule uses `git -c core.hooksPath=/dev/null commit -m "your message"` for that
-commit. This disables hooks for that command only, not future pushes: keep the
-pre-push trace-leak guard active and obtain independent source review. Do not
-change the clone's persistent hook configuration to avoid a build.
+**Commit boundary.** With `.githooks` active, pre-commit refuses a commit on
+`main`, `master` or `develop`, and pre-push refuses a push that adds Dune build
+traces (`trace.csexp`, `_build-*/`). Neither hook runs a build, so commit
+normally from a worktree branch and keep both hooks active. Independent source
+review is still required.
 
 Keeper lanes may build/test locally if their toolchain exists. Those results do
 not replace independent source review or full Release/Tag CI. A session's

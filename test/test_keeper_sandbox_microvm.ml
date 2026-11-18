@@ -4443,9 +4443,18 @@ esac
   Unix.chmod cli 0o755;
   let previous_path = Sys.getenv "PATH" in
   Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  (* The guest boots on the inherited network, so the server picks a resolver
+     for it before it stops anything. Unless one is named here it copies the
+     host's from /etc/resolv.conf, which on a Linux CI runner is the loopback
+     stub of systemd-resolved. A guest cannot reach that, so the boot is
+     refused before the old guest is stopped and the last assertion fails for
+     a reason unrelated to the shim. A blank value is unset. *)
+  let previous_dns = Option.value (Sys.getenv_opt "MASC_KEEPER_MICROVM_DNS") ~default:"" in
+  Unix.putenv "MASC_KEEPER_MICROVM_DNS" "192.0.2.53";
   Fun.protect ~finally:(fun () ->
     Eio_context.restore_state context;
     Unix.putenv "PATH" previous_path;
+    Unix.putenv "MASC_KEEPER_MICROVM_DNS" previous_dns;
     remove_snapshot_fixture dir)
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -4478,9 +4487,16 @@ esac
       (Sys.file_exists guest_file))
     [ "first"; "second" ];
   install current_shim_fixture;
-  ignore (attempt ());
-  Alcotest.(check bool) "a current shim lets the replacement stop the old guest" true
-    (List.mem ("stop " ^ guest) (calls ()))
+  (* Only the stop shows the replacement began, so the result is not checked.
+     A failing run names the error the request ended with, because nothing
+     else in the log does. *)
+  let outcome = attempt () in
+  let stopped = List.mem ("stop " ^ guest) (calls ()) in
+  let why = match outcome with
+    | Error detail when not stopped -> ": the request ended with " ^ detail
+    | Error _ | Ok _ -> "" in
+  Alcotest.(check bool) ("a current shim lets the replacement stop the old guest" ^ why) true
+    stopped
 ;;
 
 (* #52968, the process-bound runtimes. A boot on Nerdctl_kata or

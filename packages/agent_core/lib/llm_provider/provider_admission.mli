@@ -190,7 +190,8 @@ val with_admission_and_work_for
 type seat
 
 (** [take_first_seat first rest] takes a seat on one of the endpoints of
-    [first :: rest] and returns its position in that list (0 for [first]).
+    [first :: rest] and returns the seat with the value the caller paired
+    with that endpoint's config.
 
     It asks each endpoint in order and takes the first seat it can take
     without waiting: an endpoint with no declaration, or one with a permit
@@ -202,7 +203,10 @@ type seat
     held and no request queued.
 
     The allowance and conflict rules are those of {!with_admission}. *)
-val take_first_seat : Provider_config.t -> Provider_config.t list -> int * seat
+val take_first_seat
+  :  'owner * Provider_config.t
+  -> ('owner * Provider_config.t) list
+  -> 'owner * seat
 
 (** Return the seat's permit to its endpoint. Returning a seat twice returns
     it once. *)

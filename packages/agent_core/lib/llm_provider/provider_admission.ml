@@ -307,14 +307,14 @@ let scheduler_of (config : Provider_config.t) =
    fiber that holds a seat ever returns a result [Fiber.any] could drop. *)
 let wait_for_first_seat first_full rest_full =
   let won = Atomic.make None in
-  let wait (index, (config : Provider_config.t), scheduler) () =
+  let wait (owner, (config : Provider_config.t), scheduler) () =
     Slot_scheduler.acquire_held
       ?on_queue:(on_queue_for config)
       ~admission_class:config.admission_class
       scheduler;
     let seat = held scheduler in
     if Atomic.compare_and_set won None (Some seat)
-    then index, seat
+    then owner, seat
     else (
       release_seat seat;
       Eio.Fiber.await_cancel ())
@@ -329,27 +329,27 @@ let wait_for_first_seat first_full rest_full =
 ;;
 
 (* A seat taken at once, or the full endpoint to wait on. *)
-let ask_now index (config : Provider_config.t) =
+let ask_now (owner, (config : Provider_config.t)) =
   match scheduler_of config with
-  | None -> Ok (index, Unadmitted)
+  | None -> Ok (owner, Unadmitted)
   | Some scheduler ->
     if Slot_scheduler.try_acquire scheduler
-    then Ok (index, held scheduler)
-    else Error (index, config, scheduler)
+    then Ok (owner, held scheduler)
+    else Error (owner, config, scheduler)
 ;;
 
 let take_first_seat first rest =
-  let rec ask_rest index full = function
+  let rec ask_rest full = function
     | [] -> Error (List.rev full)
-    | config :: configs ->
-      (match ask_now index config with
+    | endpoint :: endpoints ->
+      (match ask_now endpoint with
        | Ok taken -> Ok taken
-       | Error endpoint -> ask_rest (index + 1) (endpoint :: full) configs)
+       | Error full_endpoint -> ask_rest (full_endpoint :: full) endpoints)
   in
-  match ask_now 0 first with
+  match ask_now first with
   | Ok taken -> taken
   | Error first_full ->
-    (match ask_rest 1 [] rest with
+    (match ask_rest [] rest with
      | Ok taken -> taken
      | Error rest_full -> wait_for_first_seat first_full rest_full)
 ;;

@@ -37,6 +37,19 @@ let test_consecutive_failures_wait_longer_up_to_the_max () =
   check int "each failure counts" 3
     (failures (failed ~now:0.0 (failed ~now:0.0 (failed ~now:0.0 P.answering))))
 
+(* An outage of hours: the count of failures keeps growing, the wait does not
+   shrink back to nothing, so the ring cannot come back after a long outage. *)
+let test_a_long_outage_keeps_the_longest_wait () =
+  let rec run t now n =
+    if n = 0 then t, now
+    else
+      let t = failed ~now t in
+      run t (now +. wait_after ~now t) (n - 1)
+  in
+  let t, now = run P.answering 0.0 5000 in
+  check int "every failure counts" 5000 (failures t);
+  check (float 1e-9) "the wait stays at the max" max_retry_s (wait_after ~now:now (failed ~now t))
+
 let test_a_pass_that_answers_resets_the_wait () =
   let t = failed ~now:0.0 (failed ~now:0.0 (failed ~now:0.0 P.answering)) in
   let t = P.pass_answered t in
@@ -82,6 +95,8 @@ let () =
     [ ( "pace",
         [ test_case "consecutive failures wait longer up to the max" `Quick
             test_consecutive_failures_wait_longer_up_to_the_max
+        ; test_case "a long outage keeps the longest wait" `Quick
+            test_a_long_outage_keeps_the_longest_wait
         ; test_case "a pass that answers resets the wait" `Quick
             test_a_pass_that_answers_resets_the_wait
         ; test_case "no pass starts before its wait" `Quick

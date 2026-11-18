@@ -281,4 +281,9 @@ run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-recorded-messages.cfg" "recorded-messages"
 
+# KeeperRowFacts.cfg has the writers under the store's mutex. This one has two
+# writers and no mutex, which is the decision record; it expects no violation.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "KeeperRowFacts.tla" \
+  "KeeperRowFacts-no-mutex.cfg" "no-mutex"
+
 echo "All TLA+ checks passed."

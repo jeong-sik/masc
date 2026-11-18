@@ -1239,14 +1239,37 @@ let probe_failed name message =
 ;;
 
 (* Run in a process whose descriptor limit is [descriptor_limit]: the cache
-   is full and no descriptor is left. A new path still opens, because the
-   cache closes a writer before it opens the new one. *)
+   is full, its least recently used writer is lent, and no descriptor is
+   left. A new path still opens, because the cache closes a writer that is
+   not lent before it opens the new one. *)
 let descriptor_limit_probe dir =
-  fill_cache dir;
+  let name = "descriptor limit probe" in
+  let lent = Atomic.make false in
+  let release = Atomic.make false in
+  let holder =
+    Thread.create
+      (fun () ->
+        Fs_compat.with_cached_writer_for_testing (numbered_path dir 1) (fun _ ->
+          Atomic.set lent true;
+          hold_until release))
+      ()
+  in
+  if not (wait_until (fun () -> Atomic.get lent))
+  then probe_failed name "the first writer was not lent";
+  for i = 2 to cache_bound do
+    Fs_compat.append_jsonl (numbered_path dir i) (`Int i)
+  done;
   use_up_descriptors ();
-  match Fs_compat.append_jsonl (numbered_path dir (cache_bound + 1)) (`Int 0) with
-  | () -> exit 0
-  | exception Sys_error message -> probe_failed "descriptor limit probe" message
+  let outcome =
+    match Fs_compat.append_jsonl (numbered_path dir (cache_bound + 1)) (`Int 0) with
+    | () -> Ok ()
+    | exception Sys_error message -> Error message
+  in
+  Atomic.set release true;
+  Thread.join holder;
+  match outcome with
+  | Ok () -> exit 0
+  | Error message -> probe_failed name message
 ;;
 
 (* The same with two new paths whose opens are in flight together: they are

@@ -220,15 +220,15 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       wrap (warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading"))
+  (* With no reading the edge draws the failure mark, and one row says why:
+     the row that names the cause with its age. A general row above it
+     ("not observed · fleet unreachable") said the same thing again. *)
   | Unreachable { since } ->
-      wrap (warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable"))
-      @ wrap (quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
+      wrap (warning (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
   | Unavailable { degradation; disconnected_since } ->
-      wrap (warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable"))
-      @ wrap (quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
+      wrap (warning (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
   | Cannot_read failure ->
-      wrap (warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable"))
-      @ wrap (quiet (Masc_tui_fleet_line.failure_text ~ko failure))
+      wrap (warning (Masc_tui_fleet_line.failure_text ~ko failure))
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let identity_confirmed = state.workspace_identity = Workspace_identity_match in

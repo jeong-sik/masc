@@ -489,12 +489,12 @@ let render_board_list (state : state) =
          | None -> None
          | Some _ when count = 0 -> None
          | Some _ ->
-             let at = state.board_cursor + 1 in
+             let selected = Some state.board_cursor in
              Some
                (match holding with
                 | Some total when total > count ->
-                    Masc_tui_value.Position.Partial { at; loaded = count; total }
-                | Some _ | None -> Masc_tui_value.Position.Row { at; total = count }))
+                    Masc_tui_value.Position.partial ~selected ~loaded:count ~total
+                | Some _ | None -> Masc_tui_value.Position.row ~selected ~total:count))
   in
 
   let layout = board_layout ~cols in

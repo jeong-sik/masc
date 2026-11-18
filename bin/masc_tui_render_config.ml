@@ -1792,7 +1792,10 @@ let render_runtime_config_status state =
       ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  Home/End:top/end  r:reload")
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_rows state ~cols in
-      let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
+      let total = List.length lines in
+      let scroll = min state.runtime_config_status_scroll (max 0 (total - budget)) in
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total);
       lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
       |> List.iter (fun (style, text) -> c.push_styled ~style text))
 

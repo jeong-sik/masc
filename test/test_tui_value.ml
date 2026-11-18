@@ -113,20 +113,55 @@ let test_only_one_is_singular () =
         (Count.reading ~ko:false Count.Entry count))
     [ (0, "0 entries"); (1, "1 entry"); (2, "2 entries"); (8347, "8,347 entries") ]
 
-(* A card edge counts a list read in part with the rows read, the word for
-   the whole and the server's total. The position on the same screen says the
-   selected row ahead of the same three, so the two cannot drift apart. *)
-let test_a_partial_count_reads_like_the_position () =
-  List.iter
-    (fun (ko, expected) ->
-      let count = Count.partial ~ko ~loaded:50 ~total:2000 in
-      Alcotest.(check string) "the card edge's count" expected count;
-      Alcotest.(check string) "the position ends with the same count"
-        ("1/" ^ count)
-        (Position.text ~ko (Position.Partial { at = 1; loaded = 50; total = 2000 })))
-    [ (true, "50 \xc2\xb7 \xec\xa0\x84\xec\xb2\xb4 2,000")
-    ; (false, "50 \xc2\xb7 of 2,000")
-    ]
+(* Which position a screen hands, and its numbers: a window that hides rows
+   and none for one that shows them all, a list's selected row held inside
+   the list, and a list read in part. The text zone 2 draws from them is not
+   checked here (RFC tui-one-screen-grammar, section 10). *)
+let window_numbers = function
+  | Some (Position.Window { first; last; total }) -> Some (first, last, total)
+  | Some (Position.Row _ | Position.Partial _) | None -> None
+
+let test_a_window_is_handed_only_when_it_hides_rows () =
+  let check label expected ~first ~shown ~total =
+    Alcotest.(check (option (triple int int int))) label expected
+      (window_numbers (Position.window ~first ~shown ~total))
+  in
+  check "every row shown hands nothing" None ~first:0 ~shown:10 ~total:10;
+  check "a short reading hands nothing" None ~first:4 ~shown:10 ~total:3;
+  check "an empty reading hands nothing" None ~first:0 ~shown:10 ~total:0;
+  check "a middle window counts from one" (Some (6, 15, 30)) ~first:5 ~shown:10 ~total:30;
+  check "a window past the end is held at the last full window"
+    (Some (21, 30, 30)) ~first:99 ~shown:10 ~total:30;
+  check "a window above the top starts at the top" (Some (1, 10, 30))
+    ~first:(-4) ~shown:10 ~total:30;
+  check "a window with no rows shows none of them" (Some (0, 0, 3))
+    ~first:0 ~shown:0 ~total:3
+
+let test_a_list_names_its_selected_row () =
+  Alcotest.(check bool) "the seventh of 29" true
+    (match Position.row ~selected:(Some 6) ~total:29 with
+     | Position.Row { at = 7; total = 29 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a list that fits still names its row" true
+    (match Position.row ~selected:(Some 0) ~total:3 with
+     | Position.Row { at = 1; total = 3 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "nothing selected is row zero" true
+    (match Position.row ~selected:None ~total:31 with
+     | Position.Row { at = 0; total = 31 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a cursor past the end names the last row" true
+    (match Position.row ~selected:(Some 40) ~total:29 with
+     | Position.Row { at = 29; total = 29 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "an empty list selects nothing" true
+    (match Position.row ~selected:(Some 0) ~total:0 with
+     | Position.Row { at = 0; total = 0 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a list read in part names the row among those read" true
+    (match Position.partial ~selected:(Some 0) ~loaded:50 ~total:2000 with
+     | Position.Partial { at = 1; loaded = 50; total = 2000 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false)
 
 (* What a card cut off is a number of rows in the screen's language, grouped
    like any other count. *)
@@ -373,10 +408,14 @@ let () =
     ; ( "count",
         [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit
         ; Alcotest.test_case "only one is singular" `Quick test_only_one_is_singular
-        ; Alcotest.test_case "a partial count reads like the position" `Quick
-            test_a_partial_count_reads_like_the_position
         ; Alcotest.test_case "cut rows are counted in the screen's language" `Quick
             test_cut_rows_are_counted_in_the_screens_language
+        ] )
+    ; ( "position",
+        [ Alcotest.test_case "a window is handed only when it hides rows" `Quick
+            test_a_window_is_handed_only_when_it_hides_rows
+        ; Alcotest.test_case "a list names its selected row" `Quick
+            test_a_list_names_its_selected_row
         ] )
     ; ( "hash",
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )

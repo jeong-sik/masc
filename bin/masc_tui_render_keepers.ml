@@ -2263,13 +2263,13 @@ let keeper_list_position ~stop rows : Masc_tui_value.Position.t option =
   match rows with
   | [] -> None
   | _ :: _ ->
-      let at =
+      let selected =
         match stop with
-        | Some (Keeper_list_model.Stop_row position) -> position + 1
+        | Some (Keeper_list_model.Stop_row position) -> Some position
         | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _)
-        | None -> 0
+        | None -> None
       in
-      Some (Row { at; total = List.length rows })
+      Some (Masc_tui_value.Position.row ~selected ~total:(List.length rows))
 
 let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in

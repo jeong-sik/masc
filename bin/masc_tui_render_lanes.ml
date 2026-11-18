@@ -1123,11 +1123,12 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
      [3/50] of a list read whole, [3/50 · of 8,347] of one read in part. The
      footer names the key for the older page while there is one. *)
   let position : Masc_tui_value.Position.t option =
-    let at = state.lane_runs_cursor + 1 in
+    let selected = Some state.lane_runs_cursor in
     match state.lane_runs_total with
     | _ when shown = 0 -> None
-    | Some total when total > shown -> Some (Partial { at; loaded = shown; total })
-    | Some _ | None -> Some (Row { at; total = shown })
+    | Some total when total > shown ->
+        Some (Masc_tui_value.Position.partial ~selected ~loaded:shown ~total)
+    | Some _ | None -> Some (Masc_tui_value.Position.row ~selected ~total:shown)
   in
   let header =
     here_row ~cols state

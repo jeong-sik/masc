@@ -120,6 +120,11 @@ let acting_pane_context_rows = ref 0
    a drag against the copy the terminal accepted, never this one. *)
 let frame_panes = ref Masc_tui_pane_selection.no_panes
 
+(* What zone 2 of the frame being drawn says about where the reader is. Its
+   one drawer sets it; the render clears it when a frame starts, so a frame
+   that draws no position leaves [None]. *)
+let frame_position : Masc_tui_value.Position.t option ref = ref None
+
 
 
 (* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
@@ -1957,7 +1962,61 @@ type chrome_body = {
           content will start -- where a picture placed over body rows goes.
           Holds while the body stays inside its budget, which a [Fits] body
           does. *)
+  position : Masc_tui_value.Position.t -> unit;
+      (** Where the reader stands in what the body holds. The contract draws
+          it at the right of the title row once the body has finished; the
+          last one handed is drawn. *)
 }
+
+(* The cells kept clear ahead of the position. *)
+let here_position_gap_cells = 2
+
+(* The mark in a position's row place when no row is selected or none is
+   shown (RFC section 6.4). *)
+let no_position_mark = "\xe2\x80\x94"
+
+(* The one place a position becomes text (RFC section 2): [7/29],
+   [1–49/75], [1/50 · 전체 8,347]. Not exported: a body hands the value and
+   cannot draw it. *)
+let position_text ~ko : Masc_tui_value.Position.t -> string =
+  let grouped = Masc_tui_value.Count.grouped in
+  let row at = if at = 0 then no_position_mark else grouped at in
+  function
+  | Row { at; total } -> row at ^ "/" ^ grouped total
+  | Window { first = 0; last = _; total } -> no_position_mark ^ "/" ^ grouped total
+  | Window { first; last; total } ->
+      grouped first ^ "\xe2\x80\x93" ^ grouped last ^ "/" ^ grouped total
+  | Partial { at; loaded; total } ->
+      row at ^ "/" ^ Masc_tui_value.Count.partial ~ko ~loaded ~total
+
+(* The position as zone 2 draws it, recorded as the frame's. *)
+let zone_two_position (state : state) position =
+  frame_position := position;
+  Option.map
+    (fun position ->
+      Ansi.dim ^ position_text ~ko:(state.ui_language = Lang_ko) position ^ Ansi.reset)
+    position
+
+(* The cells the position and its gap take from the end of zone 2's row. *)
+let zone_two_position_cells = function
+  | None -> 0
+  | Some text ->
+      Message_layout.display_width (Masc_tui_theme.strip_sgr text)
+      + here_position_gap_cells
+
+(* Zone 2's row: [left], laid out in the cells the position leaves, then the
+   position at the right-hand end, where it keeps its column whatever the
+   left says. *)
+let zone_two_row ~cols ~left = function
+  | None -> left
+  | Some text ->
+      let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+      left
+      ^ String.make
+          (max here_position_gap_cells
+             (framed_inner_width cols - cells left - cells text))
+          ' '
+      ^ text
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
    itself. Everything else is the body's budget. The framed panels count the
@@ -1988,14 +2047,14 @@ type overflow =
   | Scrolled of { scroll : int; report : int -> clamped_scroll }
   | Self_scrolled of (unit -> clamped_scroll)
 
-(* The window a [Scrolled] body gets out of [count] rows: the budget, less the
-   position row when they overflow. The key handler that bounds the scroll and
-   the frame that draws it both ask this. *)
+(* The window a [Scrolled] body gets out of [count] rows: the whole budget,
+   since its position is on the title row. The key handler that bounds the
+   scroll and the frame that draws it both ask this. *)
 let surface_window_height state ~terminal_rows ~count =
   Masc_tui_scroll.content_height
     ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
-    ~overflow_takes_row:true
+    ~overflow_takes_row:false
 
 let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
@@ -2029,17 +2088,23 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
         , framed_empty
         , framed_bottom )
   in
-  top buf cols;
-  line buf cols title;
-  divider buf cols;
-  (* The lines drawn above the body, counted from what was drawn rather than
-     by hand, and the strip [finish_surface] puts above them. *)
-  let body_top = strip_rows + lines_ended_since buf ~start:0 in
+  (* The title row waits for the body, which is the only one that knows where
+     its reader stands. The lines above the body are counted from the rows
+     drawn there rather than by hand, with the strip [finish_surface] puts
+     above them; the title is one row whatever it says. *)
+  let body_top =
+    let head = Buffer.create 256 in
+    top head cols;
+    line head cols "";
+    divider head cols;
+    strip_rows + lines_ended_since head ~start:0
+  in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
   let pushed = ref [] in
+  let handed = ref None in
   let hold draw = pushed := draw :: !pushed in
   let body_pushers =
     { push = (fun text -> hold (fun () -> line buf cols text))
@@ -2051,6 +2116,7 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
     ; next_origin =
         (fun () -> (body_top + List.length !pushed,
                     sidebar_cols + Masc_tui_ansi.framed_content_column))
+    ; position = (fun position -> handed := Some position)
     }
   in
   Masc_tui_frame_timing.finish_stage ~name:"surface.setup" setup_started;
@@ -2060,6 +2126,33 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
+  (* A scrolled body's window is the contract's, so its position is too. *)
+  let window =
+    match overflow with
+    | Fits | Paged_by_cursor | Self_scrolled _ -> None
+    | Scrolled { scroll; report = _ } ->
+        let height = surface_window_height state ~terminal_rows ~count in
+        Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
+  in
+  let position =
+    match window with
+    | Some (height, scroll) ->
+        Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
+    | None -> !handed
+  in
+  top buf cols;
+  (* A title that already carries a position, laid out by [here_row], keeps
+     it: only a position the body handed is placed here. *)
+  (match position with
+   | None -> line buf cols title
+   | Some _ as position ->
+       let position = zone_two_position state position in
+       let left_cells =
+         framed_inner_width cols - zone_two_position_cells position
+       in
+       line buf cols
+         (zone_two_row ~cols ~left:(fit_width title (max 0 left_cells)) position));
+  divider buf cols;
   (* No row is drawn past the budget: one more shoves the bottom rule and the
      footer off the screen. *)
   let used = ref 0 in
@@ -2091,15 +2184,14 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
            exists: a body that windows part of itself cannot say what it
            clamped to before it has drawn. *)
         Some (read ())
-    | Scrolled { scroll; report } ->
-        let height = surface_window_height state ~terminal_rows ~count in
-        let scroll = Masc_tui_scroll.normalize ~count ~height scroll in
+    | Scrolled { scroll = _; report } ->
+        let height, scroll =
+          Option.value window ~default:(count, 0)
+        in
         List.iteri
           (fun index draw ->
             if index >= scroll && index < scroll + height then draw_row draw)
           held;
-        Option.iter draw_note
-          (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
         Some (report scroll)
   in
   for _ = !used + 1 to budget do
@@ -2308,8 +2400,6 @@ let surface_connection_badge (state : state) ~width =
    of the thing being read, and the steps before it are how to get back. *)
 let here_step_separator = " \xe2\x80\xba "
 
-(* The cells kept clear ahead of the position. *)
-let here_position_gap_cells = 2
 
 (* The top-row screen the current one belongs to, by the name the top row
    draws for it. *)
@@ -2379,25 +2469,11 @@ let here_row ~cols (state : state) ~path ~readings ~position =
      that needs a style of its own is drawn with [here_path], by a caller
      that lays out its own row. *)
   let path = List.map Terminal_text.single_line path in
-  let position =
-    Option.map
-      (fun position ->
-        Ansi.dim
-        ^ Masc_tui_value.Position.text
-            ~ko:(state.ui_language = Lang_ko) position
-        ^ Ansi.reset)
-      position
-  in
+  let position = zone_two_position state position in
   let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
-  (* The position ends the row: the path and the readings are laid out in the
-     cells left of it, then padded, so it keeps its column whatever the path
-     says. *)
-  let position_cells =
-    match position with
-    | Some text -> cells text + here_position_gap_cells
-    | None -> 0
-  in
-  let left_cols = cols - position_cells in
+  (* The path and the readings are laid out in the cells left of the
+     position. *)
+  let left_cols = cols - zone_two_position_cells position in
   (* Reads come and go with every refresh, and a row that changed with them
      would never sit still. Each screen says what it is still reading in its
      own body; the row speaks up only for what went wrong. *)
@@ -2438,15 +2514,7 @@ let here_row ~cols (state : state) ~path ~readings ~position =
                 (if index = 0 then "  " else reading_separator) ^ reading))
       ~tail
   in
-  match position with
-  | None -> left
-  | Some position ->
-      left
-      ^ String.make
-          (max here_position_gap_cells
-             (framed_inner_width cols - cells left - cells position))
-          ' '
-      ^ position
+  zone_two_row ~cols ~left position
 
 (* The step the Runtime screens take from System, and a keeper's runtime
    takes from that keeper. *)

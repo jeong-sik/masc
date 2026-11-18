@@ -361,14 +361,29 @@ end
 module Position = struct
   type t =
     | Row of { at : int; total : int }
+    | Window of { first : int; last : int; total : int }
     | Partial of { at : int; loaded : int; total : int }
 
-  (* The mark for a value that is absent (RFC section 6.4). *)
-  let nothing_selected = "\xe2\x80\x94"
+  (* The selected index as a row counted from one, held inside the list: a
+     cursor left past the end by a list that shrank names the last row. *)
+  let selected_row ~selected ~total =
+    match selected with
+    | None -> 0
+    | Some _ when total <= 0 -> 0
+    | Some index -> Int.max 0 (Int.min index (total - 1)) + 1
 
-  let text ~ko = function
-    | Row { at = 0; total } -> nothing_selected ^ "/" ^ Count.grouped total
-    | Row { at; total } -> Count.grouped at ^ "/" ^ Count.grouped total
-    | Partial { at; loaded; total } ->
-        Count.grouped at ^ "/" ^ Count.partial ~ko ~loaded ~total
+  let row ~selected ~total =
+    let total = Int.max 0 total in
+    Row { at = selected_row ~selected ~total; total }
+
+  let partial ~selected ~loaded ~total =
+    let loaded = Int.max 0 loaded in
+    Partial { at = selected_row ~selected ~total:loaded; loaded; total = Int.max loaded total }
+
+  let window ~first ~shown ~total =
+    if total <= shown then None
+    else if shown <= 0 then Some (Window { first = 0; last = 0; total })
+    else
+      let first = Int.max 0 (Int.min first (total - shown)) in
+      Some (Window { first = first + 1; last = first + shown; total })
 end

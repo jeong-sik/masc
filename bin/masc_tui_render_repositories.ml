@@ -585,9 +585,9 @@ let render_repository_changes (state : state) =
              | [] -> None
              | _ :: _ ->
                  Some
-                   (Masc_tui_value.Position.Row
-                      { at = state.repository_changes_cursor + 1
-                      ; total = List.length changes }))
+                   (Masc_tui_value.Position.row
+                      ~selected:(Some state.repository_changes_cursor)
+                      ~total:(List.length changes)))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"

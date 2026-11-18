@@ -92,6 +92,12 @@ val frame_panes : Masc_tui_pane_selection.layout ref
     ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
     once the terminal accepts the frame. *)
 
+val frame_position : Masc_tui_value.Position.t option ref
+(** Where zone 2 of the frame being drawn says the reader is (RFC
+    tui-one-screen-grammar, section 2), set by the one function that draws
+    it: {!here_row}, or the title row {!surface_chrome} draws. [None] when
+    the frame names no position. The render clears it as each frame starts. *)
+
 val clamped_scroll_now :
   Masc_tui_types.state ->
   Masc_tui_types.clamped_scroll ->
@@ -280,6 +286,12 @@ type chrome_body = {
           content will start -- where a picture placed over body rows goes.
           Holds while the body stays inside its budget, which a [Fits] body
           does. *)
+  position : Masc_tui_value.Position.t -> unit;
+      (** Where the reader stands in what the body holds (RFC
+          tui-one-screen-grammar, section 2). The contract draws it at the
+          right of the title row once the body has finished; the last one
+          handed is drawn. A body that hides rows hands one; a [Scrolled]
+          body is handed its window by the contract. *)
 }
 
 val surface_chrome_rows : int
@@ -307,9 +319,9 @@ type overflow =
           {!Masc_tui_scroll}. A body that miscounts is cut as [Fits] is. *)
   | Scrolled of { scroll : int; report : int -> Masc_tui_types.clamped_scroll }
       (** The body pushes every row it has. The contract shows the window
-          from [scroll], held inside the rows there are, draws the
-          ["[lines a-b/n]"] row under it when they overflow, and reports the
-          scroll it drew from through [report]. *)
+          from [scroll], held inside the rows there are, hands that window as
+          the title row's position when it hides rows, and reports the scroll
+          it drew from through [report]. *)
   | Self_scrolled of (unit -> Masc_tui_types.clamped_scroll)
       (** The body windows part of itself under rows it pins, which the
           contract cannot tell apart from the window. The thunk is read after
@@ -317,9 +329,9 @@ type overflow =
 
 val surface_window_height :
   Masc_tui_types.state -> terminal_rows:int -> count:int -> int
-(** The window a {!Scrolled} body gets out of [count] rows: the budget, less
-    the position row when they overflow. A key handler that bounds the scroll
-    asks this, the number the frame draws with. *)
+(** The window a {!Scrolled} body gets out of [count] rows: the whole
+    budget, since the position is on the title row. A key handler that
+    bounds the scroll asks this, the number the frame draws with. *)
 
 val surface_chrome :
   overflow:overflow ->
@@ -361,7 +373,9 @@ val here_row :
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. A step ahead of the last that the row
     cannot hold whole is folded in the middle, the longest first, so the last
-    step stays on the row. The product name is not drawn. *)
+    step stays on the row. The product name is not drawn. This and the title
+    row of {!surface_chrome} are the only places a position becomes text, and
+    each records it as {!frame_position}. *)
 
 val reading_separator : string
 (** The mark between two readings of one row. *)

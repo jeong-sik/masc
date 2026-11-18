@@ -235,7 +235,7 @@ let pulse_line ~cols (state : state) kpis =
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
-  Layout.take_cells text inner_width ^ Ansi.reset
+  Layout.truncate_end inner_width text ^ Ansi.reset
 
 (* The three sections as a tab strip, drawn the way the surface strip above
    every screen is: a mark on the one being read, the names beside it. It was
@@ -263,9 +263,7 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
           Masc_tui_press.(pressable (Press_metrics_section section)) text)
         (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
-  if Layout.display_width line > inner_width then
-    Layout.take_cells line inner_width ^ Ansi.reset
-  else line
+  Layout.truncate_end inner_width line
 
 let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let ko = state.ui_language = Lang_ko in
@@ -468,15 +466,18 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   else
-    [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
-        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
-        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[%s]%s %s"
-        (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
-    ; Printf.sprintf "  %s[%s]%s %s · %s"
-        c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
+    (* Each card is one clause, so a row too narrow for two moves the second
+       to the next row whole: cutting it at the edge left "최" of 최대 and
+       dropped the figure after it (RFC tui-one-screen-grammar §6.6). *)
+    let card tone title text = Printf.sprintf "%s[%s]%s %s" tone title Ansi.reset text in
+    [ [ card (Theme.info ()) (say "엔진" "ENGINE") c1_compact
+      ; card c2_tone (say "지연" "SCHED") c2_l1 ]
+    ; [ card (Theme.info ()) (say "작업" "TASKS") c3_l1 ]
+    ; [ card c4_tone (say "확인" "HOLDS") (c4_l1 ^ " · " ^ c4_l2) ]
     ]
-    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
+    |> List.concat_map (fun cards ->
+           Layout.pack_clauses ~max_cells:(inner_width - 2) cards
+           |> List.map (fun row -> "  " ^ row))
 
 type session_entry = { event : event; run : int; rows : string list }
 type session_block = { earlier : int; kept : session_entry list }
@@ -550,7 +551,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
@@ -705,7 +706,7 @@ let age_text = Layout.span_text
 
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
@@ -953,11 +954,7 @@ let render_section_resources ~cols (state : state) =
 let render_section_tools ~cols (state : state) : string list =
   (* Section 3: Memory & Gate Safety *)
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip line =
-    if Layout.display_width line > inner_width then
-      Layout.take_cells line inner_width ^ Ansi.reset
-    else line
-  in
+  let clip line = Layout.truncate_end inner_width line in
   let bar_w = min 60 (max 20 (inner_width - 8)) in
 
   let ko = state.ui_language = Lang_ko in
@@ -1193,8 +1190,4 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     | None -> push_empty ()
     | Some row ->
       let inner_width = max 20 (framed_inner_width cols) in
-      let clipped =
-        if Layout.display_width row > inner_width then Layout.take_cells row inner_width
-        else row
-      in
-      push_styled ~style:(Theme.recede ()) clipped
+      push_styled ~style:(Theme.recede ()) (Layout.truncate_end inner_width row)

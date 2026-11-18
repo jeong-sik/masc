@@ -678,8 +678,8 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
   let tail = if Message_layout.display_width tail <= room / 3 then tail else "" in
   let claim = Message_layout.truncate_middle
       (max 0 (room - Message_layout.display_width tail)) (Terminal_text.single_line claim) in
-  Message_layout.take_cells
-    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset) inner_width
+  Message_layout.truncate_end inner_width
+    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset)
 
 (* One label column for the three detail blocks. They take turns in the same
    rows as the cursor moves down the list, and each line padded its own label
@@ -1876,8 +1876,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let room = max 1 (rows * (width - 2) - Message_layout.display_width suffix) in
         let name = Terminal_text.single_line (memory_category_filter_text ~ko category) in
         let name =
-          if Message_layout.display_width name <= room then name
-          else Message_layout.take_cells name (max 0 (room - 1)) ^ "…"
+          Message_layout.truncate_end room name
         in
         Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
         |> List.map (fun text -> category, text)) in

@@ -176,7 +176,7 @@ let span_text window =
    when it does not fit either. *)
 let rec first_within ~cells wording rest =
   match rest with
-  | [] -> Layout.take_cells wording cells
+  | [] -> Layout.truncate_end cells wording
   | next :: later ->
       if Layout.display_width wording <= cells then wording
       else first_within ~cells next later
@@ -525,7 +525,7 @@ let legend ~cells ~at_most =
   let rows =
     match List.find_opt fits legend_wordings with
     | Some rows -> rows
-    | None -> [ Layout.take_cells legend_shortest room ]
+    | None -> [ Layout.truncate_end room legend_shortest ]
   in
   List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
 
@@ -582,7 +582,7 @@ let summary_line ~cells t =
   let calls, failures, _deferred = totals buckets in
   if calls = 0 then
     Theme.recede ()
-    ^ Layout.take_cells (label ^ summary_gap ^ "no calls") cells
+    ^ Layout.truncate_end cells (label ^ summary_gap ^ "no calls")
     ^ Ansi.reset
   else
     let figures =
@@ -604,10 +604,10 @@ let summary_line ~cells t =
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures
     else
       Theme.recede ()
-      ^ Layout.take_cells (label ^ summary_gap ^ figures) cells
+      ^ Layout.truncate_end cells (label ^ summary_gap ^ figures)
       ^ Ansi.reset
 
 let summary_note ~cells window note =
   Theme.recede ()
-  ^ Layout.take_cells (summary_label window ^ summary_gap ^ note) cells
+  ^ Layout.truncate_end cells (summary_label window ^ summary_gap ^ note)
   ^ Ansi.reset

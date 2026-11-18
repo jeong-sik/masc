@@ -593,19 +593,11 @@ let wide_tool_extra_cells = wide_extra_cols - wide_name_extra_cells
 
 (* Figures read down a column when their last digits line up, so counts and
    tokens are right-aligned; names read from their first letter. *)
-(* Text cut to [room] cells, the cut shown: a preview that ends mid-word
-   with no mark reads as the whole. *)
-let clip_cells text room =
-  if Layout.display_width text <= room then text
-  else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
+(* A cut is shown: a preview that ends mid-word with no mark reads as the
+   whole (RFC tui-one-screen-grammar §6.6). *)
+let pad_right width text = Layout.fit_width text width
 
-let pad_right width text =
-  let text = clip_cells text width in
-  text ^ String.make (max 0 (width - Layout.display_width text)) ' '
-
-let pad_left width text =
-  let text = Layout.take_cells text width in
-  String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
+let pad_left width text = Layout.pad_left text width
 
 (* The state word, then the newest tool and the count, or the count and
    the tokens once done. No clock here: the age
@@ -671,7 +663,9 @@ let rec first_fitting ~room = function
       if spans_width candidate <= room then candidate else first_fitting ~room rest
 
 (* Exactly [cols] cells: cut the spans that overflow, pad what falls short.
-   Retained spans keep their measured cells; only a clipped span is remeasured. *)
+   Retained spans keep their measured cells; only a clipped span is remeasured,
+   and it ends in the cut mark, so a sentence cut at the edge does not read
+   as whole. *)
 let fit_line ~cols spans =
   let rec cut used acc = function
     | [] -> List.rev acc, used
@@ -682,7 +676,7 @@ let fit_line ~cols spans =
           let room = cols - used in
           if room <= 0 then List.rev acc, used
           else
-            let text = Layout.take_cells span.text room in
+            let text = Layout.truncate_end room span.text in
             List.rev ({ span with text } :: acc), used + Layout.display_width text
   in
   let spans, used = cut 0 [] spans in
@@ -1062,7 +1056,7 @@ let call_detail_line ~ko ~cols ~now (tool : Acting.chunk_tool) part =
     let body =
       match preview with
       | Some text ->
-          { text = clip_cells (Masc.Tui_terminal_text.preview_line text) (max 0 (room - label_cells))
+          { text = Layout.truncate_end (max 0 (room - label_cells)) (Masc.Tui_terminal_text.preview_line text)
           ; tone = Plain
           }
       | None -> { text = say ko "실려 오지 않음" "not carried"; tone = Dim }
@@ -1245,13 +1239,17 @@ let focus_header_line ~ko ~cols ~now ~health name current =
            (List.map (fun words -> with_border ({ text = name; tone = Accent } :: words)) now_rows
             @ List.map with_clock states))
   | None ->
+      (* The name gives way first, so a long one cannot push the state words
+         off the row: cut at the edge, the sentence lost its negation and read
+         as the opposite (RFC tui-one-screen-grammar §6.6). *)
+      let state =
+        { text = middle_dot ^ say ko "이 피드에 아직 이벤트 없음" "no events on this feed yet"
+        ; tone = Dim
+        }
+      in
+      let name_room = cols - border_cells - Layout.display_width state.text in
       fit_line ~cols
-        (with_border
-           [ { text = name; tone = Accent }
-           ; { text = middle_dot ^ say ko "이 피드에 아직 이벤트 없음" "no events on this feed yet"
-             ; tone = Dim
-             }
-           ])
+        (with_border [ { text = Layout.truncate_end name_room name; tone = Accent }; state ])
 
 let approval_line ~ko ~cols tool =
   fit_line ~cols

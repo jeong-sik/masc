@@ -158,7 +158,7 @@ let work_preview_body ~cells ~rows text =
   let shown = List.take rows lines in
   if List.length lines <= rows then shown
   else List.mapi (fun index line ->
-    if index = rows - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
+    if index = rows - 1 then Message_layout.truncate_end cells line
     else line) shown
 
 (* The rows on screen are the last reading that arrived. A read still in

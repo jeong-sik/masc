@@ -583,7 +583,13 @@ let render_chat_row ~theme ~origin buf cols (row : Message_layout.row) =
              rather than the speaker's colour. An errored turn already says so
              on its own glyph; painting the bracket red as well would say it a
              second time, down the side of every row the turn touched. *)
-          let rail = Message_layout.take_cells row.gutter rail_cells in
+          (* Each field is a slice of the gutter: what one leaves out the next
+             draws, so no head carries a mark. *)
+          let slice text cells =
+            match Message_layout.take_cells text cells with
+            | Message_layout.Whole head | Message_layout.Cut head -> head
+          in
+          let rail = slice row.gutter rail_cells in
           let after_rail = Message_layout.drop_cells row.gutter rail_cells in
           (* The clock is time-chrome, not identity, so it leaves the mark's
              span and recedes with the rest of the gutter's chrome; the mark
@@ -593,12 +599,9 @@ let render_chat_row ~theme ~origin buf cols (row : Message_layout.row) =
           let clock_cells =
             max 0 (min row.gutter_clock_cells (at - rail_cells))
           in
-          let clock = Message_layout.take_cells after_rail clock_cells in
+          let clock = slice after_rail clock_cells in
           let after_clock = Message_layout.drop_cells after_rail clock_cells in
-          let marked =
-            Message_layout.take_cells after_clock
-              (at - rail_cells - clock_cells)
-          in
+          let marked = slice after_clock (at - rail_cells - clock_cells) in
           let label =
             Message_layout.drop_cells after_clock
               (at - rail_cells - clock_cells)
@@ -4669,7 +4672,11 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   let rows, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (frame_lines buf) in
   List.map (fun row -> row
       |> fun text -> Message_layout.drop_cells text Masc_tui_frame.content_column
-      |> fun text -> Message_layout.take_cells text cols) rows
+      |> fun text ->
+      (* The frame laid each row out at [cols]; what lies past it is the
+         frame's padding, not text. *)
+      match Message_layout.take_cells text cols with
+      | Message_layout.Whole row | Message_layout.Cut row -> row) rows
 
 let render_keeper_message (state : state) =
   reset_chat_row_actions ();

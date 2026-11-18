@@ -609,6 +609,38 @@ let test_scroll_anchor_round_trip_after_revisiting_history () =
       else entry) entries in
   revisit changed Layout.Origin_row 27
 
+(* Whether a cut happened is the cutting function's answer, and a cut drawn
+   at an edge carries the mark (RFC tui-one-screen-grammar §6.6). Checked as
+   decisions: the branch, the mark the module itself defines, the width. *)
+let test_a_cut_is_cut_and_a_fit_is_whole () =
+  let sentence = "keeper-with-a-long-name \xc2\xb7 \xec\x97\x86\xec\x9d\x8c" in
+  let width = Layout.display_width sentence in
+  check bool "the whole sentence fits its own width" true
+    (match Layout.take_cells sentence width with
+     | Layout.Whole kept -> String.equal kept sentence
+     | Layout.Cut _ -> false);
+  check bool "one cell less is a cut" true
+    (match Layout.take_cells sentence (width - 1) with
+     | Layout.Cut kept -> Layout.display_width kept <= width - 1
+     | Layout.Whole _ -> false)
+
+let test_an_edge_cut_carries_the_mark () =
+  let sentence = "keeper-with-a-long-name \xc2\xb7 \xec\x97\x86\xec\x9d\x8c" in
+  let width = Layout.display_width sentence in
+  check bool "a fitting text is drawn without a mark" false
+    (String.ends_with ~suffix:Layout.cut_mark (Layout.truncate_end width sentence));
+  List.iter
+    (fun cells ->
+      let drawn = Layout.truncate_end cells sentence in
+      check bool (Printf.sprintf "cut to %d ends in the mark" cells) true
+        (String.ends_with ~suffix:Layout.cut_mark drawn);
+      check bool (Printf.sprintf "cut to %d stays within it" cells) true
+        (Layout.display_width drawn <= cells))
+    [ 1; 2; width - 2; width - 1 ];
+  let styled = "\027[31m" ^ sentence ^ "\027[0m" in
+  check bool "a styled cut resets before the mark" true
+    (String.ends_with ~suffix:("\027[0m" ^ Layout.cut_mark) (Layout.truncate_end 5 styled))
+
 let () =
   run "tui_message_layout"
     [
@@ -625,6 +657,9 @@ let () =
             test_truncate_middle
         ; test_case "count_noun is singular only at one" `Quick
             test_count_noun_is_singular_only_at_one
+        ; test_case "a cut is Cut and a fit is Whole" `Quick
+            test_a_cut_is_cut_and_a_fit_is_whole
+        ; test_case "an edge cut carries the mark" `Quick test_an_edge_cut_carries_the_mark
         ] );
       ( "spans"
       , [ test_case "a span that is not a number reads as nothing" `Quick

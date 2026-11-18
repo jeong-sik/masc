@@ -501,11 +501,31 @@ val split_at_cells : string -> int -> string * string
     that straddles the boundary moves to the tail whole, rather than being
     given up and padded the way {!take_cells} gives it up to hold a column. *)
 
-val take_cells : string -> int -> string
+(** The first cells of a text, and whether that is all of it. *)
+type head =
+  | Whole of string  (** Every cell fit; nothing was left out. *)
+  | Cut of string
+      (** The cells that fit. The rest is not in it, and nothing marks that
+          it is gone: a caller that draws this at an edge draws
+          {!truncate_end} instead, and one that draws the rest elsewhere (a
+          scrolled column, a highlighted span) says so by taking it. *)
+
+val take_cells : string -> int -> head
 (** Keep the first [cells] display cells, the counterpart to [drop_cells]: the
     two halves of a cut add up to the whole, and a zero-cell head is empty.
     Not [split_cells], which wraps and so always takes one piece -- as a
-    prefix that invents a cell the caller never asked for. *)
+    prefix that invents a cell the caller never asked for.
+
+    The result says whether it cut, so a caller cannot drop text at the edge
+    of a line without choosing to: the usage summary ended on half a word and
+    the Activity pane lost the [없음] of its empty-feed sentence that way
+    (RFC tui-one-screen-grammar §6.6). *)
+
+val truncate_end : int -> string -> string
+(** [truncate_end max_cells text] is [text] when it fits [max_cells] cells,
+    and otherwise its head ending in {!cut_mark}, no wider than [max_cells]
+    and not padded. A styled head is reset before the mark. {!fit_width} is
+    the same cut for a padded column. *)
 
 val drop_cells : string -> int -> string
 (** Drop the first [cells] display cells, keeping every ANSI sequence crossed

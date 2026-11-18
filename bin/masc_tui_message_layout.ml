@@ -445,9 +445,16 @@ let drop_cells text cells =
    forward or it never ends: it takes one piece even when [max_cells] is zero.
    Read as a prefix that invents a cell, which is how a row with no mark to
    colour drew its first character twice. *)
+type head =
+  | Whole of string
+  | Cut of string
+
 let take_cells text cells =
-  let prefix, _, _ = cell_prefix text (Int.max 0 cells) in
-  prefix
+  let cells = Int.max 0 cells in
+  if fits_within_cells ~max_cells:cells text then Whole text
+  else
+    let prefix, _, _ = cell_prefix text cells in
+    Cut prefix
 
 (* The longest prefix that fits in [cells] without cutting a grapheme, and
    what is left of the text. Where {!take_cells} cuts by cells and gives up a
@@ -544,7 +551,20 @@ let cut_mark_cells = display_width cut_mark
 let fitted_source_bytes text width =
   if width <= 0 then 0
   else if display_width text <= width then String.length text
-  else String.length (take_cells text (Int.max 0 (width - cut_mark_cells)))
+  else
+    let prefix, _, _ = cell_prefix text (Int.max 0 (width - cut_mark_cells)) in
+    String.length prefix
+
+let truncate_end max_cells text =
+  if max_cells <= 0 then ""
+  else
+    match take_cells text max_cells with
+    | Whole text -> text
+    | Cut _ ->
+        let prefix, _, saw_ansi =
+          cell_prefix text (Int.max 0 (max_cells - cut_mark_cells))
+        in
+        prefix ^ (if saw_ansi then "\x1B[0m" else "") ^ cut_mark
 
 let fit_width text width =
   if width <= 0 then ""

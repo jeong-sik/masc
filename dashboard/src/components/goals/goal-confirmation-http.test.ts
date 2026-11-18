@@ -3,10 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearStoredToken, setRejectedCredentialListener } from '../../api/core'
 import { GoalConfirmationPanel, _testResetConfirmationReceipts } from './goal-confirmation'
+import { goalCriterion } from '../../api/fixtures/goal-criterion'
 
 const instance = '018f83d7-93a4-7f5d-9a72-123456789abc'
 const epoch = 'epoch-a'
-const criterion = { revision: 'revision-1', title: 'Goal', metric: 'cases', target_value: '10' }
+const criterion = goalCriterion({ revision: 'revision-1', title: 'Goal', measure: { kind: 'count', noun: 'cases', total: 10 } })
 const evidence = 'sensitive verifier evidence'
 const proof = { inspection_operator_id: 'operator-a',
   goal: { id: 'goal-1', phase: 'awaiting_confirmation', criterion_revision: criterion.revision, ...criterion },

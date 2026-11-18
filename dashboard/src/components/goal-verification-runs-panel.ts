@@ -10,6 +10,7 @@ import {
   type GoalVerificationRunStatus,
 } from '../api/dashboard'
 import type { ManagedAsyncResource } from '../lib/async-state'
+import { goalMeasureText } from '../api/goal-measure'
 import { relativeTime } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { truncate } from '../lib/truncate'
@@ -100,7 +101,8 @@ function GoalVerificationRunRow({ row }: { row: GoalVerificationRunRecord }) {
         ${row.detail ?? ''}
         <details><summary>검토한 성공 조건</summary>
           <div>${row.criterion.title}</div>
-          <div>${row.criterion.metric ?? '—'} · 목표 ${row.criterion.target_value ?? '—'}</div>
+          <div>목표 ${goalMeasureText(row.criterion.measure)}</div>
+          <div class="whitespace-pre-wrap">${row.criterion.procedure}</div>
           <div>요청 <code>${row.requestId}</code></div>
           <div>조건 revision <code>${row.criterion.revision}</code></div>
         </details>

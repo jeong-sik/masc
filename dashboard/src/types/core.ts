@@ -573,8 +573,8 @@ export type KeeperLifecycleState =
 export interface GoalProofCriterion {
   revision: string
   title: string
-  metric: string | null
-  target_value: string | null
+  measure: import("../api/goal-measure").GoalMeasure
+  procedure: string
 }
 
 export type GoalProofCompletion =

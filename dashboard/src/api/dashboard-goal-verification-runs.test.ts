@@ -8,6 +8,7 @@ import {
   fetchGoalVerificationRuns,
   parseGoalVerificationRunsResponse,
 } from './dashboard-goal-verification-runs'
+import { countMeasure, goalCriterion } from './fixtures/goal-criterion'
 
 afterEach(() => {
   getMock.mockReset()
@@ -19,7 +20,7 @@ function row(overrides: Record<string, unknown> = {}) {
     run_id: '019f-goal-run',
     goal_id: 'goal-a',
     request_id: 'request-a',
-    criterion: { revision: 'criterion-a', title: 'Three services', metric: 'verified services', target_value: '3' },
+    criterion: goalCriterion(),
     evaluated_verdict: { decision: 'approved', reason: 'three services verified' },
     review_kind: 'proof',
     authority_actor: 'verifier_exact',
@@ -95,7 +96,7 @@ describe('parseGoalVerificationRunsResponse', () => {
     const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
       runs: [row({ status, detail: 'new proof request replaced the old one' })] })
     expect(parsed.runs[0]).toMatchObject({ status, requestId: 'request-a',
-      criterion: { target_value: '3' }, evaluatedVerdict: { decision: 'approved', reason: 'three services verified' } })
+      criterion: { measure: countMeasure }, evaluatedVerdict: { decision: 'approved', reason: 'three services verified' } })
   })
 
   it.each(['reviewed', 'committed'])('rejects %s without an evaluated verdict', status => {

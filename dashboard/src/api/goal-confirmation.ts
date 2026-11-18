@@ -1,6 +1,7 @@
 import { getWithResponse, post } from './core'
 import { artifactWorkspaceBody, artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
 import { decodeGoalProof } from './goal-proof'
+import { decodeGoalMeasure, goalMeasureEqual } from './goal-measure'
 import { isRecord } from '../components/common/normalize'
 import type { GoalProofCompletion, GoalProofCriterion } from '../types/core'
 
@@ -43,8 +44,10 @@ export function decodeConfirmation(raw: unknown, goalId: string, workspace: Arti
   if (!isRecord(authority) || (authority.kind !== 'system_llm_agent' && authority.kind !== 'human_operator'))
     throw new Error('verifier 증명의 권한을 확인할 수 없습니다')
   const criterion = decoded.completion.criterion
+  const goalMeasure = decodeGoalMeasure(raw.goal.measure)
   if (raw.goal.criterion_revision !== criterion.revision || raw.goal.title !== criterion.title
-    || raw.goal.metric !== criterion.metric || raw.goal.target_value !== criterion.target_value)
+    || goalMeasure === null || !goalMeasureEqual(goalMeasure, criterion.measure)
+    || raw.goal.procedure !== criterion.procedure)
     throw new Error('목표 기준과 verifier 증명의 내용이 다릅니다')
   return { goalId, phase: raw.goal.phase, proof: decoded.completion, workspace, inspectionOperatorId: raw.inspection_operator_id, runtimeInstanceId,
     authorityKind: authority.kind }
@@ -66,7 +69,8 @@ export function sameConfirmationBinding(evidence: GoalConfirmationEvidence, bind
     && current.expected_operator_id === binding.expected_operator_id
     && current.expected_runtime_instance_id === binding.expected_runtime_instance_id
     && current.criterion.revision === binding.criterion.revision && current.criterion.title === binding.criterion.title
-    && current.criterion.metric === binding.criterion.metric && current.criterion.target_value === binding.criterion.target_value
+    && goalMeasureEqual(current.criterion.measure, binding.criterion.measure)
+    && current.criterion.procedure === binding.criterion.procedure
     && current.observedProof.evidence === binding.observedProof.evidence
     && current.observedProof.actor === binding.observedProof.actor
     && current.observedProof.recordedAt === binding.observedProof.recordedAt

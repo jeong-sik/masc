@@ -5,8 +5,9 @@ const api = vi.hoisted(() => ({ getWithResponse: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), ...api }))
 import { GoalConfirmationPanel, _testResetConfirmationReceipts } from './goal-confirmation'
 import { ApiRequestError, clearStoredToken, getStoredToken, setStoredToken } from '../../api/core'
+import { goalCriterion } from '../../api/fixtures/goal-criterion'
 
-const criterion = { revision: 'revision-1', title: 'Original criterion', metric: 'passed cases', target_value: '10' }
+const criterion = goalCriterion({ revision: 'revision-1', title: 'Original criterion', measure: { kind: 'count', noun: 'passed cases', total: 10 } })
 const verdict = { criterion, request_id: 'request-1', verification_run_id: 'run-1', outcome: 'proven', reason: null,
   authority: { kind: 'system_llm_agent', actor: 'verifier' }, evidence: '<script>literal evidence</script> 10/10', recorded_at: '2026-09-10T00:00:00Z' }
 const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
@@ -18,7 +19,7 @@ const current = () => true
 const panelDefaults = { readAuthority: {}, lifecyclePending: false, hasLifecyclePending: () => false }
 function evidence(confirmed = false, id = 'goal-1') {
   return { inspection_operator_id: 'inspecting-operator', goal: { id, phase: confirmed ? 'completed' : 'awaiting_confirmation', criterion_revision: criterion.revision,
-      title: criterion.title, metric: criterion.metric, target_value: criterion.target_value },
+      title: criterion.title, measure: criterion.measure, procedure: criterion.procedure },
     verification: { goal_id: id, updated_at: '2026-09-10T00:00:00Z', completion: confirmed
       ? { state: 'human_confirmed', verdict, operator_id: 'operator-1', confirmed_at: '2026-09-10T01:00:00Z' }
       : { state: 'proof_proven', verdict } } }
@@ -205,9 +206,12 @@ describe('real Goal confirmation component through API decoding', () => {
     fireEvent.click(screen.getByText('현재 증거 다시 조회'))
     await screen.findByText('이 증명으로 목표 완료 확인')
   })
-  it('refuses a proof whose criterion differs from the Goal at the same revision', async () => {
+  it.each([
+    ['measure', (goal: ReturnType<typeof evidence>['goal']) => { goal.measure = { kind: 'count', noun: 'passed cases', total: 11 } }],
+    ['procedure', (goal: ReturnType<typeof evidence>['goal']) => { goal.procedure = 'Read a different report.' }],
+  ])('refuses a proof whose %s differs from the Goal at the same revision', async (_field, change) => {
     const wrong = evidence()
-    wrong.goal.metric = 'different metric'
+    change(wrong.goal)
     api.getWithResponse.mockResolvedValue(response(wrong))
     render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${current} onConfirmed=${vi.fn()} />`)
     await screen.findByText(/증거 조회에 실패했습니다/)
@@ -216,8 +220,8 @@ describe('real Goal confirmation component through API decoding', () => {
   it('does not accept a response that changes the inspected criterion at the same revision', async () => {
     api.getWithResponse.mockResolvedValue(response(evidence()))
     const wrong = structuredClone(evidence(true))
-    wrong.goal.metric = 'different metric'
-    wrong.verification.completion.verdict.criterion.metric = 'different metric'
+    wrong.goal.measure = { kind: 'count', noun: 'passed cases', total: 11 }
+    wrong.verification.completion.verdict.criterion.measure = { kind: 'count', noun: 'passed cases', total: 11 }
     api.post.mockResolvedValue(wrong)
     render(html`<${GoalConfirmationPanel} ...${panelDefaults} owner=${owner()} isCurrent=${current} onConfirmed=${vi.fn()} />`)
     fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))

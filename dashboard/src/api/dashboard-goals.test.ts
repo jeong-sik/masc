@@ -25,6 +25,7 @@ import {
   GOAL_STORE_RESET_STEPS,
   GOAL_STORE_UNAVAILABLE_REASONS,
 } from '../types/goal-store-unavailable'
+import { goalCriterion } from './fixtures/goal-criterion'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -497,7 +498,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
   })
 })
 
-const proofCriterion = { revision: 'criterion-v2', title: 'Measured goal', metric: 'passed cases', target_value: '10' }
+const proofCriterion = goalCriterion({ revision: 'criterion-v2', title: 'Measured goal', measure: { kind: 'count', noun: 'passed cases', total: 10 } })
 const proofVerdict = {
   outcome: 'proven', reason: null, request_id: 'request-v2', criterion: proofCriterion,
   verification_run_id: 'verifier-v2', authority: { kind: 'system_llm_agent', actor: 'verifier_exact' },

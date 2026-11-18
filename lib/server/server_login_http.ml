@@ -349,6 +349,16 @@ let verify t ~base_path request reqd =
       Server_setup_account_login.verify ~person:(person_of t person) ~base_path ~body request reqd))
 ;;
 
+(* The registration of a key puts files of the person on the server, so the
+   gate of their own provider accounts judges it, as it judges a login. The
+   body holds the key: it goes to {!Server_key_account.register} and to
+   nothing else. *)
+let register_key_account t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) person ->
+    with_body reqd (fun body ->
+      respond reqd (Server_key_account.register ~person:(person_of t person) ~base_path ~body)))
+;;
+
 (* The removal of a key account takes files of the person off the server, so
    the gate of their own provider accounts judges it. The body is not read. *)
 let remove_key_account t ~base_path request reqd =
@@ -511,6 +521,7 @@ let add_person_routes t ~env ~base_path router =
        access
        Auth_preview_keeper.conversation_entry_prefix
        (delete_keeper_conversation t ~env ~base_path)
+  |> Server_route.post access Server_key_account.path (register_key_account t ~base_path)
   |> Server_route.prefix_delete access Server_key_account.entry_prefix (remove_key_account t ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)

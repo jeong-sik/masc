@@ -1533,6 +1533,33 @@ let a_person_keeps_keepers_over_mcp () =
       (result theirs "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1")))
 ;;
 
+(* A PAT of the person of [browser] on every Runtime, with these effects. *)
+let pat_with router browser ~csrf effects =
+  let issued =
+    send
+      browser
+      router
+      ~meth:"POST"
+      ~path:"/api/v1/auth/pats"
+      ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+      ~body:
+        (Printf.sprintf
+           {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":%s},"expires_at_ms":null}|}
+           effects)
+  in
+  match member "token" issued with
+  | Some (`String token) -> token
+  | _ -> Alcotest.failf "no PAT in %S" issued.body
+;;
+
+(* The status of the answer, and its code when it has one. *)
+let told (reply : reply) =
+  ( reply.status
+  , match member "code" reply with
+    | Some (`String code) -> code
+    | Some _ | None -> "" )
+;;
+
 (* The removal of a key account over the route (RFC
    a-persons-api-key-is-their-own-provider-account 3.6): what a request needs
    to reach it, and what it is told. What a removal does to the files and the
@@ -1566,30 +1593,7 @@ let a_person_removes_a_key_account () =
          t.routes.R.zone
          ~user_id
          ~provider_account_id:(get_ok (Provider_account_id.of_string on_login)));
-    let pat effects =
-      let issued =
-        send
-          admin
-          router
-          ~meth:"POST"
-          ~path:"/api/v1/auth/pats"
-          ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
-          ~body:
-            (Printf.sprintf
-               {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":%s},"expires_at_ms":null}|}
-               effects)
-      in
-      match member "token" issued with
-      | Some (`String token) -> token
-      | _ -> Alcotest.failf "no PAT in %S" issued.body
-    in
-    (* The status of the answer, and its code when it has one. *)
-    let told (reply : reply) =
-      ( reply.status
-      , match member "code" reply with
-        | Some (`String code) -> code
-        | Some _ | None -> "" )
-    in
+    let pat = pat_with router admin ~csrf in
     let remove ?(browser = fresh_browser ()) headers id =
       send browser router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ id) ~headers
     in
@@ -1627,6 +1631,67 @@ let a_person_removes_a_key_account () =
       "the removed account, again"
       (404, "unknown_account")
       (by_token owner on_key))
+;;
+
+(* The registration of a key over the route (RFC
+   a-persons-api-key-is-their-own-provider-account 3.3): what a request needs
+   to reach it, what it is told, and that the removal route takes the account
+   it made. What a registration leaves on the server is tested in
+   test_server_key_account_registration. The key is made up. *)
+let a_person_registers_a_key () =
+  with_installation (fun t ->
+    declare_providers t;
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    let pat = pat_with router admin ~csrf in
+    let key = "sk-test-a-key-over-the-route" in
+    let register ?(browser = fresh_browser ()) ?(integration = "claude_code") headers =
+      send
+        browser
+        router
+        ~meth:"POST"
+        ~path:Server_key_account.path
+        ~headers:(("Content-Type", "application/json") :: headers)
+        ~body:(Yojson.Safe.to_string (`Assoc [ "integration_id", `String integration; "key", `String key ]))
+    in
+    let accounts () =
+      List.length (Authz_provider_account.owned (Authz_zone.snapshot t.routes.R.zone).Authz_zone.state user_id)
+    in
+    Alcotest.(check int) "a request with no credential" 401 (register []).status;
+    Alcotest.(check int) "the session without its token" 403 (register ~browser:admin (changing ())).status;
+    Alcotest.(check int)
+      "a PAT that manages Keepers and no provider account"
+      403
+      (register [ "Authorization", "Bearer " ^ pat {|["manage_own_keeper","read_state"]|} ]).status;
+    Alcotest.(check int) "the requests that were turned away recorded no account" 0 (accounts ());
+    let refused = register ~browser:admin ~integration:"agy" (changing ~csrf ()) in
+    Alcotest.(check (pair int string))
+      "a provider whose key is not taken"
+      (400, "integration_takes_no_key")
+      (told refused);
+    Alcotest.(check bool) "that answer holds nothing of the key" false (contains ~sub:key refused.body);
+    let registered = register ~browser:admin (changing ~csrf ()) in
+    Alcotest.(check int) ("the session with its token: " ^ registered.body) 200 registered.status;
+    Alcotest.(check bool) "the answer holds nothing of the key" false (contains ~sub:key registered.body);
+    let account =
+      match member "provider_account_id" registered, member "kind" registered with
+      | Some (`String id), Some (`String "key") -> id
+      | (Some _ | None), (Some _ | None) -> Alcotest.failf "no key account in %S" registered.body
+    in
+    Alcotest.(check int) "the log holds the account" 1 (accounts ());
+    let by_token = register [ "Authorization", "Bearer " ^ pat {|["manage_own_provider"]|} ] in
+    Alcotest.(check int) ("a PAT that manages provider accounts: " ^ by_token.body) 200 by_token.status;
+    Alcotest.(check int) "the same key again is a second account" 2 (accounts ());
+    let removed =
+      send admin router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ account) ~headers:(changing ~csrf ())
+    in
+    Alcotest.(check int) ("the removal of the account it made: " ^ removed.body) 200 removed.status)
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved
@@ -1877,6 +1942,7 @@ let () =
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp
         ; Alcotest.test_case "a person removes a key account" `Quick a_person_removes_a_key_account
+        ; Alcotest.test_case "a person registers a key" `Quick a_person_registers_a_key
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

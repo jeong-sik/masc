@@ -170,3 +170,12 @@ val one_call_of
   -> busy:'e
   -> (in_call -> ('a, 'e) result)
   -> ('a, 'e) result
+
+(** The runtime root of [person] under [base_path], made when it is not
+    there: the folder the homes and the key files of their accounts are
+    under ({!Runtime_account_home_layout.person_runtime_root}). A login and
+    a verification make it the same way. The registration of a key asks for
+    it after the record of its account is written
+    ({!Server_key_account_registration}). The error is a sentence that names
+    no path. *)
+val person_runtime_root : person -> base_path:string -> (string, string) result

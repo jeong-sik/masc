@@ -69,3 +69,17 @@ val remove
     is: the others go on, and the server keeps serving. Cancellation and the
     exceptions of a process that cannot go on are raised. *)
 val resume : zone:Authz_zone.t -> base_path:string -> unit
+
+(** {!remove} for a caller that holds the call of the account and knows it
+    to be a key account of [person]: the registration whose files were not
+    made removes the account it had just recorded, in the same call (RFC
+    a-persons-api-key-is-their-own-provider-account 3.3,
+    {!Server_key_account_registration}). The steps and the errors are those
+    of {!remove} from its second step on; [Not_a_key_account] and
+    [Account_busy] are not answered. *)
+val remove_in_call
+  :  Server_setup_account_login.in_call
+  -> person:Server_setup_account_login.person
+  -> base_path:string
+  -> Authz_types.Provider_account_id.t
+  -> (unit, error) result

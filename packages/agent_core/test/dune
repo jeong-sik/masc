@@ -55,18 +55,20 @@
  (libraries agent_core_test_deps agent_core alcotest))
 
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
-; ---- (1) compile failures — not wired until bodies are fixed ----
-; No file is listed here: the header is kept for the next compile failure.
-; Nothing below this header is withheld for a compile failure.
+; ---- (1) compile failures — nothing is held back here ----
+; This header used to say that files were withheld until their bodies compiled.
+; No file is named below: nothing is withheld for a compile failure today.
+; Keep this header as the place to record one if it returns, and say so.
 ;
-; ---- (2) pre-existing runtime failures — compile OK, runtest fails ----
-; The suites below this header ARE wired and DO run in `dune runtest`.
-; Two of them fail on today's main for reasons older than any single change
-; (see task-3737). A failure in either one is not evidence about the change
-; under test, and a full regression run cannot be green until they are fixed
-; or moved out of `names`:
-;   test_backend_openai_codec              (serialize 3, 7)
-;   test_snapshot_provider_serialization   gemini 0 (tool_choice Any)
+; ---- (2) pre-existing runtime failures — wired, and running ----
+; The suites named below are NOT excluded.  They sit in the tests stanza that
+; follows and do run under `dune runtest`.  Two of them fail on today's main
+; for reasons older than any single change:
+;   - backend_openai_codec: serialize 3 and serialize 7
+;   - snapshot_provider_serialization: gemini 0, tool_choice Any
+; A failure in either one says nothing about the change under test, and a full
+; regression run cannot be green until they are fixed or moved out of the list.
+; See task-3737.
 ;
 
 (tests

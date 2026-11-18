@@ -159,7 +159,8 @@ module Position : sig
             the row's place. *)
     | Partial of { at : int; loaded : int; total : int }
         (** A list read in part: the selected row among the rows read, and
-            how many the server holds: [1/50 · whole 8,347]. *)
+            how many the server holds: [1/50 · 전체 8,347],
+            [1/50 · of 8,347]. *)
 
   val text : ko:bool -> t -> string
   (** [7/29], or [1/50 · 전체 8,347] and [1/50 · of 8,347] for a list read in

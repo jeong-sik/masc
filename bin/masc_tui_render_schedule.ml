@@ -1600,9 +1600,14 @@ let fusion_pipeline_diagram
 
 let board_mark_width = 1
 let board_id_width = 12
-let board_hearth_width = 12
+(* Thirteen holds "#verification", the hearth with the most posts; a
+   narrower column cut it to "#ve…fication" on most rows. *)
+let board_hearth_width = 13
 let board_author_width = 16
-let board_age_width = 6
+
+(* Seven holds the Korean header, "게시 후" or "변경 후", and the widest span,
+   "12h43m"; at six the header read "… 후". *)
+let board_age_width = 7
 let board_score_width = 5
 let board_replies_width = 7
 

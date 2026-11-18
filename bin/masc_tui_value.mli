@@ -110,6 +110,14 @@ module Ongoing : sig
       reads differently ({!Redraw.note_change_at}). A moment ahead of [now]
       (clocks that disagree) reads [0s]. *)
 
+  val note_since : now:float -> float -> unit
+  (** Note when the length from a past moment next reads differently on this
+      ladder, without reading it. For a narrow cell that draws the same length
+      in one truncated unit ([45s], [3m], [1h], [2d]; RFC tui-one-screen-grammar
+      §6.2): each change of such a reading falls on a change of this ladder,
+      so its frame is never late, and early at most once a minute below a day
+      and once an hour below a hundred days. *)
+
   val age : now:float -> float -> string
   (** {!since} for a length measured on another clock, such as the monotonic
       age of a pending read: [age ~now seconds] reads [seconds] and notes when

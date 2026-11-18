@@ -109,6 +109,15 @@ val short_span : float -> string
 (** A span of seconds in at most five cells, the mock's [dur]: [42s], [17m],
     [3h05m], [27h], [9d]. A negative span reads as [0s]. *)
 
+val short_span_next_change : float -> float
+(** A span longer than the given one by which {!short_span} has read
+    differently: never later than its next change, and at most half a minute
+    after the previous one. *)
+
+val short_since : now:float -> float -> string
+(** {!short_span} of the length from a past moment to [now], noting when it
+    next reads differently ({!Masc_tui_value.Redraw.note_change_at}). *)
+
 val dated_clock_text : now:float -> localtime:(float -> Unix.tm) -> float -> string
 (** The clock time of [at], [HH:MM], with the date in front, [MM-DD HH:MM],
     from half a day before [now] back: an older time of day reads as today's. *)

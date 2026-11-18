@@ -148,7 +148,9 @@ let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
     |> List.map (fun row -> "  " ^ row)) lines
 
 let memory_fact_age_label ts =
-  keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
+  let now = Unix.gettimeofday () in
+  Masc_tui_value.Ongoing.note_since ~now ts;
+  keeper_lane_idle_text (int_of_float (now -. ts))
 
 let memory_date ts =
   let tm = Unix.localtime ts in

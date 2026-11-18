@@ -263,6 +263,7 @@ let said ~ko (row : scheduled) =
 (* How long the operator has not answered. Coarse on purpose: the row exists
    because the wait is long, and minutes past the first day are noise. *)
 let waited_since ~ko ~now since =
+  Masc_tui_value.Ongoing.note_since ~now since;
   let seconds = now -. since in
   if Float.compare seconds 0.0 <= 0
   then (if ko then "방금" else "just now")
@@ -296,6 +297,7 @@ let updated ~ko ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
   | Some since ->
+    Masc_tui_value.Ongoing.note_since ~now since;
     let seconds = now -. since in
     if Float.compare seconds 0.0 <= 0
     then (if ko then "방금 갱신" else "updated just now")

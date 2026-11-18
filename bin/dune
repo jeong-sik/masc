@@ -1670,7 +1670,7 @@
  (name masc_tui_board_quarantine)
  (wrapped false)
  (modules masc_tui_board_quarantine)
- (libraries masc masc_tui_ansi masc_tui_fetched yojson))
+ (libraries masc_tui_value masc masc_tui_ansi masc_tui_fetched yojson))
 
 (library
  (name masc_tui_fork_guard)

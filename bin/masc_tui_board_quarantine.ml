@@ -249,6 +249,7 @@ let lines ~ko ~now fetched ~keeper_name =
       List.map
         (fun { oldest; members } ->
              let age =
+               Masc_tui_value.Ongoing.note_since ~now oldest.Command.quarantined_at;
                span_words (Float.to_int (now -. oldest.Command.quarantined_at))
              in
              let asked =

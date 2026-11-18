@@ -157,12 +157,15 @@ module Ongoing = struct
       let step = step whole in
       Some (Float.of_int ((whole / step + 1) * step))
 
-  let since ~now at =
+  let note_since ~now at =
     let seconds = now -. at in
-    (if Float.is_finite seconds then
-       let from = Float.max 0. seconds in
-       Option.iter (fun next -> Redraw.note_change_at (at +. next)) (next_change from));
-    text seconds
+    if Float.is_finite seconds then
+      let from = Float.max 0. seconds in
+      Option.iter (fun next -> Redraw.note_change_at (at +. next)) (next_change from)
+
+  let since ~now at =
+    note_since ~now at;
+    text (now -. at)
 
   let age ~now seconds = since ~now (now -. seconds)
 

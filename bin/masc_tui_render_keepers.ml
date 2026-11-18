@@ -862,7 +862,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
 let grid_digest ~now memory =
   let text =
     match Memory_reading.digest_at memory with
-    | Memory_reading.Measured at -> Grid.short_span (now -. at)
+    | Memory_reading.Measured at -> Grid.short_since ~now at
     | Memory_reading.Unmeasured -> Masc_tui_theme.Glyph.no_value
     | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
     | Memory_reading.Row_refused -> ""
@@ -934,7 +934,7 @@ let grid_fact_ages (grid : Grid.t) memory =
 let grid_saved ~now memory =
   match Memory_reading.updated_at memory with
   | Memory_reading.Measured at ->
-      fit_width (Keeper_mark.grid_saved_mark ^ " " ^ Grid.short_span (now -. at)) Grid.now_cells
+      fit_width (Keeper_mark.grid_saved_mark ^ " " ^ Grid.short_since ~now at) Grid.now_cells
   | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
       grid_fitted Grid.now_cells
         (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
@@ -1029,7 +1029,7 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
       if Message_layout.display_width worded <= room then worded else clock
   | Masc_tui_keeper_pulse.Failing_unrecorded, Keeper_trail.Trail_failed { ended_at = Some at; _ }
     when at <= now ->
-      Grid.short_span (now -. at) ^ " " ^ Keeper_mark.grid_ago_word
+      Grid.short_since ~now at ^ " " ^ Keeper_mark.grid_ago_word
   | ( (Masc_tui_keeper_pulse.Failing_unrecorded | Masc_tui_keeper_pulse.Not_failing)
     , (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ) -> ""
 
@@ -1838,7 +1838,7 @@ let matrix_keeper_row matrix ~now row =
       | Keeper_trail.Matrix_unknown -> Theme.recede () ^ "?" in
     fit_width (failure ^ head ^ Ansi.reset) matrix.matrix_cell_cells) matrix.matrix_ids in
   let last = match Keeper_list_model.trail_of_row row with
-    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now -> Grid.short_span (now -. at)
+    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now -> Grid.short_since ~now at
     | Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound -> "?" in
   let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots

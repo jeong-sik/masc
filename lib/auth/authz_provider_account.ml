@@ -13,11 +13,8 @@ let error_to_string = function
   | Commit_failed error -> Authz_zone.error_to_string error
 ;;
 
-let link zone ~user_id ~provider_account_id =
-  match
-    Authz_provider_account_event.to_body
-      (Authz_provider_account_event.Linked { provider_account_id; user_id })
-  with
+let write zone ~user_id event =
+  match Authz_provider_account_event.to_body event with
   | Error error -> Error (Body_not_built error)
   | Ok body ->
     let draft =
@@ -29,6 +26,17 @@ let link zone ~user_id ~provider_account_id =
     (match Authz_zone.commit zone draft with
      | Ok (_ : Authz_zone.committed) -> Ok ()
      | Error error -> Error (Commit_failed error))
+;;
+
+let link zone ~user_id ~provider_account_id =
+  write zone ~user_id (Authz_provider_account_event.Linked { provider_account_id; user_id })
+;;
+
+let link_key zone ~user_id ~provider_account_id ~integration_id =
+  write
+    zone
+    ~user_id
+    (Authz_provider_account_event.Key_linked { provider_account_id; user_id; integration_id })
 ;;
 
 let owned (state : Authz_state.t) user_id =

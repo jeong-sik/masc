@@ -1546,6 +1546,106 @@ let test_provider_accounts () =
     (S.Provider_account (Pas.Not_a_human (Authz_types.Principal.Service keeper_service)))
 ;;
 
+let key_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-key-user"
+let first_integration = id_of_string Authz_types.Integration_id.of_string "claude_code"
+
+let key_linked ~by =
+  Pae.Key_linked
+    { provider_account_id = key_account; user_id = by; integration_id = first_integration }
+;;
+
+(* RFC a-persons-api-key-is-their-own-provider-account 3.1 and 5: a key
+   account is a record of its own, written under the conditions of a login
+   account, and its body is read back member for member. *)
+let test_key_accounts () =
+  let state =
+    applied_change
+      "a key link"
+      (two_admins ())
+      (account_record ~author:(human user) (key_linked ~by:user))
+      None
+  in
+  (match Pas.find state.S.provider_accounts key_account with
+   | Some { Pas.owner; kind = Pas.Key { integration_id; generation } } ->
+     Alcotest.(check bool) "its owner" true (Authz_types.User_id.equal owner user);
+     Alcotest.(check bool)
+       "its integration"
+       true
+       (Authz_types.Integration_id.equal integration_id first_integration);
+     Alcotest.(check bool)
+       "the first generation"
+       true
+       (Authz_types.Key_generation.equal generation Authz_types.Key_generation.first)
+   | Some { Pas.owner = _; kind = Pas.Login } -> Alcotest.fail "the key account reads as a login account"
+   | None -> Alcotest.fail "the key account is not in the state");
+  (match Pas.find state.S.provider_accounts first_account with
+   | None -> ()
+   | Some (_ : Pas.account) -> Alcotest.fail "an account no record linked is in the state");
+  (match Pae.to_body (key_linked ~by:user) with
+   | Error _ -> Alcotest.fail "fixture key account body refused"
+   | Ok body ->
+     Alcotest.(check string)
+       "the body on disk"
+       {|{"event":"key_linked","provider_account_id":"claude-code-key-user","user_id":"user-1","integration_id":"claude_code"}|}
+       (Authz_body.to_string body);
+     (match Pae.of_body body with
+      | Ok event -> Alcotest.(check bool) "read back" true (Pae.equal event (key_linked ~by:user))
+      | Error error -> Alcotest.failf "its own body is refused: %s" (Pae.error_to_string error)));
+  refused_as
+    "a key linked twice"
+    state
+    (account_record ~author:(human user) (key_linked ~by:user))
+    (S.Provider_account (Pas.Already_linked key_account));
+  refused_as
+    "a login on the id of a key account"
+    state
+    (account_record
+       ~author:(human user)
+       (Pae.Linked { provider_account_id = key_account; user_id = user }))
+    (S.Provider_account (Pas.Already_linked key_account));
+  refused_as
+    "an Admin links a key for another"
+    (two_admins ())
+    (account_record ~author:(human bob) (key_linked ~by:user))
+    (S.Provider_account (Pas.Linked_for_another { author = bob; user_id = user }));
+  refused_as
+    "a person who is not active"
+    (two_admins ())
+    (account_record ~author:(human carol) (key_linked ~by:carol))
+    (S.Provider_account (Pas.User_not_active carol));
+  let members_of members = record_by ~author:(human user) K.Provider_account (body_of_json (`Assoc members)) in
+  let text value = `String value in
+  refused_as
+    "the members in another order"
+    (two_admins ())
+    (members_of
+       [ "event", text "key_linked"
+       ; "user_id", text "user-1"
+       ; "provider_account_id", text "claude-code-key-user"
+       ; "integration_id", text "claude_code"
+       ])
+    (S.Provider_account_unreadable Pae.Wrong_members);
+  refused_as
+    "a key account with no integration"
+    (two_admins ())
+    (members_of
+       [ "event", text "key_linked"
+       ; "provider_account_id", text "claude-code-key-user"
+       ; "user_id", text "user-1"
+       ])
+    (S.Provider_account_unreadable Pae.Wrong_members);
+  refused_as
+    "a login account with an integration"
+    (two_admins ())
+    (members_of
+       [ "event", text "linked"
+       ; "provider_account_id", text "claude-code-key-user"
+       ; "user_id", text "user-1"
+       ; "integration_id", text "claude_code"
+       ])
+    (S.Provider_account_unreadable Pae.Wrong_members)
+;;
+
 (* ---- Runtimes ---- *)
 
 module Re = Authz_runtime_event
@@ -1998,7 +2098,10 @@ let () =
             `Quick
             test_service_credentials_and_their_intents
         ] )
-    ; "provider accounts", [ Alcotest.test_case "linked by their owner" `Quick test_provider_accounts ]
+    ; ( "provider accounts"
+      , [ Alcotest.test_case "linked by their owner" `Quick test_provider_accounts
+        ; Alcotest.test_case "a key account is a record of its own" `Quick test_key_accounts
+        ] )
     ; "runtimes", [ Alcotest.test_case "made by their owner on their account" `Quick test_runtimes ]
     ; "keepers", [ Alcotest.test_case "made by their owner, given their Runtimes" `Quick test_keepers ]
     ; ( "purges"

@@ -2,9 +2,10 @@
    authorization log add up to. The owner this module names for an account is
    the only person whose Runtime may spend it. *)
 
-(** The owners of the provider accounts that the provider account records of
-    [authz.jsonl] add up to (design 4.2, plan D1-1). {!Authz_state} keeps one
-    of these as its field and hands it every provider account record of a
+(** The owners and the kinds of the provider accounts that the provider
+    account records of [authz.jsonl] add up to (design 4.2, plan D1-1, RFC
+    a-persons-api-key-is-their-own-provider-account 3.1). {!Authz_state} keeps
+    one of these as its field and hands it every provider account record of a
     bootstrapped log.
 
     {b Who may write.} An active human principal links an account for
@@ -13,11 +14,33 @@
     5.4).
 
     {b One id.} A provider account id names one account for good: once linked,
-    it keeps its owner, and no record links it again. *)
+    it keeps its owner and its kind, and no record links it again, as a login
+    account or as a key account.
+
+    {b Kind.} The record that linked the account says what it is. A login
+    account holds the login of the official client in its home. A key account
+    holds a key its owner registered, of the generation the records say: the
+    first, until a record replaces the key. *)
+
+(** What an account is, as the record that linked it says. *)
+type kind =
+  | Login
+  | Key of
+      { integration_id : Authz_types.Integration_id.t
+      ; generation : Authz_types.Key_generation.t
+      }
+
+type account =
+  { owner : Authz_types.User_id.t
+  ; kind : kind
+  }
 
 type t
 
 val empty : t
+
+(** The account, if it was linked. *)
+val find : t -> Authz_types.Provider_account_id.t -> account option
 
 (** The owner of the account, if it was linked. *)
 val owner : t -> Authz_types.Provider_account_id.t -> Authz_types.User_id.t option

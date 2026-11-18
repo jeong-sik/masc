@@ -657,11 +657,18 @@ let test_missing_parent_comment_does_not_abort_later_comment_replay () =
   let parent_id = add_comment ~post_id ~author:parent_author.name "keeper parent comment" in
   ignore (Keeper_registry.For_testing.register ~base_path parent_author.name parent_author);
   ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:parent_author);
+  (* A reply is written under a live comment of its post; it loses that parent
+     when the parent's TTL runs out and the sweep removes the row. *)
+  let expired_parent_id = add_comment ~post_id ~author:"external" "comment that expires" in
   Unix.sleepf write_spacing_seconds;
-  let expired_parent_id = "c-" ^ String.make 32 '1' in
   (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~parent_id:expired_parent_id
            ~author:"external" ~content:"reply to expired comment" () with
    | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  let store : Board.store = Board_dispatch.backend () in
+  let expired_parent = Hashtbl.find store.comments expired_parent_id in
+  Hashtbl.replace store.comments expired_parent_id { expired_parent with expires_at = 1.0 };
+  let _, swept_comments = Board.sweep store in
+  check int "the sweep removed the expired parent" 1 swept_comments;
   Unix.sleepf write_spacing_seconds;
   (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~parent_id
            ~author:"external" ~content:"reply after expired-parent sibling" () with

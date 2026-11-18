@@ -649,17 +649,20 @@ let media_projection_admission entry projection () =
   check bool "fixture's selected model cannot accept documents" false
     (Runtime_agent.provider_caps_of_config config.provider_cfg).supports_document_input;
   let agent_ref = ref None in
-  let from_runtime result = Result.map
-      (fun (result : Runtime_agent.run_result) -> result.response) result in
+  let from_runtime result =
+    Result.map (fun (result : Runtime_agent.run_result) -> result.response) result
+    |> Result.map_error Runtime_agent.run_failure_error in
   let built build = match build () with
     | Ok agent -> agent_ref := Some agent; agent
     | Error error -> fail (Agent_core.Error.to_string error) in
   let outcome = Eio.Time.with_timeout_exn env#clock
       Exact_output_fixture.fixture_wait_seconds (fun () -> match entry with
     | Structured_run -> from_runtime
-        (Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref [document])
+        (Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref
+           ~execution_capture:(Runtime_agent.execution_capture config) [document])
     | Stored_continuation -> from_runtime
-        (Runtime_agent.continue_from_checkpoint ~sw ~net:env#net ~config ~checkpoint ~agent_ref ())
+        (Runtime_agent.continue_from_checkpoint ~sw ~net:env#net ~config ~checkpoint ~agent_ref
+           ~execution_capture:(Runtime_agent.execution_capture config) ())
     | Direct_build ->
       let agent = built (fun () -> Runtime_agent.build ~sw ~net:env#net ~config) in
       Agent_core.Agent.run_blocks ~sw agent [document]
@@ -730,7 +733,10 @@ let projected_tool_media_is_validated_on_the_next_request () =
   let config = {config with model_input_projection=Some project} in
   let agent_ref = ref None in
   let outcome = Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
-      (fun () -> Runtime_agent.run ~sw ~net:env#net ~config ~agent_ref "Read an image result.") in
+      (fun () ->
+        Runtime_agent.run ~sw ~net:env#net ~config ~agent_ref
+          ~execution_capture:(Runtime_agent.execution_capture config) "Read an image result."
+        |> Result.map_error Runtime_agent.run_failure_error) in
   (match outcome with
    | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field; _})) ->
      check string "new nested media is refused by the existing capability floor" "multimodal_input" field

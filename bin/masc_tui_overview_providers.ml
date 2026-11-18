@@ -1236,6 +1236,7 @@ let account_card ~tone ~layout entry =
             |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
         in
         full_name @ draw_entry layout tone entry)
+  ; selection = Masc_tui_card.No_selected_row
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone

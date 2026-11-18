@@ -129,7 +129,7 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
                               title_style=Theme.info (); reset=Ansi.reset} in
     Card.render ~ko ~style ~width ~height
       {edge={name; key=None; status=None; count=None; focus=Card.Unfocused};
-       body=(fun ~cells:_ -> rows)} in
+       body=(fun ~cells:_ -> rows); selection=Card.No_selected_row} in
   let claims = if width >= 90 && budget >= 5 then
       let left = card ~width:half ~height:4 (text "↻ 최근 갱신" "↻ Recently recorded") [at left 0; at left 1] in
       let right = card ~width:(width-half-2) ~height:4 (text "◇ 자주 조회" "◇ Frequently retrieved") [at right 0; at right 1] in
@@ -189,7 +189,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
                             title_style=Theme.info (); reset=Ansi.reset} in
   let body = Card.render ~ko ~style ~width:(max 1 (cols - 4)) ~height
     {edge={name=text "◇ 기억의 흐름" "◇ Memory flow"; key=None; status=None; count=None;
-           focus=Card.Unfocused}; body} in
+           focus=Card.Unfocused}; body; selection=Card.No_selected_row} in
   List.take max_lines (List.map (fun line -> "  " ^ line) ([header] @ notes @ scope @ body))
 
 let change_reading (state : Masc_tui_types.state) ~keeper_name =

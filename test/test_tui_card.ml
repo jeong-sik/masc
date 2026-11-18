@@ -39,8 +39,8 @@ let occurrences ~needle haystack =
 let edge ?key ?status ?count ?(focus = Card.Unfocused) name =
   { Card.name; key; status; count; focus }
 
-let card ?(title = "Needs your decision") body =
-  { Card.edge = edge title; body = (fun ~cells:_ -> body) }
+let card ?(title = "Needs your decision") ?(selection = Card.No_selected_row) body =
+  { Card.edge = edge title; body = (fun ~cells:_ -> body); selection }
 
 let bodies =
   [ "empty", []
@@ -185,17 +185,32 @@ let test_stacked_cards_are_separated_by_the_row_gap () =
   check int "no gap" (3 + 3)
     (List.length (grid ~inner_width:60 ~row_gap:0 stack))
 
-(* A grid that needs more rows than it has draws nothing, so the caller falls
-   back before any row is put on screen. *)
-let test_a_grid_that_does_not_fit_draws_nothing () =
-  let columns = [ [ card (rows_of 6) ] ] in
-  let drawn max_rows =
-    Card.grid ~ko:true ~style:plain ~inner_width:60 ~gap:2 ~row_gap:1 ~max_rows columns
+(* A card one row too tall squashes to its top edge rather than taking the
+   grid with it. The grid draws nothing only when the squashed card still does
+   not fit, or when the card may not squash: it holds the selected row or owns
+   the keyboard. Then the caller falls back before any row is put on screen. *)
+let test_a_grid_draws_nothing_only_when_squashing_does_not_fit () =
+  let drawn ?(focus = Card.Unfocused) ?(selection = Card.No_selected_row) max_rows =
+    Card.grid ~ko:true ~style:plain ~inner_width:60 ~gap:2 ~row_gap:1 ~max_rows
+      [ [ { Card.edge = edge ~focus "Tasks"
+          ; body = (fun ~cells:_ -> rows_of 6)
+          ; selection
+          } ] ]
   in
-  check bool "one row short" true (Option.is_none (drawn 7));
-  match drawn 8 with
-  | Some rows -> check int "exactly its height" 8 (List.length rows)
-  | None -> fail "a grid with exactly enough rows drew nothing"
+  let rows_drawn label expected = function
+    | Some rows -> check int label expected (List.length rows)
+    | None -> fail (label ^ ": the grid drew nothing")
+  in
+  rows_drawn "exactly its height" 8 (drawn 8);
+  rows_drawn "one row short: squashed to one row" 1 (drawn 7);
+  rows_drawn "one row: squashed" 1 (drawn 1);
+  check bool "no row at all" true (Option.is_none (drawn 0));
+  check bool "the selected row's card does not squash" true
+    (Option.is_none (drawn ~selection:Card.Holds_selected_row 7));
+  List.iter
+    (fun focus ->
+       check bool "a focused card does not squash" true (Option.is_none (drawn ~focus 7)))
+    [ Card.Focused_list; Card.Focused_other ]
 
 (* Each body is asked for the width the layout chose, and only once. *)
 let test_each_body_is_asked_once_for_its_layout_width () =
@@ -204,6 +219,7 @@ let test_each_body_is_asked_once_for_its_layout_width () =
   let probe =
     { Card.edge = edge "probe"
     ; body = (fun ~cells -> seen := cells :: !seen; [ String.make cells 'x' ])
+    ; selection = Card.No_selected_row
     }
   in
   ignore
@@ -489,6 +505,7 @@ let test_a_focused_card_borders_in_the_focus_token () =
       { Card.edge =
           edge ~focus ~status:(yours "your turn") ~count:(Card.Whole 6) "Tasks"
       ; body = (fun ~cells:_ -> List.init 6 string_of_int)
+      ; selection = Card.No_selected_row
       }
   in
   List.iter
@@ -557,7 +574,10 @@ let test_every_edge_keeps_the_cards_width () =
               (fun width ->
                  let rows =
                    Card.render ~ko ~style:styled ~width ~height:4
-                     { Card.edge; body = (fun ~cells:_ -> [ "alpha"; "beta"; "gamma" ]) }
+                     { Card.edge
+                     ; body = (fun ~cells:_ -> [ "alpha"; "beta"; "gamma" ])
+                     ; selection = Card.No_selected_row
+                     }
                  in
                  check int (label ^ ": height") 4 (List.length rows);
                  List.iter
@@ -571,13 +591,248 @@ let test_every_edge_keeps_the_cards_width () =
   match
     Card.grid ~ko:true ~style:styled ~inner_width:82 ~gap:2 ~row_gap:1
       ~max_rows:max_int
-      (List.map (fun (_, edge) -> [ { Card.edge; body = (fun ~cells:_ -> [ "a" ]) } ]) edges)
+      (List.map
+         (fun (_, edge) ->
+            [ { Card.edge; body = (fun ~cells:_ -> [ "a" ]); selection = Card.No_selected_row } ])
+         edges)
   with
   | None -> fail "grid drew nothing"
   | Some rows ->
     List.iter
       (fun row -> check int "grid row width" 82 (Layout.display_width row))
       rows
+
+
+(* ---- squashing: which cards a short grid squashes (RFC section 2) ---- *)
+
+let height =
+  testable
+    (fun formatter shape ->
+       Format.pp_print_string formatter
+         (match shape with Card.Full -> "full" | Card.Squashed -> "squashed"))
+    ( = )
+
+let plan = option (list (list height))
+let may natural = (natural, Card.May_squash)
+let stays natural = (natural, Card.Stays_full)
+let full = Card.Full
+let squashed = Card.Squashed
+
+(* The rows a column takes at the heights chosen for it. *)
+let column_rows ~row_gap column shapes =
+  let rows =
+    List.map2
+      (fun (natural, _) shape ->
+         match shape with Card.Full -> natural | Card.Squashed -> 1)
+      column shapes
+  in
+  List.fold_left ( + ) 0 rows + (row_gap * max 0 (List.length rows - 1))
+
+let test_a_grid_that_fits_squashes_nothing () =
+  List.iter
+    (fun (row_gap, columns, max_rows) ->
+       let expected = List.map (List.map (fun _ -> full)) columns in
+       check plan
+         (Printf.sprintf "%d rows" max_rows)
+         (Some expected)
+         (Card.heights ~row_gap ~max_rows columns))
+    [ (1, [ [ may 3; may 3; may 3 ]; [ may 3; may 3 ] ], 11)
+    ; (1, [ [ may 3; may 3; may 3 ]; [ may 3; may 3 ] ], 40)
+    ; (0, [ [ may 10 ]; [ stays 4 ]; [] ], 10)
+    ; (1, [], 0)
+    ]
+
+(* As the rows run out a column too tall for them gives up its lowest full
+   card, and a column that fits gives up nothing. The left column is eleven
+   rows and the right seven, one row between cards. *)
+let test_a_tall_columns_lowest_card_squashes_first () =
+  let columns = [ [ may 3; may 3; may 3 ]; [ may 3; may 3 ] ] in
+  List.iter
+    (fun (max_rows, expected) ->
+       check plan (Printf.sprintf "%d rows" max_rows) expected
+         (Card.heights ~row_gap:1 ~max_rows columns))
+    [ (10, Some [ [ full; full; squashed ]; [ full; full ] ])
+    ; (8, Some [ [ full; squashed; squashed ]; [ full; full ] ])
+    ; (6, Some [ [ squashed; squashed; squashed ]; [ full; squashed ] ])
+    ; (5, Some [ [ squashed; squashed; squashed ]; [ full; squashed ] ])
+    ; (4, None)
+    ];
+  check plan "the column too tall, not the leftmost"
+    (Some [ [ full ]; [ full; squashed ] ])
+    (Card.heights ~row_gap:1 ~max_rows:6 [ [ may 3 ]; [ may 3; may 3 ] ])
+
+(* A card too tall on its own squashes the card under it on the way; once the
+   column fits, that card opens again. *)
+let test_a_card_squashed_on_the_way_opens_again () =
+  check plan "the short card under the tall one is full"
+    (Some [ [ squashed; full ] ])
+    (Card.heights ~row_gap:0 ~max_rows:8 [ [ may 10; may 3 ] ])
+
+(* A card that may not squash stays full: the next card up squashes in its
+   place, and when no card is left to squash the grid does not fit. *)
+let test_a_card_that_stays_full_is_never_squashed () =
+  check plan "the card under it squashes"
+    (Some [ [ full; squashed ] ])
+    (Card.heights ~row_gap:1 ~max_rows:7 [ [ stays 5; may 4 ] ]);
+  check plan "the card over it squashes"
+    (Some [ [ squashed; full ] ])
+    (Card.heights ~row_gap:1 ~max_rows:7 [ [ may 5; stays 4 ] ]);
+  check plan "nothing left to squash" None
+    (Card.heights ~row_gap:1 ~max_rows:6 [ [ stays 5; may 4 ] ])
+
+(* Every column of up to three cards, each three or six rows tall and either
+   squashable or not, paired with every other, at every row limit up to 25:
+   the chosen heights never pass the limit; a card that stays full is full; a
+   grid that fits squashes nothing; no squashed card could be full on its own;
+   and the grid fails only when squashing every squashable card still does
+   not fit. *)
+let test_the_heights_hold_for_every_small_grid () =
+  let kinds = [ may 3; may 6; stays 3; stays 6 ] in
+  let rec stacks size =
+    if size = 0 then [ [] ]
+    else [] :: List.concat_map (fun kind -> List.map (fun rest -> kind :: rest) (stacks (size - 1))) kinds
+  in
+  let stacks = List.sort_uniq compare (stacks 3) in
+  let fits ~row_gap ~max_rows columns shapes =
+    List.for_all2
+      (fun column shapes -> column_rows ~row_gap column shapes <= max_rows)
+      columns shapes
+  in
+  List.iter
+    (fun row_gap ->
+       List.iter
+         (fun left ->
+            List.iter
+              (fun right ->
+                 let columns = [ left; right ] in
+                 let all_full = List.map (List.map (fun _ -> full)) columns in
+                 let floor =
+                   List.map
+                     (List.map (fun (_, squash) ->
+                        match squash with Card.May_squash -> squashed | Card.Stays_full -> full))
+                     columns
+                 in
+                 for max_rows = 0 to 25 do
+                   let at what = Printf.sprintf "%s, gap %d at %d rows" what row_gap max_rows in
+                   match Card.heights ~row_gap ~max_rows columns with
+                   | None ->
+                       check bool (at "fails only when the floor does not fit") false
+                         (fits ~row_gap ~max_rows columns floor)
+                   | Some shapes ->
+                       check bool (at "never past the limit") true
+                         (fits ~row_gap ~max_rows columns shapes);
+                       if fits ~row_gap ~max_rows columns all_full then
+                         check plan (at "a fit squashes nothing") (Some all_full) (Some shapes);
+                       List.iteri
+                         (fun column_index (column, column_shapes) ->
+                            List.iteri
+                              (fun card_index ((_, squash), shape) ->
+                                 (match squash, shape with
+                                  | Card.Stays_full, Card.Squashed ->
+                                      fail (at "a card that stays full squashed")
+                                  | Card.Stays_full, Card.Full
+                                  | Card.May_squash, (Card.Full | Card.Squashed) -> ());
+                                 match shape with
+                                 | Card.Full -> ()
+                                 | Card.Squashed ->
+                                     let opened =
+                                       List.mapi
+                                         (fun c shapes ->
+                                            List.mapi
+                                              (fun i shape ->
+                                                 if c = column_index && i = card_index then full
+                                                 else shape)
+                                              shapes)
+                                         shapes
+                                     in
+                                     check bool (at "a squashed card could not be full") false
+                                       (fits ~row_gap ~max_rows columns opened))
+                              (List.combine column column_shapes))
+                         (List.combine columns shapes)
+                 done)
+              stacks)
+         stacks)
+    [ 0; 1 ]
+
+(* A squashed card is one row of its column's width, so its top edge keeps
+   what a full card's keeps at that width: the count and the mark stay. The
+   grid squashes every card here, and each edge's fit at its column's width
+   still writes the count it has. *)
+let test_a_squashed_card_keeps_its_count () =
+  let inner_width = 101 and gap = 2 and row_gap = 1 and max_rows = 13 in
+  let body = rows_of 4 in
+  let columns =
+    let rec split = function
+      | first :: second :: rest -> (first :: fst (split rest), second :: snd (split rest))
+      | [ only ] -> ([ only ], [])
+      | [] -> ([], [])
+    in
+    let left, right = split (List.map snd edges) in
+    [ left; right ]
+  in
+  let widths = Card.column_widths ~inner_width ~gap ~columns:2 in
+  let natural = List.length body + 2 in
+  let shapes =
+    Card.heights ~row_gap ~max_rows
+      (List.map (List.map (fun (edge : Card.edge) ->
+         ( natural
+         , match edge.focus with
+           | Card.Unfocused -> Card.May_squash
+           | Card.Focused_list | Card.Focused_other -> Card.Stays_full )))
+         columns)
+  in
+  (match shapes with
+   | None -> fail "the grid squashed nothing it could"
+   | Some shapes ->
+       List.iter2
+         (fun (width, column) column_shapes ->
+            List.iter2
+              (fun (edge : Card.edge) shape ->
+                 match shape with
+                 | Card.Full -> ()
+                 | Card.Squashed ->
+                     List.iter
+                       (fun ko ->
+                          let fit = Card.top_fit ~ko ~width edge in
+                          check bool (edge.name ^ ": the count stays") (writes_count edge)
+                            fit.count_kept;
+                          check bool (edge.name ^ ": the mark stays")
+                            (Option.is_some edge.status) fit.symbol_kept)
+                       [ true; false ])
+              column column_shapes)
+         (List.combine widths columns) shapes;
+       check bool "some card squashed" true
+         (List.exists (List.exists (fun shape -> shape = Card.Squashed)) shapes));
+  match
+    Card.grid ~ko:true ~style:styled ~inner_width ~gap ~row_gap ~max_rows
+      (List.map
+         (List.map (fun edge ->
+            { Card.edge; body = (fun ~cells:_ -> body); selection = Card.No_selected_row }))
+         columns)
+  with
+  | None -> fail "the grid drew nothing"
+  | Some rows ->
+      check bool "within the row limit" true (List.length rows <= max_rows);
+      List.iter
+        (fun row -> check int "a squashing grid fills the width" inner_width (Layout.display_width row))
+        rows
+
+(* A grid that squashes still asks each body once, at its column's width. *)
+let test_a_squashing_grid_asks_each_body_once () =
+  let seen = ref 0 in
+  let probe =
+    { Card.edge = edge "probe"
+    ; body = (fun ~cells:_ -> incr seen; rows_of 5)
+    ; selection = Card.No_selected_row
+    }
+  in
+  (match
+     Card.grid ~ko:true ~style:plain ~inner_width:101 ~gap:2 ~row_gap:1 ~max_rows:9
+       [ [ probe; probe ]; [ probe ] ]
+   with
+   | Some _ -> ()
+   | None -> fail "the grid drew nothing");
+  check int "one ask per card" 3 !seen
 
 let () =
   run "tui card"
@@ -626,11 +881,27 @@ let () =
             test_a_card_is_as_tall_as_its_body_and_does_not_fill_the_screen
         ; test_case "stacked cards are separated by the row gap" `Quick
             test_stacked_cards_are_separated_by_the_row_gap
-        ; test_case "a grid that does not fit draws nothing" `Quick
-            test_a_grid_that_does_not_fit_draws_nothing
+        ; test_case "a grid draws nothing only when squashing does not fit" `Quick
+            test_a_grid_draws_nothing_only_when_squashing_does_not_fit
         ; test_case "each body is asked once for its layout width" `Quick
             test_each_body_is_asked_once_for_its_layout_width
         ; test_case "a cut body with styled rows keeps the width" `Quick
             test_a_cut_body_with_styled_rows_keeps_the_width
+        ] )
+    ; ( "squashing"
+      , [ test_case "a grid that fits squashes nothing" `Quick
+            test_a_grid_that_fits_squashes_nothing
+        ; test_case "a tall column's lowest card squashes first" `Quick
+            test_a_tall_columns_lowest_card_squashes_first
+        ; test_case "a card squashed on the way opens again" `Quick
+            test_a_card_squashed_on_the_way_opens_again
+        ; test_case "a card that stays full is never squashed" `Quick
+            test_a_card_that_stays_full_is_never_squashed
+        ; test_case "the heights hold for every small grid" `Quick
+            test_the_heights_hold_for_every_small_grid
+        ; test_case "a squashed card keeps its count" `Quick
+            test_a_squashed_card_keeps_its_count
+        ; test_case "a squashing grid asks each body once" `Quick
+            test_a_squashing_grid_asks_each_body_once
         ] )
     ]

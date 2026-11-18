@@ -30,9 +30,14 @@ type edge =
   ; focus : focus
   }
 
+type selection =
+  | No_selected_row
+  | Holds_selected_row
+
 type t =
   { edge : edge
   ; body : cells:int -> string list
+  ; selection : selection
   }
 
 type style =
@@ -59,6 +64,14 @@ type bottom_fit =
   | Says_more
   | Number_only
   | Plain
+
+type height =
+  | Full
+  | Squashed
+
+type squash =
+  | May_squash
+  | Stays_full
 
 (* A side, one cell of padding, a cell of content, one cell of padding, a side. *)
 let side_and_padding_cells = 4
@@ -201,7 +214,21 @@ let border_style ~style = function
   | Focused_list | Focused_other -> style.focused_border
   | Unfocused -> style.border
 
-let top_edge ~ko ~style ~width edge =
+(* The ends of a squashed card are half rules, after lazygit's squashed frame:
+   a row with corners would read as a box that never closes, and the half
+   rules tell it from a full card's top edge without colour. Each is one cell,
+   as a corner is, so both shapes keep the same {!top_fit}. *)
+let squashed_start = "\xe2\x95\xb6" (* ╶ *)
+let squashed_end = "\xe2\x95\xb4" (* ╴ *)
+
+let edge_ends = function
+  | Full -> (Box.tl_round, Box.tr_round)
+  | Squashed -> (squashed_start, squashed_end)
+
+(* [shape] is the card's height: a full card's top edge, or the one row of a
+   squashed card. Both say the same things in the same places. *)
+let top_edge ~ko ~style ~width ~shape edge =
+  let start, finish = edge_ends shape in
   let fit = top_fit ~ko ~width edge in
   let border = border_style ~style edge.focus in
   let paint code text = code ^ text ^ style.reset in
@@ -230,13 +257,13 @@ let top_edge ~ko ~style ~width edge =
     | Some count when fit.count_kept -> Some (count_text ~ko count)
     | Some _ | None -> None
   in
-  let opening = Box.tl_round ^ Box.h in
-  let closing = Box.h ^ Box.tr_round in
+  let opening = start ^ Box.h in
+  let closing = Box.h ^ finish in
   match left_cells > 0, count with
-  | false, None -> paint border (Box.tl_round ^ repeat Box.h (width - 2) ^ Box.tr_round)
+  | false, None -> paint border (start ^ repeat Box.h (width - 2) ^ finish)
   | true, None ->
       paint border (opening ^ " ") ^ left
-      ^ paint border (" " ^ repeat Box.h (width - left_cells - left_only_cells) ^ Box.tr_round)
+      ^ paint border (" " ^ repeat Box.h (width - left_cells - left_only_cells) ^ finish)
   | false, Some count ->
       paint border
         (opening
@@ -292,7 +319,7 @@ let render_body ~ko ~style ~width ~height edge body =
     let shown, hidden = window ~rows body in
     let border = border_style ~style edge.focus in
     let filler = List.init (rows - List.length shown) (fun _ -> "") in
-    (top_edge ~ko ~style ~width edge
+    (top_edge ~ko ~style ~width ~shape:Full edge
      :: List.map (body_row ~border ~reset:style.reset ~width) (shown @ filler))
     @ [ bottom_edge ~ko ~border ~reset:style.reset ~width hidden ]
   end
@@ -318,63 +345,157 @@ let column_widths ~inner_width ~gap ~columns =
 (* A card's height with nothing to stretch it: its body and the two edges. *)
 let natural_height body = max min_height (List.length body + 2)
 
+(* A squashed card is its top edge alone. *)
+let squashed_rows = 1
+
 let stack_height ~row_gap heights =
   List.fold_left ( + ) 0 heights + (row_gap * max 0 (List.length heights - 1))
 
+(* A focused card owns the keyboard and a card with the selected row holds
+   what the keys act on: squashing either would hide it. *)
+let squash_of card =
+  match card.edge.focus, card.selection with
+  | (Focused_list | Focused_other), (No_selected_row | Holds_selected_row) -> Stays_full
+  | Unfocused, Holds_selected_row -> Stays_full
+  | Unfocused, No_selected_row -> May_squash
+
+(* {!heights} over any card: [natural] and [squash] read what it needs, and
+   each card comes back with its height, so the caller never zips two lists.
+
+   Each column is settled on its own. A column that fits is left alone, so
+   only a column taller than [max_rows] squashes; which tall column goes first
+   does not change what each one ends with. *)
+let choose_heights ~row_gap ~max_rows ~natural ~squash columns =
+  let card_height (card, shape) =
+    match shape with
+    | Full -> natural card
+    | Squashed -> squashed_rows
+  in
+  let fits column = stack_height ~row_gap (List.map card_height column) <= max_rows in
+  let lowest_squashable column =
+    List.fold_left
+      (fun (index, found) (card, shape) ->
+         match squash card, shape with
+         | May_squash, Full -> (index + 1, Some index)
+         | May_squash, Squashed | Stays_full, (Full | Squashed) -> (index + 1, found))
+      (0, None) column
+    |> snd
+  in
+  let set column ~card shape =
+    List.mapi (fun index (it, was) -> (it, if index = card then shape else was)) column
+  in
+  (* [squashed] is the newest first, the order cards open again in. *)
+  let rec squash_until_fit column squashed =
+    if fits column then Some (column, squashed)
+    else
+      match lowest_squashable column with
+      | None -> None
+      | Some card -> squash_until_fit (set column ~card Squashed) (card :: squashed)
+  in
+  let reopen column card =
+    let opened = set column ~card Full in
+    if fits opened then opened else column
+  in
+  let settle column =
+    squash_until_fit (List.map (fun card -> (card, Full)) column) []
+    |> Option.map (fun (column, squashed) -> List.fold_left reopen column squashed)
+  in
+  (* The grid fits when every column does. *)
+  List.fold_right
+    (fun column settled ->
+       match settle column, settled with
+       | Some column, Some rest -> Some (column :: rest)
+       | None, (Some _ | None) | Some _, None -> None)
+    columns (Some [])
+
+let heights ~row_gap ~max_rows columns =
+  choose_heights ~row_gap ~max_rows ~natural:fst ~squash:snd columns
+  |> Option.map (List.map (List.map snd))
+
 (* Each card of a column with its body, asked once at the column's width. *)
 let prepare_column ~width stack =
-  List.map (fun card -> (card.edge, card.body ~cells:(content_cells ~width))) stack
+  List.map (fun card -> (card, card.body ~cells:(content_cells ~width))) stack
 
-let prepared_height ~row_gap prepared =
-  stack_height ~row_gap (List.map (fun (_, body) -> natural_height body) prepared)
+let drawn_height ~body = function
+  | Full -> natural_height body
+  | Squashed -> squashed_rows
 
-(* The last card of a column takes whatever the column lacks against the
-   tallest, so every column ends on the same row. *)
-let column_rows ~ko ~style ~row_gap ~width ~height prepared =
-  let extra = max 0 (height - prepared_height ~row_gap prepared) in
-  let last = List.length prepared - 1 in
+let squashed_row ~ko ~style ~width edge =
+  if width < min_width then blank width
+  else top_edge ~ko ~style ~width ~shape:Squashed edge
+
+(* The lowest full card of a column takes whatever the column lacks against
+   the tallest, so every column ends on the same row. A column with no full
+   card ends in blank rows. *)
+let column_rows ~ko ~style ~row_gap ~width ~height placed =
+  let used =
+    stack_height ~row_gap (List.map (fun ((_, body), shape) -> drawn_height ~body shape) placed)
+  in
+  let extra = max 0 (height - used) in
+  let stretched =
+    List.fold_left
+      (fun (index, found) (_, shape) ->
+         match shape with
+         | Full -> (index + 1, Some index)
+         | Squashed -> (index + 1, found))
+      (0, None) placed
+    |> snd
+  in
   let drawn =
     List.mapi
-      (fun index (edge, body) ->
-         let card_height = natural_height body + if index = last then extra else 0 in
-         render_body ~ko ~style ~width ~height:card_height edge body)
-      prepared
+      (fun index ((card, body), shape) ->
+         match shape with
+         | Squashed -> [ squashed_row ~ko ~style ~width card.edge ]
+         | Full ->
+             let stretch = if Option.equal Int.equal (Some index) stretched then extra else 0 in
+             render_body ~ko ~style ~width ~height:(natural_height body + stretch) card.edge body)
+      placed
   in
   let gap_rows = List.init row_gap (fun _ -> blank width) in
+  let foot =
+    match stretched with
+    | Some _ -> []
+    | None -> List.init extra (fun _ -> blank width)
+  in
   List.concat
     (List.mapi (fun index rows -> if index = 0 then rows else gap_rows @ rows) drawn)
+  @ foot
 
 let grid ~ko ~style ~inner_width ~gap ~row_gap ~max_rows columns =
   let count = List.length columns in
+  let width index = column_width ~inner_width ~gap ~columns:count ~index in
   let prepared =
-    List.mapi
-      (fun index stack ->
-         let width = column_width ~inner_width ~gap ~columns:count ~index in
-         (width, prepare_column ~width stack))
-      columns
+    List.mapi (fun index stack -> prepare_column ~width:(width index) stack) columns
   in
-  let height =
-    List.fold_left
-      (fun tallest (_, column) -> max tallest (prepared_height ~row_gap column))
-      0 prepared
+  let planned =
+    choose_heights ~row_gap ~max_rows
+      ~natural:(fun (_, body) -> natural_height body)
+      ~squash:(fun (card, _) -> squash_of card)
+      prepared
   in
-  if height > max_rows then None
-  else begin
-    let drawn =
-      List.map
-        (fun (width, column) ->
-           match column with
-           (* A column with no cards is blank rows of its width. *)
-           | [] -> List.init height (fun _ -> blank width)
-           | _ :: _ -> column_rows ~ko ~style ~row_gap ~width ~height column)
-        prepared
-    in
-    let rec zip rows =
-      if List.for_all (function [] -> true | _ :: _ -> false) rows then []
-      else
-        let heads = List.map (function [] -> "" | head :: _ -> head) rows in
-        let tails = List.map (function [] -> [] | _ :: tail -> tail) rows in
-        String.concat (blank gap) heads :: zip tails
-    in
-    Some (zip drawn)
-  end
+  match planned with
+  | None -> None
+  | Some plan ->
+      let column_height placed =
+        stack_height ~row_gap
+          (List.map (fun ((_, body), shape) -> drawn_height ~body shape) placed)
+      in
+      let height = List.fold_left (fun tallest placed -> max tallest (column_height placed)) 0 plan in
+      let drawn =
+        List.mapi
+          (fun index placed ->
+             let width = width index in
+             match placed with
+             (* A column with no cards is blank rows of its width. *)
+             | [] -> List.init height (fun _ -> blank width)
+             | _ :: _ -> column_rows ~ko ~style ~row_gap ~width ~height placed)
+          plan
+      in
+      let rec zip rows =
+        if List.for_all (function [] -> true | _ :: _ -> false) rows then []
+        else
+          let heads = List.map (function [] -> "" | head :: _ -> head) rows in
+          let tails = List.map (function [] -> [] | _ :: tail -> tail) rows in
+          String.concat (blank gap) heads :: zip tails
+      in
+      Some (zip drawn)

@@ -10,9 +10,12 @@
     exactly [width] cells, the body padded one cell from the sides.
 
     Cards are laid out as columns of stacks. Each card is as tall as its body,
-    and the columns end on the same row: the card at the bottom of a shorter
+    and the columns end on the same row: the lowest full card of a shorter
     column takes the difference, so the grid is one block with a straight
-    bottom edge rather than boxes of unrelated heights.
+    bottom edge rather than boxes of unrelated heights. A card the height
+    cannot hold is squashed to its top edge alone, one row that keeps its
+    name, status mark and count (RFC section 2, after lazygit's squashed
+    frame).
 
     The caller passes the style codes, so the same card reads in whatever
     palette the screen probed. That includes a focused card's border, the
@@ -65,6 +68,12 @@ type edge =
   ; focus : focus
   }
 
+type selection =
+  | No_selected_row
+  | Holds_selected_row
+      (** The selected row is in this card's body. A grid never squashes the
+          card: the selection would leave the screen (RFC section 8). *)
+
 type t =
   { edge : edge
   ; body : cells:int -> string list
@@ -72,6 +81,9 @@ type t =
             styled. Asked once the layout has chosen the width, so a body can
             wrap to it. A row wider than [cells] is cut with the shared ["…"]
             mark. *)
+  ; selection : selection
+        (** Read by {!grid} only. A card drawn alone by {!render} has the
+            height its caller gives it. *)
   }
 
 type style =
@@ -165,6 +177,39 @@ val column_widths : inner_width:int -> gap:int -> columns:int -> int list
     leftover cells going to the leftmost columns. The widths and the gaps add
     up to [inner_width]. *)
 
+type height =
+  | Full
+      (** Both edges and the body, as tall as the body, or taller when the
+          card is the lowest full card of a column shorter than the grid. *)
+  | Squashed
+      (** The top edge alone, one row of the column's width, its ends [╶] and
+          [╴] rather than corners. It keeps what a full card's top edge keeps
+          at that width ({!top_fit}), so its count says how many rows it
+          holds. With no bottom edge it writes no cut-off rows. *)
+
+type squash =
+  | May_squash
+  | Stays_full
+      (** The card holds the selected row or owns the keyboard. *)
+
+val heights :
+  row_gap:int -> max_rows:int -> (int * squash) list list -> height list list option
+(** The height of each card of each column, given each card's natural height
+    (its body and its two edges) and whether it may squash, so that the
+    tallest column, [row_gap] rows between its cards, is at most [max_rows].
+
+    Nothing squashes when the natural heights fit. Otherwise each column
+    taller than [max_rows] squashes its lowest full card that may squash,
+    again and again, until it fits; a column that fits is left alone. Then
+    each squashed card, the last squashed first, opens again when its column
+    still fits with it full: an upper card too tall on its own squashes the
+    cards under it on the way. [None] when a column still does not fit with
+    every card that may squash squashed.
+
+    Squashing one column does not change another's height, so the columns
+    are settled one by one: squashing the tallest column first would end
+    the same way. *)
+
 val grid :
   ko:bool ->
   style:style ->
@@ -176,7 +221,9 @@ val grid :
   string list option
 (** Lays out columns of stacked cards, [gap] cells between columns and
     [row_gap] blank rows between stacked cards. Every row is [inner_width]
-    cells wide, and the rows are those of the tallest column at its cards'
-    natural heights. [None] when that is more than [max_rows], so a caller
+    cells wide, and the rows are those of the tallest column at the heights
+    {!heights} chooses, so there are never more than [max_rows]. A card
+    focused or holding the selected row stays full. A column with no full
+    card ends in blank rows. [None] when {!heights} finds no fit, so a caller
     falls back to something shorter before anything is drawn. Each body is
     asked once per card. *)

@@ -23,14 +23,17 @@ accepts connections, and writes one JSON line per decision to --log:
   done            verb, target, status, bytes, how it ended, when the request
                   arrived; an event stream adds `stream` and its per-event counts
   upstream-error  the server could not be reached
+  client-left-before-last-chunk  the client left after the whole body but
+                  before the end of the chunked answer
 
 `done` lines are the per-path byte log. Events are named as
 scripts/harness/perf/tui_request_events.py names them. Targets keep their
 query, so the log holds workspace names: keep it outside the repository.
 
 With --record DIR the relay keeps each 200 or 404 answer to a GET or an allowed
-POST /mcp, and the headers of each event stream, for frozen_server.py
-(relay_files.py describes the format).
+POST /mcp (an event-stream answer to POST /mcp included), and the headers of
+each GET event stream, for frozen_server.py (relay_files.py describes the
+format).
 """
 import argparse
 from collections.abc import Sequence
@@ -253,6 +256,9 @@ class Relay(http.server.BaseHTTPRequestHandler):
         if server.recorder is not None and stream and self.command == 'GET':
             server.recorder.append(Kind.STREAM, target, status, response.getheaders(), b'')
         counter = StreamCounter() if stream else None
+        # A GET event stream does not end, so only its headers are kept. An
+        # answer to POST /mcp may be a finite event stream and is kept whole.
+        keep = server.recorder is not None and not (stream and self.command == 'GET')
         kept = bytearray()
         sent = 0
         ending = Ending.COMPLETE
@@ -264,17 +270,18 @@ class Relay(http.server.BaseHTTPRequestHandler):
                 except (OSError, http.client.HTTPException):
                     ending = Ending.UPSTREAM_FAILED
                     break
+                if not chunk:
+                    break
                 try:
-                    self.wfile.write(b'%x\r\n%s\r\n' % (len(chunk), chunk) if chunk else b'0\r\n\r\n')
+                    self.wfile.write(b'%x\r\n%s\r\n' % (len(chunk), chunk))
                     self.wfile.flush()
                 except OSError:
                     ending = Ending.CLIENT_LEFT
                     break
-                if not chunk:
-                    break
                 sent += len(chunk)
-                if counter is None:
+                if keep:
                     kept.extend(chunk)
+                if counter is None:
                     continue
                 counter.feed(chunk)
                 if time.monotonic() >= next_progress:
@@ -288,13 +295,20 @@ class Relay(http.server.BaseHTTPRequestHandler):
         if counter is not None:
             done |= {'stream': True, 'events': counter.report()}
         server.log.write(done)
-        if (server.recorder is None or counter is not None or ending is not Ending.COMPLETE
-                or status not in RECORDED_STATUSES):
+        if server.recorder is not None and keep and ending is Ending.COMPLETE and status in RECORDED_STATUSES:
+            if self.command == 'GET':
+                server.recorder.append(Kind.GET, target, status, response.getheaders(), bytes(kept))
+            elif self.command == 'POST' and (key := mcp_key(body)) is not None:
+                server.recorder.append(Kind.MCP, key, status, response.getheaders(), bytes(kept))
+        if bodyless or ending is not Ending.COMPLETE:
             return
-        if self.command == 'GET':
-            server.recorder.append(Kind.GET, target, status, response.getheaders(), bytes(kept))
-        elif self.command == 'POST' and (key := mcp_key(body)) is not None:
-            server.recorder.append(Kind.MCP, key, status, response.getheaders(), bytes(kept))
+        # The last chunk goes out after the log line and the recording, so a
+        # client holding a whole answer knows both are written.
+        try:
+            self.wfile.write(b'0\r\n\r\n')
+            self.wfile.flush()
+        except OSError:
+            server.log.write({'decision': 'client-left-before-last-chunk', 'verb': self.command, 'path': target})
 
     def do_GET(self) -> None:
         if (self.headers.get('Upgrade') or '').lower() == 'websocket':

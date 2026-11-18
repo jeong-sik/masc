@@ -10,31 +10,36 @@ let descriptor = function
 
 let append_flags access = [ access; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ]
 
+let is_regular = function
+  | Unix.S_REG -> true
+  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> false
+;;
+
 (* Whether the path names a regular file, or nothing yet (the open then
    creates one). *)
 let regular_file_expected path =
-  match (Unix.stat path).Unix.st_kind with
-  | Unix.S_REG -> true
-  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> false
+  match Unix.stat path with
+  | stats -> is_regular stats.Unix.st_kind
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
 ;;
 
-let open_target path =
-  let readable = regular_file_expected path in
-  let fd =
-    Unix.openfile path (append_flags (if readable then Unix.O_RDWR else Unix.O_WRONLY)) 0o644
-  in
-  match readable, (Unix.fstat fd).Unix.st_kind with
-  | true, Unix.S_REG -> Regular_file fd
-  | false, Unix.S_REG
-    (* The path changed between the two calls. The descriptor is open for
-       writing only, so it is used as one that cannot be read. *)
-  | ( (true | false)
-    , (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) ) ->
-    Stream fd
+let rec open_target path =
+  let expected = regular_file_expected path in
+  let access = if expected then Unix.O_RDWR else Unix.O_WRONLY in
+  let fd = Unix.openfile path (append_flags access) 0o644 in
+  match expected, is_regular (Unix.fstat fd).Unix.st_kind with
   | exception (Unix.Unix_error _ as error) ->
     Unix.close fd;
     raise error
+  | true, true -> Regular_file fd
+  | false, false -> Stream fd
+  | true, false | false, true ->
+    (* The path came to name another kind of file between the two calls.
+       The access mode was chosen for the first kind: a regular file
+       opened for writing only cannot be read, and a FIFO opened for
+       reading too did not wait for its reader. Start again. *)
+    Unix.close fd;
+    open_target path
 ;;
 
 type io =
@@ -70,7 +75,7 @@ type start =
   | Anywhere
   | At_line_start
 
-type left_in_place =
+type not_rolled_back =
   | Not_a_regular_file
   | Changed_by_another_writer of
       { expected_size : int
@@ -85,9 +90,9 @@ type left_in_place =
 type rollback =
   | Nothing_written
   | Rolled_back of { bytes : int }
-  | Left_in_place of
+  | Not_rolled_back of
       { bytes : int
-      ; reason : left_in_place
+      ; reason : not_rolled_back
       }
 
 type failure =
@@ -96,7 +101,7 @@ type failure =
       ; function_name : string
       ; argument : string
       }
-  | End_moved
+  | Last_byte_missing of { size : int }
   | Write_failed of
       { write_failure : Fd_write_all.failure
       ; rollback : rollback
@@ -128,46 +133,73 @@ type before =
   ; ends_mid_line : bool
   }
 
+(* What one look at the end of a regular file found. *)
+type look =
+  | Seen of before
+  | No_byte_before of int
+
+let look_once ~io ~start fd =
+  let size = io.end_offset fd in
+  match start with
+  | Anywhere -> Seen { size; ends_mid_line = false }
+  | At_line_start ->
+    if size = 0
+    then Seen { size; ends_mid_line = false }
+    else (
+      match io.last_byte fd ~size with
+      | Some byte -> Seen { size; ends_mid_line = not (Char.equal byte '\n') }
+      | None -> No_byte_before size)
+;;
+
+(* The file can become shorter between the two calls of a look, when
+   another process takes back its own failed append. The length read
+   first is then stale, so the file is looked at again. Every further
+   look has to find a shorter file, which ends the looks: a file that
+   did not shrink and still has no byte before its end is reported. *)
 let observe ~io ~start fd =
-  match
-    retrying_eintr (fun () ->
-      let size = io.end_offset fd in
-      match start with
-      | Anywhere -> Some { size; ends_mid_line = false }
-      | At_line_start ->
-        if size = 0
-        then Some { size; ends_mid_line = false }
-        else
-          Option.map
-            (fun byte -> { size; ends_mid_line = not (Char.equal byte '\n') })
-            (io.last_byte fd ~size))
-  with
-  | Ok (Some before) -> Ok before
-  | Ok None -> Error End_moved
-  | Error (error, function_name, argument) ->
-    Error (End_unreadable { error; function_name; argument })
+  let rec look ~shorter_than =
+    match retrying_eintr (fun () -> look_once ~io ~start fd) with
+    | Ok (Seen before) -> Ok before
+    | Ok (No_byte_before size) ->
+      (match shorter_than with
+       | Some previous when size >= previous -> Error (Last_byte_missing { size })
+       | Some _ | None -> look ~shorter_than:(Some size))
+    | Error (error, function_name, argument) ->
+      Error (End_unreadable { error; function_name; argument })
+  in
+  look ~shorter_than:None
 ;;
 
 (* The call's bytes are removed only when the file is exactly [size_before +
-   bytes] long. Every other writer of these files appends, so that length
-   means nothing was added since [size_before] was read except this call's
-   bytes, and they are everything after [size_before]. *)
+   bytes] long. When every other writer of the file only appends, that
+   length means nothing was added since [size_before] was read except this
+   call's bytes, and they are everything after [size_before]. A shorter
+   file is never grown back to [size_before]. *)
 let roll_back ~io ~fd ~size_before ~bytes =
   if bytes = 0
   then Nothing_written
   else (
     let expected_size = size_before + bytes in
-    match
-      retrying_eintr (fun () ->
-        let size = io.end_offset fd in
-        if size = expected_size then io.truncate fd size_before;
-        size)
-    with
-    | Ok size when size = expected_size -> Rolled_back { bytes }
-    | Ok size ->
-      Left_in_place { bytes; reason = Changed_by_another_writer { expected_size; size } }
-    | Error (error, function_name, argument) ->
-      Left_in_place { bytes; reason = Rollback_error { error; function_name; argument } })
+    let left reason = Not_rolled_back { bytes; reason } in
+    (* [truncate_interrupted]: a [truncate] of this call raised [EINTR].
+       Whether it had cut the file by then is read from the file's length:
+       a file that is [size_before] long has lost this call's bytes. *)
+    let rec attempt ~truncate_interrupted =
+      match io.end_offset fd with
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> attempt ~truncate_interrupted
+      | exception Unix.Unix_error (error, function_name, argument) ->
+        left (Rollback_error { error; function_name; argument })
+      | size when size = expected_size ->
+        (match io.truncate fd size_before with
+         | () -> Rolled_back { bytes }
+         | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+           attempt ~truncate_interrupted:true
+         | exception Unix.Unix_error (error, function_name, argument) ->
+           left (Rollback_error { error; function_name; argument }))
+      | size when truncate_interrupted && size = size_before -> Rolled_back { bytes }
+      | size -> left (Changed_by_another_writer { expected_size; size })
+    in
+    attempt ~truncate_interrupted:false)
 ;;
 
 let append_to_regular_file ~io ~start fd content =
@@ -191,7 +223,7 @@ let append_to_stream ~io fd content =
     let rollback =
       match bytes_written write_failure with
       | 0 -> Nothing_written
-      | bytes -> Left_in_place { bytes; reason = Not_a_regular_file }
+      | bytes -> Not_rolled_back { bytes; reason = Not_a_regular_file }
     in
     Error (Write_failed { write_failure; rollback })
 ;;
@@ -221,7 +253,7 @@ let write_failure_to_string = function
       (Printexc.to_string exception_)
 ;;
 
-let left_in_place_to_string = function
+let not_rolled_back_to_string = function
   | Not_a_regular_file -> "not a regular file"
   | Changed_by_another_writer { expected_size; size } ->
     Printf.sprintf
@@ -235,8 +267,8 @@ let left_in_place_to_string = function
 let rollback_to_string = function
   | Nothing_written -> "file unchanged"
   | Rolled_back { bytes } -> Printf.sprintf "%d bytes removed again" bytes
-  | Left_in_place { bytes; reason } ->
-    Printf.sprintf "%d bytes left in the file (%s)" bytes (left_in_place_to_string reason)
+  | Not_rolled_back { bytes; reason } ->
+    Printf.sprintf "%d bytes not removed (%s)" bytes (not_rolled_back_to_string reason)
 ;;
 
 let failure_to_string = function
@@ -245,7 +277,10 @@ let failure_to_string = function
       "the end of the file could not be read (%s: %s); nothing written"
       function_name
       (Unix.error_message error)
-  | End_moved -> "the file became shorter while its end was being read; nothing written"
+  | Last_byte_missing { size } ->
+    Printf.sprintf
+      "the file is %d bytes long and has no byte before its end; nothing written"
+      size
   | Write_failed { write_failure; rollback } ->
     write_failure_to_string write_failure ^ "; " ^ rollback_to_string rollback
 ;;

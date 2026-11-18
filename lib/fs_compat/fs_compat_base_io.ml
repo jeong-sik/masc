@@ -308,8 +308,9 @@ let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
 (* No byte of a failed append reaches the file later: the cached descriptor
    holds no buffer that a later append or a close could write out (#52980).
-   [Fd_append_whole.run] removes the bytes a partial write added when they
-   are the file's last and nobody else's, and says so when it left them.
+   [Fd_append_whole.run] removes the bytes a partial write added when the
+   file is exactly as long as this call alone would have left it, and
+   says so when it removed nothing.
    With [~start:At_line_start] the content does not join onto a line an
    earlier writer left unfinished (#52974). *)
 let append_file_unix_with_io ~io ~start (path : string) (content : string) : unit =
@@ -330,7 +331,7 @@ let append_file_unix_with_io ~io ~start (path : string) (content : string) : uni
         Printexc.raise_with_backtrace exception_ backtrace
       | Error
           (( Fd_append_whole.End_unreadable _
-           | Fd_append_whole.End_moved
+           | Fd_append_whole.Last_byte_missing _
            | Fd_append_whole.Write_failed
                { write_failure =
                    Fd_write_all.No_progress _ | Fd_write_all.Unix_error _

@@ -90,7 +90,7 @@ let write_current_seq config seq =
   Fs_compat.save_file (seq_path config) (string_of_int seq)
 
 let append_line path line =
-  Fs_compat.append_file path line
+  Fs_compat.append_lines path line
 
 let sanitize_entity_ref (value : entity_ref) =
   {

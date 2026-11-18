@@ -86,7 +86,7 @@ val record : config:Workspace.config -> record -> (unit, [ `Io of string ]) resu
     [r.keeper_id]) via the sibling-family writer
     {!Keeper_types_support.append_jsonl_line} — so the feedback log shares the
     sibling JSONL format and the same
-    size-threshold rotation. [append_jsonl_line]'s underlying [append_file]
+    size-threshold rotation. [append_jsonl_line]'s underlying [append_lines]
     raises [Sys_error] on an IO fault; it is caught here and returned as [`Io],
     so a write is never silently dropped. *)
 

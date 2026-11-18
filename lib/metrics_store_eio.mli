@@ -120,7 +120,7 @@ val record : config -> task_metric -> (record_receipt, record_error) result
     Concurrency: when the flush fiber is active (post-
     {!start_flush_fiber}), the metric is serialised and pushed to
     the queue (lock-free).  Otherwise falls back to direct
-    {!Fs_compat.append_file} (tests, pre-init).  Always ensures the
+    {!Fs_compat.append_lines} (tests, pre-init).  Always ensures the
     target directory and binds its exact identity before queue admission.
     Root format and per-agent identity documents are strict current contracts;
     incompatible nonempty stores are refused, never read or rewritten as aliases.
@@ -138,7 +138,7 @@ val record : config -> task_metric -> (record_receipt, record_error) result
 val flush_pending : unit -> unit
 (** [flush_pending ()] drains all pending entries from the write
     queue, batches them by file, and appends each batch with a
-    single {!Fs_compat.append_file} call.
+    single {!Fs_compat.append_lines} call.
 
     Errors during append are logged to {!Log.Metrics.error} but do
     not raise.  [Eio.Cancel.Cancelled] is re-raised. *)

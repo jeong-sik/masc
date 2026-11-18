@@ -4,18 +4,27 @@
    subscription a Keeper turn spends. *)
 
 (** The body of a record of a provider account (design 4.2 and 5.4, plan
-    D1-1): a person links a subscription as their own.
+    D1-1): a person links a subscription as their own, by a login of the
+    official client or by a key of theirs (RFC
+    a-persons-api-key-is-their-own-provider-account, 3.1).
 
     {b Account.} A provider account is one provider entry of [runtime.toml]
     with its account home, and its id is the id of that entry (plan D1). The
     record names the owner. What the provider is and where its home lies stay
     in [runtime.toml], which a later layer checks against this record.
 
-    {b Body.} [{"event":"linked","provider_account_id":...,"user_id":...}],
+    {b Body.} [{"event":"linked","provider_account_id":...,"user_id":...}]
+    or
+    [{"event":"key_linked","provider_account_id":...,"user_id":...,"integration_id":...}],
     with the members in this order and every value a string. The labels are on
     disk and renaming one orphans every record written with it. A body with
     other members, the same members in another order, or a member of another
-    type is refused.
+    type is refused. [linked] keeps its members for that reason: a key account
+    is a record of its own, and not a [linked] with one member more.
+
+    {b Integration.} What a login account is an account of is in its login
+    receipt, which the login writes. A key account has no login, so its record
+    names the integration.
 
     This module does not know who may write the record ({!Authz_record.admits}
     and {!Authz_state} decide that), nor whether the account was linked
@@ -25,6 +34,11 @@ type t =
   | Linked of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; user_id : Authz_types.User_id.t  (** The owner, who links it. *)
+      }
+  | Key_linked of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; user_id : Authz_types.User_id.t  (** The owner, whose key it is. *)
+      ; integration_id : Authz_types.Integration_id.t
       }
 
 val provider_account_id : t -> Authz_types.Provider_account_id.t
@@ -42,10 +56,12 @@ type error =
           each a string. *)
   | Invalid_provider_account_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
+  | Invalid_integration_id of Authz_id.error
 
 val error_to_string : error -> string
 
 (** Reads a body. The first check that fails is the result: it is an object,
     its first member names an event, its members are those of that event, and
-    then the account id and the user id are ones. *)
+    then the account id, the user id and, of a key account, the integration
+    id are ones. *)
 val of_body : Authz_body.t -> (t, error) result

@@ -52,6 +52,27 @@ module Account_home_namespace : Authz_id.S
     by it and its owner (plan S1b-3c). *)
 module Conversation_id : Authz_id.S
 
+(** The id of an integration: a provider entry of [runtime.toml] that a person
+    may connect an account of (RFC a-persons-api-key-is-their-own-provider-account,
+    3.1). The record of a key account names by it what the key is for. A login
+    account has none in the log: its login receipt names it. *)
+module Integration_id : Authz_id.S
+
+(** The generation of the key of a key account (the same RFC, 3.2 and 3.7).
+    The key a person registers is the first. The path of a key file names its
+    generation, so a reader opens the file of the generation the log says and
+    no other. *)
+module Key_generation : sig
+  type t
+
+  val first : t
+
+  (** [1] for {!first}. *)
+  val to_int : t -> int
+
+  val equal : t -> t -> bool
+end
+
 module Principal : sig
   type t =
     | Human of User_id.t

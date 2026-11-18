@@ -41,6 +41,15 @@ module Account_home_namespace = struct
 end
 
 module Conversation_id = Authz_id.Make ()
+module Integration_id = Authz_id.Make ()
+
+module Key_generation = struct
+  type t = int
+
+  let first = 1
+  let to_int t = t
+  let equal = Int.equal
+end
 
 module Principal = struct
   type t =

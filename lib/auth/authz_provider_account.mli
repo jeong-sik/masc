@@ -21,5 +21,17 @@ val link
   -> provider_account_id:Authz_types.Provider_account_id.t
   -> (unit, error) result
 
+(** Writes the record that links [provider_account_id] to [user_id] as a key
+    account of [integration_id]: the account holds a key the person
+    registered (RFC a-persons-api-key-is-their-own-provider-account, 3.1 and
+    3.3). The route that registers a key writes it before any file of the
+    key. *)
+val link_key
+  :  Authz_zone.t
+  -> user_id:Authz_types.User_id.t
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
+  -> (unit, error) result
+
 (** The accounts the person owns, in the order of their ids. *)
 val owned : Authz_state.t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list

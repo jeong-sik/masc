@@ -110,7 +110,15 @@ let render_workspace_activity (state : state) repo_id =
     [ ui_text state ~ko:"활동" ~en:"activity"; Terminal_text.single_line repo_id ]
   in
   let title = match state.workspace_activity_context_scroll with
-    | None -> here_row ~cols state ~path:activity_path ~readings:[] ~position:None
+    | None ->
+        here_row ~cols state ~path:activity_path ~readings:[]
+          ~position:
+            (match rows with
+             | [] -> None
+             | _ :: _ ->
+                 Some
+                   (Masc_tui_value.Position.row ~selected:(Some cursor)
+                      ~total:(List.length rows)))
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
@@ -118,8 +126,8 @@ let render_workspace_activity (state : state) repo_id =
         let scroll = max 0 (min requested (max 0 (count - height))) in
         here_row ~cols state
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
-          ~readings:[ Masc_tui_scroll.window_text ~scroll ~height count ]
-          ~position:None in
+          ~readings:[]
+          ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count) in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title
     ~hints:(match state.workspace_activity_context_scroll with
@@ -288,7 +296,6 @@ type repository_studio_geometry = {
   rsg_detail : string list;
   rsg_errors : string list;
   rsg_content_height : int;
-  rsg_overflowing : bool;
 }
 
 let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
@@ -332,12 +339,11 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
            (Terminal_text.single_line reason) ^ Ansi.reset]
     | Some _ | None -> [] in
   let room = max 1 (list_budget - (if boxed then 2 else 0) - List.length errors) in
-  let overflowing = shown > room && room > 1 in
-  let content_height = max 1 (min shown (room - if overflowing then 1 else 0)) in
+  let content_height = max 1 (min shown room) in
   {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
    rsg_list_width = list_width; rsg_detail_width = detail_width;
    rsg_detail = detail; rsg_errors = errors;
-   rsg_content_height = content_height; rsg_overflowing = overflowing}
+   rsg_content_height = content_height}
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
   (repository_studio_geometry state ~cols ~budget ~cursor).rsg_content_height
@@ -401,12 +407,11 @@ let render_repository_list (state : state) =
                 Theme.selection ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
-      let lines =
-        geometry.rsg_errors @ lines
-        @ (if geometry.rsg_overflowing then
-             [ui_text state ~ko:"저장소 " ~en:"repositories "
-              ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
-           else []) in
+      if shown > 0 then
+        c.position
+          (Masc_tui_value.Position.row ~selected:(Some state.repositories_cursor)
+             ~total:shown);
+      let lines = geometry.rsg_errors @ lines in
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
         ui_text state ~ko:"등록된 저장소" ~en:"Registered repositories" in
@@ -793,15 +798,14 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let diff_rows = prepared.diff_rows in
   let removed, added = prepared.removed, prepared.added in
   let total = prepared.count in
-  let header =
+  (* The title names where the window stands, known once the notes are
+     counted, so it is drawn last and put first. *)
+  let header ~position =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; change_row_address change ]
       ~readings:[ Printf.sprintf "-%d +%d" removed added ]
-      ~position:None
+      ~position
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
   (* Facts about the change the rows themselves cannot carry. *)
   let notes =
     let turn =
@@ -848,12 +852,14 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      rows plus the notes, which left the surface one row over its budget --
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
-  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  (* The position row carries the esc hint at every count, so it is one of
-     [listing_rows_below_the_body] and needs no row of its own. *)
+  (* One status row under the rows names the column and the esc key. *)
+  let status_rows = 1 in
+  let chrome_rows =
+    boxed_head_rows cols + count_frame_lines buf + status_rows + listing_rows_below_the_body
+  in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
-      ~preview_keep:None ~overflow_takes_row:false
+      ~preview_keep:None
   in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
@@ -872,20 +878,21 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~hscroll:state.changes_diff_hscroll ~width:(framed_inner_width cols) row)
     done;
-  let position = match Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total with
-    | None -> ""
-    | Some text -> " · " ^ String.trim text in
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d%s · Esc 로 닫기"
-        else "  col %d%s · esc closes")
-       (state.changes_diff_hscroll + 1) position);
+       (if state.ui_language = Lang_ko then "  열 %d · Esc 로 닫기"
+        else "  col %d · esc closes")
+       (state.changes_diff_hscroll + 1));
   box_bottom buf cols;
-  Buffer.add_string buf
+  let framed = Buffer.create (Buffer.length buf + 512) in
+  boxed_head framed cols
+    (header ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total));
+  Buffer.add_buffer framed buf;
+  Buffer.add_string framed
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_changes_diff ~lang:state.ui_language));
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
-    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+    ~surface_key:"changes" ~rows:terminal_rows ~cols framed
 
 let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -905,7 +912,13 @@ let render_changes_list (state : state) =
   let heading ~reading =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; whose ]
-      ~readings:[ reading ] ~position:None
+      ~readings:[ reading ]
+      ~position:
+        (if shown = 0 then None
+         else
+           Some
+             (Masc_tui_value.Position.row ~selected:(Some state.changes_cursor)
+                ~total:shown))
   in
   let header =
     match state.changes with
@@ -993,13 +1006,12 @@ let render_changes_list (state : state) =
     | Some _ when shown = 0 -> 0
     | Some keep -> Masc_tui_scroll.preview_height ~total:total_content ~keep
   in
-  (* The list's rows as the keypress counts them: what the preview leaves,
-     less the scroll row while the list overflows. *)
+  (* The list's rows as the keypress counts them: what the preview leaves. *)
   let content_height =
     match scrolled_surface state ~cols Changes with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
-          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+          ~preview_keep:s.sc_preview_keep
     | None -> max 1 (total_content - preview_height)
   in
   let max_scroll = max 0 (shown - content_height) in
@@ -1084,11 +1096,6 @@ let render_changes_list (state : state) =
          | None -> box_empty buf cols
        done
    | Some _ -> ());
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf
-         (if state.ui_language = Lang_ko then "  [변경 %s]" else "  [changes %s]")
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)

@@ -541,16 +541,17 @@ let render_runtime_detail (state : state) target =
     | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
     | Runtime_catalog_entry { runtime_id } -> runtime_id
   in
-  box_top buf cols;
-  box_line buf cols
-    (here_row ~cols state ~path:[ runtime_step state; target_label ]
-       ~readings:[] ~position:None);
-  box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.runtime_detail_scroll max_scroll) in
+  box_top buf cols;
+  box_line buf cols
+    (here_row ~cols state ~path:[ runtime_step state; target_label ]
+       ~readings:[]
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total));
+  box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
@@ -558,15 +559,8 @@ let render_runtime_detail (state : state) target =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
-  let position =
-    if total > content_height then
-      Some
-        (Printf.sprintf (if state.ui_language = Lang_ko then "행 %s" else "lines %s")
-           (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
-    else None
-  in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ?position
+    (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints_runtime_detail
             ~lang:state.ui_language
@@ -772,19 +766,15 @@ let render_runtime_reading (state : state) =
     else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
-  let scroll_hint =
-    if shown > content_height then
-      Printf.sprintf (if ko then "[행 %s]  " else "[rows %s]  ")
-        (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
-    else ""
-  in
   let hints =
-    scroll_hint
-    ^ Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
-        ~mode:state.runtime_mode ~picker:None
+    Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+      ~mode:state.runtime_mode ~picker:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
+  if shown > 0 then
+    c.position
+      (Masc_tui_value.Position.row ~selected:(Some state.runtime_cursor) ~total:shown);
   let authority_style =
     match state.runtime_surface with
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
@@ -1055,7 +1045,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | Runtime_prompt_parent (Lane_remove_prompt lane) ->
         text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
   let header = if projection.rpp_notices = 0 then
-    here_row ~cols state ~path:[ title ] ~readings:[] ~position:None
+    here_row ~cols state ~path:[ title ] ~readings:[] ~position:projection.rpp_position
   else
     let door = match projection.rpp_parent with
       | Runtime_media_parent | Runtime_prompt_parent (Lane_remove_prompt _) -> "v"
@@ -1073,11 +1063,10 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     let label_width = max 0 (available - Message_layout.display_width (separator ^ connection)) in
     (* Own notice count/reader key survive a one-row body even when a global
        connection warning also needs the title. Identity uses what is left. *)
-    screen_title lead ^ Message_layout.fit_middle label_width title ^ separator ^ connection in
-  let position = match projection.rpp_position with
-    | None -> ""
-    | Some position -> Printf.sprintf "[%s]  " position in
-  let hints = position ^ Masc_tui_keys.footer_hints_runtime_parent
+    titled_row ~cols state ~position:projection.rpp_position
+      ~title:(screen_title lead ^ Message_layout.fit_middle label_width title
+              ^ separator ^ connection) in
+  let hints = Masc_tui_keys.footer_hints_runtime_parent
       ~lang:state.ui_language ~parent:projection.rpp_parent in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"runtime-parent"
@@ -1143,13 +1132,28 @@ let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let header =
+  let header ~position =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
-      ~readings:[] ~position:None
+      ~readings:[] ~position
   in
+  let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
+  let layout = tools_scrolled_for_lines state display_lines in
+  let drawable = layout.sc_count in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:drawable ~preview_keep:layout.sc_preview_keep
+  in
+  let max_scroll = max 0 (drawable - content_height) in
+  let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
+  frame_tools_task := Option.map (fun owner ->
+    {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
+     ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
+     ttf_cols=cols}) (tools_task_display_owner state);
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols
+    (header
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
   box_line_styled buf cols ~style:Theme.selection
     (Render_tools.tools_selection_line ~cols state);
@@ -1162,29 +1166,12 @@ let render_tools (state : state) =
             (request_failure_text ~ko:(state.ui_language = Lang_ko)
                ~request:Kept_request.Tool_inventory_read failure));
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
-  let layout = tools_scrolled_for_lines state display_lines in
-  let drawable = layout.sc_count in
-  let content_height =
-    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
-      ~count:drawable ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
-  in
-  let max_scroll = max 0 (drawable - content_height) in
-  let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
-  frame_tools_task := Option.map (fun owner ->
-    {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
-     ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
-     ttf_cols=cols}) (tools_task_display_owner state);
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
-  if drawable > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -1568,6 +1555,7 @@ let render_metrics (state : state) =
             drawn_metrics_scroll := scroll;
             drawn_metrics_height := height;
             drawn_metrics_card_rows := Some card_rows)
+          ~hand_position:c.position
           ~push:c.push ~push_styled:c.push_styled
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
@@ -1628,23 +1616,19 @@ let render_metrics (state : state) =
         (* Put variable-length status details after account rows: refreshes do
            not move the account the reader is already scrolling through. *)
         let lines = usage_lines ~cols ~rows:content_budget state @ connection_rows in
-        let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
-        let height = content_budget - overflow_rows in
+        let height = content_budget in
         let max_scroll = max 0 (List.length lines - height) in
         let scroll = min max_scroll (max 0 state.metrics_scroll) in
         drawn_metrics_scroll := scroll;
         drawn_metrics_height := height;
         drawn_metrics_card_rows := Some 0;
+        Option.iter c.position
+          (Masc_tui_value.Position.window ~first:scroll ~shown:height
+             ~total:(List.length lines));
         List.iteri
           (fun index line ->
             if index >= scroll && index < scroll + height then c.push line)
-          lines;
-        if overflow_rows > 0 then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf (if state.ui_language = Lang_ko then
-                 "  [줄 %s · j/k:스크롤]" else "  [rows %s · j/k to scroll]")
-               (Masc_tui_scroll.window_text ~scroll ~height
-                  (List.length lines)))
+          lines
       end)
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it

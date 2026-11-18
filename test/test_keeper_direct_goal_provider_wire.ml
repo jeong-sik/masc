@@ -150,7 +150,8 @@ let run_case source () =
       ~provider_cfg ~system_prompt:base_system_prompt
       ~tools:[] in
   let runtime = {runtime with hooks = Some hooks} in
-  let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime owner_request with
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime
+      ~execution_capture:(Runtime_agent.execution_capture runtime) owner_request |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason = Runtime_agent.Completed _; _} as result) -> result
     | Ok _ -> fail "direct request did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -320,7 +321,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
       ~system_prompt:"Read the metric, then record the remaining work as a Task."
       ~tools:[read_tool;create_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      owner_request with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) owner_request |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
     | Ok _ -> fail "tool-loop fixture did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -504,7 +505,7 @@ let test_completion_observation_survives_tool_reply approved () =
   let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:meta.name ~provider_cfg
       ~system_prompt:"BASE_AUTHORITY_WIRE" ~tools:[read_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      "Inspect the next artifact." with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) "Inspect the next artifact." |> Result.map_error Runtime_agent.run_failure_error with
     | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
     | Ok _ -> fail "authority fixture did not complete"
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -625,7 +626,7 @@ let test_goal_under_proof_survives_tool_reply ~current_norms () =
   let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"proof-wire" ~provider_cfg ~system_prompt:"BASE_PROOF_WIRE" ~tools:[read_tool] in
   (match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
-      "Keep working the linked Tasks." with
+      ~execution_capture:(Runtime_agent.execution_capture runtime) "Keep working the linked Tasks." |> Result.map_error Runtime_agent.run_failure_error with
    | Ok {stop_reason=Runtime_agent.Completed _;_} -> ()
    | Ok _ -> fail "proof fixture did not complete"
    | Error error -> fail (Agent_core.Error.to_string error));

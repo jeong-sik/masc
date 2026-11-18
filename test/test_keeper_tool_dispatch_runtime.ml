@@ -5213,7 +5213,9 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
                 Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
-              [Agent_core.Types.Text "run probe"])
+              ~execution_capture:(Runtime_agent.execution_capture config)
+              [Agent_core.Types.Text "run probe"]
+            |> Result.map_error Runtime_agent.run_failure_error)
       in
       check int "one actual provider call" 1 provider_calls;
       check int "one completed local tool" 1 !tool_calls;
@@ -5335,7 +5337,9 @@ let test_deferred_web_search_keeps_the_turn_going () =
            ~cooperative_yield_probe:(fun _boundary ->
              Masc.Keeper_agent_run.terminal_effect_boundary_decision
                (bundle.terminal_effect_state ()))
+           ~execution_capture:(Runtime_agent.execution_capture runtime_config)
            [ Agent_core.Types.Text "search for the tool" ]
+         |> Result.map_error Runtime_agent.run_failure_error
        in
        check int
          "the turn continued past the parked effect"
@@ -5556,7 +5560,9 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ~cooperative_yield_probe:(fun _boundary ->
                     Masc.Keeper_agent_run.terminal_effect_boundary_decision
                       (runtime_bundle.terminal_effect_state ()))
+                  ~execution_capture:(Runtime_agent.execution_capture runtime_config)
                   [ Agent_core.Types.Text "deliver the dashboard reply" ]
+                |> Result.map_error Runtime_agent.run_failure_error
               with
               | Error error -> error
               | Ok _ -> fail "terminal failure reached ordinary provider completion"

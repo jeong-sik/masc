@@ -158,7 +158,11 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
     ; prepared_requests = List.rev !prepared
     }
   in
-  match Runtime_agent.run ~sw ~net ~config prompt.user with
+  match
+    Runtime_agent.run ~sw ~net ~config
+      ~execution_capture:(Runtime_agent.execution_capture config) prompt.user
+    |> Result.map_error Runtime_agent.run_failure_error
+  with
   | Error error ->
       Error
         ({ request = request (); error = Agent_core.Error.to_string error

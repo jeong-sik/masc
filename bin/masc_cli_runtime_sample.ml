@@ -69,7 +69,10 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
                     let failure = failure ~turn:index in
                     report "started" [ "turn", `Int index; "prompt", `String prompt ];
                     match Runtime_agent.run ~sw ~net
-                            ~config:{ config with initial_messages = history } prompt with
+                            ~config:{ config with initial_messages = history }
+                            ~execution_capture:(Runtime_agent.execution_capture config)
+                            prompt
+                          |> Result.map_error Runtime_agent.run_failure_error with
                     | Error err -> failure "agent_core" (Agent_core.Error.to_string err)
                     | Ok result ->
                         let response = result.response in

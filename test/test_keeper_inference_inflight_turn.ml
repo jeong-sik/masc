@@ -4,7 +4,8 @@
    and reads the snapshot payload at the moment the provider holds the
    request, then again after the turn ended. Until 2026-11-14 nothing on the
    turn path entered the observation, so the payload read 0 at both points
-   (#49820). *)
+   (#49820). The same fixture proves a refused request keeps its execution
+   capture (#52969). *)
 open Alcotest
 open Masc
 
@@ -31,7 +32,7 @@ let snapshot_active () =
 (* Run one turn against [behavior] and return its result, the snapshot's
    [active] as read while the provider held each request, and the number of
    requests the provider received. *)
-let run_turn_against ~label behavior =
+let run_turn_against ?on_runtime_observation ~label behavior =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -91,6 +92,7 @@ max-context = 200000
         ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
         ~agent_core_tools:[]
         ~goal:"answer once"
+        ?on_runtime_observation
         ~sw
         ~net:env#net
         ())
@@ -134,6 +136,47 @@ let test_a_refused_turn_leaves_nothing_counted () =
   check int "nothing is in flight after the refusal" 0 (snapshot_active ())
 ;;
 
+(* #52969: the refused request entered the provider transport, so every
+   observation the turn emits carries that attempt. A dispatched failure must
+   not surface as an uncaptured runtime failure. *)
+let test_a_refused_turn_keeps_its_dispatched_capture () =
+  let observations = ref [] in
+  let result, _observed, posts =
+    run_turn_against
+      ~label:"inflight-captured"
+      ~on_runtime_observation:(fun observation ->
+        observations := observation :: !observations)
+      (Exact_output_fixture.Reply_with
+         (fun _ _ ->
+            `Bad_request, {|{"error":{"message":"refused","type":"invalid_request_error"}}|}))
+  in
+  check bool "the provider's refusal ends the turn" true (Result.is_error result);
+  check bool "the request reached the provider" true (posts >= 1);
+  let observations = List.rev !observations in
+  check bool "the dispatched failure is observed" true (observations <> []);
+  List.iter
+    (fun (observation : Runtime_observation.runtime_observation) ->
+       (match observation.execution_evidence with
+        | Runtime_observation.Captured_execution -> ()
+        | Runtime_observation.Uncaptured_failure detail ->
+          failf "a dispatched failure lost its capture: %s" detail);
+       check bool "the refused attempt carries the provider error" true
+         (List.exists
+            (fun (attempt : Runtime_observation.runtime_attempt) ->
+               Option.is_some attempt.error)
+            observation.attempts);
+       check bool "the receipt records the failure" true
+         (Keeper_agent_error.runtime_outcome_of_observation
+            ~lane_failover_applied:false (Some observation)
+          = Keeper_execution_receipt.Runtime_failed))
+    observations;
+  check int "every provider request is a captured attempt" posts
+    (List.fold_left
+       (fun total (observation : Runtime_observation.runtime_observation) ->
+          total + List.length observation.attempts)
+       0 observations)
+;;
+
 let () =
   Alcotest.run
     "keeper_inference_inflight_turn"
@@ -146,6 +189,10 @@ let () =
             "a refused turn leaves nothing counted"
             `Quick
             test_a_refused_turn_leaves_nothing_counted
+        ; test_case
+            "a refused turn keeps its dispatched capture"
+            `Quick
+            test_a_refused_turn_keeps_its_dispatched_capture
         ] )
     ]
 ;;

@@ -161,7 +161,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
     match
       Native.reconcile_after_dispatch binding (fun () ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ~input_metadata:[] input)
+          ~input_metadata:[] ~execution_capture:(Runtime_agent.execution_capture config) input)
     with
     | Ok _ -> fail "the provider request that never completes answered"
     | Error _ ->

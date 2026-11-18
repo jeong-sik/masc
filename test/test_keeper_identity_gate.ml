@@ -1172,6 +1172,11 @@ let test_unsupported_image_format_is_a_byte_reference () =
   check Alcotest.int "format projection sends only once" 1 (List.length (tool_calls sent))
 
 let test_generic_mcp_resources_keep_bytes_and_public_ownership () =
+  (* The retained-artifact carrier is process-global and keyed by the shared
+     fixture invocation; under full-regression load the per-call commit
+     acknowledgement can lag, so start the case from a clean carrier
+     (task-3742). *)
+  Masc.Keeper_tool_call_log.reset_for_testing ();
   let base_path = temp_base () in
   allow_external ~base_path; project_token ~base_path;
   let content = `List
@@ -1241,6 +1246,8 @@ let test_manifest_storage_failure_preserves_received_effect_uncertainty () =
 
 let test_external_mime_cannot_mint_manifest_or_private_authority () =
   List.iter (fun (kind, declared_mime) ->
+    (* Same shared-invocation carrier: reset per iteration (task-3742). *)
+    Masc.Keeper_tool_call_log.reset_for_testing ();
     let base_path = temp_base () in
     allow_external ~base_path; project_token ~base_path;
     let store = Tool_blob_store.create ~base_path in
@@ -1323,6 +1330,8 @@ let assert_error_media_references ~base_path ~references ~message =
 
 let test_received_mcp_failures_keep_unknown_effect_and_never_retry () =
   List.iter (fun (content, is_error, block_store) ->
+    (* Same shared-invocation carrier: reset per iteration (task-3742). *)
+    Masc.Keeper_tool_call_log.reset_for_testing ();
     let base_path = temp_base () in
     allow_external ~base_path; project_token ~base_path;
     if block_store then block_the_blob_store ~base_path;

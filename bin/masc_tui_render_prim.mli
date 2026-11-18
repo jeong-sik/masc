@@ -192,16 +192,11 @@ val zone4_notice :
 val footer_line :
   ?help_door:bool ->
   ?status:Masc_tui_footer.status_item list ->
-  ?position:string ->
   ?recovery_in_slot:recovery_row option ->
   ?choices:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
-(** [position] is where a scrolling surface stands in what it is scrolling.
-    It is separate from [hints] because the fitter gives up key items from
-    the back, and a position is the one item on the row that [?] cannot
-    recover; kept with the keys that cannot be dropped. Use the footer when
-    the detail has no spare content row; list panes with a window-reading row
-    keep their position in the body. [choices] is an open menu's complete
+(** The footer takes no position: where a surface stands is a value drawn on
+    the title row (RFC tui-one-screen-grammar, section 2). [choices] is an open menu's complete
     decision, retained ahead of ambient notices when it fits whole; otherwise
     its keys use the ordinary item fitter. Quit and input-recovery notices
     keep their existing priority. It does not authorize an action. *)
@@ -373,9 +368,20 @@ val here_row :
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. A step ahead of the last that the row
     cannot hold whole is folded in the middle, the longest first, so the last
-    step stays on the row. The product name is not drawn. This and the title
-    row of {!surface_chrome} are the only places a position becomes text, and
-    each records it as {!frame_position}. *)
+    step stays on the row. The product name is not drawn. This,
+    {!titled_row} and the title row of {!surface_chrome} are the only places a
+    position becomes text, and each records it as {!frame_position}. *)
+
+val titled_row :
+  cols:int ->
+  Masc_tui_types.state ->
+  title:string ->
+  position:Masc_tui_value.Position.t option ->
+  string
+(** A title row a surface lays out itself rather than through {!here_row},
+    with [position] at its right-hand end: [title] keeps the cells the
+    position leaves. Records the position as {!frame_position}, as
+    {!here_row} does. *)
 
 val reading_separator : string
 (** The mark between two readings of one row. *)
@@ -459,6 +465,12 @@ val keeper_roster_pane :
   Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit
 
 val listing_rows_below_the_body : int
+
+(** The top edge, the title row and the divider of a boxed surface. *)
+val boxed_head : Buffer.t -> int -> string -> unit
+
+(** How many rows {!boxed_head} draws at [cols]. *)
+val boxed_head_rows : int -> int
 
 val write_list_sidebar :
   Buffer.t ->
@@ -622,11 +634,6 @@ val planning_change_clauses :
 val pack_planning_summary_rows : cols:int -> string list -> string list
 (** Packs summary clauses within [framed_inner_width cols - 2] and prefixes
     each physical row with the 2-cell left margin. *)
-
-val work_tasks_room : budget:int -> header_rows:int -> count:int -> int
-(** Visible task rows for [Work / Tasks] given [budget] body rows and
-    [header_rows] summary/divider rows, reserving one row for [[tasks a-b/n]]
-    when overflowing and at least 2 rows remain below the header. *)
 
 val planning_goal_history_summary : unlisted:int -> ended:int -> string
 (** The retained-history count row: how many goals are no longer listed, and
@@ -851,7 +858,7 @@ val answering_preview_rows : int
 
 (** Common title and content geometry for surfaces with two panes. *)
 val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
-  path:string list -> split:bool -> unit
+  path:string list -> split:bool -> position:Masc_tui_value.Position.t option -> unit
 val pane_surface_content_height : rows:int -> int
 
 val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list

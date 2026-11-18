@@ -21935,7 +21935,8 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
   end
 
-let start_http_scoped_refresh state ~host ~port ~refresh_inflight
+let start_http_scoped_refresh state ~host ~port
+    ~(ask : Masc_tui_refresh_pace.screen_ask) ~refresh_inflight
     ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   (* Entering a surface that draws the roster owes it a whole read rather
@@ -21945,7 +21946,15 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
   let needs = { needs with needs_keeper_roster = false } in
   let authority = state.workspace_authority in
-  if Masc_tui_types.surface_needs_any needs then begin
+  (* This bundle probes [/health] first, so while the probe keeps failing a
+     read the screen owes by itself waits for the pass the failure owes
+     (RFC tui-one-screen-grammar §2). A held read starts nothing and records
+     no start, so its debt stays owed and its launcher asks again on a later
+     loop. Every caller states its [ask]; none is assumed. *)
+  if Masc_tui_types.surface_needs_any needs
+     && Masc_tui_refresh_pace.screen_read_starts ~now:(monotonic_now_s ()) ask
+          state.refresh_pace
+  then begin
     let collection_inflight = !full_refresh_inflight
       || Surface_read_order.navigation_in_flight state.http_surface_reads in
     refresh_inflight := true;
@@ -22051,12 +22060,6 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         log_http_surface_read_finished state surface_context
   end
 
-(* A screen's own reads probe [/health] first, so they wait out a failing
-   probe as a pass the TUI asks for by itself does (RFC tui-one-screen-grammar
-   §2). Their debts stay owed meanwhile. *)
-let screen_reads_may_start state =
-  Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) Revalidate state.refresh_pace
-
 (* Runs on every loop iteration. A pushed source off screen owes nothing:
    arriving on its surface reads it. A read of it already in flight is let
    finish first. The due sources go out together in one surface bundle. *)
@@ -22089,8 +22092,9 @@ let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
         end)
       Masc_tui_types.pushed_sources
   in
-  if due <> [] && server_authority_ready state && screen_reads_may_start state then
+  if due <> [] && server_authority_ready state then
     start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+      ~ask:Masc_tui_refresh_pace.Owed_read_due
       ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
       ~needs:
         (List.fold_left
@@ -22118,9 +22122,9 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
        && server_authority_ready state
        && state.workspace_identity = Workspace_identity_match
        && not reading
-       && screen_reads_may_start state
     then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with needs_board = true }
   end
@@ -22156,9 +22160,9 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     let planning_due = Masc_tui_owed_read.due ~now planning && not planning_reading in
     let goals_due = Masc_tui_owed_read.due ~now goals && not goals_reading in
     if (planning_due || goals_due) && server_authority_ready state
-       && state.workspace_identity = Workspace_identity_match
-       && screen_reads_may_start state then
+       && state.workspace_identity = Workspace_identity_match then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with
                  needs_planning = planning_due; needs_overview_goals = goals_due }
@@ -41006,8 +41010,11 @@ Use relative paths for resources already held in the package. -->
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
             let needs = cycle_usage_history_window state in
+            (* The operator's key: the window it picks is read at once, during
+               a [/health] wait too (RFC tui-one-screen-grammar §2). *)
             start_http_scoped_refresh state ~host:server_peer_host
-              ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+              ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+              ~refresh_inflight:http_scoped_refresh_inflight
               ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
               ~mailbox:async_messages ~needs
        (* In chat, printable keys normally belong to the draft. Keep [?] as
@@ -44977,9 +44984,14 @@ Use relative paths for resources already held in the package. -->
         in
         drawn_needs := needed;
         Masc_tui_types.note_drawn_surface_needs state needed;
+        (* The operator moved to another screen or view, and it reads what
+           the destination adds at once, during a [/health] wait too (RFC
+           tui-one-screen-grammar §2). [drawn_needs] already holds the
+           destination, so a held read here would be lost; it is not held. *)
         if Masc_tui_types.surface_needs_any delta then
           start_http_scoped_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+            ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+            ~refresh_inflight:http_scoped_refresh_inflight
             ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
             ~mailbox:async_messages ~needs:delta
       end;

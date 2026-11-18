@@ -39,6 +39,17 @@ type ask =
           failures in a row, so a failure after it waits longer. *)
   | Owed_pass  (** The pass a failing probe owes, once its wait is over. *)
 
+(** Who asks for a screen's own read. It probes [/health] first, so it is
+    paced as a pass is. No screen read is the pass a failing probe owes:
+    that pass is a full one. *)
+type screen_ask =
+  | Owed_read_due
+      (** A read the screen owes came due by itself. Waits as {!Revalidate}
+          does; the debt stays owed meanwhile. *)
+  | Operator_change
+      (** The operator's key or a screen or view change asks for what the
+          screen now draws. Starts at once, as {!Operator_key} does. *)
+
 (** How the stream that restores the workspace confirmation opened. *)
 type stream_open =
   | Opened_each_time
@@ -74,5 +85,9 @@ val due : now:float -> t -> bool
 (** Whether the owed pass should start now. *)
 
 val starts : now:float -> ask -> t -> bool
-(** Whether a pass, or a screen read that probes first, asked for by [ask]
-    starts now when nothing else holds it. *)
+(** Whether a pass asked for by [ask] starts now when nothing else holds
+    it. *)
+
+val screen_read_starts : now:float -> screen_ask -> t -> bool
+(** Whether a screen's own read asked for by [ask] starts now. A read that
+    does not start is held, not dropped: the caller still owes it. *)

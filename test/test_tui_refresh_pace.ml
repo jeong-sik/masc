@@ -123,6 +123,25 @@ let test_a_failure_after_a_reopened_stream_waits_longer () =
   check (float 1e-9) "a [/health] answer after it ends the run" retry_s
     (wait_after ~now:10.3 (failed ~now:10.3 (P.answered_again reopened)))
 
+(* A screen's own read probes [/health] first. A debt it owes waits out a
+   failing probe as a pass the TUI asks for does; the operator's key or
+   screen change reads at once. Both start once [/health] answers. *)
+let test_a_screen_read_waits_unless_the_operator_asks () =
+  let t = failed ~now:10.0 P.answering in
+  check bool "a due debt waits during the wait" false
+    (P.screen_read_starts ~now:10.1 P.Owed_read_due t);
+  check bool "a due debt still waits once the owed pass is due" false
+    (P.screen_read_starts ~now:12.0 P.Owed_read_due t);
+  check bool "the operator's change reads during the wait" true
+    (P.screen_read_starts ~now:10.1 P.Operator_change t);
+  check bool "a due debt starts while the probe answers" true
+    (P.screen_read_starts ~now:0.0 P.Owed_read_due P.answering);
+  check bool "a due debt starts once [/health] answers again" true
+    (P.screen_read_starts ~now:10.1 P.Owed_read_due (P.answered_again t));
+  check bool "a due debt starts once the stream reopens" true
+    (P.screen_read_starts ~now:10.1 P.Owed_read_due
+       (P.stream_opened P.Opened_after_failure t))
+
 let () =
   run "tui_refresh_pace"
     [ ( "pace",
@@ -144,5 +163,7 @@ let () =
             test_a_stream_open_after_a_failed_attempt_ends_the_wait
         ; test_case "a failure after a reopened stream waits longer" `Quick
             test_a_failure_after_a_reopened_stream_waits_longer
+        ; test_case "a screen read waits unless the operator asks" `Quick
+            test_a_screen_read_waits_unless_the_operator_asks
         ] )
     ]

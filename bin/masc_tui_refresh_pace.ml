@@ -5,6 +5,8 @@ type t =
 
 type ask = Revalidate | Operator_key | Owed_pass
 
+type screen_ask = Owed_read_due | Operator_change
+
 type stream_open = Opened_each_time | Opened_after_failure
 
 let answering = Answering
@@ -42,3 +44,10 @@ let starts ~now ask t =
   | Revalidate, (Answering | Recovered _) -> true
   | Revalidate, Failing _ -> false
   | Owed_pass, (Answering | Failing _ | Recovered _) -> due ~now t
+
+let screen_read_starts ~now ask t =
+  starts ~now
+    (match ask with
+     | Owed_read_due -> Revalidate
+     | Operator_change -> Operator_key)
+    t

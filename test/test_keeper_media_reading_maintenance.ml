@@ -19,15 +19,16 @@ let resolve_reader ?(identity = fixture_identity) read ~kind:_ ~media_type:_ =
   Ok (Reading.reader ~identity ~read)
 
 let check_reading label identity text = function
-  | Ok (reading : Reading.reading) ->
+  | Reading.Read (reading : Reading.reading) ->
     check string (label ^ ": reader id") identity.Reading.id reading.reader.id;
     check string (label ^ ": reader revision") identity.revision reading.reader.revision;
     check string (label ^ ": text") text reading.text
-  | Error error -> fail (Reading.failure_to_string error)
+  | Reading.Unavailable error -> fail (Reading.failure_to_string error)
+  | Reading.Pending _ -> fail (label ^ ": unexpected pending original")
 
 let check_failure label expected = function
-  | Ok _ -> fail (label ^ ": expected a typed failure")
-  | Error actual ->
+  | Reading.Read _ | Reading.Pending _ -> fail (label ^ ": expected a typed failure")
+  | Reading.Unavailable actual ->
     check (testable (fun fmt value -> Format.pp_print_string fmt (Reading.failure_to_string value)) (=))
       label expected actual
 
@@ -331,7 +332,7 @@ let test_raw_cancellation_propagates_without_memoization () =
       incr reads;
       if !reads = 1 then raise cancelled else Ok "resumed reading")) () in
   (match Reading.read_stored projector ~kind:Reading.Document ~media_type:"application/pdf" stored with
-   | Ok _ | Error _ -> fail "reader cancellation must propagate"
+   | Reading.Read _ | Reading.Unavailable _ | Reading.Pending _ -> fail "reader cancellation must propagate"
    | exception (Eio.Cancel.Cancelled _ as observed) ->
      check bool "the original cancellation is preserved" true (observed == cancelled));
   let history = project_document projector stored in

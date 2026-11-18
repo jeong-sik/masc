@@ -103,7 +103,7 @@ let eligible_partition ~base_path ~keeper_name
           | Some Keeper_gate.Replay_connector_post ->
             single (Terminal_operation delivery.request.tool_name)
           | Some (Keeper_gate.Replay_write | Replay_execute | Replay_network_read
-                 | Replay_identity | Replay_voice_speak) ->
+                 | Replay_identity | Replay_voice_speak | Replay_media_read) ->
             Ok (partition resolution.channel)
 
 let try_append ~base_path ~keeper_name batch

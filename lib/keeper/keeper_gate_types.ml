@@ -49,6 +49,7 @@ type replayable =
   | Replay_connector_post
   | Replay_identity
   | Replay_voice_speak
+  | Replay_media_read
 
 let replayable_operation operation =
   if String.equal operation filesystem_write_gate_operation
@@ -63,6 +64,8 @@ let replayable_operation operation =
   then Some Replay_identity
   else if String.equal operation voice_speak_gate_operation
   then Some Replay_voice_speak
+  else if String.equal operation media_read_gate_operation
+  then Some Replay_media_read
   else None
 ;;
 

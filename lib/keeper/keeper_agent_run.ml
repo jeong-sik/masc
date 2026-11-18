@@ -1486,6 +1486,7 @@ let run_turn
                         | Some _ -> Keeper_meta_contract.runtime_id_of_meta meta)
                       ~base_path:config.base_path
                       ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
+                      ~media_readers:s.Keeper_run_tools.media_readers
                       ~keeper_name:meta.name
                       ~walk_owner:
                         (Keeper_turn_driver.Fleet_keeper_turn { keeper_name = meta.name })

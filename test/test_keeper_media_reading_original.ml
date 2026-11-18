@@ -289,8 +289,8 @@ let test_approval_link_restores_with_original () = with_fixture @@ fun fixture -
   strings (Owner.check_retained record);
   check bool "approval data does not change Captured into execution" true
     (Progress.phase record.progress = Progress.Captured);
-  check bool "operation is not advertised as replayable before a producer exists" true
-    (Keeper_gate.replayable_operation Keeper_gate.media_read_gate_operation = None);
+  check bool "retained media operation has its exact host replay" true
+    (Keeper_gate.replayable_operation Keeper_gate.media_read_gate_operation = Some Keeper_gate.Replay_media_read);
   check (option string) "no goal is invented" None (Fingerprint.goal_id request);
   json_equal "the exact original supplies task and channel"
     (Channel.to_yojson (Original.continuation_channel value))

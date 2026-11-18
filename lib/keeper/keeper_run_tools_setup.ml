@@ -595,6 +595,15 @@ let prepare_agent_setup
            (Agent_core.Error.InvalidConfig
               { field = "tool input_schema"; detail = Tool_bridge.schema_error_to_string error }))
   in
+  let media_producer = Keeper_media_reading_producer.create
+      ~config ~meta ~turn_sandbox_factory
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
+      ~declarations:(Runtime.media_reader_declarations ())
+      ~causal_context:(Some (Keeper_gate_causal_context.snapshot gate_context))
+      ~continuation_channel () in
+  let media_readers : Keeper_media_reading.source_readers =
+    { observe = Keeper_media_reading_producer.observe media_producer
+    ; read = Keeper_media_reading_producer.read media_producer } in
   let replay_delivery =
     List.find_map
       (fun input ->
@@ -913,6 +922,7 @@ let prepare_agent_setup
     ; compute_tool_surface
     ; record_tool_assignment
     ; config
+    ; media_readers
     ; keeper_tools_cleanup
     ; terminal_effect_state
     ; keeper_turn_id

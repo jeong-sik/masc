@@ -45,6 +45,7 @@ type agent_setup =
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t
   ; model_input_projection : Keeper_history_projection.t
+  ; media_readers : Keeper_media_reading.source_readers
   ; stage_skill_delivery_on_wire :
       runtime_id:string ->
       agent_core_turn:int ->
@@ -90,6 +91,7 @@ type ctx =
   ; record_tool_assignment :
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
+  ; media_readers : Keeper_media_reading.source_readers
   ; keeper_tools_cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; keeper_turn_id : int
@@ -1511,6 +1513,7 @@ let assemble_hooks
       ; on_runtime_attempt
       ; on_memory_capacity_refusal
       ; model_input_projection
+      ; media_readers = ctx.media_readers
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff
       ; observe_official_client_native_action

@@ -710,7 +710,9 @@ let test_dispatch_covers_all_replayable_operations () =
     Alcotest.bool
     "an approved identity_call is host-replayed"
     true
-    (replayable_of_operation "identity_call" = Some Replay_identity)
+    (replayable_of_operation "identity_call" = Some Replay_identity);
+  Alcotest.check Alcotest.bool "an approved original media read is host-replayed" true
+    (replayable_of_operation "media_read" = Some Replay_media_read)
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -1150,10 +1152,280 @@ let test_resolution_absent_tells_the_model_once () =
     (Masc.Keeper_gate_replay.outcome_to_string outcome)
 ;;
 
+module Media_replay_tests = struct
+  open Masc
+  module Original = Keeper_media_reading_original
+  module Owner = Keeper_media_reading_owner
+  module Generic = Lane_addon_tool_request_owner
+  module Progress = Lane_addon_request_progress
+  module Approval = Lane_addon_request_approval
+  module Reply = Keeper_media_reading_reply
+  module Queue = Keeper_approval_queue
+  module Queue_result = Keeper_approval_queue_result
+  module Gate = Keeper_gate
+  module Replay = Keeper_gate_replay
+  module Remote = Keeper_sandbox_remote
+  module Sdk = Agent_core_protocol.Mcp_schema.Sdk_types
+
+  let get show = function Ok value -> value | Error error -> Alcotest.fail (show error)
+  let strings result = get Fun.id result
+  let owned result = get Owner.error_to_string result
+  let original result = get Original.error_to_string result
+  let published = function
+    | Owner.Stored value | Already_stored value -> value
+    | Unconfirmed detail -> Alcotest.fail detail
+
+  type fixture = {
+    config : Workspace.config; meta : Keeper_meta_contract.keeper_meta;
+    store : Lane_addon_store.t; owner : Original.owner; original : Original.t;
+    request : Gate.request; approval_id : string; grant : Gate.cycle_grant;
+  }
+
+  let reload fixture =
+    match owned (Owner.load ~store:fixture.store ~owner:fixture.owner
+      ~request_id:(Original.request_id fixture.original)) with
+    | Some value -> value | None -> Alcotest.fail "original disappeared"
+
+  let advance fixture events =
+    (match Generic.advance_events ~store:fixture.store
+        ~expected:(Owner.record (reload fixture)) ~events with
+     | Ok (Generic.Stored _ | Already_stored _) -> ()
+     | Ok (Unconfirmed detail) -> Alcotest.fail detail
+     | Error error -> Alcotest.fail (Generic.update_error_to_string error));
+    reload fixture
+
+  let resolution ~base_path ~keeper_name ~approval_id =
+    let queue = strings (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name) in
+    let found = Keeper_event_queue.to_list queue |> List.find_map
+      (fun (stimulus : Keeper_event_queue.stimulus) -> match stimulus.payload with
+       | Keeper_event_queue.Hitl_resolved value ->
+         if String.equal value.approval_id approval_id then Some value else None
+       | Board_routing_pending _ | Board_signal _ | Board_attention _ | Bootstrap
+       | Fusion_completed _ | Schedule_due _ | Connector_attention _ | Ask_answered _
+       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+       | Delegate_completed _ | Composition_completed _ | Tool_result_ready _
+       | Owned_job_completed _ | Task_outcome _ -> None) in
+    match found with Some value -> value | None -> Alcotest.fail "actual approval wake missing"
+
+  let with_fixture f =
+    let base_path = Unix.realpath (temp_dir ()) in
+    Queue.For_testing.reset_runtime_state ();
+    Keeper_approval.Audit.For_testing.reset_store ();
+    Fun.protect ~finally:(fun () ->
+      Queue.For_testing.reset_runtime_state ();
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path) (fun () ->
+      let config = Workspace.default_config base_path in
+      let keeper_name = "media-replay-fixture" in
+      let meta = strings (Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name",`String keeper_name;"trace_id",`String "media-replay"])) in
+      strings (Keeper_meta_store.replace_snapshot config meta);
+      ignore (get Queue_result.install_error_to_string (Queue.install_persistence ~base_path));
+      ignore (strings (Keeper_gate_mode.set config ~actor:"fixture" Keeper_gate_mode.Manual));
+      let store = Lane_addon_store.create ~root:(Lane_addon_store.directory
+          ~masc_dir:(Config_dir_resolver.masc_root ~base_path)) in
+      let owner = original (Original.observe_owner ~base_path ~keeper_name) in
+      let media = Agent_core.History.Memory_store.create () in
+      let media_type = "application/pdf" in
+      let stored = get Agent_core.History.show_media_error
+          (media.put ~media_type ~raw:"retained fixture bytes, not a valid PDF") in
+      let subject = original (Original.subject owner ~kind:Document ~media_type stored) in
+      let source = original (Original.verify_source ~media_store:media subject) in
+      let declaration : Runtime_schema.media_reader_decl =
+        {id="recovery-only";revision="one";kind=Document;media_types=[media_type];
+         adapter=Markitdown_mcp;command="must-not-run-reader";args=["--stdio"]} in
+      (* Real Guest request preparation binds a recipe; no socket or program
+         is opened by this recovery fixture. *)
+      let endpoint = Remote.of_agent_socket ~base_path ~keeper_name ~remote_root:"/workspace"
+          ~gh_config_dir:"/workspace/.config/gh" ~injected_env:[] ~env_allowlist:[]
+          ~connect_timeout_sec:1 ~max_concurrent_sessions:1 ~container_name:"media-replay"
+          ~shim_path:"/usr/local/bin/masc-exec-shim"
+          ~host_socket:(Filename.concat base_path "never-connected.sock")
+          ~expected:{Keeper_guest_socket.uid=Unix.getuid ();gid=Unix.getgid ()} in
+      let argv = declaration.command :: declaration.args in
+      let prepared = get (fun _ -> "Guest preparation refused")
+          (Remote.Stdio_request.prepare ~timeout_sec:10. endpoint ~argv ~env:[||] ~cwd:None) in
+      let launch = get (fun _ -> "Guest binding refused")
+          (Remote.Stdio_request.binding prepared ~base_path ~keeper_name ~expected_argv:argv) in
+      let channel = Keeper_continuation_channel.unrouted "media replay fixture" in
+      let captured = original (Original.create ~execution_id:"media-replay-execution" ~source
+          ~declaration ~launch ~causal_context:None ~task_id:None ~continuation_channel:channel) in
+      let retained = owned (Owner.retain ~store captured) in
+      let intent = strings (Keeper_media_reading_approval.intent captured) in
+      let advance_record expected events =
+        match Generic.advance_events ~store ~expected ~events with
+        | Ok (Generic.Stored value | Already_stored value) -> value
+        | Ok (Unconfirmed detail) -> Alcotest.fail detail
+        | Error error -> Alcotest.fail (Generic.update_error_to_string error) in
+      let intended = advance_record (Owner.record retained) [Progress.Approval_intended intent] in
+      let request : Gate.request =
+        {base_path;keeper_name;operation=Gate.media_read_gate_operation;
+         input=Keeper_media_reading_approval.input captured;call_summary=None;
+         causal_context=None;task_id=None;continuation_channel=Some channel;sandbox_profile=None} in
+      let approval_id = match Gate.decide ~intent:Keeper_tool_execute_typed_input.Request_effect
+          ~keeper_always_allow:false request with
+        | Gate.Deferred value -> value.approval_id
+        | Allow _ -> Alcotest.fail "manual media approval bypassed"
+        | Unavailable reason -> Alcotest.fail (Gate.unavailable_reason_to_string reason) in
+      let wait = strings (Approval.wait intent ~approval_id
+          ~input_hash:(Keeper_approval_request_fingerprint.input_hash (Approval.request intent))) in
+      ignore (advance_record intended [Progress.Approval_wait_retained wait]);
+      ignore (get Queue.resolve_error_to_string (Queue.resolve_with_policy ~base_path ~id:approval_id
+          ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+          ~source:Keeper_approval_queue_rules_types.Human_operator ()));
+      let grant = match Gate.cycle_grant_of_resolution (resolution ~base_path ~keeper_name ~approval_id) with
+        | Some grant -> grant | None -> Alcotest.fail "actual approved wake has no grant" in
+      f {config;meta;store;owner;original=captured;request;approval_id;grant})
+
+  let consume ?grant fixture =
+    let grant = Option.value grant ~default:fixture.grant in
+    match Gate.decide ~intent:Keeper_tool_execute_typed_input.Request_effect
+        ~cycle_grant:grant ~keeper_always_allow:false fixture.request with
+    | Gate.Allow authorization ->
+      Alcotest.(check bool) "actual resume spends the exact original approval" true
+        (authorization.source = Gate.One_shot_resolution fixture.approval_id)
+    | Deferred _ | Unavailable _ -> Alcotest.fail "approved original did not resume"
+
+  let run ?media_replayer fixture =
+    let publication_recovery = {Keeper_publication_recovery_availability.provider=
+        Keeper_publication_recovery_availability.non_runtime_provider;
+        keeper_name=fixture.meta.name} in
+    match media_replayer with
+    | None -> Replay.replay_approved_effect_with_receipt
+        ~config:fixture.config ~meta:fixture.meta ~publication_recovery
+        ~turn_sandbox_factory:None ~grant:fixture.grant ~approval_id:fixture.approval_id ()
+    | Some media_replayer -> Replay.For_testing.replay_media_with_receipt ~media_replayer
+        ~config:fixture.config ~meta:fixture.meta ~publication_recovery
+        ~turn_sandbox_factory:None ~grant:fixture.grant ~approval_id:fixture.approval_id ()
+
+  let delivery fixture = get Queue_result.grant_error_to_string
+      (Queue.approved_resolution_delivery ~base_path:fixture.config.base_path ~id:fixture.approval_id)
+
+  let retain_answer ?grant fixture =
+    consume ?grant fixture;
+    let pending = advance fixture [Progress.Dispatch_intended] in
+    let sdk : Sdk.tool_result =
+      {content=[TextContent {type_="text";text="retained media answer";annotations=None}];
+       is_error=Some false;structured_content=None;
+       _meta=Some (`Assoc ["private",`String "SDK-only-private-value"])} in
+    let reply = strings (Reply.capture_sdk_reply sdk) in
+    let retained = owned (Owner.retain_reply ~store:fixture.store ~expected:pending ~reply) |> published in
+    let retained = owned (Owner.retain_transport ~store:fixture.store ~expected:retained
+      ~observation:(Remote.Execution_unavailable (Remote.Transport_unavailable Remote.Acceptance_read))) |> published in
+    let reply_ref = match strings (Reply.validate_progress ~original:fixture.original (Owner.record retained).progress) with
+      | Some link -> Reply.artifact link | None -> Alcotest.fail "reply link missing" in
+    let transport_ref = match Owner.transport_artifact retained with
+      | Some value -> value | None -> Alcotest.fail "transport link missing" in
+    retained, reply_ref, transport_ref
+
+  let recovered_reply () = with_fixture (fun fixture ->
+    let before, reply_ref, transport_ref = retain_answer fixture in
+    let result = run fixture in
+    let public_ref = match result.outcome with
+      | Replay.Applied {output_ref;_} -> output_ref
+      | Not_applicable | Applied_with_warning _ | Failed _ | Indeterminate _
+      | Repair_required _ | Resolution_absent _ -> Alcotest.fail "retained reading was not recovered" in
+    Alcotest.(check bool) "reading invents no terminal effect receipt" true
+      (Option.is_none result.terminal_effect_receipt);
+    let evidence = match (delivery fixture).replay_outcome with
+      | Some (Queue_result.Replay_applied evidence) -> evidence
+      | Some (Replay_applied_with_warning _ | Replay_failed _ | Replay_indeterminate _) | None ->
+        Alcotest.fail "actual replay sidecar did not retain recovered reading" in
+    List.iter (fun (reference : Tool_output.artifact_ref) ->
+      Alcotest.(check bool) "private artifact survives Gate settlement" true
+        (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256)
+          evidence.retained_artifacts)) [reply_ref;transport_ref];
+    Alcotest.(check bool) "private SDK blob is never the public model artifact" false
+      (public_ref.sha256=reply_ref.sha256);
+    let public_bytes = match get Tool_blob_store.fetch_error_to_string
+        (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.config.base_path) ~sha256:public_ref.sha256) with
+      | Some bytes -> bytes | None -> Alcotest.fail "public replay artifact missing" in
+    Alcotest.(check bool) "private SDK metadata is not copied into replay text" false
+      (String_util.contains_substring public_bytes "SDK-only-private-value");
+    ignore (run fixture);
+    Alcotest.(check bool) "repeated settlement preserves the original's exact progress" true
+      (Generic.same_record (Owner.record before) (Owner.record (reload fixture))))
+
+  let consumed_without_reply () = with_fixture (fun fixture ->
+    consume fixture;
+    let before = advance fixture [Progress.Dispatch_intended] in
+    ignore (strings (Keeper_gate_mode.set fixture.config ~actor:"fixture" Keeper_gate_mode.Always_allow));
+    (match (run fixture).outcome with
+     | Replay.Indeterminate _ -> ()
+     | Not_applicable | Applied _ | Applied_with_warning _ | Failed _
+     | Repair_required _ | Resolution_absent _ -> Alcotest.fail "spent grant without reply did not remain unknown");
+    Alcotest.(check bool) "changed Allow policy cannot dispatch the spent original" true
+      (Generic.same_record (Owner.record before) (Owner.record (reload fixture)));
+    Alcotest.(check bool) "recovery invents no answer" true
+      (owned (Owner.load_reply ~store:fixture.store before) = None))
+
+  let missing_linked_reply () = with_fixture (fun fixture ->
+    let before, reply_ref, _ = retain_answer fixture in
+    let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.config.base_path) in
+    Unix.unlink (Filename.concat (Filename.concat root (String.sub reply_ref.sha256 0 2)) reply_ref.sha256);
+    (match (run fixture).outcome with
+     | Replay.Repair_required {stage;_} ->
+       Alcotest.(check bool) "linked blob damage is an evidence repair" true (stage=Replay.Evidence_retrieval)
+     | Not_applicable | Applied _ | Applied_with_warning _ | Failed _ | Indeterminate _
+     | Resolution_absent _ -> Alcotest.fail "linked missing reply became a fresh execution or terminal result");
+    Alcotest.(check bool) "repair does not manufacture a replay outcome" true
+      (Option.is_none (delivery fixture).replay_outcome);
+    Alcotest.(check bool) "repair preserves the original and damaged link" true
+      (Generic.same_record (Owner.record before) (Owner.record (reload fixture))))
+
+  type interrupted_publication = Lost_ack | Raised_after_reply | Cancelled_after_reply
+
+  let interrupted_reply failure () = with_fixture (fun fixture ->
+    let invocations = ref 0 in
+    let produce ~grant ~approval_id ~input =
+      incr invocations;
+      Alcotest.(check string) "media branch forwards its actual approval ID"
+        fixture.approval_id approval_id;
+      Alcotest.check json "media branch forwards complete approved input" fixture.request.input input;
+      ignore (retain_answer ~grant fixture);
+      match failure with
+      | Lost_ack -> Error (Keeper_media_reading.Progress_unconfirmed "fixture lost ACK after real reply publication")
+      | Raised_after_reply -> failwith "fixture callback raised after real reply publication"
+      | Cancelled_after_reply ->
+        raise (Eio.Cancel.Cancelled (Failure "fixture cancellation after real reply publication")) in
+    let replay () = run ~media_replayer:produce fixture in
+      (match replay () with
+       | result ->
+         (match failure with
+          | Cancelled_after_reply -> Alcotest.fail "media replay swallowed cancellation"
+          | Lost_ack | Raised_after_reply ->
+            match result.outcome with
+            | Replay.Repair_required _ -> ()
+            | Not_applicable | Applied _ | Applied_with_warning _ | Failed _
+            | Indeterminate _ | Resolution_absent _ -> Alcotest.fail "partial publication became terminal")
+       | exception Eio.Cancel.Cancelled _ ->
+         (match failure with
+          | Cancelled_after_reply -> ()
+          | Lost_ack | Raised_after_reply -> Alcotest.fail "non-cancellation changed into cancellation"));
+      Alcotest.(check bool) "uncertain result does not close the Gate recovery path" true
+        (Option.is_none (delivery fixture).replay_outcome);
+      Alcotest.(check bool) "actual original reply remains readable" true
+        (Option.is_some (owned (Owner.load_reply ~store:fixture.store (reload fixture))));
+      (match (replay ()).outcome with
+       | Replay.Applied _ -> ()
+       | Not_applicable | Applied_with_warning _ | Failed _ | Indeterminate _
+       | Repair_required _ | Resolution_absent _ -> Alcotest.fail "next wake did not recover the retained reply");
+      Alcotest.(check int) "recovery never calls the invocation port again" 1 !invocations)
+
+  let tests = Alcotest.[
+    test_case "actual grant and consumed reply recover private roots" `Quick recovered_reply;
+    test_case "consumed without reply ignores changed Allow policy" `Quick consumed_without_reply;
+    test_case "missing linked reply stays repair-required" `Quick missing_linked_reply;
+    test_case "lost reply acknowledgement leaves consumed recovery open" `Quick (interrupted_reply Lost_ack);
+    test_case "exception after reply leaves consumed recovery open" `Quick (interrupted_reply Raised_after_reply);
+    test_case "cancellation after reply propagates and recovery stays open" `Quick (interrupted_reply Cancelled_after_reply)]
+end
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
-    [ ( "filesystem producer replay decoder"
+    [ ("media original replay", Media_replay_tests.tests)
+    ; ( "filesystem producer replay decoder"
       , [ Alcotest.test_case "content write" `Quick test_content_write
         ; Alcotest.test_case "edit write" `Quick test_edit_write
         ; Alcotest.test_case

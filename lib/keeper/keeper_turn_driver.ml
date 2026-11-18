@@ -1846,7 +1846,7 @@ let project_request_media ~project_media ~project_images
              { message with content })
            messages)
 
-let retained_media_reader ~input_source projector =
+let retained_media_reader ?source_reader ~input_source projector =
   match (input_source : Keeper_request_source.t) with
   | Completion_review -> None
   | Keeper_history _ ->
@@ -1854,12 +1854,12 @@ let retained_media_reader ~input_source projector =
       let kind = match attachment.kind with
         | Audio -> Keeper_media_reading.Audio
         | Document -> Keeper_media_reading.Document in
-      Result.bind
-        (Agent_core.History.stored
-           ~sha256:attachment.original.sha256 ~bytes:attachment.original.bytes
-         |> Result.map_error (fun error -> Keeper_media_reading.Invalid_source_reference error))
-        (Keeper_media_reading.read_stored projector ~kind
-           ~media_type:attachment.media_type))
+      match Agent_core.History.stored
+        ~sha256:attachment.original.sha256 ~bytes:attachment.original.bytes with
+      | Error error ->
+        Keeper_media_reading.Unavailable (Keeper_media_reading.Invalid_source_reference error)
+      | Ok stored -> Keeper_media_reading.read_stored ?source_reader projector
+          ~kind ~media_type:attachment.media_type stored)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
@@ -2161,6 +2161,7 @@ let run_named
     ?pre_tool_rejects
     ~base_path
     ~media_store
+    ?media_readers
     ~goal
     ?goal_blocks
     ?(goal_metadata = [])
@@ -2685,12 +2686,17 @@ let run_named
   let media_projector =
     Keeper_media_reading.projector
       ~base_path
+      ?source_reader:(Option.map
+        (fun (readers : Keeper_media_reading.source_readers) -> readers.observe) media_readers)
       ~media_store
       ~keeper_name
       ~resolve:(Keeper_media_reading.production_readers ~base_path)
       ()
   in
-  let read_retained_media = retained_media_reader ~input_source media_projector in
+  let read_retained_media = retained_media_reader
+      ?source_reader:(Option.map
+        (fun (readers : Keeper_media_reading.source_readers) -> readers.read) media_readers)
+      ~input_source media_projector in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates

@@ -307,6 +307,31 @@ describe('BoardSurface Component', () => {
     expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'warning')
   })
 
+  it('says the selected thread was not read, and reads it again on request', async () => {
+    // #52959: after a failed read the thread panel said the post had no comments.
+    const post = makePost({ id: 'unread-thread', title: 'Unread thread', author: 'keeper' })
+    const reply = { id: 'recovered', post_id: post.id, parent_id: null, author: 'keeper',
+      content: 'Recovered comment', created_at: post.created_at }
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    vi.mocked(fetchBoardPost).mockReset().mockRejectedValueOnce(new Error('temporary transport failure'))
+      .mockResolvedValue({ ...post, comments: [reply], commentPage: { offset: 0, total: 1 } } as any)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      render(h(BoardSurface, {}))
+      await waitFor(() => expect(detailReadPhase.value).toBe('failed'))
+      const panel = screen.getByTestId('bd-thread-detail')
+      const unread = within(panel).getByTestId('error-state')
+      expect(panel.querySelector('[data-feedback-kind="empty"]')).toBeNull()
+
+      await fireEvent.click(within(unread).getByRole('button'))
+
+      await waitFor(() => expect(panel.querySelectorAll('.board-comment')).toHaveLength(1))
+      expect(within(panel).queryByTestId('error-state')).toBeNull()
+      expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([[post.id], [post.id]])
+    } finally { warn.mockRestore() }
+  })
+
   it('keeps the selected thread visible for a pending decision without a success refresh', async () => {
     const post = makePost({ id: 'decision-pending', title: 'Deletion decision pending', author: 'keeper' })
     boardPosts.value = [post]
@@ -802,6 +827,38 @@ describe('BoardSurface Component', () => {
     await waitFor(() => expect(within(screen.getByTestId('board-comment-route-focus')).getByText('author keeper')).toBeInTheDocument())
     expect(detailComments.value.map(comment => comment.id)).toEqual([reply.id])
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('says a post outside the loaded list could not be read, and reads it again on request', async () => {
+    // A write on this post re-reads it; the post is drawn from that read alone.
+    const post = makePost({ id: 'outside-the-list', title: 'Post on a later page', author: 'keeper' })
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: post.id } } as any
+    let readable = true
+    vi.mocked(fetchBoardPost).mockReset().mockImplementation(async () => {
+      if (!readable) throw new Error('temporary transport failure')
+      return { ...post, comments: [], commentPage: { offset: 0, total: 0 } } as any
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      render(h(BoardSurface, null))
+      await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
+      expect(await screen.findByText('Post on a later page')).toBeInTheDocument()
+
+      readable = false
+      await loadPostDetail(post.id)
+
+      const failure = within(await screen.findByTestId('error-state'))
+      expect(failure.getByText('글을 불러오지 못했습니다')).toBeInTheDocument()
+      expect(screen.queryByText('글을 찾지 못했습니다')).toBeNull()
+
+      readable = true
+      await fireEvent.click(failure.getByRole('button', { name: '다시 시도' }))
+
+      expect(await screen.findByText('Post on a later page')).toBeInTheDocument()
+      expect(detailReadPhase.value).toBe('loaded')
+      expect(screen.queryByTestId('error-state')).toBeNull()
+    } finally { warn.mockRestore() }
   })
 
   it('reuses a pending focused read across visits instead of starting another transport', async () => {

@@ -5,6 +5,8 @@
    hold at every size: rows exactly as wide as asked, never more rows than
    asked, column widths and gaps that add up, a too-small reason whose numbers
    agree with the decision, and a decision that a larger terminal cannot undo.
+   The surface frame [finish_surface] assembles is measured too, because the
+   decision's row budget is only true if the drawer spends the same rows.
    No case reads wording, a position on the screen or the order of rows.
 
    A size that once broke stays in [pinned_rows] / [pinned_cols] with the
@@ -20,18 +22,18 @@ let range ~from ~upto ~step =
 
 let dedup sizes = List.sort_uniq compare sizes
 
-(* The sweep: columns 40 to 240 every 7, rows 8 to 80 every 3. *)
-let swept_cols = range ~from:40 ~upto:240 ~step:7
+(* The sweep: columns 8 to 240 every 7, rows 8 to 80 every 3. No column
+   threshold exists, so the narrow terminals are swept too. *)
+let swept_cols = range ~from:8 ~upto:240 ~step:7
 let swept_rows = range ~from:8 ~upto:80 ~step:3
 
 (* Terminal rows that once broke a decision. *)
 let pinned_rows =
-  [ (* The composer weighed its row against the terminal alone. With the
-       agenda strip up, a 16-row terminal gave it a row and left the body 13:
-       the too-small screen, where 14 body rows fit without the composer, the
-       row its own contract says it yields. With two agenda rows it took a row
-       at 16 and 17 rows. *)
-    16; 17
+  [ (* The body's budget gave the composer's row back on a short terminal,
+       but [finish_surface] draws the composer at every size. With no agenda
+       strip, 15 rows drew a frame of 16; with the strip up, 16 rows did once
+       the budget weighed the composer after the agenda. *)
+    15; 16; 17
   ; (* PR #49459: an 8-row terminal cut the too-small count at 40, 43 and 56
        columns. *)
     8 ]
@@ -41,20 +43,26 @@ let pinned_cols = [ 40; 43; 56 ]
 (* Agenda rows the strip can take, and one more than it does today. *)
 let agenda_rows_cases = [ 0; 1; 2 ]
 
-(* Rows either side of every row threshold: where the body reaches the fixed
-   budget and where the composer starts to take its row. *)
+let below_strip rows = Viewport.below_strip ~terminal_rows:rows
+
+let decide ~cols ~rows ~agenda_rows () =
+  Viewport.too_small ~terminal_rows:(below_strip rows) ~terminal_cols:cols
+    ~agenda_rows ~notice_needs_full_frame:(fun () -> false)
+
+let fits ~cols ~rows ~agenda_rows =
+  Option.is_none (decide ~cols ~rows ~agenda_rows ())
+
+(* Rows either side of every row threshold, as the decision states it on the
+   shortest terminal. *)
 let boundary_rows =
   List.concat_map
     (fun agenda_rows ->
-       let at = Viewport.minimum_fixed_chrome_rows + Viewport.navigation_rows + agenda_rows in
-       [ at - 1; at; at + 1; at + 2 ])
+       match decide ~cols:80 ~rows:1 ~agenda_rows () with
+       | Some (Viewport.Rows_short { need_rows; _ }) -> [ need_rows - 1; need_rows; need_rows + 1 ]
+       | Some Viewport.Notice_needs_full_frame | None -> [])
     agenda_rows_cases
 
 let terminal_rows_list = dedup (swept_rows @ boundary_rows @ pinned_rows)
-
-(* The rows below the strip, as [Masc_tui_render_prim.get_terminal_size]
-   hands them to the decision. *)
-let below_strip rows = max 1 (rows - Viewport.navigation_rows)
 
 (* Failures a case names before it only counts the rest. *)
 let failures_named = 20
@@ -70,41 +78,22 @@ let expect_none label failures =
 (* -------------------------------------------------------------------- *)
 (* The too-small decision. *)
 
-let decide ~cols ~rows ~agenda_rows () =
-  Viewport.too_small ~terminal_rows:(below_strip rows) ~terminal_cols:cols
-    ~agenda_rows ~notice_needs_full_frame:(fun () -> false)
-
-let fits ~cols ~rows ~agenda_rows =
-  Option.is_none (decide ~cols ~rows ~agenda_rows ())
-
-let row_budget_adds_up () =
+(* The decision fits exactly where the body holds the fixed budget. *)
+let fits_where_the_body_holds_the_budget () =
   let failures = ref [] in
   let fail fmt = Printf.ksprintf (fun text -> failures := text :: !failures) fmt in
   List.iter
     (fun agenda_rows ->
        List.iter
          (fun rows ->
-            let terminal_rows = below_strip rows in
-            let body = Viewport.body_rows ~terminal_rows ~agenda_rows in
-            let composer = terminal_rows - body - agenda_rows in
+            let body = Viewport.body_rows ~terminal_rows:(below_strip rows) ~agenda_rows in
             let fits_now = fits ~cols:80 ~rows ~agenda_rows in
             if body < 1 then fail "agenda %d, %d rows: body %d" agenda_rows rows body;
-            if fits_now && composer <> 0 && composer <> 1 then
-              fail "agenda %d, %d rows: composer takes %d rows" agenda_rows rows composer;
-            if fits_now
-               && Viewport.navigation_rows + body + composer + agenda_rows <> rows
-            then
-              fail "agenda %d, %d rows: strip %d + body %d + composer %d + agenda %d"
-                agenda_rows rows Viewport.navigation_rows body composer agenda_rows;
-            (* A convenience row never costs the surface. *)
-            if composer = 1 && body < Viewport.minimum_fixed_chrome_rows then
-              fail "agenda %d, %d rows: the composer's row leaves the body %d"
-                agenda_rows rows body;
             if fits_now <> (body >= Viewport.minimum_fixed_chrome_rows) then
               fail "agenda %d, %d rows: fits %b with body %d" agenda_rows rows fits_now body)
          terminal_rows_list)
     agenda_rows_cases;
-  expect_none "the row budget adds up at every size" !failures
+  expect_none "the decision fits where the body holds the budget" !failures
 
 let reason_agrees_with_decision () =
   let failures = ref [] in
@@ -183,6 +172,135 @@ let decision_is_monotone () =
          fitting)
     agenda_rows_cases;
   expect_none "a larger terminal still fits" !failures
+
+(* The size line's form. PR #49459's count, cut to its first digit, is a
+   form wider than the terminal; a count-carrying form must be chosen at
+   the pinned widths, and no chosen form is wider than the terminal. *)
+let hint_forms_fit () =
+  let failures = ref [] in
+  let fail fmt = Printf.ksprintf (fun text -> failures := text :: !failures) fmt in
+  let module Hint = Masc_tui_too_small_hint in
+  let order = function
+    | Hint.Full -> 0
+    | Hint.Size_and_need -> 1
+    | Hint.Need -> 2
+    | Hint.Need_count -> 3
+    | Hint.Key_only -> 4
+  in
+  let cols_list = dedup (swept_cols @ pinned_cols) in
+  List.iter
+    (fun ko ->
+       List.iter
+         (fun agenda_rows ->
+            List.iter
+              (fun rows ->
+                 let previous = ref (order Hint.Key_only) in
+                 List.iter
+                   (fun cols ->
+                      match decide ~cols ~rows ~agenda_rows () with
+                      | None | Some Viewport.Notice_needs_full_frame -> ()
+                      | Some (Viewport.Rows_short { have; need_rows }) ->
+                          let at = Printf.sprintf "ko %b, agenda %d, %dx%d" ko agenda_rows cols rows in
+                          let form = Hint.choose ~ko ~cols ~have ~need_rows in
+                          let width = Layout.display_width (Hint.text ~ko ~have ~need_rows form) in
+                          (match form with
+                           | Hint.Full | Hint.Size_and_need | Hint.Need | Hint.Need_count ->
+                               if width > cols then fail "%s: a form of %d cells" at width
+                           | Hint.Key_only ->
+                               if List.mem cols pinned_cols then fail "%s: the count is gone" at);
+                          (* A wider terminal never takes a narrower form. *)
+                          if order form > !previous then fail "%s: a narrower form than at fewer columns" at;
+                          previous := order form)
+                   cols_list)
+              (List.filter (fun rows -> not (fits ~cols:80 ~rows ~agenda_rows)) terminal_rows_list))
+         agenda_rows_cases)
+    [ true; false ];
+  expect_none "the size line keeps its count at the pinned widths and fits" !failures
+
+(* -------------------------------------------------------------------- *)
+(* The surface frame [finish_surface] assembles: strip, body, agenda strip
+   and composer, at every size the decision lets a surface draw in. *)
+
+let agenda_strip_up (state : Masc_tui_types.state) =
+  state.schedules_agenda <-
+    Some
+      { Masc_tui_types.scs_status = "ok"
+      ; scs_read_error = None
+      ; scs_request_count = None
+      ; scs_truncated = false
+      ; scs_payload_target = None
+      ; scs_paging = Masc_tui_types.Schedule_paging_unavailable
+      ; scs_next_due_iso = None
+      ; scs_counts = None
+      ; scs_rows = []
+      ; scs_observed_at_iso = "2026-10-26T08:59:00Z"
+      ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
+      };
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed
+
+let frame_cols = dedup (swept_cols @ pinned_cols)
+
+(* The frame a surface of [drawn] rows ends in on a [cols] x [rows]
+   terminal, measured the way [Masc_tui_render] measures it. *)
+let surface_frame state ~cols ~rows ~drawn =
+  ignore
+    (Masc_tui_render_schedule.Terminal_size_cache.refresh Masc_tui_ansi.terminal_size_cache
+       ~probe:(fun () -> Some (rows, cols)));
+  let below, inner_cols = Masc_tui_render_prim.get_terminal_size () in
+  let buf = Buffer.create 256 in
+  for index = 1 to drawn do
+    Buffer.add_string buf (Printf.sprintf "row %d\n" index)
+  done;
+  fst (Masc_tui_render_prim.finish_surface state ~surface_key:"geometry" ~rows:below ~cols:inner_cols buf)
+
+let widest frame =
+  List.fold_left (fun widest line -> max widest (Layout.display_width line)) 0
+    frame.Masc_tui_frame_presenter.lines
+
+let surface_frame_fits_the_terminal () =
+  let failures = ref [] in
+  let fail fmt = Printf.ksprintf (fun text -> failures := text :: !failures) fmt in
+  Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+  let measured = ref 0 in
+  List.iter
+    (fun agenda_up ->
+       let state = Masc_tui_types.create_state ~workspace:"geometry" ~port:1 () in
+       if agenda_up then agenda_strip_up state;
+       let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
+       if agenda_up && agenda_rows = 0 then fail "the agenda strip did not come up";
+       let fitting_rows = List.filter (fun rows -> fits ~cols:1 ~rows ~agenda_rows) terminal_rows_list in
+       (* The widest row the frame draws on a one-column terminal. Under it
+          some row is wider than the terminal, and the too-small decision does
+          not stop that yet (RFC tui-one-screen-grammar §12, issue #53189).
+          The row count is measured at every width. *)
+       let floor =
+         match fitting_rows with
+         | rows :: _ -> widest (surface_frame state ~cols:1 ~rows ~drawn:3)
+         | [] -> fail "agenda %d: no row count fits" agenda_rows; 0
+       in
+       List.iter
+         (fun cols ->
+            List.iter
+              (fun rows ->
+                 incr measured;
+                 (* A surface that drew a few rows, and one that drew more
+                    than its budget. *)
+                 List.iter
+                   (fun drawn ->
+                      let frame = surface_frame state ~cols ~rows ~drawn in
+                      let at = Printf.sprintf "agenda %d, %dx%d, %d drawn" agenda_rows cols rows drawn in
+                      let lines = List.length frame.Masc_tui_frame_presenter.lines in
+                      if lines > rows then fail "%s: %d lines" at lines;
+                      if frame.terminal_rows <> rows then
+                        fail "%s: declares %d rows" at frame.terminal_rows;
+                      if cols >= floor && widest frame > cols then
+                        fail "%s: a row of %d cells" at (widest frame))
+                   [ 3; rows * 2 ])
+              fitting_rows)
+         frame_cols)
+    [ false; true ];
+  if !measured = 0 then fail "no size fitted";
+  expect_none "the surface frame is never taller or wider than the terminal" !failures
 
 (* -------------------------------------------------------------------- *)
 (* Cards. *)
@@ -404,10 +522,21 @@ let overview_cards_fit () =
 (* -------------------------------------------------------------------- *)
 (* The Keeper roster's columns. *)
 
-(* The swept terminals' inner widths, and one either side of every width
-   where the roster shows or drops a column. *)
+(* The narrowest row the roster allocates: every column at its floor. Below
+   it the fixed columns alone are wider than the frame, and the too-small
+   decision does not stop that yet (RFC tui-one-screen-grammar §12, issue
+   #53189). *)
+let roster_floor =
+  Schedule.keeper_columns_used_width
+    (Schedule.allocate_keeper_columns ~prioritize_runtime:false ~inner_width:0 ~widest_runtime:0 ())
+
+(* The swept terminals' inner widths from the roster's floor up, and one
+   either side of every width where the roster shows or drops a column. *)
 let roster_inner_widths =
-  let swept = List.map (fun cols -> Masc_tui_frame.inner_width ~cols) (swept_cols @ pinned_cols) in
+  let swept =
+    List.filter (fun width -> width >= roster_floor)
+      (List.map (fun cols -> Masc_tui_frame.inner_width ~cols) (swept_cols @ pinned_cols))
+  in
   let shown inner_width =
     let columns =
       Schedule.allocate_keeper_columns ~prioritize_runtime:false ~inner_width ~widest_runtime:0 ()
@@ -423,7 +552,7 @@ let roster_inner_widths =
          else [])
       (range ~from:(lowest + 1) ~upto:highest ~step:1)
   in
-  dedup (swept @ changes)
+  dedup (List.filter (fun width -> width >= roster_floor) ((roster_floor :: swept) @ changes))
 
 let keeper_columns_fit () =
   let failures = ref [] in
@@ -451,13 +580,18 @@ let keeper_columns_fit () =
 let () =
   Alcotest.run "tui layout geometry"
     [ ( "too-small decision"
-      , [ Alcotest.test_case "the row budget adds up" `Quick row_budget_adds_up
+      , [ Alcotest.test_case "fits where the body holds the budget" `Quick
+            fits_where_the_body_holds_the_budget
         ; Alcotest.test_case "the reason's numbers are the decision's" `Quick
             reason_agrees_with_decision
         ; Alcotest.test_case "a wide notice decides only when rows fit" `Quick
             notice_is_the_reason_only_when_rows_fit
         ; Alcotest.test_case "a larger terminal still fits" `Quick decision_is_monotone
+        ; Alcotest.test_case "the size line keeps its count" `Quick hint_forms_fit
         ] )
+    ; ( "surface frame"
+      , [ Alcotest.test_case "never taller or wider than the terminal" `Quick
+            surface_frame_fits_the_terminal ] )
     ; ( "cards"
       , [ Alcotest.test_case "widths and gaps add up" `Quick widths_add_up
         ; Alcotest.test_case "a grid is its rectangle" `Quick grid_fits_its_rectangle

@@ -240,6 +240,10 @@ val last_row : recent_entry option fact
 val newest_parsed_row : Yojson.Safe.t option fact
 (* JSON 으로 읽히는 가장 새 줄. JSON 이 아닌 줄은 건너뛴다. *)
 
+val last_rows : name:string -> count:int -> Yojson.Safe.t option list fact
+(* 마지막 count 줄, 오래된 것부터. JSON 이 아닌 줄은 None 으로 자리를 지킨다.
+   부를 때마다 새 사실이다. count 를 정한 곳에서 한 번 만들어 둔다. *)
+
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 
 val keep_facts_in_this_process : unit -> unit
@@ -256,7 +260,7 @@ val directories_removed : unit -> unit
   |---|---|---|
   | 최근 TurnRecord | 마지막 줄(`last_row`) | L2d-1 |
   | 가장 새 온전한 receipt | JSON 으로 읽히는 가장 새 줄(`newest_parsed_row`) | L2d-2 |
-  | 도구 호출 | 원장의 마지막 16줄. 깨진 줄도 자리를 지킨다 | L2d-3 |
+  | 도구 호출 | 원장의 마지막 16줄(`last_rows ~count`). 깨진 줄도 `None` 으로 자리를 지킨다 | L2d-3 |
   | 결정 기록 | 마지막 object 행. `Dated_jsonl` 저장소가 아니라서 `Keeper_row_facts` 의 표에 `Fact_cell` 을 둔다 | L2d-4 |
   | metrics | 끝 120줄, 그리고 decoder 가 받는 가장 새 줄(Turn tool audit) | L3 |
 
@@ -267,7 +271,7 @@ val directories_removed : unit -> unit
 - 칸은 저장소를 쓰는 process 만 든다. 칸을 고치는 것은 그 process 의 쓰기뿐이고, 다른 process 가 쓴 줄은 칸에 닿지 않는다. TUI 는 서버와 다른 process 인데 같은 함수로 TurnRecord 파일을 읽는다(`bin/masc_tui_context_state.ml` 의 `load`). 값을 들면 TUI 는 처음 읽은 줄을 끝까지 보인다.
   - 「이 process 가 혼자 쓴다」는 사실 둘로 이루어진다. 하나는 process 의 사실이다. 이 process 가 writer lease 를 쥐었는가. 다른 하나는 저장소의 사실이다. 이 저장소의 파일을 lease 를 쥔 process 만 바꾸는가. 둘 다 맞을 때만 `read_fact` 가 값을 든다.
   - process 의 사실은 process 가 말한다(`Dated_jsonl.keep_facts_in_this_process`). 한 번 말하면 거두지 않는다. 서버는 BasePath writer lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). 이 함수는 받은 lease 가 지금 이 process 가 쥔 lease 일 때만 말한다. 놓은 lease 로 부르면 `Lease_not_held` 를 돌려주고 아무 말도 하지 않는다.
-  - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord 와 execution receipt 다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
+  - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord, execution receipt, 도구 호출 원장이다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
   - 둘 중 하나라도 아니면 전처럼 매번 파일을 읽는다. 칸도 등록부 항목도 만들지 않는다.
   - `keep_facts_in_this_process` 자체는 누구나 부를 수 있다. `Dated_jsonl` 은 lease 를 모르고, 서버를 대신하는 시험 실행 파일도 이 함수를 부른다. lease 를 쥐지 않은 실행 파일이 부르면 #53145 의 결함이 돌아온다. 그래서 TUI 가 쓰는 진입점을 시험으로 고정한다(§5).
   - 읽는 호출처가 「든 값」과 「파일」 가운데 고르게 하지 않았다. 그러면 호출처마다 맞게 골라야 하고, 틀리면 빠르지만 틀린 값이 나온다. 지금 모양은 말하기를 잊으면 느릴 뿐이다.
@@ -283,7 +287,7 @@ val directories_removed : unit -> unit
 - 등록부에 항목을 남기지 않는 handle 은 `Dated_jsonl.Reader` 다. 운영에 한 곳 있고 읽기만 한다(`keeper_autonomous_turn_source.ml` 의 `read_store`). 추측한 이름마다 등록부 항목이 생기지 않게 하려는 것이다. 그 handle 에는 칸이 없고, 읽는 쪽은 파일을 읽는다. 쓰는 함수는 이 타입을 받지 않는다. 등록부 밖 handle 로 쓰면 칸이 틀리기 때문이다.
 - `Type.Id` 는 OCaml 5.5.2 에 있다(작은 프로그램으로 확인). 사실마다 `Type.Id` 를 하나 든다. 항목의 목록은 타입이 다른 칸을 같이 들고, 찾을 때 `Type.Id.provably_equal` 로 타입을 되찾는다.
 - 값은 디스크에 쓴 줄을 읽는 쪽과 같은 parser 로 해석한 JSON 이다. 결정 기록 4곳, 도구 호출 6곳, metrics 2곳이 넘기는 모양이 저마다 달라서 행 타입으로 묶지 않는다(`keeper_tool_memory_runtime.ml:1332`, `keeper_unified_metrics_decision.ml:401` 등). 읽는 쪽은 지금 쓰는 decoder 를 그대로 쓴다. 그래서 `Undecodable_turn_record` 같은 구분도 지금처럼 나온다(`keeper_context_observation_projection.ml:92-101`). JSON 이 아닌 줄은 `Dated_jsonl.recent_entry` 의 `Malformed_json` 으로 든다. 그 상태도 칸에 담으려는 것이다.
-- 목록 값(도구 호출 16줄, metrics 120줄)은 읽는 쪽이 세는 줄을 자리 그대로 든다. 두 reader 는 빈 줄이 아닌 줄을 세고, 깨진 줄은 그 뒤에 건너뛴다(`keeper_tool_call_log.ml:1572-1586`, `operator_control_snapshot_tool_audit.ml:14-38`, `operator_control_snapshot_tool_names.ml:41-56`). 그래서 깨진 줄도 `Malformed_json` 으로 든다. 깨진 줄을 빼고 들면 다음 쓰기 뒤에 창에서 빠지는 줄이 파일과 달라진다.
+- 목록 값(도구 호출 16줄, metrics 120줄)은 읽는 쪽이 세는 줄을 자리 그대로 든다. 두 reader 는 빈 줄이 아닌 줄을 세고, 깨진 줄은 그 뒤에 건너뛴다(`keeper_tool_call_log.ml:1572-1586`, `operator_control_snapshot_tool_audit.ml:14-38`, `operator_control_snapshot_tool_names.ml:41-56`). 그래서 깨진 줄도 자리를 차지한다. 깨진 줄을 빼고 들면 다음 쓰기 뒤에 창에서 빠지는 줄이 파일과 달라진다. 창의 줄은 JSON 이거나 `None`(JSON 이 아닌 줄)이다. `Malformed_json` 으로 들지 않는다. `Malformed_json` 은 그 줄이 든 날짜 파일의 경로를 담는데, 크기 rotation 은 창이 든 줄 아래에서 그 파일의 이름을 바꾼다. 처음에는 `Malformed_json` 으로 들었고, 400걸음 차분 시험이 22번째 걸음에서 든 경로와 파일의 경로가 다른 것을 잡았다. 창을 읽는 곳은 경로를 쓰지 않는다.
 - 채우다 파일을 못 읽으면 값을 넣지 않는다(§3.4). 행은 그때 지금의 reader 가 내는 값을 그대로 낸다. 오류를 돌려주던 reader 는 오류를 내고(`Turn_record_read_failed` 등), 빈 값을 내던 reader 는 빈 값을 낸다. 다음 읽기가 다시 채운다.
 - receipt 칸은 가장 새 온전한 줄을 든다. 마지막 줄이 아니다. 두 reader 가 모두 깨진 줄을 건너뛰기 때문이다(§1.1). 그래서 두 reader 가 칸 하나에서 답을 얻는다. 파일로 돌아가는 길은 없다. 쓰는 쪽은 JSON 을 쓰므로, 쓴 뒤의 값은 늘 쓴 그 줄이다. 쓴 줄이 JSON 으로 다시 읽히지 않으면 칸을 비운다.
 - TurnRecord 칸은 마지막 줄을 든다. 그 reader 는 깨진 줄도 한 줄로 세고 `Undecodable_turn_record` 로 알린다(`keeper_context_observation_projection.ml:83-101`).

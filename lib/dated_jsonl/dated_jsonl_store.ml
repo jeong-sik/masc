@@ -206,6 +206,12 @@ let root_facts = function
   (* [masc-cost --log] appends to the cost log and takes no lease
      ([bin/masc_cost.ml]). *)
   | Root.Costs -> Read_from_the_files
+  (* One writer, [Keeper_tool_call_log], and only in a process where the
+     server's start has opened the ledger ([Server_bootstrap_maintenance]),
+     which holds the lease; anywhere else a logged call writes nothing. The
+     read index keeps its own files beside the months and changes no day
+     file. Day files go by the prune pass, in that process. *)
+  | Root.Tool_calls -> Kept_by_the_lease_holder
   | Root.Transition_audit
   | Root.Audit_approvals
   | Root.Tool_events
@@ -214,7 +220,6 @@ let root_facts = function
   | Root.Telemetry
   | Root.Events
   | Root.Activity_events
-  | Root.Tool_calls
   | Root.Tool_usage
   | Root.Agent_core_events
   | Root.Provider_usage_history

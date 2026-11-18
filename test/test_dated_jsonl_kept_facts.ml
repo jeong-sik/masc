@@ -819,7 +819,8 @@ let test_which_stores_keep_their_facts () =
   check
     (list store)
     "the stores whose facts are kept"
-    [ D.Store.Keeper D.Store.Keeper.Execution_receipts
+    [ D.Store.Root D.Store.Root.Tool_calls
+    ; D.Store.Keeper D.Store.Keeper.Execution_receipts
     ; D.Store.Keeper D.Store.Keeper.Turn_records
     ]
     kept

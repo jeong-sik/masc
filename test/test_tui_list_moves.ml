@@ -91,6 +91,49 @@ let test_every_move_key_walks_the_stops () =
       ; 3, Line_up, 2, 2; 0, Page_down, 2, 2; 1, Page_down, 9, 4; 4, Page_up, 2, 2
       ; 2, Page_up, 9, 0; 3, To_top, 2, 0; 1, To_end, 2, 4 ]
 
+(* Every view the Keeper list has, every move key, from every stop, with every
+   group folded and then with none: the key lands on a stop of that list,
+   leaves the folds as they were, and Home and End are the first and last
+   stop. The By_memory case above is one view; the rule is the list's. *)
+let every_view =
+  Model.[ Plain; By_state; By_cause; By_time; By_memory; By_age; By_runtime; Day_wall ]
+
+let test_every_view_moves_over_its_stops () =
+  List.iter
+    (fun view ->
+      let state = keeper_list ~view [ "alpha"; "beta"; "gamma"; "delta" ] in
+      ignore (keeper_list_stops state);
+      let all_groups = headings state in
+      List.iter
+        (fun folded ->
+          state.keeper_list_folded <- folded;
+          let stops = keeper_list_stops state in
+          let last = List.length stops - 1 in
+          List.iteri
+            (fun from stop ->
+              List.iter
+                (fun move ->
+                  place_keeper_list_stop state stop;
+                  move_keeper_list_stop state ~page:2 move;
+                  let label = Printf.sprintf "view %d folded %d from %d"
+                      (Option.value ~default:(-1)
+                         (List.find_index (( = ) view) every_view))
+                      (List.length folded) from in
+                  Alcotest.(check bool) (label ^ ": folds kept") true
+                    (state.keeper_list_folded = folded);
+                  Alcotest.(check bool) (label ^ ": lands on a stop") true
+                    (Option.is_some (stop_index state));
+                  match move with
+                  | Scroll.To_top ->
+                      Alcotest.(check (option int)) (label ^ ": Home") (Some 0) (stop_index state)
+                  | Scroll.To_end ->
+                      Alcotest.(check (option int)) (label ^ ": End") (Some last) (stop_index state)
+                  | Scroll.Line_down | Scroll.Line_up | Scroll.Page_down | Scroll.Page_up -> ())
+                every_move)
+            stops)
+        [ all_groups; [] ])
+    every_view
+
 (* A plain list has only rows, and an empty one has nothing to move. *)
 let test_plain_and_empty_lists () =
   let state = keeper_list ~view:Model.Plain [ "alpha"; "beta" ] in
@@ -204,6 +247,8 @@ let () =
       , [ Alcotest.test_case "no move key unfolds a group" `Quick test_no_move_key_unfolds_a_group
         ; Alcotest.test_case "every move key walks the stops" `Quick
             test_every_move_key_walks_the_stops
+        ; Alcotest.test_case "every view moves over its stops" `Quick
+            test_every_view_moves_over_its_stops
         ; Alcotest.test_case "plain and empty lists" `Quick test_plain_and_empty_lists
         ] )
     ; ( "overview"

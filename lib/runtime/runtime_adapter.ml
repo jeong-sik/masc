@@ -1085,19 +1085,19 @@ let claude_code_execution (provider : Runtime_schema.provider)
           a-persons-api-key-is-their-own-provider-account 3.4): read by the
           check of every credential file, captured with the account, and
           handed to a child only by [Runtime_account_access.authorize]. *)
-       let open Result.Syntax in
-       let* key =
-         Runtime_api_key_file.read path
-         |> Result.map_error (fun error ->
-           Printf.sprintf
-             "provider %S uses claude-code on a file credential: %s"
-             provider.id
-             (Runtime_api_key_file.read_error_to_string error))
-       in
-       let* captured =
-         Runtime_official_account.capture_on_key ~declaration:provider.account_home ~key
-       in
-       Ok (execution captured))
+       (match
+          Runtime_official_account.capture_on_key
+            ~declaration:provider.account_home
+            ~key_file:path
+        with
+        | Ok captured -> Ok (execution captured)
+        | Error (Runtime_official_account.Key_not_read error) ->
+          Error
+            (Printf.sprintf
+               "provider %S uses claude-code on a file credential: %s"
+               provider.id
+               (Runtime_api_key_file.read_error_to_string error))
+        | Error (Runtime_official_account.Key_not_captured detail) -> Error detail))
 ;;
 
 let muse_serve_execution (provider : Runtime_schema.provider)

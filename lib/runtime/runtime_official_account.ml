@@ -14,6 +14,7 @@ type 'client t =
   { client : 'client client
   ; home : string
   ; source : source
+  ; key_file : string option
   ; environment : string array
   }
 
@@ -145,29 +146,39 @@ let capture (type owner) ~(client : owner client) ~declaration : (owner t, strin
       Ok (Runtime_codex_environment_projection.project
         ~explicit_account:(Option.is_some declaration) ~home:(Some home) ~configured inherited) in
   let* () = validate_environment environment in
-  Ok {client; home; source; environment = Array.copy environment}
+  Ok {client; home; source; key_file = None; environment = Array.copy environment}
 
-let capture_on_key ~declaration ~key =
-  let inherited = Unix.environment () in
+type key_capture_error =
+  | Key_not_read of Runtime_api_key_file.read_error
+  | Key_not_captured of string
+
+(* The capture reads the file itself, so the file an account says its key is
+   of is the file its key came from. *)
+let capture_on_key ~declaration ~key_file =
   let ( let* ) = Result.bind in
-  let* source, home =
-    selected_directory ~client:Claude_code ~declaration ~environment:inherited in
-  (* The names a declared account keeps, whether or not a home is declared:
-     no credential, provider choice or endpoint of the server stays beside
-     the key. *)
-  let kept = Runtime_claude_environment_projection.inherited_names ~explicit_account:true in
-  let names = match source with
-    | Inherited_directory -> directory_variable Claude_code :: kept
-    | Declared_directory | Inherited_user_home -> kept in
-  let environment =
-    Array.append
-      (Runtime_claude_environment_projection.of_inherited
-         ~account_home:(Option.map (fun _ -> home) declaration)
-         (claude_inherited ~names ~source ~home inherited))
-      [| Runtime_claude_environment_projection.api_key_variable
-         ^ "=" ^ Runtime_api_key_file.value key |] in
-  let* () = validate_environment environment in
-  Ok {client = Claude_code; home; source; environment}
+  let captured key =
+    let inherited = Unix.environment () in
+    let* source, home =
+      selected_directory ~client:Claude_code ~declaration ~environment:inherited in
+    (* The names a declared account keeps, whether or not a home is declared:
+       no credential, provider choice or endpoint of the server stays beside
+       the key. *)
+    let kept = Runtime_claude_environment_projection.inherited_names ~explicit_account:true in
+    let names = match source with
+      | Inherited_directory -> directory_variable Claude_code :: kept
+      | Declared_directory | Inherited_user_home -> kept in
+    let environment =
+      Array.append
+        (Runtime_claude_environment_projection.of_inherited
+           ~account_home:(Option.map (fun _ -> home) declaration)
+           (claude_inherited ~names ~source ~home inherited))
+        [| Runtime_claude_environment_projection.api_key_variable
+           ^ "=" ^ Runtime_api_key_file.value key |] in
+    let* () = validate_environment environment in
+    Ok {client = Claude_code; home; source; key_file = Some key_file; environment} in
+  match Runtime_api_key_file.read key_file with
+  | Error error -> Error (Key_not_read error)
+  | Ok key -> Result.map_error (fun detail -> Key_not_captured detail) (captured key)
 
 let private_codex_environment ~home selected =
   let ( let* ) = Result.bind in
@@ -181,11 +192,13 @@ let private_codex_environment ~home selected =
 let home selected = selected.home
 let client selected = selected.client
 let source selected = selected.source
+let key_file selected = selected.key_file
 let environment selected = Array.copy selected.environment
 let environment_value selected name = value name selected.environment
 let same left right =
   String.equal left.home right.home
   && left.source = right.source
+  && Option.equal String.equal left.key_file right.key_file
   && List.equal String.equal
        (List.sort String.compare (Array.to_list left.environment))
        (List.sort String.compare (Array.to_list right.environment))

@@ -51,6 +51,49 @@ type person =
   ; home : string  (** The Claude Code home of [account], as the layout spells it. *)
   }
 
+(* A Runtime of the person on [account] and a Keeper on that Runtime, each
+   through its writer. *)
+let runtime_and_keeper zone ~user_id ~account ~name =
+  let runtime = get (Runtime_id.of_string ("account-" ^ name ^ ".model")) in
+  (match
+     Authz_runtime.make
+       zone
+       ~user_id
+       ~provider_account_id:account
+       ~runtime_id:runtime
+       ~self_effects:Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
+       ~draw:(fun () -> "grant-" ^ name)
+   with
+   | Ok (_ : Grant_id.t) -> ()
+   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
+  let keeper = "keeper-" ^ name in
+  let keeper_id = get (Keeper_id.of_string keeper) in
+  let turn_scope =
+    { Authorization_scope.runtimes = Runtime_scope.all
+    ; channels = Channel_scope.only (Channel.Set.of_list Channel.[ Autonomous; Direct ])
+    ; allowed_effects = Effect_scope.all
+    }
+  in
+  (match Authz_keeper.make zone ~user_id ~keeper_id ~turn_scope ~draw:(fun () -> "policy-" ^ name) with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
+  (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id:runtime with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
+  runtime, keeper
+;;
+
+(* The Claude Code home of [account] under [runtime_root], as the layout
+   spells it, made. *)
+let claude_home ~runtime_root account =
+  let home =
+    get_text
+      (Layout.home ~runtime_root Layout.Claude_home ~account_id:(Provider_account_id.to_string account))
+  in
+  Fs_compat.mkdir_p home;
+  home
+;;
+
 (* One person joins through an invitation, links one account, makes a Runtime
    on it, and makes a Keeper on that Runtime, each through its writer. *)
 let person zone ~base_path ~name ~hex =
@@ -84,44 +127,24 @@ let person zone ~base_path ~name ~hex =
   (match Authz_provider_account.link zone ~user_id ~provider_account_id:account with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
-  let runtime = get (Runtime_id.of_string ("account-" ^ name ^ ".model")) in
-  (match
-     Authz_runtime.make
-       zone
-       ~user_id
-       ~provider_account_id:account
-       ~runtime_id:runtime
-       ~self_effects:Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
-       ~draw:(fun () -> "grant-" ^ name)
-   with
-   | Ok (_ : Grant_id.t) -> ()
-   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
-  let keeper = "keeper-" ^ name in
-  let keeper_id = get (Keeper_id.of_string keeper) in
-  let turn_scope =
-    { Authorization_scope.runtimes = Runtime_scope.all
-    ; channels = Channel_scope.only (Channel.Set.of_list Channel.[ Autonomous; Direct ])
-    ; allowed_effects = Effect_scope.all
-    }
-  in
-  (match Authz_keeper.make zone ~user_id ~keeper_id ~turn_scope ~draw:(fun () -> "policy-" ^ name) with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
-  (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id:runtime with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
+  let runtime, keeper = runtime_and_keeper zone ~user_id ~account ~name in
   let runtime_root = Layout.person_runtime_root ~base_path ~namespace in
   Fs_compat.mkdir_p runtime_root;
-  let home =
-    get_text
-      (Layout.home ~runtime_root Layout.Claude_home ~account_id:(Provider_account_id.to_string account))
-  in
-  Fs_compat.mkdir_p home;
+  let home = claude_home ~runtime_root account in
   { user_id; account; runtime; keeper; runtime_root; home }
 ;;
 
 let captured home =
   get_text (Account.capture ~client:Account.Claude_code ~declaration:(Some home))
+;;
+
+(* The account of [home] on the key of [key_file]. *)
+let captured_on_key home ~key_file =
+  match Account.capture_on_key ~declaration:(Some home) ~key_file with
+  | Ok account -> account
+  | Error (Account.Key_not_read error) ->
+    Alcotest.failf "the key was not read: %s" (Runtime_api_key_file.read_error_to_string error)
+  | Error (Account.Key_not_captured detail) -> Alcotest.failf "the account was not captured: %s" detail
 ;;
 
 let allowed label request captured =
@@ -908,6 +931,102 @@ let test_multi_account () =
          with
          | Error Access.Already_published -> ()
          | Ok () -> Alcotest.fail "a second publication was taken");
+        (* RFC a-persons-api-key-is-their-own-provider-account 3.4: a key
+           account is spent on the key of the file its records say, and on
+           no other. Frank has a key account, with a Runtime and a Keeper on
+           it, beside the login account every person of this test has. *)
+        let frank = person zone ~base_path ~name:"frank" ~hex:'f' in
+        let frank_key =
+          let account = get (Provider_account_id.of_string "account-frank-key") in
+          (match
+             Authz_provider_account.link_key
+               zone
+               ~user_id:frank.user_id
+               ~provider_account_id:account
+               ~integration_id:(get (Integration_id.of_string "claude_code"))
+           with
+           | Ok () -> ()
+           | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+          let runtime, keeper =
+            runtime_and_keeper zone ~user_id:frank.user_id ~account ~name:"frank-key"
+          in
+          { frank with
+            account
+          ; runtime
+          ; keeper
+          ; home = claude_home ~runtime_root:frank.runtime_root account
+          }
+        in
+        let key_of_frank =
+          (match
+             Option.map
+               (Runtime_api_key_file.write
+                  ~runtime_root:frank.runtime_root
+                  ~account_id:frank_key.account
+                  ~generation:Key_generation.first)
+               (Runtime_api_key_file.key_of_string "sk-test-the-key-of-frank")
+           with
+           | Some (Ok ()) -> ()
+           | None -> Alcotest.fail "the fixture key is no key"
+           | Some
+               (Error
+                 ( Runtime_api_key_file.Root_unavailable _
+                 | Runtime_api_key_file.Folder_not_private _
+                 | Runtime_api_key_file.Generation_taken
+                 | Runtime_api_key_file.Not_written _ )) ->
+             Alcotest.fail "the key file was not written");
+          get_text
+            (Layout.key_file
+               ~runtime_root:frank.runtime_root
+               ~account_id:frank_key.account
+               ~generation:Key_generation.first)
+        in
+        (* A private file of this user that holds a key and is not the file
+           of any account. *)
+        let a_key_elsewhere =
+          let path = Filename.concat frank.runtime_root "a-key-elsewhere" in
+          Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 path (fun channel ->
+            Out_channel.output_string channel "sk-test-a-key-elsewhere");
+          Unix.chmod path 0o600;
+          path
+        in
+        let not_the_key_of (who : person) refusal = refusal = Access.Not_the_account_key who.account in
+        let on_its_key = captured_on_key frank_key.home ~key_file:key_of_frank in
+        allowed "a key account, on the key of its records" (own frank_key ()) on_its_key;
+        allowed "a turn on a key account, on the key of its records" (turn frank_key ()) on_its_key;
+        let without_key = captured frank_key.home in
+        refused "a key account, on no key" (own frank_key ()) without_key (not_the_key_of frank_key);
+        refused "a turn on a key account, on no key" (turn frank_key ()) without_key (not_the_key_of frank_key);
+        let on_another_file = captured_on_key frank_key.home ~key_file:a_key_elsewhere in
+        refused
+          "a key account, on the key of another file"
+          (own frank_key ())
+          on_another_file
+          (not_the_key_of frank_key);
+        refused
+          "a turn on a key account, on the key of another file"
+          (turn frank_key ())
+          on_another_file
+          (not_the_key_of frank_key);
+        (* The key of one's own key account is not the key of one's login
+           account either: an account runs on what its records say. *)
+        let login_on_a_key = captured_on_key frank.home ~key_file:key_of_frank in
+        refused "a login account, on a key" (own frank ()) login_on_a_key (not_the_key_of frank);
+        refused "a turn on a login account, on a key" (turn frank ()) login_on_a_key (not_the_key_of frank);
+        allowed "the login account of the same person, on no key" (own frank ()) (captured frank.home);
+        (* Another person names the key account, on the home their own
+           namespace spells for its id and on the key file itself. The
+           answer is the one of any account of another person. *)
+        refused
+          "the key account of another person, on its key"
+          (own bob ~account:frank_key.account ())
+          (captured_on_key (claude_home ~runtime_root:bob.runtime_root frank_key.account) ~key_file:key_of_frank)
+          (fun refusal ->
+            refusal
+            = Access.Account_unavailable
+                { provider_account_id = frank_key.account
+                ; reason = Authz_provider_account.Linked_to_another
+                });
         (* RFC a-persons-api-key-is-their-own-provider-account 3.6: from the
            start of the purge of an account on, no turn spends it, before
            anything of it is deleted. *)

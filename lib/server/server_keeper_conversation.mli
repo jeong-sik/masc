@@ -125,7 +125,8 @@ type start_error =
     conversation runs inside the call of its account, and so does the start.
     [one_call_of account ~busy f] runs [f] when no other call of [account]
     runs and gives [busy] otherwise, as
-    {!Server_setup_account_login.one_call_of} does. Inside the call, a row a
+    {!Server_setup_account_login.one_call_of} does. What it hands [f] is
+    not looked at. Inside the call, a row a
     stopped server left half written in that conversation is cut, as its next
     turn would have cut it, and the [started] row of the new one is appended.
     A Keeper with no current conversation follows none and takes no call. *)
@@ -139,7 +140,7 @@ val start
   -> one_call_of:
        (Authz_types.Provider_account_id.t
         -> busy:start_error
-        -> (unit -> (conversation, start_error) result)
+        -> ('call -> (conversation, start_error) result)
         -> (conversation, start_error) result)
   -> (conversation, start_error) result
 

@@ -82,15 +82,40 @@ let on_the_server ~home ~config_directory run =
     run
 ;;
 
-let key =
-  match Runtime_api_key_file.key_of_string file_key with
-  | Some key -> key
-  | None -> Alcotest.fail "fixture key refused"
+(* A private file that holds [text], as a key file is. *)
+let with_file ?(permissions = 0o600) text run =
+  with_directory (fun directory ->
+    let path = Filename.concat directory "key" in
+    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] permissions path (fun channel ->
+      Out_channel.output_string channel text);
+    Fun.protect
+      ~finally:(fun () -> Sys.remove path)
+      (fun () ->
+        (* The mode of the open is narrowed by the umask of the process. *)
+        Unix.chmod path permissions;
+        run path))
 ;;
+
+let with_key_file run = with_file file_key run
 
 let environment = function
   | Ok account -> Array.to_list (Account.environment account)
   | Error detail -> Alcotest.failf "the account was not captured: %s" detail
+;;
+
+(* The account of the key of [key_file], and the entries of its child. *)
+let on_key ~declaration ~key_file =
+  match Account.capture_on_key ~declaration ~key_file with
+  | Ok account ->
+    Alcotest.(check (option string))
+      "the account says the file its key came from"
+      (Some key_file)
+      (Account.key_file account);
+    Array.to_list (Account.environment account)
+  | Error (Account.Key_not_read error) ->
+    Alcotest.failf "the key was not read: %s" (Runtime_api_key_file.read_error_to_string error)
+  | Error (Account.Key_not_captured detail) ->
+    Alcotest.failf "the account was not captured: %s" detail
 ;;
 
 let name_of entry =
@@ -128,16 +153,20 @@ let test_declared () =
   with_directory (fun home ->
     with_directory (fun account_home ->
       on_the_server ~home ~config_directory:None (fun () ->
-        let on_key = environment (Account.capture_on_key ~declaration:(Some account_home) ~key) in
+        with_key_file @@ fun key_file ->
+        let on_key = on_key ~declaration:(Some account_home) ~key_file in
         only_the_file_key "a declared home" on_key;
         Alcotest.(check (list string))
           "the home is the declared one"
           [ account_home ]
           (values config_dir on_key);
         (* Beside the key, the child is the child of a login on that home. *)
-        let on_login =
-          environment (Account.capture ~client:Account.Claude_code ~declaration:(Some account_home))
-        in
+        let login = Account.capture ~client:Account.Claude_code ~declaration:(Some account_home) in
+        Alcotest.(check (option (option string)))
+          "a login says no file of a key"
+          (Some None)
+          (Result.to_option (Result.map Account.key_file login));
+        let on_login = environment login in
         Alcotest.(check (list string)) "a login on a declared home has no API key" [] (values api_key on_login);
         Alcotest.(check (list string))
           "the key is all that a key adds"
@@ -148,7 +177,8 @@ let test_declared () =
 let test_undeclared () =
   with_directory (fun home ->
     on_the_server ~home ~config_directory:None (fun () ->
-      let on_key = environment (Account.capture_on_key ~declaration:None ~key) in
+      with_key_file @@ fun key_file ->
+      let on_key = on_key ~declaration:None ~key_file in
       only_the_file_key "the home of the user" on_key;
       Alcotest.(check (list string)) "the user home stays" [ home ] (values "HOME" on_key);
       Alcotest.(check (list string)) "no directory is chosen for it" [] (values config_dir on_key)))
@@ -158,12 +188,31 @@ let test_inherited_directory () =
   with_directory (fun home ->
     with_directory (fun chosen ->
       on_the_server ~home ~config_directory:(Some chosen) (fun () ->
-        let on_key = environment (Account.capture_on_key ~declaration:None ~key) in
+        with_key_file @@ fun key_file ->
+        let on_key = on_key ~declaration:None ~key_file in
         only_the_file_key "a directory the server chose" on_key;
         Alcotest.(check (list string))
           "the directory the server chose stays chosen"
           [ chosen ]
           (values config_dir on_key))))
+;;
+
+(* The capture reads the file itself: a file that gives no key captures no
+   account, so no account says a file whose key it does not carry. *)
+let test_no_key () =
+  with_directory (fun account_home ->
+    let not_read label ~key_file expected =
+      match Account.capture_on_key ~declaration:(Some account_home) ~key_file with
+      | Ok (_ : Account.claude_code Account.t) -> Alcotest.failf "%s: captured" label
+      | Error (Account.Key_not_captured detail) -> Alcotest.failf "%s: not captured: %s" label detail
+      | Error (Account.Key_not_read error) ->
+        Alcotest.(check string) label expected (Runtime_api_key_file.read_error_code error)
+    in
+    not_read "a file that is not there" ~key_file:(Filename.concat account_home "no-key") "key_missing";
+    with_file ~permissions:0o640 file_key (fun key_file ->
+      not_read "a file its group reads" ~key_file "key_unreadable");
+    with_file {|{"api_key":"sk-test-file-key"}|} (fun key_file ->
+      not_read "a credential document" ~key_file "key_unreadable"))
 ;;
 
 let () =
@@ -173,6 +222,7 @@ let () =
       , [ Alcotest.test_case "on a declared home" `Quick test_declared
         ; Alcotest.test_case "on the home of the user" `Quick test_undeclared
         ; Alcotest.test_case "on a directory the server chose" `Quick test_inherited_directory
+        ; Alcotest.test_case "on a file that gives no key" `Quick test_no_key
         ] )
     ]
 ;;

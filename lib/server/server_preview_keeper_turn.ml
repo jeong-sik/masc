@@ -85,7 +85,8 @@ let refusal_error (refusal : Runtime_account_access.refusal) =
   match refusal with
   | Runtime_account_access.Turn_refused (Authz_keeper_turn.Denied _)
   | Runtime_account_access.Not_active _
-  | Runtime_account_access.Not_the_account_home _ -> E.Turn_refused text
+  | Runtime_account_access.Not_the_account_home _
+  | Runtime_account_access.Not_the_account_key _ -> E.Turn_refused text
   | Runtime_account_access.Not_the_assigned_runtime _
   | Runtime_account_access.Turn_refused (Authz_keeper_turn.No_authorized_runtime _) ->
     (* The owner gave the Keeper another Runtime after the route read it. *)
@@ -368,59 +369,65 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
     let* name, message = request_of body in
     let* keeper_id = keeper_id_of name in
     let* runtime_id, provider_account_id = assigned person keeper_id in
-    (* The binding is chosen by the Runtime id, so [prepared.runtime_id] is
-       [runtime_id]. *)
-    let* prepared =
-      Login.person_runtime
-        person
-        ~base_path
-        ~provider_account_id
-        ~binding:(Runtime_account_runtime.Runtime (Authz_types.Runtime_id.to_string runtime_id))
-      |> Result.map_error login_error
-    in
-    let request =
-      Runtime_account_access.Keeper_turn
-        { owner = person.user_id
-        ; keeper_id
-        ; channel = Authz_types.Channel.Direct
-        ; pat
-        ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
-        }
-    in
-    let authorize account =
-      Runtime_account_access.authorize request account |> Result.map_error refusal_error
-    in
-    let one_call turn =
-      Login.one_call_of provider_account_id ~busy:(E.Account_call_running E.Runtime_account) turn
-    in
-    let* { model; text; conversation } =
-      match prepared.Login.runtime.Runtime_instance.execution with
-      | Runtime_execution.Claude_code execution ->
-        let* account = authorize execution.account_home in
-        one_call (fun () ->
-          call_claude
-            ~env
-            ~keeper_id
-            ~execution
-            ~account
-            ~records:(Conversation.root ~base_path ~namespace:person.namespace)
-            ~deleted:(Server_keeper_conversation_purge.deletion_began person)
-            ~provider_account_id
-            ~message)
-      | Runtime_execution.Codex_app_server execution ->
-        let* account = authorize execution.account_home in
-        one_call (fun () ->
-          call_codex ~env ~keeper_id ~runtime:prepared.Login.runtime ~execution ~account ~message)
-      | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Muse_serve _
-      | Runtime_execution.Vibe_cli _
-      | Runtime_execution.Agent_core _ -> Error E.Runtime_not_supported
+    (* The runtime is made and the turn is judged inside the call of the
+       account: its key is read there, and the removal of an account takes
+       the same call before it removes the key (RFC
+       a-persons-api-key-is-their-own-provider-account 3.6). *)
+    let* prepared_runtime_id, { model; text; conversation } =
+      Login.one_call_of
+        provider_account_id
+        ~busy:(E.Account_call_running E.Runtime_account)
+        (fun in_call ->
+           (* The binding is chosen by the Runtime id, so
+              [prepared.runtime_id] is [runtime_id]. *)
+           let* prepared =
+             Login.person_runtime
+               in_call
+               person
+               ~base_path
+               ~binding:(Runtime_account_runtime.Runtime (Authz_types.Runtime_id.to_string runtime_id))
+             |> Result.map_error login_error
+           in
+           let request =
+             Runtime_account_access.Keeper_turn
+               { owner = person.user_id
+               ; keeper_id
+               ; channel = Authz_types.Channel.Direct
+               ; pat
+               ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
+               }
+           in
+           let authorize account =
+             Runtime_account_access.authorize request account |> Result.map_error refusal_error
+           in
+           let* answer =
+             match prepared.Login.runtime.Runtime_instance.execution with
+             | Runtime_execution.Claude_code execution ->
+               let* account = authorize execution.account_home in
+               call_claude
+                 ~env
+                 ~keeper_id
+                 ~execution
+                 ~account
+                 ~records:(Conversation.root ~base_path ~namespace:person.namespace)
+                 ~deleted:(Server_keeper_conversation_purge.deletion_began person)
+                 ~provider_account_id
+                 ~message
+             | Runtime_execution.Codex_app_server execution ->
+               let* account = authorize execution.account_home in
+               call_codex ~env ~keeper_id ~runtime:prepared.Login.runtime ~execution ~account ~message
+             | Runtime_execution.Antigravity_cli _
+             | Runtime_execution.Muse_serve _
+             | Runtime_execution.Vibe_cli _
+             | Runtime_execution.Agent_core _ -> Error E.Runtime_not_supported
+           in
+           Ok (prepared.Login.runtime_id, answer))
     in
     Ok
       (R.json
          R.Ok_200
          ([ "keeper_id", `String (Authz_types.Keeper_id.to_string keeper_id)
-          ; "runtime_id", `String (Authz_types.Runtime_id.to_string prepared.Login.runtime_id)
+          ; "runtime_id", `String (Authz_types.Runtime_id.to_string prepared_runtime_id)
           ; "model", `String model
           ; "text", `String text
           ]

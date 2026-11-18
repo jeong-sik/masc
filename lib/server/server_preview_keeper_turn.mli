@@ -32,8 +32,10 @@
       own instructions. Codex keeps no rollout or history of the thread.
 
     The client may be silent for 120 seconds. One call of an account runs at
-    a time ({!Server_setup_account_login.one_call_of}). The authorization log
-    keeps no record of a turn.
+    a time ({!Server_setup_account_login.one_call_of}). The runtime is made
+    and the turn is authorized inside that call, so a turn while another
+    call of the account runs is told so before anything of the account is
+    read. The authorization log keeps no record of a turn.
 
     {b The conversation} (Claude Code). A Keeper has one conversation at a
     time ({!Server_keeper_conversation}), and its first turn starts one on

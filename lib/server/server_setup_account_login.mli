@@ -122,10 +122,19 @@ type runtime_error =
     {!Runtime_api_key_file.read_error_code}. *)
 val key_unusable_message : Runtime_api_key_file.read_error -> string
 
-(** The runtime of [binding] on the home of the person's account
-    [provider_account_id]: a provider of the workspace with the home of the
+(** The call of an account that is running. Only {!one_call_of} makes one,
+    and it hands it to the work it runs. *)
+type in_call
+
+(** The runtime of [binding] on the home of the account of the call, an
+    account of the person: a provider of the workspace with the home of the
     account ({!Runtime_account_runtime}). {!verify} chooses a model, and a
     turn of a Keeper the Runtime its owner gave it (plan D2-8).
+
+    It takes the call of the account ({!one_call_of}), so the records of the
+    account and its key file are read inside that call. The files of an
+    account change only inside its call, so no runtime is made on a key that
+    a removal or a replacement was taking away.
 
     The record that linked the account says what it runs on. A login account
     is of the provider its login receipt names and runs on the login in its
@@ -137,9 +146,9 @@ val key_unusable_message : Runtime_api_key_file.read_error -> string
     An account the person does not own, or a login account with no login
     receipt of theirs, is a 404 with the same sentence. *)
 val person_runtime
-  :  person
+  :  in_call
+  -> person
   -> base_path:string
-  -> provider_account_id:Authz_types.Provider_account_id.t
   -> binding:Runtime_account_runtime.binding
   -> (prepared, runtime_error) result
 
@@ -147,9 +156,10 @@ val person_runtime
     otherwise. A call starts the official client on the home of the account,
     and no two clients refresh the credential of one home at once, so a
     verification and a Keeper turn of one account take turns (issue #50018).
-    It holds within this process. *)
+    [f] gets the call it runs in, which {!person_runtime} takes. It holds
+    within this process. *)
 val one_call_of
   :  Authz_types.Provider_account_id.t
   -> busy:'e
-  -> (unit -> ('a, 'e) result)
+  -> (in_call -> ('a, 'e) result)
   -> ('a, 'e) result

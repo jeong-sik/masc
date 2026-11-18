@@ -32,20 +32,31 @@ val capture
     a projected context. Codex includes credential names declared in the selected
     home's root config.toml; MASC does not select a separate CLI profile. *)
 
-(** {!capture} for Claude Code on an API key read from a file (RFC
-    a-persons-api-key-is-their-own-provider-account 3.4).
+(** Why {!capture_on_key} captured no account. *)
+type key_capture_error =
+  | Key_not_read of Runtime_api_key_file.read_error
+      (** The file gave no key ({!Runtime_api_key_file.read}). *)
+  | Key_not_captured of string
+      (** The key was read and the account was not captured: what {!capture}
+          answers. *)
+
+(** {!capture} for Claude Code on the API key of [key_file] (RFC
+    a-persons-api-key-is-their-own-provider-account 3.4). The capture reads
+    the file itself ({!Runtime_api_key_file.read}), so a caller cannot name
+    one file and hand over the key of another: {!key_file} of the account is
+    the file its key came from.
 
     The child takes from the environment of the server only the names a
     declared account takes, whether or not [declaration] names a home: no API
     key, authentication token, provider choice, cloud credential or endpoint
     of the server. A home the environment chose keeps its
-    [CLAUDE_CONFIG_DIR]. [key] is then the one [ANTHROPIC_API_KEY] of the
+    [CLAUDE_CONFIG_DIR]. The key is then the one [ANTHROPIC_API_KEY] of the
     child, which a non-interactive session uses before the account signed in
     to the home. *)
 val capture_on_key
   :  declaration:string option
-  -> key:Runtime_api_key_file.key
-  -> (claude_code t, string) result
+  -> key_file:string
+  -> (claude_code t, key_capture_error) result
 
 val resolve_home : client:'client client -> declaration:string option -> (string, string) result
 (** Current directory metadata for setup/display boundaries. This does not
@@ -60,6 +71,11 @@ val client : 'client t -> 'client client
 
 val home : 'client t -> string
 val source : 'client t -> source
+
+(** The file the API key of the account was read from, as {!capture_on_key}
+    was given it. [None] for an account of {!capture}, which carries no key
+    of a file. *)
+val key_file : 'client t -> string option
 val environment : 'client t -> string array
 (** Return a fresh copy; mutation cannot change the captured selection. *)
 

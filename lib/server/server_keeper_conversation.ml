@@ -572,7 +572,7 @@ let start root keeper_id provider_account_id ~deleted ~draw ~now_ms ~one_call_of
     match current ~deleted (of_keeper keeper_id started) with
     | None -> begin_new ()
     | Some followed ->
-      one_call_of followed.provider_account_id ~busy:Account_busy (fun () ->
+      one_call_of followed.provider_account_id ~busy:Account_busy (fun (_ : _) ->
         let* () = settle root followed |> recorded in
         begin_new ()))
 ;;

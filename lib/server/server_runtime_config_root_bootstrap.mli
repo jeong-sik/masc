@@ -53,7 +53,13 @@ val place_embedded_runtime_toml
     Either way the directory of [path] and the directories the call made are
     synced before [Ok]: a call after one that gave [Not_synced] syncs again.
     The calls block on the file system: a command calls this, not a fiber of
-    a server. *)
+    a server.
+
+    The directory this makes is a config root that holds runtime.toml alone. A
+    single-user start on the base path afterwards treats it as an existing
+    root ({!bootstrap_initial_config_root}): it adds the scaffold and the
+    missing prompt seeds, and not the rest of what it seeds a new root with,
+    the Keepers among them. *)
 
 val bootstrap_base_path_config_root : base_path:string -> unit
 

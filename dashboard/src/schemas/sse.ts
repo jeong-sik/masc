@@ -97,8 +97,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
   SSE_APPROVAL_RULES_CHANGED_EVENT,
   // Held tool calls and tool approval modes changed
-  // (lib/keeper/keeper_tool_approval_broadcast.ml). The TUI re-reads on them;
-  // the dashboard follows held calls on the chat stream.
+  // (lib/keeper/keeper_tool_approval_broadcast.ml). The TUI re-reads on them.
+  // The dashboard draws a held call from the chat stream and reads the
+  // listing again when the waits change; it does not follow the modes.
   'keeper_tool_approval_waits_changed',
   'keeper_tool_approval_mode_changed',
   // A Keeper's or an installation's questions to the operator changed

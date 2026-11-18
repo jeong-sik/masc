@@ -169,6 +169,136 @@ describe('hydrateKeeperToolApprovals', () => {
   })
 })
 
+// #52954: the event that ends a wait can miss this view. The listing is every
+// wait the server holds, so a card it does not name has nothing to answer.
+describe('cards whose wait the listing no longer holds', () => {
+  const listing = (...pending: unknown[]) => jsonResponse(200, { pending })
+  const listed = (keeper: string, toolCallId: string) => ({ keeper, tool_call_id: toolCallId,
+    approval_id: `approval-${toolCallId}`, tool: 'Execute', args: '{}', question: 'run?', because: '',
+    asked_at: 1, timeout_sec: 180 })
+
+  it('retires a card that was on screen before the read', async () => {
+    pendingRow('call-ended')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(listing()))
+
+    await hydrateKeeperToolApprovals()
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-ended']).toBeUndefined()
+  })
+
+  it('retires the cards of every Keeper, and keeps the ones still held', async () => {
+    pendingRow('call-held', 'approval-call-held', 'sangsu')
+    pendingRow('call-ended', 'approval-call-ended', 'sangsu')
+    pendingRow('call-elsewhere', 'approval-call-elsewhere', 'albini')
+    const held = keeperToolApprovals.value.sangsu?.['approval-call-held']
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(listing(listed('sangsu', 'call-held'))))
+
+    await hydrateKeeperToolApprovals()
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-held']).toBe(held)
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-ended']).toBeUndefined()
+    expect(keeperToolApprovals.value.albini?.['approval-call-elsewhere']).toBeUndefined()
+  })
+
+  it('keeps a card the stream drew while the listing was being read', async () => {
+    let release!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { release = resolve })))
+    const hydration = hydrateKeeperToolApprovals()
+    // The server answered before this wait began; the listing cannot speak for it.
+    pendingRow('call-new')
+    const drawn = keeperToolApprovals.value.sangsu?.['approval-call-new']
+    release(listing())
+
+    await hydration
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-new']).toBe(drawn)
+  })
+
+  it('keeps a card whose answer is in flight', async () => {
+    pendingRow('call-answering')
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).includes('/tool-approvals')
+      ? Promise.resolve(listing())
+      : new Promise<Response>(resolve => { answer = resolve })))
+    const answering = answerHeldKeeperToolApproval('sangsu', 'call-answering', 'approval-call-answering', 'approve')
+    await vi.waitFor(() => expect(keeperToolApprovals.value.sangsu?.['approval-call-answering']?.answering).toBe(true))
+
+    await hydrateKeeperToolApprovals()
+
+    // The server has already released the wait; the answer's own response settles the row.
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-answering']?.answering).toBe(true)
+    answer(jsonResponse(200, { settled: true, remembered: false, decision: 'approve' }))
+    await expect(answering).resolves.toBe(true)
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-answering']?.settled).toBe(true)
+  })
+
+  it('keeps a card that was drawn again while the listing was being read', async () => {
+    pendingRow('call-again')
+    let release!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { release = resolve })))
+    const hydration = hydrateKeeperToolApprovals()
+    // The stream settled the card and asked again under the same id. The
+    // listing was read before that and does not speak for the new card.
+    dropKeeperToolApproval('sangsu', 'call-again', 'approval-call-again')
+    pendingRow('call-again')
+    const drawnAgain = keeperToolApprovals.value.sangsu?.['approval-call-again']
+    release(listing())
+
+    await hydration
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-again']).toBe(drawnAgain)
+  })
+
+  it('leaves every card of a call to the answer that is in flight for it', async () => {
+    // Two cards of one call, and the operator answers the first. The answer
+    // watches the call's cards: one retired under it reads as someone else's
+    // change, and it would stop without telling the operator the answer did not take.
+    pendingRow('call-1', 'approval-a')
+    pendingRow('call-1', 'approval-b')
+    const sibling = keeperToolApprovals.value.sangsu?.['approval-b']
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).includes('/tool-approvals')
+      ? Promise.resolve(listing())
+      : new Promise<Response>(resolve => { answer = resolve })))
+    const answering = answerHeldKeeperToolApproval('sangsu', 'call-1', 'approval-a', 'approve')
+    await vi.waitFor(() => expect(keeperToolApprovals.value.sangsu?.['approval-a']?.answering).toBe(true))
+
+    await hydrateKeeperToolApprovals()
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-b']).toBe(sibling)
+    answer(jsonResponse(200, { settled: false, remembered: false, decision: 'approve' }))
+    await expect(answering).resolves.toBe(false)
+    // The answer did not take, says so, and reads the listing itself.
+    expect(keeperActionErrors.value.sangsu).toEqual(expect.any(String))
+    expect(keeperToolApprovals.value.sangsu?.['approval-a']).toBeUndefined()
+  })
+
+  it('retires nothing when the workspace changes while the listing is being read', async () => {
+    pendingRow('call-other-workspace')
+    const before = keeperToolApprovals.value.sangsu?.['approval-call-other-workspace']
+    let release!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { release = resolve })))
+    const hydration = hydrateKeeperToolApprovals()
+    resetExecutionSnapshotGeneration()
+    release(listing())
+
+    await hydration
+
+    // The listing answers for the workspace that was asked, not this one.
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-other-workspace']).toBe(before)
+  })
+
+  it('keeps every card when the listing cannot be read', async () => {
+    pendingRow('call-unknown')
+    const before = keeperToolApprovals.value.sangsu?.['approval-call-unknown']
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, { error: 'unavailable' })))
+
+    await hydrateKeeperToolApprovals()
+
+    expect(keeperToolApprovals.value.sangsu?.['approval-call-unknown']).toBe(before)
+  })
+})
+
 describe('approval instance ownership', () => {
   it.each([
     { change: 'requested', settled: true, remembered: false },

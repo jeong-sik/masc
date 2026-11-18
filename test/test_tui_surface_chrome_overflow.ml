@@ -134,6 +134,36 @@ let test_a_paged_body_hands_its_position () =
   Alcotest.(check bool) "a body that shows every row hands none" true
     (Option.is_none !frame_position)
 
+(* The contract owns a scrolled body's window, so a position the body hands
+   as well gives way to it; a paged body that hands twice is drawn with the
+   last one it handed (RFC tui-one-screen-grammar, section 2). *)
+let test_the_contract_decides_which_position_is_drawn () =
+  let state = fresh () in
+  let budget = surface_chrome_budget state ~terminal_rows in
+  let count = budget * 4 in
+  let reported = ref None in
+  let _ =
+    draw
+      ~hand:(fun ~budget:_ -> Some (Masc_tui_value.Position.row ~selected:(Some 2) ~total:9))
+      ~overflow:(Scrolled { scroll = 0; report = report_into reported })
+      ~count state
+  in
+  Alcotest.(check (option (triple int int int)))
+    "a scrolled body is drawn with the contract's window"
+    (Some (1, surface_window_height state ~terminal_rows ~count, count))
+    (window_numbers ());
+  frame_position := None;
+  let _ =
+    surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+      ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints
+      ~body:(fun ~budget c ->
+        c.position (Masc_tui_value.Position.row ~selected:(Some 0) ~total:3);
+        Option.iter c.position
+          (Masc_tui_value.Position.window ~first:3 ~shown:budget ~total:(budget * 2)))
+  in
+  Alcotest.(check (option (triple int int int))) "the last position handed is drawn"
+    (Some (4, budget + 3, budget * 2)) (window_numbers ())
+
 let () =
   Alcotest.run "tui_surface_chrome_overflow"
     [ ( "surface chrome overflow"
@@ -143,5 +173,7 @@ let () =
             test_the_frame_windows_a_scrolled_body
         ; Alcotest.test_case "a paged body hands its position" `Quick
             test_a_paged_body_hands_its_position
+        ; Alcotest.test_case "the contract decides which position is drawn" `Quick
+            test_the_contract_decides_which_position_is_drawn
         ;] )
     ]

@@ -2216,9 +2216,9 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
   in
   let keeper_wake =
-    match row.sch_payload_kind with
-    | Some ("keeper_wake" | "masc.keeper_wake") -> true
-    | Some _ | None -> false
+    match Option.bind row.sch_payload_kind Masc.Schedule_payload_projection.classify_kind with
+    | Some Masc.Schedule_payload_projection.Keeper_wake -> true
+    | Some Masc.Schedule_payload_projection.Lane_act | None -> false
   in
   let target_link =
     match keeper_wake, row.sch_payload_target with

@@ -3086,12 +3086,16 @@ let schedule_counts_line counts =
 
 (* Why the modify editor does not open on a row: the store refuses rows in
    that status (as last read), or this build cannot read the recurrence or the
-   delivery the form would carry back, so saving would put a default over it. *)
+   delivery the form would carry back, so saving would put a default over it,
+   or it does not know the row's kind, so saving would put another kind over
+   it. *)
 type schedule_modify_refusal =
   | Schedule_status_not_modifiable of string
   | Schedule_recurrence_unreadable of string
   | Schedule_delivery_unreadable of { delivery : string; detail : string }
   | Schedule_delivery_not_a_string
+  | Schedule_payload_kind_unknown of string option
+      (* The kind word the server sent with the row, when it sent one. *)
 
 let schedule_modify_refusal_text ~ko = function
   | Schedule_status_not_modifiable status ->
@@ -3129,6 +3133,21 @@ let schedule_modify_refusal_text ~ko = function
       else
         "the schedule's delivery is not a string; the form would save a \
          default over it"
+  | Schedule_payload_kind_unknown (Some kind) ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 일정 종류를 모름(%S) \xc2\xb7 저장하면 다른 종류로 바뀜"
+          kind
+      else
+        Printf.sprintf
+          "this build does not name the schedule's kind %S; the form would \
+           save another kind over it"
+          kind
+  | Schedule_payload_kind_unknown None ->
+      if ko then "서버가 일정 종류를 보내지 않음 \xc2\xb7 저장하면 다른 종류로 바뀜"
+      else
+        "the server sent no kind for this schedule; the form would save \
+         another kind over it"
 
 (** Why the store would refuse a modify, read before the editor opens.
 
@@ -3188,14 +3207,35 @@ let schedule_form_delivery (row : schedule_row) =
        | Some _ -> Error Schedule_delivery_not_a_string)
   | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
 
-let schedule_modify_form (row : schedule_row) recurrence ~delivery =
+(* The row's payload kind, read the way the projection that dispatches the row
+   reads it. The update replaces the whole definition and the server takes the
+   replacement's kind from the fields the call carries, so a form of another
+   kind would save that kind over the row. A word this build does not name
+   opens no form, and neither does a row the server sent no kind for. *)
+let schedule_form_payload_kind (row : schedule_row) =
+  match row.sch_payload_kind with
+  | None -> Error (Schedule_payload_kind_unknown None)
+  | Some word ->
+      (match Masc.Schedule_payload_projection.classify_kind word with
+       | Some kind -> Ok kind
+       | None -> Error (Schedule_payload_kind_unknown (Some word)))
+
+(* The schedule request's own fields, which a modify form carries whatever the
+   row's payload kind: when it is due, how it recurs and where it came from,
+   and below them when it expires. The update replaces the whole definition,
+   so the form of each kind carries all of these. *)
+let schedule_form_request_fields (row : schedule_row) recurrence =
+  [ "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
+  ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string recurrence)
+  ; "source", `String row.sch_source
+  ]
+
+let schedule_form_expiry_fields (row : schedule_row) =
+  Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
+  |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
+
+let schedule_keeper_wake_modify_form (row : schedule_row) recurrence ~delivery =
   let body = schedule_payload_body row.sch_payload in
-  let recurrence_kind = Schedule_domain.recurrence_kind_to_string recurrence in
-  let recurrence_fields = schedule_form_fields_of_recurrence recurrence in
-  let expires =
-    Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
-    |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
-  in
   (* The update replaces the whole definition, so a form without the run or
      commit watch removes it on save. Creation refuses a body whose watch does
      not decode, so only a hand-edited store file reaches the [Error] arm. *)
@@ -3238,12 +3278,32 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
      ; "title", `String (schedule_json_string "title" body)
      ]
      @ delivery_and_urgency
-     @ [ "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
-     ; "recurrence_kind", `String recurrence_kind
-     ; "source", `String row.sch_source
-     ; "allow_unregistered_keeper", `Bool false
-     ]
-     @ run_watch @ checks_watch @ recurrence_fields @ expires)
+     @ schedule_form_request_fields row recurrence
+     @ [ "allow_unregistered_keeper", `Bool false ]
+     @ run_watch @ checks_watch
+     @ schedule_form_fields_of_recurrence recurrence
+     @ schedule_form_expiry_fields row)
+  |> Yojson.Safe.pretty_to_string
+
+(* A Lane action row's form: the fields the update tool reads a Lane action
+   from, as the store holds them, and the same timing as a Keeper wake form.
+   It carries no Keeper wake field: the server takes the replacement's kind
+   from the fields the call carries, and refuses a call that carries fields of
+   both kinds. A field the stored body does not hold is left out, so the server
+   refuses the save instead of taking a default for it. *)
+let schedule_lane_action_modify_form (row : schedule_row) recurrence =
+  let stored field =
+    match schedule_payload_body row.sch_payload with
+    | `Assoc fields ->
+        List.assoc_opt field fields
+        |> Option.fold ~none:[] ~some:(fun value -> [ field, value ])
+  in
+  `Assoc
+    ([ "schedule_id", `String row.sch_schedule_id ]
+     @ List.concat_map stored Masc.Tool_schedule.lane_act_arg_names
+     @ schedule_form_request_fields row recurrence
+     @ schedule_form_fields_of_recurrence recurrence
+     @ schedule_form_expiry_fields row)
   |> Yojson.Safe.pretty_to_string
 
 (** The form the modify editor opens with, or why it does not open.
@@ -3251,16 +3311,24 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
     [Error] first carries {!schedule_modify_refusal}. A row whose recurrence
     this build cannot read is refused too: the update replaces the whole
     definition, so a form built without that recurrence would save a default
-    over it. *)
+    over it. The form is of the row's own payload kind for the same reason: a
+    Keeper wake form saved over a Lane action row would replace the action
+    with a wake. *)
 let schedule_update_form_json (row : schedule_row)
     : (string, schedule_modify_refusal) result =
   match schedule_modify_refusal row, row.sch_recurrence with
   | Some reason, (Ok _ | Error _) -> Error reason
   | None, Error detail -> Error (Schedule_recurrence_unreadable detail)
   | None, Ok recurrence ->
-      Result.map
-        (fun delivery -> schedule_modify_form row recurrence ~delivery)
-        (schedule_form_delivery row)
+      (match schedule_form_payload_kind row with
+       | Error reason -> Error reason
+       | Ok Masc.Schedule_payload_projection.Keeper_wake ->
+           Result.map
+             (fun delivery ->
+               schedule_keeper_wake_modify_form row recurrence ~delivery)
+             (schedule_form_delivery row)
+       | Ok Masc.Schedule_payload_projection.Lane_act ->
+           Ok (schedule_lane_action_modify_form row recurrence))
 
 let schedule_create_form_json () =
   `Assoc

@@ -135,3 +135,9 @@ val body_result_delivery :
 
 val lane_act_body : payload_view -> (string * Yojson.Safe.t, string) result
 (** A [masc.lane_act] body's installation id and action object. *)
+
+val classify_kind : string -> known_kind option
+(** The kind a payload's [kind] word names; {!kind} reads that word from a
+    stored request. [None] for a word this build does not name. A reader that
+    holds only the word matches on this result instead of comparing the
+    word. *)

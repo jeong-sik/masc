@@ -11,7 +11,6 @@ let ( let* ) = Result.bind
 type error =
   | Id_not_usable
   | Not_recorded of Authz_provider_account.error
-  | Record_not_read
   | Files_not_made
   | Account_stays of
       { provider_account_id : Provider_account_id.t
@@ -39,35 +38,33 @@ let generation_of (person : Login.person) id =
   | None -> None
 ;;
 
-(* The second step. The published state tells whether the record went into
-   the log: a commit can answer an error after its record went in, as when
-   the store did not take the end of the commit. *)
+(* The second step, and the generation of the key the record names.
+
+   A commit that answers [Ok] published the state with its record before it
+   answered ({!Authz_zone.commit}), and a [key_linked] record gives its
+   account the first generation ({!Authz_types.Key_generation}). A commit
+   can also answer an error after its record went in, as when the store did
+   not take the end of the commit: the published state tells then. *)
 let recorded (person : Login.person) id ~integration_id =
-  let written =
+  match
     Authz_provider_account.link_key
       person.zone
       ~user_id:person.user_id
       ~provider_account_id:id
       ~integration_id
-  in
-  match written, generation_of person id with
-  | Ok (), Some generation -> Ok generation
-  | Error error, Some generation ->
-    logged
-      id
-      "its record went in, and the commit answered"
-      (Authz_provider_account.error_to_string error);
-    Ok generation
-  | Error error, None ->
-    logged id "it was not recorded" (Authz_provider_account.error_to_string error);
-    Error (Not_recorded error)
-  | Ok (), None ->
-    logged
-      id
-      "its record is not read"
-      "the commit answered that the record went in, and the published state holds no key account \
-       of the person under the id";
-    Error Record_not_read
+  with
+  | Ok () -> Ok Key_generation.first
+  | Error error ->
+    (match generation_of person id with
+     | Some generation ->
+       logged
+         id
+         "its record went in, and the commit answered"
+         (Authz_provider_account.error_to_string error);
+       Ok generation
+     | None ->
+       logged id "it was not recorded" (Authz_provider_account.error_to_string error);
+       Error (Not_recorded error))
 ;;
 
 let files_detail = function
@@ -95,6 +92,10 @@ let register ~(person : Login.person) ~base_path ~integration_id key =
   match Provider_account_id.of_string (Auth.generate_token ()) with
   | Error (_ : Authz_id.error) -> Error Id_not_usable
   | Ok id ->
+    (* No call runs under an id that was just drawn. The call is held for
+       what comes after the record: from then on the list of the person
+       names the account, and a verification, a turn or a removal of it
+       answers that a call runs until the files are there. *)
     Login.one_call_of id ~busy:Id_not_usable (fun in_call ->
       let* generation = recorded person id ~integration_id in
       match made person ~base_path id ~generation key with

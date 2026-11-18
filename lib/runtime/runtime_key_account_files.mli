@@ -29,7 +29,17 @@ type make_error =
     [generation] ({!Runtime_api_key_file.write}). The home comes first, so an
     account whose key file is there has its home.
 
-    After an error, whoever asked removes what was made ({!remove}). *)
+    It makes the files of an account that has none: a registration calls it
+    once, inside the call of the account it has just recorded. After an
+    error there, nothing under the id is a key the account was given, and
+    whoever asked removes the account with what is under its id
+    ({!remove}).
+
+    {!remove} is not the undo of a call: it takes the key of every
+    generation. On an account whose files are there, an error says what
+    this call did. [Key_not_written Generation_taken] says it wrote no key
+    and changed none: the key in place is the one that was there, and a
+    removal after it would take that key away. *)
 val make
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

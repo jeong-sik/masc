@@ -232,8 +232,7 @@ let registration_error : Registration.error -> R.answer = function
   | Registration.Not_recorded
       ( Authz_provider_account.Body_not_built (_ : Authz_body.error)
       | Authz_provider_account.Commit_failed (Authz_zone.Record_not_built _ | Authz_zone.Log_holds_records _)
-        )
-  | Registration.Record_not_read -> unexpected
+        ) -> unexpected
   | Registration.Not_recorded
       (Authz_provider_account.Commit_failed
          ( Authz_zone.Store_stopped _

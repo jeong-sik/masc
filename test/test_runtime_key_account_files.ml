@@ -142,13 +142,18 @@ let test_made =
       "the key reads back from the file of its generation"
       ("key:" ^ the_key)
       (read_name (key_file_of ~runtime_root account));
-    (* A second registration of the id: its key file is taken, and the first
-       key stays the one in place. *)
+    (* A second making of an account that has its files: the place of its
+       key is taken. The call wrote no key and changed nothing that was
+       there, so nothing is to be removed after it. *)
     made "the same account again" ~runtime_root account "sk-test-another" "key_not_written:generation_taken";
-    Alcotest.(check string)
-      "the first key is the one in place"
-      ("key:" ^ the_key)
-      (read_name (key_file_of ~runtime_root account)))
+    let key_file = key_file_of ~runtime_root account in
+    Alcotest.(check string) "the first key is the one in place" ("key:" ^ the_key) (read_name key_file);
+    Alcotest.(check (list string))
+      "the folder of the key holds the file of the generation and nothing the refused call left"
+      [ Filename.basename key_file ]
+      (Array.to_list (Sys.readdir (Filename.dirname key_file)));
+    Alcotest.(check int) "the home is as it was" 0o700 (mode home);
+    key_state "a list reads the key of the account" ~runtime_root account "readable")
 ;;
 
 let test_no_root () =

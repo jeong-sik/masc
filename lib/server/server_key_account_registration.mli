@@ -16,7 +16,7 @@
       account, and a removal finds every key from the records alone.
     + The runtime root of the person, the home of the account and then its
       key file are made ({!Runtime_key_account_files.make}), the key as the
-      generation the records give the account.
+      generation the record gives the account: the first.
     + When the files were not made, the same call removes the account
       ({!Server_key_account_purge.remove_in_call}).
 
@@ -38,10 +38,6 @@ type error =
       (** The [key_linked] record is not in the log. Nothing was written. A
           commit that answered an error after its record went in is not
           this: the registration goes on from that record. *)
-  | Record_not_read
-      (** The commit answered that the record went in, and the published
-          state holds no key account of the person under the id. No file
-          was made. This means a bug in the zone. *)
   | Files_not_made
       (** The files of the account were not all made, and its removal went
           through: nothing of the key is on the server, and the account

@@ -109,6 +109,15 @@ let required_schedule_json_field json field =
   | `Null -> Error (Printf.sprintf "schedule %s is required" field)
   | value -> Ok value
 
+let optional_nested_contract_field json object_field field of_string =
+  let* token = optional_nested_string_field json object_field field in
+  match token with
+  | None -> Ok None
+  | Some token ->
+      of_string token
+      |> Result.map_error Schedule_contract_values.decode_error_to_string
+      |> Result.map Option.some
+
 let decode_schedule_row json =
   let* sch_schedule_instance_id =
     Masc.Tui_decode_fields.required_string_field json "schedule_instance_id"
@@ -158,15 +167,21 @@ let decode_schedule_row json =
   let* sch_last_wake_error =
     optional_nested_string_field json "last_wake" "error"
   in
+  (* Both projection axes decode through the schedule contract's closed
+     tables, so a word this build does not know fails the read the way the
+     wake status above does (#36009). *)
   let* sch_queue_projection_status =
-    optional_nested_string_field json "keeper_queue_evidence" "projection_status"
+    optional_nested_contract_field json "keeper_queue_evidence"
+      "projection_status"
+      Schedule_contract_values.queue_projection_status_of_string
   in
   let* sch_queue_pending_count =
     optional_nested_int_field json "keeper_queue_evidence" "pending_count"
   in
   let* sch_reaction_projection_status =
-    optional_nested_string_field json "keeper_reaction_evidence"
+    optional_nested_contract_field json "keeper_reaction_evidence"
       "projection_status"
+      Schedule_contract_values.reaction_projection_status_of_string
   in
   let* sch_reaction_latest_at_iso =
     optional_nested_string_field json "keeper_reaction_evidence"

@@ -1476,34 +1476,73 @@ let schedule_status_word_cells =
 let schedule_requested_clock_cells =
   Message_layout.display_width (Terminal_text.short_timestamp_of_unix 0.)
 
+(* The screen's words for the two projection axes. Both arrive as the
+   schedule contract's closed variants, so each value has its own arm here and
+   a value the server learns has to be given a word before this builds
+   (#36009). The words name what the reader sees, not the wire spelling:
+   [matched_consumed_ack] is "acknowledged", [matched_pending] is "queued". *)
+let schedule_queue_word = function
+  | Schedule_contract_values.Queue_matched_pending -> "queued"
+  | Schedule_contract_values.Queue_retained_terminal_wake -> "retained"
+  | Schedule_contract_values.Queue_withdrawn_at_cancel -> "withdrawn"
+  | Schedule_contract_values.Queue_not_found -> "not in queue"
+  | Schedule_contract_values.Queue_matched_terminal_completed -> "completed"
+  | Schedule_contract_values.Queue_matched_terminal_cancelled -> "cancelled"
+  | Schedule_contract_values.Queue_terminal_projection_pending -> "settling"
+  | Schedule_contract_values.Queue_transfer_projection_pending -> "transferring"
+  | Schedule_contract_values.Queue_evidence_invalid -> "mismatched"
+  | Schedule_contract_values.Queue_read_error -> "unreadable"
+  | Schedule_contract_values.Queue_unrecognized_receipt -> "unknown receipt"
+
+let schedule_reaction_word = function
+  | Schedule_contract_values.Reaction_conflicting_terminal_evidence -> "conflicting"
+  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> "cancelled"
+  | Schedule_contract_values.Reaction_matched_consumed_ack -> "acknowledged"
+  | Schedule_contract_values.Reaction_matched_turn_finished -> "turn finished"
+  | Schedule_contract_values.Reaction_matched_turn_started -> "turn started"
+  | Schedule_contract_values.Reaction_matched_stimulus -> "received"
+  | Schedule_contract_values.Reaction_not_found -> "not found"
+  | Schedule_contract_values.Reaction_quarantined -> "quarantined"
+  | Schedule_contract_values.Reaction_read_error -> "unreadable"
+  | Schedule_contract_values.Reaction_missing_stimulus_id -> "no stimulus id"
+  | Schedule_contract_values.Reaction_invalid_stimulus_id -> "bad stimulus id"
+  | Schedule_contract_values.Reaction_unrecognized_receipt -> "unknown receipt"
+
+let schedule_queue_color = function
+  | Schedule_contract_values.Queue_matched_pending
+  | Schedule_contract_values.Queue_terminal_projection_pending
+  | Schedule_contract_values.Queue_transfer_projection_pending -> Theme.warn ()
+  | Schedule_contract_values.Queue_matched_terminal_completed -> Theme.ok ()
+  | Schedule_contract_values.Queue_retained_terminal_wake
+  | Schedule_contract_values.Queue_withdrawn_at_cancel
+  | Schedule_contract_values.Queue_matched_terminal_cancelled -> Ansi.dim
+  | Schedule_contract_values.Queue_not_found
+  | Schedule_contract_values.Queue_evidence_invalid
+  | Schedule_contract_values.Queue_read_error
+  | Schedule_contract_values.Queue_unrecognized_receipt -> Theme.bad ()
+
+let schedule_reaction_color = function
+  | Schedule_contract_values.Reaction_matched_consumed_ack
+  | Schedule_contract_values.Reaction_matched_turn_finished -> Theme.ok ()
+  | Schedule_contract_values.Reaction_matched_turn_started
+  | Schedule_contract_values.Reaction_matched_stimulus -> Theme.info ()
+  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> Ansi.dim
+  | Schedule_contract_values.Reaction_conflicting_terminal_evidence
+  | Schedule_contract_values.Reaction_not_found
+  | Schedule_contract_values.Reaction_quarantined
+  | Schedule_contract_values.Reaction_read_error
+  | Schedule_contract_values.Reaction_missing_stimulus_id
+  | Schedule_contract_values.Reaction_invalid_stimulus_id
+  | Schedule_contract_values.Reaction_unrecognized_receipt -> Theme.bad ()
+
 (* What became of the wake, for a list row that has one line to say it in.
-
-   The word is the server's own [projection_status], not a reading of it.
-   That status is written at a dozen places in
-   [server_dashboard_schedule_projection.ml] as bare strings, and the live
-   store holds values this file has never heard of; a table of meanings
-   here would be a second classifier over that same open axis, drifting
-   from the ledger's the first time the server learns a word. Showing the
-   word the server wrote cannot drift.
-
-   The [matched_] prefix comes off. It sits on most of the values and
-   separates none of them, which is the reason the subject drops
-   [keeper:] a few lines below.
-
    [None] is the ledger saying nothing, and the row then shows an em dash
    rather than a delivery it does not know. That is not the same as a wake
    that failed, which [wake:] beside it already names. *)
 let schedule_delivery_word (row : schedule_row) =
-  let matched = "matched_" in
-  let cut status =
-    let n = String.length matched in
-    if String.length status > n && String.equal (String.sub status 0 n) matched then
-      String.sub status n (String.length status - n)
-    else status
-  in
   match row.sch_reaction_projection_status with
   | None -> Masc_tui_theme.Glyph.no_value
-  | Some status -> cut status
+  | Some status -> schedule_reaction_word status
 
 (* What the last occurrence came to, for a row that has one line to say it.
 
@@ -1514,9 +1553,9 @@ let schedule_delivery_word (row : schedule_row) =
    occurrence before (a held occurrence has no wake of its own, and a
    projection between occurrences still carries the last one's reading), so
    drawing it would pair a dash in the trigger column with a word about a
-   different occurrence in this one. The word is the server's own, cut of
-   its [matched_] prefix, and the caller sanitises it the way it sanitises
-   every other reading from this projection. *)
+   different occurrence in this one. The word is [schedule_reaction_word]'s,
+   and the caller sanitises it the way it sanitises every other reading
+   from this projection. *)
 let schedule_outcome_word (row : schedule_row) =
   match row.sch_last_wake_status with
   | Some Schedule_contract_values.Wake_succeeded ->
@@ -1543,17 +1582,20 @@ let delivery_summary_in_korean = false
 
 let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
+    (* [pending_count] is the length of the owner's whole queue, not a fact
+       about this wake, so it is spelled as the depth beside the wake's
+       word rather than as a second "pending". *)
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
     | None, None -> "queue:\xe2\x80\x94"
-    | Some status, None -> "queue:" ^ status
-    | None, Some count -> Printf.sprintf "queue:pending=%d" count
+    | Some status, None -> "queue:" ^ schedule_queue_word status
+    | None, Some count -> Printf.sprintf "queue:depth=%d" count
     | Some status, Some count ->
-        Printf.sprintf "queue:%s/%d pending" status count
+        Printf.sprintf "queue:%s depth=%d" (schedule_queue_word status) count
   in
   let reaction =
     match row.sch_reaction_projection_status with
     | None -> "reaction:\xe2\x80\x94"
-    | Some status -> "reaction:" ^ status
+    | Some status -> "reaction:" ^ schedule_reaction_word status
   in
   (* A held occurrence has no wake of its own, so the queue and reaction
      readings on the next line still describe the previous one. The hold says
@@ -2161,17 +2203,18 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
     | None, None -> Masc_tui_theme.Glyph.no_value
-    | Some status, None -> status
-    | None, Some count -> Printf.sprintf "pending=%d" count
-    | Some status, Some count -> Printf.sprintf "%s  pending=%d" status count
+    | Some status, None -> schedule_queue_word status
+    | None, Some count -> Printf.sprintf "depth=%d" count
+    | Some status, Some count ->
+        Printf.sprintf "%s  depth=%d" (schedule_queue_word status) count
   in
   let reaction =
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
-    | Some status, None -> status
+    | Some status, None -> schedule_reaction_word status
     | None, Some at -> at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" status at
+        Printf.sprintf "%s  %s" (schedule_reaction_word status) at
   in
   let summary =
     Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
@@ -2226,12 +2269,12 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   @ hold_rows
   @ [ field
         ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+          (Option.fold ~none:Ansi.dim ~some:schedule_queue_color
              row.sch_queue_projection_status)
         (t "큐" "Queue") queue
     ; field
         ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+          (Option.fold ~none:Ansi.dim ~some:schedule_reaction_color
              row.sch_reaction_projection_status)
         (t "반응" "Reaction") reaction
     ]

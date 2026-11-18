@@ -114,16 +114,21 @@ let test_accounts_of_a_catalog_row_are_exact_slots () =
        (Registry.rejected_slots registry))
 ;;
 
+(* What an operator writes today for an account the catalog does not know:
+   the dialect by hand, and the context window and a capabilities table on
+   the model, or boot drops the runtime. *)
+let manual name key = account name key ~extra:"kind = \"anthropic\"\nrequest-path = \"/v1/messages\""
+
+let with_capabilities text =
+  Str.global_replace (Str.regexp_string "api-name = \"claude-haiku-5-5\"\n")
+    "api-name = \"claude-haiku-5-5\"\nmax-context = 200000\n" text
+  ^ "\n[models.haiku.capabilities]\nsupports-system-prompt = true\n"
+;;
+
 let test_accounts_without_the_key_are_not_exact_slots () =
   with_fixture @@ fun ~root ~path ->
-  let manual name key = account name key ~extra:"kind = \"anthropic\"\nrequest-path = \"/v1/messages\"" in
-  let text = runtime_toml ~a:(manual "claude_a" key_a) ~b:(manual "claude_b" key_b) () in
-  (* What an operator writes today for an account the catalog does not know:
-     the context window and a capabilities table, or boot drops the runtime. *)
   let with_capabilities =
-    Str.global_replace (Str.regexp_string "api-name = \"claude-haiku-5-5\"\n")
-      "api-name = \"claude-haiku-5-5\"\nmax-context = 200000\n" text
-    ^ "\n[models.haiku.capabilities]\nsupports-system-prompt = true\n"
+    with_capabilities (runtime_toml ~a:(manual "claude_a" key_a) ~b:(manual "claude_b" key_b) ())
   in
   (* The runtimes load, so Keeper turns can use them, but the catalog has no
      row for either account: every lane is left with no slot and the required
@@ -256,6 +261,41 @@ catalog-provider = "claude"
          errors)
 ;;
 
+let init ~path text =
+  Fs_compat.save_file path text;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error detail -> failf "runtime initialization: %s" detail
+;;
+
+(* RFC §3.4: boot publishes without a slot the catalog cannot admit and keeps
+   serving; the install check refuses the same file and says which slot. *)
+let test_install_check_refuses_a_slot_boot_drops () =
+  with_fixture @@ fun ~root ~path ->
+  let text =
+    with_capabilities
+      (runtime_toml ~a:(account "claude_a" key_a ~extra:"catalog-provider = \"claude\"")
+         ~b:(manual "claude_b" key_b) ())
+  in
+  init ~path text;
+  (match Server_runtime_bootstrap.check_exact_output_registry ~config_root:root () with
+   | () -> fail "the install check passed a lane that boot would shorten"
+   | exception Env_config_core.Config_error message ->
+     let named = Printf.sprintf "lane %S slot 2 (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row" lane_id slot_b in
+     check bool ("names " ^ named) true (contains message named);
+     check bool "says what to write" true (contains message Runtime_schema.catalog_provider_key);
+     check bool "leaves the admitted account out" false (contains message (Printf.sprintf "(%S)" slot_a)));
+  boot ~root ~path text;
+  let registry = Registry.current () |> require_ok "boot publishes without the slot" in
+  check (list string) "boot keeps the admitted account" [ slot_a ] (selected_slots registry lane_id)
+;;
+
+let test_install_check_passes_when_every_slot_is_admitted () =
+  with_fixture @@ fun ~root ~path ->
+  init ~path (runtime_toml ());
+  Server_runtime_bootstrap.check_exact_output_registry ~config_root:root ()
+;;
+
 let () =
   run "account provider catalog row"
     [ ( "exact"
@@ -269,6 +309,11 @@ let () =
             test_two_accounts_of_one_row_admit_apart
         ; test_case "a spent account leaves the other open" `Quick
             test_a_spent_account_leaves_the_other_open
+        ] )
+    ; ( "install check"
+      , [ test_case "refuses a slot boot drops" `Quick test_install_check_refuses_a_slot_boot_drops
+        ; test_case "passes when every slot is admitted" `Quick
+            test_install_check_passes_when_every_slot_is_admitted
         ] )
     ; ( "refusals"
       , [ test_case "a catalog-provider typo is refused at load" `Quick

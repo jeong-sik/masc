@@ -2221,13 +2221,23 @@ let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
     degradation.emptied_lane_ids
 ;;
 
-let warn_rejected_exact_output_slots ~runtimes registry =
-  (* A slot left out for rule 3 is rejected here too, because its target was
-     never handed to the resolver. Its cause is already named, one WARN per
-     slot, by [warn_exact_slot_degradation]; diagnosing it again would
-     call it a subscription CLI or a typo. It is counted in the summary. *)
+(* Why a publication goes without a lane slot. The boot report and the
+   deployment preflight name a slot in the same words, from this one
+   classification. *)
+type rejected_exact_slot_cause =
+  | Left_out_for_deadline
+  | Model_reads_unstated of
+      { runtime : t
+      ; unstated : Runtime_exact_reads.t * Runtime_exact_reads.t list
+      }
+  | Diagnosed of Runtime_exact_output_registry.rejected_slot_diagnosis
+
+let rejected_exact_slot_causes ~runtimes resolver_snapshot rejected_slots =
+  (* A slot left out for rule 3 is rejected too, because its target was never
+     handed to the resolver. Diagnosing it would call it a subscription CLI or
+     a typo. *)
   let gaps = exact_slot_body_deadline_gaps () in
-  (* A slot's binding as [registry] was built from it: [runtimes] are the
+  (* A slot's binding as the snapshot was built from it: [runtimes] are the
      runtimes it was built from, not whatever table is loaded now. *)
   let runtime_of_slot slot_id =
     List.find_opt (fun (rt : t) -> String.equal rt.id slot_id) runtimes
@@ -2242,10 +2252,10 @@ let warn_rejected_exact_output_slots ~runtimes registry =
   (* A slot whose binding names a model the catalog has no row for, under a
      provider it has a row for, is left out by the resolver ([Target_model])
      while runtime.toml leaves one of the five reads [Runtime_exact_reads]
-     names unstated (RFC-0514 §2.2). The diagnosis below would call it a binding that
-     resolved to no catalog row; it is named here instead, once per slot,
-     with the keys to write. Only runtime bindings are targets; under a full
-     replacement catalog none is. *)
+     names unstated (RFC-0514 §2.2). The diagnosis would call it a binding that
+     resolved to no catalog row; it is named with the keys to write instead.
+     Only runtime bindings are targets; under a full replacement catalog none
+     is. *)
   let target_source = exact_output_target_source () in
   let model_row_missing =
     List.filter_map
@@ -2253,7 +2263,7 @@ let warn_rejected_exact_output_slots ~runtimes registry =
          match binding.component with
          | Agent_core.Exact_output.Target_model -> Some binding.target_ref
          | Agent_core.Exact_output.Target_provider -> None)
-      (Runtime_exact_output_registry.rejected_target_bindings registry)
+      (Agent_core.Exact_output.resolver_rejected_target_bindings resolver_snapshot)
   in
   let unstated_reads_of (slot : Runtime_exact_output_registry.rejected_slot) =
     match target_source with
@@ -2262,86 +2272,113 @@ let warn_rejected_exact_output_slots ~runtimes registry =
       Option.bind (runtime_of_slot slot.slot_id) (fun (rt : t) ->
         match Runtime_exact_reads.parse rt with
         | Ok (_ : Runtime_exact_reads.stated) -> None
-        | Error unstated -> Some (rt, unstated))
+        | Error unstated -> Some (Model_reads_unstated { runtime = rt; unstated }))
     | Runtime_binding_targets -> None
   in
-  let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
-  let deadline_rejected = List.filter left_out_for_deadline all_rejected in
-  let unstated, rejected =
-    List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
-    |> List.partition_map (fun slot ->
-      match unstated_reads_of slot with
-      | Some (rt, reads) -> Either.Left (slot, rt, reads)
-      | None -> Either.Right slot)
-  in
-  List.iter
-    (fun ((slot : Runtime_exact_output_registry.rejected_slot), (rt : t), (first, rest)) ->
-       Log.Server.warn
-         "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for the window, effort ladder, JSON mode, native schema or output ceiling of a model it has no row for, so write each one"
-         slot.lane_id
-         slot.position
-         slot.slot_id
-         rt.model.Runtime_schema.api_name
-         rt.provider.Runtime_schema.id
-         rt.model.Runtime_schema.id
-         (String.concat ", " (List.map Runtime_exact_reads.key (first :: rest))))
-    unstated;
   let configured_runtime slot_id =
     Option.map
       (fun (rt : t) ->
          rt.provider.Runtime_schema.id, rt.model.Runtime_schema.api_name)
       (runtime_of_slot slot_id)
   in
-  let diagnoses =
-    List.map
-      (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
-         ( slot
-         , Runtime_exact_output_registry.diagnose_rejected_slot
-             registry
-             slot
-             ~configured_runtime ))
-      rejected
+  List.map
+    (fun slot ->
+       if left_out_for_deadline slot
+       then slot, Left_out_for_deadline
+       else
+         match unstated_reads_of slot with
+         | Some cause -> slot, cause
+         | None ->
+           ( slot
+           , Diagnosed
+               (Runtime_exact_output_registry.diagnose_rejected_slot
+                  resolver_snapshot
+                  slot
+                  ~configured_runtime) ))
+    rejected_slots
+;;
+
+let rejected_exact_slot_text (slot : Runtime_exact_output_registry.rejected_slot) = function
+  | Left_out_for_deadline ->
+    Printf.sprintf
+      "lane %S slot %d (%S) ignored because its provider declares no %s (connect-timeout-s ends at the response headers and does not bound the body)"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+      Runtime_schema.exact_body_timeout_s_key
+  | Model_reads_unstated { runtime = rt; unstated = first, rest } ->
+    Printf.sprintf
+      "lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for the window, effort ladder, JSON mode, native schema or output ceiling of a model it has no row for, so write each one"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+      rt.model.Runtime_schema.api_name
+      rt.provider.Runtime_schema.id
+      rt.model.Runtime_schema.id
+      (String.concat ", " (List.map Runtime_exact_reads.key (first :: rest)))
+  | Diagnosed Runtime_exact_output_registry.Declared_target_binding_rejected ->
+    Printf.sprintf
+      "lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row; an endpoint the install wizard created can never match one, so name the catalog row its provider speaks as with %s, point the slot at a binding the catalog knows, or add the row"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+      Runtime_schema.catalog_provider_key
+  | Diagnosed (Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name })
+    when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
+    (* verifier_exact admits slots here, and judgement then admits each
+       id as a configured direct runtime
+       (verifier_exact_slot_admission) and dispatches that id
+       alone, so its ids must exist in both registries; #32653 measured
+       the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
+    Printf.sprintf
+      "lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+      provider_id
+      api_name
+      api_name
+  | Diagnosed (Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }) ->
+    Printf.sprintf
+      "lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+      provider_id
+      api_name
+      api_name
+  | Diagnosed Runtime_exact_output_registry.Unknown_to_both_registries ->
+    Printf.sprintf
+      "lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
+      slot.lane_id
+      slot.position
+      slot.slot_id
+;;
+
+let rejected_exact_slot_refusals ~runtimes resolver_snapshot rejected_slots =
+  List.map
+    (fun (slot, cause) -> rejected_exact_slot_text slot cause)
+    (rejected_exact_slot_causes ~runtimes resolver_snapshot rejected_slots)
+;;
+
+let warn_rejected_exact_output_slots ~runtimes registry =
+  let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let causes =
+    rejected_exact_slot_causes
+      ~runtimes
+      (Runtime_exact_output_registry.resolver_snapshot registry)
+      all_rejected
   in
   List.iter
-    (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
-       match diagnosis with
-       | Runtime_exact_output_registry.Declared_target_binding_rejected ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
-         when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
-         (* verifier_exact admits slots here, and judgement then admits each
-            id as a configured direct runtime
-            (verifier_exact_slot_admission) and dispatches that id
-            alone, so its ids must exist in both registries; #32653 measured
-            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-           provider_id
-           api_name
-           api_name
-       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-           provider_id
-           api_name
-           api_name
-       | Runtime_exact_output_registry.Unknown_to_both_registries ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
-           slot.lane_id
-           slot.position
-           slot.slot_id)
-    diagnoses;
+    (fun (slot, cause) ->
+       match cause with
+       | Left_out_for_deadline ->
+         (* Already named, one WARN per slot, by [warn_exact_slot_degradation];
+            counted in the summary. *)
+         ()
+       | Model_reads_unstated _ | Diagnosed _ ->
+         Log.Server.warn "exact_output: %s" (rejected_exact_slot_text slot cause))
+    causes;
   (* One consolidated line at ERROR, because per-slot WARNs read as
      tolerable degradation and get discounted: four lanes carried retired
      targets for days on 2026-08-28 while the warnings repeated unread. The
@@ -2357,7 +2394,7 @@ let warn_rejected_exact_output_slots ~runtimes registry =
        |> List.sort_uniq String.compare
      in
      let count predicate =
-       List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
+       List.length (List.filter (fun (_, cause) -> predicate cause) causes)
      in
      Log.Server.error
        "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose model has no catalog row and leaves an exact read unstated, %d whose provider declares no %s — fix runtime.toml"
@@ -2365,19 +2402,29 @@ let warn_rejected_exact_output_slots ~runtimes registry =
        (List.length lanes)
        (String.concat ", " lanes)
        (count (function
-          | Runtime_exact_output_registry.Unknown_to_both_registries -> true
-          | Runtime_exact_output_registry.Configured_runtime_only _
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+          | Diagnosed Runtime_exact_output_registry.Unknown_to_both_registries -> true
+          | Diagnosed
+              ( Runtime_exact_output_registry.Configured_runtime_only _
+              | Runtime_exact_output_registry.Declared_target_binding_rejected )
+          | Left_out_for_deadline | Model_reads_unstated _ -> false))
        (count (function
-          | Runtime_exact_output_registry.Configured_runtime_only _ -> true
-          | Runtime_exact_output_registry.Unknown_to_both_registries
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+          | Diagnosed (Runtime_exact_output_registry.Configured_runtime_only _) -> true
+          | Diagnosed
+              ( Runtime_exact_output_registry.Unknown_to_both_registries
+              | Runtime_exact_output_registry.Declared_target_binding_rejected )
+          | Left_out_for_deadline | Model_reads_unstated _ -> false))
        (count (function
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
-          | Runtime_exact_output_registry.Unknown_to_both_registries
-          | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
-       (List.length unstated)
-       (List.length deadline_rejected)
+          | Diagnosed Runtime_exact_output_registry.Declared_target_binding_rejected -> true
+          | Diagnosed
+              ( Runtime_exact_output_registry.Unknown_to_both_registries
+              | Runtime_exact_output_registry.Configured_runtime_only _ )
+          | Left_out_for_deadline | Model_reads_unstated _ -> false))
+       (count (function
+          | Model_reads_unstated _ -> true
+          | Left_out_for_deadline | Diagnosed _ -> false))
+       (count (function
+          | Left_out_for_deadline -> true
+          | Model_reads_unstated _ | Diagnosed _ -> false))
        Runtime_schema.exact_body_timeout_s_key)
 ;;
 

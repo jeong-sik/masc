@@ -77,10 +77,13 @@ val create_server_state :
 val check_exact_output_registry : ?config_root:string -> unit -> unit
 (** What boot's exact-output registry step refuses for the runtime.toml under
     [config_root] and the runtimes {!Runtime} has loaded: an unusable
-    mandatory lane, a resolver snapshot that does not build, or a registry
-    {!Runtime_exact_output_registry.publish} would refuse. Publishes nothing.
-    Raises [Env_config_core.Config_error] with the same text boot raises. The
-    deployment preflight runs it after {!Runtime.init_default_degraded_observation}. *)
+    mandatory lane, a resolver snapshot that does not build, a registry
+    {!Runtime_exact_output_registry.publish} would refuse, or a registry it
+    would publish without one of the declared lane slots. Publishes nothing.
+    Raises [Env_config_core.Config_error]: for a refusal, with the same text
+    boot raises; for a dropped slot, which boot publishes without, with the
+    words of {!Runtime.rejected_exact_slot_refusals}. The deployment preflight
+    runs it after {!Runtime.init_default_degraded_observation}. *)
 
 (** Why one of [Standalone_lane.required_ids] is unusable in the resolved
     [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or

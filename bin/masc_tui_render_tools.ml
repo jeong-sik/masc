@@ -5,8 +5,11 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
-(* The Skills list's name column: at least the width it always had, and no
-   wider than leaves the sizes on an 80-column screen. *)
+(* The Skills list's name column is as wide as its longest name, between
+   these two. The floor is the width the column always had. The cap keeps a
+   row on an 80-column screen: 32 name cells and an instruction Skill's
+   other fields (mark, execution, sizes) come to about 74 cells. A longer name is cut in
+   the middle, so two names that share a head still differ on screen. *)
 let skill_name_min_cells = 22
 let skill_name_max_cells = 32
 
@@ -1106,8 +1109,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                   else Ansi.dim)
                , Printf.sprintf " %s %s %-11s%s discovery=%dB body=%dB"
                    (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
-                   (Masc_tui_message_layout.fit_width
-                      (Terminal_text.single_line profile.esp_name) skill_name_cells)
+                   (Masc_tui_message_layout.fit_middle skill_name_cells
+                      (Terminal_text.single_line profile.esp_name))
                    (Terminal_text.single_line execution)
                    flow
                    profile.esp_discovery_bytes

@@ -557,14 +557,22 @@ let draw_ask_questions buf cols (state : state) ~budget =
         if Option.is_some selected_index then " · " ^ Masc_tui_keys.approval_answer_hint
         else ""
       in
+      (* The section follows the screen language, as the queue above it does
+         (RFC tui-one-screen-grammar section 5.1). *)
+      let count = Masc_tui_approvals_model.approvals_open_question_count state in
       box_line buf cols
-        (Printf.sprintf "  %s[?] Questions waiting on you (%d)%s%s" heading_tone
-           (Masc_tui_approvals_model.approvals_open_question_count state) answer_hint Ansi.reset);
+        ("  " ^ heading_tone
+         ^ (if state.ui_language = Lang_ko
+            then Printf.sprintf "[?] 답을 기다리는 질문 %d" count
+            else Printf.sprintf "[?] Questions waiting on you (%d)" count)
+         ^ answer_hint ^ Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
-            (Printf.sprintf "  %snone -- nobody is waiting on a decision%s"
-               Ansi.dim Ansi.reset)
+            ("  " ^ Ansi.dim
+             ^ ui_text state ~ko:"결정을 기다리는 키퍼 없음"
+                 ~en:"none · nobody is waiting on a decision"
+             ^ Ansi.reset)
       | rows ->
           (* Only the ask under the cursor keeps its questions; every other one
              folds to a line. Before this the panel drew all of them and the
@@ -577,8 +585,10 @@ let draw_ask_questions buf cols (state : state) ~budget =
               (* The selected ask left the list. No ask is drawn open, because
                  an open ask here is the one the next keys would answer. *)
               box_line buf cols
-                (Printf.sprintf "  %snothing selected -- [ or ] chooses a question%s"
-                   Ansi.dim Ansi.reset);
+                ("  " ^ Ansi.dim
+                 ^ ui_text state ~ko:"고른 질문 없음 · [/]: 질문 고르기"
+                     ~en:"nothing selected · [ or ] chooses a question"
+                 ^ Ansi.reset);
               let count = List.length rows in
               let room = max 0 (budget - count_frame_lines buf) in
               let shown = if count <= room then count else max 0 (room - 1) in
@@ -587,8 +597,12 @@ let draw_ask_questions buf cols (state : state) ~budget =
                 rows;
               if shown < count then
                 box_line buf cols
-                  (Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim (count - shown)
-                     (if count - shown = 1 then "" else "s") Ansi.reset)
+                  ("  " ^ Ansi.dim
+                   ^ (if state.ui_language = Lang_ko
+                      then Printf.sprintf "질문 %d개 더 · [/]: 이동" (count - shown)
+                      else Printf.sprintf "+%d more ask%s · [/] to reach" (count - shown)
+                          (if count - shown = 1 then "" else "s"))
+                   ^ Ansi.reset)
           | Some cursor ->
           let count = List.length rows in
           let selected = List.nth rows cursor in

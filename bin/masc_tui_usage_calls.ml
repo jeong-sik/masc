@@ -530,9 +530,11 @@ let legend ~cells ~at_most =
   in
   List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
 
-(* Two blank rows and a two-row legend are worth their rows while the section
-   fits. Taller than [rows], the legend takes one row and the blank rows go, so
-   the table shows more of its rows without a scroll. *)
+(* The section's arrangements, richest first: the taller chart, then the
+   two blank rows, then the two-row legend give way in that order, one step
+   at a time, so the section takes the richest arrangement the rows hold and
+   leaves no row empty that a richer one could have used. The table is never
+   what gives way: every arrangement keeps all of it. *)
 let lines ~width:cells ~rows t =
   let calls, failures, deferred = totals t.series.Series.tsr_buckets in
   let heading = heading ~cells t in
@@ -540,17 +542,25 @@ let lines ~width:cells ~rows t =
   else
     let top = [ heading; totals_line ~calls ~failures ~deferred ] in
     let table = table_lines ~cells t in
-    let spaced ~tall =
-      top @ [ "" ] @ chart_lines ~tall ~cells t @ legend ~cells ~at_most:2 @ [ "" ] @ table
+    let arrange ~tall ~gap_above ~gap_below ~legend_rows =
+      top
+      @ (if gap_above then [ "" ] else [])
+      @ chart_lines ~tall ~cells t
+      @ legend ~cells ~at_most:legend_rows
+      @ (if gap_below then [ "" ] else [])
+      @ table
     in
-    (* The taller chart takes rows only the section would leave empty: it
-       never pushes a row of the table out of sight. *)
-    let tall_spaced = spaced ~tall:tall_rows in
-    if List.length tall_spaced <= rows then tall_spaced
-    else
-      let short_spaced = spaced ~tall:1 in
-      if List.length short_spaced <= rows then short_spaced
-      else top @ chart_lines ~tall:1 ~cells t @ legend ~cells ~at_most:1 @ table
+    let arrangements =
+      [ (fun () -> arrange ~tall:tall_rows ~gap_above:true ~gap_below:true ~legend_rows:2);
+        (fun () -> arrange ~tall:1 ~gap_above:true ~gap_below:true ~legend_rows:2);
+        (fun () -> arrange ~tall:1 ~gap_above:true ~gap_below:false ~legend_rows:2);
+        (fun () -> arrange ~tall:1 ~gap_above:false ~gap_below:false ~legend_rows:2) ]
+    in
+    match List.find_map (fun arrangement ->
+        let drawn = arrangement () in
+        if List.length drawn <= rows then Some drawn else None) arrangements with
+    | Some drawn -> drawn
+    | None -> arrange ~tall:1 ~gap_above:false ~gap_below:false ~legend_rows:1
 
 (* The Dashboard's row names its window in as few cells as the row can spare. *)
 let short_span = function

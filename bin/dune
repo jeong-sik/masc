@@ -1269,7 +1269,7 @@
  (name masc_tui_tool_table)
  (wrapped false)
  (modules masc_tui_tool_table)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_table))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_say masc_tui_table))
 
 (library
  (name masc_tui_fleet_summary)
@@ -2428,6 +2428,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_say
   masc_tui_nested_result
   masc_tui_pick_list
   masc_tui_fetched

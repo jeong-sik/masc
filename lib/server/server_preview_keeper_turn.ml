@@ -133,13 +133,26 @@ let logged ~keeper_id detail =
   Log.Server.warn "Keeper %s turn failed: %s" (Authz_types.Keeper_id.to_string keeper_id) detail
 ;;
 
-let claude_failure : Runtime_claude_code.error -> Conversation.failure = function
+(* A turn that ended on a status of the provider says [Key_refused] when the
+   status is the refusal of the key the account runs on (RFC
+   a-persons-api-key-is-their-own-provider-account 3.5). Every other status
+   is a turn without an answer, as it is on an account of a login. *)
+let claude_failure ~account : Runtime_claude_code.error -> Conversation.failure = function
   | Runtime_claude_code.Subscription_required _ -> Conversation.Not_signed_in
   | Runtime_claude_code.Quota_blocked _ -> Conversation.No_quota
   | Runtime_claude_code.Timeout _ -> Conversation.Silent
   | Runtime_claude_code.Spawn_refused _ -> Conversation.Not_started
   | Runtime_claude_code.Invalid_config _ -> Conversation.Configuration_refused
-  | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status
+      ; api_error_cause = (_ : Runtime_claude_code.api_error_cause option)
+      ; detail = (_ : string)
+      ; tool_effect_attempted = (_ : bool)
+      ; response_emitted = (_ : bool)
+      } ->
+    if Runtime_claude_code.key_refused account ~api_error_status
+    then Conversation.Key_refused
+    else Conversation.No_answer
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Unsupported_control_request _
   | Runtime_claude_code.Turn_transport_interrupted _
@@ -316,7 +329,7 @@ let call_claude
        Error E.Answer_unrecorded)
   | Error failure ->
     logged ~keeper_id (Runtime_claude_code.error_to_string failure);
-    let kind = claude_failure failure in
+    let kind = claude_failure ~account failure in
     (* A [failed] row that is not written leaves the turn with its [asked]
        row alone, which reads as a turn with no recorded answer. *)
     (match Conversation.failed asked kind ~now_ms with

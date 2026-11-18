@@ -84,7 +84,9 @@ val max_message_bytes : int
     - 409: the Keeper has no Runtime, a call of the account runs, the owner
       gave the Keeper another Runtime meanwhile, the account is not signed in
       to a subscription, the key file of a key account is not there
-      ([key_missing]) or is not read as a key ([key_unreadable]), or the
+      ([key_missing]) or is not read as a key ([key_unreadable]), the
+      provider refused the key of a key account with HTTP 401
+      ([key_refused], {!Runtime_claude_code.key_refused}), or the
       conversation of the Keeper began on another account.
     - 429: the subscription has no quota left.
     - 504: the client was silent for 120 seconds.

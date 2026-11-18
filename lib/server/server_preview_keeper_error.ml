@@ -29,6 +29,7 @@ type t =
   | Conversation_on_other_subscription
   | Runtime_reassigned of string
   | Not_signed_in
+  | Key_refused
   | Key_unusable of
       { reason : Runtime_api_key_file.read_error
       ; sentence : string
@@ -58,6 +59,7 @@ let of_record_error : Conversation.error -> t = function
 let of_failure (failure : Conversation.failure) ~silent_after_s ~in_conversation =
   match failure with
   | Conversation.Not_signed_in -> Not_signed_in
+  | Conversation.Key_refused -> Key_refused
   | Conversation.No_quota -> No_quota
   | Conversation.Silent -> Silent { after_s = silent_after_s }
   | Conversation.Not_started -> Not_started
@@ -122,6 +124,10 @@ let parts = function
     ( R.Conflict_409
     , failure_code Conversation.Not_signed_in
     , "The account of this Runtime is not signed in to a subscription." )
+  | Key_refused ->
+    ( R.Conflict_409
+    , failure_code Conversation.Key_refused
+    , "The provider refused the API key of the account of this Runtime." )
   | Key_unusable { reason; sentence } ->
     R.Conflict_409, Runtime_api_key_file.read_error_code reason, sentence
   | No_quota ->

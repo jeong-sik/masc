@@ -51,7 +51,9 @@ let commit zone ~author ~kind body =
    was given, or null. While [<script>.hold] is there it writes
    [<script>.started] after the message and waits. While [<script>.fail] is
    there it ends after the message with no answer, and while [<script>.lost]
-   is there it ends so when it was started to resume a session. The session
+   is there it ends so when it was started to resume a session. While
+   [<script>.refused] is there it ends the turn as the provider's refusal
+   with the HTTP status the file holds. The session
    is the one it was started with, new or resumed. It prints the version
    [<script>.version] holds, or 2.1.322. A purge appends the home and the
    arguments to [<script>.purge.jsonl] and exits 0, or 1 while
@@ -110,6 +112,14 @@ if hold.exists():
     while hold.exists():
         time.sleep(0.02)
 emit({"type": "system", "subtype": "init", "session_id": session})
+refused = Path(script + ".refused")
+if refused.exists():
+    emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
+        "uuid": "turn-result", "result": "the provider refused the request",
+        "api_error_status": int(refused.read_text())})
+    for line in sys.stdin:
+        pass
+    sys.exit(0)
 text = "echo: " + prompt
 emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session, "uuid": "turn-assistant",
     "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]}})
@@ -2038,7 +2048,7 @@ let test_turn () =
             (* His Keeper answers on his key: the client has his home, his
                key as its one API key, and nothing else the server runs on. *)
             forget ();
-            let (_ : string) =
+            let dave_conversation =
               answered
                 "the Keeper of a key account answers"
                 ~keeper:"keeper-dave"
@@ -2073,6 +2083,57 @@ let test_turn () =
               "a login account runs on its home and no API key"
               (home_of ~base_path bob, None, [])
               (ran_on ());
+            (* The provider refuses the request with an HTTP status (RFC
+               3.5). A 401 on the key account is the refusal of its key: the
+               answer and the record of the turn say so. *)
+            let refused_file = claude ^ ".refused" in
+            let refused_with status =
+              Out_channel.with_open_bin refused_file (fun channel ->
+                Out_channel.output_string channel (string_of_int status))
+            in
+            let dave_turns =
+              List.fold_left
+                Filename.concat
+                (records_of ~base_path dave)
+                [ dave_conversation; "turns.jsonl" ]
+            in
+            let last_failure () =
+              match List.rev (rows dave_turns) with
+              | failed :: _ -> text_of failed "kind", text_of failed "failure"
+              | [] -> Alcotest.fail "the conversation of the key account has no row"
+            in
+            Fun.protect
+              ~finally:(fun () -> if Sys.file_exists refused_file then Sys.remove refused_file)
+              (fun () ->
+                refused_with 401;
+                forget ();
+                Alcotest.(check (pair int string))
+                  "a 401 of the provider on a key account: its key was refused"
+                  (409, "key_refused")
+                  (refused (dave_turn ()));
+                Alcotest.(check bool)
+                  "the client was started with the message"
+                  true
+                  (Sys.file_exists turn_record);
+                Alcotest.(check (pair string string))
+                  "the record of the turn keeps the kind the answer gave"
+                  ("failed", "key_refused")
+                  (last_failure ());
+                (* The same status on an account of a login names no key. *)
+                Alcotest.(check (pair int string))
+                  "a 401 of the provider on a login account is a turn without an answer"
+                  (502, "no_answer")
+                  (refused (reply bob (body ~keeper:"keeper-bob-beside-a-key" ~message:"hello")));
+                (* Another status says nothing of the key. *)
+                refused_with 403;
+                Alcotest.(check (pair int string))
+                  "a 403 of the provider on a key account is a turn without an answer"
+                  (502, "no_answer")
+                  (refused (dave_turn ()));
+                Alcotest.(check (pair string string))
+                  "and is recorded as one"
+                  ("failed", "no_answer")
+                  (last_failure ()));
             (* A key file its group reads is not read, and no client
                starts. *)
             Unix.chmod key_file 0o640;

@@ -650,3 +650,14 @@ val run_turn :
     Supported API-key, token and routing environment variables are preserved.
     Preflight uses the same settings isolation as the turn; credential validity
     and selected-model access are established by the actual turn. *)
+
+(** Whether a status a child of [account] reported says the provider refused
+    the API key of the account (RFC
+    a-persons-api-key-is-their-own-provider-account 3.5): HTTP 401, on an
+    account that runs on a key of a file
+    ({!Runtime_official_account.key_file}), whose child has that key as its
+    one credential. [api_error_status] is the status of a terminal result
+    ({!error}) or of a retry the client reported. The status is read as a
+    value, and no sentence of the provider is read. On an account of a login
+    it is [false] for every status. *)
+val key_refused : authorized_account -> api_error_status:int option -> bool

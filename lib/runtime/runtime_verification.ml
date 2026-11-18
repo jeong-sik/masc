@@ -14,6 +14,7 @@ type failure =
   | Quota_exhausted of string
   | Provider_overloaded of string
   | Provider_auth_refused of string
+  | Key_refused of string
   | Provider_unreachable of string
   | Model_not_found of string
   | Provider_rejected of string
@@ -51,6 +52,7 @@ let failure_code = function
   | Quota_exhausted _ -> "quota_exhausted"
   | Provider_overloaded _ -> "provider_overloaded"
   | Provider_auth_refused _ -> "provider_auth_refused"
+  | Key_refused _ -> "key_refused"
   | Provider_unreachable _ -> "provider_unreachable"
   | Model_not_found _ -> "model_not_found"
   | Provider_rejected _ -> "provider_rejected"
@@ -90,6 +92,9 @@ let failure_message = function
   | Provider_auth_refused _ ->
     "The provider refused the credential or account access. Check the API key or \
      sign-in, and whether the account can use this model."
+  | Key_refused _ ->
+    "The provider refused the API key of this account. Check at the provider that the \
+     key is still valid: a key that was revoked, disabled or mistyped is refused this way."
   | Provider_unreachable _ ->
     "The provider could not be reached. Check the endpoint URL, proxy and network."
   | Model_not_found _ ->
@@ -118,6 +123,7 @@ let failure_detail = function
   | Quota_exhausted detail
   | Provider_overloaded detail
   | Provider_auth_refused detail
+  | Key_refused detail
   | Provider_unreachable detail
   | Model_not_found detail
   | Provider_rejected detail -> Some detail
@@ -152,6 +158,7 @@ let status_of_failure = function
   | Some (Unavailable _) -> unavailable_status
   | Some
       ( Rate_limited _ | Quota_exhausted _ | Provider_overloaded _ | Provider_auth_refused _
+      | Key_refused _
       | Provider_unreachable _ | Model_not_found _ | Provider_rejected _ | Timed_out | Tool_not_called | Tool_result_not_consumed
       | Empty_response | Model_unreported ) -> "failed"
 ;;
@@ -220,7 +227,8 @@ let exit_code result =
   | None -> 0
   | Some (Unavailable _) -> 2
   | Some (Rate_limited _) | Some (Quota_exhausted _) | Some (Provider_overloaded _)
-  | Some (Provider_auth_refused _) | Some (Provider_unreachable _) | Some (Model_not_found _)
+  | Some (Provider_auth_refused _) | Some (Key_refused _) | Some (Provider_unreachable _)
+  | Some (Model_not_found _)
   | Some (Provider_rejected _) | Some (Timed_out) | Some (Tool_not_called)
   | Some (Tool_result_not_consumed) | Some (Empty_response) | Some (Model_unreported) -> 1
 ;;
@@ -254,6 +262,7 @@ let failure_of_code ~code ~detail =
   | "quota_exhausted", Some detail -> Ok (Quota_exhausted detail)
   | "provider_overloaded", Some detail -> Ok (Provider_overloaded detail)
   | "provider_auth_refused", Some detail -> Ok (Provider_auth_refused detail)
+  | "key_refused", Some detail -> Ok (Key_refused detail)
   | "provider_unreachable", Some detail -> Ok (Provider_unreachable detail)
   | "model_not_found", Some detail -> Ok (Model_not_found detail)
   | "provider_rejected", Some detail -> Ok (Provider_rejected detail)
@@ -264,7 +273,7 @@ let failure_of_code ~code ~detail =
   | "model_unreported", None -> Ok Model_unreported
   | ( ( "missing_credential" | "invalid_credential" | "invalid_configuration"
       | "client_not_authenticated" | "client_not_started" | "rate_limited"
-      | "quota_exhausted" | "provider_overloaded" | "provider_auth_refused"
+      | "quota_exhausted" | "provider_overloaded" | "provider_auth_refused" | "key_refused"
       | "provider_unreachable" | "model_not_found" | "provider_rejected" )
     , None ) -> Error (Printf.sprintf "failure code %S arrived without its detail" code)
   | ( ( "unsupported_runtime" | "tools_not_declared" | "timed_out" | "tool_not_called"
@@ -544,17 +553,32 @@ let http_status_name status = Printf.sprintf "HTTP %d" status
 
 (* A child that inherits an environment credential runs on it before the
    signed-in account, so a refusal on that child names the credential's source
-   as a candidate rather than the account the operator looks at first. *)
+   as a candidate rather than the account the operator looks at first. An
+   account that runs on a key of a file inherits none: the key in the
+   environment of its child is the key of the account. *)
 let claude_auth_refusal ~account ~named detail =
+  let official = Runtime_account_access.account account in
   let inherited =
-    if Runtime_claude_code.runs_on_environment_credential
-         (Runtime_official_account.Captured (Runtime_account_access.account account))
-    then
-      " (this child inherited an environment credential, which Claude Code uses \
-       before the signed-in account)"
-    else ""
+    match Runtime_official_account.key_file official with
+    | Some (_ : string) -> ""
+    | None ->
+      if Runtime_claude_code.runs_on_environment_credential
+           (Runtime_official_account.Captured official)
+      then
+        " (this child inherited an environment credential, which Claude Code uses \
+         before the signed-in account)"
+      else ""
   in
   Provider_auth_refused (Printf.sprintf "%s: %s%s" named detail inherited)
+;;
+
+(* What a 401 or a 403 of the provider says of the account of the child: on
+   an account that runs on a key of a file, a 401 is the refusal of that key
+   ([Runtime_claude_code.key_refused]). *)
+let claude_status_refusal ~account ~status detail =
+  if Runtime_claude_code.key_refused account ~api_error_status:(Some status)
+  then Key_refused (Printf.sprintf "%s: %s" (http_status_name status) detail)
+  else claude_auth_refusal ~account ~named:(http_status_name status) detail
 ;;
 
 let failure_of_agent_core_error error =
@@ -977,9 +1001,9 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                  refusal_before_deadline :=
                    Option.map
                      (fun status ->
-                        claude_auth_refusal
+                        claude_status_refusal
                           ~account
-                          ~named:(http_status_name status)
+                          ~status
                           (Printf.sprintf
                              "Claude Code was retrying the provider request (retry %d of %d)"
                              retry.Runtime_claude_api_retry.attempt
@@ -1032,7 +1056,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               reading even when an authentication diagnostic preceded it. *)
            (match claude_auth_status api_error_status, api_error_status, api_error_cause with
             | Some status, (Some _ | None), (Some _ | None) ->
-              Error (claude_auth_refusal ~account ~named:(http_status_name status) detail)
+              Error (claude_status_refusal ~account ~status detail)
             | None, None, Some Runtime_claude_code.Authentication_failed ->
               Error (claude_auth_refusal ~account ~named:"authentication_failed" detail)
             | None, Some _, Some Runtime_claude_code.Authentication_failed

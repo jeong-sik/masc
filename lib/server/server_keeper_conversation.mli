@@ -77,6 +77,9 @@ type conversation =
     It names no path and no detail of the client. *)
 type failure =
   | Not_signed_in
+  | Key_refused
+      (** The provider refused the API key of the account
+          ({!Runtime_claude_code.key_refused}). *)
   | No_quota
   | Silent
   | Not_started

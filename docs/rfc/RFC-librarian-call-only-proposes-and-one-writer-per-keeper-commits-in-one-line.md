@@ -810,7 +810,7 @@ type log_line =
 
 쓰는 쪽은 사는 동안 `<k>.memory.lock` 을 쥔다. Keeper 경로는 이 잠금을 기다리지 않는다.
 
-1. **계획**(순수 함수). `Plan.of_answer ~question ~facts ~removed_since answer` 가 `(facts', effects)` 를 돌려준다.
+1. **계획**(순수 함수). `Librarian_plan.of_answer ~shown ~facts ~removed_since ~at ~trace_id answer` 가 새 Memory, `effects`, 받아들인 하던 일을 돌려준다. 새 Memory 는 `Librarian_effects.apply` 를 `effects` 에 적용한 값이다. 그래서 줄만으로 스냅샷을 다시 쓸 수 있다.
 2. **쓰기 전 상태 확인.** `memory-current.json` 을 읽어 sha 를 낸다. 마지막 줄의 `after`(또는 `Started.snapshot`)와 같아야 한다. 다르면 `Stopped (Log_diverged _)` 로 가고 쓰지 않는다(`authoritative_read_only`).
 3. **인코딩.** 지금 쓰는 스냅샷 codec 으로 새 envelope 을 만든다. `revision + 1` 이고 `after = sha256 bytes` 다. `Skip` 이나 효과 없는 답은 바이트를 그대로 두고 `after = basis` 다. 읽은 자리가 움직였으므로 줄은 쓴다.
    - envelope 은 `revision`, `updated_at`, `source`, `facts`, `change` 다. 지운 이유(`removal`)는 담지 않는다. 그것은 줄에만 있다.
@@ -838,7 +838,7 @@ type log_line =
 - op 를 다 적용한 뒤 파생 fact 의 근거를 본다. 근거가 된 fact 가 없어진 파생 fact 는 `Support_lost` 로 같은 줄에서 지운다.
 - 그다음, 지운 것을 대신할 새 fact 가 그 확인에서 살아남지 못한 op 는 거둔다. 원본을 되살리고 그 op 를 `Successor_unsupported` 로 적는다. 달라지는 것이 없을 때까지 되풀이한다.
   - 이 순서가 없으면 `Merge` 가 원본과 새 fact 를 함께 잃는다. 새 fact 가 자기가 대신한 원본에서 파생된 경우다.
-  - 지금 반영이 하는 일이다. `keeper_memory_os_disposition_core.plan` 안의 지역 함수 `settle` 이 한다. 그 모듈을 쓰는 쪽의 타입으로 고쳐 쓴다. op 번호가 붙은 지우기를 받고, 거둔 op 번호를 돌려준다. 지금 `plan` 은 옛 답의 목록 넷을 받고 op 번호를 돌려주지 않는다. 부르던 곳 셋은 모두 지운다(§19).
+  - 지금 반영이 하는 일이다. `keeper_memory_os_disposition_core.plan` 안의 지역 함수 `settle` 이 한다. 새 모듈 `Librarian_plan` 이 같은 일을 op 번호와 함께 한다. 거둔 op 가 번호로 돌아온다. 옛 모듈은 부르던 곳 셋과 함께 지운다(§19).
   - `plan` 은 원본이 이미 없는 새 fact 를 따로 거절한다. 그 일은 쓰는 쪽의 규칙(§8.3)이 하므로 두 번 두지 않는다.
   - 직접 쓰기 뒤에는 근거 확인만 한다. 지금과 같다.
 
@@ -1754,7 +1754,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 |---|---|---|
 | L0 | 이 RFC, 연구 기록, 근거 폴더(상태 표와 검사 스크립트, 모델과 결과, 자리 재생, slot 결과 분류 표) | 독립 리뷰 판정. 상태 표와 slot 결과 표의 검사 스크립트를 돌린 결과를 근거 폴더에 적는다. 표가 OCaml 의 `match` 가 되는 L5·L6 부터는 컴파일러가 빠진 쌍을 잡는다 |
 | L1a | 답의 타입과 codec(§6.2), 질문 id 의 반쪽 둘, 스냅샷 codec 의 golden fixture | 네 op 의 왕복. 글로 고정한 wire 모양. 답 전체를 버리는 이유 넷과 op 하나의 흠. fixture 가 지금 codec 과 바이트로 같다 |
-| L1b | 순수 계획 `Plan.of_answer`(§8.2): 이름 풀기, 거절 집합, 근거 잃은 fact. `keeper_memory_os_disposition_core` 를 쓰는 쪽의 타입으로 고쳐 쓴다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
+| L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
 | L1c | 평가 틀. 프롬프트보다 먼저 고정한다. 만든 질문의 고정 corpus(합성 자료만), hash 로 못 박은 채점기(slot 별 유효율, 되돌려 적기, op 적용률, 변화율, merge 뒤 보존) | 채점기 hash 를 RFC 에 적는다 |
 | L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
 | L3a | 턴 기록: 줄 타입(자기 모듈 타입만), codec, 끝을 확인하는 덧붙임, 끝자리, slice. Agent-Core 턴 경로에 건다(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 속성 시험 T1(§13 F1). 끝나는 길마다 `Closed` 가 정확히 하나. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 덧붙임 실패 시험. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |

@@ -10,7 +10,7 @@ module R = Schedule_dispatch_receipt
 let evidence
   ?(stimulus_seen = true)
   ?(turn_started_seen = false)
-  ?(turn_finished_seen = false)
+  ?turn_finished
   ?(event_queue_ack_seen = false)
   ?(event_queue_cancelled_seen = false)
   ()
@@ -20,7 +20,7 @@ let evidence
   ; stimulus_id = "stimulus-1"
   ; stimulus_seen
   ; turn_started_seen
-  ; turn_finished_seen
+  ; turn_finished
   ; event_queue_ack_seen
   ; event_queue_cancelled_seen
   ; stimulus_recorded_at = None
@@ -82,12 +82,12 @@ let test_reading_order () =
   case "ACK and cancellation conflict" C.Conflicting_terminal_evidence
     (evidence ~event_queue_ack_seen:true ~event_queue_cancelled_seen:true ());
   case "cancellation" C.Terminal_cancelled
-    (evidence ~turn_finished_seen:true ~event_queue_cancelled_seen:true ());
+    (evidence ~turn_finished:Keeper_reaction_ledger.Turn_disposition.Completed ~event_queue_cancelled_seen:true ());
   case "ACK outranks the turn rows" C.Consumed_ack
-    (evidence ~turn_started_seen:true ~turn_finished_seen:true
+    (evidence ~turn_started_seen:true ~turn_finished:Keeper_reaction_ledger.Turn_disposition.Completed
        ~event_queue_ack_seen:true ());
   case "finished outranks started" C.Turn_finished
-    (evidence ~turn_started_seen:true ~turn_finished_seen:true ());
+    (evidence ~turn_started_seen:true ~turn_finished:Keeper_reaction_ledger.Turn_disposition.Completed ());
   case "started" C.Turn_started (evidence ~turn_started_seen:true ());
   case "stimulus only" C.Stimulus_seen (evidence ());
   case "nothing recorded" C.No_reaction_recorded (evidence ~stimulus_seen:false ())
@@ -99,7 +99,7 @@ let test_awaiting_ack_receipt_reads_the_ack () =
     asked := (keeper_name, stimulus_id) :: !asked;
     Ok
       (Keeper_reaction_ledger.Evidence_complete
-         (evidence ~turn_finished_seen:true ~event_queue_ack_seen:true ()))
+         (evidence ~turn_finished:Keeper_reaction_ledger.Turn_disposition.Completed ~event_queue_ack_seen:true ()))
   in
   (match C.of_receipt ~read_evidence (wake (Some (keeper_wake_receipt ()))) with
    | C.Reaction_observed { occurrence; reading = got; _ } ->

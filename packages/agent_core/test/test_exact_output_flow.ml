@@ -612,22 +612,19 @@ let candidate_id (candidate : EO.flow_attempt_receipt) =
 let flow_failure_id = function
   | EO.Flow_candidate_rejected rejection ->
     (EO.candidate_rejection_identity rejection).candidate_id
-  | EO.Flow_candidate_before_dispatch_admission_timed_out { candidate; _ }
   | EO.Flow_candidate_execution_failed { candidate; _ } -> candidate_id candidate
 ;;
 
 let flow_advance_failure_id = function
   | EO.Flow_advance_candidate_rejected rejection ->
     (EO.candidate_rejection_identity rejection).candidate_id
-  | EO.Flow_advance_before_dispatch_admission_timed_out { candidate; _ }
   | EO.Flow_advance_execution_failed { candidate; _ } ->
     candidate.visit.identity.candidate_id
 ;;
 
 let flow_execution_failure = function
   | EO.Flow_candidate_execution_failed { candidate; cause; _ } -> candidate, cause
-  | EO.Flow_candidate_rejected _
-  | EO.Flow_candidate_before_dispatch_admission_timed_out _ ->
+  | EO.Flow_candidate_rejected _ ->
     fail "expected an execution failure, got a pre-dispatch failure"
 ;;
 
@@ -1357,7 +1354,6 @@ let test_missing_current_credential_advances_after_durable_settlement () =
             transitions
             := (identity.candidate_id, next.identity.candidate_id) :: !transitions;
             Ok ()
-          | EO.Flow_candidate_before_dispatch_admission_timed_out _
           | EO.Flow_candidate_execution_failed _ ->
             fail "missing credential became an execution failure")
         (start_flow (frozen_flow snapshot [ "current-missing"; "next-good" ]))
@@ -1449,7 +1445,6 @@ let test_read_failed_current_credential_advances_to_good_successor () =
                , next.identity.candidate_id )
                :: !advances;
             Ok ()
-          | EO.Flow_candidate_before_dispatch_admission_timed_out _
           | EO.Flow_candidate_execution_failed _ ->
             fail "read-failed credential became an execution attempt")
         (start_flow
@@ -2907,7 +2902,6 @@ let test_predispatch_measurement_failure_advances_without_wire () =
               (EO.candidate_rejection_measurement_outcome rejection
                = EO.Measurement_transport_failed);
             Ok ()
-          | EO.Flow_candidate_before_dispatch_admission_timed_out _
           | EO.Flow_candidate_execution_failed _ ->
             fail "predispatch measurement rejection became a generation failure")
         flow
@@ -2965,7 +2959,6 @@ let test_unsendable_endpoint_is_refused_before_an_attempt () =
           (match failed with
            | EO.Flow_candidate_rejected rejection ->
              advances := EO.candidate_rejection_disposition rejection :: !advances
-           | EO.Flow_candidate_before_dispatch_admission_timed_out _
            | EO.Flow_candidate_execution_failed _ ->
              fail "an unsendable endpoint reached execution");
           Ok ())
@@ -3072,7 +3065,6 @@ let test_postdispatch_measurement_failures_advance () =
                    (EO.candidate_rejection_measurement_outcome rejection
                     = expected_outcome);
                  Ok ()
-               | EO.Flow_candidate_before_dispatch_admission_timed_out _
                | EO.Flow_candidate_execution_failed _ ->
                  failf "%s measurement rejection became a generation failure" label)
              flow
@@ -3458,7 +3450,6 @@ let test_exception_after_durable_rejection_stops_before_successor () =
                         Unix.fsync (Unix.descr_of_out_channel channel));
                       observed := Some (failed_visit, next);
                       raise Rejection_advance_committed_before_successor
-                    | EO.Flow_candidate_before_dispatch_admission_timed_out _
                     | EO.Flow_candidate_execution_failed _ ->
                       fail "credential rejection allocated an execution attempt")
                   flow
@@ -4821,65 +4812,6 @@ let test_guarded_flow_holds_final_candidate () =
   | EO.Guarded_finished _ -> fail "final queued candidate was reported as finished"
 ;;
 
-let test_guarded_flow_admission_work_expiry_keeps_observation () =
-  let result, posts =
-    with_server ~first_stalled_response:(`OK, {|{"status":"queued"|}) ~response:"unused"
-    @@ fun ~sw ~net ~clock:watchdog_clock ~base_url ->
-    with_bound_targets ~request_path:"/v1/responses" ~base_url ~body_timeout_s:1.0
-    @@ fun snapshot _config ->
-    let clock = Eio_mock.Clock.make () in
-    Eio_mock.Clock.set_time clock 0.0;
-    let flow = start_flow (frozen_flow snapshot ["bound-primary";"bound-successor"]) in
-    let headers, headers_resolver = Eio.Promise.create () in
-    let candidate = ref None in
-    let await ~label wait =
-      match Eio.Time.with_timeout watchdog_clock 30.0 (fun () -> Ok (wait ())) with
-      | Ok value -> value
-      | Error `Timeout -> failf "%s did not reach its fixture boundary" label in
-    let observer = Http_request_observer.create (fun event ->
-      (match event.Http_request_observer.phase with
-       | Response_headers_received {status=200} -> Eio.Promise.resolve headers_resolver ()
-       | Client_entered _ | Dispatch_entered | Response_headers_received _ | Client_finished _ -> ());
-      Ok ()) in
-    let work = Eio.Fiber.fork_promise ~sw (fun () ->
-      Http_request_observer.with_observer observer (fun () ->
-        EO.execute_flow_once_guarded ~net ~clock
-          ~before_measurement_dispatch:(fun _ -> Ok ())
-          ~on_measurement_terminal:(fun _ -> Ok ())
-          ~before_dispatch:(fun attempt ->
-            candidate := Some attempt;
-            (* Arm the outer 1.0 deadline before starting the inner 1.0
-               deadline at time 0.25. *)
-            Eio.Fiber.yield ();
-            Eio_mock.Clock.set_time clock 0.25;
-            Ok ())
-          ~before_advance:(fun ~failed:_ ~next:_ -> fail "expired work advanced")
-          ~validate:(fun _ -> fail "incomplete response was validated") flow)) in
-    await ~label:"response headers" (fun () -> Eio.Promise.await headers);
-    let candidate = match !candidate with Some value -> value | None -> fail "dispatch receipt missing" in
-    check (option int) "headers reached the original receipt before expiry" (Some 200)
-      (EO.receipt_http_status candidate.receipt);
-    Eio_mock.Clock.set_time clock 1.0;
-    await ~label:"admission work expiry" (fun () -> Eio.Promise.await_exn work) in
-  check int "outer work expiry sent no successor" 1 posts;
-  match result with
-  | EO.Guarded_unresolved unresolved ->
-    check bool "work expiry holds unobserved lifecycle" true
-      (unresolved.reason = EO.Response_lifecycle_unobserved);
-    (match unresolved.execution_error with
-     | Some {cause=EO.Completion_failed
-         {error=Http_client.TimeoutError
-            {phase=Http_client.Wall_clock; message="exact body deadline exceeded during the provider round trip"};
-          dispatch=EO.Generation_dispatch_started};_} -> ()
-     | None | Some _ -> fail "admission Work_expired result was not preserved");
-    check (option int) "expiry retained actual headers" (Some 200)
-      (EO.generation_receipt_snapshot_http_status unresolved.observation);
-    check (option string) "expiry retained no completed body" None
-      (EO.generation_receipt_snapshot_response_body_sha256 unresolved.observation);
-    check_guarded_observation "outer work expiry" unresolved.candidate unresolved.observation unresolved.evidence
-  | EO.Guarded_finished _ -> fail "outer work expiry was not held"
-;;
-
 (* The provider's own wait survives the collapsed refusal, so a caller that
    keeps per-binding rate-limit evidence rests the binding for as long as the
    provider asked instead of inventing a time. *)
@@ -5370,8 +5302,7 @@ let test_postdispatch_outcomes_advance_once_to_successor () =
             (match failed with
              | EO.Flow_candidate_execution_failed { candidate; _ } ->
                advances := (candidate_id candidate, next.identity.candidate_id) :: !advances
-             | EO.Flow_candidate_rejected _
-             | EO.Flow_candidate_before_dispatch_admission_timed_out _ ->
+             | EO.Flow_candidate_rejected _ ->
                fail (label ^ " advanced on a rejection it never met"));
             Ok ())
           (start_flow (frozen_flow snapshot [ label ^ "-a"; label ^ "-b" ]))
@@ -5997,11 +5928,13 @@ let test_standard_exact_flow_keeps_arrival_order () =
     (exact_flow_grant_order ~admission_class:Admission_class.Standard)
 ;;
 
-let test_bound_exact_queue_expiry_advances_without_post () =
+(* A walk does not stand in front of a full slot while a later one has a
+   free seat: the primary is passed over and never dispatched. *)
+let test_a_full_primary_is_passed_for_a_free_successor () =
   let (result, evidence, dispatched, advance_failures), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
-    with_bound_targets ~base_url ~body_timeout_s:0.05
+    with_bound_targets ~base_url ~body_timeout_s:2.0
     @@ fun snapshot config ->
     let flow =
       start_flow
@@ -6043,39 +5976,119 @@ let test_bound_exact_queue_expiry_advances_without_post () =
     let result =
       match !result with
       | Some result -> result
-      | None -> fail "queue expiry result was not collected"
+      | None -> fail "pass-over result was not collected"
     in
     result, EO.flow_attempt_evidence flow, List.rev !dispatched, List.rev !advance_failures
   in
-  check int "only successor POST reached provider" 1 posts;
-  check (list string) "before_dispatch skipped saturated primary" [ "bound-successor" ] dispatched;
+  check int "only the successor POST reached a provider" 1 posts;
+  check (list string) "before_dispatch ran for the successor only" [ "bound-successor" ] dispatched;
   (match advance_failures with
-   | [ EO.Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ] ->
-     check string "timed-out candidate id" "bound-primary" (candidate_id candidate);
-     check bool "permit wait expiry kind" true (timeout = EO.Permit_wait_expired)
-   | _ -> fail "permit wait expiry must advance as a pre-dispatch admission timeout");
-  let primary = (attempt_for evidence "bound-primary").receipt in
-  check
-    bool
-    "expired wait leaves primary receipt Not_started"
-    true
-    (EO.generation_receipt_snapshot_phase primary = EO.Not_started);
-  check
-    int
-    "expired wait records zero primary generation dispatches"
-    0
-    (EO.generation_receipt_snapshot_dispatch_count primary);
-  (match result with
-   | Ok success ->
+   | [ EO.Flow_candidate_rejected rejection ] ->
      check
        string
-       "successor was selected after queue expiry"
-       "bound-successor"
-       (candidate_id (EO.flow_success_candidate success))
-   | Error _ -> fail "successor should run after primary permit wait expires")
+       "passed candidate"
+       "bound-primary"
+       (EO.candidate_rejection_identity rejection).candidate_id;
+     check
+       bool
+       "passed for full seats"
+       true
+       (EO.candidate_rejection_disposition rejection = EO.Seats_full)
+   | _ -> fail "a full primary must be passed over as a rejection");
+  check
+    (list string)
+    "no attempt was started on the passed primary"
+    [ "bound-successor" ]
+    (List.map
+       (fun (attempt : EO.flow_attempt_snapshot) -> attempt.visit.identity.candidate_id)
+       evidence.EO.attempts);
+  match result with
+  | Ok success ->
+    check
+      string
+      "the successor answered"
+      "bound-successor"
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the successor should answer while the primary is full"
 ;;
 
-let test_bound_exact_queue_expiry_terminal_is_resting_and_advanceable () =
+(* When every slot is full the walk queues on all of them and runs on the
+   first seat to free, passing the slots in front of it. *)
+let test_a_full_walk_runs_on_the_first_seat_to_free () =
+  let (result, dispatched), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let successor_config =
+      { config with api_key = Secret.of_string "successor-test-key" }
+    in
+    let flow =
+      start_flow
+        (frozen_candidates
+           [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary"
+           ; flow_candidate_as
+               snapshot
+               ~id:"bound-successor"
+               ~target_ref:"bound-successor"
+           ])
+    in
+    let occupied, occupied_resolver = Eio.Promise.create () in
+    let release_primary, release_primary_resolver = Eio.Promise.create () in
+    let release_successor, release_successor_resolver = Eio.Promise.create () in
+    let dispatched = ref [] in
+    let result = ref None in
+    Eio.Fiber.all
+      [ (fun () ->
+          Provider_admission.with_admission ~config (fun () ->
+            Eio.Promise.await release_primary))
+      ; (fun () ->
+          Provider_admission.with_admission ~config:successor_config (fun () ->
+            Eio.Promise.resolve occupied_resolver ();
+            Eio.Promise.await release_successor))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          result :=
+            Some
+              (execute_with_accepting_test_validator
+                 ~net
+                 ~clock
+                 ~on_measurement_terminal:(fun _ -> Ok ())
+                 ~before_measurement_dispatch:(fun _ -> Ok ())
+                 ~before_dispatch:(fun candidate ->
+                   dispatched := candidate_id candidate :: !dispatched;
+                   Ok ())
+                 ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+                 flow);
+          Eio.Promise.resolve release_primary_resolver ())
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          Eio.Time.sleep clock 0.03;
+          check bool "nothing dispatched while both are full" true (!dispatched = []);
+          Eio.Promise.resolve release_successor_resolver ())
+      ];
+    let result =
+      match !result with
+      | Some result -> result
+      | None -> fail "full-walk result was not collected"
+    in
+    result, List.rev !dispatched
+  in
+  check int "one POST, on the seat that freed" 1 posts;
+  check (list string) "the successor ran" [ "bound-successor" ] dispatched;
+  match result with
+  | Ok success ->
+    check
+      string
+      "the successor answered"
+      "bound-successor"
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the walk should answer on the first seat to free"
+;;
+
+(* The body deadline does not count the wait for a seat (#52981): a slot
+   whose seat frees long after its body deadline still answers. *)
+let test_the_body_deadline_counts_from_the_dispatch_not_the_wait () =
   let (result, dispatched), posts =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
@@ -6090,50 +6103,44 @@ let test_bound_exact_queue_expiry_terminal_is_resting_and_advanceable () =
     let release, release_resolver = Eio.Promise.create () in
     let dispatched = ref [] in
     let result = ref None in
-    Eio.Fiber.both
-      (fun () ->
-         Provider_admission.with_admission ~config (fun () ->
-           Eio.Promise.resolve occupied_resolver ();
-           Eio.Promise.await release))
-      (fun () ->
-         Eio.Promise.await occupied;
-         result :=
-           Some
-             (execute_with_accepting_test_validator
-                ~net
-                ~clock
-                ~on_measurement_terminal:(fun _ -> Ok ())
-                ~before_measurement_dispatch:(fun _ -> Ok ())
-                ~before_dispatch:(fun candidate ->
-                  dispatched := candidate_id candidate :: !dispatched;
-                  Ok ())
-                ~before_advance:(fun ~failed:_ ~next:_ ->
-                  fail "single-slot queue expiry should not advance")
-                flow);
-         Eio.Promise.resolve release_resolver ());
+    Eio.Fiber.all
+      [ (fun () ->
+          Provider_admission.with_admission ~config (fun () ->
+            Eio.Promise.resolve occupied_resolver ();
+            Eio.Promise.await release))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          result :=
+            Some
+              (execute_with_accepting_test_validator
+                 ~net
+                 ~clock
+                 ~on_measurement_terminal:(fun _ -> Ok ())
+                 ~before_measurement_dispatch:(fun _ -> Ok ())
+                 ~before_dispatch:(fun candidate ->
+                   dispatched := candidate_id candidate :: !dispatched;
+                   Ok ())
+                 ~before_advance:(fun ~failed:_ ~next:_ ->
+                   fail "a lone slot has nothing to advance to")
+                 flow))
+      ; (fun () ->
+          Eio.Promise.await occupied;
+          (* Twice the body deadline passes while the seat is held. *)
+          Eio.Time.sleep clock 0.1;
+          Eio.Promise.resolve release_resolver ())
+      ];
     let result =
       match !result with
       | Some result -> result
-      | None -> fail "terminal queue expiry result was not collected"
+      | None -> fail "seat-wait result was not collected"
     in
     result, List.rev !dispatched
   in
-  check int "saturated terminal sent zero POSTs" 0 posts;
-  check (list string) "before_dispatch never ran" [] dispatched;
+  check int "the generation was sent once" 1 posts;
+  check (list string) "before_dispatch ran after the seat freed" [ "bound-primary" ] dispatched;
   match result with
-  | Error (EO.Flow_before_dispatch_admission_timed_out { timeout; _ } as cause) ->
-    check bool "permit wait expiry kind" true (timeout = EO.Permit_wait_expired);
-    check
-      bool
-      "terminal queue expiry is advanceable to CLI tail"
-      true
-      (EO.flow_execution_terminal_kind cause = EO.Advanceable_candidates_exhausted);
-    check
-      bool
-      "terminal queue expiry reports every binding resting"
-      true
-      (EO.flow_execution_binding_standing cause = EO.Every_binding_resting)
-  | Ok _ | Error _ -> fail "expected Flow_before_dispatch_admission_timed_out"
+  | Ok _ -> ()
+  | Error _ -> fail "a slot that waited past its body deadline should still answer"
 ;;
 
 let test_bound_measurement_waits_for_shared_provider_permit () =
@@ -6618,10 +6625,6 @@ let () =
             `Quick
             test_guarded_flow_holds_final_candidate
         ; test_case
-            "guarded flow keeps the admission work-expiry observation"
-            `Quick
-            test_guarded_flow_admission_work_expiry_keeps_observation
-        ; test_case
             "HTTP 429 keeps the provider's Retry-After"
             `Quick
             test_rate_limited_429_keeps_retry_after
@@ -6722,13 +6725,17 @@ let () =
             `Quick
             test_bound_exact_waits_for_shared_provider_permit
         ; test_case
-            "bound exact queue expiry advances without a POST"
+            "a full primary is passed for a free successor"
             `Quick
-            test_bound_exact_queue_expiry_advances_without_post
+            test_a_full_primary_is_passed_for_a_free_successor
         ; test_case
-            "bound exact queue expiry terminal is resting and advanceable"
+            "a full walk runs on the first seat to free"
             `Quick
-            test_bound_exact_queue_expiry_terminal_is_resting_and_advanceable
+            test_a_full_walk_runs_on_the_first_seat_to_free
+        ; test_case
+            "the body deadline counts from the dispatch, not the wait"
+            `Quick
+            test_the_body_deadline_counts_from_the_dispatch_not_the_wait
         ; test_case
             "bound exact with a priority run limit is sent"
             `Quick

@@ -105,16 +105,14 @@ let note_advances ~resolved (evidence : Exact.flow_evidence) =
        match advance.failed with
        | Exact.Flow_advance_execution_failed { candidate; cause; _ } ->
          note_cause ~resolved ~slot_id:candidate.visit.identity.candidate_id cause
-       | Exact.Flow_advance_candidate_rejected _
-       | Exact.Flow_advance_before_dispatch_admission_timed_out _ -> ())
+       | Exact.Flow_advance_candidate_rejected _ -> ())
     evidence.advances
 ;;
 
 let note_candidate_failure ~resolved = function
   | Exact.Flow_candidate_execution_failed { candidate; cause } ->
     note_cause ~resolved ~slot_id:candidate.visit.identity.candidate_id cause.cause
-  | Exact.Flow_candidate_rejected _
-  | Exact.Flow_candidate_before_dispatch_admission_timed_out _ -> ()
+  | Exact.Flow_candidate_rejected _ -> ()
 ;;
 
 let note_rejections ~resolved rejections =
@@ -138,8 +136,7 @@ let note_terminal ~resolved (cause : _ Exact.flow_execution_error) =
   | Exact.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
   | Exact.Flow_measurement_terminal_callback_failed { evidence; _ }
   | Exact.Flow_before_dispatch_callback_failed { evidence; _ }
-  | Exact.Flow_candidates_exhausted { evidence; _ }
-  | Exact.Flow_before_dispatch_admission_timed_out { evidence; _ } ->
+  | Exact.Flow_candidates_exhausted { evidence; _ } ->
     note_advances ~resolved evidence
 ;;
 

@@ -137,7 +137,7 @@ let test_capacity_only_keeps_all_non_capacity_visits () =
     Alcotest.(check bool) "neutral admission preserves the capacity-only observation" true
       (S.input_capacity_only (S.combine local capacity)))
     [EO.Runtime_slot_unavailable;Runtime_contract_rejected;Input_contract_rejected;
-     Output_requirement_rejected;Request_preparation_failed];
+     Output_requirement_rejected;Request_preparation_failed;Seats_full];
   Alcotest.(check bool) "empty evidence is not capacity-only" false (S.input_capacity_only S.empty);
   Alcotest.(check bool) "measured CLI refusal is capacity-only" true
     (S.input_capacity_only (measured "cli-only" 23 17));

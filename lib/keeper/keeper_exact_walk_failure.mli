@@ -97,6 +97,9 @@ val combine : t -> t -> t
 
 type local_rejection = Runtime_unavailable | Runtime_contract | Input_contract
   | Output_requirement | Local_input_capacity | Preparation_failed
+  | Seats_full
+    (** Every seat of the slot was held and a later slot gave one: the walk
+        passed it. Not a provider verdict. *)
 [@@deriving yojson]
 val local_rejection : Agent_core.Exact_output.candidate_rejection_disposition -> local_rejection
 val of_local_rejection : local_rejection -> t

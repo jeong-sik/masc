@@ -233,6 +233,10 @@ type candidate_rejection_disposition =
   | Output_requirement_rejected
   | Input_capacity of input_capacity_disposition
   | Request_preparation_failed
+  | Seats_full
+      (** Every permit of this endpoint was held, and a later candidate's
+          permit was taken: the walk passed this candidate and does not come
+          back to it. Not a provider verdict. *)
 
 type plan_provenance
 
@@ -662,9 +666,9 @@ val start_attempt : ready_plan -> (attempt, start_attempt_error) result
     for each frozen candidate. This performs no credential selection, request
     admission, call identity allocation, callback, or network effect. A new
     invocation always creates a new flow; restart resume belongs to the
-    caller's authenticated durable journal. [admission_class] is the queue
-    every candidate of this flow joins while its endpoint's permits are all
-    held; see {!Provider_admission}. Every caller names it. *)
+    caller's authenticated durable journal. [admission_class] is the class
+    this flow queues as on every endpoint whose permits are all held; see
+    {!Provider_admission.take_first_seat}. Every caller names it. *)
 val start_flow
   :  admission_class:Admission_class.t
   -> flow_snapshot
@@ -768,20 +772,8 @@ type flow_attempt_snapshot = private
   ; receipt : generation_receipt_snapshot
   }
 
-(** Why a bounded endpoint-permit wait ended before [before_dispatch] or
-    generation started. *)
-type admission_wait_timeout =
-  | Permit_wait_expired
-  | Permit_granted_as_deadline_passed
-
-val admission_wait_timeout_to_string : admission_wait_timeout -> string
-
 type flow_advance_failure_snapshot =
   | Flow_advance_candidate_rejected of candidate_rejection_receipt
-  | Flow_advance_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_snapshot
-      ; timeout : admission_wait_timeout
-      }
   | Flow_advance_execution_failed of
       { candidate : flow_attempt_snapshot
       ; cause : execution_error_cause
@@ -894,10 +886,6 @@ type ('accepted, 'rejection) validated_flow_success = private
 
 type flow_candidate_failure =
   | Flow_candidate_rejected of candidate_rejection_receipt
-  | Flow_candidate_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_receipt
-      ; timeout : admission_wait_timeout
-      }
   | Flow_candidate_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -938,11 +926,6 @@ type 'callback_error flow_execution_error =
       }
   | Flow_candidates_exhausted of
       { rejection : candidate_rejection_receipt
-      ; evidence : flow_evidence
-      }
-  | Flow_before_dispatch_admission_timed_out of
-      { candidate : flow_attempt_receipt
-      ; timeout : admission_wait_timeout
       ; evidence : flow_evidence
       }
   | Flow_exact_execution_failed of
@@ -1084,7 +1067,15 @@ val flow_attempt_evidence : flow_attempt -> flow_evidence
     moves directly to the predetermined successor without using [before_advance].
     Every candidate performs at most one generation POST. A final semantic
     rejection returns a typed nonempty exhaustion trace. AGENT_CORE performs no domain
-    durable commit, recovery, retirement, or preference update. *)
+    durable commit, recovery, retirement, or preference update.
+
+    Each candidate measures and sends under one seat of its endpoint
+    ({!Provider_admission.take_first_seat}). A candidate whose endpoint is
+    full is rejected as [Seats_full], without dispatch, when a later
+    candidate gives a seat first; the flow then runs on that later
+    candidate. When every remaining endpoint is full the flow waits on all
+    of them with no deadline. The body deadline of each request counts
+    from its dispatch, not from the wait. *)
 val execute_flow_once
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock

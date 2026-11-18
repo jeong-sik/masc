@@ -65,30 +65,12 @@ let rejected receipt = Rejected {visit=visit (Exact.candidate_rejection_visit re
 let execution (candidate : Exact.flow_attempt_receipt) (error : Exact.execution_error) =
   Execution_failed {visit=visit candidate.visit;cause=Failure.api_observation error.cause;
     raw_sha=Option.map (fun (raw : Exact.raw_response) -> raw.body_sha256) error.raw_response}
-let predispatch_queue_timeout (visit_val : Exact.flow_candidate_visit) timeout =
-  Execution_failed
-    { visit = visit visit_val
-    ; cause =
-        Failure.api_observation
-          (Exact.Completion_failed
-             { dispatch = Exact.No_generation_dispatch
-             ; error = Agent_core.Llm_provider.Http_client.TimeoutError
-                 { phase = Agent_core.Llm_provider.Http_client.Queue
-                 ; message = Exact.admission_wait_timeout_to_string timeout
-                 }
-             })
-    ; raw_sha = None
-    }
 let failed_snapshot = function
   | Exact.Flow_advance_candidate_rejected receipt -> rejected receipt
-  | Flow_advance_before_dispatch_admission_timed_out {candidate;timeout} ->
-    predispatch_queue_timeout candidate.visit timeout
   | Flow_advance_execution_failed {candidate;cause;raw_response_sha256} ->
     Execution_failed {visit=visit candidate.visit;cause=Failure.api_observation cause;raw_sha=raw_response_sha256}
 let failed_candidate = function
   | Exact.Flow_candidate_rejected receipt -> rejected receipt
-  | Flow_candidate_before_dispatch_admission_timed_out {candidate;timeout} ->
-    predispatch_queue_timeout candidate.visit timeout
   | Flow_candidate_execution_failed {candidate;cause} -> execution candidate cause
 let semantic ~rejection_to_string (receipt : 'a Exact.semantic_rejection_receipt) =
   {visit=visit (Exact.flow_success_candidate receipt.transport_success).visit;
@@ -146,8 +128,6 @@ let http_failure ~callback_error_to_string ~rejection_to_string = function
           | Exact.Advanceable_candidates_exhausted -> Execution_exhausted (execution candidate error)
           | Non_advanceable_terminal -> Execution_stopped (execution candidate error))
       | Flow_candidates_exhausted {rejection;evidence} -> evidence,Candidates_exhausted (rejected rejection)
-      | Flow_before_dispatch_admission_timed_out {candidate;timeout;evidence} ->
-        evidence,Execution_exhausted (predispatch_queue_timeout candidate.visit timeout)
       | Flow_attempt_already_started evidence -> evidence,Locally_stopped Already_started
       | Flow_attempt_start_failed {evidence;_} -> evidence,Locally_stopped Attempt_start
       | Flow_measurement_start_failed {evidence;_} -> evidence,Locally_stopped Measurement_start

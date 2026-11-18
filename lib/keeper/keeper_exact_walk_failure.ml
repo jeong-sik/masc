@@ -208,7 +208,7 @@ let dispatched_valid_output_failure = function
   | Output_limit | Incomplete | Missing | Ambiguous _ | Unexpected -> true
 
 type local_rejection = Runtime_unavailable | Runtime_contract | Input_contract
-  | Output_requirement | Local_input_capacity | Preparation_failed
+  | Output_requirement | Local_input_capacity | Preparation_failed | Seats_full
 [@@deriving yojson]
 
 let local_rejection (disposition : Exact_output.candidate_rejection_disposition) = match disposition with
@@ -216,10 +216,12 @@ let local_rejection (disposition : Exact_output.candidate_rejection_disposition)
   | Runtime_slot_unavailable -> Runtime_unavailable | Runtime_contract_rejected -> Runtime_contract
   | Input_contract_rejected -> Input_contract | Output_requirement_rejected -> Output_requirement
   | Request_preparation_failed -> Preparation_failed
+  | Seats_full -> Seats_full
 
 let of_local_rejection = function
   | Local_input_capacity -> input_capacity_refusal
-  | Runtime_unavailable | Runtime_contract | Input_contract | Output_requirement | Preparation_failed -> empty
+  | Runtime_unavailable | Runtime_contract | Input_contract | Output_requirement | Preparation_failed
+  | Seats_full -> empty
 
 let of_disposition disposition = of_local_rejection (local_rejection disposition)
 ;;

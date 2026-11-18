@@ -3035,12 +3035,11 @@ let test_wrong_shape_run_record_keeps_the_shape () =
         Alcotest.fail "the wrong-shape run did not close with durable detail"))
 ;;
 
-let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
+let test_a_full_primary_is_passed_without_partition_invariant () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
       with_temp_base "board-attention-permit-wait-expiry" @@ fun base_path ->
       let cand_failover = candidate "board-attention-permit-wait-failover" in
-      let cand_defer = candidate "board-attention-permit-wait-defer" in
       let meta =
         Masc_test_deps.meta_of_json_fixture
           (`Assoc
@@ -3062,8 +3061,8 @@ let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
       let make_binding key =
         Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat
-          ~provider_id:"fixture-provider"
-          ~model_id:"fixture-model"
+          ~provider_id:"deepseek"
+          ~model_id:"deepseek-v4-pro"
           ~base_url:server.base_url
           ~api_key:key
           ~request_path:"/v1/chat/completions"
@@ -3082,7 +3081,7 @@ let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
         ; binding = cfg
         ; credential =
             Exact_output.Credential_resolved (Llm_provider.Secret.of_string key)
-        ; body_timeout_s = Some 0.05
+        ; body_timeout_s = Some 2.0
         ; model_declaration = Exact_output.No_model_declaration
         }
       in
@@ -3094,10 +3093,16 @@ let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
                ; declared "permit-successor" (make_binding successor_key) successor_key
                ])
           ()
-        |> Result.get_ok
+        |> function
+        | Ok snapshot -> snapshot
+        | Error error ->
+          Alcotest.failf
+            "permit fixture catalog did not load: %s"
+            (Runtime_exact_output_registry.resolver_snapshot_error_to_string error)
       in
-      (* Part 1: primary times out in permit queue -> advances cleanly via
-         Predispatch_rejection (no Durable_partition_invariant) to successor. *)
+      (* The primary's only seat is held, and the successor has a free one:
+         the walk passes the primary as a pre-dispatch rejection (no
+         Durable_partition_invariant) and the successor answers. *)
       ignore
         (Fixture.publish_registry
            ~lane_id:Exact_flow.lane_id
@@ -3129,36 +3134,8 @@ let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
             | Ok (Worker.Judgment_completed { candidate_id; _ })
               when String.equal candidate_id cand_failover.candidate_id -> ()
             | Ok (Worker.Partition_blocked { reason = _; _ }) ->
-              Alcotest.fail "permit wait expiry unexpectedly blocked partition"
-            | Ok _ -> Alcotest.fail "unexpected worker step on permit-wait failover"
-            | Error detail -> Alcotest.fail detail);
-           (* Part 2: all slots time out in permit queue -> defers Ready
-              instead of quarantining Exact_lane_exhausted. *)
-           ignore
-             (Fixture.publish_registry
-                ~lane_id:Exact_flow.lane_id
-                ~slot_ids:[ "permit-primary" ]
-                snapshot
-               : Runtime_exact_output_registry.t);
-           (match Candidate.record ~base_path cand_defer with
-            | Candidate.Recorded _ -> ()
-            | Candidate.Duplicate _ | Candidate.Record_error _ ->
-              Alcotest.fail "record defer candidate");
-           (match
-              Worker.For_testing.process_next_exact
-                ~clock
-                ~net:(Some net)
-                ~now:(fun () -> 4.0)
-                ~worker_epoch:(Partition.Worker_epoch.generate ())
-                ~base_path
-                ~keeper_name:cand_defer.keeper_name
-            with
-            | Ok (Worker.Judgment_deferred { candidate_id; _ })
-              when String.equal candidate_id cand_defer.candidate_id -> ()
-            | Ok (Worker.Partition_blocked { reason = _; _ }) ->
-              Alcotest.fail
-                "all-slots permit queue expiry quarantined instead of deferring"
-            | Ok _ -> Alcotest.fail "expected Judgment_deferred when permit queue expires"
+              Alcotest.fail "a passed full primary blocked the partition"
+            | Ok _ -> Alcotest.fail "unexpected worker step while the primary was full"
             | Error detail -> Alcotest.fail detail);
            Eio.Promise.resolve release_resolver ());
       Alcotest.(check int)
@@ -3207,9 +3184,9 @@ let () =
             `Quick
             test_explicit_lane_failover_and_success_provenance
         ; Alcotest.test_case
-            "permit wait expiry advances and defers without partition invariant"
+            "a full primary is passed without a partition invariant"
             `Quick
-            test_permit_wait_expiry_advances_and_defers_without_partition_invariant
+            test_a_full_primary_is_passed_without_partition_invariant
         ; Alcotest.test_case
             "strict singleton mismatch advances to declared successor"
             `Quick

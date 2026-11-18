@@ -1176,6 +1176,66 @@ describe('BoardSurface Component', () => {
     )
   })
 
+  describe('input typed while the composer waits for the answer', () => {
+    // #52958: the answer emptied the fields as they stood when it arrived.
+    function heldAnswer(): { promise: Promise<never>; arrive: () => void } {
+      let arrive = (): void => {}
+      const promise = new Promise<never>(resolve => { arrive = () => resolve(undefined as never) })
+      return { promise, arrive }
+    }
+
+    it('keeps a body typed after the post was sent and clears the title that was sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(createPost).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+      const title = screen.getByTestId('bd-composer-title') as HTMLInputElement
+      const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+
+      fireEvent.input(title, { target: { value: 'first post' } })
+      fireEvent.input(body, { target: { value: 'first body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      fireEvent.input(body, { target: { value: 'body of the next post' } })
+      answer.arrive()
+
+      await waitFor(() => expect(title.value).toBe(''))
+      expect(createPost).toHaveBeenCalledExactlyOnceWith('first post', 'first body', 'dashboard-user', { hearth: undefined })
+      expect(body.value).toBe('body of the next post')
+    })
+
+    it('clears a post the operator left as sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(createPost).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+      const title = screen.getByTestId('bd-composer-title') as HTMLInputElement
+      const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+
+      fireEvent.input(title, { target: { value: 'only post' } })
+      fireEvent.input(body, { target: { value: 'only body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      answer.arrive()
+
+      await waitFor(() => expect(title.value).toBe(''))
+      expect(body.value).toBe('')
+    })
+
+    it('keeps a mention typed after the previous one was sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(dispatchOperatorAction).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+
+      fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+      fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+      const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+      fireEvent.input(body, { target: { value: '@sangsu check the queue' } })
+      fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+      fireEvent.input(body, { target: { value: '@sangsu and one more thing' } })
+      answer.arrive()
+
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('Message sent.', 'success'))
+      expect(body.value).toBe('@sangsu and one more thing')
+    })
+  })
+
   it('submits the mobile mention quick composer through the keeper message action', () => {
     const dispatchMock = vi.mocked(dispatchOperatorAction)
     render(h(BoardSurface, null))

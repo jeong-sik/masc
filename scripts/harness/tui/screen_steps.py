@@ -9,7 +9,7 @@ types:
 - The palette runs whichever entry ranks first for the typed text, and some
   entries act: `gate ...` sets the approval gate, `language: ...` stores a
   preference, `keeper ...` opens a chat (bin/masc_tui_palette.ml). So a jump
-  names a `Destination`, whose value is one whole `go ...` entry. Typed
+  names a `Destination`, whose label is one whole `go ...` entry. Typed
   whole, that entry is the only one that ranks as the whole query.
 - One key means different things on different screens. `p` switches Usage
   to Telemetry, but on the Keeper list it pauses the Keeper under the cursor.
@@ -19,6 +19,14 @@ types:
 
 `plan` turns a step into keys only when every move is in `MOVES`, so a step
 that leaves the table never reaches a terminal.
+
+`MOVES` is what the code says a key does, not what the TUI did. Each place
+therefore names the surface the TUI draws there, the `surface_key` its frames
+carry into the frame report (MASC_TUI_FRAME_TIMING), and idle.py compares
+the surface on screen when the window starts with the one the step's last
+place names. A surface covers a whole screen, not its tab or view: every
+Keeper detail tab is `keeper-detail`, and Usage is `metrics` on Plan, Calls
+and Telemetry alike.
 
 Opening a row uses Right, not Enter. Both open a row in the dispatcher's
 shared arm (bin/masc_tui.ml), but two arms before it take Enter: on the
@@ -35,46 +43,65 @@ from pty_driver import Jump, Key, Press
 
 
 class Destination(enum.Enum):
-    """A `go` entry of the command palette, spelled whole: `main_entries`,
+    """A `go` entry of the command palette, spelled whole (`main_entries`,
     `palette_entries` and `config_panes` of bin/masc_tui_palette.ml and
-    bin/masc_tui_types.ml."""
-    OPERATIONS = 'go Operations'
-    USAGE = 'go Operations / Usage'
-    WORK = 'go Work'
-    REQUESTS = 'go Work / Requests'
-    BOARD = 'go Work / Board'
-    TASK_REVIEW = 'go Work / Task Review'
-    TASK_VERDICTS = 'go Work / Task Verdicts'
-    KEEPERS = 'go Keepers'
-    MEMORY = 'go Keepers / Memory'
-    SCHEDULES = 'go Keepers / Schedules'
-    FUSION = 'go Keepers / Fusion'
-    CHANGES = 'go Keepers / Changes'
-    FEATURES = 'go Features & plugins'
-    TOOLS = 'go Features & plugins / Tools & Skills'
-    RESOURCES = 'go Features & plugins / Resources'
-    CLIENTS = 'go Features & plugins / Clients'
-    CHANNELS = 'go Features & plugins / Channels'
-    WORKSPACE = 'go Workspace'
-    CODE = 'go Workspace / Code'
-    SYSTEM = 'go System'
-    MODELS = 'go System / models'
-    RUNTIME = 'go System / Runtime'
-    ACTIVITY = 'go System / Activity'
-    LOGS = 'go System / Logs'
+    bin/masc_tui_types.ml), and the surface the TUI draws once it ran: the
+    `surface_key` its frames carry into the frame report."""
+    label: str
+    surface: str
+
+    def __init__(self, label: str, surface: str) -> None:
+        self.label = label
+        self.surface = surface
+
+    OPERATIONS = ('go Operations', 'overview')
+    USAGE = ('go Operations / Usage', 'metrics')
+    WORK = ('go Work', 'planning-list')
+    REQUESTS = ('go Work / Requests', 'approvals')
+    BOARD = ('go Work / Board', 'board-list')
+    TASK_REVIEW = ('go Work / Task Review', 'verification')
+    TASK_VERDICTS = ('go Work / Task Verdicts', 'harness')
+    KEEPERS = ('go Keepers', 'keeper-list')
+    MEMORY = ('go Keepers / Memory', 'memory')
+    SCHEDULES = ('go Keepers / Schedules', 'schedules')
+    FUSION = ('go Keepers / Fusion', 'fusion-list')
+    CHANGES = ('go Keepers / Changes', 'changes')
+    FEATURES = ('go Features & plugins', 'lanes')
+    TOOLS = ('go Features & plugins / Tools & Skills', 'tools')
+    RESOURCES = ('go Features & plugins / Resources', 'resources')
+    CLIENTS = ('go Features & plugins / Clients', 'clients')
+    CHANNELS = ('go Features & plugins / Channels', 'connectors')
+    WORKSPACE = ('go Workspace', 'repositories')
+    CODE = ('go Workspace / Code', 'code')
+    # Config opens on its runtime.toml pane, which shows the settings status.
+    SYSTEM = ('go System', 'config-status')
+    MODELS = ('go System / models', 'config_models')
+    RUNTIME = ('go System / Runtime', 'runtime')
+    ACTIVITY = ('go System / Activity', 'acting')
+    LOGS = ('go System / Logs', 'system-logs')
 
 
 class Reached(enum.Enum):
-    """A screen that a move opens over or inside a destination."""
-    HELP = 'the help sheet of the screen'
-    HELP_EVERYWHERE = 'the help sheet of every screen'
-    PALETTE = 'the command palette'
-    USAGE_TELEMETRY = 'Usage on Telemetry'
-    WORK_TASKS = 'Work on Tasks'
-    KEEPER_ROW = 'the first Keeper row of the list'
-    KEEPER_DETAIL = 'a Keeper detail'
-    BOARD_POST = 'a Board post'
-    REQUEST_DETAIL = 'a request detail'
+    """A screen that a move opens over or inside a destination, and the
+    surface the TUI draws there. None where it depends on the workspace."""
+    label: str
+    surface: str | None
+
+    def __init__(self, label: str, surface: str | None) -> None:
+        self.label = label
+        self.surface = surface
+
+    HELP = ('the help sheet of the screen', 'help')
+    HELP_EVERYWHERE = ('the help sheet of every screen', 'help')
+    PALETTE = ('the command palette', 'palette')
+    USAGE_TELEMETRY = ('Usage on Telemetry', 'metrics')
+    WORK_TASKS = ('Work on Tasks', 'work-tasks')
+    # The list with its cursor on a row, or already that row's detail when
+    # row 0 of the list was no folded heading (see MOVES).
+    KEEPER_ROW = ('the first Keeper row of the list', None)
+    KEEPER_DETAIL = ('a Keeper detail', 'keeper-detail')
+    BOARD_POST = ('a Board post', 'board-read')
+    REQUEST_DETAIL = ('a request detail', 'approval-detail')
 
 
 type Place = Destination | Reached
@@ -153,6 +180,11 @@ MOVES: Mapping[tuple[Place, Move], Place] = MappingProxyType({
 })
 
 
+# Places that type a printable key into a text field. In the palette j and k
+# become query text, so idle.py presses no --keys there.
+TAKES_TEXT: frozenset[Place] = frozenset({Reached.PALETTE})
+
+
 @dataclass(frozen=True, slots=True)
 class Step:
     name: str
@@ -163,9 +195,12 @@ class Step:
 @dataclass(frozen=True, slots=True)
 class Planned:
     """A step whose every move the allow-list holds, with the keys that
-    reach its screen."""
+    reach its screen, the surface that screen draws (None where it depends
+    on the workspace) and whether it takes typed text."""
     name: str
     keys: tuple[Key, ...]
+    surface: str | None
+    takes_text: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +210,7 @@ class Refused:
     move: Move
 
     def why(self) -> str:
-        return f'{self.step}: {self.move.value} is not allowed on {self.at.value}'
+        return f'{self.step}: {self.move.value} is not allowed on {self.at.label}'
 
 
 def route(step: Step) -> tuple[Place, ...] | Refused:
@@ -193,7 +228,8 @@ def plan(step: Step) -> Planned | Refused:
     passed = route(step)
     if isinstance(passed, Refused):
         return passed
-    return Planned(step.name, (Jump(step.start.value),) + tuple(Press(move_bytes(move)) for move in step.moves))
+    return Planned(step.name, (Jump(step.start.label),) + tuple(Press(move_bytes(move)) for move in step.moves),
+                   passed[-1].surface, passed[-1] in TAKES_TEXT)
 
 
 # The Keeper detail's tabs in the order [ and ] walk them: keeper_detail_tabs

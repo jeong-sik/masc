@@ -1,6 +1,7 @@
 # pyright: strict
 """The screen table of idle.py: every step stays inside the allow-list of
-read-only moves, and names are unique.
+read-only moves, no move sends a key that acts, every jump is a whole palette
+label, every place names a surface the TUI draws, and names are unique.
 
     python3 -m unittest scripts.tests.test_tui_screen_steps
 
@@ -14,17 +15,13 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'harness' / 'tui'))
 from pty_driver import Jump, Press  # noqa: E402
-from screen_steps import (KEEPER_TABS, MOVES, STEP_NAMES, STEPS, Destination, Move, Planned, Reached,  # noqa: E402
-                          Refused, Step, move_bytes, plan, route)
+from screen_steps import (KEEPER_TABS, MOVES, STEP_NAMES, STEPS, TAKES_TEXT, Destination, Move,  # noqa: E402
+                          Planned, Reached, Refused, Step, move_bytes, plan, route)
 
 # Keys that act somewhere in the TUI: Enter runs a palette entry, sends a
 # chat and starts a Services login; y answers; a lone Esc leaves a Keeper
 # chat. No move may send them.
 NEVER = frozenset({b'\r', b'\n', b'y', b'\x1b'})
-# What the Keeper list and detail do with these: pause, wake, shut down,
-# delete, toggle the gate, unbind all channels (bin/masc_tui_keys.ml
-# keeper_actions, keeper_detail_tab_bindings), and toggle a Services provider.
-KEEPER_ACTS = frozenset({b'p', b'w', b's', b'x', b'g', b'U', b't', b'T'})
 KEEPER_PLACES = frozenset({Destination.KEEPERS, Reached.KEEPER_ROW, Reached.KEEPER_DETAIL})
 
 # Keys no move may send from any screen, whatever MOVES says: on the Keeper
@@ -32,7 +29,7 @@ KEEPER_PLACES = frozenset({Destination.KEEPERS, Reached.KEEPER_ROW, Reached.KEEP
 # unbind all channels; on Requests w and e set the approval gate and y and n
 # answer the ask under the cursor; Enter runs and a lone Esc leaves a chat.
 # KEEPER_ACTS above is checked only on the Keeper screens, so a w added from
-# Requests would pass it.
+# Requests would pass a check limited to the Keeper screens.
 FORBIDDEN_EVERYWHERE = frozenset({b'p', b'w', b's', b'x', b'g', b'U', b'e', b'y', b'n', b'\r', b'\n', b'\x1b'})
 # The pairs allowed to send a key of that set anyway. On Usage, p is a
 # Navigate binding (metrics_bindings) that switches to Telemetry; the
@@ -47,8 +44,11 @@ FORBIDDEN_KEY_EXCEPTIONS = frozenset({(Destination.USAGE, Move.TELEMETRY)})
 KEEPER_MOVES = frozenset({Move.OPEN, Move.NEXT_TAB, Move.PREVIOUS_TAB})
 
 REPO = Path(__file__).resolve().parent.parent.parent
-PALETTE_SOURCE = REPO / 'bin' / 'masc_tui_palette.ml'
-TYPES_SOURCE = REPO / 'bin' / 'masc_tui_types.ml'
+BIN = REPO / 'bin'
+PALETTE_SOURCE = BIN / 'masc_tui_palette.ml'
+TYPES_SOURCE = BIN / 'masc_tui_types.ml'
+# How a drawing names its surface for the frame report: `~surface_key:"tools"`.
+SURFACE_KEY = re.compile(r'surface_key:"([^"]+)"')
 SURFACE_RING = re.compile(r'let surface_ring : \(surface \* string\) list =\s*\[(.*?)\]', re.S)
 CONFIG_PANES = re.compile(r'let config_panes =\s*\[(.*?)\]', re.S)
 RING_LABEL = re.compile(r', "([^"]+)"\)')
@@ -76,6 +76,18 @@ def palette_go_labels() -> frozenset[str] | str:
                      | set(GO_LITERAL.findall(palette)))
 
 
+def drawn_surfaces() -> frozenset[str] | str:
+    """The surface keys the TUI's drawings pass to the frame report. A
+    string says why they could not be read."""
+    found: set[str] = set()
+    try:
+        for source in sorted(BIN.glob('masc_tui*.ml')):
+            found.update(SURFACE_KEY.findall(source.read_text(encoding='utf-8')))
+    except OSError as exc:
+        return f'{type(exc).__name__}: {exc}'
+    return frozenset(found)
+
+
 def planned(step: Step) -> Planned:
     match plan(step):
         case Planned() as result:
@@ -96,30 +108,17 @@ class AllowListTest(unittest.TestCase):
             with self.subTest(step.name):
                 jump, *presses = planned(step).keys
                 assert isinstance(jump, Jump)
-                self.assertIn(jump.entry, {destination.value for destination in Destination})
+                self.assertIn(jump.entry, {destination.label for destination in Destination})
                 pressed: list[Move] = []
                 for key in presses:
                     assert isinstance(key, Press)
                     pressed.append(moves_by_bytes[key.key])
                 self.assertEqual(tuple(pressed), step.moves)
 
-    def test_a_jump_names_only_go_entries(self) -> None:
-        # Palette entries that act start otherwise: gate, language:, keeper,
-        # task, usage account.
-        for destination in Destination:
-            with self.subTest(destination.name):
-                self.assertTrue(destination.value.startswith('go '))
-
     def test_moves_send_distinct_bytes_and_none_that_act(self) -> None:
         sent = [move_bytes(move) for move in Move]
         self.assertEqual(len(set(sent)), len(sent))
         self.assertFalse(NEVER & set(sent))
-
-    def test_no_move_from_a_keeper_screen_sends_a_keeper_action(self) -> None:
-        for (place, move) in MOVES:
-            if place in KEEPER_PLACES:
-                with self.subTest(place=place.name, move=move.name):
-                    self.assertNotIn(move_bytes(move), KEEPER_ACTS)
 
     def test_a_move_off_its_screen_is_refused(self) -> None:
         # p pauses on the Keeper list; Right on Usage and ? on Work are not in
@@ -209,7 +208,36 @@ class PaletteLabelTest(unittest.TestCase):
         self.assertIn('go System / runtime.toml', labels)
         for destination in Destination:
             with self.subTest(destination.name):
-                self.assertIn(destination.value, labels)
+                self.assertIn(destination.label, labels)
+
+
+class SurfaceTest(unittest.TestCase):
+    """idle.py compares the surface on screen with the one a step's last
+    place names, so a misspelled name would fail every run of that screen."""
+
+    def test_every_named_surface_is_one_the_tui_draws(self) -> None:
+        surfaces = drawn_surfaces()
+        if isinstance(surfaces, str):
+            self.fail(surfaces)
+        self.assertIn('overview', surfaces)
+        for place in (*Destination, *Reached):
+            if place.surface is not None:
+                with self.subTest(place.name):
+                    self.assertIn(place.surface, surfaces)
+
+    def test_every_step_names_the_surface_it_lands_on(self) -> None:
+        # Only KEEPER_ROW names none, and no step ends there.
+        for step in STEPS:
+            with self.subTest(step.name):
+                self.assertIsNotNone(planned(step).surface)
+
+    def test_only_the_palette_takes_text(self) -> None:
+        for step in STEPS:
+            with self.subTest(step.name):
+                passed = route(step)
+                assert isinstance(passed, tuple)
+                self.assertEqual(planned(step).takes_text, passed[-1] in TAKES_TEXT)
+        self.assertTrue(planned(STEP_NAMES['palette']).takes_text)
 
 
 if __name__ == '__main__':

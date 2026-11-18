@@ -300,22 +300,26 @@ let test_replaced_path_reopens () =
   check (list string) "retired inode receives no new record" [ "1" ] (read_lines old)
 ;;
 
-(* #52980. A write that fails part-way leaves the file as it was, and nothing
-   of it reaches the file later: not with the next append and not when the
-   cached descriptor is closed. Before, the cached [out_channel] kept the
-   unwritten bytes in its buffer and wrote them on the next flush or close. *)
+(* #52980. No byte of a failed append reaches the file later: not with the
+   next append and not when the cached descriptor is closed. Before, the
+   cached [out_channel] kept the unwritten bytes in its buffer and wrote them
+   on the next flush or close. Bytes a partial write did put in the file are
+   removed again when they are the file's last and nobody else's. *)
+
+module Whole = Fs_compat_internal.Fd_append_whole
 
 let read_all path = In_channel.with_open_bin path In_channel.input_all
+let no_space () = raise (Unix.Unix_error (Unix.ENOSPC, "write", ""))
 
 (* The real write, limited to [budget] more bytes in total. Once they are
    used up every write fails the way a full disk does. *)
 let io_failing_after budget =
   let left = ref budget in
-  { Fs_compat_internal.Fd_append_whole.unix_io with
+  { Whole.unix_io with
     write =
       (fun fd content offset length ->
         if !left = 0
-        then raise (Unix.Unix_error (Unix.ENOSPC, "write", ""))
+        then no_space ()
         else (
           let written =
             Unix.single_write_substring fd content offset (min length !left)
@@ -325,16 +329,27 @@ let io_failing_after budget =
   }
 ;;
 
-let failing_append ?(start = Fs_compat_internal.Fd_append_whole.Anywhere) ~budget path content =
-  match
-    Fs_compat.append_file_unix_with_io_for_testing
-      ~io:(io_failing_after budget)
-      ~start
-      path
-      content
-  with
+let failing_append ?(start = Whole.Anywhere) ~io path content =
+  match Fs_compat.append_file_unix_with_io_for_testing ~io ~start path content with
   | () -> fail "the append was expected to fail"
-  | exception Sys_error _ -> ()
+  | exception Sys_error message -> message
+;;
+
+let fail_append ?start ~budget path content =
+  ignore (failing_append ?start ~io:(io_failing_after budget) path content : string)
+;;
+
+(* One [Whole.run] on a descriptor of its own, for the typed result. *)
+let run_on_own_descriptor ~io ~start path content =
+  let target = Whole.open_target path in
+  Fun.protect
+    ~finally:(fun () -> Unix.close (Whole.descriptor target))
+    (fun () -> Whole.run ~io ~start target content)
+;;
+
+let describe = function
+  | Ok () -> "Ok"
+  | Error failure -> Whole.failure_to_string failure
 ;;
 
 let row_0 = "{\"row\":0}\n"
@@ -351,7 +366,7 @@ let failed_append_file name =
 
 let test_failed_append_without_bytes_leaves_nothing () =
   let path = failed_append_file "no-bytes.jsonl" in
-  failing_append ~budget:0 path row_a;
+  fail_append ~budget:0 path row_a;
   check string "file after the failed append" row_0 (read_all path);
   Fs_compat.append_file path row_b;
   check string "the next append adds its own row only" (row_0 ^ row_b) (read_all path)
@@ -359,7 +374,7 @@ let test_failed_append_without_bytes_leaves_nothing () =
 
 let test_failed_append_with_bytes_is_rolled_back () =
   let path = failed_append_file "some-bytes.jsonl" in
-  failing_append ~budget:4 path row_a;
+  fail_append ~budget:4 path row_a;
   check string "the four written bytes are removed again" row_0 (read_all path);
   Fs_compat.append_file path row_b;
   check string "the next append starts where the file ended" (row_0 ^ row_b) (read_all path)
@@ -367,51 +382,226 @@ let test_failed_append_with_bytes_is_rolled_back () =
 
 let test_failed_append_is_not_written_on_close () =
   let path = failed_append_file "close.jsonl" in
-  failing_append ~budget:0 path row_a;
+  fail_append ~budget:4 path row_a;
   Fs_compat.reset_fd_cache_for_testing ();
   check string "closing the cached descriptor writes nothing" row_0 (read_all path)
 ;;
 
 let test_repeated_failed_appends_do_not_pile_up () =
   let path = failed_append_file "repeated.jsonl" in
-  failing_append ~budget:0 path row_a;
-  failing_append ~budget:0 path row_a2;
+  fail_append ~budget:4 path row_a;
+  fail_append ~budget:6 path row_a2;
   check string "file after two failed appends" row_0 (read_all path);
   Fs_compat.append_file path row_b;
   check string "only the append that succeeded is in the file" (row_0 ^ row_b) (read_all path)
 ;;
 
-(* When the rollback itself fails the bytes stay, and the error says so. *)
+let test_rollback_result_names_the_bytes () =
+  let path = failed_append_file "typed.jsonl" in
+  (match run_on_own_descriptor ~io:(io_failing_after 4) ~start:Whole.Anywhere path row_a with
+   | Error
+       (Whole.Write_failed
+         { rollback = Whole.Rolled_back { bytes = 4 }
+         ; write_failure =
+             Fs_compat_internal.Fd_write_all.Unix_error
+               { bytes_written = 4; error = Unix.ENOSPC; _ }
+         }) -> ()
+   | other -> failf "expected 4 bytes rolled back, got: %s" (describe other));
+  check string "the file is as it was" row_0 (read_all path)
+;;
+
+(* More than one [write(2)]: [Unix.single_write] sends at most 65536 bytes. *)
+let test_rollback_spans_several_writes () =
+  let path = failed_append_file "several-writes.jsonl" in
+  let content = String.make 149_999 'x' ^ "\n" in
+  (match
+     run_on_own_descriptor ~io:(io_failing_after 100_000) ~start:Whole.Anywhere path content
+   with
+   | Error (Whole.Write_failed { rollback = Whole.Rolled_back { bytes = 100_000 }; _ }) -> ()
+   | other -> failf "expected 100000 bytes rolled back, got: %s" (describe other));
+  check string "the file is as it was" row_0 (read_all path)
+;;
+
+(* When the truncation fails the bytes stay, and the result says so. *)
+let io_whose_truncate_fails ~budget attempts =
+  { (io_failing_after budget) with
+    truncate =
+      (fun _ _ ->
+        incr attempts;
+        raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
+  }
+;;
+
 let test_failed_rollback_is_reported () =
   let path = failed_append_file "rollback-fails.jsonl" in
+  let attempts = ref 0 in
+  let failure =
+    match
+      run_on_own_descriptor
+        ~io:(io_whose_truncate_fails ~budget:4 attempts)
+        ~start:Whole.Anywhere
+        path
+        row_a
+    with
+    | Error
+        (Whole.Write_failed
+          { rollback =
+              Whole.Left_in_place
+                { bytes = 4
+                ; reason =
+                    Whole.Rollback_error
+                      { error = Unix.EIO; function_name = "ftruncate"; _ }
+                }
+          ; _
+          } as failure) -> failure
+    | other -> failf "expected 4 bytes left after a failed truncation, got: %s" (describe other)
+  in
+  check int "the truncation was tried once" 1 !attempts;
+  let left = row_0 ^ String.sub row_a 0 4 in
+  check string "the partial bytes are still there" left (read_all path);
+  (* The same failure through the cached path: its message is the path and
+     this result's text. *)
+  let cached = failed_append_file "rollback-fails-cached.jsonl" in
+  let message =
+    failing_append ~io:(io_whose_truncate_fails ~budget:4 (ref 0)) cached row_a
+  in
+  check
+    string
+    "the error names the path and says the bytes were left"
+    (Fs_compat.canonical_append_mutex_path_for_testing cached
+     ^ ": "
+     ^ Whole.failure_to_string failure)
+    message;
+  check string "the partial bytes are still there" left (read_all cached)
+;;
+
+(* What a writer in another process does: its own descriptor, the same
+   append. *)
+let append_as_another_writer path lines =
+  match run_on_own_descriptor ~io:Whole.unix_io ~start:Whole.At_line_start path lines with
+  | Ok () -> ()
+  | Error failure -> failf "the other writer failed: %s" (Whole.failure_to_string failure)
+;;
+
+(* The rollback removes only bytes it can tell are this call's. A row another
+   writer appended during the failed call makes the file longer than this
+   call's bytes account for, so nothing is truncated and that row stays. *)
+let test_another_writers_row_survives_a_failed_append () =
+  let path = failed_append_file "another-writer.jsonl" in
+  let writes = ref 0 in
   let io =
-    { (io_failing_after 4) with
-      truncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
+    { Whole.unix_io with
+      write =
+        (fun fd content offset length ->
+          incr writes;
+          if !writes > 1
+          then no_space ()
+          else (
+            let written = Unix.single_write_substring fd content offset (min length 4) in
+            append_as_another_writer path row_b;
+            written))
     }
   in
-  (match
-     Fs_compat.append_file_unix_with_io_for_testing
-       ~io
-       ~start:Fs_compat_internal.Fd_append_whole.Anywhere
-       path
-       row_a
-   with
-   | () -> fail "the append was expected to fail"
-   | exception Sys_error message ->
-     check
-       bool
-       "the error names the path"
-       true
-       (String.starts_with ~prefix:(Fs_compat.canonical_append_mutex_path_for_testing path) message));
-  check string "the partial bytes are still there" (row_0 ^ String.sub row_a 0 4) (read_all path)
+  let torn = String.sub row_a 0 4 in
+  let expected_size = String.length row_0 + 4 in
+  let size = expected_size + 1 + String.length row_b in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Error
+       (Whole.Write_failed
+         { rollback =
+             Whole.Left_in_place
+               { bytes = 4
+               ; reason = Whole.Changed_by_another_writer { expected_size = e; size = s }
+               }
+         ; _
+         })
+     when e = expected_size && s = size -> ()
+   | other -> failf "expected the bytes left for another writer, got: %s" (describe other));
+  check
+    string
+    "the other writer's row is whole, on a line of its own"
+    (row_0 ^ torn ^ "\n" ^ row_b)
+    (read_all path);
+  Fs_compat.append_lines path row_a2;
+  check
+    string
+    "the next row follows it"
+    (row_0 ^ torn ^ "\n" ^ row_b ^ row_a2)
+    (read_all path)
+;;
+
+(* A real failed write: the kernel stops the write at the process's file
+   size limit and fails the next one. The probe is this executable again,
+   started under [ulimit -f]. *)
+let file_size_limit_probe path bytes =
+  (* Past the limit the kernel also sends SIGXFSZ, which ends the process
+     unless it is ignored. *)
+  Sys.set_signal Sys.sigxfsz Sys.Signal_ignore;
+  let content = String.make (bytes - 1) 'x' ^ "\n" in
+  match run_on_own_descriptor ~io:Whole.unix_io ~start:Whole.At_line_start path content with
+  | Error (Whole.Write_failed { rollback = Whole.Rolled_back { bytes }; _ }) when bytes > 0 ->
+    exit 0
+  | other ->
+    prerr_endline ("file size limit probe: " ^ describe other);
+    exit 3
+;;
+
+let test_real_failed_write_is_rolled_back ~limit_kib ~bytes () =
+  let path = failed_append_file "file-size-limit.jsonl" in
+  Fs_compat.reset_fd_cache_for_testing ();
+  let script =
+    Printf.sprintf
+      "set +o posix && builtin ulimit -S -f %d && exec %s --file-size-limit-probe %s %d"
+      limit_kib
+      (Filename.quote (Unix.realpath Sys.executable_name))
+      (Filename.quote path)
+      bytes
+  in
+  (match Unix.system ("/bin/bash -c " ^ Filename.quote script) with
+   | Unix.WEXITED 0 -> ()
+   | Unix.WEXITED code -> failf "the probe exited with %d" code
+   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "the probe got signal %d" signal);
+  check string "the file is as it was before the failed append" row_0 (read_all path)
+;;
+
+(* A FIFO has no last byte to read and its bytes cannot be taken back. *)
+let test_stream_is_written_as_it_is () =
+  let path = Filename.concat (tmpdir "fd_cache_stream") "out.fifo" in
+  Unix.mkfifo path 0o600;
+  let reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+  let target = Whole.open_target path in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close (Whole.descriptor target);
+      Unix.close reader)
+    (fun () ->
+      (match target with
+       | Whole.Stream _ -> ()
+       | Whole.Regular_file _ -> fail "a FIFO was opened as a regular file");
+      (match Whole.run ~io:Whole.unix_io ~start:Whole.At_line_start target row_a with
+       | Ok () -> ()
+       | Error failure -> failf "append to a FIFO: %s" (Whole.failure_to_string failure));
+      (match Whole.run ~io:(io_failing_after 2) ~start:Whole.At_line_start target row_b with
+       | Error
+           (Whole.Write_failed
+             { rollback =
+                 Whole.Left_in_place { bytes = 2; reason = Whole.Not_a_regular_file }
+             ; _
+             }) -> ()
+       | other -> failf "expected 2 bytes left in the FIFO, got: %s" (describe other));
+      let received = Bytes.create 64 in
+      let count = Unix.read reader received 0 64 in
+      check
+        string
+        "the row and the two bytes of the failed one arrived"
+        (row_a ^ String.sub row_b 0 2)
+        (Bytes.sub_string received 0 count))
 ;;
 
 (* #52974. A line append starts at a line start. When the file ends in the
    middle of a line, the append writes a newline first, so the unfinished
    bytes stay a line of their own and the new row is read whole. Before, the
    row was written right after them and both were lost as one broken line. *)
-
-module Whole = Fs_compat_internal.Fd_append_whole
 
 (* Bytes written through a descriptor other than the cached one, the way a
    writer that died part-way leaves them. *)
@@ -448,9 +638,20 @@ let test_line_append_notices_bytes_from_another_descriptor () =
   Fs_compat.append_jsonl path (`Int 2);
   check
     string
-    "the end is read again when the size changed"
+    "the end is read on every append"
     ("1\n" ^ unfinished ^ "\n2\n")
     (read_all path)
+;;
+
+(* The file is rewritten in place to the length it had, now ending in the
+   middle of a line. Only reading the last byte tells. *)
+let test_line_append_notices_a_same_size_rewrite () =
+  let path = line_start_file "same-size.jsonl" in
+  Fs_compat.append_lines path "12345\n";
+  Out_channel.with_open_gen [ Open_wronly; Open_binary ] 0o644 path (fun channel ->
+    output_string channel "abcdef");
+  Fs_compat.append_jsonl path (`Int 2);
+  check string "the row starts on a new line" "abcdef\n2\n" (read_all path)
 ;;
 
 let test_line_append_at_a_line_start_adds_nothing () =
@@ -478,18 +679,17 @@ let test_line_append_after_raw_unfinished_bytes () =
   check string "the row starts on a new line" (unfinished ^ "\n2\n") (read_all path)
 ;;
 
+(* Bytes a failed append could not remove are unfinished bytes like any
+   other: the next row does not join them. *)
 let test_line_append_after_failed_rollback () =
   let path = failed_append_file "after-failed-rollback.jsonl" in
-  let io =
-    { (io_failing_after 4) with
-      truncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
-    }
-  in
-  (match
-     Fs_compat.append_file_unix_with_io_for_testing ~io ~start:Whole.At_line_start path row_a
-   with
-   | () -> fail "the append was expected to fail"
-   | exception Sys_error _ -> ());
+  ignore
+    (failing_append
+       ~start:Whole.At_line_start
+       ~io:(io_whose_truncate_fails ~budget:4 (ref 0))
+       path
+       row_a
+     : string);
   Fs_compat.append_jsonl path (`Int 2);
   check
     string
@@ -527,27 +727,27 @@ let test_empty_line_append_writes_nothing () =
 let test_failed_line_append_removes_its_newline_too () =
   let path = line_start_file "newline-rolled-back.jsonl" in
   write_through_another_descriptor path (row_0 ^ unfinished);
-  failing_append ~start:Whole.At_line_start ~budget:3 path row_a;
+  fail_append ~start:Whole.At_line_start ~budget:3 path row_a;
   check string "the file is as it was" (row_0 ^ unfinished) (read_all path)
 ;;
 
 let test_unreadable_end_writes_nothing () =
   let path = line_start_file "unreadable-end.jsonl" in
   write_through_another_descriptor path row_0;
-  let io =
+  let unreadable =
     { Whole.unix_io with
-      observe_end = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "read", "")))
+      end_offset = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "lseek", "")))
     }
   in
-  (match
-     Fs_compat.append_file_unix_with_io_for_testing ~io ~start:Whole.At_line_start path row_a
-   with
-   | () -> fail "the append was expected to fail"
-   | exception Sys_error _ -> ());
-  check string "nothing was written" row_0 (read_all path)
+  let moved = { Whole.unix_io with last_byte = (fun _ ~size:_ -> None) } in
+  List.iter
+    (fun io ->
+      ignore (failing_append ~start:Whole.At_line_start ~io path row_a : string);
+      check string "nothing was written" row_0 (read_all path))
+    [ unreadable; moved ]
 ;;
 
-let () =
+let tests () =
   Alcotest.run
     "fs_compat_fd_cache"
     [ ( "fd_cache"
@@ -588,7 +788,7 @@ let () =
             `Quick
             test_failed_append_with_bytes_is_rolled_back
         ; test_case
-            "closing the cached descriptor writes nothing"
+            "closing the cached descriptor after a failed append writes nothing"
             `Quick
             test_failed_append_is_not_written_on_close
         ; test_case
@@ -596,9 +796,33 @@ let () =
             `Quick
             test_repeated_failed_appends_do_not_pile_up
         ; test_case
-            "a failed rollback is reported and the bytes stay"
+            "the result names the bytes rolled back"
+            `Quick
+            test_rollback_result_names_the_bytes
+        ; test_case
+            "a rollback spans several writes"
+            `Quick
+            test_rollback_spans_several_writes
+        ; test_case
+            "a failed truncation is reported and the bytes stay"
             `Quick
             test_failed_rollback_is_reported
+        ; test_case
+            "another writer's row survives a failed append"
+            `Quick
+            test_another_writers_row_survives_a_failed_append
+        ; test_case
+            "a real short write at the file size limit is rolled back"
+            `Quick
+            (test_real_failed_write_is_rolled_back ~limit_kib:1 ~bytes:2_000)
+        ; test_case
+            "a real failure after several writes is rolled back"
+            `Quick
+            (test_real_failed_write_is_rolled_back ~limit_kib:100 ~bytes:150_000)
+        ; test_case
+            "a FIFO is written as it is and nothing is taken back"
+            `Quick
+            test_stream_is_written_as_it_is
         ] )
     ; ( "line start"
       , [ test_case
@@ -609,6 +833,10 @@ let () =
             "bytes from another descriptor are noticed"
             `Quick
             test_line_append_notices_bytes_from_another_descriptor
+        ; test_case
+            "a rewrite to the same size is noticed"
+            `Quick
+            test_line_append_notices_a_same_size_rewrite
         ; test_case
             "a row at a line start gets no extra newline"
             `Quick
@@ -642,9 +870,16 @@ let () =
             `Quick
             test_failed_line_append_removes_its_newline_too
         ; test_case
-            "an unreadable file end writes nothing"
+            "an end that cannot be read writes nothing"
             `Quick
             test_unreadable_end_writes_nothing
         ] )
     ]
+;;
+
+let () =
+  match Sys.argv with
+  | [| _; "--file-size-limit-probe"; path; bytes |] ->
+    file_size_limit_probe path (int_of_string bytes)
+  | _ -> tests ()
 ;;

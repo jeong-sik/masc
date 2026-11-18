@@ -37,6 +37,24 @@ let test_every_rolled_up_name_is_a_section () =
       | Error _ -> Alcotest.failf "%s is not decoded to a section" name)
     rolled_up
 
+(* The defect the decoder exists for: a known section drawn as the wire
+   identifier it arrived as. A label is checked only against that identifier,
+   in both languages, never against a wording. *)
+let test_no_known_section_is_labelled_with_its_wire_name () =
+  List.iter
+    (fun name ->
+      match Section.of_wire name with
+      | Ok section ->
+          List.iter
+            (fun ko ->
+              Alcotest.(check bool)
+                (Printf.sprintf "%s (ko=%b) is not drawn as received" name ko)
+                false
+                (String.equal (Section.label ~ko section) (Section.wire_name section)))
+            [ true; false ]
+      | Error _ -> Alcotest.failf "%s is not decoded to a section" name)
+    rolled_up
+
 let test_an_unknown_name_is_kept_as_received () =
   let received = "keeper_new_section_from_a_later_server" in
   Alcotest.(check bool) "unknown names are not taken for a known section" true
@@ -49,6 +67,8 @@ let () =
     [ ( "decode"
       , [ Alcotest.test_case "every rolled-up name is a section" `Quick
             test_every_rolled_up_name_is_a_section
+        ; Alcotest.test_case "no known section is labelled with its wire name" `Quick
+            test_no_known_section_is_labelled_with_its_wire_name
         ; Alcotest.test_case "an unknown name is kept as received" `Quick
             test_an_unknown_name_is_kept_as_received
         ] )

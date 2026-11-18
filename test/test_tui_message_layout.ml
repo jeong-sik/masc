@@ -641,6 +641,33 @@ let test_an_edge_cut_carries_the_mark () =
   check bool "a styled cut resets before the mark" true
     (String.ends_with ~suffix:("\027[0m" ^ Layout.cut_mark) (Layout.truncate_end 5 styled))
 
+(* A boundary inside a two-cell grapheme: the grapheme is not split, the
+   head is still a cut, and the mark still fits. A styled text that fits is
+   drawn as it came, its escapes included. *)
+let test_a_wide_head_is_cut_whole_within_its_width () =
+  let wide = "\xea\xb0\x80\xeb\x82\x98\xeb\x8b\xa4\xeb\x9d\xbc\xeb\xa7\x88" in
+  let width = Layout.display_width wide in
+  check bool "a boundary inside a grapheme is a cut" true
+    (match Layout.take_cells wide 3 with
+     | Layout.Cut kept -> String.starts_with ~prefix:kept wide && Layout.display_width kept <= 3
+     | Layout.Whole _ -> false);
+  List.iter
+    (fun cells ->
+      let drawn = Layout.truncate_end cells wide in
+      let head =
+        String.sub drawn 0 (String.length drawn - String.length Layout.cut_mark)
+      in
+      check bool (Printf.sprintf "cut to %d ends in the mark" cells) true
+        (String.ends_with ~suffix:Layout.cut_mark drawn);
+      check bool (Printf.sprintf "cut to %d stays within it" cells) true
+        (Layout.display_width drawn <= cells);
+      check bool (Printf.sprintf "cut to %d keeps whole graphemes" cells) true
+        (String.starts_with ~prefix:head wide))
+    (List.init (width - 1) (fun index -> index + 1));
+  let styled = "\027[1m" ^ wide ^ "\027[0m" in
+  check bool "a fitting styled text is drawn as it came" true
+    (String.equal styled (Layout.truncate_end width styled))
+
 let () =
   run "tui_message_layout"
     [
@@ -660,6 +687,8 @@ let () =
         ; test_case "a cut is Cut and a fit is Whole" `Quick
             test_a_cut_is_cut_and_a_fit_is_whole
         ; test_case "an edge cut carries the mark" `Quick test_an_edge_cut_carries_the_mark
+        ; test_case "a wide head is cut whole within its width" `Quick
+            test_a_wide_head_is_cut_whole_within_its_width
         ] );
       ( "spans"
       , [ test_case "a span that is not a number reads as nothing" `Quick

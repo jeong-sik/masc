@@ -22185,7 +22185,9 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
 
 (* Runs on every loop iteration. A failing [/health] probe owes one pass,
    which starts once its wait is over, whether or not anything asked
-   (RFC tui-one-screen-grammar §2). *)
+   (RFC tui-one-screen-grammar §2). Only a full pass in flight holds it: a
+   screen read in flight is the same case for this pass as for any other,
+   and [start_http_refresh] decides it through [note_full_refresh_intent]. *)
 let launch_owed_refresh_pass state ~refresh_inflight ~scoped_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if not !refresh_inflight

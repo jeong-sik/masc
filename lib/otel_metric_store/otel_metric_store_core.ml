@@ -276,11 +276,11 @@ let observe_histogram name ?(labels = []) value =
        | Some bounds ->
          List.iter
            (fun bound ->
-              let le = histogram_bound_label bound in
-              let bucket_labels = ("le", le) :: labels in
-              let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
               if value <= bound
-              then
+              then (
+                let le = histogram_bound_label bound in
+                let bucket_labels = ("le", le) :: labels in
+                let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
                 Series.write
                   bucket_key
                   ~make:(fun () ->
@@ -290,7 +290,7 @@ let observe_histogram name ?(labels = []) value =
                     ; value = 1.0
                     ; labels = bucket_labels
                     })
-                  ~change:(fun m -> m.value <- m.value +. 1.0))
+                  ~change:(fun m -> m.value <- m.value +. 1.0)))
            bounds;
          let inf_labels = ("le", "+Inf") :: labels in
          let inf_key = metric_key (name ^ "_bucket") inf_labels in

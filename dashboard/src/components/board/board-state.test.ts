@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>()
@@ -41,7 +41,9 @@ import {
   refreshBoardHearths,
   loadPostDetail,
   submitComment,
-  commentText,
+  commentDraft,
+  setCommentText,
+  setReplyingTo,
   loadOlderPostComments,
   detailPost,
   detailPostId,
@@ -80,6 +82,24 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
     ...overrides,
   }
 }
+
+// Comment drafts outlive a test, so each one written here is emptied after it.
+const draftedPosts = new Set<string>()
+
+function typeOn(postId: string, text: string): void {
+  draftedPosts.add(postId)
+  setCommentText(postId, text)
+}
+
+function replyOn(postId: string, commentId: string): void {
+  draftedPosts.add(postId)
+  setReplyingTo(postId, commentId)
+}
+
+afterEach(() => {
+  for (const postId of draftedPosts) setReplyingTo(postId, null)
+  draftedPosts.clear()
+})
 
 beforeEach(() => {
   detailPostId.value = null
@@ -767,7 +787,7 @@ describe('loadPostDetail', () => {
       commentPage: { offset: 40, total: 45, revision: 'after-reply' },
     })
     detailPostId.value = 'p1'
-    commentText.value = 'Reply to the older page'
+    typeOn('p1', 'Reply to the older page')
     await submitComment('p1', 'older-parent')
     expect(commentPost).toHaveBeenCalledWith('p1', expect.any(String), 'Reply to the older page', 'older-parent')
     expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith('p1', undefined, undefined, 'older-parent')
@@ -788,7 +808,7 @@ describe('loadPostDetail', () => {
       finishSubmit = () => resolve({})
     }))
     await loadPostDetail('post-a', null)
-    commentText.value = 'written on A'
+    typeOn('post-a', 'written on A')
     const submitted = submitComment('post-a')
     await loadPostDetail('post-b', null)
     finishSubmit()
@@ -797,6 +817,46 @@ describe('loadPostDetail', () => {
     expect(detailPostId.value).toBe('post-b')
     expect(detailPost.value?.id).toBe('post-b')
     expect(detailComments.value.map(row => row.id)).toEqual(['comment-of-post-b'])
+  })
+
+  it('keeps a draft with the post it was typed on', async () => {
+    // #52955: text typed on A was what B's form showed and sent.
+    vi.mocked(commentPost).mockResolvedValue({})
+    typeOn('draft-a', 'draft composed for A')
+    replyOn('reply-a', 'comment-of-a')
+    expect(commentDraft('draft-b')).toEqual({ text: '', replyingTo: null, submitting: false })
+    await submitComment('draft-b')
+    expect(commentPost).not.toHaveBeenCalled()
+    expect(commentDraft('draft-a').text).toBe('draft composed for A')
+    expect(commentDraft('reply-a').replyingTo).toBe('comment-of-a')
+  })
+
+  it('a submit in flight on one post leaves another post free to type', async () => {
+    let finishSubmit = (): void => {}
+    vi.mocked(commentPost).mockImplementation(() => new Promise(resolve => {
+      finishSubmit = () => resolve({})
+    }))
+    typeOn('flight-a', 'sent on A')
+    const submitted = submitComment('flight-a')
+    expect(commentDraft('flight-a').submitting).toBe(true)
+    expect(commentDraft('flight-b').submitting).toBe(false)
+    typeOn('flight-b', 'typed on B while A is in flight')
+    finishSubmit()
+    await submitted
+    expect(commentDraft('flight-a')).toEqual({ text: '', replyingTo: null, submitting: false })
+    expect(commentDraft('flight-b').text).toBe('typed on B while A is in flight')
+  })
+
+  it('keeps the text when the submit fails', async () => {
+    vi.mocked(commentPost).mockRejectedValue(new Error('fixture comment refused'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      typeOn('failed-a', 'not stored yet')
+      await submitComment('failed-a')
+      expect(commentDraft('failed-a')).toEqual({ text: 'not stored yet', replyingTo: null, submitting: false })
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('leaves detailPost.closed undefined for an open post', async () => {

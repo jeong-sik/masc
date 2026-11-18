@@ -83,9 +83,41 @@ let boardHearthsRequestId = 0
 
 // ── Signals: comments ──────────────────────────────────────────────
 const COMMENT_PAGE_SIZE = 20
-export const commentText = signal('')
-export const commentSubmitting = signal(false)
-export const replyingTo = signal<string | null>(null)
+
+/** What the operator has entered on one post: the text, the comment it
+ *  answers, and whether that post's submit is in flight. Each post has its
+ *  own, so opening another post neither shows this text nor sends it there. */
+export interface CommentDraft {
+  readonly text: string
+  readonly replyingTo: string | null
+  readonly submitting: boolean
+}
+
+const EMPTY_COMMENT_DRAFT: CommentDraft = { text: '', replyingTo: null, submitting: false }
+const commentDrafts = signal<ReadonlyMap<string, CommentDraft>>(new Map())
+
+export function commentDraft(postId: string): CommentDraft {
+  return commentDrafts.value.get(postId) ?? EMPTY_COMMENT_DRAFT
+}
+
+function changeCommentDraft(postId: string, change: Partial<CommentDraft>): void {
+  const next = { ...commentDraft(postId), ...change }
+  const drafts = new Map(commentDrafts.value)
+  // A post with nothing entered needs no entry: the empty draft is what a miss reads as.
+  if (next.text === '' && next.replyingTo === null && !next.submitting) drafts.delete(postId)
+  else drafts.set(postId, next)
+  commentDrafts.value = drafts
+}
+
+export function setCommentText(postId: string, text: string): void {
+  changeCommentDraft(postId, { text })
+}
+
+/** Point the post's draft at a comment, or back at the post with `null`. The
+ *  text was written for the previous target, so it starts over. */
+export function setReplyingTo(postId: string, commentId: string | null): void {
+  changeCommentDraft(postId, { replyingTo: commentId, text: '' })
+}
 
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
@@ -459,13 +491,15 @@ export async function loadOlderPostComments(postId: string) {
 }
 
 export async function submitComment(postId: string, parentId?: string) {
-  const text = commentText.value.trim()
+  const text = commentDraft(postId).text.trim()
   if (!text) return
-  commentSubmitting.value = true
+  changeCommentDraft(postId, { submitting: true })
   try {
     await commentPost(postId, commentAuthor.value, text, parentId)
-    commentText.value = ''
-    replyingTo.value = null
+    // While this post's submit is in flight its two composers and every reply
+    // toggle of its thread are disabled, so the draft still holds exactly what
+    // was sent.
+    changeCommentDraft(postId, { text: '', replyingTo: null })
     showToast('댓글을 등록했습니다', 'success')
     await refreshPostDetail(postId, parentId)
     refreshBoard()
@@ -473,7 +507,7 @@ export async function submitComment(postId: string, parentId?: string) {
     console.warn('[board] comment submit failed', err instanceof Error ? err.message : err)
     showToast('댓글 등록에 실패했습니다', 'error')
   } finally {
-    commentSubmitting.value = false
+    changeCommentDraft(postId, { submitting: false })
   }
 }
 

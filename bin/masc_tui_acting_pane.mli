@@ -218,7 +218,8 @@ type keeper_waiting_summary =
   | Waiting_not_observed
   | Waiting_read_unavailable
   | Waiting_items of {
-      schedules : Masc.Tui_decode.waiting_item list;
+      schedules : (Masc.Tui_decode.waiting_item * int) option;
+          (** The first waiting schedule and how many wait. *)
       delegate_result_waiting : bool;
       read_error : bool;
     }

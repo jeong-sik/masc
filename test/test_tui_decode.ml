@@ -8480,29 +8480,20 @@ let keeper_turns_waiting_json =
             ; "turn", `Null
             ; "waiting", `Assoc
                 [ "keeper_name", `String "echo"
-                ; "paused", `Bool false
                 ; "state", `String "waiting"
-                ; "waiting_count", `Int 1
+                ; "waiting_count", `Int 3
+                ; "sources", `Assoc [ "event_queue_pending", `Int 3 ]
                 ; "since", `Float 10.
-                ; "since_iso", `String "1970-01-01T00:00:10Z"
                 ; "due_at", `Null
-                ; "due_at_iso", `Null
-                ; "sources", `Assoc [ "event_queue_pending", `Int 1 ]
-                ; "source_next_actions", `Assoc
-                    [ "event_queue_pending", `List [ `String "resume_on_delegate_completed" ] ]
-                ; "current_execution", `Null
-                ; "waiting_on", `List
+                ; "waiting_heads", `List
                     [ `Assoc
                         [ "source", `String "event_queue_pending"
                         ; "waiting_on", `String "keeper-delegate:op-1"
                         ; "what", `String "Delegated answer from crystal"
                         ; "wake_producer", `String "keeper_delegate"
                         ; "since", `Float 10.
-                        ; "since_iso", `String "1970-01-01T00:00:10Z"
                         ; "due_at", `Null
-                        ; "due_at_iso", `Null
                         ; "next_action", `String "resume_on_delegate_completed"
-                        ; "detail", `Assoc [ "delegate_operation_id", `String "op-1" ]
                         ]
                     ]
                 ]
@@ -8521,29 +8512,20 @@ let keeper_turns_quota_spent_json =
             ; "turn", `Null
             ; "waiting", `Assoc
                 [ "keeper_name", `String "echo"
-                ; "paused", `Bool false
                 ; "state", `String "waiting"
                 ; "waiting_count", `Int 1
-                ; "since", `Null
-                ; "since_iso", `Null
-                ; "due_at", `Float 1794182400.
-                ; "due_at_iso", `String "2026-11-09T00:00:00Z"
                 ; "sources", `Assoc [ "runtime_quota_spent", `Int 1 ]
-                ; "source_next_actions", `Assoc
-                    [ "runtime_quota_spent", `List [ `String "assign_a_route_with_open_quota" ] ]
-                ; "current_execution", `Null
-                ; "waiting_on", `List
+                ; "since", `Null
+                ; "due_at", `Float 1794182400.
+                ; "waiting_heads", `List
                     [ `Assoc
                         [ "source", `String "runtime_quota_spent"
                         ; "waiting_on", `String "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
                         ; "what", `String "한도 소진 · ollama_cloud"
                         ; "wake_producer", `String "keeper_supervisor"
                         ; "since", `Null
-                        ; "since_iso", `Null
                         ; "due_at", `Float 1794182400.
-                        ; "due_at_iso", `String "2026-11-09T00:00:00Z"
                         ; "next_action", `String "assign_a_route_with_open_quota"
-                        ; "detail", `Assoc []
                         ]
                     ]
                 ]
@@ -8555,7 +8537,7 @@ let test_decode_keeper_turns_projection_reads_quota_spent_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_quota_spent_json with
   | Error detail -> Alcotest.fail detail
   | Ok { waiting = Tui_decode.Keeper_waiting_observed [ waiting ]; _ } ->
-    (match waiting.Tui_decode.kwr_waiting_on with
+    (match waiting.Tui_decode.kwr_waiting_heads with
      | [ item ] ->
        Alcotest.(check bool) "quota spent source" true
          (item.Tui_decode.kwi_source = Tui_decode.Waiting_source_runtime_quota_spent);
@@ -8578,8 +8560,12 @@ let test_decode_keeper_turns_projection_reads_waiting () =
       Alcotest.(check string) "waiting owner" "echo" waiting.Tui_decode.kwr_keeper_name;
       Alcotest.(check bool) "canonical waiting state" true
         (waiting.kwr_state = Tui_decode.Keeper_waiting_blocked);
-      Alcotest.(check int) "waiting count" 1 waiting.kwr_waiting_count;
-      (match waiting.kwr_waiting_on with
+      Alcotest.(check int) "every row is counted" 3 waiting.kwr_waiting_count;
+      Alcotest.(check int) "rows per source" 3
+        (Tui_decode.waiting_source_count waiting Tui_decode.Waiting_source_event_queue_pending);
+      Alcotest.(check int) "a source with no rows" 0
+        (Tui_decode.waiting_source_count waiting Tui_decode.Waiting_source_schedule_waiting);
+      (match waiting.kwr_waiting_heads with
        | [ item ] ->
            Alcotest.(check bool) "queue source" true
              (item.Tui_decode.kwi_source = Tui_decode.Waiting_source_event_queue_pending);
@@ -8706,7 +8692,7 @@ let test_decode_keeper_turns_projection_separates_fleet_errors () =
    | Ok _ | Error _ -> Alcotest.fail "deadline observation failure must be visible" );
   let valid_waiting = `Assoc
       [ "keeper_name", `String "echo"; "state", `String "idle"; "waiting_count", `Int 0
-      ; "since", `Null; "due_at", `Null; "waiting_on", `List [] ] in
+      ; "sources", `Assoc []; "since", `Null; "due_at", `Null; "waiting_heads", `List [] ] in
   let invalid_rows =
     [ wire `Null (`String "not an array")
     ; wire `Null `Null

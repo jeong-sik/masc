@@ -2,7 +2,204 @@
 
 ## [Unreleased]
 
-## [0.73.1] - 2026-11-17
+### Upgrade notes
+
+- Switch a declaration to keeper-librarian 0.2.7, workspace-curator 0.1.6, candle-appraiser 0.1.7 or hitl-auto-judge 0.1.3 with the server stopped, then start the server that includes this change. A server without it refuses their manifests, and a server that includes #52731 does not read the `capacity_wait` answer of revisions before keeper-librarian 0.2.6, workspace-curator 0.1.5, candle-appraiser 0.1.6 and hitl-auto-judge 0.1.2. From those revisions the server may be updated first (#52778).
+
+### Added
+
+- A retained host audio or document attachment that reached a later request inside a `Text` carrier is now read, or answered with an explicit unavailable result, for each exact admitted attachment before the request is built. The lane-owned raw H5 reader is shared across Core, Codex, Claude Code, Antigravity and Muse; receipt validation, producer-lease filtering and viewer admission still run before any bytes are read, and original context, outcomes and receipt identity are preserved. Core, Codex and Claude freeze the complete context including readings before address shrinking, while Antigravity and Muse have no equivalent size-refusal shrink and retry, so long readings can enlarge their requests. Usage guide: `docs/KEEPER-MEDIA-FALLBACK-H5.md` (#52606).
+- `masc auth bootstrap` puts `<base>/.masc/config/runtime.toml` in place
+  before it activates the workspace: where no entry is at that path it
+  writes the file this release ships, readable by its owner only, and it
+  keeps an entry that is there. The account server reads what people may
+  connect from that file. A bootstrap that one of its checks refuses makes
+  no file there, and one that cannot put the file there activates nothing.
+  The file is described in
+  `docs/guides/account-server-setup.md`, "6. Declare what people connect"
+  (#52697).
+- `GET /api/v1/auth/integrations` names, under `withheld`, the models of a
+  subscription that a person is not offered, each with the reason. For a
+  provider whose models are called and that is left with no model to check,
+  the account console shows the reason where the subscription is picked and
+  on the card of an account of it, and names the subscription no longer
+  among those to connect now for a Keeper. The account server logs once at
+  its start that such a provider offers no model and why, and
+  `masc auth preview` prints the same. The reasons are described in
+  `docs/guides/account-server-setup.md`, "6. Declare what people connect"
+  (#52714).
+- Expose Muse's native Developer instruction option on session start and resume, preserving omission and explicit clear semantics and rejecting invalid UTF-8 before process spawn (#52715).
+- Add an owned duplex process session that lends stdin/stdout, drains exact output, and keeps process-group cleanup attached through callback failure and cancellation. (#52723).
+- Add interactive stdio sessions for OpenSSH and microVM per-request carriers, with endpoint admission, pre-dispatch ownership, and completion bound to the prepared request. (#52724).
+- Add Relay v2 interactive requests with input-pressure cancellation and final output delivery that omits Exit when the stream is incomplete (#52734).
+- Add owned guest socket stdio sessions with actual hello validation, exact payload streams, callback error propagation and real relay completion (#52735).
+- Connect default microVM Guest Agent stdio with captured runtime context, endpoint admission and completion bound to the original carrier and request (#52736).
+- Parse complete external media reader declarations from runtime TOML, preserving command arguments and overlapping MIME support while rejecting malformed or duplicate declarations (#52745).
+- Publish media reader declarations with the loaded Runtime configuration, keeping captured lists stable across reload and rejected configuration writes (#52746).
+- Let owned stdio callers capture one process runtime and keep its manager, working directory and clock across admission (#52757).
+- Capture the actual prepared remote stdio invocation recipe for durable comparison without serializing carrier environment values or creating a launch capability (#52793).
+- Retain complete verified media-reading originals with their workspace, Keeper, reader declaration and invocation recipe; restore every live original before subject selection so changed summaries cannot hide unknown execution progress (#52794).
+- Validate retained media-reading originals through the existing deployment preflight and register their metadata and progress references with archive handling (#52795).
+- Goal 성공 조건과 측정값을 타입 있는 값(`Goal_measure`)으로 적는 모듈을 더해요. 아직 부르는 곳은 없어요 (#52812).
+- Capture complete canonical approval requests and original-bound intent/wait links, rejecting typed provenance that cannot be restored (#52817).
+- Preserve an original request's exact approval intent and wait link through later progress phases while retaining existing producers' dispatch rules (#52818).
+- Expose exact approval-state lookup, retain decisions referenced by live original intents or wait links, and validate media approval facts against their original request (#52819).
+- Add durable storage for complete returned media-reader SDK responses, preserving the first reply and its original request across uncertain publication and later progress (#52825).
+- Capture full Keeper and Runtime TOML documents and durable prompt override provenance in a versioned world bundle, preserving source bytes and rejecting invalid or unreadable members. #52827
+- Export complete authored world configuration documents through the Admin-only HTTP API, with responses marked no-store and workspace read preconditions. Import and dependency packaging remain separate work. #52829
+- Commit complete Keeper TOML through the existing configuration owner with revision checks and recovery journaling, preserving authored bytes without resuming a paused Keeper or changing its Runtime assignment. #52874
+
+### Changed
+
+- Restart settlement no longer requeues an operation whose native call
+  journal it cannot read. It closes the call with the unknown-effect receipt
+  and fails that one operation as `Interrupted_by_restart`, the way the
+  store-recovery settlement closes an Active call; the Keeper keeps running
+  and claims its next operation. Before, the requeued operation's claim
+  failed on the same read and left the row Running, which held the Keeper's
+  chat queue until the next restart. A read failure that was only momentary
+  still loses that operation (#52711).
+- When a restart settlement finds Active native calls on Running
+  operations, the Owner writes one Info log entry for that Keeper. Its
+  details carry the ids of the operations it put back in the queue, the ids
+  of the ones it failed, and the number of journals it could not read
+  (`event_kind` `keeper_restart_settlement`). Before, the log held nothing
+  about what the settlement command requeued or failed (#52712).
+- When a chat operation's child fails while its native call is still
+  Active, the Owner closes the call with the unknown-effect receipt and
+  fails the operation with the child's own failure kind, unless the Owner
+  is stopping. This holds whether or not this process bound the call, so a
+  claim that cannot open an inherited call ends the same way. The Keeper
+  then claims its next operation. Before, the Owner left the call Active
+  for a restart to resume, and no operation is claimed while one is
+  Running, so one failed turn held the Keeper's chat queue until the next
+  restart. A failure that was only momentary now loses that operation
+  (#52742).
+- Share the Audio/Document reading kind between Runtime configuration and Keeper media consumers through the existing common types library (#52744).
+- Summarize memory events once for the requested current fact IDs, preserving retrieval, retraction, and incoming revision history while skipping unrelated historical IDs (#52752).
+- Reuse verified durable tool-schema blobs during wire capture, and repair missing or changed blobs before recording their references while preserving per-request secret redaction (#52753).
+- Revalidate the effective owner and parent-directory permissions before reusing a durably published blob (#52753).
+- TUI footers highlight key shortcuts against contrast-verified receded labels, top and secondary tab strips replace SGR dim with palette-projected recede styling, context/voice bars use segmented glyphs, and framed panes/overlays draw rounded corners (#52770).
+- Strict chat-row decoding accepts an already parsed JSON value, preserving typed validation, redaction and error locations (#52772).
+- A Lane Add-on worker that declares `[world] host_request_pages = true` is asked for the page after the last request id of the page before, and its listing ends at an empty page. A page carries nothing beside its requests and no longer names `next`, and the host refuses a page whose request ids do not rise above that cursor (#52778).
+- Overview, Usage and Metrics draw rounded Bento cards with border-embedded hotkeys and badges, Braille LED tool-call series, and Oklab gradient telemetry meters (#52781).
+- Keepers split/grid views and the right-hand Activity pane draw rounded/segmented `btop` selection bands, accented header pills and route keycaps, Oklab unread-turn lag meters, and WCAG-verified receded chrome (#52791).
+- Chat Skill enrichment groups activations for the requested turns once per trace and call, preserving row duplicates, ledger order and read-only source handling (#52796).
+- Add a required-owner file metadata observation that preserves descriptor and parent checks without loading the file body (#52805).
+- Keep owned JSONL admission and descriptor closure inside the transaction's data-path mutex, preserving lock exclusion, private permissions and cancellation settlement (#52805).
+- Artifact drafts, app inputs and publication checks inspect owned data and lock metadata before the authoritative locked read, avoiding discarded body reads while preserving permissions and failures (#52806).
+- Admit artifact data and lock files under the same transaction mutex, avoiding concurrent lock initialization races while retaining ownership and exact app-data permissions (#52806).
+
+### Fixed
+
+- Anthropic and Responses apply one document projection to serialization, input sizing and signed-history replay, so all three inspect the same content: a document the selected provider cannot represent becomes the existing explicit omission text before the wire is built, and recursive degradation reaches nested `ToolResult` attachments while keeping the source type and the canonical originals (#52598).
+- `runtime.toml` declares document input on its own key, `supports-document-input`, instead of standing in for it with mixed-media support. A model without that declaration withholds document support and native Ollama cannot enable an unsupported document wire form, so a runtime that accepts individual media types but refuses their combination receives readings or references. Admission, nested fallback, and the Dashboard declaration and effective views all consume the same frozen decision (#52599).
+- Attached MCP results keep their text, structured content and visible media through a typed, audience-aware projection instead of being flattened before normal-call and approved-replay consumption. Only images the frozen runtime and wire support reach model-visible output, other visible media stay readable as byte artifacts, user-only content and the private received envelope stay outside model projections, and a replay validates or repairs durable chat ownership before cleanup (#52601).
+- Media added to carried history after the initial admission is read before the wire is resolved: the selected Keeper-history request is projected after canonical range selection and materialization and before wire resolution, input sizing and signed-prefix inspection, reusing the lane walk's reader, cache and deadline. Later structured `ToolResult` audio and document attachments therefore see the same request-only view the provider is built from, while canonical occurrences, digests and originals stay unchanged (#52604).
+- Acknowledging a tool result keeps the validated receipt durably under the same Keeper's `consumed-tool-results` directory before the pending delivery retires, so attachments whose receipt was the last owner keep an owner after ACK while consumed receipts stay outside pending delivery. Conflicting or unavailable storage refuses retirement, an equal visible archive is durably rewritten before deletion, and blob maintenance recognises that exact directory through the same receipt codec (#52605).
+- Recover Librarian admission, floor and successor lineage after a confirmed
+  declaration replacement while preserving the original host ending (#52608).
+- Keep a scoped original claim live while validating retained Cut recovery authority. (#52609).
+- Fence retained Librarian Cut effects, retain canonical child preparation and finish receipt-proved ACKs under source locks. (#52610).
+- The `.last-good` schedule mirror stays readable for observation but no longer mutates the ledger when the primary is missing or unreadable, so a stale Scheduled or Running row cannot replace an accepted cancellation or settlement. Reservation changes, startup recovery and runner dispatch stop until the authoritative primary can be read again, and the surviving primary and mirror bytes are preserved rather than automatically restored. A successful primary write still succeeds when its later mirror write fails, and a genuinely uninitialized store remains writable (#52611).
+- Recover permanent Librarian capacity-refusal ACK settlement after partial acknowledgement and fragment pruning. (#52612).
+- A Keeper no longer reuses the first media read's deadline for the rest of its lane walk, so an attachment that arrives after earlier reads or ordinary provider and tool work is read instead of being rejected before its bytes or reader are consulted. The walk still memoizes each attachment's raw success or failure, reuses durable successful readings, retries failures in a later walk and propagates cancellation; speech-to-text keeps its existing per-call process and HTTP limits, and PDF extraction keeps the existing 60-second Poppler limit per document instead of inheriting the provider's no-progress setting (#52620).
+- Continue a retained Librarian Cut through a durable intent, a verified successor, Memory receipts and the original source acknowledgement. (#52625).
+- Join local Memory publication and its lock cleanup before returning a cancellation to the caller. (#52625).
+- Librarian가 체크포인트와 완료 턴을 함께 처리할 때 원본 순서와 두 범위의 저장 증거를 한 Memory 변경으로 보존한다. 중단된 처리는 처음 판단한 Memory를 검증하고 이어가며, 실제 저널과 전체 범위 영수증이 맞아야 저장 완료로 판정한다. (#52664).
+- Cut 이후 입력 용량 제한으로 멈춘 Librarian가 보존된 원본 전체를 작은 단계로 이어 읽고, 실제 Memory 저장과 원본 ACK를 확인한 뒤 완료 증거를 남긴다. 대기 중인 단계는 같은 ID를 유지하며, 저장 후 ACK 전후의 중단도 같은 프로그램으로 복구한다 (#52684).
+- A native call that an earlier restart requeued and nothing claimed before
+  the server went down again now resumes with `Resume_after_writer_exit` at
+  the next start. The Owner reads every Active call in the store when it
+  starts and, under `Prior_writers_exited`, the first restart settlement
+  admits the ones it does not close; before, only calls whose operation was
+  Running at that start were admitted, so an operation cut inside a Tool
+  failed with `Effect_outcome_unknown` after two restarts in a row. A Bind
+  removes the call, so a claim that runs before the settlement keeps it
+  unproven. RFC restart-resumes-running-chat-operations 4.7 and its test
+  line in section 8 describe this reading (#52709).
+- Cancelling a chat operation that restart settlement put back in the queue
+  is no longer refused with `Native_call_unsettled`. Its native call is still
+  Active and no executor holds it, so the cancel transaction closes the call
+  with the unknown-effect receipt and settles the execution as cancelled.
+  Completing or failing a Running operation still refuses an Active call
+  (#52710).
+- Refuse Observe execution before spawning when the notification socketpair cannot be created; keep the payload from running without its required network enforcement. (#52722).
+- Retain complete exec-shim control trailers independently of payload previews, preserving long Observe receipts and keeping control JSON out of streamed payload stderr (#52724).
+- Continuity reads of changed checkpoints avoid building an unused save memo while preserving object integrity and captured-source checks (#52747).
+- Librarian source projections reuse atom groups and digest lookups within one captured history while preserving tool pairs, attribution and turn ordering. (#52748).
+- Goals tree observations read goal events once for both the current projection and retained history, preserving malformed-row diagnostics. (#52750).
+- Prevent overlapping preset restores from mixing prompt overrides, Keeper instructions and Runtime routing, and preserve the complete preceding settings in autosave (#52756).
+- Keep the remote interactive request carrier on the process runtime acquired before endpoint admission when global initialization changes during the wait or dispatch callback (#52758).
+- The Keeper Librarian upgrade guide and the workspace-curator and candle-appraiser READMEs select the new Exact worker revision before a server that no longer reads `capacity_wait` runs the installation. The 0.73.1 entry for #52731 gives the reverse order, which leaves each original answered with `capacity_wait` waiting for good (#52762).
+- Exact turn transcript reads share parsed rows between identity checks and strict decoding, reducing duplicate parsing while preserving historical delivery joins and unreadable-row failures (#52773).
+- An Exact request kept by an earlier worker revision is listed on a page of its own while other requests wait behind it, however close to the reply frame it is. With `next` beside the requests, a request within 81 bytes of the frame could not be listed (#52778).
+- Unchanged monthly Keeper efficiency observations reuse the projection file without serializing and rewriting it; new ledger boundaries and rebuilds still publish updated totals (#52783).
+- Checkpoint transcript validation avoids building discarded message partitions while preserving tool-cycle validation and unfinished-call recovery semantics (#52784).
+- Next-request forecasts share one history atom count and opening-digest index across candidate range reads, avoiding repeated history labeling while preserving carried-position checks (#52792).
+- Document delivery of ambiguous final stderr bytes and the existing completion-error precedence (#52793).
+- Keeper configuration previews read constitution diagnostics without retaining decoded event history, while preserving rejected and isolated lines and independent read failures (#52797).
+- Release original messages from written checkpoint memos while preserving written history and reuse of live message identities (#52809).
+- Read HOME only when expanding an actual home prefix, keeping absolute path normalization free of environment lookup (#52817).
+- Keep plain-reader descriptors inside the shared canonical data-path mutex, with Eio worker dispatch before blocking and cancellation after cleanup (#52831).
+- Coordinate Gate audit and Fusion event-history descriptor lifetimes with appenders, preserving their parsing and final-line contracts (#52832).
+- Recording the same Skill activation a second time no longer fails as an invocation-id collision: the ledger settles the activation's own wall-clock timestamp on the recorded value before it compares frames, so a repeat of one invocation is recognised as already recorded while two different activations that share a tool-use id are still refused. Inline composition children that commit more than once in a turn stop turning their second commit into a `store_failed` runtime error (#52843).
+- A Keeper turn whose Task Skill pins cannot be resolved ends with that reason's own terminal code (`task_skill_config_rejected`, `task_skill_config_unreadable`, `task_skill_source_unreadable` or `task_skill_entry_unreadable`) instead of `internal_error`. Its receipt is classified as `config_invalid`, so the operator is asked to fix the Skill configuration or source, and the runtime failure route exhausts it as `config_mismatch` instead of an opaque internal failure (#52845).
+- Keep owned data reads inside the writer mutex and borrow transaction descriptors without reopening them; preserve durable outcomes and child-process lock tests. (#52848).
+- Reuse the owned transaction observation for named composition admission and phase updates, preserving source and private-mode checks while removing callback rereads and duplicate decoding. (#52849).
+- Serialize owned question-log, execution-journal, completion-marker and invocation-binding reads with their data-file writers. (#52850).
+- The Board curation panel no longer shows a health percentage, a Health components card or a model name. The server's curation snapshot never carried `health_score`, `health_components` or `model`, so those cells were always empty (#52853).
+- Recording the same composition activation again no longer collides when only the invocation's `execution_id` differs. That id is minted per invocation attempt, so the same `tool_use_id` invoked again carries a fresh one while naming the same Skill; the recorded `execution_id` now stands, the way the recorded time does, and the remaining fields still have to match (#52854).
+- Use the configuration journal's unwrapped module in the Keeper declaration import test. #52874
+- Keep the explicit CLI workspace authoritative through runtime configuration
+  and Memory preflight, even when the ambient workspace is absent or different (#52887).
+- Let Librarian recover confirmed replaced or interrupted executions before
+  arbitrating waiting requests, preserving their original source obligations (#52893).
+- Recover unsent Librarian requests after a declaration replacement under their
+  actual execution claim, including queues with several waiting originals (#52894).
+
+### Performance
+
+- Avoid a duplicate UTF-8 repair traversal when encoding Schedule ledgers while preserving repaired written-state cache behavior (#52765).
+- Move durable Librarian atom-range selection and unread calculations to the shared CPU pool while preserving historical validation and worker nesting (#52775).
+- Add verified checkpoint read witnesses that recheck every named file identity without retaining decoded history (#52786).
+- Reuse a verified Librarian unread count while its count inputs and checkpoint objects remain unchanged (#52787).
+- Reuse verified unread counts across Pending and stopped queue measurements, discarding retired observations after errors, cancellation or purge (#52788).
+- Let strict blob writers reuse owner-prepared payload digests while preserving owned-file validation, repair and durable publication (#52800).
+- Avoid hashing provider snapshot payloads twice on artifact reuse misses, without retaining encoded payloads in projection digest memos (#52801).
+- Stop Gate audit JSON parsing after the requested number of valid recent rows while retaining the complete raw read (#52832).
+- Claude Code·Codex에서 히스토리 축소 경계를 구할 때 같은 메시지를 반복 인코딩하던 작업을 줄여요 (#52835).
+- Reuse each telemetry summary's discovered trajectory and execution-receipt directories for both its Keeper list and counts, while discovering new directories on the next observation (#52840).
+- Avoid copying the JSON writer buffer into an extra string when counting dashboard projection diagnostic bytes (#52846).
+- Anthropic prefix verification reuses accepted message block bytes for the request-chain digest while preserving binding decisions and wire framing. (#52881)
+
+### Documentation
+
+- An RFC drafts typed Goal measures (Count, Quantity, Done_when), measurements and verdicts that carry a value of the same shape, and the TUI Goal list and detail built from them (#52737).
+- Retain the range-offload source review and selected native one-worker parity evidence with their runtime and performance limits (#52776).
+- Added a Draft RFC in which the masc binary carries its Exact worker packages, a Lane Add-on declaration may name a carried package that the server resolves to the revision it carries, installation writes those packages and builds their images, and a manifest names the Exact protocol a server refuses unless it is its own, so that no running server and worker speak different protocols (#52782).
+- 선언 교체 정책 RFC 에 남은 리뷰 지적을 고쳐요: 3.3 비교의 범위, 함수 이름 인용, 변이 시험의 위치, model 요청 상한 열린 질문, 층마다 main 에 넣은 PR (#52804).
+- Retain checkpoint memo ownership regressions, warm-save costs and conditional ToolUse input GC results with source-bound evidence (#52810).
+- An RFC drafts how a person registers their own API key on an account server: the key is that person's provider account, kept under their namespace, carried only by calls the access judgment allows for its owner, and removed by a purge. A research note holds the official Claude Code documentation quotes, a CLI measurement with a fake key, and the code coordinates (#52814).
+- The File-credential contract uses the existing strict environment projection with or without a declared account home, excluding inherited credentials and provider settings before inserting one API key. Its planned verification covers both home modes and conflicting inherited values (#52814).
+- 히스토리 축소 경계 계산의 동작 검증과 CPU·할당량 측정 근거를 남겨요 (#52836).
+
+### Internal
+
+- Approval classification reads a tool's name from the public tool schema, and GitHub credential paths validate a name with the typed `Keeper_id.Keeper_name` validator, so neither reaches the full Keeper configuration module any more. The same names, validation grammar, errors, and checks before disk access are preserved, and the isolated GitHub fixture imports the real owner instead of duplicating the validator. This removes two direct implementation dependencies and does not claim the rest of the runtime dependency graph is gone (#52603).
+- Exercise cancellation during real offloaded Librarian fence publication, with separate source-lock, Runtime-owner and pool cleanup joins. (#52626).
+- Add scripted Muse start/resume regressions for native Developer instruction transport and pre-spawn UTF-8 rejection (#52717).
+- Add regression coverage for overlapping preset restores using two Domains and the real Runtime writer (#52760).
+- Add Oklab contrast-lifted colour ramps, 2x4 Braille sparkline/meter primitives and border-embedded card chrome for the TUI (#52763).
+- Return compact JSON bytes together with their UTF-8-repaired writer input so persistence consumers can reuse one repair traversal (#52764).
+- The replacement-policy RFC replaces the two line-number citations that had drifted (`keeper_librarian_floor_chain.ml` 131~145행 and `keeper_librarian_durable_execution.ml` 550~555행) with the symbol names they meant, spells out that the floor chain's `outcome` has four cases rather than only `Stopped`, and records that the remaining `N행` citations are as of a named commit so a symbol name wins when both are present (#52821).
+- The replacement-policy RFC no longer describes `Settled_if_replaced` as current behavior. That constructor is gone from `lib/`: `keeper_librarian_durable_commit.ml` declares `type frontier = Unfinished | Settled`, and whether a `Cut` was released is decided by `Keeper_librarian_declaration_replacement.released_cut` (and `ended` for the pre-dispatch case), whose answer collapses into those two values. The two sentences at 253행 and 302행 now name the symbols that exist (#52828).
+- The replacement-policy RFC's pre-dispatch paragraph now names the symbol that actually decides it. §3.3 describes `Rejected {stage=Progress.Before_dispatch}`, which `keeper_librarian_durable_commit.ml` closes with `Keeper_librarian_declaration_replacement.ended` and answers `Settled` or `Error "Original history has no declaration replacement ending"`. The earlier sentence attributed it to `released_cut`, which belongs to the Execution-stage `Retained_unknown Exact.Cut` branch and answers `Settled`/`Unfinished`; the two read sites are now told apart (#52834).
+- Add a shard mode to the targeted test runner so the nightly full suite can
+  split across matrix jobs instead of saturating one runner's disk (#52838).
+- The TUI design notes no longer carry the 2026-10-07 "지금처럼 여유 있게" density choice. `LAYOUT-LANGUAGE.md` loses the decision sentence and its "give headings, sections and the composer breathing room" rule, `FULL-SCREEN-LAYOUT.md` loses the two bullets that rested on it, and the layout preview tagline drops "여유 있는 여백". The TUI follows the btop-style density merged on 2026-11-17 (#52844).
+
+## [0.73.1] - 2026-11-18
 
 ### 요약
 
@@ -3325,6 +3522,11 @@
 - Removed the TUI's MSX tick receiver, which nothing sends to: the `Poll_pending` and `Poll_observing` states, the `Msx_tick_withdrawn`, `Msx_frame_loaded` and `Msx_activity_loaded` messages, the checkpoint block that could never trigger, and the `Masc_tui_msx_tick` client (#52644).
 - The chat turn's progress row is built from a list of facts instead of a joined string, and the context-checkpoint note becomes its own clause (#52650).
 - Read paths that no longer poll drop `poll` from their names: `msx_poll_view`/`invalidate_msx_poll` became `machine_view`/`retire_machine_view`, `launch_dos_live_poll` became `launch_dos_live_read`, `keeper_turns_poll_error` became `keeper_turns_read_error`, and `Poll_failed`/`Poll_kept_back`/`poll_error` became `Read_failed`/`Read_kept_back`/`read_error`. The one visible change is the English `poll failed:` sentence, now `read failed:` (#52726).
+
+### Known issues
+- main 전체 회귀(Test 워크플로)가 실패 상태다. 기준선 run #8045(head 261695fc)에서 실패 표시 배치 블록 40(자기 suite 통과 2 포함, suite 단위 집계 아님). 확정 귀속 — task-3733 exact_output_catalog_binding 골든 누락줄(수리 #52932 대기), task-3743 judge_operands 7 시험 전제(수리 #52940, 표적 실행 52 tests 초록), task-3751 artifacts_endpoint 401→403 계약 변경(수리 #52939 병합 완료 — 외부 출처 403·same-origin 401). 근원 분석 확정 — workspace backend 폴백의 프로세스 전역 메모리 캐시(base_path 공유)가 케이스 간 누적(3 suite 실패, 수리 미착지 — 1차 시도 #52933은 같은 실패 재현으로 변경 요청). task-3752 test_auth_token_prune_transaction이 부하에서 부모 waitpid 무제한 대기로 최대 5400s 정지 가능(간헐적 — #8045에서 0.73s 통과, #52916과 같은 부류의 다른 파일). 잔여 귀속 진행 중(현 main tip b08b7954 전수 #8058 진행 중 — 발행 시점 숫자 변동 가능).
+- RC 빌드 로그의 opam 색인 리비전 기록이 `unknown`으로 남는다(task-3735).
+- RC 빌드가 `--locked`와 달리 dune 3.25.0·dune-build-info 3.25.0을 설치한다(lock은 3.24.1·3.22.2, task-3740). 산출물 기능 검증에는 영향이 없다.
 
 ## [0.72.0] - 2026-11-12
 

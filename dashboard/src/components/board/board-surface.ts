@@ -775,6 +775,13 @@ function BdDetail({
   `
 }
 
+/** State updater for a composer field whose submit just succeeded: the field
+ *  empties only while it still holds what was sent. The answer settles the
+ *  draft that went out; text typed while it was on the wire stays. */
+function clearSent(sent: string): (current: string) => string {
+  return current => (current === sent ? '' : current)
+}
+
 function BdComposer() {
   const mode = boardComposerMode.value
   const [localTitle, setLocalTitle] = useState('')
@@ -919,18 +926,21 @@ function BdComposer() {
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
     event?.stopPropagation()
-    const body = localBody.trim()
-    const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
+    const sentTitle = localTitle
+    const sentBody = localBody
+    const sentFlair = localFlair
+    const body = sentBody.trim()
+    const title = options.compactMobile ? mobilePostTitle(body) : sentTitle.trim()
     if (!title || !body) return
     setSubmitting(true)
     try {
-      const contentWithFlair = localFlair
-        ? `[flair:${localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
+      const contentWithFlair = sentFlair
+        ? `[flair:${sentFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
         : body
       await createPost(title, contentWithFlair, 'dashboard-user', { hearth: localHearth || undefined })
-      setLocalTitle('')
-      setLocalBody('')
-      setLocalFlair('')
+      setLocalTitle(clearSent(sentTitle))
+      setLocalBody(clearSent(sentBody))
+      setLocalFlair(clearSent(sentFlair))
       setMobileOpen(false)
       showToast('글을 등록했습니다', 'success')
       refreshBoard()
@@ -949,10 +959,11 @@ function BdComposer() {
     }
 
     event?.stopPropagation()
-    const body = localBody.trim()
+    const sentBody = localBody
+    const body = sentBody.trim()
     if (mobileQuickDisabled) return
     const message = mode === 'mention'
-      ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
+      ? serializeComposerBody({ text: sentBody, attachments: [], voice: null })
       : body
     if (!message) return
     setSubmitting(true)
@@ -970,14 +981,14 @@ function BdComposer() {
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), message)
         if (!receipt.ok) {
-          setLocalBody('')
+          setLocalBody(clearSent(sentBody))
           resetMobileMentionDrafts()
           setMobileOpen(false)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
-      setLocalBody('')
+      setLocalBody(clearSent(sentBody))
       resetMobileMentionDrafts()
       setMobileOpen(false)
       showToast('Message sent.', 'success')

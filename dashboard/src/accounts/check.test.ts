@@ -274,13 +274,13 @@ describe('the checks of a person', () => {
 
 // ---- the card of an account ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' } }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' }, takesKey: false }
 const bare: Integration = {
-  id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' },
+  id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' }, takesKey: false,
   withheld: [{ model: 'bare-ghost', reason: 'model_undeclared' }, { model: 'bare-notools', reason: 'tools_not_declared' }],
 }
-const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' } }
-const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId } }], runtimes: [] })
+const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
+const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId }, held: { kind: 'login' }, removal: null }], runtimes: [] })
 
 const card = (checks: ChecksModel, owned: Owned = one('claude_code')) =>
   render(html`
@@ -381,7 +381,7 @@ describe('the card of an account', () => {
 
   it('names the field and the button of each card with the card', () => {
     const two: Owned = {
-      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: { read: true, value: 'claude_code' } }) as const),
+      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }) as const),
       runtimes: [],
     }
     const container = card(showing(undefined), two)
@@ -392,7 +392,7 @@ describe('the card of an account', () => {
   })
 
   it.each([
-    ['the server refuses its calls', { ...claude, calls: { kind: 'refused', refusal: 'native_unpublished' } } satisfies Integration],
+    ['the server refuses its calls', { ...claude, calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false } satisfies Integration],
     ['it has no model to check', { ...claude, models: [] } satisfies Integration],
   ])('moves the focus to the title of the card when a reading takes the check away: %s', (_name, after) => {
     const checks = showing(undefined)
@@ -416,7 +416,7 @@ describe('the card of an account', () => {
     const { container, rerender } = render(drawn(claude))
     const elsewhere = container.querySelector<HTMLButtonElement>('section > button')
     elsewhere?.focus()
-    rerender(drawn({ ...claude, calls: { kind: 'refused', refusal: 'native_unpublished' } }))
+    rerender(drawn({ ...claude, calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }))
     expect(document.activeElement === elsewhere).toBe(true)
   })
 

@@ -791,9 +791,9 @@ describe('a request of a panel that the server refused', () => {
     })
 
     it('keeps a check of the person shown again, and reads again once it passes', async () => {
-      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
+      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
       const offered = (): Response => json(200, { integrations: [claude] })
-      const account = { provider_account_id: 'acct_1', integration_id: 'claude_code' }
+      const account = { provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code' }
       const runtime = { runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }
       const owned = (...runtimes: readonly unknown[]): Response => json(200, { provider_accounts: [account], runtimes })
       const passed = json(200, {
@@ -829,9 +829,9 @@ describe('a request of a panel that the server refused', () => {
     })
 
     it('reads the subscriptions again when a check passes while they are read', async () => {
-      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
+      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
       const offered = (): Response => json(200, { integrations: [claude] })
-      const account = { provider_account_id: 'acct_1', integration_id: 'claude_code' }
+      const account = { provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code' }
       const runtime = { runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }
       const owned = (...runtimes: readonly unknown[]): Response => json(200, { provider_accounts: [account], runtimes })
       const passed = json(200, {

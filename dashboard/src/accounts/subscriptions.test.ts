@@ -74,12 +74,12 @@ const linking = (): Response => new Response(
   { status: 200, headers: { 'content-type': 'text/event-stream' } },
 )
 
-const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
-const codex = { integration_id: 'codex', display_name: 'Codex', models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
+const claude = { integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
+const codex = { integration_id: 'codex', display_name: 'Codex', connect: ['login'], models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
 const offered = (): Response => json(200, { integrations: [claude, codex] })
 const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
 const ownedOne = (): Response => json(200, {
-  provider_accounts: [{ provider_account_id: 'acct_1', integration_id: 'claude_code' }],
+  provider_accounts: [{ provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code' }],
   runtimes: [{ runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }],
 })
 const notReady = (): Response => json(503, { error: 'the files are being read again' })
@@ -110,11 +110,11 @@ describe('reading the subscriptions', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: {
-        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' } }],
+        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }],
         runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
       },
     })
@@ -389,16 +389,16 @@ describe('checking a model from the panel', () => {
 
 describe('what the panel knows of each account', () => {
   const integrations: readonly Integration[] = [
-    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
   ]
   const facts = accountFacts(integrations, {
     accounts: [
-      { id: 'acct_gone', integration: { read: true, value: 'muse' } },
-      { id: 'acct_claude', integration: { read: true, value: 'claude_code' } },
-      { id: 'acct_codex', integration: { read: true, value: 'codex' } },
-      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' } },
-      { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+      { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
     ],
     runtimes: [
       { id: 'acct_codex.gpt-5.5', accountId: 'acct_codex', model: { read: true, value: 'gpt-5.5' } },
@@ -450,8 +450,8 @@ describe('what the panel knows of each account', () => {
   it('tells an account that has a model to check from one whose subscription offers none', () => {
     const owned = {
       accounts: [
-        { id: 'acct_checked', integration: { read: true, value: 'claude_code' } },
-        { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+        { id: 'acct_checked', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
       ],
       runtimes: [{ id: 'acct_checked.claude-sonnet-5', accountId: 'acct_checked', model: { read: true, value: 'claude-sonnet-5' } }],
     } as const
@@ -473,8 +473,8 @@ describe('the panel', () => {
     kind: 'read',
     forUser: person,
     integrations: [
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
     ],
     owned,
   })
@@ -490,11 +490,11 @@ describe('the panel', () => {
     ['nothing connected', read({ accounts: [], runtimes: [] })],
     ['accounts of each kind', read({
       accounts: [
-        { id: 'acct_claude', integration: { read: true, value: 'claude_code' } },
-        { id: 'acct_codex', integration: { read: true, value: 'codex' } },
-        { id: 'acct_gone', integration: { read: true, value: 'muse' } },
-        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' } },
-        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' } },
+        { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' }, held: { kind: 'login' }, removal: null },
       ],
       runtimes: [
         { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
@@ -554,9 +554,9 @@ describe('the panel', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called },
-        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called },
-        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called, takesKey: false },
+        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called, takesKey: false },
+        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: { accounts: [], runtimes: [] },
     })

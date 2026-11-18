@@ -46,6 +46,8 @@
   바꾸기, 16색 테마, 미터·그래프의 색 고르기, 목록 흐림이다.
 - 다른 다섯 도구는 한 곳씩 맞췄다. bottom 점자 칸 겹침, htop 단색 막대 글자, k9s 고른 줄
   바탕, lazygit 작성자 색, nvtop 열 나누기다. 나머지는 읽기 기록의 인용을 옮겼다(§6).
+- 같은 날 검증에서 모든 `파일:줄` 인용과 hex·기본값을 그 커밋에서 다시 열었다. 틀린 줄과
+  값은 고쳤다.
 - MASC 는 `866aefc` 를 읽었다.
 - 경사 폭은 MASC 색 계산을 Python 으로 옮겨 53개 배색에서 쟀다(§3.8). btop 기본 테마의
   멈춤점도 같은 계산으로 쟀다(§3.1).
@@ -55,7 +57,7 @@
 
 | btop 기록에 적은 것 | 이번에 본 것 | 근거 |
 |---|---|---|
-| truecolor 를 끄면 256색 6×6×6 정육면체로 바꾼다 | 정육면체만 쓰지 않는다. R·G·B 를 11 로 나눠 반올림한 값이 셋 다 같으면 회색 24단(232~255)을 쓴다. 정육면체만 말하는 것은 설정 설명이다 | [theme:155][bt-256], [config:80][bt-truecolor-doc] |
+| truecolor 를 끄면 256색 6×6×6 정육면체로 바꾼다 | 정육면체만 쓰지 않는다. R·G·B 를 11 로 나눠 반올림한 값이 셋 다 같으면 회색 24단(232~255)을 쓴다. 정육면체만 말하는 것은 설정 설명이다 | [theme:155][bt-256], [config:81][bt-truecolor-doc] |
 | 경사 색이 상태를 말한다. 막대 끝이 빨강에 닿으면 한도에 가깝다 | btop 경사는 두 종류다. cpu·process·temp 는 색상이 돈다. 메모리·디스크·네트워크 경사는 한 색상의 밝기만 오른다. 뒤쪽의 색은 상태가 아니다. 어느 계열인지와 얼마나 높은지를 말한다 | §3.1 |
 | 한 줄 그래프는 열마다 그 값(0~100)의 색이다 | 한 칸에 표본 둘이 들어간다. 칸 색은 둘 중 큰 값의 색이다. 0~100 은 그 그래프 축 위의 자리다. 네트워크 축은 저절로 바뀌므로 한도가 아니다 | [draw:446][bt-graph], [collect:3068][bt-scale] |
 | §3 「경사 미터는 선언된 한도가 있는 미터에만」 | 운영자 결정(2026-11-19)으로 바뀐다. 한도가 없는 미터는 계열 경사를 쓴다(§3.8) | — |
@@ -66,13 +68,13 @@
 | 축 | btop | bottom | htop | k9s | lazygit | nvtop |
 |---|---|---|---|---|---|---|
 | 색 | 계열마다 101칸 경사 표 [theme:306][bt-grad] | 계열마다 색 하나, 경사 없음 [style:112][bo-style] | 역할 × 배색 표, 단색도 한 배색 [CRT:128][ht-crt] | 상태 역할 8개, 경사 없음 [styles:146][k9-status] | 바탕색을 물어 선택 색을 섞음 [theme_config:31][lg-mix] | 그래프 안 자리마다 색, 8색 [setup:372][nv-slot] |
-| 그래프 | 점자, 칸에 표본 둘, 줄 높이로 색 [draw:446][bt-graph] | 점자 선, 겹치면 나중 계열만 [grid:138][bo-grid] | 점자, 두 색, 합만 그림 [Meter:225][ht-graph] | 1/8 블록 막대, 1분 간격 [sparkline:84][k9-spark] | 시간 그래프 없음 [cell:11][lg-graph] | ACS 계단선, 계열이 열을 나눔 [plot:50][nv-plot] |
+| 그래프 | 점자, 칸에 표본 둘, 줄 높이로 색 [draw:446][bt-graph] | 점자 선, 겹치면 나중 계열만 [grid:138][bo-grid] | 점자, 두 색, 합만 그림 [Meter:268][ht-graph] | 1/8 블록 막대, 1분 간격 [sparkline:84][k9-spark] | 시간 그래프 없음 [cell:11][lg-graph] | ACS 계단선, 계열이 열을 나눔 [plot:50][nv-plot] |
 | 미터 | `■` 칸, 칸 위치로 색 [draw:398][bt-meter] | `[\|\|\|\| 42%]`, `█` 만 1/8 칸 [pipe_gauge:20][bo-gauge] | 쌓인 칸, 값 글자가 막대 위 [Meter:91][ht-bar] | 막대 없음, 70·90 문턱 색 [threshold:77][k9-thr] | 없음, 글자 수 ` 52 ` [commit_message:178][lg-len] | `\|` 채움, 두 겹 [interface:666][nv-meter] |
 | 테두리 | 테두리에 탭·키·시계·위치 [draw:279][bt-box] | 제목만, 초점은 색 [canvas:58][bo-border] | 상자 없음, 머리 띠 [CRT:134][ht-panel] | `pods(ns)[n] </f>` 제목 문법 [table_helper:23][k9-title] | 모서리 자리 고정, `N of M` [gui:1498][lg-frame] | 그래프만 상자, 범례가 제목 [plot:126][nv-rect] |
-| 목록 | 고른 줄에서 멀수록 흐림 [draw:2082][bt-procgrad] | 머리에 `▲▼`, 한쪽부터 열 배정 [column:172][bo-col] | 0·N/A 흐림, 자릿수 묶음 색 [Row:534][ht-shadow] | 고른 줄 바탕 = 줄 상태 색 [select_table:119][k9-sel] | 안 보이는 줄까지 열 폭 예약 [commits:228][lg-widths] | 정렬 열은 색만 다름 [interface:1690][nv-sort] |
-| 배치 | % 격자, 작으면 필요 크기 표시 [btop:157][bt-small] | TOML 비율 행·열 [constants:196][bo-layout] | 머리 비율 틀 13개 [HeaderLayout:16][ht-layout] | 7줄 머리, 폭 반응 없음 [app:166][k9-header] | 이름 붙은 문턱, 상자 접기 [window_arrangement:414][lg-layout] | 순수 배치 함수 + 기하 시험 [interfaceTests:118][nv-test] |
-| 키 안내 | 낱말 속 키 글자, 안 되면 회색 [draw:1918][bt-hint] | `?` 9구역 도움말 [help_dialog:47][bo-help] | 아래 기능 키 줄, 칸 폭 고정 [FunctionBar:92][ht-fbar] | 최대 6줄, 열 우선 메뉴 [menu:78][k9-menu] | 지금 쓸 만한 키만 색 [options_map:32][lg-options] | F키 줄, 모드마다 바뀜 [interface:2086][nv-keys] |
-| 다시 그리기 | 그래프 두 위상, DEC 2026 [draw:493][bt-phase] | 사건으로만 그림 [lib:456][bo-event] | 선택만 움직이면 두 줄 [Panel:313][ht-repaint] | 2초마다 표 전체 재구성 [table:472][k9-update] | 내용만 바뀌면 배치 생략 [gui:1641][lg-flush] | 정적 틀은 배치 때 한 번 [interface:2354][nv-draw] |
+| 목록 | 고른 줄에서 멀수록 흐림 [draw:2082][bt-procgrad] | 머리에 `▲▼`, 한쪽부터 열 배정 [column:172][bo-col] | 0·N/A 흐림, 자릿수 묶음 색 [Row:539][ht-shadow] | 고른 줄 바탕 = 줄 상태 색 [select_table:119][k9-sel] | 안 보이는 줄까지 열 폭 예약 [commits:228][lg-widths] | 정렬 열은 색만 다름 [interface:1690][nv-sort] |
+| 배치 | % 격자, 작으면 필요 크기 표시 [btop:157][bt-small] | TOML 비율 행·열 [constants:196][bo-layout] | 머리 비율 틀 13개 [HeaderLayout:16][ht-layout] | 7줄 머리, 폭 반응 없음 [app:282][k9-header] | 이름 붙은 문턱, 상자 접기 [window_arrangement:414][lg-layout] | 순수 배치 함수 + 기하 시험 [interfaceTests:118][nv-test] |
+| 키 안내 | 낱말 속 키 글자, 안 되면 회색 [draw:1918][bt-hint] | `?` 9구역 도움말 [help_dialog:47][bo-help] | 아래 기능 키 줄, 칸 폭 고정 [MainPanel:29][ht-fbar] | 최대 6줄, 열 우선 메뉴 [menu:78][k9-menu] | 지금 쓸 만한 키만 색 [options_map:32][lg-options] | F키 줄, 모드마다 바뀜 [interface:2086][nv-keys] |
+| 다시 그리기 | 그래프 두 위상, DEC 2026 [draw:493][bt-phase] | 사건으로만 그림 [lib:456][bo-event] | 선택만 움직이면 두 줄 [Panel:313][ht-repaint] | 2초마다 표 전체 재구성 [table:472][k9-update] | 내용만 바뀌면 배치 생략 [gui:1641][lg-flush] | 정적 틀은 배치 때 한 번 [interface:373][nv-draw] |
 
 ## 3. 색
 
@@ -114,7 +116,7 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
 
 - 경사는 두 종류다. cpu·process·temp 는 밝기가 비슷하고 색상이 돈다. 초록→노랑→빨강은
   부하를 말한다.
-- 나머지 여섯은 색상이 거의 그대로다. 세 멈춤점 사이에서 색상각이 38° 넘게 움직이지 않는다.
+- 나머지 여섯은 색상이 거의 그대로다. 세 멈춤점 사이에서 색상각이 39° 넘게 움직이지 않는다.
   밝기만 0.31~0.40 에서 0.67~0.95 로 오른다. 색상은 계열, 밝기는 높이를 말한다.
 - 여섯의 start 는 검정 바탕에서 1.5:1~2.3:1 이다. 낮은 값은 바탕에 거의 묻힌다. 조용한
   구간이 조용하게 보이게 한 선택이다.
@@ -126,8 +128,9 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
 
 - nord 는 모든 계열이 한 경사 `#81A1C1`→`#88C0D0`→`#ECEFF4` 다. 상자 테두리도 한 색이다.
 - dracula 의 cpu 는 `#bd93f9`→`#8be9fd`→`#50fa7b` 다. 빨강으로 끝나지 않는다.
-- greyscale 은 `#50`→`#ff` 두 멈춤점 회색이다.
-- paper 는 밝은 바탕(`#F2EEDE`)이다. 경사는 `#55`→`#00`→`#CC3E28` 이다.
+- greyscale 은 `#50`→`#ff` 두 멈춤점 회색이다. 받기·보내기만 `#30` 에서 시작한다.
+- paper 는 밝은 바탕(`#F2EEDE`)이다. cpu·temp·받기·보내기 경사는 `#55`→`#00`→`#CC3E28` 이다.
+  메모리 경사 넷은 start 와 end 가 같은 한 색이다.
 - 색이 얼마나 많은 뜻을 싣는지는 테마가 정한다. 같은 프로그램이 nord 에서는 계열을 색으로
   가르지 않는다.
 
@@ -138,7 +141,9 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
 - 16색은 손으로 쓴 TTY 테마다([theme:103][bt-tty]). 계열 경사는 보통 항목→밝은 항목 두 띠다
   (`\x1b[34m`→`\x1b[94m`). cpu 는 밝은 초록→밝은 노랑→밝은 빨강 세 띠다. 띠 경계는 mid 가
   있으면 33·66, 없으면 50 이다([theme:366][bt-ttygrad]).
-- TTY 모드는 그래프를 음영 글리프로, 모서리를 직각으로 바꾼다([btop:805][bt-ttymode]).
+- TTY 모드는 그래프를 음영 글리프(`░▒█`)로, 모서리를 직각으로 바꾼다([draw:498][bt-ttygraph],
+  [draw:291][bt-ttycorner]). TTY 모드는 명령 인자, 설정, `/dev/tty` 감지로 켜진다
+  ([btop:805][bt-ttymode]).
 - `NO_COLOR` 와 색 없는 모드는 없다. 밝은·어두운 바탕을 알아내지 않는다.
 - `theme_background=false` 면 바탕을 SGR 49 로 둔다([theme:248][bt-bg]).
 
@@ -161,17 +166,18 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
 
 ### 3.3 htop: 역할 표와 색 없는 배색
 
-- 색은 역할 약 118개를 배색 8개가 채우는 표다: `CRT_colorSchemes[scheme][role]`
+- 색은 역할 117개를 배색 8개가 채우는 표다: `CRT_colorSchemes[scheme][role]`
   ([CRT:128][ht-crt]). 모든 그리기가 역할을 거친다.
 - 색 없는 배색(Monochrome)이 표의 한 열이다. bold, dim, reverse 만 쓴다. 막대는 계열마다
   채움 글자를 바꾼다: `|#*@$%&.`([Meter:88][ht-mono]). 색 없이도 쌓인 계열이 갈린다.
 - `has_colors()` 가 거짓이면 Monochrome 을 쓴다. 회색은 색이 8개보다 많으면 8번,
-  아니면 굵은 0번이다. 검정 바탕은 터미널 기본 바탕(-1)이 된다([CRT:1350][ht-fallback]).
+  아니면 굵은 0번이다. 검정 바탕은 터미널 기본 바탕(-1)이 된다. Blacknight 배색만 검정을
+  지킨다([CRT:1283][ht-nocolor], [CRT:1350][ht-fallback]).
 - Broken Gray 배색은 손으로 쓰지 않는다. Default 를 복사하고 굵은 회색만 흰색으로 바꾼다
   ([CRT:1203][ht-broken]).
 - 계열마다 역할이 있다. CPU 는 nice 파랑, user 초록, system 빨강 같은 식이다
-  ([CRT:180][ht-series]).
-- 그래프는 두 색이다. 맨 위 줄과 나머지 줄이다. 계열은 합 하나로 그린다([Meter:225][ht-graph]).
+  ([CRT:205][ht-series]).
+- 그래프는 두 색이다. 맨 위 줄과 나머지 줄이다. 계열은 합 하나로 그린다([Meter:268][ht-graph]).
 - Load 막대는 용량에 견준 문턱으로 색을 바꾼다. 1.0 미만 초록, CPU 수 미만 노랑, 그 위
   빨강이다([LoadAverage:50][ht-load]).
 - 도움말의 범례는 진짜 역할 색으로 그린다. 메모리 범례는 미터가 쓰는 표에서 만든다.
@@ -204,15 +210,15 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
   ([theme_config:31][lg-mix]).
 - 작성자 색은 이름 해시로 HSLuv 를 고른다. 밝기는 어두운 바탕 0.57~0.72, 밝은 바탕
   0.31~0.46 이다. 코드 주석은 흔한 바탕에서 4.5:1 을 넘는다고 적는다([authors:107][lg-author]).
-- 늘 24비트로 쓰고 256색·16색 바꾸기는 tcell 에 맡긴다. `NO_COLOR` 면 색이 0개다
-  ([gui:61][lg-downsample]).
+- 늘 24비트로 쓰고 256색·16색 바꾸기는 tcell 에 맡긴다([gui:61][lg-downsample]). `NO_COLOR`
+  면 tcell 이 색 수를 0 으로 둔다([tscreen:459][lg-nocolor]).
 - 상태 색은 ANSI 8색의 작은 낱말 모음이다. 커밋 해시는 안 올림 빨강, 올림 노랑, 합쳐짐
   초록이다([commits:537][lg-status]).
 
 ### 3.6 nvtop: 자리 색과 글자 범례
 
-- 색은 그래프 안의 자리(0~3)에 붙는다. 장치나 지표에 붙지 않는다. 기본은 Cyan, Yellow,
-  Green, Blue 다([setup:372][nv-slot]).
+- 색은 그래프 안의 자리(0~3)에 붙는다. 장치나 지표에 붙지 않는다([setup:372][nv-slot]).
+  기본은 Cyan, Yellow, Green, Blue 다([options:138][nv-default]).
 - 범례는 그래프 안에 계열마다 한 줄이다. 글자를 그 계열 색으로 쓰고 견본 기호는 없다. 오래된
   표본이 있는 쪽에 둔다([plot:110][nv-legend]).
 - ANSI 8색과 터미널 기본 바탕(-1)만 쓴다. 색 없음은 전부 켜거나 전부 끈다
@@ -234,7 +240,8 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
   가장 가까운 칸을 찾는다.
 - 선언된 한도 미터는 칸마다 success→warning(0~0.5), warning→danger(0.5~1)를 Oklab 으로
   잇는다. 16색은 50%·80% 띠, 색 없음은 기본 글자다(`masc_tui_theme.ml:450`, `:476`).
-- 한도가 없는 미터(`Relative`)와 점자 그래프는 색이 없다(#53049, `masc_tui_chart.mli:51`).
+- 한도가 없는 미터(`Relative`)와 점자 그래프는 색이 없다(#53049, `masc_tui_chart.mli:51`,
+  `masc_tui_braille.mli:5`).
 - 종류 색 슬롯은 둘이다. `Slot_1` 밝은 파랑, `Slot_2` 밝은 자홍이다. 상태 토큰이 쓰지 않는
   색상은 이 둘뿐이다(`masc_tui_ansi.ml:148`, RFC-0431).
 - 대비 시험은 실은 배색 53개(`config/themes/`)를 잰다(`test/test_tui_theme_contrast.ml`).
@@ -244,7 +251,7 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
   `base0D` 다(`masc_tui_theme_catalog.ml:81`). 그래서 btop 식 「보통→밝은」 16색 두 띠는
   이 배색에서 한 색이 된다.
 
-막대와 그래프를 그리는 곳:
+막대와 그래프를 그리는 곳(파일 이름은 앞의 `bin/masc_tui_` 를 뗐다):
 
 | 곳 | 무엇 | 지금 | 제안 |
 |---|---|---|---|
@@ -255,8 +262,8 @@ Oklab 밝기(L)와 색상각(h)은 이 문서가 계산했다. 바탕은 기본 
 | `render_metrics.ml:355` | 작업 완료 / 전체 | 기본 글자 | 계열 경사, 계열 1 |
 | `render_metrics.ml:963` | 키퍼별 기억 수 / 전체 | 기본 글자 | 계열 경사, 계열 1 |
 | `render.ml:245`, `:258` | 실행 / 띄울 수, 반응 여력 | 기본 글자, 부족분 수만 warning | 나란한 두 미터라 계열 1, 계열 2. 부족분은 이상 덧칠 |
-| `usage_calls.ml:382` | 도구별 호출 수 / 최대 | 기본 글자 | 계열 경사, 계열 1 |
-| `render_keepers.ml:857` | 키퍼 기억 칸(빈틈이면 warning) | 이상이면 warning | 이상 덧칠 먼저, 아니면 계열 1 |
+| `usage_calls.ml:382` | 도구별 호출 수 / 최대 | 기본 글자. 모든 호출이 실패하면 막대 전체 danger(`:386`) | 계열 경사, 계열 1. 모두 실패면 이상 덧칠 |
+| `render_keepers.ml:857` | 기억 보기의 지연 막대(빈틈이면 warning) | 이상이면 warning | 이상 덧칠 먼저, 아니면 계열 1 |
 | `render_prim.ml:3381` | 목표 완료 | 기본 글자 | 계열 경사, 계열 1 |
 | `render_metrics.ml:824` | 완료 추세 점자 그래프 | 색 없음 | 한 줄 그래프, 값으로 계열 1 |
 | `keeper_age_ladder.ml:155` | 키퍼 줄의 블록 sparkline | 색 없음 | 목록 줄 안이라 흐림 |
@@ -309,7 +316,7 @@ MASC 색 계산을 Python 으로 옮겨 실은 배색 53개에서 쟀다. 바탕
 
 - 53개 모두 3:1 낮은 쪽이 있었다. 높은 쪽은 모두 4.5:1 에 닿았다.
 - 모든 거리가 지금 슬롯 시험의 하한 0.023 을 넘는다.
-- MASC 경사는 btop 보다 좁다. btop download 의 ΔL 은 0.45, used 는 0.32 다. btop 은 낮은
+- MASC 경사는 btop 보다 좁다. btop download 의 ΔL 은 0.44, used 는 0.32 다. btop 은 낮은
   쪽을 1.5:1~2.3:1 까지 내리고, MASC 는 3:1 에서 멈추기 때문이다.
 - ΔL 0.095 가 실제 터미널에서 높이 차로 보이는지는 재지 않았다(§6).
 
@@ -380,10 +387,12 @@ type cell =
 - 부하 경사는 선언된 한도에만 쓴다. 초록→빨강 막대를 보면 한도라고 읽어도 된다.
 - 정상 칸이 상태 색상을 쓰지 않으므로 이상 칸이 눈에 띈다.
 - 한 그림에서 색으로 가르는 계열은 둘까지다. 셋째부터 줄을 나눠 따로 그린다. 상태 토큰이
-  쓰지 않는 색상이 둘뿐이기 때문이다. nvtop 은 한 그래프에 넷까지 겹치고 그 이상을 막는다
+  쓰지 않는 색상이 둘뿐이기 때문이다. nvtop 은 한 그래프에 넷까지 넣고 그 이상을 막는다
   ([interface_options:72][nv-max]).
+- 이 상한은 운영자 결정 「나란한 계열은 계열마다 제 경사」를 좁힌다. btop 메모리처럼 계열이
+  넷인 그림에서는 셋째부터 제 색이 없다. 운영자 결정이 필요하다(§6).
 - htop 은 평범한 값(0, N/A, 기본값)을 흐리게 하고 강한 색을 이상에 남긴다
-  ([Row:534][ht-shadow]). MASC 의 흐림은 이전 관측이다(RFC §6.4). 평범한 값 흐림은
+  ([Row:539][ht-shadow]). MASC 의 흐림은 이전 관측이다(RFC §6.4). 평범한 값 흐림은
   가져오지 않는다.
 
 #### 범례가 맞는 말을 하게 (제안)
@@ -396,8 +405,8 @@ type cell =
 3. 미터 옆 수는 부하 경사면 값이 든 띠의 색이다. 계열 경사면 계열의 높은 쪽 색이다. 수는
    글자라 4.5:1 을 지킨다. btop 은 수를 막대 끝과 같은 자리 색으로 칠한다
    ([draw:875][bt-readout]). MASC 계열 경사의 낮은 쪽은 3:1 이라 수에 쓰지 않는다.
-4. 범례는 자리 낱말을 붙인다: `위 받기 · 아래 보내기`. 색이 없어도 맞다. k9s 는 모드를
-   색, 아이콘, 앞 글자 셋으로 말한다([log_indicator:137][k9-toggle]).
+4. 범례는 자리 낱말을 붙인다: `위 받기 · 아래 보내기`. 색이 없어도 맞다. k9s 는 켜짐·꺼짐을
+   색, 낱말(`On`·`Off`), 굵기·흐림 셋으로 말한다([log_indicator:137][k9-toggle]).
 5. 범례에 `▲` `▼` 를 쓰지 않는다. `▲` 는 주의다(RFC §7.2).
 6. 대체 경로(배색 모름, 올림 끔, 16색)에서도 그림과 범례는 같은 함수에서 색을 받는다.
    그래서 같이 바뀐다.
@@ -431,7 +440,7 @@ type cell =
 | 축 최대 캐시, 새 표본만 훑음 [auto_y:13][bo-autoy] | 그릴 때마다 전부 훑음 | 지금은 가져오지 않는다 | btop 기록 §4 에서 build p50 은 0.26~0.67 ms 다. 병목이 아니다 |
 | 겹친 점자 칸은 나중 계열만 [grid:138][bo-grid] | 겹쳐 그리지 않는다(거울) | 가져오지 않는다 | 색 있는 계열을 둘로 묶고 거울과 줄 나눔으로 겹침을 없앤다 |
 | 계열마다 열을 나눔, 움직인 계열이 교차점을 가짐 [plot:50][nv-plot], [plot:63][nv-cross] | — | 가져오지 않는다 | 시간 해상도가 계열 수만큼 준다 |
-| 시간 축에 `60s`·`0s` 두 낱말, 확대 뒤 5초만 보임 [base:111][bo-axis] | 창 길이를 적지 않는다 | 열린 것 | btop 도 적지 않는다. 적을 자리가 축 열 아래뿐이다 |
+| 시간 축에 `60s`·`0s` 두 낱말 [base:111][bo-axis]. `autohide_time` 을 켜면 확대 뒤 5초만 보임 [drawing_utils:10][bo-autohide] | 창 길이를 적지 않는다 | 열린 것 | btop 도 적지 않는다. 적을 자리가 축 열 아래뿐이다 |
 | 표본 없음과 0 이 같음(nvtop 결함) [interface:2137][nv-zero] | `Unread`·`Absent`·`Zero` 가 다르다 | 지금이 낫다 | — |
 | 목록 줄 작은 그래프 5칸, 한 색 [draw:2058][bt-procgraph] | 블록 sparkline, 색 없음 | 가져온다: `recede` 한 색, 이상만 상태 색 | 운영자 결정 |
 
@@ -440,8 +449,8 @@ type cell =
 | 도구에서 본 것 | MASC 지금 | 가져오나 | 이유 |
 |---|---|---|---|
 | 칸 위치로 경사 [draw:398][bt-meter] | 한도 미터만 | 가져온다(§3.8) | 운영자 결정 |
-| 수가 막대 끝과 같은 색 [draw:875][bt-readout] | 수는 기본 글자. 부족분만 warning | 가져온다(§3.8 범례 3) | 수와 막대가 같은 말을 한다 |
-| 폭 문턱을 묶음의 첫 칸이 정함. 12칸 이상 이름·막대·수, 10~11칸 수만 [cpu_basic:102][bo-gaugecut] | 카드 폭이 좁으면 미터 대신 글 한 줄(`render_metrics.ml:298`) | 제안: 가져온다 | 한 카드의 미터들이 같은 모양으로 줄어든다. MASC 는 수를 늘 남긴다(RFC §5.6) |
+| 수가 막대 끝과 같은 색 [draw:875][bt-readout] | 수는 기본 글자. 부족분만 warning | 제안: 가져온다(§3.8 범례 3) | 수와 막대가 같은 말을 한다 |
+| 폭 문턱을 묶음의 첫 칸이 정함. 12칸 이상 이름·막대·수, 10~11칸 이름·수, 그 아래 수만 [cpu_basic:102][bo-gaugecut], [pipe_gauge:167][bo-gaugeparts] | 카드 폭이 좁으면 미터 대신 글 한 줄(`render_metrics.ml:298`) | 제안: 가져온다 | 한 카드의 미터들이 같은 모양으로 줄어든다. MASC 는 수를 늘 남긴다(RFC §5.6) |
 | 미터가 100% 의 뜻을 선언 [Meter.h:81][ht-total] | `meter_scale` | 이미 있다 | — |
 | 두 겹 미터(쓴 것 안의 유효분) [interface:684][nv-twolayer] | 없음 | 열린 것 | 컨텍스트 창 안의 캐시 토큰 같은 곳에 맞을 수 있다. 확인 필요 |
 | 한 칸이 안 되는 값은 0칸 [draw:398][bt-meter] | 0 보다 크면 한 칸 이상(`bar_filled_cells`) | 가져오지 않는다 | 작은 값이 0 으로 보인다(RFC §5.6) |
@@ -453,19 +462,19 @@ type cell =
 |---|---|---|---|
 | 모서리 자리 고정: 왼쪽 위 이름, 오른쪽 위 지금 상태, 오른쪽 아래 `N of M` [gui:1498][lg-frame] | 위에 이름·상태·개수, 아래에 `외 N`(RFC §2) | 이미 비슷하다 | — |
 | 한 줄로 눌린 상자 `╶─이름──3 of 9─╴` [gui:1465][lg-squash] | 없음 | 제안: 가져온다 | 높이가 모자란 카드가 사라지지 않는다. 이름과 개수가 남는다 |
-| 스크롤 막대가 오른쪽 테두리 자체. 끝에서만 바닥에 닿음 [scrollbar:7][lg-scroll] | 카드 오른쪽 테두리 막대(RFC §2) | 계산식을 가져온다 | 막대가 바닥에 닿으면 정말 끝이다 |
+| 스크롤 막대가 오른쪽 테두리 자체. 끝에서만 바닥에 닿음 [scrollbar:7][lg-scroll] | 카드 오른쪽 테두리 막대(RFC §2) | 제안: 계산식을 가져온다 | 막대가 바닥에 닿으면 정말 끝이다 |
 | 초점은 옆 테두리만 생기고 내용은 안 움직임 [drawing_utils:33][bo-basic-border] | `border.focused` 와 다른 기호 | 이미 비슷하다 | — |
 | 초점을 색으로만 [canvas:58][bo-border] | — | 가져오지 않는다 | 색 없이 안 보인다 |
 | 위첨자 상자 번호 [draw:279][bt-box] | #53050 이 지웠다 | 가져오지 않는다 | btop 기록 §3 |
-| 상자마다 테두리 색 [theme:62][bt-theme] | 카드 테두리는 한 색 | 가져오지 않는다 | 카드는 이름이 가른다. 테두리 색은 초점이 쓴다 |
+| 상자마다 테두리 색 [theme:63][bt-theme] | 카드 테두리는 한 색 | 가져오지 않는다 | 카드는 이름이 가른다. 테두리 색은 초점이 쓴다 |
 
 ### 4.4 목록
 
 | 도구에서 본 것 | MASC 지금 | 가져오나 | 이유 |
 |---|---|---|---|
 | 고른 줄 바탕 = 그 줄의 상태 색 [select_table:119][k9-sel] | 고른 줄은 띠이고 안의 색을 지운다(`strip_sgr`) | 열린 것 | 고른 줄의 상태 색이 사라진다. 기호와 낱말은 남는다 |
-| 정렬 방향: bottom `▲▼` [sortable:115][bo-sort], htop `△▽` [Table:445][ht-sortmark] | 정하지 않았다 | 제안: `▲` 를 피한다 | `▲` 는 주의다(RFC §7.2) |
-| 평범한 값 흐림 [Row:534][ht-shadow] | 흐림 = 이전 관측(RFC §6.4) | 가져오지 않는다 | 뜻이 섞인다 |
+| 정렬 방향: bottom `▲▼` [sortable:115][bo-sort], htop `△▽` [Table:468][ht-sortmark] | 정하지 않았다 | 제안: `▲` 를 피한다 | `▲` 는 주의다(RFC §7.2) |
+| 평범한 값 흐림 [Row:539][ht-shadow] | 흐림 = 이전 관측(RFC §6.4) | 가져오지 않는다 | 뜻이 섞인다 |
 | 자릿수 묶음마다 색 [Row:225][ht-digits] | 쉼표(RFC §6.3) | 가져오지 않는다 | 색이 크기를 말하게 된다. 계열 색과 겹친다 |
 | 키를 누른 뒤 5틱 동안 정렬 멈춤 [ScreenManager:136][ht-sortpause] | 정렬 키가 바뀔 때만 순서가 바뀐다(RFC §8) | 이미 더 강하다 | — |
 | 사라진 줄 5초 빨강, 새 줄 초록 [Row:49][ht-tomb]. 바뀐 칸 한 틱 `↑↓Δ` [table_data:426][k9-delta] | 없음 | 가져오지 않는다 | 정상 변화를 상태 색으로 칠한다. 이상 덧칠 규칙과 어긋난다 |
@@ -478,7 +487,7 @@ type cell =
 | 도구에서 본 것 | MASC 지금 | 가져오나 | 이유 |
 |---|---|---|---|
 | 배치가 순수 함수. 겹침 없음·화면 안·비지 않음을 시험하고 과거 버그 크기를 고정 [interfaceTests:118][nv-test] | 없음 | 제안: 가져온다 | 문구가 아니라 결정을 본다(RFC §10). 평가 기준을 먼저 고정한다 |
-| 너무 작으면 지금 크기와 필요한 크기를 적은 화면 [btop:157][bt-small]. lazygit 은 `Not enough space` 화면 [window_arrangement:414][lg-layout] | RFC-0459 §4.1 폭 기준 | 제안: 바닥 화면을 가져온다 | 무엇이 왜 빠졌는지 말한다 |
+| 너무 작으면 지금 크기와 필요한 크기를 적은 화면 [btop:157][bt-small]. lazygit 은 `Not enough space` 화면 [layout:151][lg-limit] | RFC-0459 §4.1 폭 기준 | 제안: 바닥 화면을 가져온다 | 무엇이 왜 빠졌는지 말한다 |
 | 생겼다 사라지는 줄은 30초 쉰 뒤에만 숨김 [interface:777][nv-hide]. 옵션이 같으면 줄은 늘기만 [interface:939][nv-jitter] | 그린 줄 수를 붙듦(RFC §8) | 이미 비슷하다 | — |
 | 프리셋 [config:92][bt-preset] | 보기(`v`) | 가져오지 않는다 | 보기가 같은 일을 한다 |
 
@@ -487,7 +496,7 @@ type cell =
 | 도구에서 본 것 | MASC 지금 | 가져오나 | 이유 |
 |---|---|---|---|
 | 낱말 속 키 글자만 다른 색 [draw:1918][bt-hint] | 구역 5 의 `c 대화` | 가져오지 않는다 | 키가 낱말 앞에 따로 있다. 한글 낱말 안에는 영문 키 글자가 없다 |
-| 지금 안 되는 키는 회색으로 자리를 지킴 [draw:1947][bt-grey]. htop 은 읽기 전용에서 빈칸 [FunctionBar:92][ht-fbar]. k9s 는 지움 [action:159][k9-ro] | 되는 키만 적는다(RFC §2) | 제안: 흐린 글자로 남긴다 | 키가 사라졌다 생기면 줄이 흔들린다(RFC §8). 왜 안 되는지는 동작 창이 말한다 |
+| 지금 안 되는 키는 회색으로 자리를 지킴 [draw:1947][bt-grey]. htop 은 읽기 전용에서 빈칸 [MainPanel:29][ht-fbar]. k9s 는 지움 [action:159][k9-ro] | 되는 키만 적는다(RFC §2) | 제안: 흐린 글자로 남긴다 | 키가 사라졌다 생기면 줄이 흔들린다(RFC §8). 왜 안 되는지는 동작 창이 말한다 |
 | 지금 누를 만한 키만 색 [options_map:32][lg-options] | 키 글자에 색 없음(RFC §7.3) | 가져오지 않는다 | 색은 상태와 계열에 쓴다 |
 | 모드 이름은 한 곳, 옆에 `(Reset)` [mode_helper:50][lg-mode] | 구역 2 의 경로와 보기 | 이미 비슷하다 | — |
 
@@ -607,16 +616,18 @@ type cell =
 ## 6. 확인하지 못한 것
 
 - 여섯 도구 모두 빌드하거나 돌리지 않았다. 화면을 찍지 않았다. 주장은 소스에서 왔다.
-- 다시 열어 맞춘 것은 btop 색 모델과 다른 도구 한 곳씩이다(§1.3). 나머지 인용은 읽기 기록을
-  옮겼다. 줄 번호가 한두 줄 어긋날 수 있다.
+- 모든 인용은 그 커밋에서 다시 열어 맞췄다(§1.3). 화면으로는 확인하지 않았다.
 - §3.8 의 수치는 `masc_tui_color.ml` 을 Python 으로 옮겨 계산한 추정이다. OCaml 코드를 돌린
   값이 아니다. 계산 스크립트는 저장소에 넣지 않았다. 같은 값은 §5.3 의 대비 시험이 재야 한다.
+- 검증 때 `masc_tui_color.ml` 을 따로 다시 옮겨 계산했다. 표의 여섯 줄 모두 같은 값과 배색이
+  나왔다. 이것도 OCaml 을 돌린 값은 아니다.
 - 그 계산은 페이지 바탕만 쟀다. 옆 창 바탕, 색각 이상 흉내, 실제 터미널 배색은 재지 않았다.
 - 배색 항목 대응(파랑 `base0D`, 자홍 `base0E`, 빨강 `base08`)은 `masc_tui_theme_catalog.ml` 의
   표를 따랐다. 자기 배색을 쓰는 터미널에서는 값이 다르다.
 - 3:1 은 WCAG 2.1 SC 1.4.11 의 값이다. 점자 점처럼 가는 글리프에서 3:1 이 충분한지 모른다.
   ΔL 0.095 가 높이 차로 보이는지도 모른다. 화면을 찍어 봐야 한다.
-- 「한 그림에 색 있는 계열 둘」은 제안이다. 운영자 결정이 필요하다.
+- 「한 그림에 색 있는 계열 둘」은 제안이다. 운영자 결정 「나란한 계열은 계열마다 제 경사」와
+  어긋날 수 있다. 계열이 넷인 그림에서 셋째부터 제 색이 없다. 운영자 결정이 필요하다.
 - lazygit 작성자 색이 4.5:1 을 넘는다는 것은 코드 주석이다. 재지 않았다.
 - k9s 의 두 가지는 읽기로 짐작했다. 일부만 쓴 배색에 `--invert` 를 걸면 물려받은 칸이 두 번
   뒤집힌다는 것, 접힌 머리의 MEM 화살표가 CPU 이전 값과 비교한다는 것이다.
@@ -629,10 +640,12 @@ type cell =
 [bt-theme]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L52-L101
 [bt-grad]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L305-L363
 [bt-256]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L154-L165
-[bt-truecolor-doc]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_config.cpp#L80
+[bt-truecolor-doc]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_config.cpp#L81
 [bt-tty]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L103-L152
 [bt-ttygrad]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L366-L386
 [bt-ttymode]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop.cpp#L805-L822
+[bt-ttygraph]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_draw.cpp#L498-L501
+[bt-ttycorner]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_draw.cpp#L291-L294
 [bt-bg]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_theme.cpp#L248-L252
 [bt-meter]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_draw.cpp#L398-L419
 [bt-graph]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_draw.cpp#L446-L486
@@ -653,8 +666,8 @@ type cell =
 [bt-sync]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/src/btop_tools.cpp#L755-L756
 [bt-nord]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/nord.theme#L37-L59
 [bt-dracula]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/dracula.theme#L32-L54
-[bt-greyscale]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/greyscale.theme#L57-L59
-[bt-paper]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/paper.theme#L7-L53
+[bt-greyscale]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/greyscale.theme#L52-L89
+[bt-paper]: https://github.com/aristocratos/btop/blob/5d03929a45e0720a4c8e2d189360ff1eb9ce1731/themes/paper.theme#L7-L83
 
 [bo-c]: https://github.com/ClementTsang/bottom/tree/6e1c1385d82285a35c0d75c95bfab243d2c850c1
 [bo-style]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/options/config/style.rs#L112-L149
@@ -667,7 +680,9 @@ type cell =
 [bo-colorval]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/options/config/style/utils.rs#L42-L54
 [bo-gauge]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/components/pipe_gauge.rs#L20-L52
 [bo-gaugecut]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/widgets/cpu_basic.rs#L102-L114
+[bo-gaugeparts]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/components/pipe_gauge.rs#L167-L217
 [bo-axis]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/components/time_series/base.rs#L111-L132
+[bo-autohide]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/drawing_utils.rs#L10-L28
 [bo-autoy]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/components/time_series/auto_y.rs#L13-L92
 [bo-border]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas.rs#L58-L65
 [bo-basic-border]: https://github.com/ClementTsang/bottom/blob/6e1c1385d82285a35c0d75c95bfab243d2c850c1/src/canvas/drawing_utils.rs#L33-L51
@@ -680,21 +695,22 @@ type cell =
 [ht-c]: https://github.com/htop-dev/htop/tree/21bbc80c7811149ee33f449748addf23740c7b9f
 [ht-crt]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L128-L136
 [ht-panel]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L134-L139
-[ht-series]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L180-L212
+[ht-series]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L205-L213
 [ht-broken]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L1203-L1206
 [ht-fallback]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L1350-L1373
+[ht-nocolor]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/CRT.c#L1283
 [ht-mono]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Meter.c#L88-L173
 [ht-bar]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Meter.c#L91-L196
-[ht-graph]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Meter.c#L225-L232
+[ht-graph]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Meter.c#L268-L325
 [ht-total]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Meter.h#L81-L85
 [ht-load]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/LoadAverageMeter.c#L50-L57
 [ht-legend]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Action.c#L766-L827
-[ht-shadow]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Row.c#L534-L556
+[ht-shadow]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Row.c#L539-L563
 [ht-digits]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Row.c#L225-L325
 [ht-tomb]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Row.c#L49-L82
-[ht-fbar]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/FunctionBar.c#L92-L105
+[ht-fbar]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/MainPanel.c#L29-L30
 [ht-sortpause]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/ScreenManager.c#L136-L141
-[ht-sortmark]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Table.c#L445-L470
+[ht-sortmark]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Table.c#L468-L474
 [ht-repaint]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/Panel.c#L313-L363
 [ht-layout]: https://github.com/htop-dev/htop/blob/21bbc80c7811149ee33f449748addf23740c7b9f/HeaderLayout.h#L16-L50
 
@@ -709,7 +725,7 @@ type cell =
 [k9-title]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/ui/table_helper.go#L23-L33
 [k9-sel]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/ui/select_table.go#L119-L128
 [k9-delta]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/model1/table_data.go#L426-L461
-[k9-header]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/view/app.go#L166-L183
+[k9-header]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/view/app.go#L280-L286
 [k9-menu]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/ui/menu.go#L78-L149
 [k9-ro]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/ui/action.go#L159-L169
 [k9-toggle]: https://github.com/derailed/k9s/blob/617476cfc0673be026fba339e2c204e22d505e53/internal/view/log_indicator.go#L137-L177
@@ -720,15 +736,17 @@ type cell =
 [lg-bgquery]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/color_scheme.go#L56-L81
 [lg-author]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/presentation/authors/authors.go#L107-L142
 [lg-downsample]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/gui.go#L61-L66
+[lg-nocolor]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/vendor/github.com/gdamore/tcell/v3/tscreen.go#L459-L463
 [lg-status]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/presentation/commits.go#L537-L573
 [lg-graph]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/presentation/graph/cell.go#L11-L22
 [lg-len]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/context/commit_message_context.go#L178-L196
-[lg-frame]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/gui.go#L1498-L1530
+[lg-frame]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/gui.go#L1498-L1608
 [lg-squash]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/gui.go#L1465-L1472
 [lg-scroll]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/scrollbar.go#L7-L27
 [lg-widths]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/presentation/commits.go#L228-L260
 [lg-select]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/view.go#L1062-L1096
 [lg-layout]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/controllers/helpers/window_arrangement_helper.go#L414-L525
+[lg-limit]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/layout.go#L148-L151
 [lg-options]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/options_map.go#L32-L36
 [lg-mode]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gui/controllers/helpers/mode_helper.go#L50-L171
 [lg-flush]: https://github.com/jesseduffield/lazygit/blob/54cc6af1d77b5a6cec3dc9ad0b203afdb4ad3451/pkg/gocui/gui.go#L1641-L1659
@@ -740,6 +758,7 @@ type cell =
 [nv-legend]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/plot.c#L110-L113
 [nv-rect]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/plot.c#L126-L137
 [nv-slot]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface_setup_win.c#L372-L373
+[nv-default]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface_options.c#L138-L141
 [nv-max]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/include/nvtop/interface_options.h#L72-L77
 [nv-zero]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L2137-L2141
 [nv-meter]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L666-L675
@@ -750,5 +769,5 @@ type cell =
 [nv-colors]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L579-L599
 [nv-sort]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L1690-L1692
 [nv-keys]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L2086-L2088
-[nv-draw]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L2354-L2375
+[nv-draw]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/src/interface.c#L373-L384
 [nv-test]: https://github.com/Syllo/nvtop/blob/84559095d8c7bee5ddd64003d6e5569cd34af8b6/tests/interfaceTests.cpp#L118-L128

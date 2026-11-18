@@ -9,6 +9,7 @@ type stage =
   | Turn_ended of Keeper_reaction_ledger.Turn_disposition.t
   | Consumed
   | Completed
+  | Receipt_is_the_record
   | Cancelled of string option
   | Settling of string
   | Transferring of { owner : string; target : string }
@@ -169,34 +170,49 @@ let decode row_json =
         | "failed" -> optional_text "error" wake |> Result.map (fun reason -> Dispatch_failed reason)
         | "succeeded" ->
             let* detail_json = field "detail" wake in
-            let* detail = object_fields detail_json in
-            let* kind = text "kind" detail in
-            if not (String.equal kind "masc.keeper_wake.enqueued")
-            then Ok (Unknown "예약 실행 증거 미지원")
-            else
-              let* () = same "schedule_instance_id" instance detail in
-              let* () = same "schedule_id" schedule detail in
-              let* keeper = text "keeper_name" detail in
+            let* _unique_fields = object_fields detail_json in
+            (* The server's own decoder, so a receipt kind it writes cannot be
+               one this reader calls unsupported. *)
+            let* receipt = Schedule_dispatch_receipt.dispatch_receipt_of_detail detail_json in
+            let same_id name expected actual =
+              if String.equal expected actual then Ok ()
+              else Error ("schedule observation identity mismatch: " ^ name) in
+            let occurrence_identity ~schedule_instance_id ~schedule_id =
+              let* () = same_id "schedule_instance_id" instance schedule_instance_id in
+              same_id "schedule_id" schedule schedule_id in
+            let keeper_target keeper =
               let* named_target = optional_text "payload_keeper_name" row in
               let* encoded_target = optional_text "payload_target" row in
-              let* () = match named_target, encoded_target with
-                | None, None -> Error "schedule observation is missing its Keeper target"
-                | (Some _ | None), (Some _ | None) ->
-                    if (match named_target with None -> true | Some name -> String.equal name keeper)
-                       && (match encoded_target with None -> true | Some target -> String.equal target ("keeper:" ^ keeper))
-                    then Ok () else Error "schedule observation identity mismatch: Keeper target" in
-              let* post = text "post_id" detail in
+              match named_target, encoded_target with
+              | None, None -> Error "schedule observation is missing its Keeper target"
+              | (Some _ | None), (Some _ | None) ->
+                  if (match named_target with None -> true | Some name -> String.equal name keeper)
+                     && (match encoded_target with None -> true | Some target -> String.equal target ("keeper:" ^ keeper))
+                  then Ok () else Error "schedule observation identity mismatch: Keeper target" in
+            (match receipt with
+             | Schedule_dispatch_receipt.Lane_act_handed_over { schedule_instance_id; schedule_id; _ } ->
+                 let* () = occurrence_identity ~schedule_instance_id ~schedule_id in
+                 Ok Receipt_is_the_record
+             | Schedule_dispatch_receipt.Keeper_receipt_delivered
+                 { keeper_name; schedule_instance_id; schedule_id } ->
+                 let* () = occurrence_identity ~schedule_instance_id ~schedule_id in
+                 let* () = keeper_target keeper_name in
+                 Ok Receipt_is_the_record
+             | Schedule_dispatch_receipt.Keeper_wake_enqueued
+                 { keeper_name = keeper; schedule_instance_id; schedule_id; post_id = post
+                 ; stimulus_id = stimulus; _ } ->
+              let* () = occurrence_identity ~schedule_instance_id ~schedule_id in
+              let* () = keeper_target keeper in
               let check_identity fields =
                 let* () = same "schedule_instance_id" instance fields in
                 let* () = same "schedule_id" schedule fields in
                 let* () = same "keeper_name" keeper fields in
                 same "post_id" post fields in
               let* reaction = evidence_fields row "keeper_reaction_evidence" in
-              let* stimulus = optional_text "stimulus_id" detail in
               (match stimulus with
                | None -> missing_stimulus_stage ~check_identity queue reaction
                | Some stimulus ->
-                  let* () = same "post_id" stimulus detail in
+                  let* () = same_id "post_id" stimulus post in
                   let* reaction_observation = match reaction with
                     | None -> Ok Unobserved
                     | Some reaction ->
@@ -254,16 +270,16 @@ let decode row_json =
                                (match result with
                                 | Completed -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended _ | Consumed | Cancelled _ | Settling _
+                                | Turn_started | Turn_ended _ | Consumed | Receipt_is_the_record | Cancelled _ | Settling _
                                 | Transferring _ | Unknown _ -> false)
                            | Observed Consumed ->
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended _ | Consumed | Completed
+                                | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
                                 | Settling _ | Transferring _ | Unknown _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                      | Turn_started | Turn_ended _ | Completed | Settling _
+                                      | Turn_started | Turn_ended _ | Completed | Receipt_is_the_record | Settling _
                                       | Transferring _ | Unknown _) -> false in
                          matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
                        match reaction_observation with
@@ -278,7 +294,7 @@ let decode row_json =
                                | Observed (Unknown _ | Queued | Turn_started | Turn_ended _ as stage) -> matched stage
                                | Unobserved -> matched Queued
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
-                               | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed
+                               | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Receipt_is_the_record
                                           | Missing | Queued_at _ | Settling _ | Transferring _) -> matched (Unknown "예약 반응 재확인 필요"))
                           | Contract.Queue_matched_terminal_completed ->
                               terminal "completed" (fun _ -> Completed)
@@ -294,18 +310,18 @@ let decode row_json =
                           | Contract.Queue_not_found ->
                               (match reaction_observation with
                                | Unobserved | Observed Queued -> matched Missing
-                               | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed
+                               | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed | Receipt_is_the_record
                                           | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Cancelled _
                                           | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
                           | Contract.Queue_withdrawn_at_cancel -> matched (Cancelled None)
                           | Contract.Queue_read_error | Contract.Queue_evidence_invalid
                           | Contract.Queue_unrecognized_receipt ->
-                              Ok (Unknown "예약 큐 조회 불가"))))
+                              Ok (Unknown "예약 큐 조회 불가")))))
         | _ -> Ok (Unknown "예약 전달 상태 미지원") in
       Ok { stage; due_at_iso }
 
 let needs_attention = function
   | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _
   | Consumed | Settling _ | Transferring _ | Unknown _ -> true
-  | No_occurrence | Completed | Cancelled _ -> false
+  | No_occurrence | Completed | Receipt_is_the_record | Cancelled _ -> false

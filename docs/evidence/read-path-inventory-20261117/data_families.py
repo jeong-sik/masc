@@ -10,18 +10,25 @@ Variable segments:
 - below the top level, a directory with more than WIDE_DIR_CHILDREN
   subdirectories has `<*>` children (top-level store names stay)
 - a path deeper than MAX_FAMILY_SEGMENTS keeps its first segments and its file name
-- below the top level, a directory segment equal to a directory name under
-  `keepers/` is `<keeper>`; top-level store names stay even when a Keeper
-  directory has the same name (`tool_usage`)
-- directly under `keepers/`, a file whose stem (text before the first dot) is
-  such a name keeps only its suffix: `keepers/<keeper>.decisions.jsonl`
+- Keeper names come from the layout the code declares for `keepers/`
+  (lib/core/common.ml keeper_runtime_store_dirname): every directory there
+  except the shared ones, the stems of the files there
+  (`<keeper>.json`, `<keeper>.decisions.jsonl`), the `<keeper>.json` files in
+  `tool_usage/`, and the `_<keeper>` directories in `.shutdown-operations/`
+  and `.configuration-removals/`
+- below the top level, a segment that is such a name is `<keeper>`, a
+  `_`-prefixed one is `_<keeper>`, and a file named `<keeper>.<suffix>` keeps
+  only its suffix: `keepers/<keeper>.decisions.jsonl`. The shared directories
+  keep their names. Top-level store names stay
 - uuids, long hex, dates, day numbers and long digit runs get typed placeholders
 
 Outputs, both sorted by total bytes:
 - --out: one row per family
 - --stores-out: one row per store, the top-level name, or
   `keepers/<keeper>/<name>` under keepers/
-No output names a file: a path would carry Keeper names and trace ids.
+No output names a file: a path would carry Keeper names and trace ids. Before
+writing, every row is checked again; a row that still names a Keeper stops
+the run with exit 1 and nothing is written.
 """
 
 from __future__ import annotations
@@ -40,6 +47,13 @@ WIDE_DIR_CHILDREN = 40
 MAX_FAMILY_SEGMENTS = 7
 SECONDS_PER_DAY = 86_400
 BYTES_PER_MB = 1024 * 1024
+KEEPERS_DIR = "keepers"
+TOOL_USAGE_DIR = "tool_usage"
+TOOL_USAGE_SUFFIX = ".json"
+OWNER_PREFIXED_DIRS = frozenset({".shutdown-operations", ".configuration-removals"})
+OWNER_DIR_PREFIX = "_"
+SHARED_KEEPER_DIRS = OWNER_PREFIXED_DIRS | {TOOL_USAGE_DIR}
+KEEPER = "<keeper>"
 
 SEGMENT_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"), "<uuid>"),
@@ -80,20 +94,68 @@ def normalize_segment(segment: str) -> str:
     return out
 
 
+def masked_name(name: str, keeper_names: frozenset[str]) -> str | None:
+    """The masked form of a segment that names a Keeper, or None."""
+    if name in keeper_names:
+        return KEEPER
+    owner = name.removeprefix(OWNER_DIR_PREFIX)
+    if owner != name and owner in keeper_names:
+        return OWNER_DIR_PREFIX + KEEPER
+    stem, dot, rest = name.partition(".")
+    if dot and stem in keeper_names:
+        return KEEPER + dot + normalize_segment(rest)
+    return None
+
+
 def dir_segment(name: str, *, family: str, wide: bool, keeper_names: frozenset[str]) -> str:
-    if family and name in keeper_names:
-        return "<keeper>"
+    if family == KEEPERS_DIR and name in SHARED_KEEPER_DIRS:
+        return name
+    if family:
+        masked = masked_name(name, keeper_names)
+        if masked is not None:
+            return masked
     if wide:
         return "<*>"
     return normalize_segment(name)
 
 
 def file_segment(name: str, *, family: str, keeper_names: frozenset[str]) -> str:
-    if family == "keepers":
-        stem, dot, rest = name.partition(".")
-        if stem in keeper_names:
-            return "<keeper>" + dot + normalize_segment(rest)
+    if family:
+        masked = masked_name(name, keeper_names)
+        if masked is not None:
+            return masked
     return normalize_segment(name)
+
+
+def keeper_names_under(keepers_dir: Path) -> frozenset[str]:
+    names: set[str] = set()
+    for entry in os.scandir(keepers_dir):
+        if entry.name == TOOL_USAGE_DIR:
+            names.update(
+                child.name.removesuffix(TOOL_USAGE_SUFFIX)
+                for child in os.scandir(entry.path)
+                if child.name.endswith(TOOL_USAGE_SUFFIX)
+            )
+        elif entry.name in OWNER_PREFIXED_DIRS:
+            names.update(
+                child.name.removeprefix(OWNER_DIR_PREFIX)
+                for child in os.scandir(entry.path)
+                if child.name.startswith(OWNER_DIR_PREFIX)
+            )
+        elif entry.is_dir(follow_symlinks=False):
+            names.add(entry.name)
+        else:
+            names.add(entry.name.partition(".")[0])
+    names.discard("")
+    return frozenset(names)
+
+
+def rows_naming_a_keeper(keys: Iterator[str], keeper_names: frozenset[str]) -> int:
+    return sum(
+        1
+        for key in keys
+        if any(masked_name(segment, keeper_names) is not None for segment in key.split("/")[1:])
+    )
 
 
 def store_of(family: str) -> str:
@@ -179,10 +241,13 @@ def main(argv: list[str], now: datetime) -> int:
     root: Path = args.root
     out: Path = args.out
     stores_out: Path = args.stores_out
-    keepers_dir = root / "keepers"
-    keeper_names = frozenset(
-        e.name for e in os.scandir(keepers_dir) if e.is_dir(follow_symlinks=False)
-    ) if keepers_dir.is_dir() else frozenset[str]()
+    keepers_dir = root / KEEPERS_DIR
+    keeper_names = keeper_names_under(keepers_dir) if keepers_dir.is_dir() else frozenset[str]()
+    keeper_dirs = sum(
+        1
+        for e in os.scandir(keepers_dir)
+        if e.is_dir(follow_symlinks=False) and e.name not in SHARED_KEEPER_DIRS
+    ) if keepers_dir.is_dir() else 0
     changed_since = now.timestamp() - SECONDS_PER_DAY
     families: dict[str, FamilyStats] = {}
     stores: dict[str, FamilyStats] = {}
@@ -190,13 +255,17 @@ def main(argv: list[str], now: datetime) -> int:
         key = family_key(meta)
         families[key] = add(families.get(key, EMPTY_STATS), meta, changed_since)
         stores[meta.store] = add(stores.get(meta.store, EMPTY_STATS), meta, changed_since)
+    named = rows_naming_a_keeper(iter([*families, *stores]), keeper_names)
+    if named:
+        print(f"{named} rows still name a Keeper; nothing written", file=sys.stderr)
+        return 1
     write_table(out, families, "family")
     write_table(stores_out, stores, "store")
     total_files = sum(s.files for s in families.values())
     total_bytes = sum(s.total_bytes for s in families.values())
     print(
         f"root={root} families={len(families)} files={total_files} "
-        f"total_mb={total_bytes / BYTES_PER_MB:.1f} keepers_dirs={len(keeper_names)} "
+        f"total_mb={total_bytes / BYTES_PER_MB:.1f} keeper_dirs={keeper_dirs} keeper_names={len(keeper_names)} "
         f"measured_at={now.isoformat(timespec='seconds')}"
     )
     return 0

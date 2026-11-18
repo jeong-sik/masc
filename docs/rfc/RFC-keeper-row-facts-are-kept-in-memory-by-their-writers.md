@@ -240,7 +240,8 @@ val last_row : recent_entry option fact
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 
 val keep_facts_in_this_process : unit -> unit
-(* 이 process 가 저장소를 쓰는 쪽이다. 이 말을 한 뒤부터 read_fact 가 값을 든다. *)
+(* 이 process 가 writer lease 를 쥐었다. 이 말을 한 뒤부터 read_fact 가
+   Store.facts 가 Kept_by_the_lease_holder 인 저장소의 값을 든다. *)
 
 val directories_removed : unit -> unit
 (* 저장소 디렉터리를 이 모듈 밖에서 지웠다. 기억한 이름과 모든 칸을 비운다. *)
@@ -261,9 +262,11 @@ val directories_removed : unit -> unit
 - 칸은 저장소 등록부 항목에 둔다(규칙 1). 항목은 (사실, 칸) 목록을 `Atomic` 하나에 든다. 사실 하나에 칸은 하나다. 읽는 쪽이 처음 물을 때 compare-and-set 으로 목록에 더한다. 진 쪽은 이긴 쪽의 칸을 쓴다. 있는 칸을 새것으로 바꿔 끼우지 않는다. `Keeper_owner_projection.install` 처럼 덮어쓰면(`keeper_owner_projection.ml:15-19`) 쓰는 쪽과 읽는 쪽이 서로 다른 칸을 본다.
 - 칸은 읽는 쪽만 만든다. 쓰는 쪽과 지우는 쪽은 있는 칸만 돈다. prune 은 디스크의 Keeper 디렉터리마다 저장소를 연다(`prune_listed_stores_bound`). 여는 쪽마다 칸을 만들면 아무도 읽지 않는 디렉터리에도 칸이 생긴다.
 - 칸은 저장소를 쓰는 process 만 든다. 칸을 고치는 것은 그 process 의 쓰기뿐이고, 다른 process 가 쓴 줄은 칸에 닿지 않는다. TUI 는 서버와 다른 process 인데 같은 함수로 TurnRecord 파일을 읽는다(`bin/masc_tui_context_state.ml` 의 `load`). 값을 들면 TUI 는 처음 읽은 줄을 끝까지 보인다.
-  - 그래서 process 가 쓰는 쪽이라고 말한 뒤에만 `read_fact` 가 값을 든다(`Dated_jsonl.keep_facts_in_this_process`). 한 번 말하면 거두지 않는다.
-  - 서버는 BasePath writer lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). 이 함수는 lease 를 인자로 받는다. lease 가 없는 코드는 부르지 못한다.
-  - 말하지 않은 process 는 전처럼 매번 파일을 읽는다. 칸도 등록부 항목도 만들지 않는다.
+  - 「이 process 가 혼자 쓴다」는 사실 둘로 이루어진다. 하나는 process 의 사실이다. 이 process 가 writer lease 를 쥐었는가. 다른 하나는 저장소의 사실이다. 이 저장소의 파일을 lease 를 쥔 process 만 바꾸는가. 둘 다 맞을 때만 `read_fact` 가 값을 든다.
+  - process 의 사실은 process 가 말한다(`Dated_jsonl.keep_facts_in_this_process`). 한 번 말하면 거두지 않는다. 서버는 BasePath writer lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). 이 함수는 받은 lease 가 지금 이 process 가 쥔 lease 일 때만 말한다. 놓은 lease 로 부르면 `Lease_not_held` 를 돌려주고 아무 말도 하지 않는다.
+  - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord 하나다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
+  - 둘 중 하나라도 아니면 전처럼 매번 파일을 읽는다. 칸도 등록부 항목도 만들지 않는다.
+  - `keep_facts_in_this_process` 자체는 누구나 부를 수 있다. `Dated_jsonl` 은 lease 를 모르고, 서버를 대신하는 시험 실행 파일도 이 함수를 부른다. lease 를 쥐지 않은 실행 파일이 부르면 #53145 의 결함이 돌아온다. 그래서 TUI 가 쓰는 진입점을 시험으로 고정한다(§5).
   - 읽는 호출처가 「든 값」과 「파일」 가운데 고르게 하지 않았다. 그러면 호출처마다 맞게 골라야 하고, 틀리면 빠르지만 틀린 값이 나온다. 지금 모양은 말하기를 잊으면 느릴 뿐이다.
 - 그래서 쓰는 도중에 칸이 새로 생길 수 있다. 쓰는 쪽은 그 칸을 쓰기 전에 보지 못했다. 쓰기 전에 본 목록과 쓴 뒤의 목록이 다르면 그 저장소의 칸을 모두 비운다.
 - 같은 디렉터리를 다르게 적는 길이 여럿이다. base path 는 별칭을 허락한다(`dated_jsonl_store.ml:168`, macOS 의 `/var`·`/tmp`). 저장소 위치의 Keeper 조각은 부르는 쪽이 준 글자다(`Store.keeper`). 쓰는 쪽과 읽는 쪽은 Keeper 이름으로 만들고, prune 은 디스크의 디렉터리 이름으로 만든다(`Store.fold_retention_directories`). 대소문자를 접는 file system(운영 장비의 APFS)에서는 `keepers/Alpha` 와 `keepers/alpha` 가 한 디렉터리다. 글자로 견주는 key 는 이들을 다른 저장소로 본다. 칸이 없을 때는 그래도 값이 맞았다. 줄 쓰기는 `realpath` 로 고른 경로 mutex 가 지키고(`fs_compat_base_io.ml:219-245`), 읽는 쪽은 파일을 읽어서다. 칸을 두면 달라진다. 한쪽으로 쓰거나 지운 줄이 다른 쪽 칸을 건드리지 않아서, 그 칸이 재시작까지 옛 값이다.
@@ -413,6 +416,11 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 
 **쓰는 process 가 아니면 들지 않는다는 시험.** 쓰는 쪽이라고 말하지 않는 실행 파일(`test_dated_jsonl`)에서 `read_fact` 를 두 번 부르면 둘 다 파일을 읽은 답이다. 저장소를 거치지 않고 파일에 덧붙인 줄이 다음 답이다. 처음부터 값을 들게 바꾼 변이는 이 시험에서 죽고, 말해도 들지 않게 바꾼 변이는 `test_dated_jsonl_kept_facts` 에서 죽는다.
 
+- TUI 의 진입점도 본다. `test_tui_context_state` 는 TUI 가 링크하는 모듈을 그대로 링크하고, TUI 처럼 lease 를 쥐었다고 말하지 않는다. `Masc_tui_context_state.load` 를 부르고, 파일에 TurnRecord 한 줄을 덧붙이고, 다시 부른다. 두 번째 답이 덧붙인 줄이어야 한다.
+- 다른 process 가 쓰는 저장소는 말한 process 에서도 들지 않는다. `test_dated_jsonl_kept_facts` 는 cost 기록 저장소에서 같은 순서를 돌린다. 값을 드는 저장소의 목록도 같은 시험이 고정한다. 목록에 저장소를 더하면 이 시험이 바뀐다.
+- 놓은 lease 는 말하지 못한다(`test_server_startup_takeover`).
+- 서버가 실제로 말하는지는 시험으로 고정하지 못했다. 말하는 줄은 `bin/main_eio.ml` 에 있고 시험은 실행 파일을 링크하지 못한다. 그 줄이 빠지면 서버는 매번 파일을 읽는다. 값은 맞고 느려진다. `masc_dated_jsonl_fact_reads_total` 의 `read_not_kept` 가 늘어나는 것으로 보인다.
+
 **파일을 열지 않는다는 시험.** 값을 채운 뒤 그 파일을 지우고 행을 다시 만든다. 두 번째 행이 첫 번째와 같으면 읽는 쪽이 파일을 열지 않은 것이다. 이 시험은 §7 의 한계(서버가 돌 때 손으로 지운 파일은 재시작까지 안 보인다)도 그대로 보여 준다.
 
 **취소 시험.** 쓰기가 줄을 쓴 뒤 칸을 고치기 전에 취소되게 한다. 칸이 비워져 있어야 한다.
@@ -431,7 +439,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - 쓰는 쪽 둘은 cfg 둘로 돌린다. 저장소 잠금으로 안 섞이는 cfg 와 잠금이 없는 cfg(결정 기록)다. 잠금이 없으면 쓰기 순서와 compare-and-set 순서가 엇갈릴 수 있다. 잠금이 있는 cfg 는 쓰는 쪽 하나가 세 줄을 쓴다. 잠금 안의 두 쓰는 쪽은 차례로 쓰는 한 쪽과 같은 상태를 지난다. 쓰는 쪽 둘로도 한 번 돌려 확인했다.
 - 칸은 채우는 쪽이 처음 볼 때 생긴다. 쓰는 쪽과 지우는 쪽은 있는 칸만 고친다. 쓰는 쪽은 칸을 읽을 때 칸이 있었는지를 같이 적어 둔다.
 
-칸은 저장소 하나에만 걸리므로 모델은 저장소 하나로 충분하다. 여러 저장소를 지우는 일은 저장소마다 지우고 비우는 일을 잇달아 하는 것이다. 불변식은 "파일을 바꾸는 중인 쪽이 없고 칸이 `Filled` 면, 값은 파일에서 계산한 값과 같다"이다. `Next` 는 §2 의 규칙대로 움직이고 불변식을 지킨다. 버그 후보는 열셋이다. 후보마다 정상 걸음 하나를 바꾼 cfg 가 있다(`KeeperRowFacts-<이름>-buggy.cfg`).
+칸은 저장소 하나에만 걸리므로 모델은 저장소 하나로 충분하다. 여러 저장소를 지우는 일은 저장소마다 지우고 비우는 일을 잇달아 하는 것이다. 불변식은 "파일을 바꾸는 중인 쪽이 없고 칸이 `Filled` 면, 값은 파일에서 계산한 값과 같다"이다. `Next` 는 §2 의 규칙대로 움직이고 불변식을 지킨다. 버그 후보는 열넷이다. 후보마다 정상 걸음 하나를 바꾼 cfg 가 있다(`KeeperRowFacts-<이름>-buggy.cfg`).
 
 - (a) 채우는 쪽이 compare-and-set 없이 그냥 넣는다.
 - (b) 쓰는 쪽이 `Unfilled` 에 자기 행을 넣는다.
@@ -446,6 +454,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - (k) 쓰는 쪽이 compare-and-set 에 실패한 뒤 칸을 비우지 않고 자기가 만든 값을 넣는다.
 - (l) 채우는 쪽이 실패한 읽기를 빈 값으로 넣는다.
 - (m) 쓰는 쪽이 쓰는 도중에 생긴 칸을 그대로 둔다.
+- (n) 칸을 든 process 가 그 저장소를 혼자 쓰지 않는다. 다른 process 의 줄이 파일에 들어가고 아무도 칸을 돌지 않는다(#53145 의 모양). 정상 모델에는 process 가 하나뿐이다. 칸을 드는 쪽이 파일을 바꾸는 유일한 쪽이라는 것이 §3.2 의 두 사실이다.
 
 버그 cfg 는 후보마다 불변식을 어겨야 한다. 버그 cfg 가 통과하는 후보가 있으면 모델이 그 경우를 그리지 못한 것이다. 후보를 빼지 않고 모델을 고친다. 후보마다 어기는 사실이 다르다. (b)는 끝 K 줄에서만 어기고, (g)는 가장 최근 Turn 행에서만 어긴다. (k) 는 두 경우에 어긴다. 지우는 쪽이 쓰는 쪽의 칸 읽기와 칸 맞추기 사이에 비우기를 끝낼 때와, 잠금 없는 쓰는 쪽 둘이 엇갈릴 때다. 읽어 둔 칸이 `Unfilled` 인 쓰는 쪽은 `Unfilled` 를 넣으므로, 채우는 쪽과 겹치는 것만으로는 어기지 못한다. 버그 cfg 는 후보마다 두 사실의 불변식을 모두 확인한다. 정상 cfg 와 버그 cfg 를 둘 다 돌린다. 풀 용량 때문에 멈추는 일(§6.6)은 안전 불변식으로 잡히지 않는다. 그래서 "잠금을 쥔 채 채우는 시험"이 대신 지킨다. 시계가 뒤로 간 쓰기는 모델에 넣지 않고 `step` 단위 시험으로 본다.
 

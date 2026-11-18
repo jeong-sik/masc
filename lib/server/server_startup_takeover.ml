@@ -435,7 +435,19 @@ let write_all fd content =
   loop 0
 ;;
 
-let keep_store_facts (_ : base_path_lease) = Dated_jsonl.keep_facts_in_this_process ()
+type store_facts =
+  | Store_facts_kept
+  | Lease_not_held
+
+(* Only the lease this process holds says it: a lease that was released, or
+   one whose descriptor did not close, is not held. *)
+let keep_store_facts lease =
+  Mutex.protect base_path_lease_mu (fun () ->
+    match Hashtbl.find_opt base_path_leases lease.file with
+    | Some (Active_lease current) when current == lease ->
+      Dated_jsonl.keep_facts_in_this_process ();
+      Store_facts_kept
+    | Some (Active_lease _) | Some (Failed_close _) | None -> Lease_not_held)
 
 let release_base_path_lease lease =
   Mutex.protect base_path_lease_mu (fun () ->

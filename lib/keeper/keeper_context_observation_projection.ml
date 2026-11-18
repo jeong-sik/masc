@@ -76,30 +76,43 @@ type latest_turn_observation =
   | Turn_record_read_failed of string
   | Observed of Turn_record.t
 
-(* The strict tail read keeps failure classes apart: [read_recent] would
+(* The newest TurnRecord row is a fact the store keeps in memory
+   ([Dated_jsonl.last_row]): the append of a row moves it, and the files are
+   opened here only when the store does not hold it. The value is the strict
+   tail read's. That read keeps failure classes apart: [read_recent] would
    silently skip a malformed newest line and serve the previous row as "the
-   measurement", and it flattens listing failures into an empty result. *)
+   measurement", and it flattens listing failures into an empty result.
+
+   A malformed newest row is logged when the files were read. A held one was
+   logged by the read that found it. *)
 let latest_turn_observation ~config ~keeper_name =
+  let of_row ~read_from_files = function
+    | None -> No_turn_record
+    | Some (Dated_jsonl.Parsed json) ->
+      (match Turn_record.of_json json with
+       | Ok record -> Observed record
+       | Error _ -> Undecodable_turn_record)
+    | Some (Dated_jsonl.Malformed_json { path; line_number; detail }) ->
+      if read_from_files
+      then
+        Log.Keeper.warn
+          "context observation newest turn-record row is malformed keeper=%s path=%s line=%s: %s"
+          keeper_name
+          path
+          (match line_number with
+           | Some line -> string_of_int line
+           | None -> "?")
+          detail;
+      Undecodable_turn_record
+  in
   match
     let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-    Dated_jsonl.read_recent_result store 1
+    Dated_jsonl.read_fact store Dated_jsonl.last_row
   with
-  | Ok [] -> No_turn_record
-  | Ok (Dated_jsonl.Parsed json :: _) ->
-    (match Turn_record.of_json json with
-     | Ok record -> Observed record
-     | Error _ -> Undecodable_turn_record)
-  | Ok (Dated_jsonl.Malformed_json { path; line_number; detail } :: _) ->
-    Log.Keeper.warn
-      "context observation newest turn-record row is malformed keeper=%s path=%s line=%s: %s"
-      keeper_name
-      path
-      (match line_number with
-       | Some line -> string_of_int line
-       | None -> "?")
-      detail;
-    Undecodable_turn_record
-  | Error read_error ->
+  | Fact_cell.Held row -> of_row ~read_from_files:false row
+  | Fact_cell.Read_and_kept row | Fact_cell.Read_not_kept row ->
+    of_row ~read_from_files:true row
+  | Fact_cell.Read_failed read_error ->
     let detail = Dated_jsonl.read_error_to_string read_error in
     Log.Keeper.warn
       "context observation turn-record read failed keeper=%s: %s"

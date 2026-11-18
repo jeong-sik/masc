@@ -17,7 +17,8 @@
        clock.
     5. One directory has one fact, whichever spelling reached it. A
        spelling is asked about again after a removal, and by an append whose
-       directory was not there when it began or that a removal overlapped. *)
+       directory was not there when it began or that a removal overlapped.
+    6. Each read is counted by how its value was come by. *)
 
 open Alcotest
 module D = Dated_jsonl
@@ -545,6 +546,45 @@ let test_a_removal_told_during_an_append () =
     (last_row second_directly)
 ;;
 
+(* --- 6. each read is counted -------------------------------------------- *)
+
+(* The counter says whether a fact is being kept: a fact whose reads are
+   never [held] costs a file read each time. The counts are the process's, so
+   the test takes the difference its own reads made. *)
+let test_reads_are_counted_by_how_they_were_come_by () =
+  let location = temp_location "djkf_counted" in
+  let store = D.open_store location in
+  let outcomes = [ "held"; "read_and_kept"; "read_not_kept"; "read_failed" ] in
+  let counted () =
+    List.map
+      (fun outcome ->
+         Otel_metric_store_core.metric_value_or_zero
+           Otel_builtin_metric_names.metric_dated_jsonl_fact_reads
+           ~labels:
+             [ "store", D.Store.pool_job_name (D.Store.of_location location)
+             ; "fact", "last_row"
+             ; "outcome", outcome
+             ]
+           ())
+      outcomes
+  in
+  let before = counted () in
+  ignore (last_row store : answer);
+  ignore (last_row store : answer);
+  D.append store (row 1);
+  ignore (last_row store : answer);
+  let foreign = Filename.concat (D.Store.dir location) "not-a-month" in
+  Out_channel.with_open_text foreign (fun channel -> output_string channel "x");
+  D.directories_removed ();
+  ignore (last_row store : answer);
+  Sys.remove foreign;
+  check
+    (list (pair string (float 0.)))
+    "one read kept, two held, one failed"
+    (List.combine outcomes [ 2.; 1.; 0.; 1. ])
+    (List.combine outcomes (List.map2 ( -. ) (counted ()) before))
+;;
+
 (* --- every path, in a row and at once ---------------------------------- *)
 
 (* A long run of every operation in an order drawn from a fixed seed. After
@@ -704,6 +744,12 @@ let () =
             "a removal told during an append"
             `Quick
             test_a_removal_told_during_an_append
+        ] )
+    ; ( "each read is counted"
+      , [ test_case
+            "reads are counted by how they were come by"
+            `Quick
+            test_reads_are_counted_by_how_they_were_come_by
         ] )
     ; ( "every path"
       , [ test_case

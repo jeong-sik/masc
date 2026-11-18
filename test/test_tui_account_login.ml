@@ -125,12 +125,38 @@ let retry_early_input () =
     check string "submitted draft cleared" "" t.draft;
     check bool "submission waits for actual ACK" true t.input_pending)
     [true; false]
+(* A result longer than its rows hands its window to the title row; one that
+   fits hands none. Read as the value, never as drawn text (RFC
+   tui-one-screen-grammar, section 10). *)
+let results_hand_their_window () =
+  let t = Login.create "codex" in
+  Login.save_failed t (String.concat " " (List.init 40 (fun index -> Printf.sprintf "word%02d" index)));
+  let window ~height = snd (Login.visible_lines ~height ~width:20 t) in
+  (match window ~height:3 with
+   | Some (Masc_tui_value.Position.Window { first; last; total }) ->
+       check (list int) "the window starts at the first row and shows three"
+         [ 1; 3 ] [ first; last ];
+       check bool "the total counts every wrapped row" true (total > 3)
+   | Some (Masc_tui_value.Position.Row _ | Masc_tui_value.Position.Partial _) ->
+       fail "a result hands a window, not a row"
+   | None -> fail "a result that hides rows hands its window");
+  check bool "a result that fits hands nothing" true
+    (Option.is_none (window ~height:200));
+  (* The frame drawn at three rows bounds how far [j] may go. *)
+  ignore (window ~height:3);
+  ignore (Login.key t "j");
+  (match window ~height:3 with
+   | Some (Masc_tui_value.Position.Window { first; _ }) ->
+       check int "j moves the window one row" 2 first
+   | Some (Masc_tui_value.Position.Row _ | Masc_tui_value.Position.Partial _) | None ->
+       fail "the moved result still hands a window")
+
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
   (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
   List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> [ ] model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
+      (List.mem ("> [ ] model " ^ string_of_int cursor) (List.map Login.row_text (fst (Login.visible_lines ~height:6 ~width t)))))
     [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
@@ -635,7 +661,7 @@ let partly_checked_save () =
   check bool "quota failure and not-rechecked runtime are separately listed" true
     (let r = List.map Login.row_text (Login.lines t2) in
      List.mem ("  " ^ added ^ " (quota_exhausted)") r && List.mem ("  " ^ kept ^ " (이번 저장에서 재검증하지 않음)") r);
-  let visible () = Login.visible_lines ~height:2 ~width:32 t2 |> List.map Login.row_text in
+  let visible () = fst (Login.visible_lines ~height:2 ~width:32 t2) |> List.map Login.row_text in
   let initial = visible () in
   check bool "small result starts with its save notice" true
     (List.exists (fun row -> contains row "저장했습니다") initial);
@@ -1270,6 +1296,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "every server email row decodes" `Quick server_email_rows_round_trip;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
+  test_case "results hand their window" `Quick results_hand_their_window;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
   test_case "sgr text keeps what the operator reads" `Quick sgr_text_keeps_what_the_operator_reads;

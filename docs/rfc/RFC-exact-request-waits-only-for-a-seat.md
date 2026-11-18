@@ -88,7 +88,13 @@ Librarian 은 `Background` 등급으로 줄을 선다(`lib/server/server_lane_ad
 등급이 순서를 정하는 것은 provider 가 `admission-priority-run-limit` 를 선언했을 때뿐이다. 선언이 없으면 등급과 상관없이 줄이 하나다(`slot_scheduler.ml` 105~110행).
 운영 runtime.toml 에는 이 키를 선언한 provider 가 없다. 그래서 GLM 에서 Librarian 과 Keeper 턴은 먼저 선 순서대로 자리를 받는다.
 
-허가 대기는 저장되지 않는다. 이벤트 `masc.provider_admission.waited` 는 화면으로만 나간다. 그래서 몇 개가 기다렸는지는 세지 못했다(§9). 간접 근거는 이렇다.
+허가 대기는 사건으로 저장된다. 가득 찬 계정을 만난 요청마다 `masc.provider_admission.waited` 가 `agent-core-events` 에 한 줄씩 쓰인다(`lib/provider_admission_events.mli` 1~8행).
+
+- 11-10~11-18 에 70,536건이다.
+- glm-coding 에서 Librarian(`Background`) 요청 2,762건이 기다린 뒤 자리를 받았다. 대기 p90 은 458초다.
+- 같은 계정에서 Keeper 턴 요청 84건은 자리를 받지 못하고 만료됐다. 51건이 11-17 에 몰렸다.
+
+slot 별 시도 기록으로 본 것은 이렇다.
 
 - 11-18 에 답을 받은 시도 84개 가운데 22개를 기록이 쓰인 시각으로 slot 과 맞췄다.
 - tinker 가 답한 12개는 시작부터 끝까지 중앙값 118초가 걸렸다. 그 가운데 1개는 1,218초였다.
@@ -141,7 +147,11 @@ Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴�
 
 - 자리는 binding 이 `max-concurrent` 로 선언한 수다. HTTP 는 endpoint identity(종류, base URL, API key)마다, official client 는 provider(계정)마다 센다.
 - host 의 수가 없어지면 Exact 요청을 묶는 것은 자리뿐이다. CLI binding 은 `max-concurrent` 를 선언한다. HTTP binding 은 선언하지 않으면 provider 의 429 가 묶는다(§3.2).
-- Exact lane 과 Keeper 턴이 같이 쓰는 provider 는 `admission-priority-run-limit` 를 선언한다. 그래야 줄에서 Keeper 턴이 Librarian(`Background`)보다 먼저 자리를 받는다. Keeper 턴은 허가를 한도 안에서 기다리므로(`complete.ml` 316행·693행), 뒤로 밀리면 허가 시간 초과로 실패한다.
+- Keeper 턴은 허가를 한도 안에서 기다린다(`complete.ml` 316행·693행). 줄에서 뒤로 밀리면 허가 시간 초과로 실패한다(§1.2 의 84건).
+- `admission-priority-run-limit` 는 이것을 막아 주지 않는다. 한도는 준 자리 수를 세고, 자리를 쥔 시간은 세지 않는다(`slot_scheduler.mli` 20~29행).
+  - GLM 에서 Librarian 호출 하나는 Keeper 턴 호출보다 자리를 약 14배 오래 쥔다(413초 대 29.5초).
+  - 그래서 이 비보다 작은 한도는 선언이 없을 때보다 Keeper 턴을 오래 기다리게 한다. 7일 재생(모형)에서 한도 1 이면 900초 넘게 기다린 GLM Keeper 턴 호출이 1,228건이다. 선언이 없으면 0건이다.
+  - 이 RFC 는 이 키를 요구하지 않는다. 선언과 값은 운영자가 계정마다 잰 시간 비를 보고 정한다.
 - 쉬는 slot 은 provider 가 밝힌 때까지 부르지 않는다. 지금과 같다.
 - HTTP slot 과 CLI slot 은 층이 다르다. CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. HTTP 자리가 꽉 찬 것만으로는 CLI 로 가지 않는다.
   - HTTP 자리는 앞 요청의 본문 한도 안에 빈다. CLI 는 프로세스를 띄우고, 구독 한도를 Keeper 턴과 나눠 쓴다.
@@ -198,9 +208,9 @@ CLI slot 의 자리(CLI 층에서 요구한다. 없으면 로드 오류다):
 
 - Exact lane(`addon_exact_lanes`, `exact_output_lanes`)의 `cli_slots` 가 가리키는 binding 은 `max-concurrent` 를 선언한다. official client 하나는 이 기계에서 뜨는 프로세스다. 넘쳐도 멈춰 주는 provider 가 없다.
 
-Keeper 턴과 같이 쓰는 provider(host 층에서 요구한다. 없으면 로드 오류다):
+Keeper 턴과 같이 쓰는 provider:
 
-- Exact lane 의 slot 과 Keeper 턴 binding 이 같은 provider 를 쓰면, 그 provider 는 `admission-priority-run-limit` 를 선언한다. host 가 수를 세지 않으면 줄에 선 `Background` 요청이 Keeper 수의 두 배까지 늘기 때문이다.
+- 로드 요구를 두지 않는다. `admission-priority-run-limit` 는 준 자리 수만 세므로, 값이 작으면 선언이 없을 때보다 Keeper 턴이 더 기다린다(§2).
 
 official client 의 자리:
 
@@ -308,7 +318,10 @@ Librarian lane 의 HTTP slot 이 선언 순서로 A(자리 8, Keeper 턴과 같�
 - 뒤 slot 이 지금보다 많이 불린다. tinker 처럼 쓴 만큼 돈을 내는 slot 은 비용이 는다. 비싼 slot 은 운영자가 뒤로 옮기거나 목록에서 뺀다.
 - 지나친 slot 은 그 요청에서 다시 보지 않는다. 뒤 slot 이 실패한 사이 앞 slot 이 비어도 쓰지 않는다. 영수증 형식을 지키는 값이다(§8).
 - 한 요청이 여러 줄에 같이 서므로, 계정마다 보이는 줄 길이가 실제로 기다리는 요청 수보다 길다. 자리 화면을 읽는 쪽은 이것을 알아야 한다.
-- Exact lane 의 CLI binding 이 `max-concurrent` 를 선언하지 않으면 L3 부터 runtime.toml 이 로드되지 않는다. Keeper 턴과 같이 쓰는 provider 가 run limit 을 선언하지 않으면 L4 부터 마찬가지다.
+- Exact lane 의 CLI binding 이 `max-concurrent` 를 선언하지 않으면 L3 부터 runtime.toml 이 로드되지 않는다.
+- 매번 실패하는 slot 은 자리가 늘 비어 있어서 걷기가 그리로 간다. 앞 slot 이 꽉 찬 요청은 줄에 서지 않고, 그 slot 에서 1초 만에 실패한 뒤 CLI 층으로 간다.
+  - 11-18 운영 Librarian lane 의 마지막 HTTP slot 이 그렇다. 모든 호출에 사용량 한도를 맨 400 으로 답했다.
+  - 맨 400 은 slot 탓인지 요청 탓인지 말해 주지 않는다. 그래서 masc 는 이 slot 을 쉬게 하지 않는다. 이런 slot 은 운영자가 lane 에서 뺀다(§7).
 - 선언 없는 HTTP slot 은 걷기가 늘 빈 것으로 본다. 그 slot 이 앞에 있으면 넘친 요청은 provider 의 429 를 받은 뒤에야 다음 slot 으로 간다.
 - official client binding 에 `max-concurrent` 를 적으면 그 계정의 Keeper 턴도 자리를 기다린다. 지금은 그 값이 무시된다.
 - `Seats_full` variant 를 모르는 옛 빌드는 새 영수증을 읽지 못한다. 빌드를 되돌리면 그 사이 생긴 원본을 읽지 못한다.
@@ -334,7 +347,7 @@ native stack 으로 올린다. 층마다 Draft PR 이다.
 | L1 | 자리 API: `Slot_scheduler.try_acquire`·`acquire_held`·`release`, `Provider_admission.take_first_seat`·`release_seat` (#52995) | 빈 첫 계정 즉시. 선언 없는 계정 즉시. 모두 꽉 참 → 모든 줄에 서고 처음 받은 자리를 쥠. 뒤에 받은 자리는 돌려줌. 취소 → 줄에 남는 것·새는 자리 없음. 두 번 돌려줘도 한 번 |
 | L2 | §3.1 걷기(Agent-Core 와 Exact 소비자 넷), `Seats_full`, 재기·생성이 자리 하나, 바깥 한도 삭제, Exact flow 의 `*_admission_timed_out` 삭제. `Context_overflow` 같은 결과 타입은 건드리지 않는다 | 시험: A 꽉 참·B 빔 → B 만 보냄, A 는 `Seats_full`, A 시도 없음. 모두 꽉 참 → 먼저 빈 B 에서 보냄. 혼자인 slot 이 본문 한도의 두 배를 기다려도 답한다(#52981). 영수증 검사 통과 |
 | L3 | §3.2 CLI 자리와 그 로드 요구, official client run limit 거절 완화, watchdog 의 자리 대기, `cli_slots` fixture | CLI 층에서 자리 수를 넘는 프로세스가 뜨지 않는 시험. 선언 없는 CLI slot 거절. 자리를 기다리는 Keeper 턴을 watchdog 이 멈춤으로 세지 않는 시험 |
-| L4 | §3.3 host 가 수를 세지 않음, 다시 읽는 조건, 목록 빼기와 `exact_protocol`, 키 삭제, 공유 provider 의 run limit 로드 요구 | host walk 시험: 전달 하나 뒤 나머지를 기다리지 않고 다시 읽는다. cycle 도중 host 사건이 다시 읽게 한다. 마지막 요청이 전달 없이 끝나면 cycle 이 끝난다. 돌고 있는 id 는 목록에 없다. 키가 있는 선언은 거절. run limit 없는 공유 provider 거절 |
+| L4 | §3.3 host 가 수를 세지 않음, 다시 읽는 조건, 목록 빼기와 `exact_protocol`, 키 삭제 | host walk 시험: 전달 하나 뒤 나머지를 기다리지 않고 다시 읽는다. cycle 도중 host 사건이 다시 읽게 한다. 마지막 요청이 전달 없이 끝나면 cycle 이 끝난다. 돌고 있는 id 는 목록에 없다. 키가 있는 선언은 거절 |
 | L5 | §6 문서 | 문서 안의 `max_exact_in_flight` 가 0개 |
 
 순서의 까닭:
@@ -342,7 +355,6 @@ native stack 으로 올린다. 층마다 Draft PR 이다.
 - L1·L2 가 먼저다. 지금 `max_exact_in_flight` 31 이 동시 요청을 막고 있어서, 걷기만 들어가도 줄이 늘지 않는다. 꽉 찬 첫 slot 앞의 기다림과 #52981 은 이 두 층으로 없어진다.
 - L4 를 L2 보다 먼저 내면 늘어난 요청이 꽉 찬 첫 slot 앞에 줄만 선다.
 - L4 를 L3 보다 먼저 내면 HTTP slot 이 모두 막힐 때 목록 수만큼 CLI 프로세스가 뜬다.
-- 공유 provider 의 run limit 요구는 L4 와 함께 간다. 수가 31 로 묶인 동안은 줄에 선 `Background` 요청도 31 을 넘지 않는다.
 
 L4 를 내기 전에 확인할 것 둘:
 
@@ -351,10 +363,11 @@ L4 를 내기 전에 확인할 것 둘:
 
 배포 때 운영자가 할 일:
 
-- L1·L2 는 운영자가 할 일이 없다.
+- L1 은 운영자가 할 일이 없다.
+- L2 를 설치하기 전: Exact lane 에서 모든 호출이 실패하는 slot 을 뺀다(§5). 11-18 Librarian lane 에서는 마지막 HTTP slot 이다.
 - L3 을 설치하기 전: Exact lane 이 가리키는 CLI binding 에 `max-concurrent` 를 적는다(Librarian·candle lane 포함).
-- L4 를 설치하기 전: Keeper 턴과 같이 쓰는 provider 에 `admission-priority-run-limit` 를 적는다. 서버를 멈춘 뒤 `keeper-librarian.toml` 의 `max_exact_in_flight` 줄을 지운다.
-- 두 층의 changelog 에 이 일을 `Operator action required` 로 적는다.
+- L4 를 설치하기 전: 서버를 멈춘 뒤 `keeper-librarian.toml` 의 `max_exact_in_flight` 줄을 지운다.
+- 세 층의 changelog 에 이 일을 `Upgrade notes` 로 적는다.
 
 ## 8. 대안
 
@@ -369,7 +382,7 @@ L4 를 내기 전에 확인할 것 둘:
 
 ## 9. 확인하지 못한 것
 
-- 11-18 에 꽉 찬 slot 앞에서 기다린 요청 수. 허가 대기가 저장되지 않는다(§1.2). 지나친 slot 수는 L2 부터 영수증의 `Seats_full` 로 센다. 자리를 기다린 시간은 `Provider_admission.install_wait_observer` 가 받는다. 배포 전후를 이 둘로 잰다.
+- L2 배포 전후의 자리 대기. `masc.provider_admission.waited` 사건(§1.2)과 영수증의 `Seats_full` 수로 잰다. L2 뒤에는 한 요청이 여러 줄에 서므로, 사건 수는 요청 수가 아니라 줄 수다.
 - 기다리는 사이 쉬기 시작한 slot. L2 는 그 slot 이 자리를 주면 부르고, 거절을 받은 뒤 다음으로 간다. 받는 순간 쉼을 보고 지나치려면 masc 의 backpressure 를 걷기에 넘겨야 한다. 그 값이 provider 호출 하나를 아끼는지 재고 정한다.
 - setup 과 lane 편집기가 CLI slot 의 자리 수를 어디서 얻는지. L3 에서 정한다.
 - 자리를 쥔 호출이 모두 한도 안에 끝나는지. Exact 호출은 본문 한도가 있다. `body_timeout_s` 가 없는 HTTP binding 과 Keeper 턴의 호출이 자리를 얼마나 오래 쥐는지는 재지 않았다. 자리가 오래 비지 않으면 줄의 요청은 그동안 기다린다.

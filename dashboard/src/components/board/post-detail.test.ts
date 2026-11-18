@@ -153,7 +153,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, loadPostDetail, refreshPostDetail, setCommentText, setReplyingTo, submitComment } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, detailReadPhase, loadPostDetail, refreshPostDetail, setCommentText, setReplyingTo, submitComment } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment, BoardPost } from '../../types/core'
 
@@ -165,6 +165,7 @@ afterEach(() => {
   detailPostId.value = null
   detailFocusedCommentId.value = null
   detailLoading.value = false
+  detailReadPhase.value = 'idle'
   detailCommentPage.value = { offset: 0, total: 0 }
   if (draftFixture.drafts) draftFixture.drafts.value = new Map()
 })
@@ -774,6 +775,23 @@ describe('PostDetail', () => {
     render(h(PostDetail, { post }))
 
     expect(screen.queryByText('🔒 닫힘')).not.toBeInTheDocument()
+  })
+
+  it('says the thread was not read, and reads it again on request, after a failed read', () => {
+    // #52959: after a failed read the full detail said the post had no comments.
+    const post: BoardPost = { id: 'unread-thread', author: 'writer', title: 'Unread thread',
+      body: 'Body', tags: [], votes: 0, comment_count: 3,
+      created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z' }
+    detailPostId.value = post.id
+    detailReadPhase.value = 'failed'
+    const { container } = render(h(PostDetail, { post }))
+
+    const unread = container.querySelector('[data-feedback-kind="recoverable"]')
+    expect(unread).not.toBeNull()
+    expect(screen.queryByText('아직 댓글이 없습니다')).not.toBeInTheDocument()
+    vi.mocked(loadPostDetail).mockClear()
+    fireEvent.click(within(unread as HTMLElement).getByRole('button'))
+    expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null)
   })
 
   it('does not cast from an unreadable vote state on the full post', () => {

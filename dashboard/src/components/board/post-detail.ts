@@ -6,8 +6,7 @@ import { ActionButton } from '../common/button'
 import { SectionCard, SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
-import { EmptyState } from '../common/feedback-state'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, ErrorRecoverable, LoadingState } from '../common/feedback-state'
 import { RichComposer } from '../common/rich-composer'
 import { BoardRichContent } from './board-rich-content'
 import { TextInput } from '../common/input'
@@ -768,15 +767,21 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ` : null}
           ${detailLoading.value
             ? html`<${LoadingState}>댓글 불러오는 중...<//>`
-            : html`<${CommentThread}
-                comments=${detailComments.value}
-                postId=${post.id}
-                focusedCommentId=${focusedCommentId}
-                totalCount=${detailCommentPage.value.total}
-                olderCount=${detailCommentPage.value.offset}
-                loadingOlder=${detailLoadingOlder.value}
-                onLoadOlder=${() => loadOlderPostComments(post.id)}
-              />`}
+            : detailPostId.value === post.id && detailReadPhase.value === 'failed'
+              // The thread was not read, so nothing is said about how many comments it has.
+              ? html`<${ErrorRecoverable}
+                  title="댓글을 불러오지 못했습니다"
+                  onRetry=${() => { void loadPostDetail(post.id, focusedCommentId) }}
+                />`
+              : html`<${CommentThread}
+                  comments=${detailComments.value}
+                  postId=${post.id}
+                  focusedCommentId=${focusedCommentId}
+                  totalCount=${detailCommentPage.value.total}
+                  olderCount=${detailCommentPage.value.offset}
+                  loadingOlder=${detailLoadingOlder.value}
+                  onLoadOlder=${() => loadOlderPostComments(post.id)}
+                />`}
           <${CommentForm} postId=${post.id} />
         <//>
       </div>

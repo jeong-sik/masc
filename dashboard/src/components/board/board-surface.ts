@@ -7,7 +7,7 @@ import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
-import { EmptyState, LoadingState } from '../state-surfaces'
+import { EmptyState, ErrorState, LoadingState } from '../state-surfaces'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
@@ -718,14 +718,21 @@ function BdThreadDetail({
         </div>
         ${detailLoading.value
           ? html`<${LoadingState} title="댓글 불러오는 중…" />`
-          : html`<${CommentThread}
-              comments=${detailComments.value}
-              postId=${post.id}
-              totalCount=${detailCommentPage.value.total}
-              olderCount=${detailCommentPage.value.offset}
-              loadingOlder=${detailLoadingOlder.value}
-              onLoadOlder=${() => loadOlderPostComments(post.id)}
-            />`}
+          : detailPostId.value === post.id && detailReadPhase.value === 'failed'
+            // The thread was not read, so nothing is said about how many comments it has.
+            ? html`<${ErrorState}
+                compact
+                title="댓글을 불러오지 못했습니다"
+                onAction=${() => { void loadPostDetail(post.id, null) }}
+              />`
+            : html`<${CommentThread}
+                comments=${detailComments.value}
+                postId=${post.id}
+                totalCount=${detailCommentPage.value.total}
+                olderCount=${detailCommentPage.value.offset}
+                loadingOlder=${detailLoadingOlder.value}
+                onLoadOlder=${() => loadOlderPostComments(post.id)}
+              />`}
         <${CommentForm} postId=${post.id} />
       </div>
     </aside>
@@ -1469,6 +1476,11 @@ export function BoardSurface() {
     }
   }, [postId, post?.id, route.value.params.comment])
 
+  // A post outside the loaded list is drawn from the detail read alone, so a
+  // failed read leaves no post to draw. That is not a post known to be missing:
+  // the screen says the read failed and offers it again.
+  const detailReadFailed = detailPostId.value === postId && detailReadPhase.value === 'failed'
+
   if (postId) {
     return post
       ? html`
@@ -1486,7 +1498,13 @@ export function BoardSurface() {
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<${LoadingState} title="글 불러오는 중…" />`
-              : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
+              : detailReadFailed
+                ? html`<${ErrorState}
+                    compact
+                    title="글을 불러오지 못했습니다"
+                    onAction=${() => { void loadPostDetail(postId, route.value.params.comment ?? null) }}
+                  />`
+                : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
           </div>
         `
   }

@@ -70,6 +70,10 @@ export const detailLoadingOlder = signal(false)
 export const detailPostId = signal<string | null>(null)
 export const detailFocusedCommentId = signal<string | null>(null)
 let detailRequestId = 0
+/** How far back the read on the wire restores the thread. A refresh that
+ *  starts before that read ends restores the same range: the detail signals
+ *  are empty by then and cannot say what the operator had loaded. */
+let detailRestoreOffset: number | undefined
 
 // ── Signals: hearth filters ───────────────────────────────────────
 export const boardHearths = signal<BoardHearth[]>([])
@@ -377,7 +381,11 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
   const samePost = detailPostId.value === postId
   const hasLoadedRange = samePost && !detailLoading.value && detailPost.value !== null
   const clearingFocus = focusedCommentId === null && detailFocusedCommentId.value !== null
-  const retainedOffset = oldestOffset ?? (hasLoadedRange && !clearingFocus ? detailCommentPage.value.offset : undefined)
+  const loadedOffset = hasLoadedRange
+    ? detailCommentPage.value.offset
+    : samePost && detailLoading.value ? detailRestoreOffset : undefined
+  const retainedOffset = oldestOffset ?? (clearingFocus ? undefined : loadedOffset)
+  detailRestoreOffset = retainedOffset
   const focus = focusedCommentId === undefined && samePost ? detailFocusedCommentId.value : focusedCommentId?.trim() || null
   detailFocusedCommentId.value = focus
   const requestId = ++detailRequestId
@@ -398,25 +406,40 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     detailReadPhase.value = 'loaded'
     let comments = initialComments
     let page = initialPage
-    // Refresh only the range the operator already loaded. Focus resolution
-    // and ancestor lookup are part of the server's single thread read.
-    while (retainedOffset !== undefined && page.offset > retainedOffset) {
-      const offset = Math.max(retainedOffset, page.offset - COMMENT_PAGE_SIZE)
-      const older = await fetchBoardPost(postId, offset, page.offset - offset)
-      if (detailPostId.value !== postId || detailRequestId !== requestId) return
-      if (!sameCommentSnapshot(data.commentPage, older.commentPage)) {
-        throw new Error('Comment thread changed during refresh; retry to read one snapshot')
+    // The newest page is the answer to this read. The older pages only restore
+    // the range the operator had already loaded: focus resolution and ancestor
+    // lookup are part of the server's single thread read. A page is joined
+    // while it belongs to the snapshot of the newest page. The first page of
+    // another snapshot, or one that cannot be read, ends the restore: the
+    // pages joined so far stay, and the rest is behind "load older" again.
+    // One refresh reads each page of the range at most once, so the ancestor
+    // lookup below does not start where the restore stopped.
+    let rangeRestored = true
+    try {
+      while (retainedOffset !== undefined && page.offset > retainedOffset) {
+        const offset = Math.max(retainedOffset, page.offset - COMMENT_PAGE_SIZE)
+        const older = await fetchBoardPost(postId, offset, page.offset - offset)
+        if (detailPostId.value !== postId || detailRequestId !== requestId) return
+        if (!sameCommentSnapshot(data.commentPage, older.commentPage)) {
+          rangeRestored = false
+          break
+        }
+        if (older.commentPage.offset >= page.offset) throw new Error('Older comment page did not advance')
+        comments = mergeCommentPages(older.comments, comments)
+        page = older.commentPage
       }
-      if (older.commentPage.offset >= page.offset) throw new Error('Older comment page did not advance')
-      comments = mergeCommentPages(older.comments, comments)
-      page = older.commentPage
+    } catch (err) {
+      if (detailPostId.value !== postId || detailRequestId !== requestId) return
+      console.warn('[Board] failed to restore the loaded comment range:', postId, err)
+      rangeRestored = false
     }
     detailComments.value = comments
     detailCommentPage.value = page
+    if (!rangeRestored) showToast('이전 댓글을 불러오는 데 실패했습니다', 'error')
     try {
       // A server-focused read resolves absence. Only a returned reply with an
       // incomplete parent chain needs the ancestor fallback.
-      while (focus && comments.some(comment => comment.id === focus)
+      while (rangeRestored && focus && comments.some(comment => comment.id === focus)
         && page.offset > 0 && focusedCommentNeedsAncestors(comments, focus)) {
         const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
         const older = await fetchBoardPost(postId, offset, page.offset - offset)

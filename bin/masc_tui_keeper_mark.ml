@@ -10,8 +10,8 @@ let unread_glyph = "-"
    its count in the summary, and the sentence of its last failure. *)
 let failing_glyph = "\xe2\x97\x82" (* ◂ *)
 
-(* The filled dot: a healthy keeper that has turned, a turn under way, and the
-   now cell of the views' header. *)
+(* The filled dot: a healthy keeper that has turned, and the now cell of the
+   views' header. *)
 let filled_dot = "\xe2\x97\x8f" (* ● *)
 
 let health_glyph : Reading.keeper_health_reading -> string = function
@@ -31,7 +31,10 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Attempt_failed -> "\xe2\x9c\x97" (* ✗: an attempt of the open turn failed *)
   | Question -> "?"
   | Confirmation | Verifying -> "\xe2\x97\x87" (* ◇ *)
-  | Preparing | Running -> filled_dot (* the list substitutes its animated mark *)
+  | Preparing | Running ->
+      (* Work under way wears the still mark of the state dictionary (RFC
+         tui-one-screen-grammar §7.2); its growing length says it is going. *)
+      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
   | Streaming -> ">"
   | Async_working _ -> "&"
   | Deferred -> "\xe2\x97\x8c" (* ◌ *)

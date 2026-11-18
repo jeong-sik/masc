@@ -2613,8 +2613,11 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     match Rows.at window (first + i) with
     | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Masc_tui_roster_pane.name_window ~selected
-          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+        (* A long name keeps its family and its deciding end, the middle
+           folded (docs/design/tui/LAYOUT-LANGUAGE.md). The selected row does
+           not scroll its name: a screen with no new data changes only its
+           time text (RFC tui-one-screen-grammar §8). *)
+        let name = Message_layout.fit_middle (max 0 (cols - 7))
           (Terminal_text.single_line keeper.k_name) in
         let reading = keeper_reading state keeper in
         let glyph = keeper_state_glyph ~paused:reading.paused

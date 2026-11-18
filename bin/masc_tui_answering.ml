@@ -31,27 +31,12 @@ type line =
    the overlay stays "right now", not a log. *)
 let finish_glow_ttl_seconds = 60.
 
-(* The mark a running turn wears, and the only thing on a masc screen that
-   moves. Motion is a claim -- it says "this is changing while you look at
-   it" -- so it is spent on the one state where that is true and withheld
-   everywhere else. A paused keeper, a stale heartbeat, a queued approval:
-   none of those are working, and a spinner on them would say they were.
-
-   The frames are the half-filled circles already used for a task in
-   progress, so a reader who has seen the task list has seen this mark. The
-   circle family is the vocabulary the rest of the marks come from too
-   ([Masc_tui_keeper_mark]: filled is alive, hollow is stopped).
-
-   [still] is the same fact without the motion, for a surface that does not
-   repaint fast enough to animate. A mark that changes once every two
-   seconds is not a spinner, it is a flicker. *)
-let running_frames = [| "\xe2\x97\x90"; "\xe2\x97\x93"; "\xe2\x97\x91"; "\xe2\x97\x92" |]
-let running_still = "\xe2\x97\x8c" (* ◌ *)
-
-let running_glyph ~frame =
-  if frame < 0 then running_still
-  else running_frames.(frame mod Array.length running_frames)
-;;
+(* The mark a running turn wears. It does not move (RFC tui-one-screen-grammar
+   §7.2): the growing length beside it is what says the turn is still going,
+   and a screen with no new data redraws only when that length changes (§8).
+   The mark comes from the state dictionary, so a running turn reads the same
+   as any other work under way. *)
+let running_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
 
 (* The turn's lane in the screen's words. The server spells the chat lane
    [chat_operation]; the screen calls it a chat. *)
@@ -82,13 +67,8 @@ let elapsed_text ~now started_at = duration_text (now -. started_at)
    status colour; [rest] is the detail after it, receded. The band used to
    be drawn in the status colour whole, five rows of it, and a screen where
    every word is the colour of a warning has no warning on it. *)
-(* The source-cell extent of a moving mark from the beginning of its row.
-   This metadata survives fitting without inspecting glyph spellings. *)
-type motion = Still | Moving of int
-
 type chat_activity_row =
   { lead : string
-  ; motion : motion
   ; rest : string
   ; keys : string
         (** What a key does about this row -- " · Esc stops it · /queue" on
@@ -109,14 +89,12 @@ type read_error = Read_failed of string | Read_kept_back of string
 (* The same running turn must remain visible while a submitted chat waits
    behind it. No ETA can be inferred from the turn's elapsed age.
 
-   [frame] steps the running mark the way the live progress row's does
-   ([running_glyph]); a surface with no ticker passes none and gets the
-   still mark. Reply text belongs to the scrollable conversation; this band
-   carries only activity and the keys that act on it. *)
-let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
+   Reply text belongs to the scrollable conversation; this band carries only
+   activity and the keys that act on it. *)
+let chat_activity ?(stop_keys = "") ?(show_timing = true)
     ~ko ~now ~keeper_name ~error rows =
   let say korean english = if ko then korean else english in
-  let plain text = { lead = text; motion = Still; rest = ""; keys = "" } in
+  let plain text = { lead = text; rest = ""; keys = "" } in
   let stale = match error with
     | None -> []
     | Some (Read_failed detail) -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)]
@@ -139,16 +117,17 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
        is running, and the lane and the age are the facts; "current" and
        "turn" were the sentence around them. A stale reading keeps its word,
-       because a number from a read that is failing is a different fact. *)
-    let mark, observed =
+       because a number from a read that is failing is a different fact. The
+       mark is the same either way: the word, not the mark, says the reading
+       is an earlier one (RFC §6.4 keeps [◌] for a value not read yet). *)
+    let observed =
       match error with
-      | None -> running_glyph ~frame, ""
-      | Some _ -> running_still, say "이전 관측 " "last observed "
+      | None -> ""
+      | Some _ -> say "이전 관측 " "last observed "
     in
     stale
-    @ [ { lead = Printf.sprintf "%s %s%s%s" mark observed (lane_word ~ko lane)
+    @ [ { lead = Printf.sprintf "%s %s%s%s" running_mark observed (lane_word ~ko lane)
                    (if show_timing then " · " ^ elapsed_text ~now started_at_unix else "")
-        ; motion = (match error with None -> Moving (Masc_tui_message_layout.display_width mark) | Some _ -> Still)
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
@@ -161,25 +140,9 @@ let is_running (row : Tui_decode.keeper_turn_row) =
       false
 ;;
 
-(** Whether the screen animates at all.
-
-    Motion is a claim, so the frame counter behind {!running_glyph} advances
-    only while something is genuinely working, and a screen with nothing to say
-    stops repainting entirely. Three readings say something is: a polled keeper
-    turn, a standalone lane, and the observer feed's live transcript.
-
-    The transcript is the one that was missing. The polled rows can lag that
-    feed by a cadence, and the chat pane draws the mark against the feed, so
-    the mark sat on the still glyph — "running, but this surface does not
-    repaint fast enough to animate" — while the answer was arriving on the
-    screen in front of it. *)
-(* [awaiting_detail_read] is a wait with a number on it: the Keeper detail tabs
-   draw how long they have been blank, and those seconds are honest only because
-   something redraws them. A turn, a live transcript and a lane each do that
-   already; a detail read that the operator is watching does not move any mark,
-   so without this the counter was computed once on the keypress that opened the
-   tab and then not again while the read was pending, leaving a long read with
-   no elapsed notice until the answer arrived. *)
+(** Whether anything is working: a polled keeper turn, a standalone lane, the
+    observer feed's live transcript, or a Keeper detail read the operator is
+    watching. *)
 let anything_running ~turns ~live_transcript ~lanes ~awaiting_detail_read =
   awaiting_detail_read
   || List.exists is_running turns
@@ -240,7 +203,7 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
   fresh @ kept
 ;;
 
-let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string option)
+let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
     ~(error : read_error option) ~(observed_at : float option)
     ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
@@ -359,7 +322,7 @@ let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string optio
         List.map
           (fun (name, lane, started_at) ->
             { text =
-                Printf.sprintf "%s %s  %-14s  %s" (running_glyph ~frame)
+                Printf.sprintf "%s %s  %-14s  %s" running_mark
                   (fitted_name name)
                   (lane_word ~ko lane)
                   (elapsed_text ~now started_at)

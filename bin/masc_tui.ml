@@ -32392,8 +32392,6 @@ let main
 
   (* Main loop *)
   let machine_input_timeout_s = 0.3 in
-  let roster_marquee_target = ref None in
-  let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   let activity_tick = Render_schedule.Activity_tick.create
       ~motion_interval_ns:Masc_tui_types.motion_step_ns ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -44902,32 +44900,10 @@ Use relative paths for resources already held in the package. -->
          progress carries elapsed time; a slow reader is not a reconnect. *)
       let now_ns = Mtime_clock.elapsed_ns () in
       (* Periodic refresh *)
-      let _, terminal_cols = get_terminal_size () in
-      let current_marquee_target =
-        keeper_roster_marquee_target state ~cols:terminal_cols
-      in
-      if current_marquee_target <> !roster_marquee_target then begin
-        roster_marquee_target := current_marquee_target;
-        roster_marquee_last_step_ns := now_ns;
-        state.roster_marquee_frame <- 0
-      end
-      else if
-        Option.is_some current_marquee_target
-        && Int64.compare
-             (Int64.sub now_ns !roster_marquee_last_step_ns)
-             Masc_tui_types.motion_step_ns
-           >= 0
-      then begin
-        roster_marquee_last_step_ns := now_ns;
-        state.roster_marquee_frame <-
-          if state.roster_marquee_frame = max_int then 0
-          else state.roster_marquee_frame + 1;
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
       (* Only a moving mark emitted by the top frame needs the motion
          interval. Hidden work still keeps a whole-second clock for visible
          elapsed/read/age notices, including overlays and the Activity pane.
-         About and roster marquee keep their independent clocks above/below. *)
+         About keeps its independent clock below. *)
       let awaiting_detail_read =
         state.view = Keepers Keeper_detail
         && (match Masc_tui_types.selected_keeper state with
@@ -44952,25 +44928,13 @@ Use relative paths for resources already held in the package. -->
         || Option.is_some (local_source_pending state Local_work)
         || Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read)
       in
-      if not anything_running && state.activity_frame >= 0 then begin
-        state.activity_frame <- -1;
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
       (match Render_schedule.Activity_tick.take activity_tick ~now_ns
           ~running:(anything_running || pending_row_live)
           ~motion_visible:(anything_running
             && Render_schedule.Activity_tick.motion_visible ()
             && not state.image_open && not state.msx_open) with
        | Quiet -> ()
-       | Stop ->
-           state.activity_frame <- -1;
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Advance ->
-           if anything_running then begin
-             state.activity_frame <-
-               (if state.activity_frame < 0 || state.activity_frame = max_int then 0
-                else state.activity_frame + 1)
-           end;
+       | Stop | Advance ->
            Render_schedule.request render_schedule Render_schedule.Background);
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew

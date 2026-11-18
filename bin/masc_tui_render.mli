@@ -73,9 +73,6 @@ val operator_action_reading :
     roster rather than below it, so a line keeps the vertical position its
     buffer gave it. Answers {!Action_none} until a frame has drawn a history,
     so a press cannot be served by a row that is no longer on screen. *)
-val keeper_roster_marquee_target :
-  Masc_tui_types.state -> cols:int -> string option
-
 type lane_run_tool_counts = Masc_tui_render_lanes.lane_run_tool_counts = {
   completed : int;
   deferred : int;

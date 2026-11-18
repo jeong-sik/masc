@@ -54,25 +54,6 @@ type memory_state = Render_memory.memory_state =
 
 let set_table_frame enabled = table_frame_enabled := enabled
 
-let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
-
-(* The main loop uses the target identity to restart the motion when selection
-   changes. A short name has no animation target and therefore costs no idle
-   repaint. *)
-let keeper_roster_marquee_target (state : state) ~cols =
-  if not (keeper_roster_pane_shown state ~cols)
-     || (state.view = Overview && not state.keeper_navigation_open) then None
-  else
-    match state.view, selected_keeper state with
-    | (Overview | Keepers (Keeper_detail | Keeper_message)), Some keeper ->
-        let name = Terminal_text.single_line keeper.k_name in
-        if Message_layout.display_width name > keeper_roster_name_cells then
-          Some name
-        else None
-    | ((Overview | Keepers (Keeper_detail | Keeper_message)), None)
-    | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick))), _)
-    | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs)))))))))))))))))))), _) -> None
-
 let base_acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open

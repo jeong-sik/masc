@@ -787,7 +787,8 @@
  (wrapped false)
  (modules masc_tui_answering)
  ; masc_tui_message_layout owns the span ladder both this and [age_text] read.
- (libraries masc masc_tui_message_layout))
+ ; masc_tui_value owns the running mark.
+ (libraries masc masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_keys)
@@ -1425,7 +1426,8 @@
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
- (libraries masc masc_tui_theme masc_tui_keeper_age_ladder masc_tui_keeper_list_model))
+ (libraries masc masc_tui_theme masc_tui_keeper_age_ladder masc_tui_keeper_list_model
+  masc_tui_value))
 
 (library
  (name masc_tui_board_kind_mark)

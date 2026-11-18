@@ -1006,7 +1006,6 @@ type turn_progress =
   { tp_mark : string
   ; tp_base : string
   ; tp_facts : string Chat_facts.t list
-  ; tp_working : bool
   }
 
 let turn_progress_lead turn = "  " ^ turn.tp_mark ^ " "
@@ -1041,17 +1040,9 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
           in
           let folded_away = status.kmsp_folded_count in
           (* The streaming turn is the row the eye waits on: drawn in the
-             accent rather than dimmed, behind the mark a running turn wears
-             everywhere else on the screen.
-
-             It wore a second one -- four braille frames of its own, stepped
-             from the wall clock by the whole second. The screen repaints
-             every 150ms while a turn runs, so six or seven consecutive frames
-             drew the same glyph and then jumped, and the four frames chosen
-             are not adjacent in the braille rotation, so the jump did not
-             read as turning either. [activity_frame] is the counter that
-             ticker advances, and stepping from it means one repaint, one
-             frame. *)
+             accent rather than dimmed, behind the still mark a running turn
+             wears everywhere else on the screen (RFC tui-one-screen-grammar
+             §7.2). *)
           let mark, heading =
             let mark = Masc_tui_value.Mark.glyph in
             let waiting = mark Masc_tui_value.Mark.Waiting in
@@ -1059,7 +1050,7 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
             | Keeper_chat_transcript.Waiting ->
                 waiting, [ ui_text state ~ko:"시작 대기" ~en:"WAITING TO START" ]
             | Working ->
-                ( Masc_tui_answering.running_glyph ~frame:state.activity_frame
+                ( Masc_tui_answering.running_mark
                 , [ ui_text state ~ko:"턴" ~en:"TURN"
                   ; (if Keeper_chat_transcript.attempt live > 0 then
                        ui_text state ~ko:"다음 후보로 진행 중"
@@ -1073,11 +1064,6 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
                 ( mark Masc_tui_value.Mark.Failed
                 , [ ui_text state ~ko:"요청 실패" ~en:"REQUEST ERROR" ] )
           in
-          let working =
-            match Keeper_chat_transcript.phase live with
-            | Working -> true
-            | Waiting | Stream_ended | Stream_failed _ -> false
-          in
           if state.msg_origin_display = Message_layout.Origin_bare
           then
             { tp_mark = mark
@@ -1086,7 +1072,6 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
                  | Stream_failed _ -> Theme.bad ()
                  | Waiting | Working | Stream_ended -> Theme.recede ())
             ; tp_facts = clauses @ (if folded_away > 0 then [ expand ] else [])
-            ; tp_working = working
             }
           else (
             let base = Theme.accent () in
@@ -1151,7 +1136,6 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
                 @ (match folded with
                    | [] -> []
                    | _ :: _ -> folded @ [ expand ])
-            ; tp_working = working
             }))
 
 (* Rows the progress row of this frame takes at this width when nothing caps
@@ -4949,14 +4933,6 @@ let render_keeper_message (state : state) =
                  if Masc_tui_types.keeper_message_activity_needs_attention state
                  then Theme.warn () else Theme.recede ()) lead Ansi.reset
             (Theme.recede ()) rest keys Ansi.reset in
-        (match row.motion with
-         | Masc_tui_answering.Still -> ()
-         | Moving through_cell ->
-             let source_bytes = Message_layout.fitted_source_bytes row.lead lead_room in
-             let source_cells = Message_layout.display_width (String.sub row.lead 0 source_bytes) in
-             if source_cells >= through_cell then
-               Render_schedule.Activity_tick.note_motion_if_visible ~text:content
-                 ~width:(framed_inner_width chat_cols) ~through_cell:(2 + through_cell));
         box_line chat_buf chat_cols content)
       status_frame.kmsf_activity_rows;
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
@@ -5133,11 +5109,6 @@ let render_keeper_message (state : state) =
                              else String.make lead_cells ' ')
                             ^ Chat_facts.draw palette row
                           in
-                          if index = 0 && turn.tp_working
-                          then
-                            Render_schedule.Activity_tick.note_motion_if_visible
-                              ~text:content ~width:(framed_inner_width chat_cols)
-                              ~through_cell:(2 + Message_layout.display_width turn.tp_mark);
                           box_line chat_buf chat_cols content)
                         layout.Chat_facts.rows;
                       (* Rows the frame granted and this instant's clauses do

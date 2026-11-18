@@ -9934,13 +9934,11 @@ type state = {
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
-  mutable roster_marquee_frame: int;
   (* The frame the running-turn mark is on. The main loop advances it only
      while some turn is actually running, so a screen with nothing running
      is a screen that stops repainting -- the animation costs nothing when
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
-  mutable activity_frame: int;
   (* The candle's step. The main loop advances it only while the last frame
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
@@ -18130,14 +18128,15 @@ let loading_notice ?elapsed_s what =
 
 let nanoseconds_per_second = 1_000_000_000L
 
-(* One step of every moving thing on a masc screen: the running-turn mark,
-   the roster marquee and the /about candle. Four steps turn the mark once
-   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
-   and one pace for all three keeps them moving together. *)
+(* One step of the /about candle, the one thing on a masc screen that moves
+   without new data. It is the picture /about opens with and it arrives at a
+   still final frame, so it costs nothing once it has arrived. State marks do
+   not move and time text changes on second boundaries (RFC
+   tui-one-screen-grammar §7.2, §8). *)
 let motion_step_ns = 150_000_000L
 
-(* How far the moving marks have gone after [frame] steps; a negative frame
-   is one that has not started. *)
+(* How far the candle has gone after [frame] steps; a negative frame is one
+   that has not started. *)
 let motion_elapsed_seconds frame =
   Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
   /. Int64.to_float nanoseconds_per_second
@@ -20900,8 +20899,6 @@ let create_state
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
-  roster_marquee_frame = 0;
-  activity_frame = -1;
   emblem_frame = -1;
   about_reduce_motion = false;
   about_open = false;
@@ -27357,9 +27354,9 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
               ^ say " · 진행 중" " · in progress"
-          ; motion = Masc_tui_answering.Still; keys = "" } ]
+          ; keys = "" } ]
       | None ->
-        Masc_tui_answering.chat_activity ~frame:state.activity_frame
+        Masc_tui_answering.chat_activity
           ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
@@ -27379,7 +27376,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
     let retained = keeper_input_retained state keeper_name in
-    let plain text = { Masc_tui_answering.lead = text; rest = ""; motion = Masc_tui_answering.Still; keys = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -27403,7 +27400,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = say "다음 대기 줄" "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
-              ; motion = Masc_tui_answering.Still; keys = "" } ] in
+              ; keys = "" } ] in
         let auto_tag =
           match state.user_input_priority_next, ko with
           | true, true -> "자동 다음 순서:켬"
@@ -27416,7 +27413,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         [ { Masc_tui_answering.lead =
               Printf.sprintf (if ko then "내 메시지 %d건 대기" else "Queue (%d pending)") waiting_count
           ; rest = " · " ^ auto_tag
-          ; motion = Masc_tui_answering.Still; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
+          ; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
         @ count_row keeper_queued (say "처리 대기 · /queue" "queued at Keeper · /queue")
         @ count_row awaiting_receipt (say "전송 중" "awaiting receipt")
         @ count_row rechecking (say "전송 확인 중" "rechecking delivery")
@@ -27428,7 +27425,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
          then say " · 중단 뒤" " · after stop" else say " · 보내기 전" " · before sending")
-       ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+       ; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -27448,8 +27445,7 @@ let keeper_message_activity_rows (state : state) =
           let provisional = provisional_requests () in
           let request_id request =
             Masc_tui_keeper_chat_projection.terminal_safe_text request.Masc_tui_keeper_chat_projection.request_id in
-          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest;
-            motion = Masc_tui_answering.Still; keys = "" } in
+          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest; keys = "" } in
           let pending_lead request =
             ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) " ^ request_id request in
           let kept_back refusal = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -27593,12 +27589,12 @@ let keeper_message_activity_rows (state : state) =
           [{ Masc_tui_answering.lead = say "보류" "Held"
            ; rest = (if retained_after_stop then say " · 중단 뒤" " · after stop"
                      else say " · 보내기 전" " · before sending")
-           ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+           ; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with
         | [] -> []
         | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-            rest = ""; motion = Masc_tui_answering.Still; keys }] in
+            rest = ""; keys }] in
       held_rows @ activity_rows
 ;;
 

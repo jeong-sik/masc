@@ -237,6 +237,9 @@ type 'a fact
 val last_row : recent_entry option fact
 (* 마지막 줄. JSON 이 아닌 줄도 한 줄이다(Malformed_json). *)
 
+val newest_parsed_row : Yojson.Safe.t option fact
+(* JSON 으로 읽히는 가장 새 줄. JSON 이 아닌 줄은 건너뛴다. *)
+
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 
 val keep_facts_in_this_process : unit -> unit
@@ -252,7 +255,7 @@ val directories_removed : unit -> unit
   | 사실 | 값 | 층 |
   |---|---|---|
   | 최근 TurnRecord | 마지막 줄(`last_row`) | L2d-1 |
-  | 가장 새 온전한 receipt | JSON 으로 읽히는 가장 새 줄 | L2d-2 |
+  | 가장 새 온전한 receipt | JSON 으로 읽히는 가장 새 줄(`newest_parsed_row`) | L2d-2 |
   | 도구 호출 | 원장의 마지막 16줄. 깨진 줄도 자리를 지킨다 | L2d-3 |
   | 결정 기록 | 마지막 object 행. `Dated_jsonl` 저장소가 아니라서 `Keeper_row_facts` 의 표에 `Fact_cell` 을 둔다 | L2d-4 |
   | metrics | 끝 120줄, 그리고 decoder 가 받는 가장 새 줄(Turn tool audit) | L3 |
@@ -282,9 +285,9 @@ val directories_removed : unit -> unit
 - 값은 디스크에 쓴 줄을 읽는 쪽과 같은 parser 로 해석한 JSON 이다. 결정 기록 4곳, 도구 호출 6곳, metrics 2곳이 넘기는 모양이 저마다 달라서 행 타입으로 묶지 않는다(`keeper_tool_memory_runtime.ml:1332`, `keeper_unified_metrics_decision.ml:401` 등). 읽는 쪽은 지금 쓰는 decoder 를 그대로 쓴다. 그래서 `Undecodable_turn_record` 같은 구분도 지금처럼 나온다(`keeper_context_observation_projection.ml:92-101`). JSON 이 아닌 줄은 `Dated_jsonl.recent_entry` 의 `Malformed_json` 으로 든다. 그 상태도 칸에 담으려는 것이다.
 - 목록 값(도구 호출 16줄, metrics 120줄)은 읽는 쪽이 세는 줄을 자리 그대로 든다. 두 reader 는 빈 줄이 아닌 줄을 세고, 깨진 줄은 그 뒤에 건너뛴다(`keeper_tool_call_log.ml:1572-1586`, `operator_control_snapshot_tool_audit.ml:14-38`, `operator_control_snapshot_tool_names.ml:41-56`). 그래서 깨진 줄도 `Malformed_json` 으로 든다. 깨진 줄을 빼고 들면 다음 쓰기 뒤에 창에서 빠지는 줄이 파일과 달라진다.
 - 채우다 파일을 못 읽으면 값을 넣지 않는다(§3.4). 행은 그때 지금의 reader 가 내는 값을 그대로 낸다. 오류를 돌려주던 reader 는 오류를 내고(`Turn_record_read_failed` 등), 빈 값을 내던 reader 는 빈 값을 낸다. 다음 읽기가 다시 채운다.
-- receipt 칸은 가장 새 온전한 줄을 든다. 마지막 줄이 아니다. 두 reader 가 모두 깨진 줄을 건너뛰기 때문이다(§1.1). 그래서 두 reader 가 칸 하나에서 답을 얻는다. 파일로 돌아가는 길은 없다. 쓰는 쪽은 JSON 을 쓰므로, 쓴 뒤의 값은 늘 쓴 그 줄이다.
+- receipt 칸은 가장 새 온전한 줄을 든다. 마지막 줄이 아니다. 두 reader 가 모두 깨진 줄을 건너뛰기 때문이다(§1.1). 그래서 두 reader 가 칸 하나에서 답을 얻는다. 파일로 돌아가는 길은 없다. 쓰는 쪽은 JSON 을 쓰므로, 쓴 뒤의 값은 늘 쓴 그 줄이다. 쓴 줄이 JSON 으로 다시 읽히지 않으면 칸을 비운다.
 - TurnRecord 칸은 마지막 줄을 든다. 그 reader 는 깨진 줄도 한 줄로 세고 `Undecodable_turn_record` 로 알린다(`keeper_context_observation_projection.ml:83-101`).
-- `newest` 는 채우는 쪽이 본 가장 새 날짜 파일이다. 읽는 쪽은 날짜 파일을 새것부터 읽는다(`dated_jsonl.ml:1338-1367`). 엄격한 끝 읽기는 줄마다 원본 경로를 같이 돌려준다(`dated_jsonl.mli:312-318`). 날짜는 그 경로에서 얻는다. 줄이 없거나 `turn_audit`·`receipt` 처럼 줄 하나를 골라내는 읽기는 날짜 파일 목록 읽기(`:283-287`)에서 얻는다. 결정 기록은 파일이 하나라 이 값이 없다.
+- `newest` 는 채우는 쪽이 본 가장 새 날짜 파일이다. 읽는 쪽은 날짜 파일을 새것부터 읽는다(`dated_jsonl.ml:1338-1367`). 엄격한 끝 읽기는 줄마다 원본 경로를 같이 돌려준다(`dated_jsonl.mli:312-318`). 날짜는 그 경로에서 얻는다. 줄이 없으면 `newest` 도 없다. `turn_audit`·`receipt` 처럼 줄 하나를 골라내는 읽기는 그 줄을 찾은 파일을 `newest` 로 둔다. 건너뛴 줄은 그 값에 아무것도 말하지 않는다. 그래서 값의 줄이 있는 파일이나 그 뒤 파일에 쓴 줄은, 사이의 파일에 무엇이 있든 가장 새 값이다. 골라낸 줄이 없으면 `newest` 가 없고, 다음에 쓴 줄이 곧 값이다. 결정 기록은 파일이 하나라 이 값이 없다.
 - 행 수(16, 120)와 결정 기록의 창(40,000바이트·20줄)은 지금 읽는 쪽이 쓰는 수다. 그 사실을 만드는 층이 읽는 쪽 상수를 사실 옆으로 옮겨 한 곳에 둔다.
 - 도구 호출은 workspace 원장의 마지막 16줄을 그대로 든다. Keeper 의 최근 호출은 그 16줄에서 찾는다. 지금 `read_latest ~keeper_name` 과 같은 뜻이다. 16줄 밖으로 밀려난 Keeper 는 지금처럼 `None` 이다.
 

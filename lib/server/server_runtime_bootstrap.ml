@@ -217,7 +217,10 @@ let publish_exact_output_catalog (lanes, catalog, runtimes) =
   with
   | Error detail -> raise (exact_output_registry_refused detail)
   | Ok registry ->
-    Runtime.report_exact_output_registry ~runtimes registry;
+    Runtime.report_exact_output_registry
+      ~runtimes
+      ~gaps:catalog.Runtime.catalog_exact_slots.Runtime_config_error.gaps
+      registry;
     warn_catalog_absent_keeper_assignments resolver_snapshot;
     Log.Misc.info
       "exact_output: immutable resolver-and-lane registry published%s"
@@ -260,7 +263,11 @@ let check_exact_output_registry ?config_root () =
       (exact_output_registry_refused
          (String.concat
             "; "
-            (Runtime.rejected_exact_slot_refusals ~runtimes resolver_snapshot rejected)))
+            (Runtime.rejected_exact_slot_refusals
+               ~runtimes
+               ~gaps:catalog.Runtime.catalog_exact_slots.Runtime_config_error.gaps
+               resolver_snapshot
+               rejected)))
 ;;
 
 let install_domain_pool_references ?read domain_pool =

@@ -2205,12 +2205,15 @@ let validate_save_text ~config_path content =
    logs it before publishing, so it is said even when publication fails; a
    config commit logs it after replacing or keeping the registry, because a
    save may keep a gap the file already had. *)
+let exact_slot_deadline_gap_text gap =
+  Printf.sprintf
+    "slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
+    (exact_slot_body_deadline_gap_to_string gap)
+;;
+
 let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
   List.iter
-    (fun gap ->
-       Log.Server.warn
-         "exact_output: slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
-         (exact_slot_body_deadline_gap_to_string gap))
+    (fun gap -> Log.Server.warn "exact_output: %s" (exact_slot_deadline_gap_text gap))
     degradation.gaps;
   List.iter
     (fun lane_id ->
@@ -2225,25 +2228,24 @@ let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
    deployment preflight name a slot in the same words, from this one
    classification. *)
 type rejected_exact_slot_cause =
-  | Left_out_for_deadline
+  | Left_out_for_deadline of exact_slot_body_deadline_gap
   | Model_reads_unstated of
       { runtime : t
       ; unstated : Runtime_exact_reads.t * Runtime_exact_reads.t list
       }
   | Diagnosed of Runtime_exact_output_registry.rejected_slot_diagnosis
 
-let rejected_exact_slot_causes ~runtimes resolver_snapshot rejected_slots =
+let rejected_exact_slot_causes ~runtimes ~gaps resolver_snapshot rejected_slots =
   (* A slot left out for rule 3 is rejected too, because its target was never
      handed to the resolver. Diagnosing it would call it a subscription CLI or
-     a typo. *)
-  let gaps = exact_slot_body_deadline_gaps () in
-  (* A slot's binding as the snapshot was built from it: [runtimes] are the
-     runtimes it was built from, not whatever table is loaded now. *)
+     a typo. A slot's binding and gaps are the ones the snapshot was built
+     from: [runtimes] and [gaps] come with it, not from whatever table is
+     loaded now. *)
   let runtime_of_slot slot_id =
     List.find_opt (fun (rt : t) -> String.equal rt.id slot_id) runtimes
   in
-  let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
-    List.exists
+  let deadline_gap_of (slot : Runtime_exact_output_registry.rejected_slot) =
+    List.find_opt
       (fun (gap : exact_slot_body_deadline_gap) ->
          String.equal (Runtime_schema.exact_lane_key gap.owner) slot.lane_id
          && String.equal gap.slot_id slot.slot_id)
@@ -2283,29 +2285,23 @@ let rejected_exact_slot_causes ~runtimes resolver_snapshot rejected_slots =
   in
   List.map
     (fun slot ->
-       if left_out_for_deadline slot
-       then slot, Left_out_for_deadline
-       else
-         match unstated_reads_of slot with
-         | Some cause -> slot, cause
-         | None ->
-           ( slot
-           , Diagnosed
-               (Runtime_exact_output_registry.diagnose_rejected_slot
-                  resolver_snapshot
-                  slot
-                  ~configured_runtime) ))
+       match deadline_gap_of slot with
+       | Some gap -> slot, Left_out_for_deadline gap
+       | None ->
+         (match unstated_reads_of slot with
+          | Some cause -> slot, cause
+          | None ->
+            ( slot
+            , Diagnosed
+                (Runtime_exact_output_registry.diagnose_rejected_slot
+                   resolver_snapshot
+                   slot
+                   ~configured_runtime) )))
     rejected_slots
 ;;
 
 let rejected_exact_slot_text (slot : Runtime_exact_output_registry.rejected_slot) = function
-  | Left_out_for_deadline ->
-    Printf.sprintf
-      "lane %S slot %d (%S) ignored because its provider declares no %s (connect-timeout-s ends at the response headers and does not bound the body)"
-      slot.lane_id
-      slot.position
-      slot.slot_id
-      Runtime_schema.exact_body_timeout_s_key
+  | Left_out_for_deadline gap -> exact_slot_deadline_gap_text gap
   | Model_reads_unstated { runtime = rt; unstated = first, rest } ->
     Printf.sprintf
       "lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for the window, effort ladder, JSON mode, native schema or output ceiling of a model it has no row for, so write each one"
@@ -2355,24 +2351,25 @@ let rejected_exact_slot_text (slot : Runtime_exact_output_registry.rejected_slot
       slot.slot_id
 ;;
 
-let rejected_exact_slot_refusals ~runtimes resolver_snapshot rejected_slots =
+let rejected_exact_slot_refusals ~runtimes ~gaps resolver_snapshot rejected_slots =
   List.map
     (fun (slot, cause) -> rejected_exact_slot_text slot cause)
-    (rejected_exact_slot_causes ~runtimes resolver_snapshot rejected_slots)
+    (rejected_exact_slot_causes ~runtimes ~gaps resolver_snapshot rejected_slots)
 ;;
 
-let warn_rejected_exact_output_slots ~runtimes registry =
+let warn_rejected_exact_output_slots ~runtimes ~gaps registry =
   let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
   let causes =
     rejected_exact_slot_causes
       ~runtimes
+      ~gaps
       (Runtime_exact_output_registry.resolver_snapshot registry)
       all_rejected
   in
   List.iter
     (fun (slot, cause) ->
        match cause with
-       | Left_out_for_deadline ->
+       | Left_out_for_deadline (_ : exact_slot_body_deadline_gap) ->
          (* Already named, one WARN per slot, by [warn_exact_slot_degradation];
             counted in the summary. *)
          ()
@@ -2406,24 +2403,24 @@ let warn_rejected_exact_output_slots ~runtimes registry =
           | Diagnosed
               ( Runtime_exact_output_registry.Configured_runtime_only _
               | Runtime_exact_output_registry.Declared_target_binding_rejected )
-          | Left_out_for_deadline | Model_reads_unstated _ -> false))
+          | Left_out_for_deadline _ | Model_reads_unstated _ -> false))
        (count (function
           | Diagnosed (Runtime_exact_output_registry.Configured_runtime_only _) -> true
           | Diagnosed
               ( Runtime_exact_output_registry.Unknown_to_both_registries
               | Runtime_exact_output_registry.Declared_target_binding_rejected )
-          | Left_out_for_deadline | Model_reads_unstated _ -> false))
+          | Left_out_for_deadline _ | Model_reads_unstated _ -> false))
        (count (function
           | Diagnosed Runtime_exact_output_registry.Declared_target_binding_rejected -> true
           | Diagnosed
               ( Runtime_exact_output_registry.Unknown_to_both_registries
               | Runtime_exact_output_registry.Configured_runtime_only _ )
-          | Left_out_for_deadline | Model_reads_unstated _ -> false))
+          | Left_out_for_deadline _ | Model_reads_unstated _ -> false))
        (count (function
           | Model_reads_unstated _ -> true
-          | Left_out_for_deadline | Diagnosed _ -> false))
+          | Left_out_for_deadline _ | Diagnosed _ -> false))
        (count (function
-          | Left_out_for_deadline -> true
+          | Left_out_for_deadline _ -> true
           | Model_reads_unstated _ | Diagnosed _ -> false))
        Runtime_schema.exact_body_timeout_s_key)
 ;;
@@ -2492,11 +2489,11 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
 
 (* What boot logs after it publishes a registry, logged again after every
    config commit that replaces it, so a saved slot the new registry drops is
-   named where an operator reads the boot report. [runtimes] are the ones the
-   registry was built from. *)
-let report_exact_output_registry ~runtimes registry =
+   named where an operator reads the boot report. [runtimes] and [gaps] are
+   the ones the registry was built from. *)
+let report_exact_output_registry ~runtimes ~gaps registry =
   warn_rejected_exact_output_bindings registry;
-  warn_rejected_exact_output_slots ~runtimes registry;
+  warn_rejected_exact_output_slots ~runtimes ~gaps registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
   warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
@@ -2614,9 +2611,10 @@ let exact_output_registry_application_to_string = function
    [runtimes] leaves out. A kept registry is reported by
    [report_kept_registry] instead. *)
 let report_published_after_commit ~path ~runtimes =
-  warn_exact_slot_degradation (exact_slot_degradation ());
+  let degradation = exact_slot_degradation () in
+  warn_exact_slot_degradation degradation;
   match Runtime_exact_output_registry.current () with
-  | Ok registry -> report_exact_output_registry ~runtimes registry
+  | Ok registry -> report_exact_output_registry ~runtimes ~gaps:degradation.gaps registry
   | Error error ->
     Log.Misc.warn
       "exact_output: registry after committing %s cannot be reported: %s"

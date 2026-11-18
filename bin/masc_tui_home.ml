@@ -331,8 +331,10 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
         | Ok section ->
             Masc_tui_health_section.label ~ko:(state.ui_language = Lang_ko) section
         (* A section this build does not know is drawn as received
-           (RFC tui-one-screen-grammar §7.1). *)
-        | Error received -> "? " ^ clean (String.escaped received) in
+           (RFC tui-one-screen-grammar §7.1). The server did report it, so
+           it carries no [?]: that mark says a value was not reported
+           (§6.4). *)
+        | Error received -> clean (String.escaped received) in
       component ^ text " · 진단 확인" " · inspect diagnostics"
 
 let operator_rows_of_state state =

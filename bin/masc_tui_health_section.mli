@@ -36,7 +36,7 @@ type t =
 val of_wire : string -> (t, string) result
 (** The section a wire name stands for. A name this build does not know is
     [Error] with the name as received, so the screen can draw it as
-    received behind [?] rather than guess a section for it. *)
+    received rather than guess a section for it. *)
 
 val wire_name : t -> string
 (** The name the server sends for the section. *)

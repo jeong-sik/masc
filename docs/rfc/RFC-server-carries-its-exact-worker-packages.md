@@ -103,7 +103,8 @@ type package_source =
 ### 3.4 규약 판 (D4)
 
 - `exact_outputs` 를 선언한 manifest 는 `[world] exact_protocol = <정수>` 를 적는다.
-- 서버는 상수 하나 `Lane_addon_exact.protocol` 을 갖는다. manifest 를 읽을 때 판이 없거나 다르면 거절한다. 거절 문장은 두 판을 모두 적는다.
+- 서버는 상수 하나 `Lane_addon_types.exact_protocol` 을 갖는다. 규약의 도구 이름(`host_requests_tool`, `host_result_tool`)과 같은 모듈이다. manifest 파서는 이미 이 모듈만 기대므로, Eio 와 provider 를 쓰는 `Lane_addon_exact` 를 끌어오지 않는다. manifest 를 읽을 때 판이 없거나 다르면 거절한다. 거절 문장은 두 판을 모두 적는다.
+- 판이 있는데 `exact_outputs` 가 없는 manifest 도 거절한다. 판은 Exact 규약을 말하는 package 만 적는다.
 - 판은 서버가 읽는 worker 의 답이나 worker 가 읽는 서버의 인자가 바뀔 때 올린다. 지금까지는 `capacity_wait` 삭제(#52731)와 목록의 장 넘김(#52728, #52778)이 그런 변경이다.
 - 실은 package 는 늘 서버와 같은 판이다. 이 검사는 `manifest_path` 로 고정한 package 를 위해 있다.
 - 판을 올리면 판이 없거나 다른 고정 package 는 서버를 올린 순간 붙지 않는다. 그 설치의 요청은 기다린다. 11-17 사건이 「원본이 멈춘다」 대신 「그 설치가 붙지 않고 이유가 보인다」로 바뀐다.
@@ -147,7 +148,7 @@ S(n) 을 n 번째 서버 빌드, C(n) 을 그 빌드가 실은 package 묶음, p
 
 | 층 | 내용 | 닿는 곳 |
 |---|---|---|
-| L0 | D4. `exact_protocol` manifest 키와 서버 상수, 네 manifest 가 판을 적음 | `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, `lane_addon_exact.ml`, 네 `lane.toml` |
+| L0 | D4. `exact_protocol` manifest 키와 서버 상수, `exact_outputs` 를 적은 여섯 manifest(실은 넷과 operator-quiz, operator-lesson)가 판을 적음 | `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, 여섯 `lane.toml` |
 | L1 | D1·D2. 싣기, `package` 선언 키와 `package_source` 합타입, 실은 package 풀기 | `lib/embedded_exact_addons/`, `lib/lane_addon/lane_addon_config.ml` |
 | L2 | D3. `masc exact-addon-setup`, 두 설치 스크립트 | `bin/main_eio.ml`, `lib/exact_addon_setup.ml`, `scripts/install-local-build.sh`, `scripts/install.sh` |
 | L3 | §3.5. worker 시작 때 기록 판 훑기 | `addons/exact_worker.py` |

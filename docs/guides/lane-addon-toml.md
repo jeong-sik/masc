@@ -327,10 +327,15 @@ Claude Code에는 기본 도구 검색 정책을 사용한다. 호스트가 클�
 패키지는 host 에게 받고 싶은 답의 모양을 이름 붙여 선언할 수 있다. 답의 JSON Schema 는 패키지 안의 파일이다.
 
 ```toml
+[world]
+exact_protocol = 1
+
 [world.exact_outputs.author]
 schema = "schemas/author.json"
 ```
 
+- exact output 을 선언한 패키지는 `[world]` 의 `exact_protocol` 에 자기가 쓰인 Exact 규약 판을 정수로 적는다. 규약은 host 요청 목록과 결과 전달, Exact submit·status 의 답이다. 지금 판은 1 이다.
+- 서버는 자기 판과 같은 패키지만 붙인다. 판이 없거나 다르면 manifest 를 거절하고, 거절 문장에 두 판을 적는다. exact output 이 없는 패키지에 판이 있어도 거절한다.
 - 이름은 `a-z`, `0-9`, `_` 로 쓰고 소문자로 시작한다.
 - `schema` 는 패키지 루트 기준 상대 경로다. symlink 를 풀어도 패키지 안이어야 한다.
 - 파일은 지원되는 출력 schema 검사를 통과하고 object를 설명해야 한다. object마다

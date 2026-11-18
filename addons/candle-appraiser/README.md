@@ -82,12 +82,14 @@ the input body. Deploy this revision with the
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.7 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.8 addons
 ```
 
 Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives. A server that does not know `host_request_pages` refuses this manifest.
+gives. This revision names `[world] exact_protocol = 1`.
+A server that knows `exact_protocol` refuses a manifest that does not name the
+protocol it speaks, and a server that does not know the key refuses this one.
 A revision before 0.1.6 answers `capacity_wait`, which a server that
 includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 

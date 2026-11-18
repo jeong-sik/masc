@@ -111,6 +111,8 @@ cpus = 0.5
 memory_bytes = 67108864
 pids = 16
 max_reply_bytes = 4096
+[world]
+exact_protocol = 1
 [world.exact_outputs.author]
 schema = "out.json"
 [world.exact_outputs.grade]

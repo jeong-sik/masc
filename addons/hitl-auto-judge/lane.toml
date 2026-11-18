@@ -1,13 +1,14 @@
 id = "hitl-auto-judge"
-revision = "0.1.3"
+revision = "0.1.4"
 title = "HITL Auto Judge worker"
 ui_category = "memory_judgment"
 contributions = ["derive"]
-image = "masc-lane-hitl-auto-judge:0.1.3"
+image = "masc-lane-hitl-auto-judge:0.1.4"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world]
 host_request_pages = true
+exact_protocol = 1
 
 [world.state]
 mode = "persistent"

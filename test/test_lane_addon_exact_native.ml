@@ -70,6 +70,8 @@ command=["python3",%S,%S]
 contributions=["observe"]
 [resources]
 max_reply_bytes=65536
+[world]
+exact_protocol=1
 [world.exact_outputs.plan]
 schema="plan.json"
 |} script root);

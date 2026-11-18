@@ -765,6 +765,34 @@ let host_request_pages_are_a_package_declaration () = with_directory (fun _root 
     [ "a value that is not a boolean", "host_request_pages = \"yes\"\n[world.asks]\noperator = true\n"
     ; "pages without a host request", "host_request_pages = true\n" ])
 
+let exact_protocol_is_the_one_this_server_speaks () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "quiz.toml" in
+  write path (declaration msx_binding);
+  write (Filename.concat packages "answer.json")
+    {|{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}|};
+  let with_world world = write manifest (package () ^ "\n[world]\n" ^ world) in
+  let output = "[world.exact_outputs.answer]\nschema = \"answer.json\"\n" in
+  let server = Lane_addon_types.exact_protocol in
+  with_world (Printf.sprintf "exact_protocol = %d\n%s" server output);
+  let declared = unwrap (Config.load_file ~path) in
+  check int "a package written for this server's protocol declares its exact output" 1
+    (List.length declared.package.exact_outputs);
+  List.iter (fun (label, world, words) ->
+    with_world world;
+    match Config.load_file ~path with
+    | Ok _ -> failf "%s was accepted" label
+    | Error message ->
+        List.iter (fun word -> check bool (label ^ " is refused naming " ^ word) true (contains message word)) words)
+    [ "exact outputs without a protocol", output,
+      [ "world.exact_protocol is missing"; Printf.sprintf "Exact protocol %d" server ]
+    ; "another protocol", Printf.sprintf "exact_protocol = %d\n%s" (server + 1) output,
+      [ Printf.sprintf "world.exact_protocol is %d" (server + 1); Printf.sprintf "Exact protocol %d" server ]
+    ; "a protocol without exact outputs", Printf.sprintf "exact_protocol = %d\n" server,
+      [ "world.exact_protocol requires exact_outputs" ]
+    ; "a protocol that is not an integer", Printf.sprintf "exact_protocol = \"%d\"\n%s" server output,
+      [ "world.exact_protocol requires an integer" ] ])
+
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in
@@ -774,7 +802,7 @@ let exact_outputs_are_package_schemas () = with_directory (fun root packages dir
   let author = {|{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}}},"required":["questions"],"additionalProperties":false}|} in
   write (Filename.concat schemas "author.json") author;
   write (Filename.concat schemas "grade.json") {|{"type":"object","properties":{"verdict":{"type":"string","enum":["correct","incorrect"]}},"additionalProperties":false}|};
-  let with_outputs tables = write manifest (package () ^ "\n" ^ tables) in
+  let with_outputs tables = write manifest (package () ^ "\n[world]\nexact_protocol = 1\n" ^ tables) in
   let initial = unwrap (Config.load_file ~path) in
   check int "a package without the table declares no exact output" 0
     (List.length initial.package.exact_outputs);
@@ -831,6 +859,8 @@ let exact_outputs_are_selected_independently () = with_directory (fun _root pack
   let schema = {|{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}|} in
   write (Filename.concat packages "answer.json") schema;
   write manifest (package () ^ {|
+[world]
+exact_protocol = 1
 [world.tools]
 export = []
 hooks = ["validate_input", "validate_output"]
@@ -881,6 +911,8 @@ tool_hooks = []|}) in
     [ {|["unknown"]|}; {|["plan", "plan"]|}; {|["plan", 1]|}; {|[""]|};
       {|[" plan"]|}; "true"; {|"plan"|}; "{}" ];
   write manifest (package () ^ {|
+[world]
+exact_protocol = 1
 [world.exact_outputs.plan]
 schema = "answer.json"
 [world.exact_outputs.extract]
@@ -1154,7 +1186,7 @@ max_reply_bytes = 4096
     | Ok _ -> failf "a browser package with %s was accepted" label
     | Error error -> check bool ("a browser package with " ^ label ^ " is refused") true
         (contains (Lane_addon_manifest.error_to_string error) "omit exact_outputs and asks"))
-    [ "an exact output", "[world.exact_outputs.answer]\nschema = \"answer.json\"";
+    [ "an exact output", "[world]\nexact_protocol = 1\n[world.exact_outputs.answer]\nschema = \"answer.json\"";
       "operator asks", "[world.asks]\noperator = true" ];
   List.iter (fun (label, service) -> match load service "" with
     | Ok _ -> failf "%s was accepted" label
@@ -1338,6 +1370,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
      test_case "host request pages are a package declaration" `Quick host_request_pages_are_a_package_declaration;
+     test_case "exact protocol is the one this server speaks" `Quick exact_protocol_is_the_one_this_server_speaks;
      test_case "exact outputs are selectable independently from tool hooks" `Quick exact_outputs_are_selected_independently;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;

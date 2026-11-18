@@ -1,13 +1,14 @@
 id = "candle-appraiser"
-revision = "0.1.7"
+revision = "0.1.8"
 title = "Candle appraisal worker"
 ui_category = "memory_judgment"
 contributions = ["derive"]
-image = "masc-lane-candle-appraiser:0.1.7"
+image = "masc-lane-candle-appraiser:0.1.8"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world]
 host_request_pages = true
+exact_protocol = 1
 
 [world.state]
 mode = "persistent"

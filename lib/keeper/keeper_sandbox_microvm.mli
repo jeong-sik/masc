@@ -538,32 +538,23 @@ type shim_provenance =
       (** the binary's digest equals the sidecar's *)
   | Shim_unverified  (** no sidecar: a hand-built shim, run as it is *)
 
-(** #52968: which relay version the shim's own bytes say it speaks. The
-    guest's agent is the mounted binary, so this is the version every guest
-    booted with it will send in its hello. *)
-type relay_declaration =
-  | Relay_version of int
-      (** exactly one {!Exec_ssh_protocol.Relay.version_declaration} value *)
-  | No_relay_version
-      (** no declaration: a shim built before the declaration existed *)
-  | Several_relay_versions of int list  (** distinct values, ascending *)
-
+(** RFC host-and-shim-share-one-build-identity: what one read of the shim
+    says. [source] is every {!Source_identity} declaration in its bytes. The
+    guest's agent is this binary, so it is the identity every guest booted
+    with it names in its hello. *)
 type shim_inspection =
   { provenance : shim_provenance
-  ; relay : relay_declaration
+  ; source : Source_identity.scan
   }
 
-val relay_declaration_of_bytes : string -> relay_declaration
-(** Every ["MASC_EXEC_SHIM_RELAY_VERSION=<1-4 digits>;"] in the bytes. *)
-
 val inspect_shim : dir:string -> (shim_inspection, string) result
-(** Reads [dir/masc-exec-shim] once: its relay declaration, and, when
-    [dir/masc-exec-shim.sha256] is present, whether its digest equals the
-    sidecar's. Current bytes are read on every call: file metadata is not an
-    integrity identity, since an in-place writer can keep the size and
+(** Reads [dir/masc-exec-shim] once: its source identity declarations, and,
+    when [dir/masc-exec-shim.sha256] is present, whether its digest equals
+    the sidecar's. Current bytes are read on every call: file metadata is not
+    an integrity identity, since an in-place writer can keep the size and
     restore the modification time. The boot caller runs this read-only
-    inspection on the shared executor when installed. Comparing the relay
-    declaration with this host's version is the caller's.
+    inspection on the shared executor when installed. Comparing the identity
+    with this server's is the caller's.
     [Error] names the case: [microvm_shim_hash_mismatch] (both
     digests in the text), [microvm_shim_sidecar_invalid],
     [microvm_shim_sidecar_unreadable], [microvm_shim_unreadable]. Never

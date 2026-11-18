@@ -69,7 +69,7 @@ CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 
 |---|------|--------|
 | 1 | `container` CLI 1.3+ 와 실행 중인 container system | `microvm_cli_unavailable` / `microvm_image_probe_failed` |
 | 2 | Keeper 의 `sandbox_image` 이름에 이미지 목록(`<base-path>/.masc/config/sandbox-image-builds.toml`)이 `apple_container` 빌드를 올려 두었고, 그 태그가 container 이미지 저장소에 있음 (`container image inspect <목록의 reference>`) | 목록에 없으면 `sandbox_image_unresolved`, 저장소에 없으면 `microvm_image_missing` |
-| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부. shim 이 이 서버와 다른 relay version 을 적었거나 아무것도 적지 않았으면 `microvm_shim_relay_version_mismatch` — 붙어 있는 게스트를 멈추지도, 새로 띄우지도 않는다 |
+| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부. shim 이 이 서버와 다른 소스 신원을 적었거나 아무것도 적지 않았으면 `microvm_shim_other_source` — 붙어 있는 게스트를 멈추지도, 새로 띄우지도 않는다 |
 | 4 | 디스크 여유. 볼륨 상한은 `MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE` (기본 256g, sparse) | `microvm_work_volume_create_failed` |
 
 shim 설정(`masc-exec-shim.conf`)은 서버가 시작할 때 같은 디렉터리에 다시
@@ -92,9 +92,9 @@ shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3
 만들 수 없어서 그 요청들은 예전처럼 judge 로 간다. shim 은 모르는 설정 키를
 거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
 `remote_shim_version_skew` 로 거부된다.
-이 참음은 relay version 이 같을 때만이다. 게스트 agent 인 shim 이 서버와 다른
-relay version 을 적었으면 한 릴리즈 차이여도 `microvm_shim_relay_version_mismatch`
-로 거절된다(아래 shim 설치 절).
+microVM 게스트 agent 인 shim 에는 이 참음이 없다. shim 이 서버와 같은 소스에서
+빌드되지 않았으면 한 commit 차이여도 `microvm_shim_other_source` 로 거절된다(아래
+shim 설치 절, RFC host-and-shim-share-one-build-identity).
 
 shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shim_outdated` WARN 을
 남기고 계속 돈다. 그 줄에는 이 호스트에서 바꿀 파일 경로가 적혀 있다
@@ -155,8 +155,8 @@ microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 �
 | sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
 | 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
 | 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
-| 받은 자산이나 이미 깔린 그 릴리즈 자산이 이 빌드와 다른 relay version 을 적었다(또는 안 적었다) | 아무것도 설치하지 않고 멈춘다. 서버가 그 shim 을 거절하기 때문이다. 메시지가 지금 트리로 빌드하는 명령(아래 「직접 빌드」)을 알려 준다 |
-| 빌드한 서버(`main_eio.exe`)에서 relay version 을 하나로 읽지 못한다 | 아무것도 설치하지 않고 멈춘다 |
+| 받은 자산이나 이미 깔린 그 릴리즈 자산이 이 빌드와 다른 소스 신원을 적었다(또는 안 적었다) | 아무것도 설치하지 않고 멈춘다. 서버가 그 shim 을 거절하기 때문이다. checkout 빌드는 릴리즈의 소스가 아니므로 늘 여기서 멈춘다. 메시지가 지금 트리로 빌드하는 명령(아래 「직접 빌드」)을 알려 준다 |
+| 빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못한다 | 아무것도 설치하지 않고 멈춘다 |
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
 릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
@@ -179,18 +179,22 @@ install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 "$shim_dir/masc-exec-shim"
 grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > "$shim_dir/masc-exec-shim.sha256"
 ```
 
-게스트 agent 는 이 디렉터리의 shim 이다. 그래서 shim 은 서버와 같은 relay version 을
-말해야 한다. shim 바이너리에는 `MASC_EXEC_SHIM_RELAY_VERSION=<n>;` 이 글자 그대로
-들어 있고(`Exec_ssh_protocol.Relay.version_declaration`), 서버는 게스트를 띄우거나
-붙기 전에 이 값을 읽는다. 값이 다르거나 없으면 `microvm_shim_relay_version_mismatch`
-로 거절한다. 이 값이 생기기 전에 빌드한 shim(0.73.1 이하 릴리즈)은 값이 없다.
+게스트 agent 는 이 디렉터리의 shim 이다. 그래서 shim 은 서버와 같은 소스에서
+빌드돼야 한다. 서버와 shim 은 `lib/build_commit/probe-commit.sh` 가 만든 같은 모듈
+(`Source_identity`)을 링크하고, 두 바이너리에는
+`MASC_SOURCE_IDENTITY=<commit>/clean;` 또는
+`MASC_SOURCE_IDENTITY=<commit>/modified:<digest>;` 가 글자 그대로 들어 있다.
+`modified` 는 commit 뒤에 고친 내용(추적 파일 diff, 추적하지 않는 파일)의 해시다.
+서버는 게스트를 띄우거나 붙기 전에 shim 의 값을 읽고, 자기 값과 정확히 같지 않거나
+값이 없으면 `microvm_shim_other_source` 로 거절한다. 게스트 agent 의 hello 도 같은
+값을 싣고, 서버는 다르면 그 agent 를 쓰지 않는다. 이 값이 생기기 전에 빌드한
+shim(0.73.1 이하 릴리즈, 이 변경 전 checkout 빌드)은 값이 없다.
 거절은 멈추거나 지울 게스트가 있는 백엔드(Apple `container`, nerdctl·Kata,
 microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
-서버는 어느 릴리즈가 어느 relay version 을 싣는지 모른다. 그래서 거절 메시지는
-지금 트리로 빌드하는 길을 먼저 적고, 릴리즈 설치는 그 릴리즈가 같은 relay version
-일 때만 맞는다고 적는다. 릴리즈가 아직 싣지 않은 relay version 으로 서버를
-빌드했으면 지금 트리로 shim 도 빌드한다. `install-local-build.sh
---refresh-guest-shim` 도 이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 릴리즈 없이
+릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
+--force`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
+checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
+이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 릴리즈 없이
 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

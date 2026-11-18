@@ -13,17 +13,30 @@ import subprocess
 import tempfile
 
 
-# Exec_ssh_protocol.Relay.version_declaration, read with the grammar the host
-# uses on the mounted shim (Keeper_sandbox_microvm_shim): the host refuses a
-# shim that carries none, or several (#52968).
-RELAY_DECLARATION = re.compile(rb"MASC_EXEC_SHIM_RELAY_VERSION=([0-9]{1,4});")
+# The source identity declaration lib/build_commit/probe-commit.sh generates,
+# read with the grammar the host uses on the mounted shim (Source_identity.scan):
+# the host refuses a shim that carries none, or several, or another source's
+# (#52968, RFC host-and-shim-share-one-build-identity).
+OBJECT_ID = rb"(?:[0-9a-f]{64}|[0-9a-f]{40})"
+SOURCE_DECLARATION = re.compile(
+    rb"MASC_SOURCE_IDENTITY=(" + OBJECT_ID + rb")/(clean|modified:" + OBJECT_ID + rb");")
 
 
-def relay_version(shim_bytes):
-    found = sorted({int(version) for version in RELAY_DECLARATION.findall(shim_bytes)})
+# The one identity the shim declares. A candidate is built from a checked-out
+# commit with nothing changed, so anything else is not this candidate's shim.
+def source_identity(shim_bytes, source_commit):
+    found = []
+    for commit, state in SOURCE_DECLARATION.findall(shim_bytes):
+        identity = (commit.decode(), state.decode())
+        if identity not in found:
+            found.append(identity)
     if len(found) != 1:
-        raise SystemExit(f"candidate shim must declare exactly one relay version; found {found}")
-    return found[0]
+        raise SystemExit(f"candidate shim must declare exactly one source identity; found {found}")
+    commit, state = found[0]
+    if commit != source_commit or state != "clean":
+        raise SystemExit(
+            f"candidate shim was built from {commit}/{state}, not {source_commit}/clean")
+    return f"{commit}/{state}"
 
 
 def main():
@@ -42,7 +55,7 @@ def main():
     shim = args.shim.resolve(strict=True)
     shim_bytes = shim.read_bytes()
     binary_sha = hashlib.sha256(shim_bytes).hexdigest()
-    relay = relay_version(shim_bytes)
+    identity = source_identity(shim_bytes, source)
     file_description = subprocess.check_output(["file", str(shim)], text=True).strip()
     if "statically linked" not in file_description:
         raise SystemExit("candidate shim is not statically linked")
@@ -104,7 +117,7 @@ def main():
                    run_id=os.environ.get("GITHUB_RUN_ID"), run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT"),
                    platform="linux-" + args.arch, binary_sha256=binary_sha,
                    binary_bytes=shim.stat().st_size, file_description=file_description,
-                   relay_version=relay,
+                   source_identity=identity,
                    probe=probe, framed_config_execution=dict(exit=status, stdout=output.decode(), trailer=trailer),
                    driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                    installed=False, ssh_transport_exercised=False, keeper_exercised=False,

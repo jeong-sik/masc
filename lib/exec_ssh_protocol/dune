@@ -4,4 +4,6 @@
  (name exec_ssh_protocol)
  (public_name masc.exec_ssh_protocol)
  (modules exec_ssh_protocol)
- (libraries yojson base64 uuidm))
+ ; The guest agent's hello names its source identity, so every user of the
+ ; hello type sees Source_identity too.
+ (libraries yojson base64 uuidm (re_export masc_build_commit)))

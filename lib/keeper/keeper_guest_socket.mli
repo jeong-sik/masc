@@ -33,7 +33,15 @@ type expected =
 (** The Keeper uid and gid the agent must have dropped to. *)
 
 type refusal =
-  | Other_relay_version of { agent : int }
+  | Other_source of
+      { server : Source_identity.t option  (** {!Source_identity.current} *)
+      ; agent : Source_identity.t option  (** what the agent's hello named *)
+      ; agent_relay : int  (** the agent's relay version, for the message *)
+      }
+      (** The agent's shim was not built from this server's source, or either
+          side names no source (RFC host-and-shim-share-one-build-identity).
+          Replacing the guest helps only once the mounted shim is this
+          source's; the boot checks that before it replaces anything. *)
   | Root_writable
   | Other_owner of
       { uid : int
@@ -43,8 +51,8 @@ type refusal =
 
 val refusal : expected:expected -> Exec_ssh_protocol.Relay.hello -> refusal option
 (** Why this host does not use an agent that sent this hello, or [None]. The
-    facts are checked in a fixed order: relay version, read-only root, owner,
-    [no_new_privs]. *)
+    facts are checked in a fixed order: source identity (exact equality with
+    {!Source_identity.current}), read-only root, owner, [no_new_privs]. *)
 
 val refusal_to_string : refusal -> string
 

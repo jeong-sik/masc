@@ -26,11 +26,12 @@
 # with no shim is given none, and a shim without a sidecar was built by hand
 # and is left alone. A release that cannot be read leaves the shim as it is
 # and says so; an asset that does not match its checksum installs nothing.
-# The server refuses a shim whose relay version differs from its own (#52968),
-# so a release shim that does not declare this build's relay version installs
-# nothing either, and the install stops with the source build to use instead
-# (scripts/remote-ssh/build-shim.sh). A build whose relay version no release
-# ships yet always ends there.
+# The server refuses a shim built from another source (#52968, RFC
+# host-and-shim-share-one-build-identity), so a release shim that does not
+# declare this build's source identity installs nothing either, and the
+# install stops with the source build to use instead
+# (scripts/remote-ssh/build-shim.sh). A checkout build is never a release's
+# source, so for it this option always ends there.
 # MASC_RELEASE_BASE_URL and MASC_REPO name the release the way
 # scripts/install.sh does.
 #
@@ -328,10 +329,9 @@ fi
 # on its next request. The server keeps what the old shim answered to its
 # probe (release, capabilities) until it restarts. A release that cannot be
 # read is a line here and not a refusal: the shim already in place stays, and
-# the server checks its relay version before any guest boots with it. Server
-# and shim are not one release apart any more once their relay versions
-# differ (#52968): the server refuses that shim, so this step never installs
-# one.
+# the server checks its source identity before any guest boots with it.
+# Server and shim are never one release apart: the server refuses a shim of
+# another source (#52968), so this step never installs one.
 
 # python3 already classifies the workspace above, so hashing through it adds
 # no tool this script has to look for.
@@ -343,19 +343,25 @@ sha256_of() {
 # guest_shim_asset).
 guest_shim_assets="masc-exec-shim-linux-arm64 masc-exec-shim-linux-amd64"
 
-# The relay version a binary declares, read the way the server reads the
-# mounted shim (Keeper_sandbox_microvm_shim.relay_declaration_of_bytes): the
-# literal Exec_ssh_protocol.Relay.version_declaration, 1-4 digits and ';'.
-# Prints the one version, or "none" or "several (a, b)", and exits non-zero
-# unless there is exactly one.
-relay_declaration_of() {
+# The source identity a binary declares, read with the grammar the server
+# reads the mounted shim with (Source_identity.scan): the literal
+# lib/build_commit/probe-commit.sh generates, <commit>/clean or
+# <commit>/modified:<digest>, then ';'. Prints the one identity, or "none" or
+# "several (a, b)", and exits non-zero unless there is exactly one.
+source_identity_of() {
   python3 -I - "$1" <<'PY'
 import re, sys
-found = sorted({int(m) for m in re.findall(rb"MASC_EXEC_SHIM_RELAY_VERSION=([0-9]{1,4});", open(sys.argv[1], "rb").read())})
+object_id = rb"(?:[0-9a-f]{64}|[0-9a-f]{40})"
+grammar = rb"MASC_SOURCE_IDENTITY=(" + object_id + rb"/(?:clean|modified:" + object_id + rb"));"
+found = []
+for match in re.findall(grammar, open(sys.argv[1], "rb").read()):
+    identity = match.decode()
+    if identity not in found:
+        found.append(identity)
 if len(found) == 1:
     print(found[0])
     sys.exit(0)
-print("none" if not found else "several (" + ", ".join(map(str, found)) + ")")
+print("none" if not found else "several (" + ", ".join(found) + ")")
 sys.exit(1)
 PY
 }
@@ -398,21 +404,21 @@ refresh_guest_shim() (
     exit 0
   fi
   # The server binary carries the declaration its shim must match, because
-  # it links the same Exec_ssh_protocol.Relay.
-  if ! required_relay=$(relay_declaration_of "$build_dir/main_eio.exe"); then
-    echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one relay version (found: $required_relay), so no release shim can be matched to it; nothing installed" >&2
+  # it links the same generated Source_identity.
+  if ! required_source=$(source_identity_of "$build_dir/main_eio.exe"); then
+    echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one source identity (found: $required_source), so no release shim can be matched to it; nothing installed" >&2
     exit 1
   fi
   guest_arch=${asset##*-}
   source_build_hint="build the shim from this checkout instead: scripts/remote-ssh/build-shim.sh --arch $guest_arch, copy dist/remote-ssh/$asset to $shim and remove $sidecar (docs/MICROVM-REMOTE-RUNBOOK.md)"
-  # Fails the install when [file] does not declare [required_relay]: the
+  # Fails the install when [file] does not declare [required_source]: the
   # server would refuse a guest booted with it.
-  refuse_other_relay() {
+  refuse_other_source() {
     local file="$1" what="$2" declared
-    if declared=$(relay_declaration_of "$file") && [ "$declared" = "$required_relay" ]; then
+    if declared=$(source_identity_of "$file") && [ "$declared" = "$required_source" ]; then
       return 0
     fi
-    echo "install-local-build: $what declares relay version $declared, but this build speaks relay version $required_relay and its server refuses that shim; nothing installed. No release shim fits this build: $source_build_hint" >&2
+    echo "install-local-build: $what declares source identity $declared, but this build is $required_source and its server refuses that shim; nothing installed. No release shim fits this build: $source_build_hint" >&2
     exit 1
   }
   release_base="${MASC_RELEASE_BASE_URL:-https://github.com/${MASC_REPO:-jeong-sik/masc}/releases/download}"
@@ -441,7 +447,7 @@ refresh_guest_shim() (
     exit 1
   fi
   if [ "$recorded" = "$expected" ] && [ "$installed" = "$expected" ]; then
-    refuse_other_relay "$shim" "the installed $tag guest exec shim $shim"
+    refuse_other_source "$shim" "the installed $tag guest exec shim $shim"
     echo "guest exec shim in $shim_dir is already the $tag asset"
     exit 0
   fi
@@ -458,7 +464,7 @@ refresh_guest_shim() (
     echo "install-local-build: $asset of $tag does not match its SHA256SUMS line ($expected); nothing installed" >&2
     exit 1
   fi
-  refuse_other_relay "$staged_shim" "$asset of $tag"
+  refuse_other_source "$staged_shim" "$asset of $tag"
   chmod 755 "$staged_shim"
   staged_sidecar=$(mktemp "$shim_dir/masc-exec-shim.sha256.partial.XXXXXX")
   printf '%s  %s\n' "$expected" "$asset" > "$staged_sidecar"

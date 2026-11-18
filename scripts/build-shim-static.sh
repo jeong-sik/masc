@@ -51,6 +51,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shim_build_id.mli left the fixture exercising the previous binary and
 # reporting it as this one's behaviour.
 shim_sources=(
+  lib/build_commit/source_identity.ml
+  lib/build_commit/source_identity.mli
+  lib/build_commit/probe-commit.sh
   lib/exec_ssh_protocol/exec_ssh_protocol.ml
   lib/exec_ssh_protocol/exec_ssh_protocol.mli
   lib/exec_shim/exec_shim.ml
@@ -134,6 +137,13 @@ release="$(sed -n 's/^(version \(.*\))$/\1/p' "$repo_root/dune-project" | head -
   printf 'let release = "%s"\n' "$release"
 } > "$stage/src/shim_build_id.ml"
 
+# The source identity the shim declares (RFC
+# host-and-shim-share-one-build-identity), from the probe the repo's dune rule
+# runs, here on the checkout: the container sees only the copied sources. A
+# checkout with no identity builds no shim, because no server would run it.
+(cd "$repo_root" && sh lib/build_commit/probe-commit.sh --print-env) >/dev/null
+(cd "$repo_root" && sh lib/build_commit/probe-commit.sh) > "$stage/src/build_commit_generated.ml"
+
 cat > "$stage/src/dune-project" <<'EOF'
 (lang dune 3.0)
 EOF
@@ -144,9 +154,14 @@ EOF
 # the repo's package name, and the executable with its static link flag.
 cat > "$stage/src/dune" <<'EOF'
 (library
+ (name masc_build_commit)
+ (wrapped false)
+ (modules build_commit_generated source_identity))
+
+(library
  (name exec_ssh_protocol)
  (modules exec_ssh_protocol)
- (libraries yojson base64 uuidm))
+ (libraries yojson base64 uuidm (re_export masc_build_commit)))
 
 (include shim_libraries.inc)
 

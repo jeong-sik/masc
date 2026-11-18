@@ -164,8 +164,9 @@ Local installation leaves a microVM guest shim alone without querying releases.
 Use `--refresh-guest-shim` when deploying a server/shim change to microVM Keepers
 or addressing `remote_shim_outdated`; it refreshes an existing release shim
 (`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another
-relay version than the build, it installs nothing and names the source build
-(`scripts/remote-ssh/build-shim.sh`) to use instead.
+source identity than the build (always, for a checkout build), it installs
+nothing and names the source build (`scripts/remote-ssh/build-shim.sh`) to use
+instead.
 Before it replaces anything, the script checks the workspace's `runtime.toml`
 with the new build. A resolved workspace that observably does
 not exist yet is treated as a new workspace, with that check reported as not

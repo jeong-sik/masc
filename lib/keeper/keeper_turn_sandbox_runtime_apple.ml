@@ -308,9 +308,9 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       | Plan.Replace _ -> Ok `Boot
       | Plan.Matches_plan ->
         (* The plan matched, but the plan cannot see the agent: only its
-           hello says it is there, answers, and speaks this relay (RFC
-           microvm-guest-agent-over-socket 3.6). One that does not is
-           replaced rather than adopted. *)
+           hello says it is there, answers, and was built from this
+           server's source (RFC microvm-guest-agent-over-socket 3.6). One
+           that does not is replaced rather than adopted. *)
         (match
            Keeper_microvm_agent_socket.check_agent
              ~host_socket:(Keeper_microvm_agent_socket.host_path
@@ -322,9 +322,10 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
          | Keeper_microvm_agent_socket.Agent_answered -> Ok `Adopt
          | Keeper_microvm_agent_socket.Agent_unusable reason ->
            (* The Boot arm verifies the mounted shim before it stops this
-              guest, so a replacement is booted only with a shim that speaks
-              this relay: an agent refused for its relay version was started
-              from older bytes, and the replacement does not repeat it. *)
+              guest, so a replacement is booted only with a shim built from
+              this server's source: an agent refused for its source was
+              started from older bytes, and the replacement does not repeat
+              it. *)
            Log.Keeper.info "microvm agent guest replaced instead of adopted keeper=%s name=%s: %s"
              t.meta.name container_name reason;
            Ok `Boot
@@ -338,7 +339,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
      | Error error -> Error (Guest_identity_store_unavailable error))
   | `Boot ->
     (* The guest's agent is the mounted shim (#52968). A shim this server may
-       not run -- one that declares another relay version, or none -- would
+       not run -- one built from another source, or naming none -- would
        give the new guest the hello the old one was refused for, so it is
        refused here, before any guest is stopped or booted. Provisioning
        takes the result and verifies again after teardown. *)

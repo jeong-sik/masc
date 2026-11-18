@@ -452,14 +452,9 @@ val supports_interactive_stdin : probe -> bool
 module Relay : sig
   val version : int
   (** Version 2 adds the interactive request kind and its cancellation
-      contract. A peer with another version is refused before any request
-      kind/header byte is sent, never read past its hello. *)
-
-  val version_declaration : string
-  (** ["MASC_EXEC_SHIM_RELAY_VERSION=<version>;"], kept as a string literal so
-      it is stored verbatim in every shim binary built from this source. The
-      host reads it out of the mounted shim's bytes and refuses to boot a guest
-      whose shim declares another relay version, or none (#52968). *)
+      contract. The host admits an agent by its source identity, not by this
+      number; the hello carries it so a refusal can say what the agent
+      speaks. *)
 
   val serve_flag : string
   (** The shim argument that makes it the agent:
@@ -482,6 +477,11 @@ module Relay : sig
 
   type hello =
     { relay_version : int
+    ; source_identity : Source_identity.t option
+      (** the source the agent's shim was built from; [None] when its hello
+          names none (a shim built before identities, or by a build that
+          knew none). The host runs only an agent whose identity equals its
+          own (RFC host-and-shim-share-one-build-identity). *)
     ; root_read_only : bool
       (** the agent re-mounted the guest root read-only after binding *)
     ; uid : int  (** the uid the agent runs as once it has dropped root *)

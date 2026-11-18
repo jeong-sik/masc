@@ -695,11 +695,6 @@ let parse_probe (s : string) : (probe, string) result =
 module Relay = struct
   let version = 2
 
-  (* A literal, never built at run time: it has to sit in the shim binary's
-     bytes so a host that cannot run a Linux binary can still read which relay
-     version it speaks before booting a guest with it (#52968). A test keeps
-     the digits equal to [version]. *)
-  let version_declaration = "MASC_EXEC_SHIM_RELAY_VERSION=2;"
   let serve_flag = "--serve"
 
   type request_kind =
@@ -724,6 +719,7 @@ module Relay = struct
 
   type hello =
     { relay_version : int
+    ; source_identity : Source_identity.t option
     ; root_read_only : bool
     ; uid : int
     ; gid : int
@@ -780,17 +776,29 @@ module Relay = struct
       frame kind (String.sub payload 0 max_payload_bytes)
       :: frames kind (String.sub payload max_payload_bytes (length - max_payload_bytes))
 
+  (* [source_identity] may be absent: an agent built before identities, or
+     by a build that knew none, still says hello, and the host refuses it by
+     name rather than as an unreadable hello. *)
+  let source_identity_field = "source_identity"
+
   let hello_fields =
-    [ "relay_version"; "root_read_only"; "uid"; "gid"; "no_new_privs" ]
+    [ "relay_version"; source_identity_field; "root_read_only"; "uid"; "gid"
+    ; "no_new_privs" ]
 
   let hello_to_json (hello : hello) =
+    let identity =
+      match hello.source_identity with
+      | Some identity -> [ source_identity_field, `String (Source_identity.to_string identity) ]
+      | None -> []
+    in
     `Assoc
-      [ "relay_version", `Int hello.relay_version
-      ; "root_read_only", `Bool hello.root_read_only
-      ; "uid", `Int hello.uid
-      ; "gid", `Int hello.gid
-      ; "no_new_privs", `Bool hello.no_new_privs
-      ]
+      ([ "relay_version", `Int hello.relay_version ]
+       @ identity
+       @ [ "root_read_only", `Bool hello.root_read_only
+         ; "uid", `Int hello.uid
+         ; "gid", `Int hello.gid
+         ; "no_new_privs", `Bool hello.no_new_privs
+         ])
 
   let exit_payload = function
     | Exited code -> exit_tag_exited, code
@@ -837,6 +845,23 @@ module Relay = struct
       | Ok _ -> Error (Malformed_hello (Printf.sprintf "field %S is not a boolean" name))
       | Error error -> Error error
     in
+    let identity_field fields =
+      match List.filter (fun (key, _) -> String.equal key source_identity_field) fields with
+      | [] -> Ok None
+      | [ (_, `String value) ] ->
+        (match Source_identity.of_string value with
+         | Some identity -> Ok (Some identity)
+         | None ->
+           Error
+             (Malformed_hello
+                (Printf.sprintf "field %S is not a source identity" source_identity_field)))
+      | [ (_, _) ] ->
+        Error
+          (Malformed_hello (Printf.sprintf "field %S is not a string" source_identity_field))
+      | _ :: _ :: _ ->
+        Error
+          (Malformed_hello (Printf.sprintf "field %S is repeated" source_identity_field))
+    in
     match Yojson.Safe.from_string payload with
     | exception Yojson.Json_error detail -> Error (Malformed_hello detail)
     | `Assoc fields ->
@@ -847,13 +872,21 @@ module Relay = struct
          Error (Malformed_hello (Printf.sprintf "field %S is not a hello field" key))
        | None ->
          Result.bind (int_field fields "relay_version") (fun relay_version ->
-           Result.bind (bool_field fields "root_read_only") (fun root_read_only ->
-             Result.bind (int_field fields "uid") (fun uid ->
-               Result.bind (int_field fields "gid") (fun gid ->
-                 Result.map
-                   (fun no_new_privs ->
-                      Hello { relay_version; root_read_only; uid; gid; no_new_privs })
-                   (bool_field fields "no_new_privs"))))))
+           Result.bind (identity_field fields) (fun source_identity ->
+             Result.bind (bool_field fields "root_read_only") (fun root_read_only ->
+               Result.bind (int_field fields "uid") (fun uid ->
+                 Result.bind (int_field fields "gid") (fun gid ->
+                   Result.map
+                     (fun no_new_privs ->
+                        Hello
+                          { relay_version
+                          ; source_identity
+                          ; root_read_only
+                          ; uid
+                          ; gid
+                          ; no_new_privs
+                          })
+                     (bool_field fields "no_new_privs")))))))
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error (Malformed_hello "the hello is not a JSON object")
 

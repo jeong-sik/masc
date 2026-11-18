@@ -75,6 +75,18 @@ if [ "$PRINT_BUILDER_CONFIG" = true ]; then
   exit 0
 fi
 
+# RFC host-and-shim-share-one-build-identity. The shim declares the source
+# identity lib/build_commit/probe-commit.sh computes, and a server runs only a
+# shim whose identity equals its own. Inside the container the dune rule sees
+# no checkout (the build directory is outside /src), so the same probe runs
+# here on the checkout and its values go in through the environment the rule
+# falls back to. A checkout with no identity builds no shim.
+identity_env="$(cd "$repo_root" && sh lib/build_commit/probe-commit.sh --print-env)"
+identity_args=()
+while IFS= read -r assignment; do
+  identity_args+=(-e "$assignment")
+done <<<"$identity_env"
+
 mkdir -p "$repo_root/$OUT_DIR"
 # The unprivileged image user must be able to write to the Linux bind mount.
 chmod a+rwx "$repo_root/$OUT_DIR"
@@ -105,6 +117,7 @@ build_one() {
     -v "$repo_root:/src:ro" \
     -v "$repo_root/$OUT_DIR:/out" \
     -e OCAMLPARAM="_,ccopt=-static,ccopt=-no-pie" \
+    "${identity_args[@]}" \
     "$tag" \
     sh -lc 'cd /tmp && opam exec --switch=masc-shim -- dune build --root /src --build-dir /tmp/shimbuild bin/masc_exec_shim.exe \
       && install -m 755 /tmp/shimbuild/default/bin/masc_exec_shim.exe /out/masc-exec-shim-linux-'"$arch"''

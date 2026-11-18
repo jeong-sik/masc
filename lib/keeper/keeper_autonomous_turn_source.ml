@@ -585,7 +585,7 @@ let read_store config keeper_name =
      append mutex for every syntactically valid name a client guesses. *)
   let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
       ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records in
-  Dated_jsonl.open_store ~cross_context_mutex:(Cross_context_mutex.create ()) location
+  Dated_jsonl.Reader.open_store location
 ;;
 
 type snapshot =
@@ -602,8 +602,8 @@ let snapshot_fingerprint snapshot = snapshot.fingerprint
 let read_snapshot_result ~config ~keeper_name ?previous ?(limit = default_limit) () =
   let open Result.Syntax in
   let store = read_store config keeper_name in
-  let source_root = Dated_jsonl.base_dir store in
-  let* source_rows = Dated_jsonl.read_recent_lines_result
+  let source_root = Dated_jsonl.Reader.base_dir store in
+  let* source_rows = Dated_jsonl.Reader.read_recent_lines_result
       store (max 1 limit)
     |> Result.map_error Dated_jsonl.read_error_to_string in
   let same_row (left_path, left_line) (right_path, right_line) =
@@ -640,7 +640,7 @@ let project_snapshot_result ~config ~keeper_name snapshot =
 
 let project_latest_reply_result ~config ~keeper_name snapshot =
   if not (String.equal snapshot.keeper_name keeper_name
-          && String.equal snapshot.source_root (Dated_jsonl.base_dir (read_store config keeper_name)))
+          && String.equal snapshot.source_root (Dated_jsonl.Reader.base_dir (read_store config keeper_name)))
   then Error "TurnRecord snapshot belongs to another Keeper store"
   else
     match List.rev snapshot.records with
@@ -659,7 +659,7 @@ let project_latest_reply_result ~config ~keeper_name snapshot =
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
-  match Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit) with
+  match Dated_jsonl.Reader.read_recent_result (read_store config keeper_name) (max 1 limit) with
   | Error error ->
     Log.Keeper.warn ~keeper_name
       "autonomous turn source: cannot read current turn-record store: %s"

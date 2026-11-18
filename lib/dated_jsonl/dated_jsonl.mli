@@ -70,15 +70,15 @@ module Layout = Dated_jsonl_layout
 (** Shared calendar and numeric rotation ordering for read continuations. *)
 
 val open_store :
-  ?cross_context_mutex:Cross_context_mutex.t ->
   ?max_bytes:int ->
   Store.location ->
   t
 (** Open the store at a listed location. A store can be opened only where
-    {!Store} puts it.
+    {!Store} puts it. Every handle of one store shares the store's entry in
+    the process registry, which holds the mutex its writers take. A caller
+    that only reads and must leave no entry behind opens a {!Reader}.
 
-    An optional [mutex] can be injected to bypass the shared registry
-    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    When [?max_bytes] is positive, [append] prunes
     oldest completed day-files until the store is at or below the cap, while
     preserving the current day-file. Day files are removed by age only by
     {!prune_listed_stores_bound}. *)
@@ -590,9 +590,34 @@ val map_tail_rows_result :
     [Ok []]. A path that cannot be opened, is not a regular file once opened,
     or cannot be read is [Error]. *)
 
+(** A handle that reads one store and is not in the store registry.
+
+    Opening one leaves no registry entry, so a route that reads the store of
+    whatever Keeper name a client sent does not grow the registry by one
+    entry per made-up name. No function that writes or prunes takes a
+    reader: every change of a store's files goes through a handle that
+    shares the store's registry entry. *)
+module Reader : sig
+  type t
+
+  val open_store : Store.location -> t
+  val base_dir : t -> string
+
+  val read_recent_result :
+    ?offset:int -> t -> int -> (recent_entry list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_result} of the reader's store. *)
+
+  val read_recent_lines_result :
+    ?offset:int -> t -> int -> ((string * string) list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_lines_result} of the reader's store. *)
+end
+
 module For_testing : sig
   val cross_context_mutex : t -> Cross_context_mutex.t
   (** Expose the internal mutex so tests can verify sharing. *)
+
+  val in_registry : Store.location -> bool
+  (** Whether the registry holds an entry for the store. *)
 
   val cross_context_mutex_for_base_dir : string -> Cross_context_mutex.t
   (** Lookup or insert the registry entry for [base_dir].

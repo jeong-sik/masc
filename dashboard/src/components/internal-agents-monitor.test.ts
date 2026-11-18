@@ -37,6 +37,7 @@ import { ApiRequestError } from '../api/core'
 import { parseExactLaneRunResponse } from '../api/dashboard-exact-lane-runs'
 import { parseVerificationRunsResponse } from '../api/dashboard-verification-runs'
 import { parseGoalVerificationRunsResponse } from '../api/dashboard-goal-verification-runs'
+import { doneWhenMeasure, goalCriterion } from '../api/fixtures/goal-criterion'
 
 const journalFact = (claim: string, category: 'fact' | 'blocker', firstSeen: number) => ({
   claim,
@@ -527,7 +528,7 @@ describe('InternalAgentsMonitor', () => {
     generated_at: '2026-10-06T00:00:00Z', count: 1,
     runs: [{
       kind: 'review', run_id: 'goal-run', goal_id: 'goal-reviewed', request_id: 'request-a',
-      criterion: { revision: 'criterion-a', title: 'ships the fixture', metric: null, target_value: null },
+      criterion: goalCriterion({ title: 'ships the fixture', measure: doneWhenMeasure }),
       evaluated_verdict: { decision: 'approved', reason: 'proof matches' }, review_kind: 'proof',
       authority_actor: 'verifier_exact', started_at: 1786000100, status: 'committed', elapsed_s: 1, tools: [],
     }],

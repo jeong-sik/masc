@@ -26,6 +26,7 @@ import { parseLaneAddonSnapshot } from '../api/lane-addons'
 import { resetLaneDeclarationSessionsForTesting } from '../lib/lane-declaration-sessions'
 import { resetLanePackageActivitiesForTesting } from '../lib/lane-package-activity-session'
 import type { ExactLaneRunSummary } from '../api/dashboard-exact-lane-runs'
+import { doneWhenMeasure, goalCriterion } from '../api/fixtures/goal-criterion'
 
 // Serves the exact-run endpoint as the server does: a lane filter applies
 // before the page is cut, and an unfiltered page holds only the newest runs.
@@ -243,7 +244,7 @@ it('reads verifier_exact availability from verification runs, not the exact-run 
 
 it('lists the Verifier Lane Goal reviews beside its task reviews', async () => {
   api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [{ runId: 'goal-run', goalId: 'goal-fixture', requestId: 'request-fixture',
-    criterion: { revision: 'c1', title: 'ships the fixture', metric: null, target_value: null }, reviewKind: 'proof',
+    criterion: goalCriterion({ revision: 'c1', title: 'ships the fixture', measure: doneWhenMeasure }), reviewKind: 'proof',
     authorityActor: 'verifier', startedAt: 3, status: 'committed', elapsedSeconds: 1, evaluatorRuntime: 'runtime-fixture',
     evaluatedVerdict: { decision: 'approved', reason: 'proof matches' }, tools: [] }], skippedScans: [], count: 1, generatedAt: 'now' })
   replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'verifier_exact', workspace: '/fixture/navigation' }, true))

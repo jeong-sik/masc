@@ -119,6 +119,7 @@ import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { showGoalCreate } from './goal-create-state'
 import { fetchDashboardGoalDetail as decodeGoalDetail, fetchDashboardGoalsTree as decodeGoalTree,
   GoalSourceUnavailableError } from '../../api/dashboard-goals'
+import { doneWhenMeasure } from '../../api/fixtures/goal-criterion'
 
 const measurementFixture = JSON.parse(readFileSync(
   resolve(__dirname, '../../api/fixtures/goal-measurement-tree.json'), 'utf8',
@@ -996,13 +997,13 @@ describe('GoalTree', () => {
       goal_fsm: { state: 'awaiting_confirmation', source: 'goal.phase', next_actions: ['drop'], activity_observation: 'goal_metadata' } }
     const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
       summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
-    const criterion = { revision: goal.criterion_revision, title: goal.title, metric: null, target_value: null }
+    const criterion = { revision: goal.criterion_revision, title: goal.title, measure: doneWhenMeasure, procedure: 'Read the fixture.' }
     const verdict = { criterion, request_id: 'request-confirm-refresh', verification_run_id: 'run-confirm-refresh',
       outcome: 'proven', reason: null, authority: { kind: 'system_llm_agent', actor: 'verifier' },
       evidence: 'verified', recorded_at: '2026-11-01T00:00:00Z' }
     const evidence = (confirmed: boolean) => ({ inspection_operator_id: 'operator', goal: { id: goal.id,
       phase: confirmed ? 'completed' : 'awaiting_confirmation', criterion_revision: criterion.revision,
-      title: criterion.title, metric: criterion.metric, target_value: criterion.target_value },
+      title: criterion.title, measure: criterion.measure, procedure: criterion.procedure },
     verification: { goal_id: goal.id, updated_at: '2026-11-01T00:00:00Z', completion: confirmed
       ? { state: 'human_confirmed', verdict, operator_id: 'operator', confirmed_at: '2026-11-01T01:00:00Z' }
       : { state: 'proof_proven', verdict } } })
@@ -1041,13 +1042,13 @@ describe('GoalTree', () => {
       goal_fsm: { state: 'awaiting_confirmation', source: 'goal.phase', next_actions: ['drop'], activity_observation: 'goal_metadata' } }
     const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
       summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
-    const criterion = { revision: goal.criterion_revision, title: goal.title, metric: null, target_value: null }
+    const criterion = { revision: goal.criterion_revision, title: goal.title, measure: doneWhenMeasure, procedure: 'Read the fixture.' }
     const verdict = { criterion, request_id: 'request-auth', verification_run_id: 'run-auth',
       outcome: 'proven', reason: null, authority: { kind: 'system_llm_agent', actor: 'verifier' },
       evidence: 'verified', recorded_at: '2026-11-01T00:00:00Z' }
     const evidence = (confirmed: boolean) => ({ inspection_operator_id: 'operator', goal: { id: goal.id,
       phase: confirmed ? 'completed' : 'awaiting_confirmation', criterion_revision: criterion.revision,
-      title: criterion.title, metric: criterion.metric, target_value: criterion.target_value },
+      title: criterion.title, measure: criterion.measure, procedure: criterion.procedure },
     verification: { goal_id: goal.id, updated_at: '2026-11-01T00:00:00Z', completion: confirmed
       ? { state: 'human_confirmed', verdict, operator_id: 'operator', confirmed_at: '2026-11-01T01:00:00Z' }
       : { state: 'proof_proven', verdict } } })
@@ -1187,13 +1188,13 @@ describe('GoalTree', () => {
       const otherGoal = makeGoal('goal-other-recovery', 'Other recovery goal')
       const tree = { approval_queue_state: { state: 'ready' }, tree: outcome === 'selection-aba' ? [goal, otherGoal] : [goal],
         summary: { ...emptySummary(), total_goals: outcome === 'selection-aba' ? 2 : 1 } } satisfies DashboardGoalsTreeResponse
-      const criterion = { revision: goal.criterion_revision, title: goal.title, metric: null, target_value: null }
+      const criterion = { revision: goal.criterion_revision, title: goal.title, measure: doneWhenMeasure, procedure: 'Read the fixture.' }
       const verdict = { criterion, request_id: 'request-recovery', verification_run_id: 'run-recovery',
         outcome: 'proven', reason: null, authority: { kind: 'system_llm_agent', actor: 'verifier' },
         evidence: 'verified', recorded_at: '2026-11-01T00:00:00Z' }
       const evidence = (confirmed: boolean) => ({ inspection_operator_id: 'operator', goal: { id: goal.id,
         phase: confirmed ? 'completed' : 'awaiting_confirmation', criterion_revision: criterion.revision,
-        title: criterion.title, metric: criterion.metric, target_value: criterion.target_value },
+        title: criterion.title, measure: criterion.measure, procedure: criterion.procedure },
       verification: { goal_id: goal.id, updated_at: '2026-11-01T00:00:00Z', completion: confirmed
         ? { state: 'human_confirmed', verdict, operator_id: 'operator', confirmed_at: '2026-11-01T01:00:00Z' }
         : { state: 'proof_proven', verdict } } })
@@ -1653,10 +1654,10 @@ describe('GoalTree', () => {
     ['idle', { state: 'current', completion: { state: 'idle' } }],
     ['stale', { state: 'stale', historical: { state: 'pending', requestId: 'old-request',
       requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'old-revision',
-        title: 'Old goal', metric: null, target_value: null } } }],
+        title: 'Old goal', measure: doneWhenMeasure, procedure: 'Read the fixture.' } } }],
     ['confirmed', { state: 'current', completion: { state: 'proven', requestId: 'confirmed-request',
       runId: 'confirmed-run', evidence: 'proof', recordedAt: '2026-10-30T07:45:56Z', actor: 'verifier',
-      criterion: { revision: 'revision-default', title: 'Uncertain proof', metric: null, target_value: null },
+      criterion: { revision: 'revision-default', title: 'Uncertain proof', measure: doneWhenMeasure, procedure: 'Read the fixture.' },
       confirmation: { operatorId: 'operator', confirmedAt: '2026-10-30T08:00:00Z' } } }],
   ] satisfies Array<[string, GoalTreeNode['verification']]>)
   ('does not offer a retry for a verifying Goal with %s proof', async (_description, verification) => {
@@ -2370,7 +2371,7 @@ describe('GoalTree', () => {
       ...makeGoal('goal-verifying-retry', 'Goal awaiting verification'), phase: 'verifying',
       verification: { state: 'current', completion: { state: 'pending', requestId: 'proof-request-1',
         requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
-          title: 'Goal awaiting verification', metric: null, target_value: null } } },
+          title: 'Goal awaiting verification', measure: doneWhenMeasure, procedure: 'Read the fixture.' } } },
       goal_fsm: {
         state: 'verifying', source: 'goal.phase',
         next_actions: ['request_complete', 'drop', 'reopen', 'pause', 'block'],
@@ -2426,7 +2427,7 @@ describe('GoalTree', () => {
       ...makeGoal('goal-unknown', 'Unknown verification'), phase: 'verifying',
       verification: { state: 'current', completion: { state: 'pending', requestId: 'request-unknown',
         requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
-          title: 'Unknown verification', metric: null, target_value: null } } },
+          title: 'Unknown verification', measure: doneWhenMeasure, procedure: 'Read the fixture.' } } },
       goal_fsm: { state: 'verifying', source: 'goal.phase', next_actions: ['request_complete', 'reopen'],
         activity_observation: 'goal_metadata' },
     }
@@ -2476,7 +2477,7 @@ describe('GoalTree', () => {
       ...makeGoal('goal-history', 'Goal with history'), phase: 'verifying',
       verification: { state: 'current', completion: { state: 'pending', requestId: 'proof-original',
         requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
-          title: 'Goal with history', metric: null, target_value: null } } },
+          title: 'Goal with history', measure: doneWhenMeasure, procedure: 'Read the fixture.' } } },
       goal_fsm: { state: 'verifying', source: 'goal.phase',
         next_actions: ['request_complete', 'pause'], activity_observation: 'goal_metadata' },
     }

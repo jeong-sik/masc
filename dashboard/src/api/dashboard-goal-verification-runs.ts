@@ -158,7 +158,7 @@ function parseRun(raw: Record<string, unknown>, context: string): GoalVerificati
       : ['elapsed_s', 'tools', 'evaluated_verdict', 'detail']
   exactFields(raw, [...baseFields, ...outcomeFields], status === 'running' ? [] : ['evaluator_runtime'], context)
   if (!isRecord(raw.criterion)) protocolError(`${context}.criterion must be an object`)
-  exactFields(raw.criterion, ['revision', 'title', 'metric', 'target_value'], [], `${context}.criterion`)
+  exactFields(raw.criterion, ['revision', 'title', 'measure', 'procedure'], [], `${context}.criterion`)
   const criterion = decodeGoalProofCriterion(raw.criterion)
   if (!criterion) protocolError(`${context}.criterion is invalid`)
   let evaluatedVerdict: GoalVerificationRunRecord['evaluatedVerdict']

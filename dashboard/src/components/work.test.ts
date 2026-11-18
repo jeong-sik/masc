@@ -111,6 +111,7 @@ import { Work } from './work'
 import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
+import { doneWhenMeasure } from '../api/fixtures/goal-criterion'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -339,7 +340,7 @@ describe('Work', () => {
     it.each([
       ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 원장에 현재 요청 없음'],
       ['stale', { state: 'stale', historical: { state: 'proven',
-        criterion: { revision: 'old', title: 'Old goal', metric: null, target_value: null },
+        criterion: { revision: 'old', title: 'Old goal', measure: doneWhenMeasure, procedure: 'Read the fixture.' },
         requestId: 'old-request', runId: 'old-run', evidence: 'old evidence',
         recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 이전 기준의 기록'],
       ['unreadable', { state: 'unreadable', detail: 'primary ledger failed' }, '검증 · 확인 불가'],
@@ -358,7 +359,7 @@ describe('Work', () => {
       goals.value = [{ id: 'G-1', title: 'Old workspace Goal', priority: 1, phase: 'executing',
         created_at: '2026-01-01', updated_at: '2026-01-02',
         verification: { state: 'current', completion: { state: 'proven',
-          criterion: { revision: 'old', title: 'Old workspace Goal', metric: null, target_value: null },
+          criterion: { revision: 'old', title: 'Old workspace Goal', measure: doneWhenMeasure, procedure: 'Read the fixture.' },
           requestId: 'r', runId: 'run', evidence: 'old evidence', recordedAt: 'now', actor: 'verifier' } } }]
       goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['G-1'], complete: true } }
       goalTreeData.value = {

@@ -100,8 +100,8 @@ let validate_current_meta path =
 let validate_task_backlog path =
   try
     let json = Yojson.Safe.from_file path in
-    let* (_backlog, _diagnostics) =
-      Masc_domain.backlog_of_yojson_with_diagnostics json
+    let* _backlog =
+      Masc_domain.backlog_of_yojson json
       |> Result.map_error (fun detail ->
         `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
     in

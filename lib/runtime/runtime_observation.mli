@@ -128,6 +128,45 @@ val record_attempt_terminal :
     directly but cannot thread AGENT_CORE's per-call metrics sink through the
     provider invocation path. *)
 
+(** {2 Attempts closed by handle} *)
+
+type attempt_handle
+(** One provider request's attempt. It closes that attempt and no other. *)
+
+type attempt_terminal =
+  | Attempt_succeeded of { latency_ms : int option }
+  | Attempt_failed of { latency_ms : int option; error : string }
+  | Attempt_cancelled of { latency_ms : int option }
+      (** The request was cut off and returned nothing to the run. The
+          attempt's [error] reads ["provider request cancelled before it
+          returned"] and its terminal event has [outcome=cancelled]. *)
+
+val open_attempt : runtime_metrics_capture -> attempt_handle
+(** Opens the next attempt in [capture]. Interrupted attempts still waiting
+    for a terminal close as {!Attempt_cancelled} first: the run sent another
+    request, so their requests returned no error to it. *)
+
+val close_attempt : attempt_handle -> attempt_terminal -> unit
+(** Records the handle's terminal and emits its [runtime_execution_terminal]
+    event. Close or interrupt each handle once. *)
+
+val interrupt_attempt : attempt_handle -> latency_ms:int -> unit
+(** Marks the handle's request as cut off by a cancellation at [latency_ms].
+    No event is emitted yet: a body deadline cancels the request before
+    AGENT_CORE turns it into the error the run returns, so the terminal waits
+    for {!settle_interrupted_attempts}. *)
+
+val settle_interrupted_attempts :
+  runtime_metrics_capture ->
+  (latency_ms:int option -> attempt_terminal) ->
+  unit
+(** Closes every interrupted attempt with the terminal built from its
+    latency, then forgets them. A run calls this once when it ends. *)
+
+val capture_has_attempts : runtime_metrics_capture -> bool
+(** [true] once [capture] holds an attempt, open or terminal. A provider
+    request opened it; a capture without one never reached a provider. *)
+
 val runtime_metrics_for_candidates :
   runtime_id:string ->
   ?keeper_name:string ->

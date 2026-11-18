@@ -315,7 +315,7 @@ let test_task_snapshot_names_actor_and_handoff () =
     ; predecessor_task_id = None
     ; contract = None
     ; execution_links = Masc_domain.no_execution_links
-    ; handoff_context = Some handoff
+    ; handoff_context = Some (Masc_domain.Handoff_decoded handoff)
     ; cycle_count = 1
     ; skills = []
     }

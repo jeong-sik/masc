@@ -7,10 +7,10 @@ val note_evidence_ref : string -> string option
   (** Normalize narrative text to the typed [note:] evidence wire form. *)
 
 val verification_submission_evidence_refs :
-  Masc_domain.task ->
+  handoff:Masc_domain.task_handoff_context option ->
   notes:string ->
   string list
-(** Read the current submission's already-transitioned immutable Task, returning
+(** Read the handoff the current submission authored, returning
     its producer evidence refs plus explicit [note:] entries
     for completion notes and handoff summaries. Contract requirements are not
     submitted evidence; the verification request carries them separately as

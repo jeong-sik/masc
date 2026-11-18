@@ -518,6 +518,7 @@ let held_with_the_previous_owners_note ~id =
   { (make_task ~id ~status:(D.InProgress { assignee = owner; started_at = now })) with
     handoff_context =
       Some
+        (D.Handoff_decoded
         { summary = "previous owner: half done, see branch wip/1"
         ; reason = None
         ; next_step = None
@@ -525,7 +526,7 @@ let held_with_the_previous_owners_note ~id =
         ; evidence_refs = []
         ; updated_at = None
         ; updated_by = None
-        }
+        })
   }
 ;;
 
@@ -650,10 +651,11 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
        = [ `String "the premise this rests on is gone" ]);
     match List.find_opt (fun (task : D.task) -> String.equal task.id "task-15")
             (Workspace.get_tasks_raw config) with
-    | Some { handoff_context = Some { summary; _ }; _ } ->
+    | Some { handoff_context = Some (D.Handoff_decoded { summary; _ }); _ } ->
       Alcotest.(check string) "the committed Task keeps the same note"
         "the premise this rests on is gone" summary
-    | Some { handoff_context = None; _ } -> Alcotest.fail "the cancel's own note was dropped"
+    | Some { handoff_context = Some (D.Handoff_unreadable _) | None; _ } ->
+      Alcotest.fail "the cancel's own note was dropped"
     | None -> Alcotest.fail "task-15 vanished"))
 ;;
 

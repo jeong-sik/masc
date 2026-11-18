@@ -249,26 +249,34 @@ val load_agent_core_for_save :
 
 module Read_observation : sig
   (** Process-local evidence for reusing a derived read result. The witness
-      retains only file identities, never checkpoint messages or bodies.
+      retains only file identities and typed graph references, never
+      checkpoint messages, header JSON or bodies.
       Cold reads witness every fully verified object; written-lineage hits
       remain valid only while that existing lineage is still eligible. *)
   type t
   type revalidation =
     | Unchanged
+    | Refreshed of t
     | Changed
     | Unavailable of checkpoint_load_error
 
   val load : session_dir:string -> session_id:string ->
     (Agent_core.Checkpoint.t * t, checkpoint_load_error) result
   val revalidate : t -> revalidation
-  (** Only [Unchanged] permits reuse. Otherwise discard the derived result
-      and load the current source, preserving its current errors. *)
+  (** [Unchanged] permits reuse. [Refreshed witness] also permits reuse after
+      a changed head's complete header, identical session/object graph and
+      all prior object snapshots have been checked; retain the new witness.
+      Otherwise discard the derived result and load the current source,
+      preserving its current errors. *)
 
   module For_testing : sig
     val load_after_object_read :
       after_object_read:(Agent_core.Checkpoint_objects.digest -> unit) ->
       session_dir:string -> session_id:string ->
       (Agent_core.Checkpoint.t * t, checkpoint_load_error) result
+    val revalidate_after_object_read :
+      after_object_read:(Agent_core.Checkpoint_objects.digest -> unit) ->
+      t -> revalidation
   end
 end
 

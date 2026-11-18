@@ -19,6 +19,17 @@ val verify_microvm_shim :
   backend:Keeper_microvm_backend.t ->
   guest_name:string -> (unit, Keeper_microvm_shim_readiness.error) result
 
+type boot_shim
+(** Made only by {!verify_microvm_shim_before_teardown}. A boot needs one to
+    provision, so it checks the mounted shim before it stops or deletes any
+    guest, on every backend (#52968). *)
+
+val verify_microvm_shim_before_teardown :
+  t -> backend:Keeper_microvm_backend.t ->
+  (boot_shim, Keeper_microvm_shim_readiness.error) result
+(** Run before a boot stops, deletes or replaces anything. A refused shim
+    leaves every guest as it was. *)
+
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
@@ -33,6 +44,7 @@ val ensure_apple_volume_helpers_absent :
 val microvm_guest_provisions :
   t ->
   backend:Keeper_microvm_backend.t ->
+  shim:boot_shim ->
   timeout_sec:float -> (microvm_guest_provisions, string) result
 
 val ensure_microvm_work_volume_mounted :

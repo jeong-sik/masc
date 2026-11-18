@@ -387,6 +387,16 @@ function ExecutionLinksSection({ task }: { task: Task }) {
 }
 
 function HandoffSection({ task }: { task: Task }) {
+  if (task.handoff_context_unreadable) {
+    return html`
+      <div>
+        <${SectionTitle}>최근 Handoff</${SectionTitle}>
+        <div class="v2-workspace-detail rounded-[var(--r-1)] border border-warn/20 bg-warn/8 px-4 py-3">
+          <div class="text-sm leading-relaxed text-text-body" data-testid="handoff-unreadable">저장된 handoff 를 읽을 수 없어요. 서버는 원래 값을 그대로 보관해요.</div>
+        </div>
+      </div>
+    `
+  }
   const handoff = task.handoff_context
   if (!handoff?.summary) return null
 

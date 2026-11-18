@@ -722,21 +722,51 @@ let try_with_file_lock config path f =
 (* Event logging                                *)
 (* ============================================ *)
 
-let log_event config event_json =
-  let location =
-    Dated_jsonl.Store.at
-      (dated_store_root config)
-      Dated_jsonl.Store.Root.Events
-  in
-  let events_dir = Dated_jsonl.Store.dir location in
-  mkdir_p events_dir;
+exception Event_log_append_failed of
+    { path : string
+    ; error : Fs_compat.private_jsonl_append_error
+    ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+    }
 
+let () =
+  Printexc.register_printer (function
+    | Event_log_append_failed { path; error; cleanup_failure } ->
+      Some
+        (Printf.sprintf "task event append to %s failed: %s%s" path
+           (Fs_compat.private_jsonl_append_error_to_string error)
+           (match cleanup_failure with
+            | None -> ""
+            | Some failure ->
+              "; cleanup: " ^ Fs_compat.private_jsonl_operation_failure_to_string failure))
+    | _ -> None)
+
+let log_event config event_json =
   (* Two gmtime calls used to pick the month and the day, so a midnight
      between them filed the last day of one month under the next one's
      directory. [Jsonl_writer] runs one call behind both (#27143). *)
-  let dated = Dated_jsonl.Store.dated_path_now location in
-  let month_dir = Filename.concat events_dir dated.Dated_jsonl.Store.month_dir in
-  mkdir_p month_dir;
-  let log_file = dated.Dated_jsonl.Store.path in
-
-  Fs_compat.append_file log_file (Yojson.Safe.to_string event_json ^ "\n")
+  let dated =
+    Dated_jsonl.Store.dated_path_now
+      (Dated_jsonl.Store.at (dated_store_root config) Dated_jsonl.Store.Root.Events)
+  in
+  let path = dated.Dated_jsonl.Store.path in
+  (* The append's own directory creation is memoized per process, so a month
+     directory removed after its first use would not come back there. *)
+  mkdir_p (Filename.dirname path);
+  (* [Fusion_decision.record] appends to the same day file. A server that
+     died inside an append leaves bytes after the last newline; this append
+     cuts them under the writers' shared locks, so the new row never joins
+     onto them. *)
+  match
+    Fs_compat.append_private_jsonl_durable_locked_result
+      path (Yojson.Safe.to_string event_json ^ "\n")
+  with
+  | Fs_compat.Private_file_succeeded () -> ()
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+    (* The row is durable; raising would invite a caller to write it twice. *)
+    Log.Misc.warn "task event append to %s committed; descriptor cleanup failed: %s"
+      path (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  | Fs_compat.Private_file_failed error ->
+    raise (Event_log_append_failed { path; error; cleanup_failure = None })
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    raise
+      (Event_log_append_failed { path; error; cleanup_failure = Some cleanup_failure })

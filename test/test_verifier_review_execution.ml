@@ -201,7 +201,9 @@ let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?
         after_scope_ready ();
         Ok ())) () |> get in
   let run () = Eio.Switch.run (fun run_sw ->
-    Runtime_agent.run_blocks ~sw:run_sw ~net:env#net ~config [Agent_core.Types.Text "Review"]) in
+    Runtime_agent.run_blocks ~sw:run_sw ~net:env#net ~config
+      ~execution_capture:(Runtime_agent.execution_capture config) [Agent_core.Types.Text "Review"]
+    |> Result.map_error Runtime_agent.run_failure_error) in
   let result = match cancel_at with
     | None -> Some (run ())
     | Some (While_provider_answers | Before_report_starts | While_report_runs | After_report_settles

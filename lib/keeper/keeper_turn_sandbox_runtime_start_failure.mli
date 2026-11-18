@@ -56,6 +56,9 @@ type microvm_start_failure =
           must release them before any fresh boot can recreate or trim them. *)
   | Adopted_guest_volume_unverified of string
   | Guest_provisions_unavailable of string
+  | Guest_shim_unready of Keeper_microvm_shim_readiness.error
+      (** The mounted shim is not one this server may run a guest with
+          (#52968): nothing is adopted, stopped or booted. *)
   | Github_identity_invalid of string
   | Policy_network_unavailable of string
   | Network_unexpressible of string

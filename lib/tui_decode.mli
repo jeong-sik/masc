@@ -2729,7 +2729,9 @@ type task_history_event = {
   th_from_status : string option;
   th_to_status : string option;
   th_actor : string option;
-  th_note : string option;  (** handoff_context.summary when present *)
+  th_note : string option;
+      (** handoff_context.summary when present, plus the refusal of a stored
+          handoff the transition replaced because it was unreadable *)
 }
 
 val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) result

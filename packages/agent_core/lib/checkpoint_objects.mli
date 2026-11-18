@@ -245,6 +245,19 @@ val load_read_only
   -> head
   -> (Checkpoint_types.t, load_error) result
 
+(** Validate the complete header with its actual system-prompt and tools
+    objects, reading and digest-checking those two objects in that order.
+    The head has already passed {!head_of_string}'s version, shape and
+    empty-message checks (or was produced by {!plan_save}).
+
+    Uses the same header decoder as {!load_read_only}, but reads no history
+    object and returns no checkpoint. Success establishes only header
+    validity, not message integrity, source freshness or write authority. *)
+val validate_header
+  :  read_object:(digest -> (string option, string) result)
+  -> head
+  -> (unit, load_error) result
+
 (** The header's system prompt, read from its header object alone. *)
 val system_prompt
   :  read_object:(digest -> (string option, string) result)

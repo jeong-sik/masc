@@ -2134,12 +2134,15 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
   check bool "unrelated phase delivered" true (List.exists (Yojson.Safe.equal phase) rows);
   let acknowledged = available config in
   Goal_store.write_state config { acknowledged with pending_events = [event] };
+  (* The event is already in [contents], so delivery after a torn tail owes
+     no append: the fragment is not a row and stays until a write cuts it. *)
   write (contents ^ "{\"torn\":");
   let torn = Fs_compat.load_file path in
   (match Goal_store.flush_pending_events config with
-   | Error _ -> () | Ok () -> fail "incomplete tail must still refuse delivery");
-  check string "incomplete tail unchanged" torn (Fs_compat.load_file path);
-  check int "incomplete tail retains intent" 1
+   | Ok () -> () | Error detail -> fail ("a torn tail must not refuse delivery: " ^ detail));
+  check string "delivered event behind a torn tail writes nothing" torn
+    (Fs_compat.load_file path);
+  check int "delivered event behind a torn tail acknowledges its intent" 0
     (List.length (available config).pending_events);
   write contents;
   let collision = { event with payload = `Assoc ["actor", `String "different"] } in
@@ -2148,6 +2151,43 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
    | Error _ -> () | Ok () -> fail "malformed history must not conceal an ID collision");
   check string "collision keeps every byte" contents (Fs_compat.load_file path);
   check int "collision retains intent" 1 (List.length (available config).pending_events)
+
+(* A server that died inside an append leaves the ledger ending in bytes with
+   no newline. Neither writer of the ledger may refuse after that, and
+   neither may join its row onto the fragment. *)
+let test_audit_ledger_writes_after_a_torn_tail () =
+  with_workspace @@ fun config ->
+  let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
+  let write contents =
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents) in
+  let complete = "{\"event_id\":\"before-crash\"}\n" in
+  let fragment = "{\"event_id\":\"cut-by-cr" in
+  write (complete ^ fragment);
+  let phase = `Assoc ["goal_id", `String "goal-torn"; "event_type", `String "goal_phase"] in
+  (match Goal_store.append_audit_event config phase with
+   | Ok () -> () | Error detail -> fail ("audit append after a torn tail: " ^ detail));
+  check string "audit append cuts the fragment and writes after the last row"
+    (complete ^ Yojson.Safe.to_string phase ^ "\n") (Fs_compat.load_file path);
+  let before_delivery = Fs_compat.load_file path in
+  write (before_delivery ^ fragment);
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"delivery after a torn tail" ~metric:"proof" ~target_value:"1" () with
+    | Ok (_, _, events) -> events
+    | Error error -> fail (write_error_msg error) in
+  (match Goal_store.flush_pending_events config with
+   | Ok () -> () | Error detail -> fail ("delivery after a torn tail: " ^ detail));
+  check int "delivery acknowledges every intent" 0
+    (List.length (available config).pending_events);
+  let delivered = Fs_compat.load_file path in
+  check bool "delivery cuts the fragment" true
+    (String.starts_with ~prefix:before_delivery delivered
+     && String.ends_with ~suffix:"\n" delivered);
+  let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
+  check int "no row joined onto the fragment" 0 malformed;
+  check int "every intent delivered once after the kept rows"
+    (2 + List.length events) (List.length rows)
 
 let test_pending_phase_precedes_drop_and_survives_retry () =
   with_workspace @@ fun config ->
@@ -2255,7 +2295,9 @@ let () =
           test_case "intents survive every mutator" `Quick
             test_audit_intents_survive_other_goal_mutations;
           test_case "pending phase precedes drop and retry preserves history" `Quick
-            test_pending_phase_precedes_drop_and_survives_retry ] );
+            test_pending_phase_precedes_drop_and_survives_retry;
+          test_case "both ledger writers continue after a torn tail" `Quick
+            test_audit_ledger_writes_after_a_torn_tail ] );
       ( "proof identity",
         [ test_case "blank criterion edits preserve every phase and outbox" `Quick
             test_blank_criterion_edits_preserve_store_and_outbox;

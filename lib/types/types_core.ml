@@ -467,6 +467,40 @@ type task_handoff_context = {
   updated_by : string option; [@default None]
 } [@@deriving show, yojson { strict = false }, eq]
 
+(** A handoff context as a task stores it.
+
+    [Handoff_unreadable] is a stored value the current decoder refused. The
+    task keeps the original JSON value, and [task_to_yojson] writes it back
+    unchanged, so rewriting the backlog for an unrelated mutation cannot erase
+    it (#38219). [reason] is the decoder's refusal, kept for display. *)
+type stored_handoff_context =
+  | Handoff_decoded of task_handoff_context
+  | Handoff_unreadable of { raw : Yojson.Safe.t; reason : string }
+[@@deriving show, eq]
+
+let stored_handoff_context_of_yojson json =
+  match task_handoff_context_of_yojson json with
+  | Ok context -> Handoff_decoded context
+  | Error reason -> Handoff_unreadable { raw = json; reason }
+
+let stored_handoff_context_to_yojson = function
+  | Handoff_decoded context -> task_handoff_context_to_yojson context
+  | Handoff_unreadable { raw; reason = _ } -> raw
+
+(** A stored [Handoff_unreadable] that a transition overwrote with a new
+    note. The transition's log row carries it, so the replaced value is
+    recorded rather than dropped by the replacement (#38219). *)
+type replaced_unreadable_handoff =
+  { replaced_raw : Yojson.Safe.t
+  ; replaced_reason : string
+  }
+[@@deriving show, eq]
+
+let replaced_unreadable_handoff_to_yojson
+      { replaced_raw; replaced_reason }
+  =
+  `Assoc [ "raw", replaced_raw; "reason", `String replaced_reason ]
+
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. Two entry points supply it differently: [transition_task_r]
     takes an explicit [reason], while [release_task_r] takes none at all and
@@ -476,9 +510,12 @@ type task_handoff_context = {
     Single definition on purpose: the committed broadcast and the author wake
     both answer "why did this stop", and computing the answer twice let them
     disagree about the same cancellation. Returns [None] when neither carries a
-    non-blank reason — distinct from a reason that is the empty string. *)
+    non-blank reason — distinct from a reason that is the empty string. An
+    unreadable stored handoff states no reason: the decoder's refusal is a fact
+    about the stored note, not about why the work stopped, and the note's own
+    display names it. *)
 let stated_reason ~(reason : string option)
-      ~(handoff_context : task_handoff_context option) : string option =
+      ~(handoff_context : stored_handoff_context option) : string option =
   let non_blank value =
     match String.trim value with
     | "" -> None
@@ -489,10 +526,11 @@ let stated_reason ~(reason : string option)
   let from_handoff () =
     match handoff_context with
     | None -> None
-    | Some context ->
+    | Some (Handoff_decoded context) ->
       (match Option.bind context.reason non_blank with
        | Some _ as reason -> reason
        | None -> non_blank context.summary)
+    | Some (Handoff_unreadable { reason = _; raw = _ }) -> None
   in
   match reason with
   | None -> from_handoff ()
@@ -522,7 +560,7 @@ type task = {
      execution picks it up. Separate from [contract] so linking them never
      touches what counts as done. *)
   execution_links: task_execution_links; [@default no_execution_links]
-  handoff_context: task_handoff_context option; [@default None]
+  handoff_context: stored_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
   (* Exact immutable Skill references are Task evidence. Their source,
      package, name, and content revision survive every state transition and do
@@ -617,7 +655,7 @@ let task_to_yojson t =
         with_execution_links
         @
         [ ( "handoff_context",
-            task_handoff_context_to_yojson handoff_context ) ]
+            stored_handoff_context_to_yojson handoff_context ) ]
   in
   (* A zero cycle count is the implicit initial state. *)
   let with_cycle_count =
@@ -653,32 +691,7 @@ let task_compact_to_yojson t =
   | `Assoc status_fields -> `Assoc (base @ List.remove_assoc "notes" status_fields)
   | _ -> `Assoc base
 
-(** Outcome of decoding one optional nested field. The pre-#27499 decoder
-    folded "the key was absent" and "the key was present but its value could
-    not be decoded" into the same [None], so a dropped corruption was
-    indistinguishable from a genuinely absent field. This type keeps the two
-    apart at the decode boundary. *)
-type nested_field_outcome =
-  | Field_absent
-  | Field_decoded
-  | Field_unreadable of string
-[@@deriving show, eq]
-
-let nested_field_outcome_is_unreadable = function
-  | Field_unreadable _ -> true
-  | Field_absent | Field_decoded -> false
-
-(** Per-field decode outcome for the nested field whose corruption the
-    decoder drops instead of propagating ([handoff_context]). *)
-type task_decode_diagnostics =
-  { handoff_context_outcome : nested_field_outcome
-  }
-[@@deriving show, eq]
-
-let task_decode_diagnostics_is_unreadable d =
-  nested_field_outcome_is_unreadable d.handoff_context_outcome
-
-let task_of_yojson_with_diagnostics json =
+let task_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   let member key = Json_util.assoc_member_opt key json in
@@ -734,12 +747,11 @@ let task_of_yojson_with_diagnostics json =
       | None -> Ok no_execution_links
       | Some links_json -> task_execution_links_of_yojson links_json
     in
-    let handoff_context, handoff_outcome = match m "handoff_context" with
-      | `Null -> None, Field_absent
-      | handoff_json ->
-          (match task_handoff_context_of_yojson handoff_json with
-           | Ok handoff_context -> Some handoff_context, Field_decoded
-           | Error error -> None, Field_unreadable error)
+    (* A present value the decoder refuses stays on the task as
+       [Handoff_unreadable], so the next backlog write keeps it (#38219). *)
+    let handoff_context = match m "handoff_context" with
+      | `Null -> None
+      | handoff_json -> Some (stored_handoff_context_of_yojson handoff_json)
     in
     let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
     match
@@ -748,7 +760,7 @@ let task_of_yojson_with_diagnostics json =
     with
     | Ok skills, Ok contract, Ok execution_links, Ok task_status ->
         Ok
-          ( {
+            {
               id;
               title;
               description;
@@ -763,18 +775,13 @@ let task_of_yojson_with_diagnostics json =
               handoff_context;
               cycle_count;
               skills;
-            },
-            { handoff_context_outcome = handoff_outcome } )
+            }
     | Error error, _, _, _ -> Error error
     | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
     | _, _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
     | _, _, _, Error error -> Error error
   with e -> Error (Printexc.to_string e)
 
-(** Backward-compatible decode: drops the typed per-field diagnostics.
-    Callers that must report a dropped corruption use
-    [task_of_yojson_with_diagnostics] instead. *)
-let task_of_yojson json = Result.map fst (task_of_yojson_with_diagnostics json)
 
 (** Message - broadcast or direct *)
 type message_mention_delivery =
@@ -1084,17 +1091,7 @@ let backlog_to_yojson b =
     ("version", `Int b.version);
   ]
 
-(** A task whose decode dropped at least one nested field. [index] is the
-    position in [backlog.tasks]; [task_id] is the decoded id (empty when the
-    id itself was absent). *)
-type backlog_task_diagnostics =
-  { dropped_task_index : int
-  ; dropped_task_id : string
-  ; dropped_outcomes : task_decode_diagnostics
-  }
-[@@deriving show, eq]
-
-let backlog_of_yojson_with_diagnostics = function
+let backlog_of_yojson = function
   | `Assoc fields ->
     let pending_fields, fields =
       List.partition (fun (name, _) -> String.equal name "pending_completion_rejections") fields
@@ -1138,22 +1135,11 @@ let backlog_of_yojson_with_diagnostics = function
        ; "tasks", `List task_values
        ; "version", version_json
        ] when not (String.equal (String.trim last_updated) "") ->
-       let rec decode_tasks index acc diags = function
-         | [] -> Ok (List.rev acc, List.rev diags)
+       let rec decode_tasks index acc = function
+         | [] -> Ok (List.rev acc)
          | task_json :: rest ->
-           (match task_of_yojson_with_diagnostics task_json with
-            | Ok (task, diagnostics) ->
-              let diags =
-                if task_decode_diagnostics_is_unreadable diagnostics
-                then
-                  { dropped_task_index = index
-                  ; dropped_task_id = task.id
-                  ; dropped_outcomes = diagnostics
-                  }
-                  :: diags
-                else diags
-              in
-              decode_tasks (index + 1) (task :: acc) diags rest
+           (match task_of_yojson task_json with
+            | Ok task -> decode_tasks (index + 1) (task :: acc) rest
             | Error message ->
               Error
                 (Printf.sprintf
@@ -1175,9 +1161,9 @@ let backlog_of_yojson_with_diagnostics = function
                 "backlog.version corrupt: %s"
                 (Yojson.Safe.to_string other))
        in
-       (match decode_tasks 0 [] [] task_values, version_result, pending_result, delivered_result,
+       (match decode_tasks 0 [] task_values, version_result, pending_result, delivered_result,
               approval_result, receipt_result, creation_result with
-        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections,
+        | Ok tasks, Ok version, Ok pending_completion_rejections,
           Ok delivered_completion_rejections, Ok pending_completion_approvals,
           Ok task_deletion_receipts, Ok task_creation_receipts ->
           if List.exists (fun (pending : pending_completion_rejection) ->
@@ -1186,10 +1172,9 @@ let backlog_of_yojson_with_diagnostics = function
               pending_completion_rejections
           then Error "completion rejection task has both pending and delivered state"
           else Ok
-            ( { tasks; pending_completion_rejections; delivered_completion_rejections;
-                pending_completion_approvals; task_deletion_receipts; task_creation_receipts;
-                last_updated; version }
-            , diagnostics )
+            { tasks; pending_completion_rejections; delivered_completion_rejections;
+              pending_completion_approvals; task_deletion_receipts; task_creation_receipts;
+              last_updated; version }
         | Error error, _, _, _, _, _, _ | _, Error error, _, _, _, _, _
         | _, _, Error error, _, _, _, _ | _, _, _, Error error, _, _, _
         | _, _, _, _, Error error, _, _ | _, _, _, _, _, Error error, _
@@ -1205,10 +1190,6 @@ let backlog_of_yojson_with_diagnostics = function
          "backlog must be an object, got %s"
          (Yojson.Safe.to_string other))
 
-(** Backward-compatible decode: drops the typed per-task diagnostics.
-    Callers that must report a dropped corruption use
-    [backlog_of_yojson_with_diagnostics] instead. *)
-let backlog_of_yojson json = Result.map fst (backlog_of_yojson_with_diagnostics json)
 
 (** SSE Session info (for tracking connected agents) *)
 type sse_session = {

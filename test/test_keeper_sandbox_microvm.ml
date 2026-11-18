@@ -455,11 +455,17 @@ let fake_apple_guest_inspect ~container_name ~labels =
   fake_apple_guest_inspect_publishing ~published_sockets:[] ~container_name ~labels
 ;;
 
+(* A fixture shim this server will mount: it declares the relay version the
+   host speaks (#52968). *)
+let current_shim_fixture =
+  "#!/bin/sh\nexit 0\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"
+;;
+
 let initialize_fixture_shim ~base =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
   Fs_compat.mkdir_p shim_dir;
   let binary = Filename.concat shim_dir M.shim_binary_name in
-  Out_channel.with_open_bin binary (fun out -> output_string out "#!/bin/sh\nexit 0\n");
+  Out_channel.with_open_bin binary (fun out -> output_string out current_shim_fixture);
   Unix.chmod binary 0o700;
   let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
   match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
@@ -4137,6 +4143,8 @@ esac
     @@ fun () ->
     Eio.Switch.run @@ fun sw ->
     Eio_context.set_switch sw;
+    (* The shim is checked before any guest is removed (#52968). *)
+    initialize_fixture_shim ~base:dir;
     let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
     (match Turn.microvm_remote_endpoint runtime with
      | Error _ -> ()
@@ -4247,7 +4255,7 @@ let test_preboot_refusals_retain_durable_identity_and_recheck_shim () =
     let shim_dir = Filename.concat microvm "shim" in
     List.iter (fun path -> Unix.mkdir path 0o755) [ masc; microvm; shim_dir ];
     let shim = Filename.concat shim_dir M.shim_binary_name in
-    let shim_contents = "#!/bin/sh\nexit 0\n" in
+    let shim_contents = current_shim_fixture in
     Out_channel.with_open_bin shim (fun channel -> output_string channel shim_contents);
     Unix.chmod shim 0o755;
     (* The first request verifies the current guest generation before policy
@@ -4331,7 +4339,8 @@ esac
     (* Rewrite the same inode with equal-length bytes and restore its mtime.
        A fresh runtime drives the real boot entry again, not just the hash
        helper; neither branch may admit this changed shim to a guest. *)
-    Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 1\n");
+    Out_channel.with_open_bin shim (fun channel -> output_string channel
+      ("#!/bin/sh\nexit 1\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n"));
     Unix.utimes shim original_shim.Unix.st_atime original_shim.Unix.st_mtime;
     let changed_shim = Unix.stat shim in
     Alcotest.(check bool) "device/inode/size/mtime are unchanged" true
@@ -4351,10 +4360,218 @@ esac
     let retry_calls = In_channel.with_open_bin log In_channel.input_all
       |> String.split_on_char '\n' in
     let retry_runs = List.filter (String.starts_with ~prefix:"run ") retry_calls in
-    Alcotest.(check int) "each fresh attempt starts its claims helper" 2 (List.length retry_runs);
+    (* The retry observes the guest absent, which forgets the earlier
+       verification, so the Boot arm reads the rewritten shim before it
+       claims a volume (#52968): only the first attempt's helper ran. *)
+    Alcotest.(check int) "the rejected shim is refused before the claims helper" 1
+      (List.length retry_runs);
     Alcotest.(check bool) "the rejected shim starts no guest or other helper" true
       (List.for_all (String.starts_with ~prefix:claim_prefix) retry_runs))
     [ true; false ]
+;;
+
+(* #52968. A running guest whose agent speaks another relay is replaced by
+   booting a new guest with the mounted shim. When that shim declares relay 1
+   the new guest would be refused the same way, so the replacement is refused
+   before the old guest is stopped: no stop, delete or run. Once the shim
+   built from this source is mounted, the same request goes on to replace the
+   guest. *)
+let test_a_stale_relay_shim_refuses_the_replacement () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let module Ready = Masc.Keeper_microvm_shim_readiness in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "stale-relay-shim-" in
+  let bin = Filename.concat dir "bin" in
+  let base = Filename.concat dir "base" in
+  List.iter (fun path -> Unix.mkdir path 0o755) [ bin; base ];
+  let log = Filename.concat dir "calls" in
+  let guest_file = Filename.concat dir "guest.json" in
+  let keeper_name = "stale-relay-shim" in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:keeper_name in
+  let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name
+      ~network_mode:meta.network_mode in
+  let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base ~keeper_name
+      ~container_kind:M.keeper_vm_container_kind
+      ~network_label:(Profile.network_mode_to_string meta.network_mode)
+    @ [ M.microvm_backend_label_key, Backend.to_string Backend.Apple_container ] in
+  Out_channel.with_open_bin guest_file (fun out ->
+    output_string out (Yojson.Safe.to_string (fake_apple_guest_inspect ~container_name:guest ~labels)));
+  let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
+  Fs_compat.mkdir_p shim_dir;
+  let shim = Filename.concat shim_dir M.shim_binary_name in
+  let install contents =
+    Out_channel.with_open_bin shim (fun out -> output_string out contents);
+    Unix.chmod shim 0o755;
+    Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name) (fun out ->
+      output_string out
+        (Agent_core_sha256.(to_hex (digest_string contents)) ^ "  masc-exec-shim-linux-arm64\n")) in
+  (* A release shim from before the bump: verified by its sidecar, relay 1. *)
+  install "#!/bin/sh\nexit 0\n# MASC_EXEC_SHIM_RELAY_VERSION=1;\n";
+  let cli = Filename.concat bin "container" in
+  Out_channel.with_open_bin cli (fun out ->
+    Printf.fprintf out {|#!/bin/sh
+log=%s
+guest=%s
+guest_file=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1" in
+  list)
+    if [ -f "$guest_file" ]; then printf '[{"id":"%%s"}]\n' "$guest"; else printf '[]\n'; fi ;;
+  inspect)
+    if [ "${2-}" = "$guest" ] && [ -f "$guest_file" ]; then /bin/cat "$guest_file"; else exit 1; fi ;;
+  stop) exit 0 ;;
+  delete) /bin/rm -f "$guest_file"; exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log) (Filename.quote guest) (Filename.quote guest_file));
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    remove_snapshot_fixture dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  (match Ready.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Ready.error_message error));
+  let calls () = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+  let effects lines = List.filter (fun line ->
+    List.exists (fun prefix -> String.starts_with ~prefix line) [ "stop "; "delete "; "run "; "volume " ])
+    lines in
+  let refusal = Ready.error_message
+      (Ready.Verification_failed
+         (Ready.Shim_relay_version_mismatch
+            { installed = M.Relay_version 1; required = Exec_ssh_protocol.Relay.version })) in
+  let attempt () =
+    Turn.microvm_remote_endpoint ~timeout_sec:5.
+      (Turn.create ~config ~meta ~image:(Ok "fixture:image") ~network_mode:meta.network_mode ()) in
+  (* Two turns: neither replaces the guest, so nothing repeats. *)
+  List.iter (fun turn ->
+    (match attempt () with
+     | Error detail ->
+       Alcotest.(check bool) (turn ^ " turn names the relay refusal") true
+         (Astring.String.is_infix ~affix:refusal detail)
+     | Ok _ -> Alcotest.fail "a relay-1 shim was given an endpoint");
+    Alcotest.(check (list string)) (turn ^ " turn stops, deletes or boots nothing") []
+      (effects (calls ()));
+    Alcotest.(check bool) (turn ^ " turn leaves the guest in place") true
+      (Sys.file_exists guest_file))
+    [ "first"; "second" ];
+  install current_shim_fixture;
+  ignore (attempt ());
+  Alcotest.(check bool) "a current shim lets the replacement stop the old guest" true
+    (List.mem ("stop " ^ guest) (calls ()))
+;;
+
+(* #52968, the process-bound runtimes. A boot on Nerdctl_kata or
+   Microsandbox removes the guest it finds before provisioning reads the
+   shim, so the shim is checked first: a stopped guest and a running one
+   this process cannot adopt both stay where they are while the mounted shim
+   declares relay 1. With the shim built from this source mounted, the same
+   start goes on to stop the old guest. The Apple runtime is pinned by
+   [test_a_stale_relay_shim_refuses_the_replacement]. *)
+let test_a_stale_relay_shim_removes_no_process_bound_guest () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let module Ready = Masc.Keeper_microvm_shim_readiness in
+  let case backend state =
+    let label = Printf.sprintf "%s %s" (Backend.to_string backend) state in
+    let context = Eio_context.snapshot_state () in
+    let dir = temp_dir "stale-relay-process-bound-" in
+    let bin = Filename.concat dir "bin" in
+    let base = Filename.concat dir "base" in
+    List.iter (fun path -> Unix.mkdir path 0o755) [ bin; base ];
+    let log = Filename.concat dir "calls" in
+    let keeper_name = "stale-relay-bound" in
+    let config = Masc.Workspace.default_config base in
+    let meta =
+      { (microvm_meta ~name:keeper_name) with
+        microvm_backend = Some backend; network_mode = Profile.Network_none } in
+    let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name
+        ~network_mode:meta.network_mode in
+    let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
+    Fs_compat.mkdir_p shim_dir;
+    let shim = Filename.concat shim_dir M.shim_binary_name in
+    let install contents =
+      Out_channel.with_open_bin shim (fun out -> output_string out contents);
+      Unix.chmod shim 0o755;
+      Out_channel.with_open_bin (Filename.concat shim_dir M.shim_sidecar_name) (fun out ->
+        output_string out
+          (Agent_core_sha256.(to_hex (digest_string contents)) ^ "  masc-exec-shim-linux-arm64\n")) in
+    install "#!/bin/sh\nexit 0\n# MASC_EXEC_SHIM_RELAY_VERSION=1;\n";
+    (* nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+       answers a literal; msb inspect NAME --format json answers a status. *)
+    let script = match backend with
+      | Backend.Nerdctl_kata ->
+        Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  inspect) if [ "$6" = %s ]; then printf '%%s\n' %s; exit 0; fi; exit 1 ;;
+  ps) exit 0 ;;
+  *) exit 2 ;;
+esac
+|} (Filename.quote log) (Filename.quote guest)
+          (Filename.quote (if String.equal state "running" then "true" else "false"))
+      | Backend.Microsandbox ->
+        Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$1" in
+  inspect) if [ "$2" = %s ]; then printf '{"status":"%%s"}\n' %s; exit 0; fi; exit 1 ;;
+  list) printf '[]\n'; exit 0 ;;
+  *) exit 2 ;;
+esac
+|} (Filename.quote log) (Filename.quote guest) (Filename.quote state)
+      | Backend.Apple_container -> Alcotest.fail "the Apple runtime has its own test" in
+    let cli = Filename.concat bin (Backend.cli_name backend) in
+    Out_channel.with_open_bin cli (fun out -> output_string out script);
+    Unix.chmod cli 0o755;
+    let previous_path = Sys.getenv "PATH" in
+    Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+    Fun.protect ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      remove_snapshot_fixture dir)
+    @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.set_switch sw;
+    let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+    (match Ready.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Ready.error_message error));
+    let calls () =
+      if Sys.file_exists log
+      then In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n'
+      else [] in
+    let effects lines = List.filter (fun line ->
+      List.exists (fun prefix -> String.starts_with ~prefix line)
+        [ "stop "; "rm "; "remove "; "run "; "volume "; "image "; "network " ])
+      lines in
+    let refusal = Ready.error_message
+        (Ready.Verification_failed
+           (Ready.Shim_relay_version_mismatch
+              { installed = M.Relay_version 1; required = Exec_ssh_protocol.Relay.version })) in
+    let attempt () =
+      Turn.microvm_remote_endpoint ~timeout_sec:5.
+        (Turn.create ~config ~meta ~image:(Ok "fixture:image") ~network_mode:meta.network_mode ()) in
+    (match attempt () with
+     | Error detail ->
+       Alcotest.(check bool) (label ^ ": the start names the relay refusal") true
+         (Astring.String.is_infix ~affix:refusal detail)
+     | Ok _ -> Alcotest.fail (label ^ ": a relay-1 shim was given an endpoint"));
+    Alcotest.(check (list string)) (label ^ ": nothing is stopped, removed or booted") []
+      (effects (calls ()));
+    install current_shim_fixture;
+    ignore (attempt ());
+    Alcotest.(check bool) (label ^ ": a current shim lets the boot stop the old guest") true
+      (List.mem ("stop " ^ guest) (calls ())) in
+  List.iter (fun backend -> List.iter (case backend) [ "stopped"; "running" ])
+    [ Backend.Nerdctl_kata; Backend.Microsandbox ]
 ;;
 
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
@@ -4451,21 +4668,22 @@ let test_the_shim_sidecar_decides_the_boot () =
   let binary = Filename.concat dir M.shim_binary_name in
   let sidecar = Filename.concat dir M.shim_sidecar_name in
   let write path content = ignore (Fs_compat.save_file_atomic path content) in
-  write binary "#!/bin/sh\necho shim\n";
-  let digest =
-    Agent_core_sha256.(to_hex (digest_string "#!/bin/sh\necho shim\n"))
-  in
-  (match M.verify_shim_sidecar ~dir with
-   | Ok M.Shim_unverified -> ()
-   | Ok (M.Shim_verified _) -> Alcotest.fail "verified without a sidecar"
+  let shim = "#!/bin/sh\necho shim\n# " ^ Exec_ssh_protocol.Relay.version_declaration ^ "\n" in
+  write binary shim;
+  let digest = Agent_core_sha256.(to_hex (digest_string shim)) in
+  (match M.inspect_shim ~dir with
+   | Ok { M.provenance = M.Shim_unverified; relay = M.Relay_version version } ->
+     Alcotest.(check int) "the declared relay" Exec_ssh_protocol.Relay.version version
+   | Ok _ -> Alcotest.fail "a hand-built current shim read as something else"
    | Error e -> Alcotest.fail e);
   write sidecar (digest ^ "  masc-exec-shim-linux-arm64\n");
-  (match M.verify_shim_sidecar ~dir with
-   | Ok (M.Shim_verified { sha256 }) -> Alcotest.(check string) "the digest" digest sha256
-   | Ok M.Shim_unverified -> Alcotest.fail "a matching sidecar read as absent"
+  (match M.inspect_shim ~dir with
+   | Ok { M.provenance = M.Shim_verified { sha256 }; relay = _ } ->
+     Alcotest.(check string) "the digest" digest sha256
+   | Ok { M.provenance = M.Shim_unverified; _ } -> Alcotest.fail "a matching sidecar read as absent"
    | Error e -> Alcotest.fail e);
   write binary "#!/bin/sh\necho another shim\n";
-  (match M.verify_shim_sidecar ~dir with
+  (match M.inspect_shim ~dir with
    | Error e ->
      Alcotest.(check bool) "named mismatch" true
        (String_util.contains_substring e "microvm_shim_hash_mismatch");
@@ -4473,11 +4691,51 @@ let test_the_shim_sidecar_decides_the_boot () =
        (String_util.contains_substring e digest)
    | Ok _ -> Alcotest.fail "a binary that disagrees with its sidecar passed");
   write sidecar "not a digest\n";
-  match M.verify_shim_sidecar ~dir with
+  match M.inspect_shim ~dir with
   | Error e ->
     Alcotest.(check bool) "named invalid sidecar" true
       (String_util.contains_substring e "microvm_shim_sidecar_invalid")
   | Ok _ -> Alcotest.fail "a sidecar without a digest passed"
+;;
+
+(* #52968: the relay version a guest will speak is read from the mounted
+   shim's own bytes. The literal the shim's source carries parses to the
+   host's version, so a shim built from this source is admitted; a shim built
+   before the declaration, or one declaring another version, is not. *)
+let test_the_shim_declares_its_relay_version () =
+  let relay = M.relay_declaration_of_bytes in
+  let declare version = Printf.sprintf "MASC_EXEC_SHIM_RELAY_VERSION=%d;" version in
+  (match relay Exec_ssh_protocol.Relay.version_declaration with
+   | M.Relay_version version ->
+     Alcotest.(check int) "the literal names Relay.version" Exec_ssh_protocol.Relay.version version
+   | M.No_relay_version | M.Several_relay_versions _ ->
+     Alcotest.fail "the source's own declaration does not parse");
+  let in_binary text = "\127ELF\002\001\000" ^ text ^ "\000\000tail" in
+  (match relay (in_binary (declare 1)) with
+   | M.Relay_version 1 -> ()
+   | M.Relay_version _ | M.No_relay_version | M.Several_relay_versions _ ->
+     Alcotest.fail "a relay-1 shim was not read as relay 1");
+  (match relay (in_binary "a relay-1 shim from before the declaration") with
+   | M.No_relay_version -> ()
+   | M.Relay_version _ | M.Several_relay_versions _ ->
+     Alcotest.fail "a shim without a declaration was given a version");
+  (match relay (in_binary (declare 2 ^ "\000" ^ declare 2)) with
+   | M.Relay_version 2 -> ()
+   | M.Relay_version _ | M.No_relay_version | M.Several_relay_versions _ ->
+     Alcotest.fail "a repeated declaration is still one version");
+  (match relay (in_binary (declare 1 ^ "\000" ^ declare 2)) with
+   | M.Several_relay_versions [ 1; 2 ] -> ()
+   | M.Several_relay_versions _ | M.Relay_version _ | M.No_relay_version ->
+     Alcotest.fail "two distinct declarations were not both reported");
+  (* The prefix alone, digits without the terminator, and more than four
+     digits are not declarations. *)
+  List.iter (fun text ->
+    match relay (in_binary text) with
+    | M.No_relay_version -> ()
+    | M.Relay_version _ | M.Several_relay_versions _ ->
+      Alcotest.failf "%S was read as a declaration" text)
+    [ "MASC_EXEC_SHIM_RELAY_VERSION="; "MASC_EXEC_SHIM_RELAY_VERSION=2";
+      "MASC_EXEC_SHIM_RELAY_VERSION=;"; "MASC_EXEC_SHIM_RELAY_VERSION=12345;" ]
 ;;
 
 let test_shim_travels_read_only_with_its_config () =
@@ -5901,6 +6159,12 @@ let () =
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick
             test_the_shim_sidecar_decides_the_boot
+        ; Alcotest.test_case "the shim declares its relay version" `Quick
+            test_the_shim_declares_its_relay_version
+        ; Alcotest.test_case "a stale relay shim refuses the replacement" `Quick
+            test_a_stale_relay_shim_refuses_the_replacement
+        ; Alcotest.test_case "a stale relay shim removes no process-bound guest" `Quick
+            test_a_stale_relay_shim_removes_no_process_bound_guest
         ; Alcotest.test_case "the box the TOML names is the box the shim is asked for" `Quick
             test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for
         ; Alcotest.test_case "keeper work root is created as root with a mode" `Quick

@@ -1210,7 +1210,7 @@ let test_contract_done_submits_for_verification () =
                 ]));
        match Masc.Workspace.get_tasks_raw config with
        | [ { task_status = Masc_domain.AwaitingVerification _;
-             handoff_context = Some handoff; _ } ] ->
+             handoff_context = Some (Masc_domain.Handoff_decoded handoff); _ } ] ->
          check string "result preserved as summary"
            "implementation complete" handoff.summary;
          check (list string) "evidence preserved"
@@ -1340,7 +1340,7 @@ let test_default_done_is_terminal () =
        match Masc.Workspace.get_tasks_raw config with
        | [ { task_status =
                Masc_domain.AwaitingVerification { verification_id; _ }
-           ; handoff_context = Some handoff
+           ; handoff_context = Some (Masc_domain.Handoff_decoded handoff)
            ; _
            } ] ->
          check string "result preserved as summary"
@@ -1431,7 +1431,7 @@ let check_done_notes ~notes_fields ~expected_notes () =
           fail ("notes passthrough completion failed: " ^ execution.raw_output));
        (match Masc.Workspace.get_tasks_raw config with
         | [ { task_status = Masc_domain.AwaitingVerification _;
-              handoff_context = Some handoff;
+              handoff_context = Some (Masc_domain.Handoff_decoded handoff);
               _ } ] ->
           check string "result still preserved as summary"
             "implementation complete" handoff.summary
@@ -1727,8 +1727,9 @@ let test_release_sources_reach_the_next_owner () =
        check bool "valid handoff is accepted" true
          (accepted (release (`List (List.map (fun value -> `String value) refs))));
        let prior = match (task ()).handoff_context with
-         | Some handoff -> handoff
-         | None -> fail "release must persist its handoff"
+         | Some (Masc_domain.Handoff_decoded handoff) -> handoff
+         | Some (Masc_domain.Handoff_unreadable _) | None ->
+           fail "release must persist its handoff"
        in
        check (list string) "release stores the exact sources" refs prior.evidence_refs;
        check (option string) "outgoing author is recorded" (Some owner.name) prior.updated_by;
@@ -1739,8 +1740,9 @@ let test_release_sources_reach_the_next_owner () =
           | Masc_domain.InProgress { assignee; _ } -> assignee = successor.name
           | _ -> false);
        let after = match (task ()).handoff_context with
-         | Some handoff -> handoff
-         | None -> fail "claim and auto-start must preserve the handoff"
+         | Some (Masc_domain.Handoff_decoded handoff) -> handoff
+         | Some (Masc_domain.Handoff_unreadable _) | None ->
+           fail "claim and auto-start must preserve the handoff"
        in
        check bool "same handoff survives ownership and auto-start" true (prior = after);
        let listing = call successor "keeper_tasks_list"

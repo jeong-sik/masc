@@ -3949,7 +3949,9 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
     ]
   in
   (match
-     Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref blocks
+     Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref
+       ~execution_capture:(Runtime_agent.execution_capture config) blocks
+     |> Result.map_error Runtime_agent.run_failure_error
    with
    | Ok result -> (
        match result.Runtime_agent.stop_reason with

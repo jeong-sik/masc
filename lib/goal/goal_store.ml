@@ -706,21 +706,16 @@ let append_audit_event config json =
     (fun () ->
   let path = goal_events_path config in
   try
-    let expected = try (Unix.stat path).Unix.st_size with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> 0 in
-    (* The transaction carries the new end offset on success and the append
-       error on failure; the offset mismatch is a failure, the same reading
-       world_constitution_store gives it. The append did not commit on a
-       mismatch, so the retry cannot write the event twice. *)
-    let rec append expected_end_offset =
-      match Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
-          path ~expected_end_offset (Yojson.Safe.to_string json ^ "\n") with
-      | Fs_compat.Private_file_failed (Fs_compat.End_offset_mismatch {actual;_})
-      | Fs_compat.Private_file_failed_with_cleanup_failure
-          { error = Fs_compat.End_offset_mismatch {actual;_}; _ } -> append actual
-      | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
-    match append expected with
-    | Fs_compat.Private_file_succeeded _ ->
+    (* The rows end after the last newline. Bytes after it are an append a
+       crash cut short, never an event: this append cuts them under the same
+       path mutex and exclusive lock and writes after the last complete row.
+       It carries no end offset because the event is unconditional; the
+       ledger's order is the lock's order. *)
+    let outcome =
+      Fs_compat.append_private_jsonl_durable_locked_result
+        path (Yojson.Safe.to_string json ^ "\n") in
+    match outcome with
+    | Fs_compat.Private_file_succeeded () ->
         projection_source_changed config;
         Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
@@ -757,11 +752,13 @@ let flush_pending_events_locked config =
             ~finally:(fun () ->
               if !append_requested then
                 Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
-            (fun () -> Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+            (* [decide] receives the complete rows only. Bytes after the last
+               newline are an append a crash cut short, never an event; a
+               suffix written here goes in after the update cuts them. *)
+            (fun () -> Fs_compat.update_private_jsonl_after_cursor_durable_locked_result path
+               ~after:(None : (Fs_compat.Private_jsonl_cursor.t * unit) option)
+               (fun { Fs_compat.rows = existing; _ } ->
             let inspect () =
-              if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then
-                Error "goal event ledger has an incomplete tail"
-              else
                 let rec decode acc malformed = function
                   | [] ->
                       if malformed > 0 then
@@ -775,8 +772,7 @@ let flush_pending_events_locked config =
                        | json -> decode (json :: acc) malformed rest
                        | exception Yojson.Json_error _ ->
                            (* Complete historical rows remain byte-for-byte in
-                              the ledger; they cannot witness event identity.
-                              The tail check above still rejects torn writes. *)
+                              the ledger; they cannot witness event identity. *)
                            decode acc (malformed + 1) rest) in
                 let* rows = decode [] 0 (String.split_on_char '\n' existing) in
                 let rec select acc = function

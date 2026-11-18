@@ -12779,6 +12779,26 @@ let test_task_history_decodes_live_rows () =
         second.th_label;
       Alcotest.(check (option string)) "no actor" None second.th_actor
 
+(* #38219: a release that replaced a stored note the server could not read
+   shows that note's refusal on the history row. *)
+let test_task_history_names_a_replaced_unreadable_handoff () =
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"task_transition","agent":"alpha","task":"task-770",
+          "from_status":"in_progress","to_status":"todo",
+          "ts":"2026-11-18T09:25:14Z","action":"release",
+          "handoff_context":{"summary":"new note"},
+          "replaced_unreadable_handoff":{"raw":{"summary":7},
+            "reason":"summary is not a string"}}]|}
+  in
+  match Masc.Tui_decode.decode_task_history json with
+  | Error err -> Alcotest.fail err
+  | Ok [ row ] ->
+      Alcotest.(check (option string)) "note names the replaced note"
+        (Some "new note (replaced unreadable handoff: summary is not a string)")
+        row.Masc.Tui_decode.th_note
+  | Ok rows -> Alcotest.failf "expected one row, got %d" (List.length rows)
+
 let test_task_history_rejects_a_non_list () =
   match
     Masc.Tui_decode.decode_task_history
@@ -13963,6 +13983,8 @@ let () =
     ( "decode_task_history",
       [ Alcotest.test_case "decodes live rows" `Quick
           test_task_history_decodes_live_rows
+      ; Alcotest.test_case "names a replaced unreadable handoff" `Quick
+          test_task_history_names_a_replaced_unreadable_handoff
       ; Alcotest.test_case "rejects a non-list" `Quick
           test_task_history_rejects_a_non_list
       ] );

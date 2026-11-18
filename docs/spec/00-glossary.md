@@ -4321,7 +4321,7 @@ status: reference
   [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
 **Committed Revision Lineage (확정된 리비전 계보)**
-: Memory OS에서 지워진 기억의 Memory ID와 그 스냅샷 안의 대상을 잇는 선언된 리비전 링크(`Keeper_memory_os_types.revision`의 `superseded`·`superseded_by` 쌍). Librarian 정리(`revisions`)와 명시적 `supersedes` 쓰기는 스냅샷 교체와 같은 복구 가능한 제거 트랜잭션에 이 링크를 `revision_links`로 기록한다. 저널은 실제로 내용이 바뀐 커밋에만 링크를 싣고, 변화 없는 재관측은 리비전 전이를 만들지 못한다. 미완성 저널 영수증은 쓰기자가 복구할 때까지 증거를 읽을 수 없는 상태다. 빠진 링크 메타데이터는 추론된 관계가 아니라 기록되지 않은 것이다. 별도 `Revised` 이벤트 사이드카는 관측 표면일 뿐 그 존재만으로 커밋 증명이 되지 않는다. 이 링크는 선언된 구조적 계보일 뿐이며, 과거 입력이 후속 기억에도 그대로 적용됨을 뜻하지 않는다 — 후속 기억을 답으로 쓰려면 별도의 범위 판정(→ Demand Retrieval across Revisions)이 필요하다.
+: Memory OS에서 지워진 기억의 Memory ID와 그 스냅샷 안의 대상을 잇는 선언된 리비전 링크(`Keeper_memory_os_types.revision`의 `superseded`·`superseded_by` 쌍). Librarian 정리(`revisions`)와 명시적 `supersedes` 쓰기는 스냅샷 교체와 같은 복구 가능한 제거 트랜잭션에 이 링크를 `revision_links`로 기록한다. 저널은 실제로 내용이 바뀐 커밋에만 링크를 싣고, 변화 없는 재관측은 리비전 전이를 만들지 못한다. 미완성 저널 영수증은 쓰기자가 복구할 때까지 증거를 읽을 수 없는 상태다. 빠진 링크 메타데이터는 추론된 관계가 아니라 기록되지 않은 것이다. 대시보드의 `revised_from`과 흡수 기억 연쇄 추적도 이 저널 링크를 읽는다(#37433). 이 링크는 선언된 구조적 계보일 뿐이며, 과거 입력이 후속 기억에도 그대로 적용됨을 뜻하지 않는다 — 후속 기억을 답으로 쓰려면 별도의 범위 판정(→ Demand Retrieval across Revisions)이 필요하다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
   [12-memory-systems](12-memory-systems.md)
 
@@ -4602,19 +4602,19 @@ status: reference
     대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고 지워진 대상은
     되살아나지 않으며, 회차 도중 없어진 기억을 이어붙이는(supersedes 또는 absorbs) 새
     claim은 저장하지 않고 실행 기록(`run` 출력)에 `claims_not_applied`로 남긴다.
-    원장의 `Revised` 이벤트는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
+    저널의 리비전 링크는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
     기억은 Keeper가 직접 준 대신하는 기록 하나만 보존하며, 대신하는 기록 중 어느 것도 스냅숏에
     남지 않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
-    커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
-    원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
+    커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유와
+    리비전 링크를 남긴다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
     보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
     대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 넷으로
     나눈다. (1) 이 Keeper가 직접 적었고 Librarian이 이미 지운 Fact면, 새 claim을 보통
     쓰기로 적고 영수증 `supersedes_already_removed`에 지운 커밋(revision·시각·이유)을
-    적는다. 이 쓰기가 대체한 것이 아니므로 `Revised` 이벤트는 남기지 않는다. (2) Keeper
+    적는다. 이 쓰기가 대체한 것이 아니므로 리비전 링크는 남기지 않는다. (2) Keeper
     자신이나 운영자가 명시적으로 지운(`explicit_write`·`explicit_retract`) id는
     `supersedes_not_current`로 거절하되 `supersedes_removed`로 그 커밋을 알려 준다.
     사유가 `superseded_by <id>`면 그 id가 대신하는 기록이다. (3) 지운 기록이 없는 id
@@ -4654,20 +4654,22 @@ status: reference
   → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
 
 **Memory Event**
-: Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
-  `keeper_memory_search` 결과에 나온 것, `revised`는 Librarian의 `supersedes` 또는
-  Keeper의 `keeper_memory_write ?supersedes`로 고쳐 써진 것이다(#38122).
-  `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
-  철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
+: Fact에 일어난 일의 기록. 사이드카(`<keeper>.memory-events.jsonl`)에는
+  `retrieved`(`keeper_memory_search`·`keeper_memory_select` 결과에 나온 것)만 쓴다.
+  고쳐 써진 것(Librarian의 `supersedes`, Keeper의 `keeper_memory_write ?supersedes`)과
+  철회된 것(`keeper_memory_retract`, 운영자 정리)은 그 커밋의 저널 줄이 기록이다
+  (`revision_links`, `explicit_retract` 줄의 `dropped`). 커밋 뒤 따로 쓰던 사이드카
+  `revised`·`retracted` 줄은 커밋과 그 쓰기 사이의 취소나 프로세스 종료로 빠질 수 있어
+  없앴다(#37433). 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
   - **교체된 흡수 기억 연쇄 추적**: `keeper_memory_search`는 흡수된(`absorbs`) 기억의
     대상 claim이 이후 `keeper_memory_write ~supersedes`로 대체된 경우, 버려진(dropped)
-    claim에서 멈춰 `into_current=false`로 보고하지 않고 원장의 `Revised` 이벤트(`superseded_by`)를
+    claim에서 멈춰 `into_current=false`로 보고하지 않고 저널의 리비전 링크(`superseded_by`)를
     따라 현재 살아 있는 claim까지 연쇄 추적하여 `into_current=true`로 연결한다.
-    매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
-    해결하고, 검색어에 답하는 행의 체인 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
-    이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
+    매 검색마다 저널 전체를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
+    해결하고, 검색어에 답하는 행의 체인 끝이 non-current일 때만 저널을 읽는다. 저널을
+    읽지 못하면 `lineage_read_failed`로 실패를 알린다(#38543·#38552·#37433).
   - **Keeper 삭제 시 사이드카 정리**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
     사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)된다.
     이 파일은 쓸 때마다 경로를 새로 열어(`Fs_compat.append_private_jsonl_durable_locked_result`)

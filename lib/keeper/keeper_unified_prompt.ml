@@ -479,7 +479,16 @@ let format_current_task_with_heading ?skill_surfaces ~heading
        ]
      ^ "\n");
   (match task.Masc_domain.handoff_context with
-   | Some h ->
+   | Some (Masc_domain.Handoff_unreadable { reason; raw = _ }) ->
+     (* The stored note exists but cannot be read; saying so keeps the model
+        from reading the task as one nobody left a note on (#38219). *)
+     Buffer.add_string
+       buf
+       (render_fragment
+          Prompt_names.keeper_world_current_task_handoff_unreadable
+          [ "reason", reason ]
+        ^ "\n")
+   | Some (Masc_domain.Handoff_decoded h) ->
        (* RFC-0365: a handoff can now come from a previous owner, so the note
           must say whose it is. Without this the model reads another agent's
           first-person account ("I already verified the spec") as its own

@@ -173,10 +173,11 @@ let stopped_operation ~config ~stage operation =
 let check_receipt config operation id =
   check_todo config id;
   match (task config id).handoff_context with
-  | Some context ->
+  | Some (Masc_domain.Handoff_decoded context) ->
     check bool "release belongs to this operation" true
       (List.mem (receipt_ref operation) context.evidence_refs)
-  | None -> fail "released Task lost its durable receipt"
+  | Some (Masc_domain.Handoff_unreadable _) | None ->
+    fail "released Task lost its durable receipt"
 ;;
 
 let test_typed_cas_and_authoritative_reobservation () = with_workspace (fun config ->
@@ -248,6 +249,102 @@ let test_original_release_receipt_is_not_replayed () = with_workspace (fun confi
   check int "remaining progress is durably recorded" (before + 1) stopped.expected_backlog_version)
 ;;
 
+(* #38219, #52914 review: a stored note the server cannot read. *)
+let unreadable_raw =
+  `Assoc [ "summary", `Int 7; "updated_by", `String "earlier-owner" ]
+;;
+
+let store_unreadable_note config id =
+  let stored = Masc_domain.stored_handoff_context_of_yojson unreadable_raw in
+  (match stored with
+   | Masc_domain.Handoff_unreadable _ -> ()
+   | Masc_domain.Handoff_decoded _ -> fail "fixture note must be unreadable");
+  let backlog = read_backlog config in
+  Workspace.write_backlog config
+    { backlog with
+      tasks =
+        List.map (fun (candidate : Masc_domain.task) ->
+          if String.equal candidate.id id
+          then { candidate with handoff_context = Some stored }
+          else candidate) backlog.tasks }
+;;
+
+(* The task_transition rows the transition log wrote for [id]. *)
+let transition_rows config id =
+  let rec files path =
+    if Sys.is_directory path
+    then
+      Array.to_list (Sys.readdir path)
+      |> List.concat_map (fun name -> files (Filename.concat path name))
+    else [ path ]
+  in
+  let root = Filename.concat (Workspace.masc_dir config) "events" in
+  let paths = if Sys.file_exists root then files root else [] in
+  let member = Yojson.Safe.Util.member in
+  List.concat_map (fun path ->
+    In_channel.with_open_text path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun row ->
+      Yojson.Safe.equal (member "type" row) (`String "task_transition")
+      && Yojson.Safe.equal (member "task" row) (`String id))) paths
+;;
+
+let check_replaced_note_recorded config id =
+  let recorded =
+    List.map (Yojson.Safe.Util.member "replaced_unreadable_handoff")
+      (transition_rows config id)
+    |> List.filter (fun value -> not (Yojson.Safe.equal value `Null))
+  in
+  match recorded with
+  | [ replaced ] ->
+    check bool "the transition row keeps the raw note" true
+      (Yojson.Safe.equal unreadable_raw (Yojson.Safe.Util.member "raw" replaced));
+    check bool "and the decoder refusal" true
+      (match Yojson.Safe.Util.member "reason" replaced with
+       | `String reason -> String.trim reason <> ""
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false)
+  | [] -> fail "no transition row recorded the replaced unreadable note"
+  | _ :: _ :: _ -> fail "the replaced note was recorded more than once"
+;;
+
+(* The shutdown release over an unreadable note used to refuse, block at
+   Task_settlement, and refuse again on every retry. It now authors its own
+   note like an agent release, and the replaced value is on the log row. *)
+let test_unreadable_note_does_not_block_shutdown () = with_workspace (fun config ->
+  let operation, first, second = operation config in
+  store_unreadable_note config first;
+  ignore (stopped_operation ~config ~stage:Pending_confirm_cleanup operation);
+  check_receipt config operation first;
+  check_receipt config operation second;
+  check_replaced_note_recorded config first;
+  check int "a readable note replaces nothing" 0
+    (List.length
+       (List.filter (fun row ->
+          not (Yojson.Safe.equal
+                 (Yojson.Safe.Util.member "replaced_unreadable_handoff" row) `Null))
+          (transition_rows config second))))
+;;
+
+(* An agent release goes through the same transition executor, so it records
+   the replaced note the same way. *)
+let test_agent_release_records_replaced_unreadable_note () = with_workspace (fun config ->
+  let id = add_task config "agent-held Task" in
+  claim config "alpha" id;
+  store_unreadable_note config id;
+  ignore (require_task (Workspace.release_task_r config ~agent_name:"alpha" ~task_id:id
+    ~handoff_context:(handoff "agent-release") ()));
+  check_todo config id;
+  (match (task config id).handoff_context with
+   | Some (Masc_domain.Handoff_decoded context) ->
+     check string "the agent's own note is stored" "retain this Task's handoff"
+       context.summary
+   | Some (Masc_domain.Handoff_unreadable _) | None ->
+     fail "the release did not store its own note");
+  check_replaced_note_recorded config id)
+;;
+
 let () = run "keeper_shutdown_task_settlement"
   ["Task settlement", [
     test_case "typed CAS is pre-effect and reobservation keeps unrelated ownership" `Quick
@@ -255,4 +352,8 @@ let () = run "keeper_shutdown_task_settlement"
     test_case "a changed owner is never released" `Quick test_changed_owner_is_not_released;
     test_case "new active work is not absorbed" `Quick test_new_active_task_is_not_absorbed;
     test_case "the original release receipt is never replayed" `Quick
-      test_original_release_receipt_is_not_replayed]]
+      test_original_release_receipt_is_not_replayed;
+    test_case "an unreadable note does not block the shutdown release" `Quick
+      test_unreadable_note_does_not_block_shutdown;
+    test_case "an agent release records the unreadable note it replaced" `Quick
+      test_agent_release_records_replaced_unreadable_note]]

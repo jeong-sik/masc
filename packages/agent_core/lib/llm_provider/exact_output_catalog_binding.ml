@@ -371,6 +371,7 @@ let%test "exact functional capability projection has a stable golden" =
     ; "audio=0"
     ; "video=0"
     ; "document=1"
+    ; "function_response_parts=0"
     ; "modality_priority=visual_first"
     ; "system_prompt=1"
     ; "assistant_prefill=1"

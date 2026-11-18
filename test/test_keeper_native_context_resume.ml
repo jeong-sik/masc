@@ -115,10 +115,12 @@ let run_phase ~child root =
     let result = match Native.prepared_input prepared with
       | Native.New_input {blocks; metadata} ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ?agent_core_checkpoint:checkpoint ~input_metadata:metadata blocks
+          ?agent_core_checkpoint:checkpoint ~input_metadata:metadata
+          ~execution_capture:(Runtime_agent.execution_capture config) blocks
       | Native.Continue_from_checkpoint ->
         Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ~checkpoint:(Option.get checkpoint) () in
+          ~checkpoint:(Option.get checkpoint) ~execution_capture:(Runtime_agent.execution_capture config) () in
+    let result = Result.map_error Runtime_agent.run_failure_error result in
     let result = match result with
       | Ok result -> result
       | Error error -> fail (Agent_core.Error.to_string error) in
@@ -257,7 +259,9 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
           ~agent_ref () |> (function Ok prepared -> prepared
             | Error detail -> failf "prepare owned input call failed: %s" detail) in
       Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
-        ~agent_ref ?agent_core_checkpoint:(Native.prepared_checkpoint prepared) blocks in
+        ~agent_ref ?agent_core_checkpoint:(Native.prepared_checkpoint prepared)
+        ~execution_capture:(Runtime_agent.execution_capture (Native.config prepared)) blocks
+      |> Result.map_error Runtime_agent.run_failure_error in
     let first = dispatch None [Agent_core.Types.Text goal] |> require "first input pause" in
     let checkpoint = Option.get first.checkpoint in
     let pending = Option.get checkpoint.pending_input in
@@ -385,7 +389,8 @@ let test_retired_input_history_cut () =
         ~input:(Native.New_input {blocks=[Agent_core.Types.Text goal];metadata=[]}) ~agent_ref ()
       |> require "first native preparation" in
     Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
-      ~agent_ref [Agent_core.Types.Text goal] |> require "first provider dispatch" |> ignore;
+      ~agent_ref ~execution_capture:(Runtime_agent.execution_capture (Native.config prepared)) [Agent_core.Types.Text goal]
+      |> Result.map_error Runtime_agent.run_failure_error |> require "first provider dispatch" |> ignore;
     publish_input:=false;
     let previous=match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
         |> require "retired native state" with
@@ -416,7 +421,9 @@ let test_retired_input_history_cut () =
         ~input:Native.Continue_from_checkpoint ~agent_ref ~retired_history_cut:proof ()
       |> require "verified cut preparation" in
     Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
-      ~agent_ref ~checkpoint:(Option.get (Native.prepared_checkpoint prepared)) ()
+      ~agent_ref ~checkpoint:(Option.get (Native.prepared_checkpoint prepared))
+      ~execution_capture:(Runtime_agent.execution_capture (Native.config prepared)) ()
+      |> Result.map_error Runtime_agent.run_failure_error
       |> require "dispatch after exact cut" |> ignore;
     let owned=Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id:meta.runtime.trace_id
       |> require "cut input owner" in

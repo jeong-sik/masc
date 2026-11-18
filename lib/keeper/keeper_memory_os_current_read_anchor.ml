@@ -451,6 +451,75 @@ let read_dropped ~keepers_dir ~keeper_id ~current_facts =
       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
 ;;
 
+type commit_lineage =
+  { revisions : revision list
+  ; retractions : string list
+  }
+
+(* Revisions and explicit retractions are read from the committed journal
+   rows, which the commit itself writes (or recovers from its publication
+   receipt), so no step after the snapshot replace can leave a commit without
+   its lineage (#37433). A commit cut off after its replace leaves a prepared
+   publication whose journal row is not written yet; the recovery every public
+   read runs writes it first. The scan runs newest first; prepending each row
+   keeps the result in journal order. *)
+let read_commit_lineage ~keepers_dir ~keeper_id =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let* () = recover_publication ~keepers_dir ~keeper_id in
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    let* receipt = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+    let* () =
+      match receipt with
+      | None -> Ok ()
+      | Some receipt ->
+        Error
+          (Printf.sprintf
+             "memory lineage journal finalization pending keeper=%s target_revision=%d; a writer must reconcile the preserved removal before lineage can be read"
+             keeper_id
+             receipt.target_revision)
+    in
+    let revisions = ref [] in
+    let retractions = ref [] in
+    let record_row ~fields ~(source : source) ~dropped =
+      match Journal_codec.journal_revision_links fields with
+      | Error detail -> Some detail
+      | Ok links ->
+        (match links with
+         | None -> ()
+         | Some links -> revisions := links @ !revisions);
+        (match source.kind, dropped with
+         | Explicit_retract, Some statements ->
+           retractions :=
+             List.map
+               (fun (statement : dropped_statement) -> statement.memory_id)
+               statements
+             @ !retractions
+         | Explicit_retract, None | (Librarian | Explicit_write), (Some _ | None) -> ());
+        None
+    in
+    let visit = function
+      | Dated_jsonl.Malformed_json { detail; _ } -> Some detail
+      | Dated_jsonl.Parsed json ->
+        (match Journal_codec.journal_entry_of_json json with
+         | Error detail -> Some detail
+         | Ok (Journal_failed _ | Journal_quarantined _) -> None
+         | Ok (Journal_committed { source; dropped; _ }) ->
+           (match json with
+            | `Assoc fields -> record_row ~fields ~source ~dropped
+            | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+              Some "memory journal committed row is not an object"))
+    in
+    match Unix.lstat path with
+    | _ ->
+      (match Dated_jsonl.find_latest_entry_in_file_result path visit with
+       | Ok None -> Ok { revisions = !revisions; retractions = !retractions }
+       | Ok (Some detail) -> Error detail
+       | Error error -> Error (Dated_jsonl.read_error_to_string error))
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok { revisions = []; retractions = [] }
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+;;
+
 type retirement_context =
   | Retirement_source_changed
   | Retirement_source_unavailable of string

@@ -129,6 +129,17 @@ class LayoutTest(unittest.TestCase):
         self.assertIs(layout.kind, Kind.CARDS)
         self.assertEqual(layout.card_rows, (1,))
 
+    def test_a_name_that_fills_the_edge_up_to_its_corner_still_makes_an_edge(self) -> None:
+        # An edge with no count and a name cut to the room it has leaves no
+        # rule before the closing glyph: card.ml draws `╭─ <name> ╮` and the
+        # squashed `╶─ <name> ╴`. A focused list's edge writes no count.
+        lines = ('╭─ 조치가 필요한 이유 ╮', '│ 대기 없음           │', '╰────────────────────╯',
+                 '╶─ m 실행 여력 ◌ ╴')
+        layout = layout_of(screen(lines))
+        self.assertEqual([(edge.row, edge.shape) for edge in layout.edges],
+                         [(0, Shape.TOP), (2, Shape.BOTTOM), (3, Shape.SQUASHED)])
+        self.assertIs(layout_of(screen(lines[3:])).kind, Kind.CARDS)
+
     def test_an_opening_before_a_closing_starts_the_edge_over(self) -> None:
         # The first opening has no closing of its own, so the edge runs from
         # the second opening (cell 5) to the closing (cell 11), not from cell 0.

@@ -6,11 +6,13 @@ A capture keeps every cell, so a key that only moves the selection highlight
 still changes rows.
 
 The layout kind is read from box-drawing glyphs, never from words.
-bin/masc_tui_card.ml draws a full card's top edge as `╭─ … ─╮` and its bottom
-as `╰─ … ─╯`, and a squashed card as the one row `╶─ … ─╴`. A card edge is an
-opening glyph followed by `─`, then the matching closing glyph after a `─`,
-on one row. A screen with at least one edge is `cards`; one with none is
-`plain`. A chat's turn rail draws `╭` and `╶` followed by a space
+bin/masc_tui_card.ml draws a full card's top edge as `╭─ … ╮` and its bottom
+as `╰─ … ╯`, and a squashed card as the one row `╶─ … ╴`. The opening glyph is
+always followed by `─`. The closing glyph usually follows one too, but an edge
+whose name fills it up to the corner ends in ` ╮`. A card edge is therefore an
+opening glyph followed by `─`, then its closing glyph later on the same row,
+before any other opening. A screen with at least one edge is `cards`; one with
+none is `plain`. A chat's turn rail draws `╭` and `╶` followed by a space
 (bin/masc_tui_message_layout.ml), so it is no edge. A pane frame drawn with
 the same rounded corners is one, so compare kinds only on a screen whose
 plain layout draws no rounded box.
@@ -88,7 +90,7 @@ def row_edges(index: int, row: Row) -> list[Edge]:
         closing, shape = EDGE_ENDS[texts[column]]
         end: int | None = None
         for at in range(column + 2, len(texts)):
-            if texts[at] == closing and texts[at - 1] == RULE:
+            if texts[at] == closing:
                 end = at
                 break
             if opens_edge(texts, at):

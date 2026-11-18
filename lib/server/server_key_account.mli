@@ -70,3 +70,8 @@ val register
   -> body:string
   -> Login_routes.answer
 
+(** Whether {!register} takes a key for a provider of this client: in this
+    stage, the keys of Claude Code (RFC
+    a-persons-api-key-is-their-own-provider-account 3.8). The list of what a
+    person connects reads it ({!Server_person_integrations}). *)
+val takes_key : Runtime_setup_login_client.client -> bool

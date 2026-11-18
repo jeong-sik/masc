@@ -111,10 +111,23 @@ val keeper_conversation_reader
 
 (** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}].
 
-    - The accounts the person owns ({!Authz_provider_account.owned}), as
-      [{"provider_account_id":...,"integration_id":...}]: the integration the
-      login of the account named, read from its receipt under [base_path].
-    - The Runtimes they own ({!Authz_runtime.owned}), as
+    - The accounts of the person that a list shows
+      ({!Authz_provider_account.shown}: not those whose removal is pending
+      or went through), as
+      [{"provider_account_id":...,"kind":...,"integration_id":...}].
+      ["kind"] is ["login"] or ["key"] (RFC
+      a-persons-api-key-is-their-own-provider-account 3.8). The integration
+      of a login account is the one its login named, read from its receipt
+      under [base_path]; that of a key account is the one its record names.
+      A key account has ["key"] too: ["readable"], or [key_missing] or
+      [key_unreadable] as a use of the account answers
+      ({!Runtime_key_account_files.key_state}), or [not_looked_at]. Nothing
+      of the key is in the answer. An account whose removal did not go
+      through has ["removal"]: [key_not_removed] or [home_not_removed], the
+      stage that stayed, or [start_given_up]. Nothing spends such an
+      account, and its owner asks for the removal again.
+    - The Runtimes they own ({!Authz_runtime.owned}) on the accounts shown,
+      as
       [{"runtime_id":...,"provider_account_id":...,"model":...}]: the model
       of the binding of the account's template that makes the Runtime id
       ({!Runtime_account_runtime.binding_of}), the binding a turn of the
@@ -123,7 +136,7 @@ val keeper_conversation_reader
       which may be another name. [config] is the runtime.toml of the
       workspace, [None] when it could not be read.
 
-    Each account's receipt is read once per answer. A fact that is not read
+    What an account runs on is read once per answer. A fact that is not read
     is [null], and ["unread"] says why. For an integration:
     [login_receipt_missing] or [login_receipt_unreadable]. For a model:
     [account_integration_unread], [configuration_unavailable],

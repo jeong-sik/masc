@@ -111,6 +111,18 @@ let present label ~runtime_root id expected =
   | Error detail -> Alcotest.failf "%s: not looked at: %s" label detail
 ;;
 
+(* What a list says of the key of the account. *)
+let key_state_name ~runtime_root id =
+  match F.key_state ~runtime_root ~account_id:id ~generation with
+  | F.Key_readable -> "readable"
+  | F.Key_not_read error -> K.read_error_code error
+  | F.Key_not_looked_at (_ : string) -> "not_looked_at"
+;;
+
+let key_state label ~runtime_root id expected =
+  Alcotest.(check string) label expected (key_state_name ~runtime_root id)
+;;
+
 (* What a read of the key file gave, with the key as its characters: the keys
    of this file are made up. *)
 let read_name path =
@@ -190,6 +202,25 @@ let test_removed =
       (read_name (key_file_of ~runtime_root other_account));
     Alcotest.(check bool) "the home of the other account is there" true (there (home_of ~runtime_root other_account));
     removed "the same account again" ~runtime_root account "removed")
+;;
+
+(* What a list says of the key of an account, without making anything. *)
+let test_key_state =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    key_state "an account before its files" ~runtime_root account "key_missing";
+    made "the account" ~runtime_root account the_key "made";
+    key_state "an account with its files" ~runtime_root account "readable";
+    key_state "another account of the person" ~runtime_root other_account "key_missing";
+    let file = key_file_of ~runtime_root account in
+    Unix.chmod file 0o640;
+    key_state "a key file its group reads" ~runtime_root account "key_unreadable";
+    Unix.chmod file 0o600;
+    key_state "the file closed again" ~runtime_root account "readable";
+    (* A person no login and no registration made a runtime root for: the
+       reading finds no file, and makes no folder. *)
+    let no_root = Filename.concat (Filename.dirname runtime_root) "namespace-of-nobody" in
+    key_state "under a runtime root that is not there" ~runtime_root:no_root account "key_missing";
+    Alcotest.(check bool) "the reading made no runtime root" false (there no_root))
 ;;
 
 (* An account whose record was written and whose files were not, as a process
@@ -275,5 +306,6 @@ let () =
         ; Alcotest.test_case "the key that does not go" `Quick test_key_stays
         ; Alcotest.test_case "the home that does not go" `Quick test_home_stays
         ] )
+    ; "list", [ Alcotest.test_case "what is said of the key" `Quick test_key_state ]
     ]
 ;;

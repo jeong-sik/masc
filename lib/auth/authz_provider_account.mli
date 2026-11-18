@@ -65,3 +65,28 @@ val availability
   -> user_id:Authz_types.User_id.t
   -> Authz_types.Provider_account_id.t
   -> (unit, unavailable) result
+
+(** What the records say of a removal of an account that is neither pending
+    nor through. In both cases nothing spends the account ({!availability}),
+    and its owner asks for the removal again. *)
+type removal =
+  | Start_given_up
+      (** The start of its removal wrote its intent and no record (design
+          8.3). *)
+  | Stayed of Authz_purge_event.account_failed_stage
+      (** The removal ended with this stage still there. *)
+
+(** An account as a list of the accounts of its owner shows it (RFC
+    a-persons-api-key-is-their-own-provider-account 3.6 and 3.8). *)
+type shown =
+  { provider_account_id : Authz_types.Provider_account_id.t
+  ; kind : Authz_provider_account_state.kind
+  ; removal : removal option
+  }
+
+(** The accounts of the person that a list shows, in the order of their ids:
+    those the person owns whose removal is not pending and did not go
+    through. An account whose removal is pending is on its way out, and one
+    whose removal went through is gone; the records of both stay in the
+    log. *)
+val shown : Authz_state.t -> Authz_types.User_id.t -> shown list

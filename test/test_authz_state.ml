@@ -2071,6 +2071,26 @@ let availability_word state ~by provider_account_id =
   | Error Authz_provider_account.Reduction_given_up -> "blocked"
 ;;
 
+(* The accounts of a person as a list shows them
+   ({!Authz_provider_account.shown}). *)
+let shown_words state ~by =
+  List.map
+    (fun ({ provider_account_id; kind; removal } : Authz_provider_account.shown) ->
+      Printf.sprintf
+        "%s, %s, %s"
+        (Authz_types.Provider_account_id.to_string provider_account_id)
+        (match kind with
+         | Authz_provider_account_state.Login -> "a login"
+         | Authz_provider_account_state.Key { integration_id; generation = _ } ->
+           "a key of " ^ Authz_types.Integration_id.to_string integration_id)
+        (match removal with
+         | None -> "no removal"
+         | Some Authz_provider_account.Start_given_up -> "start given up"
+         | Some (Authz_provider_account.Stayed Pg.Key_not_removed) -> "the key stayed"
+         | Some (Authz_provider_account.Stayed Pg.Home_not_removed) -> "the home stayed"))
+    (Authz_provider_account.shown state by)
+;;
+
 let account_purge_word state account =
   match Pgs.find_account state.S.purges account with
   | None -> "none"
@@ -2110,6 +2130,16 @@ let test_account_purges () =
     Alcotest.(check string) (label ^ ", by another") another (availability_word state ~by:bob key_account)
   in
   spent_by "an account before its purge" state ~owner:"spent" ~another:"another's";
+  (* What a list of the accounts of a person shows (RFC 3.6 and 3.8). *)
+  let shown label state expected =
+    Alcotest.(check (list string)) (label ^ ", in the list of its owner") expected (shown_words state ~by:user)
+  in
+  shown "an account before its purge" state [ "claude-code-key-user, a key of claude_code, no removal" ];
+  Alcotest.(check (list string)) "the list of another person" [] (shown_words state ~by:bob);
+  shown
+    "a login account beside it"
+    (applied_change "a login link" state (account_record ~author:(human user) (linked ~by:user)) None)
+    [ "claude-code-key-user, a key of claude_code, no removal"; "claude-code-user, a login, no removal" ];
   Alcotest.(check string)
     "an account no record linked, by whoever asks"
     "spent"
@@ -2122,6 +2152,7 @@ let test_account_purges () =
       [ held ~event:Authz_external_store.Change.Purge (Authz_records.Subject.Credential key_account) ]
   in
   spent_by "an account whose purge start was given up" given_up ~owner:"blocked" ~another:"another's";
+  shown "an account whose purge start was given up" given_up [ "claude-code-key-user, a key of claude_code, start given up" ];
   (* The start that was given up blocks its own account and no other. *)
   Alcotest.(check string)
     "another account, while that start is given up"
@@ -2156,19 +2187,23 @@ let test_account_purges () =
   let state = applied_change "a start" state start intent in
   Alcotest.(check string) "an account whose purge is pending" "purged" (account_status_word state key_account);
   spent_by "an account whose purge is pending" state ~owner:"purged" ~another:"another's";
+  shown "an account whose purge is pending" state [];
   refused_as "a second start" state start (S.Purge (Pgs.Already_pending target));
   let state = applied_change "a failure" state (failed Pg.Key_not_removed) None in
   Alcotest.(check string) "the stage that failed" "failed, key" (account_purge_word state account);
   Alcotest.(check string) "an account whose purge failed" "purged" (account_status_word state key_account);
   spent_by "an account whose purge failed" state ~owner:"purged" ~another:"another's";
+  shown "an account whose purge failed at the key" state [ "claude-code-key-user, a key of claude_code, the key stayed" ];
   refused_as "an end after a failure" state purged (S.Purge (Pgs.Not_started target));
   let state = applied_change "a start after the failure" state start intent in
   let state = applied_change "another failure" state (failed Pg.Home_not_removed) None in
   Alcotest.(check string) "the later stage" "failed, home" (account_purge_word state account);
+  shown "an account whose purge failed at the home" state [ "claude-code-key-user, a key of claude_code, the home stayed" ];
   let state = applied_change "a third start" state start intent in
   let state = applied_change "the end" state purged None in
   Alcotest.(check string) "an account whose purge went through" "purged" (account_status_word state key_account);
   spent_by "an account whose purge went through" state ~owner:"purged" ~another:"another's";
+  shown "an account whose purge went through" state [];
   refused_as "a start once purged" state start (S.Purge (Pgs.Already_purged target));
   let state = applied_change "the end once more, after a restore" state purged None in
   Alcotest.(check string) "the last end" "purged" (account_purge_word state account)

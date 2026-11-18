@@ -73,3 +73,34 @@ let availability (state : Authz_state.t) ~user_id provider_account_id =
         | Revocation_state.Pending -> Error Reduction_given_up
         | Revocation_state.Not_pending -> Ok ()))
 ;;
+
+type removal =
+  | Start_given_up
+  | Stayed of Authz_purge_event.account_failed_stage
+
+type shown =
+  { provider_account_id : Provider_account_id.t
+  ; kind : Authz_provider_account_state.kind
+  ; removal : removal option
+  }
+
+let shown (state : Authz_state.t) user_id =
+  List.filter_map
+    (fun provider_account_id ->
+      Option.bind
+        (Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id)
+        (fun { Authz_provider_account_state.owner = (_ : User_id.t); kind } ->
+          let shown removal = Some { provider_account_id; kind; removal } in
+          match
+            Authz_purge_state.find_account
+              state.Authz_state.purges
+              { Authz_purge_event.owner = user_id; provider_account_id }
+          with
+          | Some (Authz_purge_state.Account_pending | Authz_purge_state.Account_purged) -> None
+          | Some (Authz_purge_state.Account_failed { failed_stage }) -> shown (Some (Stayed failed_stage))
+          | None ->
+            (match Authz_state.revocation state (Subject.Credential provider_account_id) with
+             | Revocation_state.Pending -> shown (Some Start_given_up)
+             | Revocation_state.Not_pending -> shown None)))
+    (owned state user_id)
+;;

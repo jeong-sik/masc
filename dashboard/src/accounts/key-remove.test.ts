@@ -69,7 +69,7 @@ describe('sending a removal', () => {
 
   it.each([
     ['unknown_account', 404], ['not_a_key_account', 400], ['account_call_running', 409], ['removal_refused', 403],
-    ['removal_not_recorded', 503], ['key_not_removed', 503], ['home_not_removed', 503],
+    ['removal_not_recorded', 503], ['key_not_removed', 503], ['home_not_removed', 503], ['internal_error', 500],
   ])('reads the refusal %s by its code', async (code, status) => {
     const { send } = answering([refusedAs(status, code)])
     expect(await removeAccount(send, 'token-1', 'acct_key')).toEqual({ kind: 'refused', status, code, reason: `The server said ${code}.` })
@@ -141,7 +141,7 @@ describe('the removal of an account', () => {
   })
 
   it.each([
-    ['not_a_key_account', 400], ['removal_refused', 403], ['volume_away', 409],
+    ['not_a_key_account', 400], ['removal_refused', 403], ['internal_error', 500], ['volume_away', 409],
   ])('reads nothing again after the refusal %s', async (code, status) => {
     const { model, refresh, of } = removing([refusedAs(status, code)])
     await model.remove('acct_key')

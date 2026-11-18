@@ -169,6 +169,7 @@ function removalRefusedWords(code: Exclude<RemovalStopped, 'unrecognised'>): str
     case 'key_not_removed': return '서버가 key 를 지우지 못했어요. key 가 아직 이 서버에 있어요. 다시 없애 주세요.'
     case 'home_not_removed': return '서버가 key 는 지웠고, 계정의 다른 파일을 지우지 못했어요. 다시 없애 주세요.'
     case 'removal_refused': return '내 계정이 지금 쓸 수 있는 상태가 아니라서 없애지 못했어요.'
+    case 'internal_error': return '서버가 예상하지 못한 까닭으로 거절했어요. 없애기는 시작되지 않았어요.'
     case 'not_a_key_account': return '로그인으로 연결한 계정이라 여기서 없앨 수 없어요.'
   }
 }

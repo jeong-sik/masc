@@ -211,7 +211,7 @@ function leftWordsOf(accountId: string, removing: Removing): string | null {
     case 'removed': return removing.already ? `${account}은 이미 없는 계정이에요.` : `${account}을 없앴어요.`
     case 'refused':
     case 'unknown':
-      return `${account}이 목록에서 빠졌어요. 서버가 없애기를 끝냈는지는 이 화면이 확인하지 못했어요. 끝나지 않았으면 서버가 다시 시작할 때 이어서 끝내요.`
+      return `${account}이 목록에서 빠졌어요. 서버가 없애기를 끝냈는지는 이 화면이 확인하지 못했어요. 끝나지 않은 없애기는 서버가 다시 시작할 때 이어서 해요.`
     case 'sending':
     case 'leaving':
       return null

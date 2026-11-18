@@ -69,15 +69,16 @@ val ratio_bar :
   string
 (** [ratio_bar ~width ~numerator ~denominator ~scale] fills from the left,
     because the question it answers is how much of the denominator is gone.
-    [scale] says whether the denominator is a declared limit: then each filled
-    cell takes {!Masc_tui_chart.meter_cell_style}; a [Relative] fill draws in
-    the foreground. Exactly [width] cells. *)
+    Each filled cell takes {!Masc_tui_chart.meter_cell_style} for [scale]:
+    the status ramp for a declared limit, its series' hue otherwise. Exactly
+    [width] cells. *)
 
-val reach_bar : width:int -> transmitted:int -> total:int -> string
-(** [reach_bar ~width ~transmitted ~total] fills from the right: the
+val reach_bar :
+  width:int -> transmitted:int -> total:int -> scale:Masc_tui_chart.meter_scale -> string
+(** [reach_bar ~width ~transmitted ~total ~scale] fills from the right: the
     transmitted atoms are the newest ones, and drawing them at the left would
-    put the omitted history in the future. The filled run is a share of the
-    history, so it draws in the foreground. Exactly [width] cells. *)
+    put the omitted history in the future. The filled run takes [scale]'s
+    colours by its reach, as {!ratio_bar} does. Exactly [width] cells. *)
 
 val reach_pointer :
   label:string -> width:int -> transmitted:int -> total:int -> string

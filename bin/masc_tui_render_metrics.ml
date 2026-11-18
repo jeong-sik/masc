@@ -309,27 +309,85 @@ let engine_graph_cells ~cols =
   | Cards { card_cells; _ } -> card_cells
   | Compact -> compact_graph_cells ~cols
 
-(* A graph holds two times a cell. The axis label takes a few of those cells,
-   so a narrower label shows more of what is kept (RFC tui-one-screen-grammar
-   section 5.6). *)
+(* Both engine graphs give their axis this many cells: the widest top either
+   ladder below writes ("9.99ms", "59m59s"). The axis column then does not
+   depend on the samples, so both graphs draw the same number of times, one
+   ring keeps exactly those, and a top that changes width moves no dots (RFC
+   tui-one-screen-grammar sections 5.6 and 8). *)
+let engine_axis_cells = 6
+
+(* The ring keeps as many samples as a graph draws times: two a cell of dots
+   beside the axis column (RFC tui-one-screen-grammar section 5.6). *)
 let engine_graph_capacity ~cols (state : state) =
-  if engine_view_open state then Some (2 * engine_graph_cells ~cols) else None
+  if engine_view_open state then
+    Some (Braille.graph_times ~width:(engine_graph_cells ~cols) ~axis_cells:engine_axis_cells)
+  else None
 
-(* The top of an axis with its unit: the largest live heap a sample held, in
-   the unit the Engine card writes it. *)
-let heap_axis words = format_words words
+(* [numerator / denominator] rounded up, for a numerator of zero or more,
+   without the overflow [numerator + denominator - 1] risks near [max_int]. *)
+let div_up numerator denominator =
+  (numerator / denominator) + if numerator mod denominator = 0 then 0 else 1
 
-(* The largest p95 a sample held, kept in whole microseconds. *)
+(* A rung of an axis ladder holds a figure below this; a larger one moves to
+   the next rung. *)
+let rung_limit = 1000
+let bytes_per_word = 8.
+let bytes_per_kb = 1024.
+let tenths_per_minute = 600
+
+(* The top of the heap axis: the largest live heap a time drawn held, in
+   bytes, in the smallest binary unit that keeps the figure below a thousand,
+   with tenths below ten. Rounded up, so no time drawn stands above it. At
+   most five cells ("999KB", "9.9GB"): the largest heap a 63-bit count of
+   words can name is 32EB. *)
+let heap_axis words =
+  let bytes = Float.of_int (max 0 words) *. bytes_per_word in
+  if bytes < Float.of_int rung_limit then Printf.sprintf "%.0fB" bytes
+  else
+    let rec rung size unit larger =
+      let value = bytes /. size in
+      let tenths = Float.ceil (value *. 10.) in
+      if tenths < 100. then Printf.sprintf "%.1f%s" (tenths /. 10.) unit
+      else
+        let whole = Float.ceil value in
+        match larger with
+        | next :: rest when whole >= Float.of_int rung_limit ->
+          rung (size *. bytes_per_kb) next rest
+        | _ :: _ | [] -> Printf.sprintf "%.0f%s" whole unit
+    in
+    rung bytes_per_kb "KB" [ "MB"; "GB"; "TB"; "PB"; "EB" ]
+
+(* The top of the p95 axis: the largest p95 a time drawn held, kept in whole
+   microseconds. Hundredths of a millisecond below ten, tenths below a
+   hundred, whole milliseconds below a second, tenths of a second below a
+   minute, then the two-unit ladder of a finished span (section 6.2). Each
+   rung rounds up, so no time drawn stands above the top. At most six cells
+   below a hundred thousand days, longer than a server runs and so than any
+   lag it measures. *)
 let p95_axis microseconds =
-  let ms = Float.of_int microseconds /. 1000.0 in
-  if ms >= 100.0 then Printf.sprintf "%.0fms" ms
-  else if ms >= 10.0 then Printf.sprintf "%.1fms" ms
-  else Printf.sprintf "%.2fms" ms
+  let us = max 0 microseconds in
+  let hundredths_ms = div_up us 10 in
+  if hundredths_ms < rung_limit then
+    Printf.sprintf "%d.%02dms" (hundredths_ms / 100) (hundredths_ms mod 100)
+  else
+    let tenths_ms = div_up us 100 in
+    if tenths_ms < rung_limit then Printf.sprintf "%d.%dms" (tenths_ms / 10) (tenths_ms mod 10)
+    else
+      let ms = div_up us 1_000 in
+      if ms < rung_limit then Printf.sprintf "%dms" ms
+      else
+        let tenths_s = div_up us 100_000 in
+        if tenths_s < tenths_per_minute then
+          Printf.sprintf "%d.%ds" (tenths_s / 10) (tenths_s mod 10)
+        else Layout.span_text (Float.of_int (div_up us 1_000_000))
 
 (* A card's graph row. Before the view's first sample it is the unread mark;
    with no room for dots, the number the card already wrote. *)
 let engine_graph_row ~cells ~axis ~number series (state : state) =
-  match Masc_tui_engine_samples.graph ~width:cells ~axis series state.engine_samples with
+  match
+    Masc_tui_engine_samples.graph ~width:cells ~axis_cells:engine_axis_cells ~axis series
+      state.engine_samples
+  with
   | Braille.Drawn rows -> String.concat "" rows
   | Braille.Never_read -> Unknown.(glyph Unread)
   | Braille.Too_narrow -> number

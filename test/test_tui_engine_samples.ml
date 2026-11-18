@@ -50,6 +50,9 @@ let graph_kind = function
 
 let axis maximum = string_of_int maximum
 
+(* The axis column the graphs under test give their top. *)
+let axis_cells = 4
+
 (* Runs the loop from [from] to before [until], [loop_step_s] apart, and
    answers each read the sampler asks for after [read_latency_s]: the answer
    arrives as every [/health] answer does, as the newest one the TUI
@@ -185,24 +188,24 @@ let test_a_failed_read_is_a_blank_and_said_once () =
      | Samples.Quiet -> true
      | Samples.Failure_began _ -> false);
   Alcotest.(check bool) "a graph of failed reads is not one never read" true
-    (match Samples.graph ~width:32 ~axis Samples.Live_heap failed with
+    (match Samples.graph ~width:32 ~axis_cells ~axis Samples.Live_heap failed with
      | Braille.Drawn _ -> true
      | Braille.Never_read | Braille.Too_narrow -> false)
 
 let test_a_graph_never_read_is_the_unread_variant () =
   Alcotest.(check string) "closed" "Never_read"
-    (graph_kind (Samples.graph ~width:32 ~axis Samples.Live_heap Samples.stopped));
+    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Live_heap Samples.stopped));
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
   let asked, _ = Samples.tick opened ~now:0. ~newest:None in
   Alcotest.(check string) "opened, its read still out" "Never_read"
-    (graph_kind (Samples.graph ~width:32 ~axis Samples.Scheduler_p95 asked));
+    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 asked));
   Alcotest.(check string) "narrower than four cells, still never read" "Never_read"
-    (graph_kind (Samples.graph ~width:2 ~axis Samples.Scheduler_p95 asked));
+    (graph_kind (Samples.graph ~width:2 ~axis_cells ~axis Samples.Scheduler_p95 asked));
   let read, _, _ = Samples.answered asked ~now:0.03 answered_point in
   Alcotest.(check string) "read" "Drawn"
-    (graph_kind (Samples.graph ~width:32 ~axis Samples.Scheduler_p95 read));
+    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 read));
   Alcotest.(check string) "read, with no room for dots" "Too_narrow"
-    (graph_kind (Samples.graph ~width:3 ~axis Samples.Scheduler_p95 read))
+    (graph_kind (Samples.graph ~width:3 ~axis_cells ~axis Samples.Scheduler_p95 read))
 
 let test_times_without_a_sample_are_blank () =
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
@@ -213,6 +216,7 @@ let test_times_without_a_sample_are_blank () =
   Alcotest.(check (list sample)) "two blanks before the answer"
     [ Braille.Absent; Braille.Absent; Braille.of_count a_heap ]
     (Samples.samples Samples.Live_heap read)
+
 
 let identity ~gc ~scheduler =
   { Decode.sid_version = "0.0.0"
@@ -287,6 +291,78 @@ let test_a_reading_holds_the_two_card_numbers () =
        (point_of
           (Samples.reading_of_server
              (Ok (Decode.Account_server { account_server_version = "1" })))))
+
+(* Feeds one heap per sample, two seconds apart, oldest first, into a ring of
+   [capacity]. *)
+let sampled_heaps ~capacity heaps =
+  let sampler, _ =
+    List.fold_left
+      (fun (sampler, at) heap ->
+        let newest =
+          Some { Samples.at; reading = Samples.Answered (point ~heap ~p95:a_p95_us) }
+        in
+        let next, _ = Samples.tick (Samples.shown sampler ~now:at ~capacity) ~now:at ~newest in
+        (next, at +. Samples.interval_s))
+      (Samples.stopped, 0.) heaps
+  in
+  sampler
+
+(* The top the graph hands its axis, or [None] when it asks for none. *)
+let axis_top ~width series sampler =
+  let top = ref None in
+  ignore
+    (Samples.graph ~width ~axis_cells
+       ~axis:(fun maximum -> top := Some maximum; axis maximum)
+       series sampler);
+  !top
+
+let spike = 1_000_000
+let steady = 10
+
+(* The ring sized as the graph draws keeps those times and no more: a spike
+   pushed out of it no longer tops the axis. *)
+let test_a_ring_as_wide_as_the_graph_keeps_only_the_times_drawn () =
+  let width = 12 in
+  let capacity = Braille.graph_times ~width ~axis_cells in
+  let sampler = sampled_heaps ~capacity (spike :: List.init capacity (fun _ -> steady)) in
+  Alcotest.(check int) "the times the graph draws" capacity
+    (List.length (Samples.samples Samples.Live_heap sampler));
+  Alcotest.(check (option int)) "the spike left with the oldest time" (Some steady)
+    (axis_top ~width Samples.Live_heap sampler)
+
+(* A ring wider than the graph, as one sized before the terminal narrowed,
+   still tops the axis with the largest time drawn, not one no column shows. *)
+let test_the_axis_tops_only_the_times_drawn () =
+  let width = 12 in
+  let drawn = Braille.graph_times ~width ~axis_cells in
+  let capacity = 2 * width in
+  let sampler = sampled_heaps ~capacity (spike :: List.init (capacity - 1) (fun _ -> steady)) in
+  Alcotest.(check bool) "the ring holds more than the graph draws" true
+    (List.length (Samples.samples Samples.Live_heap sampler) > drawn);
+  Alcotest.(check (option int)) "the largest time drawn" (Some steady)
+    (axis_top ~width Samples.Live_heap sampler)
+
+(* A graph whose times were all blank measured nothing, so it has no top; a
+   measured zero is a top of zero. *)
+let test_a_graph_with_nothing_measured_has_no_top () =
+  let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
+  let asked, _ = Samples.tick opened ~now:0. ~newest:None in
+  let failed, _, _ =
+    Samples.answered asked ~now:0.03 (Samples.Failed "server identity load failed: refused")
+  in
+  Alcotest.(check (option int)) "failed reads ask for no top" None
+    (axis_top ~width:32 Samples.Live_heap failed);
+  let unreported =
+    Samples.reading_of_identity
+      (Ok (identity ~gc:None ~scheduler:(Some (scheduler ~samples:0 ~p95_ms:0.))))
+  in
+  let asked, _ = Samples.tick failed ~now:2.0 ~newest:None in
+  let unreported, _, _ = Samples.answered asked ~now:2.03 unreported in
+  Alcotest.(check (option int)) "an unreported p95 asks for no top" None
+    (axis_top ~width:32 Samples.Scheduler_p95 unreported);
+  let zero = sampled_heaps ~capacity [ 0 ] in
+  Alcotest.(check (option int)) "a measured zero is a top" (Some 0)
+    (axis_top ~width:32 Samples.Live_heap zero)
 
 let count_sampled steps =
   List.length (List.filter (fun decision -> decision = Samples.Sampled) steps)
@@ -378,5 +454,11 @@ let () =
             test_times_without_a_sample_are_blank
         ; Alcotest.test_case "a reading holds the two card numbers" `Quick
             test_a_reading_holds_the_two_card_numbers
+        ; Alcotest.test_case "a ring as wide as the graph keeps only the times drawn" `Quick
+            test_a_ring_as_wide_as_the_graph_keeps_only_the_times_drawn
+        ; Alcotest.test_case "the axis tops only the times drawn" `Quick
+            test_the_axis_tops_only_the_times_drawn
+        ; Alcotest.test_case "a graph with nothing measured has no top" `Quick
+            test_a_graph_with_nothing_measured_has_no_top
         ] )
     ]

@@ -129,7 +129,16 @@ val samples : series -> t -> Masc_tui_braille.sample list
     sample. *)
 
 val graph :
-  width:int -> axis:(int -> string) -> series -> t -> Masc_tui_braille.graph
-(** One text row [width] cells wide: [axis] writes the top of the axis, the
-    largest sample, with its unit. [Never_read] before the view's first
-    sample. *)
+  width:int ->
+  axis_cells:int ->
+  axis:(int -> string) ->
+  series ->
+  t ->
+  Masc_tui_braille.graph
+(** One text row [width] cells wide. Its axis column is [axis_cells] wide
+    whatever the top, so it draws {!Masc_tui_braille.graph_times} times, the
+    newest, and a ring the loop sizes with that keeps no time it does not
+    draw. [axis] writes the top, the largest time drawn, with its unit, in at
+    most [axis_cells] cells. With no time measured among those drawn (every
+    read failed, or none reported the number) there is no top and the column
+    stays blank. [Never_read] before the view's first sample. *)

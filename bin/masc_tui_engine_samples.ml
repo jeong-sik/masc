@@ -2,6 +2,7 @@
 
 module Braille = Masc_tui_braille
 module Decode = Masc.Tui_decode
+module Layout = Masc_tui_message_layout
 
 type point =
   { live_heap : Braille.sample
@@ -211,7 +212,27 @@ let samples series t =
   | None -> []
   | Some session -> List.map (pick series) (Ring.to_list session.ring)
 
-let graph ~width ~axis series t =
+(* The newest [count] items, oldest first. *)
+let newest count items =
+  let held = List.length items in
+  List.filteri (fun index _ -> index >= held - count) items
+
+let measured = function
+  | Braille.Zero | Braille.Value _ -> true
+  | Braille.Unread | Braille.Absent -> false
+
+(* The axis column is as wide as the widest top [axis] writes, whatever this
+   top is, so the graph draws the same number of times at every top and the
+   ring the loop sizes with {!Braille.graph_times} holds exactly those. The
+   top is the largest of the times drawn: a ring wider than the graph for a
+   moment (the terminal narrowed before the loop resized it) cannot lift the
+   axis with a time no column shows. A graph with no time measured has no
+   top to write, and its column stays blank. *)
+let graph ~width ~axis_cells ~axis series t =
   let samples = samples series t in
-  let maximum = Braille.graph_maximum samples in
-  Braille.braille_graph ~width ~rows:1 ~axis:(axis maximum) ~maximum samples
+  let drawn = newest (Braille.graph_times ~width ~axis_cells) samples in
+  let maximum = Braille.graph_maximum drawn in
+  let top = if List.exists measured drawn then axis maximum else "" in
+  Braille.braille_graph ~width ~rows:1
+    ~axis:(Layout.fit_width top (Stdlib.max 0 axis_cells))
+    ~maximum samples

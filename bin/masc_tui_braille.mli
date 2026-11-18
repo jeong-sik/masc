@@ -83,6 +83,11 @@ val graph_min_cells : int
 (** [4]: a graph needs this many cells of dots or it is replaced by its
     number. *)
 
+val graph_times : width:int -> axis_cells:int -> int
+(** How many times {!braille_graph} draws in [width] cells when its axis text
+    is [axis_cells] wide: two a cell of dots, after the axis column and the
+    one-cell gap beside it. [0] when nothing is left for dots. *)
+
 val graph_maximum : sample list -> int
 (** The largest [Value], or [0] when there is none: the top of an axis scaled
     to its samples. *)

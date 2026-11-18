@@ -185,10 +185,10 @@ let rec first_within ~cells wording rest =
    stays in every wording: the answer can be a read behind the store, and this
    time is what says by how much. *)
 let heading ~cells t =
-  let as_of = Unix.gmtime t.series.Series.tsr_generated_at in
   let time =
-    Printf.sprintf "as of %02d-%02d %02d:%02d UTC" (as_of.Unix.tm_mon + 1)
-      as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min
+    "as of "
+    ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
+        t.series.Series.tsr_generated_at
   in
   first_within ~cells
     (Printf.sprintf " Tool calls (%s) · %s" (span_text t.window) time)

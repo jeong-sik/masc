@@ -144,10 +144,7 @@ let memory_fact_age_label ts =
   Masc_tui_value.Ongoing.Narrow.since ~now:(Unix.gettimeofday ()) ts
 
 let memory_date ts =
-  let tm = Unix.localtime ts in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min
+  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) ts
 
 let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value

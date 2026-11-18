@@ -1027,7 +1027,7 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
   in
   match failing, trail with
   | Masc_tui_keeper_pulse.Failing_since at, (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ->
-      let clock = Grid.dated_clock_text ~now ~localtime:Unix.localtime at in
+      let clock = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
       let worded = Keeper_mark.grid_since_word ^ " " ^ clock in
       (* The word goes first, so a cut never leaves a minute that reads as data. *)
       if Message_layout.display_width worded <= room then worded else clock
@@ -3406,10 +3406,9 @@ let terminal_drawing (state : state) ~width =
   let facts = match observation with
     | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
     | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
-        let time = Unix.localtime observed_at in
         [ (if snapshot.kes_active_count > 0 then Printf.sprintf "%d active" snapshot.kes_active_count
            else if snapshot.kes_closed then "closed" else "state unknown")
-        ; Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.tm_min time.tm_sec ]
+        ; Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) observed_at ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in
   let facts = mode_facts @ facts in

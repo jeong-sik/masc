@@ -487,7 +487,7 @@ type session_block = { earlier : int; kept : session_entry list }
    next step after the subject -- "runtime event feed closed: " and then
    why -- so a row cut at the pane's edge loses the part that says what to
    do, at any width. *)
-let session_entry_rows ~width ((event : event), run) =
+let session_entry_rows ~now ~width ((event : event), run) =
   let mark =
     match session_event_mark event with
     | None -> ""
@@ -495,7 +495,9 @@ let session_entry_rows ~width ((event : event), run) =
       Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph Ansi.reset
   in
   let lead =
-    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ()) event.timestamp Ansi.reset mark
+    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ())
+      (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now event.at)
+      Ansi.reset mark
   in
   let lead_cells = Layout.display_width lead in
   let content = Terminal_text.single_line event.content in
@@ -516,13 +518,13 @@ let session_entry_rows ~width ((event : event), run) =
    newest event is kept even when it alone is taller than the room beside
    that count; the section scrolls, and a row pushed below the fold can be
    reached where a sentence cut at the edge cannot. *)
-let session_block ~width ?room events =
+let session_block ~now ~width ?room events =
   let entries =
     Masc_tui_render_schedule.collapse_consecutive ~key:session_event_collapse_key
       events
     |> List.rev
     |> List.map (fun ((event : event), run) ->
-           { event; run; rows = session_entry_rows ~width (event, run) })
+           { event; run; rows = session_entry_rows ~now ~width (event, run) })
   in
   let rows_of entry = List.length entry.rows in
   let all = { earlier = 0; kept = entries } in
@@ -676,7 +678,8 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     match state.events with
     | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
     | events ->
-      let block = session_block ~width:inner_width ?room:session_rows events in
+      let block =
+        session_block ~now:(Unix.gettimeofday ()) ~width:inner_width ?room:session_rows events in
       let rows = List.concat_map (fun entry -> entry.rows) block.kept in
       if block.earlier > 0 then
         Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")

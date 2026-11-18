@@ -858,12 +858,13 @@ let subscription_targets view =
 let phase_label = function
   | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
   | Row.Detached -> "detached" | Row.Failed detail -> "failed: " ^ detail
-let utc_stamp time =
-  try let t=Unix.gmtime time in
-    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d.%03d"
-      (t.Unix.tm_year+1900) (t.Unix.tm_mon+1) t.Unix.tm_mday
-      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
-      (int_of_float ((time -. floor time)*.1000.))
+(* A row's moment in the operator's zone, as every other moment on the
+   screen. A value the calendar cannot break down is shown as the number it
+   is. *)
+let moment_text time =
+  try
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+      ~now:(Unix.gettimeofday ()) time
   with Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "epoch %.6g" time
 let timeline_lines ~instances ?selected ~width rows =
   match rows with
@@ -897,9 +898,9 @@ let timeline_lines ~instances ?selected ~width rows =
         let fraction = if Float.is_finite span then (time -. since) /. span
           else (time /. 2. -. since /. 2.) /. (until /. 2. -. since /. 2.) in
         max 0 (min (axis_width - 1) (int_of_float (fraction *. float_of_int (axis_width - 1)))) in
-      [Printf.sprintf "Wall time %s UTC"
-         (if since = until then utc_stamp since
-          else utc_stamp since ^ " → " ^ utc_stamp until)]
+      [Printf.sprintf "Wall time %s"
+         (if since = until then moment_text since
+          else moment_text since ^ " → " ^ moment_text until)]
       @ List.map (fun lane ->
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
@@ -1170,7 +1171,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
   let raw_row (row : Row.row) =
     technical_text ([row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
-     "Observed " ^ utc_stamp row.observed_at ^ " UTC";
+     "Observed " ^ moment_text row.observed_at;
      "Subject " ^ row.subject_id]
     @ Option.to_list (Option.map (fun actor -> "Actor " ^ actor) row.actor)
     @ Option.to_list (Option.map (fun (clock : Row.clock) ->
@@ -2285,7 +2286,7 @@ let selected_result_spans ~width (item : instance) (selected : Row.row option) =
         | readings -> List.concat_map (reading_spans ~width) readings in
       led_rows ~width ~lead:Span.empty ~text_style:(bold_style ()) row.title
       @ led_rows ~width ~lead:Span.empty ~text_style:(muted_style ())
-          (lane_name item row.lane_id ^ " · " ^ utc_stamp row.observed_at ^ " UTC")
+          (lane_name item row.lane_id ^ " · " ^ moment_text row.observed_at)
       @ (Span.empty :: values)
 
 let side_by_side ~list_width ~detail_width list detail =

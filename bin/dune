@@ -560,7 +560,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc.masc_types masc_tui_lane_application masc_tui_lane_standing masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_lane_records masc_tui_markdown masc_tui_markdown_theme masc_tui_theme masc_tui_span yojson unix))
+ (libraries masc masc.masc_types masc_tui_lane_application masc_tui_lane_standing masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_lane_records masc_tui_markdown masc_tui_markdown_theme masc_tui_theme masc_tui_span yojson unix masc_tui_value))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -1904,7 +1904,7 @@
  (name masc_tui_runtime_evidence)
  (wrapped false)
  (modules masc_tui_runtime_evidence)
- (libraries yojson unix))
+ (libraries yojson unix masc_tui_value))
 
 (library
  (name masc_tui_sgr_text)
@@ -2192,6 +2192,7 @@
  (wrapped false)
  (modules masc_tui_keeper_strip)
  (libraries
+  masc_tui_value
   masc
   masc.masc_schedule
   masc_tui_ansi
@@ -2344,7 +2345,7 @@
  (name masc_tui_memory_lineage)
  (wrapped false)
  (modules masc_tui_memory_lineage)
- (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix yojson))
+ (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix yojson masc_tui_value))
 
 (library
  (name masc_tui_memory_recall_form)
@@ -2538,7 +2539,9 @@
   masc_tui_layout
   masc_tui_render_schedule
   masc_tui_terminal_palette
-  masc_tui_theme))
+  masc_tui_theme
+  masc_tui_value
+  masc.time_codec))
 
 (library
  (name masc_tui_msx_checkpoint_pending)
@@ -2612,7 +2615,7 @@
  (name masc_tui_next_request_band)
  (wrapped false)
  (modules masc_tui_next_request_band)
- (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi))
+ (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi masc_tui_value unix))
 
 (library
  (name masc_tui_render_prim)
@@ -3561,7 +3564,7 @@
  (wrapped false)
  (modules masc_tui_queue_inspection)
  (libraries masc masc.keeper_runtime masc.keeper_chat_operations
-  masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson))
+  masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson masc_tui_value))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
 ;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints

@@ -82,7 +82,7 @@ type workspace_activity_column = Activity_date | Activity_keeper | Activity_task
 
 let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
-    | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
+    | Activity_date -> Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute | Activity_keeper -> 18 | Activity_task -> 16
     | Activity_result -> Message_layout.display_width (if ko then "결과" else "RESULT")
     | Activity_path -> 8 in
   let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -151,9 +151,8 @@ let render_workspace_activity (state : state) repo_id =
             match Rows.at rows_window (first + i) with
             | None -> if i = 0 && rows = [] then c.push (if ko then "  이 기간에 기록된 clone 쓰기 없음" else "  No recorded clone writes in this window") else c.push_empty ()
             | Some (change, path) ->
-                let tm = Unix.localtime change.Tui_decode.fc_at in
-                let date = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min in
+                let date =
+                  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
                 let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
                 let line = "  " ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)

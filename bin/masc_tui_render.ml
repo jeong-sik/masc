@@ -489,10 +489,9 @@ let render_memory (state : state) =
           ; (match current_memory_starving_count s with
              | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
              | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
-          ; (let tm = Unix.localtime s.mhs_generated_at in
-             Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
-               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-               tm.Unix.tm_hour tm.Unix.tm_min)
+          ; Printf.sprintf (if ko then "%s 관측" else "read %s")
+              (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
+                 s.mhs_generated_at)
           ]
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"

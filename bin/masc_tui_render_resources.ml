@@ -300,11 +300,9 @@ let render_resources (state : state) =
       | Some count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
-        let at = Unix.localtime inventory.received_at in
         Printf.sprintf
-          (if ko then " · 마지막 확인 조회 %02d:%02d:%02d"
-           else " · last check query %02d:%02d:%02d")
-          at.tm_hour at.tm_min at.tm_sec
+          (if ko then " · 마지막 확인 조회 %s" else " · last check query %s")
+          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) inventory.received_at)
       | Some (_, (Absent | Loading | Failed _)) | None ->
           if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period

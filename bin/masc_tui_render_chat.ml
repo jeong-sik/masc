@@ -744,10 +744,10 @@ let skill_tone_of_state :
 
 (** Render message input/conversation view *)
 (* The clock text and the bucket of one moment read the same local time; an
-   entry that needs both converts it once. *)
+   entry that needs both converts it once. The bucket draws the day rule the
+   clock sits under, so the clock carries no date of its own. *)
 let clock_of_local_time (time : Unix.tm) =
-  Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
-    time.Unix.tm_sec
+  Masc_tui_value.Instant.clock_within_day Masc_tui_value.Instant.To_second time
 ;;
 
 let bucket_of_local_time (time : Unix.tm) =
@@ -797,7 +797,8 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
         [ fact
             (Chat_facts.Reading (Theme.warn ()))
             (Masc_tui_types.librarian_failing_text
-               ~since:(keeper_message_clock failing.lf_since)
+               ~since:(Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+                         ~now:(Unix.gettimeofday ()) failing.lf_since)
                failing)
         ]
   in
@@ -2036,8 +2037,12 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
         ({ delivery_state = None; style;
              heading_boundary = Message_layout.Inherit_heading;
              body_presentation;
+             (* A row with no valid moment was read without one: the
+                server's row did not report it (RFC tui-one-screen-grammar
+                §6.4). *)
              timestamp =
-               Option.fold ~none:message.me_timestamp
+               Option.fold
+                 ~none:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
                  ~some:clock_of_local_time local_time;
              timeline_bucket = Option.map bucket_of_local_time local_time;
              diagnostics = committed_request_diagnostics

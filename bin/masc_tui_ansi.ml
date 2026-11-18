@@ -800,22 +800,32 @@ module Terminal_text = struct
     Option.value ~default (optional_single_line value)
 
   let single_lines values = List.map single_line values
-  let short_timestamp text =
-    Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime:Unix.localtime text
+  (* Every moment these draw goes through [Masc_tui_value.Instant], read
+     against the wall clock when the row is drawn: the clock alone today, the
+     date with it on another day (RFC tui-one-screen-grammar §6.1). The
+     screen's clock is the terminal's zone, and zone 1 names it once for the
+     whole screen, so no row spells "(local)" beside its own time.
+
+     A value is one moment: [short_timestamp] where it has a line to itself,
+     to the minute. A log row is a record list, to the second, and reads as
+     a column moment. A stamp the codec cannot read keeps the text the
+     server wrote, as [Masc.Tui_terminal_text] has always drawn it. *)
+  let moment_of_iso ~unreadable draw text =
+    match Time_codec.parse_rfc3339_opt text with
+    | Some at -> draw ~now:(Unix.gettimeofday ()) at
+    | None -> unreadable ~localtime:Unix.localtime text
   let short_timestamp_of_unix unix_seconds =
-    Masc.Tui_terminal_text.short_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
-      unix_seconds
-  (* The screen's clock is the terminal's zone. This is the one place that
-     names it, so every row clock and the header clock agree -- which is also
-     why no row spells "(local)" beside its own time. Four rows out of the
-     thirty-five this TUI draws used to, and a marker on four of them says the
-     other thirty-one are something else. The guide states the zone once, for
-     the whole screen. *)
-  let clock_timestamp text =
-    Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime text
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+      ~now:(Unix.gettimeofday ()) unix_seconds
+  let short_timestamp text =
+    moment_of_iso ~unreadable:Masc.Tui_terminal_text.short_timestamp_for_terminal
+      (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute) text
   let clock_timestamp_of_unix unix_seconds =
-    Masc.Tui_terminal_text.clock_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
-      unix_seconds
+    Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second
+      ~now:(Unix.gettimeofday ()) unix_seconds
+  let clock_timestamp text =
+    moment_of_iso ~unreadable:Masc.Tui_terminal_text.clock_timestamp_for_terminal
+      (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second) text
 end
 
 (** Task status icon *)

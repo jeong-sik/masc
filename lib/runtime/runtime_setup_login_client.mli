@@ -40,6 +40,11 @@ val account_home : runtime_root:string -> account_id:string -> client:client ->
 (** The home that {!prepare} made for a new account [account_id] of [client]
     under [runtime_root]. It must still be there, an owned, protected
     directory. Antigravity keeps no such home. *)
+val account_home_path : runtime_root:string -> account_id:string -> client:client ->
+  (string, string) result
+(** Where {!account_home} looks: the home of [account_id] of [client] under
+    [runtime_root], as the layout spells it. It reads the real path of the
+    runtime root, looks at no home and makes nothing. *)
 val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
 val environment : t -> (string array, string) result

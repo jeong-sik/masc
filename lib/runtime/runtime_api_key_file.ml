@@ -91,6 +91,11 @@ let read path =
   | Error (Empty | Json_document) -> Error (Key_unreadable Not_a_key)
 ;;
 
+let read_error_code = function
+  | Key_missing -> "key_missing"
+  | Key_unreadable (_ : unreadable) -> "key_unreadable"
+;;
+
 let read_error_to_string = function
   | Key_missing -> "the API key file is missing"
   | Key_unreadable Path_not_absolute -> "the API key file must use an absolute path"

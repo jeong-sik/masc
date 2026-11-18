@@ -36,7 +36,8 @@ const refusalCodes = [
   'invalid_request', 'message_too_long', 'message_blank', 'runtime_not_supported', 'account_runtime_invalid',
   'turn_refused', 'native_tools_refused', 'unknown_keeper', 'unknown_conversation', 'unknown_account',
   'keeper_has_no_runtime', 'account_call_running', 'conversation_on_other_subscription', 'runtime_reassigned',
-  'not_signed_in', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded',
+  'not_signed_in', 'key_missing', 'key_unreadable',
+  'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded',
   'conversation_row_not_understood', 'conversation_row_half_written', 'conversation_record_unavailable',
   'server_unavailable', 'internal_error',
 ] as const

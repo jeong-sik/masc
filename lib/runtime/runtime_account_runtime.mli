@@ -47,7 +47,8 @@ val error_to_string : error -> string
 
 (** The name of the error in an answer, one per constructor:
     [template_not_declared], [model_not_bound], [runtime_not_bound],
-    [key_missing], [key_unreadable], [not_materialized]. *)
+    [key_missing], [key_unreadable], [not_materialized]. The two of a key
+    file are {!Runtime_api_key_file.read_error_code}. *)
 val error_code : error -> string
 
 (** The binding of the template that [binding] chooses, moved onto the account

@@ -69,6 +69,9 @@ type read_error =
 (** The key in the file at [path], by {!read_file}. *)
 val read : string -> (key, read_error) result
 
+(** The name of the reason in an answer: [key_missing] or [key_unreadable]. *)
+val read_error_code : read_error -> string
+
 (** Why the file gave no key, for a diagnostic of the configuration. It names
     neither the path nor anything of the content. *)
 val read_error_to_string : read_error -> string

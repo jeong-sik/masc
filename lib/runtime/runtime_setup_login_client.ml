@@ -46,12 +46,15 @@ let new_home ~runtime_root ~account_id ~client = filesystem (fun () ->
   let* (_ : string) = child clients (Filename.basename client_root) in
   child client_root account_id)
 
-let account_home ~runtime_root ~account_id ~client =
+let account_home_path ~runtime_root ~account_id ~client =
   let* native = match client with
     | Codex -> Ok Codex_home | Claude -> Ok Claude_home | Muse -> Ok Muse_home
     | Antigravity -> Error "An Antigravity login keeps no account home." in
+  filesystem (fun () -> Runtime_account_home_layout.home ~runtime_root native ~account_id)
+
+let account_home ~runtime_root ~account_id ~client =
+  let* home = account_home_path ~runtime_root ~account_id ~client in
   filesystem (fun () ->
-    let* home = Runtime_account_home_layout.home ~runtime_root native ~account_id in
     let* () = directory ~private_:true home in
     Ok home)
 

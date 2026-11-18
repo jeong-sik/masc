@@ -18,6 +18,13 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
+val card_selection :
+  is_selected:('action -> bool) -> ('action * string) list -> Masc_tui_card.selection
+(** Where the selection is, as the grid sees a card listing [entries]. Every
+    entry is a destination the selection moves over: a card that lists none
+    is {!Masc_tui_card.Unselectable}, a card that lists the selected one
+    holds it, and any other card is {!Masc_tui_card.Selectable}. *)
+
 type edges =
   { decisions : Masc_tui_card.edge
   ; continuation : Masc_tui_card.edge
@@ -50,8 +57,10 @@ val draw :
 
     A card that [rows] cannot hold is squashed to its top edge, which keeps
     its name, mark and count ({!Masc_tui_card.grid}). The card that holds the
-    selected row never squashes: when it alone is too tall the result is
-    [None], so the plain window keeps the selected destination on screen.
+    selected row never squashes. Whether the cards are drawn does not depend
+    on where the selection is: they are [None] unless each card that lists a
+    destination fits full in turn, so moving the selection never switches
+    the body between the cards and the plain rows.
 
     [actions] are the reasons the server gives for needing the operator, one
     row each, drawn as a card under the status readings. With none, there is

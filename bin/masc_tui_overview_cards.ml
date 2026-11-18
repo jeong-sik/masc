@@ -48,6 +48,16 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
+(* Every row a card lists is a destination the selection moves over, so a
+   card with rows can hold it and a card with none cannot. *)
+let card_selection ~is_selected entries =
+  match entries with
+  | [] -> Masc_tui_card.Unselectable
+  | _ :: _ ->
+      if List.exists (fun (action, _) -> is_selected action) entries then
+        Masc_tui_card.Holds_selected_row
+      else Masc_tui_card.Selectable
+
 let draw ~ko ~(edges : edges) ~inner
     ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
@@ -59,38 +69,24 @@ let draw ~ko ~(edges : edges) ~inner
     let rows_of entries ~cells =
       List.concat_map (row_body ~is_selected ~cells) entries
     in
-    (* The card with the selected row stays full when the others squash, so
-       the selection stays on screen. *)
-    let selection_in entries =
-      if List.exists (fun (action, _) -> is_selected action) entries then
-        Masc_tui_card.Holds_selected_row
-      else Masc_tui_card.No_selected_row
-    in
+    let selection_in = card_selection ~is_selected in
     (* With no decision waiting the edge's count says so, and the body has
        nothing to list, as the conversations card with none. *)
     let decision_card =
-      { Masc_tui_card.edge = edges.decisions
-      ; body = rows_of decisions
-      ; selection = selection_in decisions
-      }
+      ( { Masc_tui_card.edge = edges.decisions; body = rows_of decisions }
+      , selection_in decisions )
     in
     let continue_card =
-      { Masc_tui_card.edge = edges.continuation
-      ; body = rows_of continuation
-      ; selection = selection_in continuation
-      }
+      ( { Masc_tui_card.edge = edges.continuation; body = rows_of continuation }
+      , selection_in continuation )
     in
+    (* The status readings are not destinations. *)
     let status_card =
-      { Masc_tui_card.edge = edges.capacity
-      ; body = (fun ~cells -> status ~cells)
-      ; selection = Masc_tui_card.No_selected_row
-      }
+      ( { Masc_tui_card.edge = edges.capacity; body = (fun ~cells -> status ~cells) }
+      , Masc_tui_card.Unselectable )
     in
     let actions_card =
-      { Masc_tui_card.edge = edges.actions
-      ; body = rows_of actions
-      ; selection = selection_in actions
-      }
+      ({ Masc_tui_card.edge = edges.actions; body = rows_of actions }, selection_in actions)
     in
     let style =
       { Masc_tui_card.border = Theme.recede ()

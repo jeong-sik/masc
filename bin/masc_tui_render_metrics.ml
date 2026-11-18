@@ -287,8 +287,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
       { Masc_tui_card.edge =
           { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
-      ; body = (fun ~cells:_ -> rows)
-      ; selection = Masc_tui_card.No_selected_row }
+      ; body = (fun ~cells:_ -> rows) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)

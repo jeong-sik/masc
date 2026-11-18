@@ -1,10 +1,14 @@
-(* The Overview cards decide one thing a test can see without reading the
-   screen: whether the cards are drawn at all ([Some]) or the caller falls
-   back to the plain rows ([None]). RFC tui-one-screen-grammar section 2 says
-   the card that holds the selected row never squashes, so the selection
-   stays on screen. These cases pin that decision through the result's shape:
-   the same rows fit when the selection is elsewhere and do not when the
-   selected card would have had to squash. *)
+(* The Overview cards decide two things a test can see without reading the
+   screen. One is which card the selection reaches: a card that lists the
+   selected destination holds it, a card that lists others can take it, and a
+   card that lists none never does. The other is whether the cards are drawn
+   at all ([Some]) or the caller falls back to the plain rows ([None]).
+
+   RFC tui-one-screen-grammar section 2 makes the second one independent of
+   the selection: the cards are drawn only when each card the selection can
+   reach fits full in turn. So pressing j or k never switches the body
+   between the cards and the plain rows (section 8), and a card the
+   selection can reach is never too tall to stay full once it holds it. *)
 
 open Alcotest
 module Cards = Masc_tui_overview_cards
@@ -35,83 +39,106 @@ let draw ~rows ~selected ~decisions ~continuation ~actions =
     ~status:(fun ~cells:_ -> [ "status" ])
     ~actions
 
-let drawn label = function
-  | Some _ -> ()
-  | None -> fail (label ^ ": fell back to the plain rows")
+(* Nothing selected, then each destination in turn. *)
+let selections ~decisions ~continuation ~actions =
+  None :: List.map (fun (action, _) -> Some action) (decisions @ continuation @ actions)
 
-let fell_back label = function
-  | Some _ -> fail (label ^ ": drew the cards")
-  | None -> ()
-
-(* The right column is the status card (3 rows) over the action card (5 rows,
-   7 tall), one row between them: 11 rows. The left column is 8. *)
-let test_the_selected_action_card_never_squashes () =
-  let decisions = [] and continuation = entries "c" 2 and actions = entries "a" 5 in
-  (* Nothing selected: the action card squashes and the grid fits in 8. *)
-  drawn "nothing selected"
-    (draw ~rows:8 ~selected:None ~decisions ~continuation ~actions);
-  (* Selected: the action card stays full, the status card squashes, and the
-     column needs 1 + 1 + 7 = 9 rows. *)
-  fell_back "a selected action, 8 rows"
-    (draw ~rows:8 ~selected:(Some "a0") ~decisions ~continuation ~actions);
-  drawn "a selected action, 9 rows"
-    (draw ~rows:9 ~selected:(Some "a0") ~decisions ~continuation ~actions)
-
-(* The left column is the decision card (6 rows, 8 tall) over the continue
-   card (2 rows, 4 tall): 13 rows. The right column is 11. *)
-let test_the_selected_decision_card_never_squashes () =
-  let decisions = entries "d" 6 and continuation = entries "c" 2 and actions = entries "a" 5 in
-  (* The selection is on an action: the decision card squashes, the left
-     column is 1 + 1 + 4, the right column 1 + 1 + 7. *)
-  drawn "an action selected"
-    (draw ~rows:9 ~selected:(Some "a0") ~decisions ~continuation ~actions);
-  (* The selection is on a decision: the continue card squashes and the left
-     column still needs 8 + 1 + 1 = 10 rows. *)
-  fell_back "a decision selected, 9 rows"
-    (draw ~rows:9 ~selected:(Some "d0") ~decisions ~continuation ~actions);
-  drawn "a decision selected, 10 rows"
-    (draw ~rows:10 ~selected:(Some "d0") ~decisions ~continuation ~actions)
-
-(* The continue card (6 rows, 8 tall) sits under the decision card (3 tall). *)
-let test_the_selected_continue_card_never_squashes () =
-  let decisions = [] and continuation = entries "c" 6 and actions = entries "a" 1 in
-  (* Right: 3 + 1 + 3 = 7. Left with nothing selected: the continue card
-     squashes, 3 + 1 + 1. *)
-  drawn "nothing selected"
-    (draw ~rows:7 ~selected:None ~decisions ~continuation ~actions);
-  (* Selected: the decision card squashes instead, 1 + 1 + 8 = 10. *)
-  fell_back "a continuation selected, 9 rows"
-    (draw ~rows:9 ~selected:(Some "c0") ~decisions ~continuation ~actions);
-  drawn "a continuation selected, 10 rows"
-    (draw ~rows:10 ~selected:(Some "c0") ~decisions ~continuation ~actions)
-
-(* Whatever is selected, drawn cards never take more lines than [rows] and
-   every line is [inner] cells. *)
-let test_drawn_cards_stay_inside_their_rows () =
-  let decisions = entries "d" 3 and continuation = entries "c" 4 and actions = entries "a" 5 in
+(* The same answer wherever the selection is: drawn at [fits] rows and the
+   plain rows one row shorter. *)
+let check_threshold label ~fits ~decisions ~continuation ~actions =
   List.iter
     (fun selected ->
+       let at what =
+         Printf.sprintf "%s, %s selected: %s" label
+           (Option.value selected ~default:"nothing") what
+       in
+       check bool (at "one row short falls back") true
+         (Option.is_none (draw ~rows:(fits - 1) ~selected ~decisions ~continuation ~actions));
+       check bool (at "drawn") true
+         (Option.is_some (draw ~rows:fits ~selected ~decisions ~continuation ~actions)))
+    (selections ~decisions ~continuation ~actions)
+
+let selection =
+  testable
+    (fun formatter selection ->
+       Format.pp_print_string formatter
+         (match selection with
+          | Card.Unselectable -> "unselectable"
+          | Card.Selectable -> "selectable"
+          | Card.Holds_selected_row -> "holds the selected row"))
+    ( = )
+
+let test_a_card_with_destinations_can_hold_the_selection () =
+  let rows = entries "c" 3 in
+  let is_selected action = String.equal action "c1" in
+  check selection "lists the selected one" Card.Holds_selected_row
+    (Cards.card_selection ~is_selected rows);
+  check selection "lists others" Card.Selectable
+    (Cards.card_selection ~is_selected:(fun _ -> false) rows);
+  check selection "lists none" Card.Unselectable (Cards.card_selection ~is_selected [])
+
+(* The right column is the status card (3 rows) over the action card (5 rows,
+   7 tall), one row between them. The selection can reach the action card,
+   so the column needs 1 + 1 + 7 = 9 rows wherever the selection is. The left
+   column needs 3 + 1 + 1 at most. *)
+let test_the_action_card_must_fit_full () =
+  check_threshold "actions" ~fits:9 ~decisions:[] ~continuation:(entries "c" 2)
+    ~actions:(entries "a" 5)
+
+(* The left column is the decision card (6 rows, 8 tall) over the continue
+   card (2 rows, 4 tall). With the decision card full and the continue card
+   squashed it needs 8 + 1 + 1 = 10 rows. The right column needs 9. *)
+let test_the_decision_card_must_fit_full () =
+  check_threshold "decisions" ~fits:10 ~decisions:(entries "d" 6)
+    ~continuation:(entries "c" 2) ~actions:(entries "a" 5)
+
+(* The continue card (6 rows, 8 tall) sits under the decision card, which
+   lists no decision and so never holds the selection: 1 + 1 + 8 = 10. The
+   right column needs 1 + 1 + 3 = 5. *)
+let test_the_continue_card_must_fit_full () =
+  check_threshold "continuation" ~fits:10 ~decisions:[] ~continuation:(entries "c" 6)
+    ~actions:(entries "a" 1)
+
+(* At every height the answer is the same for every selection, and drawn
+   cards never take more lines than [rows], every line [inner] cells. *)
+let test_the_selection_never_switches_the_layout () =
+  List.iter
+    (fun (decisions, continuation, actions) ->
        for rows = 0 to 24 do
-         match draw ~rows ~selected ~decisions ~continuation ~actions with
-         | None -> ()
-         | Some lines ->
-             let at = Printf.sprintf "%d rows" rows in
-             check bool (at ^ ": within the rows") true (List.length lines <= rows);
-             check bool (at ^ ": every line is the inner width") true
-               (List.for_all (fun line -> Layout.display_width line = inner) lines)
+         let at = Printf.sprintf "%d rows" rows in
+         let answers =
+           List.map
+             (fun selected -> draw ~rows ~selected ~decisions ~continuation ~actions)
+             (selections ~decisions ~continuation ~actions)
+         in
+         check bool (at ^ ": the same layout for every selection") true
+           (List.for_all Option.is_some answers || List.for_all Option.is_none answers);
+         List.iter
+           (function
+             | None -> ()
+             | Some lines ->
+                 check bool (at ^ ": within the rows") true (List.length lines <= rows);
+                 check bool (at ^ ": every line is the inner width") true
+                   (List.for_all (fun line -> Layout.display_width line = inner) lines))
+           answers
        done)
-    [ None; Some "d1"; Some "c2"; Some "a4" ]
+    [ (entries "d" 3, entries "c" 4, entries "a" 5)
+    ; ([], entries "c" 2, entries "a" 5)
+    ; (entries "d" 6, entries "c" 2, [])
+    ; ([], [], [])
+    ]
 
 let () =
   run "tui overview cards"
     [ ( "selection"
-      , [ test_case "the selected action card never squashes" `Quick
-            test_the_selected_action_card_never_squashes
-        ; test_case "the selected decision card never squashes" `Quick
-            test_the_selected_decision_card_never_squashes
-        ; test_case "the selected continue card never squashes" `Quick
-            test_the_selected_continue_card_never_squashes
-        ; test_case "drawn cards stay inside their rows" `Quick
-            test_drawn_cards_stay_inside_their_rows
+      , [ test_case "a card with destinations can hold the selection" `Quick
+            test_a_card_with_destinations_can_hold_the_selection
+        ; test_case "the action card must fit full" `Quick test_the_action_card_must_fit_full
+        ; test_case "the decision card must fit full" `Quick
+            test_the_decision_card_must_fit_full
+        ; test_case "the continue card must fit full" `Quick
+            test_the_continue_card_must_fit_full
+        ; test_case "the selection never switches the layout" `Quick
+            test_the_selection_never_switches_the_layout
         ] )
     ]

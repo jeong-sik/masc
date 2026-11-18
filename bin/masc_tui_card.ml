@@ -30,14 +30,9 @@ type edge =
   ; focus : focus
   }
 
-type selection =
-  | No_selected_row
-  | Holds_selected_row
-
 type t =
   { edge : edge
   ; body : cells:int -> string list
-  ; selection : selection
   }
 
 type style =
@@ -69,9 +64,14 @@ type height =
   | Full
   | Squashed
 
+type selection =
+  | Unselectable
+  | Selectable
+  | Holds_selected_row
+
 type squash =
-  | May_squash
-  | Stays_full
+  | By_selection of selection
+  | Owns_keyboard
 
 (* A side, one cell of padding, a cell of content, one cell of padding, a side. *)
 let side_and_padding_cells = 4
@@ -351,70 +351,84 @@ let squashed_rows = 1
 let stack_height ~row_gap heights =
   List.fold_left ( + ) 0 heights + (row_gap * max 0 (List.length heights - 1))
 
-(* A focused card owns the keyboard and a card with the selected row holds
-   what the keys act on: squashing either would hide it. *)
-let squash_of card =
-  match card.edge.focus, card.selection with
-  | (Focused_list | Focused_other), (No_selected_row | Holds_selected_row) -> Stays_full
-  | Unfocused, Holds_selected_row -> Stays_full
-  | Unfocused, No_selected_row -> May_squash
+(* A focused card owns the keyboard; the selection reaches any other card as
+   its caller says. *)
+let squash_of card selection =
+  match card.edge.focus with
+  | Focused_list | Focused_other -> Owns_keyboard
+  | Unfocused -> By_selection selection
 
 (* {!heights} over any card: [natural] and [squash] read what it needs, and
-   each card comes back with its height, so the caller never zips two lists.
-
-   Each column is settled on its own. A column that fits is left alone, so
-   only a column taller than [max_rows] squashes; which tall column goes first
-   does not change what each one ends with. *)
+   each card comes back with its height, so the caller never zips two lists. *)
 let choose_heights ~row_gap ~max_rows ~natural ~squash columns =
-  let card_height (card, shape) =
-    match shape with
-    | Full -> natural card
-    | Squashed -> squashed_rows
+  let fits rows = stack_height ~row_gap rows <= max_rows in
+  let full_now card =
+    match squash card with
+    | Owns_keyboard | By_selection Holds_selected_row -> true
+    | By_selection (Selectable | Unselectable) -> false
   in
-  let fits column = stack_height ~row_gap (List.map card_height column) <= max_rows in
-  let lowest_squashable column =
-    List.fold_left
-      (fun (index, found) (card, shape) ->
-         match squash card, shape with
-         | May_squash, Full -> (index + 1, Some index)
-         | May_squash, Squashed | Stays_full, (Full | Squashed) -> (index + 1, found))
-      (0, None) column
-    |> snd
+  (* The rows a card takes when its column squashes all it may now. *)
+  let least card = if full_now card then natural card else squashed_rows in
+  (* The column with the selection on the card at [opened], or on no card:
+     that card and the focused ones full, every other card squashed. *)
+  let with_selection_on ~opened column =
+    List.mapi
+      (fun index card ->
+         match squash card with
+         | Owns_keyboard -> natural card
+         | By_selection (Holds_selected_row | Selectable) ->
+             if Option.equal Int.equal opened (Some index) then natural card
+             else squashed_rows
+         | By_selection Unselectable -> squashed_rows)
+      column
   in
-  let set column ~card shape =
-    List.mapi (fun index (it, was) -> (it, if index = card then shape else was)) column
+  let reachable card =
+    match squash card with
+    | By_selection (Holds_selected_row | Selectable) -> true
+    | By_selection Unselectable | Owns_keyboard -> false
   in
-  (* [squashed] is the newest first, the order cards open again in. *)
-  let rec squash_until_fit column squashed =
-    if fits column then Some (column, squashed)
-    else
-      match lowest_squashable column with
-      | None -> None
-      | Some card -> squash_until_fit (set column ~card Squashed) (card :: squashed)
+  (* Wherever the selection goes, the column still fits. *)
+  let fits_every_selection column =
+    match
+      List.concat (List.mapi (fun index card -> if reachable card then [ index ] else []) column)
+    with
+    | [] -> fits (with_selection_on ~opened:None column)
+    | reached ->
+        List.for_all (fun index -> fits (with_selection_on ~opened:(Some index) column)) reached
   in
-  let reopen column card =
-    let opened = set column ~card Full in
-    if fits opened then opened else column
-  in
+  (* Top card first: a card is full when it fits with the cards above as
+     settled and every card under it at its least. Each step keeps the column
+     inside [max_rows] when its least does, so the settled column does too. *)
   let settle column =
-    squash_until_fit (List.map (fun card -> (card, Full)) column) []
-    |> Option.map (fun (column, squashed) -> List.fold_left reopen column squashed)
+    let rec down ~above = function
+      | [] -> []
+      | card :: below ->
+          let shape =
+            if full_now card || fits (List.rev_append above (natural card :: List.map least below))
+            then Full
+            else Squashed
+          in
+          let rows = match shape with Full -> natural card | Squashed -> squashed_rows in
+          (card, shape) :: down ~above:(rows :: above) below
+    in
+    down ~above:[] column
   in
-  (* The grid fits when every column does. *)
-  List.fold_right
-    (fun column settled ->
-       match settle column, settled with
-       | Some column, Some rest -> Some (column :: rest)
-       | None, (Some _ | None) | Some _, None -> None)
-    columns (Some [])
+  (* The least checks the cards full now together: two cards that each hold
+     the selected row would both stay full. *)
+  let column_fits column = fits_every_selection column && fits (List.map least column) in
+  if List.for_all column_fits columns then Some (List.map settle columns) else None
 
 let heights ~row_gap ~max_rows columns =
   choose_heights ~row_gap ~max_rows ~natural:fst ~squash:snd columns
   |> Option.map (List.map (List.map snd))
 
-(* Each card of a column with its body, asked once at the column's width. *)
+(* Each card of a column with its squash and its body, the body asked once at
+   the column's width. *)
 let prepare_column ~width stack =
-  List.map (fun card -> (card, card.body ~cells:(content_cells ~width))) stack
+  List.map
+    (fun (card, selection) ->
+       (card, squash_of card selection, card.body ~cells:(content_cells ~width)))
+    stack
 
 let drawn_height ~body = function
   | Full -> natural_height body
@@ -429,7 +443,7 @@ let squashed_row ~ko ~style ~width edge =
    card ends in blank rows. *)
 let column_rows ~ko ~style ~row_gap ~width ~height placed =
   let used =
-    stack_height ~row_gap (List.map (fun ((_, body), shape) -> drawn_height ~body shape) placed)
+    stack_height ~row_gap (List.map (fun ((_, _, body), shape) -> drawn_height ~body shape) placed)
   in
   let extra = max 0 (height - used) in
   let stretched =
@@ -443,7 +457,7 @@ let column_rows ~ko ~style ~row_gap ~width ~height placed =
   in
   let drawn =
     List.mapi
-      (fun index ((card, body), shape) ->
+      (fun index ((card, _, body), shape) ->
          match shape with
          | Squashed -> [ squashed_row ~ko ~style ~width card.edge ]
          | Full ->
@@ -469,8 +483,8 @@ let grid ~ko ~style ~inner_width ~gap ~row_gap ~max_rows columns =
   in
   let planned =
     choose_heights ~row_gap ~max_rows
-      ~natural:(fun (_, body) -> natural_height body)
-      ~squash:(fun (card, _) -> squash_of card)
+      ~natural:(fun (_, _, body) -> natural_height body)
+      ~squash:(fun (_, squash, _) -> squash)
       prepared
   in
   match planned with
@@ -478,7 +492,7 @@ let grid ~ko ~style ~inner_width ~gap ~row_gap ~max_rows columns =
   | Some plan ->
       let column_height placed =
         stack_height ~row_gap
-          (List.map (fun ((_, body), shape) -> drawn_height ~body shape) placed)
+          (List.map (fun ((_, _, body), shape) -> drawn_height ~body shape) placed)
       in
       let height = List.fold_left (fun tallest placed -> max tallest (column_height placed)) 0 plan in
       let drawn =

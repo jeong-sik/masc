@@ -1236,7 +1236,6 @@ let account_card ~tone ~layout entry =
             |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
         in
         full_name @ draw_entry layout tone entry)
-  ; selection = Masc_tui_card.No_selected_row
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
@@ -1258,7 +1257,10 @@ let draw_card_rows ~ko ~width ~tone entries =
   in
   let layout = layout_for ~show_names:false ~width:shared_cells entries in
   let row pair =
-    let cards = List.map (account_card ~tone ~layout) pair in
+    (* No row of an account card can be selected. *)
+    let cards =
+      List.map (fun entry -> (account_card ~tone ~layout entry, Masc_tui_card.Unselectable)) pair
+    in
     let columns =
       match cards with
       | [ only ] -> [ [ only ]; [] ]

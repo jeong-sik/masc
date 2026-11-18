@@ -131,10 +131,24 @@ def read_chunk(child: Child, timeout: float) -> bytes | None:
     return chunk or None
 
 
-def take(child: Child, vte: Vte, chunk: bytes) -> None:
+def send(child: Child, data: bytes) -> bool:
+    """Write `data` to the TUI's terminal. False once the terminal closed: the
+    write then fails with EIO, as the read does in read_chunk."""
+    try:
+        os.write(child.fd, data)
+    except OSError as exc:
+        if exc.errno == errno.EIO:
+            return False
+        raise
+    return True
+
+
+def take(child: Child, vte: Vte, chunk: bytes) -> bool:
+    """Feed `chunk` to the emulator and write back its answers to the TUI's
+    queries. False once the terminal closed. The next read_chunk then returns
+    None too, so a loop that reads on finds the close there."""
     replies = vte.feed(chunk)
-    if replies:
-        os.write(child.fd, replies)
+    return send(child, replies) if replies else True
 
 
 def first_frame(child: Child, vte: Vte, limit: float) -> bool:

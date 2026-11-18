@@ -5,21 +5,27 @@ layout kind is read from its card edges, and what each key reports.
     python3 -m unittest scripts.tests.test_tui_key_steps
 
 Screens are drawn into the harness's own terminal emulator, so cells, wide
-characters and colours are the ones a real capture holds. No TUI, relay or
-MASC server runs here.
+characters and colours are the ones a real capture holds. A closed terminal is
+a real pseudo-terminal whose child, /bin/sh, has exited. No TUI, relay or MASC
+server runs here.
 """
 from pathlib import Path
 import sys
+import time
 from typing import cast
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'harness' / 'tui'))
 from key_steps import (Capture, NavKey, Outcome, Pressed, PngWritten, key_bytes, key_steps_report,  # noqa: E402
-                       parse_keys)
+                       parse_keys, press_key)
+from pty_driver import POLL_S, Child, Geometry, read_chunk, spawn, stop, take  # noqa: E402
 from screen_layout import Kind, Screen, Shape, changed_rows, layout_of, snapshot, text_changed_rows  # noqa: E402
 from vte import Vte  # noqa: E402
 
 COLUMNS = 60
+CLOSE_LIMIT_S = 5.0
+STOP_GRACE_S = 1.0
+CURSOR_QUERY = b'\x1b[6n'  # the emulator answers it, so feeding it writes back
 REVERSE = '\x1b[7m'
 RESET = '\x1b[0m'
 
@@ -195,6 +201,28 @@ class ReportTest(unittest.TestCase):
     def test_a_terminal_closed_before_the_first_key_reports_no_kinds(self) -> None:
         self.assertEqual(key_steps_report(Outcome.CLOSED, None, ()),
                          {'start': {'outcome': 'closed'}, 'keys': [], 'kinds': [], 'kind_stable': None})
+
+
+class ClosedTerminalTest(unittest.TestCase):
+    def exited(self) -> tuple[Child, Vte]:
+        """A terminal whose child has exited and whose output is all read."""
+        child = spawn(['/bin/sh', '-c', 'exit 0'], {}, Geometry(COLUMNS, 4, 8, 16))
+        self.addCleanup(stop, child, STOP_GRACE_S)
+        deadline = time.monotonic() + CLOSE_LIMIT_S
+        while read_chunk(child, POLL_S) is not None:
+            if time.monotonic() > deadline:
+                self.fail('the child did not close its terminal')
+        return child, Vte(COLUMNS, 4)
+
+    def test_a_key_written_to_a_closed_terminal_is_closed_not_raised(self) -> None:
+        # macOS fails the write with EIO; the key steps report it like a
+        # closed read, so the captures before it stay in the report.
+        child, vte = self.exited()
+        self.assertIs(press_key(child, vte, NavKey.J), Outcome.CLOSED)
+
+    def test_an_answer_written_to_a_closed_terminal_says_it_closed(self) -> None:
+        child, vte = self.exited()
+        self.assertIs(take(child, vte, CURSOR_QUERY), False)
 
 
 if __name__ == '__main__':

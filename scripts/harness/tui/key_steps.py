@@ -17,12 +17,11 @@ layout after it (screen_layout.py).
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import enum
-import os
 from pathlib import Path
 import time
 from typing import assert_never
 
-from pty_driver import POLL_S, Child, read_chunk, take
+from pty_driver import POLL_S, Child, read_chunk, send, take
 from screen_layout import Screen, changed_rows, layout_of, snapshot, text_changed_rows
 from vte import Vte, render_png
 
@@ -174,18 +173,23 @@ def quiet(child: Child, vte: Vte) -> Outcome:
         if chunk is None:
             return Outcome.CLOSED
         if chunk:
-            take(child, vte, chunk)
+            if not take(child, vte, chunk):
+                return Outcome.CLOSED
             last = time.monotonic()
 
 
 def press_key(child: Child, vte: Vte, key: NavKey) -> Outcome:
-    os.write(child.fd, key_bytes(key))
+    """A terminal that closed before the key, or while it draws, is CLOSED,
+    whether the write or the read finds it."""
+    if not send(child, key_bytes(key)):
+        return Outcome.CLOSED
     first = read_chunk(child, KEY_DRAW_WAIT_S)
     if first is None:
         return Outcome.CLOSED
     if not first:
         return Outcome.NOTHING
-    take(child, vte, first)
+    if not take(child, vte, first):
+        return Outcome.CLOSED
     return quiet(child, vte)
 
 

@@ -344,13 +344,38 @@ let test_fifo_authority_refuses_without_blocking () =
        | exn -> prerr_endline (Printexc.to_string exn); exit 2)
   | pid ->
       let reaped = ref false in
+      (* A blocking [Unix.waitpid [] pid] made this test the one unbounded wait
+         in the whole suite: when the child never exited, nothing in the test
+         could end it and only dune's 90-minute deadline stopped the run
+         (#52859, run 44105462595: 5406 s, exit 124, the two processes here
+         still alive at 65 minutes). Poll instead, so a stuck child fails this
+         one case with a named reason and the rest of the suite keeps running.
+         The reap in [finally] polls for the same reason: a blocking wait there
+         would move the hang rather than remove it, and [reaped] is set before
+         the kill so [finally] never waits for a child it has already given up
+         on. *)
+      let poll_interval_s = 0.02 in
+      let reap_within ~seconds =
+        let started = Unix.gettimeofday () in
+        let rec loop () =
+          match Unix.waitpid [ Unix.WNOHANG ] pid with
+          | 0, _ ->
+              if Unix.gettimeofday () -. started >= seconds then None
+              else (Unix.sleepf poll_interval_s; loop ())
+          | _reaped_pid, status ->
+              reaped := true;
+              Some status
+        in
+        loop () in
       Fun.protect ~finally:(fun () -> if not !reaped then (
+        reaped := true;
         (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        let _reaped_child = Unix.waitpid [] pid in ())) (fun () ->
-          let _, status = Unix.waitpid [] pid in
-          reaped := true;
-          match status with Unix.WEXITED 0 -> ()
-          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        ignore (reap_within ~seconds:5.))) (fun () ->
+          match reap_within ~seconds:60. with
+          | None ->
+              fail "the FIFO child did not finish within 60 s; it is stuck"
+          | Some (Unix.WEXITED 0) -> ()
+          | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
               fail "FIFO authority must refuse without waiting for a writer")
 
 let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun base_path ->

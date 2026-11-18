@@ -1572,7 +1572,7 @@ let test_early_asks_apply_once_without_granting_authority () =
        && state.workspace_identity = Workspace_identity_match
        && not (Snapshot_read.in_flight state.asks_read)
        && state.http_refresh_started_ns = Some 0L))
-    [Fun.id; (fun _ -> Error "question store unavailable")]
+    [Fun.id; (fun _ -> Error (Request_failed "question store unavailable"))]
 
 let test_unadmitted_cold_asks_defer_without_consuming_the_read () =
   let open Masc_tui_types in
@@ -1617,7 +1617,7 @@ let test_question_answer_retires_pre_answer_reads () =
   Alcotest.(check bool) "delayed early read cannot reopen the answered question" true
     (take_early_asks_observation state early = None);
   let failed = {early with ea_observation =
-    {early.ea_observation with asks_result=Error "pre-answer request failed late"}} in
+    {early.ea_observation with asks_result=Error (Request_failed "pre-answer request failed late")}} in
   Alcotest.(check bool) "delayed pre-answer failure cannot settle the post-answer state" true
     (take_early_asks_observation state failed = None);
   Alcotest.(check bool) "terminal bundle cannot replay the pre-answer snapshot" true
@@ -3066,7 +3066,9 @@ let test_question_origin_survives_answer_and_workspace_change () =
   let state,early = early_asks_fixture () in
   let original_ref = Ids.Turn_ref.make ~trace_id:"original-question-source" ~absolute_turn:17 in
   let snapshot = match early.ea_observation.asks_result with
-    | Ok snapshot -> snapshot | Error error -> Alcotest.fail error in
+    | Ok snapshot -> snapshot
+    | Error (Request_failed detail) -> Alcotest.fail detail
+    | Error (Request_withdrawn _) -> Alcotest.fail "fixture questions kept back" in
   let original = match snapshot.asn_rows with
     | [row] -> {row with ar_source_turn_ref=Some original_ref}
     | _ -> Alcotest.fail "one original question" in

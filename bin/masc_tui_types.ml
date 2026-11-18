@@ -5317,7 +5317,7 @@ end
 
 type asks_observation = {
   asks_request: Snapshot_read.request;
-  asks_result: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+  asks_result: (Masc.Tui_decode_asks.asks_snapshot, request_failure) result;
 }
 
 type early_asks_observation = {
@@ -10483,6 +10483,10 @@ type state = {
      first: an outcome that stayed would go on claiming a keypress the
      operator has moved past. *)
   mutable last_action: Masc_tui_action_notice.t;
+  (* Background reads that keep failing, apart from [last_action] so a poll
+     cannot replace what the operator's last key did. Zone 4 ranks them
+     below it (RFC tui-one-screen-grammar §2). *)
+  mutable read_failures: Masc_tui_read_failure.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -11916,6 +11920,16 @@ let dismiss_latest_preset_save_receipt (state : state) =
 
 let set_last_action (state : state) action =
   state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
+
+(* A background read's answer, for zone 4 (RFC tui-one-screen-grammar §2): a
+   failure adds to that read's run and an answer ends it. A read the
+   workspace guard kept back never left, so it is neither. The caller passes
+   only the read's own answer, never an error put in place of one. *)
+let note_read_answer (state : state) read ~at = function
+  | Ok _ -> state.read_failures <- Masc_tui_read_failure.succeeded state.read_failures read
+  | Error (Request_failed _) ->
+      state.read_failures <- Masc_tui_read_failure.failed state.read_failures read ~at
+  | Error (Request_withdrawn _) -> ()
 
 let quit_inflight_snapshot (state : state) =
   List.map (fun (entry : inflight) ->
@@ -21189,6 +21203,7 @@ let create_state
   voice_floor = None;
   quit_armed = None;
   last_action = Masc_tui_action_notice.empty;
+  read_failures = Masc_tui_read_failure.empty;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;

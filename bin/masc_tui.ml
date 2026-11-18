@@ -10253,10 +10253,16 @@ let launch_asks_read state ~mailbox =
      | Some asks_request ->
        let enqueue_async = workspace_enqueue state in
        let host = server_peer_host and port = state.port in
-       launch_workspace_async_read state ~mailbox
+       (* The guard's refusal stays [Request_withdrawn]: that read was not sent
+          and is no failed read (RFC §2). *)
+       launch_workspace_async_read_with state ~mailbox
+         ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun asks_result ->
            enqueue_async mailbox (Ask_msg (Asks_reloaded { asks_request; asks_result })))
-         (fun () -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ());
+         (fun () ->
+           Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+           |> Result.map_error (fun detail -> Request_failed detail));
        true)
 
 (* Runs on every loop iteration. A read already in flight, the refresh's or
@@ -17312,6 +17318,18 @@ let apply_keeper_chat_result state request result =
          true)
   | Some _ | None -> false
 
+(* A background read's own answer, for zone 4 (RFC tui-one-screen-grammar
+   §2). Called where the read's answer arrives, never where an error is put
+   in place of one. The session event list still gets its line from the
+   caller. *)
+let note_read state read result =
+  Masc_tui_types.note_read_answer state read ~at:(Unix.gettimeofday ()) result
+
+(* The [/health] probe's reading: its error is the probe's own failure. *)
+let note_server_health state reading =
+  note_read state Masc_tui_read_failure.Server_health
+    (Result.map_error (fun detail -> Request_failed detail) reading)
+
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
     match current_error with
@@ -17482,9 +17500,20 @@ let apply_asks_load state = function
 
 (* A read of the questions: what it found, and whether the owed read is
    settled or waits to retry. *)
-let apply_asks_read state result =
+let settle_asks state result =
   settle_asks_read state result;
   apply_asks_load state result
+
+(* The background read of the questions, which zone 4 also hears about. The
+   guard's refusal is said as kept back, never as the read's failure
+   (RFC §2). The reread that follows an answer is that action's outcome and
+   goes to [settle_asks] alone. *)
+let apply_asks_read state result =
+  note_read state Masc_tui_read_failure.Asks result;
+  settle_asks state
+    (Result.map_error
+       (request_failure_text ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Questions_read)
+       result)
 
 let apply_asks_observation state observation =
   Option.iter (apply_asks_read state)
@@ -17510,6 +17539,19 @@ let apply_approvals_read state result =
 let apply_approval_observation state observation =
   Option.iter (fun result ->
     apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result))
+    (take_approval_observation state observation)
+
+(* The confirm queue's own answer, which zone 4 also hears about.
+   [apply_approvals_read] alone also takes an error put in place of a read --
+   a booting server, an account server, a refresh that raised -- and that is
+   no failed read (RFC §2). *)
+let apply_approvals_answer state result =
+  note_read state Masc_tui_read_failure.Confirmations result;
+  apply_approvals_read state result
+
+let apply_approval_answer_observation state observation =
+  Option.iter (fun result ->
+    apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result))
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -17541,7 +17583,7 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
     then
       (* Carried as [request_failure], so a read the guard kept back is drawn
          as kept back and not as a failed read (RFC §2). *)
-      if admit_approval_listing state listing_ticket then apply_approvals_read state result
+      if admit_approval_listing state listing_ticket then apply_approvals_answer state result
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -18161,8 +18203,10 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
          observe_http_reader ~on_progress Http_refresh_progress.Questions
            ~outcome:(fun observation -> Http_refresh_progress.of_result observation.asks_result) (fun () ->
          let asks_result = match expected_workspace with
-           | None -> Error "Server workspace identity is unavailable"
-           | Some expected_workspace -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
+           | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
+           | Some expected_workspace ->
+               Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+               |> Result.map_error (fun detail -> Request_failed detail) in
          let observation = { asks_request; asks_result } in
          (match on_asks with
           | None -> ()
@@ -18493,7 +18537,7 @@ let apply_http_scoped_data state ~datasets results =
       record dataset (if received then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
-  Option.iter (apply_approval_observation state) results.http_approvals;
+  Option.iter (apply_approval_answer_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
   if List.mem Surface_read_order.Board_posts datasets then begin
     (* The terminal reservation already marked missing data unavailable. Only
@@ -19639,6 +19683,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
        cannot replace identity observed by a newer collector. *)
     (match admission with
      | Admit_identity_and_data | Admit_identity_only ->
+         note_server_health state results.http_scoped_server_identity;
          apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
      | Admit_data_only | Admit_nothing -> ());
     match admission with
@@ -19681,6 +19726,9 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
     let err = request_failure_text ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Surface_read failure in
+    (* The last [/health] reading its probes took, the probe's own answer
+       whatever stopped the refresh after it. *)
+    Option.iter (note_server_health state) latest;
     apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
@@ -19690,9 +19738,15 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
     add_event state "error" err
   end
 
+(* A refresh pass settled, and its [/health] probe read [identity]. *)
+let note_refresh_settled state identity =
+  note_read state Masc_tui_read_failure.Refresh_pass (Ok ());
+  note_server_health state identity
+
 let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
+  note_refresh_settled state results.http_server_identity;
   let previous_items = visible_item_revision state in
   let request = results.http_scoped.http_surface_request in
   (* Navigation joins this pass's ticket while it runs, so the ticket alone
@@ -19706,7 +19760,7 @@ let apply_http_surfaces state ~mailbox results =
   let roster_refreshed = match admission with
     | Admit_identity_and_data | Admit_data_only ->
         if state.workspace_identity = Workspace_identity_match then
-          Option.iter (apply_approval_observation state) results.http_approvals;
+          Option.iter (apply_approval_answer_observation state) results.http_approvals;
         apply_http_scoped_data state ~datasets results.http_scoped
     | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
@@ -19731,6 +19785,7 @@ let apply_http_surfaces state ~mailbox results =
 
 let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  note_refresh_settled state identity;
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
@@ -19756,6 +19811,8 @@ let account_server_reason =
 
 let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  (* The probe answered; what answered is the account server. *)
+  note_refresh_settled state (Ok ());
   (* The footer's last notice was said on the screen this one covers, such
      as the settings this server could not answer at start. *)
   (match state.connection_status with
@@ -19776,6 +19833,7 @@ let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticke
   end
 
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
+  note_refresh_settled state latest_identity;
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
@@ -22684,7 +22742,7 @@ let apply_ask_answer_completion state submission result asks =
           draft it kept, never an unconfirmed recording (RFC §2). *)
        report_kept_back state ~request:Kept_request.Ask_answer
          (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
-  apply_asks_read state asks
+  settle_asks state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
@@ -25437,7 +25495,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result);
+        apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result);
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
@@ -26440,6 +26498,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       withdraw_currency_authority state;
       state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
+      note_read state Masc_tui_read_failure.Refresh_pass (Error (Request_failed err));
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight

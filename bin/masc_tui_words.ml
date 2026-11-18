@@ -173,6 +173,7 @@ module Kept_request = struct
     | Github_token_save
     | Github_login
     | Confirmations_read
+    | Questions_read
     | Report_checks_read
     | Preparation_read
     | Waiting_list_read
@@ -327,6 +328,7 @@ module Kept_request = struct
     | Github_token_save -> text "GitHub 토큰 저장" "GitHub token save"
     | Github_login -> text "GitHub 로그인" "GitHub login"
     | Confirmations_read -> text "운영자 승인 목록 읽기" "confirmation list read"
+    | Questions_read -> text "질문 목록 읽기" "question list read"
     | Report_checks_read -> text "보고서 확인 표시 읽기" "report check read"
     | Preparation_read -> text "준비 기록 읽기" "preparation record read"
     | Waiting_list_read -> text "대기 목록 읽기" "waiting list read"

@@ -92,6 +92,9 @@ shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3
 만들 수 없어서 그 요청들은 예전처럼 judge 로 간다. shim 은 모르는 설정 키를
 거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
 `remote_shim_version_skew` 로 거부된다.
+이 참음은 relay version 이 같을 때만이다. 게스트 agent 인 shim 이 서버와 다른
+relay version 을 적었으면 한 릴리즈 차이여도 `microvm_shim_relay_version_mismatch`
+로 거절된다(아래 shim 설치 절).
 
 shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shim_outdated` WARN 을
 남기고 계속 돈다. 그 줄에는 이 호스트에서 바꿀 파일 경로가 적혀 있다
@@ -132,6 +135,8 @@ shim 은 서버 릴리즈의 자산이고(RFC-0427 B-1), 설치기가 놓는다(
 해시를 `masc-exec-shim.sha256` 으로 남긴다. 부팅은 그 두 파일을 맞춰 보고,
 다르면 `microvm_shim_hash_mismatch` 로 거절한다. 따로 할 일은 없다. microvm
 keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
+같은 버전이 이미 깔려 있으면 설치기는 shim 도 그대로 둔다. shim 만 다시 받으려면
+`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 돌린다.
 
 평소 로컬 빌드 설치는 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않는다.
 microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 해결할 때는
@@ -150,6 +155,8 @@ microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 �
 | sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
 | 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
 | 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
+| 받은 자산이나 이미 깔린 그 릴리즈 자산이 이 빌드와 다른 relay version 을 적었다(또는 안 적었다) | 아무것도 설치하지 않고 멈춘다. 서버가 그 shim 을 거절하기 때문이다. 메시지가 지금 트리로 빌드하는 명령(아래 「직접 빌드」)을 알려 준다 |
+| 빌드한 서버(`main_eio.exe`)에서 relay version 을 하나로 읽지 못한다 | 아무것도 설치하지 않고 멈춘다 |
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
 릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
@@ -177,8 +184,14 @@ grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > "$shim_dir/masc-exec-
 들어 있고(`Exec_ssh_protocol.Relay.version_declaration`), 서버는 게스트를 띄우거나
 붙기 전에 이 값을 읽는다. 값이 다르거나 없으면 `microvm_shim_relay_version_mismatch`
 로 거절한다. 이 값이 생기기 전에 빌드한 shim(0.73.1 이하 릴리즈)은 값이 없다.
-릴리즈가 아직 싣지 않은 relay version 으로 서버를 빌드했으면 지금 트리로 shim 도
-빌드한다. 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
+거절은 멈추거나 지울 게스트가 있는 백엔드(Apple `container`, nerdctl·Kata,
+microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
+서버는 어느 릴리즈가 어느 relay version 을 싣는지 모른다. 그래서 거절 메시지는
+지금 트리로 빌드하는 길을 먼저 적고, 릴리즈 설치는 그 릴리즈가 같은 relay version
+일 때만 맞는다고 적는다. 릴리즈가 아직 싣지 않은 relay version 으로 서버를
+빌드했으면 지금 트리로 shim 도 빌드한다. `install-local-build.sh
+--refresh-guest-shim` 도 이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 릴리즈 없이
+지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.
 

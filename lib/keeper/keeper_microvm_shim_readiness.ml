@@ -98,8 +98,12 @@ let write_failure (error : Fs_compat.capability_write_error) =
     (Fs_compat.capability_write_target_effect_to_string error.target_effect)
     primary (List.length error.cleanup_failures)
 
-(* The fix names both ways a shim reaches the workspace: the release
-   installer, and a checkout build whose relay version no release ships yet. *)
+(* The fix names both ways a shim reaches the workspace. The source build
+   always declares this server's relay version. A release's shim declares
+   the relay version of the source it was cut from, and nothing typed here
+   records which release ships which relay version, so the release line is
+   offered with the condition under which it works rather than as the fix.
+   [install.sh] keeps a same-version shim unless it is given [--force]. *)
 let relay_version_mismatch_message ~installed ~required =
   let declared = match (installed : Shim.relay_declaration) with
     | Shim.Relay_version version -> Printf.sprintf "declares relay version %d" version
@@ -110,14 +114,19 @@ let relay_version_mismatch_message ~installed ~required =
   Printf.sprintf
     "microvm_shim_relay_version_mismatch: the mounted guest shim \
      .masc/microvm/shim/%s %s and this server speaks relay version %d, so no \
-     guest is booted, adopted or replaced with it. Install the shim built from \
-     this server's source: a release server runs `scripts/install.sh --version v%s`; \
-     a checkout build runs `scripts/remote-ssh/build-shim.sh --arch arm64` \
-     (amd64 on an x86-64 Linux host), copies \
-     dist/remote-ssh/masc-exec-shim-linux-<arch> to .masc/microvm/shim/%s and \
-     removes .masc/microvm/shim/%s (docs/MICROVM-REMOTE-RUNBOOK.md)"
-    Shim.shim_binary_name declared required Build_version.current
-    Shim.shim_binary_name Shim.shim_sidecar_name
+     guest is booted, adopted or replaced with it. Install a shim that declares \
+     relay version %d. A shim built from this server's source always does: run \
+     `scripts/remote-ssh/build-shim.sh --arch arm64` (--arch amd64 on an x86-64 \
+     Linux host), copy dist/remote-ssh/masc-exec-shim-linux-<arch> to \
+     .masc/microvm/shim/%s and remove .masc/microvm/shim/%s. A release shim \
+     does only when that release was cut with relay version %d, which this \
+     server cannot check; while relay version %d is newer than the last release, \
+     only the source build works. For such a release, run \
+     `scripts/install.sh --version v%s --force --base-path <workspace>` \
+     (without --force the installer keeps a shim already at that version) \
+     (docs/MICROVM-REMOTE-RUNBOOK.md)"
+    Shim.shim_binary_name declared required required
+    Shim.shim_binary_name Shim.shim_sidecar_name required required Build_version.current
 
 let rec error_message = function
   | Invalid_base_path _ -> "microvm shim base path is invalid"

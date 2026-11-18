@@ -138,6 +138,8 @@ def goals(value: Json) -> None:
             "executing",
             "verifying",
             "awaiting_confirmation",
+            "paused",
+            "blocked",
             "completed",
             "dropped",
         ):
@@ -145,10 +147,8 @@ def goals(value: Json) -> None:
         criterion = obj(goal.get("criterion"), "criterion")
         text(criterion.get("revision"), "criterion revision")
         string(criterion.get("title"), "criterion title")
-        for key in ("metric", "target_value"):
-            value = required(criterion, key)
-            if value is not None:
-                string(value, "criterion " + key)
+        obj(required(criterion, "measure"), "criterion measure")
+        text(criterion.get("procedure"), "criterion procedure")
 
 
 def goal_context(value: Json) -> None:

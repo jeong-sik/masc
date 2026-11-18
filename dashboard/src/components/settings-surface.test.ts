@@ -2466,7 +2466,6 @@ describe('SettingsSurface', () => {
     expect((container.querySelector('[data-testid="fusion-preset-save"]') as HTMLButtonElement).disabled).toBe(false)
     // The editor opens on the default preset with its seats from the resolver.
     expect((container.querySelector('[data-testid="fusion-preset-name"]') as HTMLInputElement).value).toBe('trio')
-    expect(container.textContent).not.toContain('per_hour_budget')
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 

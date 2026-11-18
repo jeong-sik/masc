@@ -45,9 +45,9 @@ ensure_contract_goal() {
   local goal_payload
   local goal_json
 
-  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","metric":"contract steps pass","target_value":"all steps","priority":1}')"
+  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","measure":{"kind":"done_when","condition":"The contract steps pass"},"procedure":"Read the results printed by the golden path contract.","priority":1}')"
   goal_json="$(printf '%s' "$goal_payload" | extract_result)"
-  GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal_id // empty')"
+  GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal.id // empty')"
   if [ -z "$GOAL_ID" ]; then
     mcp_fail_with_context "could not create goal for contract goal_id" "$goal_payload"
   fi

@@ -2135,10 +2135,10 @@ describe('Work', () => {
               },
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
-                kind: 'goal_owner',
+                kind: 'goal_phase',
                 lane: 'goal',
-                title: 'Goal Owner',
-                summary: 'owner: <unassigned> -> dancer by operator',
+                title: 'Goal Phase',
+                summary: 'phase=verifying by operator',
                 severity: 'ok',
               }],
               last_activity_at: '2026-01-04T10:00:00Z',
@@ -2344,10 +2344,10 @@ describe('Work', () => {
               phase: 'executing',
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
-                kind: 'goal_owner',
+                kind: 'goal_phase',
                 lane: 'goal',
-                title: 'Goal Owner',
-                summary: 'owner: <unassigned> -> dancer by operator',
+                title: 'Goal Phase',
+                summary: 'phase=verifying by operator',
                 severity: 'ok',
               }],
             }),
@@ -2372,9 +2372,9 @@ describe('Work', () => {
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         const rows = dossier.querySelectorAll('[data-goal-dossier-timeline-event]')
         expect(rows).toHaveLength(1)
-        expect(rows[0]!.textContent).toContain('goal_owner')
+        expect(rows[0]!.textContent).toContain('goal_phase')
         expect(rows[0]!.textContent).toContain('2026-01-04T10:00:00Z')
-        expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
+        expect(rows[0]!.textContent).toContain('phase=verifying by operator')
         // The count hook stays put while the list opens.
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
       })

@@ -23,14 +23,8 @@
     펜스를 봤다는 뜻이므로 이 둘 중 하나이며, 어느 쪽인지는 tier 기록이 없어
     settlement 만으로는 가려지지 않는다.
 
-    설계 SSOT 와의 충돌은 미해결이 아니라 확인된 상태다:
-    docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 는 provider-native
-    JSON schema 강제([Structured.extract], 미지원 provider fail-fast)를 요구한다.
-    구현은 그 요구를 의도적으로 철회했고 근거는 [apply_fusion_judge_output_contract] 앞에 있다 —
-    (1) capability 사실이 거짓일 수 있다(ollama.com cloud 는 declared 인데
-    json_schema 를 무시, 2026-07-02 probe), (2) #22768 "native schema or fail
-    before HTTP" 가 미지원 preset 의 fusion 을 영구 불능으로 만들어 되돌려졌다.
-    따라서 맞춰야 하는 쪽은 RFC 이며, §7.2 에 그 사실을 기재했다. *)
+    심판 출력 계약과 설계 근거는
+    docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 에 있다. *)
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다. JSON 지침은 등록된
     [fusion.judge.output] asset, 필드·타입 schema는 {!Fusion_judge_parse.output_schema}에서 온다. *)

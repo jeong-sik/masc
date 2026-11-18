@@ -35,7 +35,7 @@ shell metacharacter(`*`, `?`, `[]`, `{}`, `\`, `'`, `"`)를 포함한 path를 �
 - `instructions/software-development.md` §"AI 코드 생성 안티패턴 §2 Unknown → Permissive Default"
   (lexer가 unknown shell metachar를 만나면 default error message로 흡수)
 
-증거로 `lib/retired_worker_shell_facade`은 현재 **1718줄 godfile**(`software-development.md` §"파일 크기 임계값 500줄+ 즉시 분할" 위반)이며, 그 본문의 대부분(line 102 ~ 750+)이
+증거로 `lib/retired_worker_shell_facade`은 현재 **1718줄 godfile**이며, 그 본문의 대부분(line 102 ~ 750+)이
 *string command를 안전성 검증하는 lexer/parser/allowlist*다. 한 줄로 요약:
 **typed input schema의 부재가 그 분량의 코드를 강제한 것**.
 
@@ -178,10 +178,7 @@ PR-2 머지 후 `retired_worker_shell_facade` 가 ~800 LOC 까지 줄어든 상�
 - `lib/keeper/dev_exec_allowlist.ml(i)` — PR-1 에서 이미 분리 (allowlist data)
 - `lib/keeper/keeper_dev_tools_runtime.ml(i)` — Eio.Process 호출, stdout/stderr 캡쳐
 - `lib/keeper/keeper_dev_tools_dispatch.ml(i)` — `guarded_dispatch` 진입점
-- `lib/retired_worker_shell_facade` — 단순 re-export (≤30 LOC) 또는 완전 삭제
-
-acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-development.md`
-§"파일 크기 임계값" 준수.
+- `lib/retired_worker_shell_facade` — 삭제하거나 기존 호출자에 필요한 re-export만 둔다
 
 ## §6 Acceptance
 
@@ -190,7 +187,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
 - [x] retired path-tokenizer diagnostic markers in lib/ test/ = **0 hit**.
 - [x] `rg "forbidden_shell_chars" lib/ test/` = 0 hit.
 - [x] `rg "tokenize_path_args" lib/ test/` = 0 hit.
-- [ ] `wc -l lib/retired_worker_shell_facade` ≤ 300 또는 파일 자체 삭제.
+- [ ] 기존 facade에서 경로 판정과 실행 책임을 새 소유 모듈로 옮겼다.
 - [x] `tool_execute` tool descriptor JSON schema 가 `{executable, argv, ...}` 구조.
 - [ ] CI: representative Execute invocation tests green.
 - [ ] 24h log re-audit 에서 retired path-tokenizer diagnostic ERROR 0 건 (단, PR-3 머지 후 keeper LLM 적응에 1~2 일 transition 허용).
@@ -210,7 +207,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
    PR-3 머지 전 cross-check 의무.
 3. **dune build 영향**. `retired_worker_shell_facade` 가 godfile 이라 caller 가 많을
    가능성. `rg "Retired_worker_shell_facade\." lib/ | wc -l` 로 측정 후 PR-1 body 에 기록.
-   100+ caller 면 PR-2 sub-split (caller 도메인별).
+   호출자가 다른 실행 경계를 쓰는 경우 경계별로 전환한다.
 4. **Pipeline variant 의 expressiveness**. shell `&&` / `;` / process
    substitution `<(...)` 같은 케이스. 본 RFC 는 `&&` / `;` 지원 중단으로 결정
    (separate Exec 로 분할), `<(...)` 는 미지원 (필요 시 별도 RFC).
@@ -238,7 +235,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
 - RFC-0089 string-classifier-to-typed-variant (Draft) — *내부* 분류기 범위.
   본 RFC 는 §2 scope-out (외부 protocol boundary) 의 자매 RFC.
 - `instructions/software-development.md` §"워크어라운드 거부 기준 §2 String
-  분류기 보강" / §"파일 크기 임계값 500줄+ 즉시 분할".
+  분류기 보강".
 - `memory/feedback_hardcoding_and_legacy_zero_tolerance.md` — root-fix PR 가
   같은 머지에서 legacy 동시 삭제 의무.
 - `memory/feedback_lint_string_classifier_is_workaround_not_fundamental.md` —

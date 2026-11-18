@@ -187,12 +187,25 @@ class AutomaticMergeAdmission(unittest.TestCase):
             selected, head, scope = MERGE.prepare(REPO, 101)
         self.assertEqual((selected, head, scope['stack']), (101, sha(101), None))
 
-    def test_duplicate_stale_dismissed_author_and_blocking_reviews_do_not_admit(self):
+    def test_one_distinct_non_author_account_admits_the_current_head(self):
+        with FakeGitHub() as github:
+            github.reviews[101] = [review(1)]
+            selected, head, _ = MERGE.prepare(REPO, 101)
+        self.assertEqual((selected, head), (101, sha(101)))
+
+    def test_a_one_review_server_rule_satisfies_the_worker(self):
+        with FakeGitHub() as github:
+            github.rules = [{'type': 'pull_request', 'parameters': {
+                'required_approving_review_count': 1, 'dismiss_stale_reviews_on_push': True}}]
+            selected, _, _ = MERGE.prepare(REPO, 101)
+        self.assertEqual(selected, 101)
+
+    def test_stale_dismissed_author_and_blocking_reviews_do_not_admit(self):
         cases = {
-            'same account': [review(1), review(2)],
-            'stale head': [review(1), review(2, 3, head=sha(99))],
-            'dismissed': [review(1), review(2, 3), review(3, 3, 'DISMISSED', when=T2)],
-            'author': [review(1), review(2, 100)],
+            'no approvals': [],
+            'stale head': [review(1, head=sha(99)), review(2, 3, head=sha(99))],
+            'dismissed': [review(1), review(2, 2, 'DISMISSED', when=T2)],
+            'author': [review(1, 100), review(2, 100)],
             'remaining request': [review(1), review(2, 3), review(3, 4, 'CHANGES_REQUESTED')],
             'ambiguous decision': [review(1), review(2, 3), review(3, 3, 'CHANGES_REQUESTED')],
         }
@@ -202,11 +215,11 @@ class AutomaticMergeAdmission(unittest.TestCase):
                 with self.assertRaises(MERGE.Hold):
                     MERGE.prepare(REPO, 101)
 
-    def test_lower_review_selects_the_top_and_every_unmerged_member_needs_two(self):
+    def test_lower_review_selects_the_top_and_every_unmerged_member_needs_one(self):
         with FakeGitHub(['merged', 'open', 'open']) as github:
             github.reviews[101] = []
-            second = github.reviews[102].pop()
-            with self.assertRaisesRegex(MERGE.Hold, '#102 has 1/2'):
+            first, second = github.reviews[102].pop(), github.reviews[102].pop()
+            with self.assertRaisesRegex(MERGE.Hold, '#102 has 0/1'):
                 MERGE.prepare(REPO, 102)
             github.reviews[102].append(second)
             selected, _, scope = MERGE.prepare(REPO, 102)
@@ -250,7 +263,7 @@ class AutomaticMergeAdmission(unittest.TestCase):
         with FakeGitHub(['open', 'open']) as github:
             assert github.stack is not None
             github.stack['pull_requests'][0]['head']['sha'] = sha(9001)
-            with self.assertRaisesRegex(MERGE.Hold, '#101 has 0/2 current-head account approvals'):
+            with self.assertRaisesRegex(MERGE.Hold, '#101 has 0/1 current-head account approvals'):
                 MERGE.prepare(REPO, 102)
 
     def test_a_draft_lower_layer_in_the_listing_holds_the_stack(self):

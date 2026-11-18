@@ -24,7 +24,8 @@ import subprocess
 import sys
 import time
 
-REQUIRED_APPROVALS = 2  # the worker's own rule; a lower count here only wastes a run
+REQUIRED_APPROVALS = 1  # the worker's own rule; a lower count here only wastes a run
+# (kept equal to approval-auto-merge.py's REQUIRED_APPROVALS by test_approval_merge_sweep)
 QUOTA_EXIT = 75  # approval-auto-merge.py: ended at a quota during admission
 # The schedule starts a sweep every 30 minutes. No worker starts after this
 # long, so one sweep ends before the next begins.

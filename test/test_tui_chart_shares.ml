@@ -219,8 +219,8 @@ let series_blend_rises () =
   List.iter
     (fun series ->
       let contrasts =
-        List.init 11 (fun step ->
-          let position = float_of_int step /. 10.0 in
+        List.init (Theme.ramp_steps + 1) (fun step ->
+          let position = float_of_int step /. float_of_int Theme.ramp_steps in
           let code =
             Theme.For_testing.ramp_style ~colors_enabled:true ~project:truecolor
               (series_paint ?palette Theme.Truecolor) series ~position
@@ -233,12 +233,14 @@ let series_blend_rises () =
         (fun contrast ->
           Alcotest.(check bool) "every stop clears 3:1" true (contrast >= 3.0 -. 1e-9))
         contrasts;
+      (* Every one of the 101 steps, not a sample of them: an eight-bit
+         rounding dip sits between two tenths (review on #53181). *)
       let rec rising = function
-        | a :: (b :: _ as rest) -> a <= b +. 1e-9 && rising rest
+        | a :: (b :: _ as rest) -> a <= b && rising rest
         | [ _ ] | [] -> true
       in
       Alcotest.(check bool) "the ramp never darkens toward its top" true (rising contrasts);
-      if not (List.hd contrasts +. 1.0 < List.nth contrasts 10) then
+      if not (List.hd contrasts +. 1.0 < List.nth contrasts Theme.ramp_steps) then
         Alcotest.failf "the deep end is not darker than the bright end: %s"
           (String.concat " " (List.map (Printf.sprintf "%.2f") contrasts)))
     Theme.[ Calls; Failures; Latency; Memory; Completion; Capacity; Backlog; Usage ]

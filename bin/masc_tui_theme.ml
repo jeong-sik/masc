@@ -612,20 +612,32 @@ let series_blends ~colors_enabled ~project paint hue =
             deep top
         in
         match project blended with
-        | Some projected
-          when Color.contrast_ratio (Terminal_palette.estimated_rgb projected) background
-               >= picture_contrast_floor ->
-          Some (projected_foreground ~colors_enabled (Some projected))
-        | Some _ | None -> None
+        | Some projected ->
+          let contrast =
+            Color.contrast_ratio (Terminal_palette.estimated_rgb projected) background
+          in
+          if contrast >= picture_contrast_floor then
+            Some (projected_foreground ~colors_enabled (Some projected), contrast)
+          else None
+        | None -> None
       in
-      let rec collect index steps =
-        if index < 0 then Some (Array.of_list steps)
+      (* Rounding a blend to eight bits a channel can leave a step a hair
+         darker than the one before it (cyan 0.10 to 0.11 drops 3.208 to
+         3.205 on xterm). A step that would darken keeps the colour before
+         it, so the ramp never steps back toward the ground. *)
+      let rec collect index (previous_code, previous_contrast) steps =
+        if index > ramp_steps then Some (Array.of_list (List.rev steps))
         else
           match step index with
           | None -> None
-          | Some code -> collect (index - 1) (code :: steps)
+          | Some (code, contrast) ->
+            let kept =
+              if contrast < previous_contrast then (previous_code, previous_contrast)
+              else (code, contrast)
+            in
+            collect (index + 1) kept (fst kept :: steps)
       in
-      collect ramp_steps [])
+      collect 0 ("", 0.0) [])
   | (No_color | Colors_16 | Colors_256 | Truecolor), (Some _ | None) -> None
 ;;
 

@@ -21,7 +21,7 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 결정은 다섯 가지다.
 
 1. 메모리에 두는 값은 행이 실제로 쓰는 값만이다(§1.1). 결정 기록의 마지막 행, 도구 호출 원장의 마지막 16줄, 최근 execution receipt, 최근 TurnRecord, metrics 끝 120행과 가장 최근 Turn tool audit 행이다. meta 는 Owner 가 이미 메모리에 든 값을 읽는다(§3.1).
-2. 값마다 세대 번호를 붙인다. 파일을 바꾸는 쪽은 바꾼 뒤 세대를 올린다. 쓰는 쪽은 파일을 바꾸기 전에 본 값에서 새 값을 만든다. 그 사이 다른 쪽이 값을 바꿨으면 새 값을 넣지 않고 값을 비운다(§3.3).
+2. 값마다 세대 번호를 붙인다. 파일을 바꾸는 쪽은 바꾼 뒤 세대를 올린다. 쓰는 쪽은 파일을 바꾸기 전에 본 값에서 새 값을 만든다. 그 사이 다른 쪽이 값을 바꿨거나, 새 값을 읽는 쪽과 똑같이 만들 수 없으면 값을 비운다(§3.3).
 3. 빈 값은 읽는 쪽이 파일로 채운다. 채울 때는 어떤 잠금도 잡지 않는다. 읽기 전에 본 값이 그대로일 때만 compare-and-set 으로 넣는다(§3.4). 그래서 저장소 잠금을 쥔 채 풀 작업을 기다리는 일이 없다.
 4. 메모리 값은 디스크에 저장하지 않는 파생 값이다. 값은 쓰는 쪽이 디스크에 쓴 줄 그대로다. 차분 시험과 TLA+ 로 "파일을 바꾸는 중인 쪽이 없으면 메모리 값은 파일에서 다시 계산한 값과 같다"를 지킨다(§5).
 5. 다 옮기면 이 값들을 읽는 행 helper 의 Current/Reuse 구분과 그 helper 몫의 캐시를 지운다. 같은 캐시를 쓰는 다른 화면을 먼저 옮긴다. Keeper 세마포어는 남은 행 일을 잰 뒤 정한다(§4 L4).
@@ -128,19 +128,21 @@ Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `op
 > 화면이 보는 Keeper 사실은 그 사실을 쓰는 함수가 메모리 값도 고친다. 읽는 쪽은 그 사실 때문에 파일을 열지 않는다.
 
 1. 값 하나는 (저장소, 사실) 하나다. Keeper 저장소의 key 는 (정규화한 base path, Keeper)이고, 도구 호출 원장의 key 는 정규화한 masc root 다. 정규화는 `Keeper_owner_projection.key` 가 쓰는 `Keeper_registry_types.canonical_base_path_exn` 하나로 한다. 사실은 닫힌 합타입이다.
-2. 칸 하나는 `{ generation; slot }` 을 담은 `Atomic` 하나다. `slot` 은 `Unfilled` 거나 `Filled v` 다. 칸을 바꿀 때는 늘 새 record 를 만들고 세대를 올린다.
-3. 불변식: 파일을 바꾸는 중인 쪽이 없으면, `Filled v` 의 v 는 파일에서 다시 계산한 값과 같다. `Unfilled` 는 아무것도 주장하지 않는다.
-4. 파일을 바꾸는 쪽(쓰기, 돌리기, prune, purge, 디렉터리 지우기)은 바꾼 뒤 칸을 바꾼다.
+2. 칸 하나는 `{ generation; slot }` 을 담은 `Atomic` 하나다. `slot` 은 `Unfilled` 거나 `Filled` 다. `Filled` 는 값 v 와, v 를 계산할 때 가장 새 파일의 끝이 줄바꿈이었는지(`tail`)를 담는다. 칸을 바꿀 때는 늘 새 record 를 만들고 세대를 올린다.
+3. 불변식: 파일을 바꾸는 중인 쪽이 없으면, `Filled` 의 v 는 파일에서 다시 계산한 값과 같다. `tail` 이 줄바꿈이라고 하면 가장 새 파일의 끝은 줄바꿈이다. `Unfilled` 는 아무것도 주장하지 않는다.
+4. 파일을 바꾸는 쪽(쓰기와 그 안의 돌리기, prune, purge, 디렉터리 지우기)은 바꾼 뒤 칸을 바꾼다.
    - 쓰기는 파일을 바꾸기 전에 칸을 읽어 둔다. 쓴 뒤 칸이 그대로면 그 값에서 새 값을 만들어 compare-and-set 으로 넣는다. 칸이 바뀌었으면 칸을 비운다.
-   - 나머지는 바꾼 뒤 칸을 비운다.
+   - 쓰기가 새 값을 읽는 쪽과 똑같이 만들 수 없으면 칸을 비운다. 읽어 둔 값의 `tail` 이 줄 중간이면 그렇다. 쓴 줄이 끊긴 줄 뒤에 붙어 한 줄이 되기 때문이다(§3.3, #52974).
+   - 쓰기가 그 칸의 값을 바꾸지 않는다고 확실하면 칸을 건드리지 않는다. Turn tool audit 행이 아닌 metrics 행과 가장 최근 Turn tool audit 칸이 그렇다(§3.3).
+   - prune, purge, 디렉터리 지우기는 지운 뒤 그 저장소의 칸을 모두 비운다.
 5. 쓰는 쪽은 `Unfilled` 를 채우지 않는다. 쓰는 쪽은 자기 행만 알아서 목록 전체를 만들 수 없다.
-6. 쓰기가 실패하거나, 됐는지 모르거나, 칸을 고치기 전에 취소되면 칸을 비운다. 쓰지 않은 것이 확실하면(큐가 차서 버림, append guard 가 건너뜀) 칸을 그대로 둔다. 파일이 그대로라서다.
-7. 채우는 쪽은 잠금을 잡지 않는다. 칸을 읽고, 파일에서 값을 계산하고, 칸이 그대로일 때만 compare-and-set 으로 넣는다.
+6. 쓰기가 실패하거나, 됐는지 모르거나, 칸을 고치기 전에 취소되면 그 저장소의 칸을 모두 비운다. 파일 끝에 끊긴 줄이 남았을 수 있어서다. 쓰지 않은 것이 확실하면(큐가 차서 버림, append guard 가 건너뜀) 칸을 그대로 둔다. 파일이 그대로라서다.
+7. 채우는 쪽은 잠금을 잡지 않는다. 칸을 읽고, 파일에서 값과 `tail` 을 계산하고, 칸이 그대로일 때만 compare-and-set 으로 넣는다.
 8. 어떤 저장소 잠금도 풀 작업이나 fiber 멈춤을 지나서 쥐지 않는다. 칸을 고치는 일은 `Atomic` 연산뿐이다.
 9. 메모리 값은 디스크에 저장하지 않는다. 권위는 파일이다.
 10. 서버 밖에서도 고치는 파일(profile TOML)은 이 규칙에 넣지 않는다. 지금처럼 내용 키 캐시로 읽는다.
 
-규칙 4·7 이 불변식을 지키는 까닭은 이렇다. 채우는 쪽이 넣은 값은 그 뒤에 끝나는 변경이 늘 덮는다. 변경은 파일을 바꾼 뒤 칸을 바꾸기 때문이다. 채우는 쪽이 칸을 읽은 뒤 끝난 변경이 있으면 칸이 이미 바뀌어서 채우는 쪽의 compare-and-set 이 실패한다. 쓰는 쪽이 파일을 바꾸기 전에 칸을 읽어 두므로, 그 사이 채우는 쪽이 넣은 값(쓴 행이 들어 있을 수도 있는 값) 위에 같은 행을 한 번 더 더하는 일이 없다.
+규칙 4·7 이 불변식을 지키는 까닭은 이렇다. 채우는 쪽이 넣은 값은 그 뒤에 끝나는 변경이 늘 덮는다. 변경은 파일을 바꾼 뒤 칸을 바꾸기 때문이다. 채우는 쪽이 칸을 읽은 뒤 끝난 변경이 있으면 칸이 이미 바뀌어서 채우는 쪽의 compare-and-set 이 실패한다. 쓰는 쪽이 파일을 바꾸기 전에 칸을 읽어 두므로, 그 사이 채우는 쪽이 넣은 값(쓴 행이 들어 있을 수도 있는 값) 위에 같은 행을 한 번 더 더하는 일이 없다. 규칙 4 의 둘째 항목은 이 논리가 기대는 전제를 지킨다. 쓴 뒤의 파일은 읽어 둔 값의 파일에 쓴 행 하나를 더한 것이어야 한다. 끊긴 줄 뒤에 붙은 행은 읽는 쪽이 따로 읽지 못하므로 이 전제가 깨진다. 셋째 항목의 쓰기는 그 칸이 계산하는 값을 바꾸지 않으므로, 그 쓰기와 겹친 채우기도 맞는 값을 얻는다.
 
 ## 3. 설계
 
@@ -155,14 +157,19 @@ Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `op
 
 Owner 가 없는 Keeper 는 지금 동작 그대로다. 기동 때 meta 를 못 읽었거나, 이름이 맞지 않거나, Owner 가 시작하지 못한 Keeper 가 그렇다(`keeper_owner_registry.ml:112-134`, `:410-421`). 새 unread 이유는 만들지 않는다. TUI decoder 는 이유를 닫힌 목록으로 읽는다(`keeper_snapshot_unread.ml:44-47`).
 
-한계가 하나 있다. Owner 의 `store.replace` 가 예외로 끝나면, Owner 는 알림만 보내고 메모리 값을 바꾸지 않은 채 예외를 다시 던진다(`keeper_owner.ml:893-902`). 그때 파일은 바뀌었을 수 있다. `Error` 로 끝나면 metadata 저장소를 막는다(`:864-875`). 두 경우 모두 행은 Owner 의 이전 값을 보인다. 지금은 파일 값을 보인다. Owner 의 다음 커밋은 메모리 값으로 파일을 덮으므로, 행이 보이는 값이 Owner 가 다음에 쓸 값이다.
+한계가 하나 있다. Owner 의 `store.replace` 가 예외로 끝나면, Owner 는 알림만 보내고 메모리 값을 바꾸지 않은 채 예외를 다시 던진다(`keeper_owner.ml:893-902`). 그때 파일은 바뀌었을 수 있다. `Error` 로 끝나면 metadata 저장소를 막는다(`:940-942`). 두 경우 모두 행은 Owner 의 이전 값을 보인다. 지금은 파일 값을 보인다. Owner 의 다음 커밋은 메모리 값으로 파일을 덮으므로, 행이 보이는 값이 Owner 가 다음에 쓸 값이다.
 
 ### 3.2 새 모듈 `Keeper_row_facts`
 
 모양 예시다. 이름은 구현 때 정한다.
 
 ```ocaml
-type 'a slot = Unfilled | Filled of 'a
+(* 값을 계산할 때 가장 새 파일의 끝 *)
+type tail = Ends_at_line_break | Ends_mid_line
+
+type 'a slot =
+  | Unfilled
+  | Filled of { value : 'a; tail : tail }
 
 (* 칸 하나. 바꿀 때마다 새 record 를 만든다. *)
 type 'a cell = { generation : int; slot : 'a slot }
@@ -172,16 +179,12 @@ type latest =
   | Row of Yojson.Safe.t
   | Unparsed_row of string   (* 파일의 마지막 줄이 JSON 이 아니다 *)
 
-type metrics_tail =
-  { recent : Yojson.Safe.t list   (* 끝 120행 *)
-  ; latest_turn_audit : latest    (* 저장소 전체에서 가장 최근 Turn 행 *)
-  }
-
 type keeper_cells =
-  { decision : latest cell Atomic.t      (* 결정 기록의 마지막 object 행 *)
+  { decision : latest cell Atomic.t                    (* 결정 기록의 마지막 object 행 *)
   ; receipt : latest cell Atomic.t
   ; turn_record : latest cell Atomic.t
-  ; metrics : metrics_tail cell Atomic.t
+  ; metrics_recent : Yojson.Safe.t list cell Atomic.t  (* metrics 끝 120행 *)
+  ; turn_audit : latest cell Atomic.t                  (* metrics 저장소 전체에서 가장 최근 Turn tool audit 행 *)
   }
 
 type workspace_cells = { tool_calls : Yojson.Safe.t list cell Atomic.t }  (* 원장의 마지막 16줄 *)
@@ -190,6 +193,7 @@ type workspace_cells = { tool_calls : Yojson.Safe.t list cell Atomic.t }  (* 원
 - 칸을 담는 map 은 `Keeper_owner_projection` 처럼 처음 만들 때만 고친다.
 - 값은 쓰는 쪽이 디스크에 쓴 줄을 해석한 JSON 이다. 결정 기록 4곳, 도구 호출 6곳, metrics 2곳이 넘기는 모양이 저마다 달라서 행 타입으로 묶지 않는다(`keeper_tool_memory_runtime.ml:1332`, `keeper_unified_metrics_decision.ml:401` 등). 읽는 쪽은 지금 쓰는 decoder 를 그대로 쓴다. 그래서 `Undecodable_turn_record` 같은 구분도 지금처럼 나온다(`keeper_context_observation_projection.ml:92-101`). `Unparsed_row` 는 그 상태도 칸에 담으려고 둔다.
 - 채우다 파일을 못 읽으면 값을 넣지 않는다. 그 읽기의 오류는 지금처럼 돌려준다(`Turn_record_read_failed` 등). 다음 읽기가 다시 채운다.
+- `tail` 은 채우는 쪽이 읽을 때 본 것이다. 결정 기록 reader 는 이미 돌려준다(`completion`, `keeper_memory_recall.ml:86-90`). `Dated_jsonl` 끝 읽기와 Turn tool audit 훑기는 가장 새 파일을 끝에서부터 읽는다. L2·L3 에서 마지막 바이트가 줄바꿈인지도 같이 돌려주게 한다.
 - 행 수(16, 120)와 결정 기록의 창(40,000바이트·20줄)은 지금 읽는 쪽이 쓰는 수다. 읽는 쪽 상수를 이 모듈로 옮겨 한 곳에 둔다.
 - 도구 호출은 workspace 원장의 마지막 16줄을 그대로 든다. Keeper 의 최근 호출은 그 16줄에서 찾는다. 지금 `read_latest ~keeper_name` 과 같은 뜻이다. 16줄 밖으로 밀려난 Keeper 는 지금처럼 `None` 이다.
 
@@ -200,26 +204,39 @@ type workspace_cells = { tool_calls : Yojson.Safe.t list cell Atomic.t }  (* 원
 ```ocaml
 (* 잠금이 있으면 그 안에서, 파일을 바꾸기 전에 *)
 let before = Atomic.get cell in
-(* ... 파일 쓰기 ... *)
-let after = { generation = before.generation + 1; slot = step before.slot row } in
-if not (Atomic.compare_and_set cell before after) then forget cell
-(* step: Filled v -> Filled (v 에 row 를 더한 값), Unfilled -> Unfilled *)
+(* ... 파일 쓰기. 예외·취소면 그 저장소의 칸을 모두 비우고 다시 던진다 ... *)
+match step before.slot row with
+| Some slot ->
+  let after = { generation = before.generation + 1; slot } in
+  if not (Atomic.compare_and_set cell before after) then forget cell
+| None -> forget cell
+(* step:
+   Unfilled -> Some Unfilled
+   Filled { value; tail = Ends_at_line_break } ->
+     읽는 쪽과 똑같이 만들 수 있으면
+     Some (Filled { value = value 에 row 를 더한 값; tail = Ends_at_line_break }),
+     아니면 None
+   Filled { tail = Ends_mid_line; _ } -> None *)
 (* forget: 칸을 { generation + 1; Unfilled } 로 바꿀 때까지 compare-and-set 을 되풀이 *)
 ```
 
 - `Dated_jsonl` 저장소(도구 호출, receipt, TurnRecord, metrics): 저장소 잠금을 잡은 뒤 쓰기 전에 칸을 읽고, `on_committed` 에서 칸을 바꾼다. 도구 호출 원장의 `on_committed` 는 알림(`notify_written`)을 보내므로 칸을 그보다 먼저 바꾼다. 알림을 받고 읽는 쪽이 새 값을 보게 하려는 것이다. L2 는 `Dated_jsonl` 의 append 에 "잠금 안, 쓰기 전" hook 을 더한다.
-- append 뒤 바이트 prune(metrics 에 `max_bytes` 를 켠 때)은 `on_committed` 다음에 파일을 지운다. 지운 뒤 칸을 비운다.
+- append 뒤 바이트 prune(metrics 에 `max_bytes` 를 켠 때)은 `on_committed` 다음에 파일을 지운다. `prune_to_max_bytes_unlocked` 는 지운 파일 수를 돌려준다(`dated_jsonl.ml:865-870`). 하나라도 지웠으면 그 저장소의 칸을 비운다.
 - 결정 기록: 돌리기에는 잠금이 없고, 쓰기의 잠금은 system thread 안의 OS mutex 다(§1.4). 이 RFC 는 잠금을 더하지 않는다. 쓰는 쪽은 돌리기 전에 칸을 읽고, 쓰기가 끝난 뒤 칸을 바꾼다. 같은 Keeper 의 결정 기록을 두 곳이 같이 쓰면 늦게 온 compare-and-set 이 실패해 칸이 비워진다. 그래도 불변식은 지켜진다.
-- 결정 기록의 새 값은 디스크에 쓴 줄(`utf8_repair_string` 을 거친 줄)로 만든다. 그 줄이 40,000바이트보다 짧고 JSON object 일 때만 `Row` 로 넣는다. 아니면 칸을 비운다. 읽는 쪽 창은 40,000바이트를 넘는 마지막 줄을 버리고(`keeper_memory_recall.ml:75-78`), object 가 아닌 줄은 건너뛰고 앞 줄을 찾는다(`keeper_runtime_trust_snapshot.ml:336-366`). 그 결과는 쓴 줄 하나로 알 수 없다.
-- 쓰기가 예외로 끝나면 칸을 비우고 예외를 다시 던진다. 취소도 예외로 온다. `Fs_compat.append_file` 은 system thread 가 줄을 쓴 뒤에 취소를 확인한다(`fs_compat_base_io.ml:349-353`). 그래서 줄은 썼는데 칸은 못 고친 채 취소될 수 있다. 쓰는 쪽은 칸을 고치기 전에 끝나는 모든 경로에서 칸을 비운다.
+- 결정 기록의 새 값은 디스크에 쓴 줄(`utf8_repair_string` 을 거친 줄)로 만든다. 줄바꿈까지 쳐서 읽는 쪽 창의 절반(20,000바이트) 이하이고 JSON object 인 줄만 `Row` 로 넣는다. 아니면 칸을 비운다.
+  - 읽는 쪽은 마지막 40,000바이트를 한 번에 읽는다. 창이 파일 처음보다 뒤에서 시작하면 남은 줄 가운데 첫 줄을 버린다(`keeper_memory_recall.ml:37-42`, `:75-78`). 그래서 창에 마지막 줄 앞의 내용이 없으면 마지막 줄도 버려진다. 줄이 창의 절반 이하면 앞 줄의 끝이 늘 창에 들어온다.
+  - object 가 아닌 줄은 건너뛰고 앞 줄을 찾는다(`keeper_runtime_trust_snapshot.ml:336-366`). 그 결과는 쓴 줄 하나로 알 수 없다.
+- 파일 끝이 줄 중간이면 쓴 줄은 끊긴 줄 뒤에 붙어 한 줄이 된다. 쓰는 함수는 앞 줄이 끝났는지 보지 않는다(`fs_compat_private_file_update.ml:766-783`, `keeper_types_support.ml:285-288`). 읽는 쪽은 붙은 줄을 깨진 줄로 본다(`dated_jsonl.ml:689-694`). 쓰다가 죽었거나 디스크가 차서 쓰기가 줄 중간에 끊긴 뒤에 생긴다(#52974). 그래서 읽어 둔 값의 `tail` 이 줄 중간이면 새 값을 만들지 않고 칸을 비운다. 쓰기가 끝난 뒤 넣는 값의 `tail` 은 늘 줄바꿈이다.
+- metrics 쓰기 가운데 Turn tool audit 행이 아닌 것(heartbeat 등)은 가장 최근 Turn tool audit 행을 바꾸지 않는다. 그 훑기는 Turn 행이 아닌 행과 깨진 줄을 건너뛴다(`keeper_status_metrics.ml:205-239`). 그래서 그런 쓰기는 `turn_audit` 칸을 건드리지 않는다. 행이 Turn tool audit 인지는 읽는 쪽과 같은 `parse_snapshot` 으로 본다. 쓰기가 실패하면 규칙 6 대로 이 칸도 비운다.
+- 쓰기가 예외로 끝나면 그 저장소의 칸을 모두 비우고 예외를 다시 던진다. 취소도 예외로 온다. system thread 에 맡긴 쓰기는 부른 fiber 가 취소돼도 끝까지 기다린다(`lib/fs_compat/systhread_host.ml:29-37`). 그래서 칸을 비운 뒤에 쓰기가 늦게 떨어지는 일은 없다. `Fs_compat.append_file` 은 줄을 쓴 뒤에 취소를 확인한다(`fs_compat_base_io.ml:349-353`). 그래서 줄은 썼는데 칸은 못 고친 채 취소될 수 있다. 쓰는 쪽은 칸을 고치기 전에 끝나는 모든 경로에서 칸을 비운다.
 - `Dated_jsonl.append` 는 append guard 가 막으면 조용히 건너뛴다. `append_notifying_commit` 은 그때 `Append_guard_skipped` 를 던진다(`dated_jsonl.ml:892-905`). 건너뛴 쓰기는 파일을 안 바꾸므로 칸을 그대로 둔다. 부르는 쪽의 동작도 지금과 같게 둔다.
 
 ### 3.4 채우는 쪽과 비우는 쪽
 
-- 칸이 `Unfilled` 면 읽는 쪽이 채운다. 칸을 읽고, 지금의 읽는 함수로 파일에서 값을 계산하고, 칸이 그대로일 때만 compare-and-set 으로 `{ generation; Filled v }` 를 넣는다. 실패하면 계산한 값을 이번 행에만 쓰고 칸에는 넣지 않는다.
+- 칸이 `Unfilled` 면 읽는 쪽이 채운다. 칸을 읽고, 지금의 읽는 함수로 파일에서 값과 `tail` 을 계산하고, 칸이 그대로일 때만 compare-and-set 으로 세대를 올린 `Filled` 를 넣는다. 실패하면 계산한 값을 이번 행에만 쓰고 칸에는 넣지 않는다.
 - 채우는 쪽은 저장소 잠금을 잡지 않는다. 지금의 끝 읽기는 풀 밖에서 부르면 풀에 IO 작업을 내고 기다린다(§1.2). 잠금을 쥔 채 그 작업을 기다리면, 같은 잠금을 기다리는 행 계산이 풀을 다 차지했을 때 아무도 진행하지 못한다(§6.6).
-- 채우기는 칸 하나에 재시작 뒤 한 번, 비운 뒤 한 번이다. 여러 행이 같은 칸을 동시에 채울 수 있다. 그중 하나만 들어가고, 나머지는 파일을 한 번 더 읽은 셈이 된다. 가장 최근 Turn tool audit 행을 채울 때는 metrics 저장소를 끝에서부터 거꾸로 훑는다(`keeper_status_metrics.ml:254-258`). 지금 `Tool_audit_cache` 의 첫 채우기와 같은 일이고, 잠금을 쥐지 않으므로 heartbeat 쓰기를 막지 않는다.
-- 비우기: 24시간 prune, 대시보드 purge, runtime 디렉터리 지우기는 파일을 지운 뒤 칸을 비운다. 저장소 잠금은 필요 없다. 지우는 도중에 파일을 읽은 채우기는 compare-and-set 에서 실패하거나, 넣더라도 뒤따르는 비우기에 덮인다. 24시간 prune 은 `on_pruned`(`dated_jsonl.ml:2176-2179`)에서 비운다. 도구 호출 원장의 prune(`Root.Tool_calls`)은 그 workspace 의 칸을 비운다.
+- 채우기는 칸 하나에 재시작 뒤 한 번, 비운 뒤 한 번이다. 여러 행이 같은 칸을 동시에 채울 수 있다. 그중 하나만 들어가고, 나머지는 파일을 한 번 더 읽은 셈이 된다. 가장 최근 Turn tool audit 행을 채울 때는 metrics 저장소를 끝에서부터 거꾸로 훑는다(`keeper_status_metrics.ml:254-258`). 지금 `Tool_audit_cache` 의 첫 채우기와 같은 일이다. 잠금을 쥐지 않으므로 heartbeat 쓰기를 막지 않는다. heartbeat 쓰기는 이 칸을 건드리지 않으므로(§3.3), 오래 걸리는 훑기도 heartbeat 때문에 실패하지 않는다. 이 칸은 Turn 행 쓰기와 겹쳤거나, 쓰기가 실패했거나, prune·purge 가 지운 뒤에만 다시 훑는다.
+- 비우기: 24시간 prune, 대시보드 purge, runtime 디렉터리 지우기는 파일을 지운 뒤 그 저장소의 칸을 모두 비운다. 저장소 잠금은 필요 없다. 지우는 도중에 파일을 읽은 채우기는 compare-and-set 에서 실패하거나, 넣더라도 뒤따르는 비우기에 덮인다. 24시간 prune 은 `on_pruned`(`dated_jsonl.ml:2176-2179`)에서 비운다. 도구 호출 원장의 prune(`Root.Tool_calls`)은 그 workspace 의 칸을 비운다. runtime 디렉터리 지우기는 receipt, TurnRecord, metrics 를 한꺼번에 지운다. 칸은 저장소 하나에만 걸리므로, 저장소마다 지우고 비우는 것과 같다.
 
 ### 3.5 행과 루프에서 바뀌는 것
 
@@ -237,15 +254,15 @@ if not (Atomic.compare_and_set cell before after) then forget cell
 | 층 | 무엇 | 확인 |
 |---|---|---|
 | L1 | meta 를 Owner projection 에서 읽는다(§3.1). `keepers_json`, board address, `masc_keeper_list` | 같은 Keeper 에서 파일 meta 로 만든 행과 Owner meta 로 만든 행이 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
-| L2 | `Keeper_row_facts` 와 값 넷(결정 기록 마지막 행, 도구 호출 16줄, 최근 receipt, 최근 TurnRecord). `Dated_jsonl` 의 쓰기 전 hook. prune·purge·디렉터리 지우기 뒤 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다 |
-| L3 | metrics 끝 120행과 가장 최근 Turn tool audit 행. 읽는 쪽 tool audit·최근 활동·briefing·Keeper 상세. 그 뒤 `Tool_audit_cache` 를 지운다 | 차분 시험(`max_bytes` 를 켠 prune 포함). 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
+| L2 | `Keeper_row_facts` 와 값 넷(결정 기록 마지막 행, 도구 호출 16줄, 최근 receipt, 최근 TurnRecord). `Dated_jsonl` 의 쓰기 전 hook 과 끝 읽기의 `tail`. prune·purge·디렉터리 지우기 뒤 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, 취소 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다 |
+| L3 | metrics 끝 120행 칸과 가장 최근 Turn tool audit 행 칸. 읽는 쪽 tool audit·최근 활동·briefing·Keeper 상세. 그 뒤 `Tool_audit_cache` 를 지운다 | 차분 시험(`max_bytes` 를 켠 prune 포함), heartbeat 와 겹친 채우기 시험. 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
 | L4 | 지우기: 행 helper 의 Current/Reuse 구분, 행 몫의 audit 10초 캐시, `dt_profile`, 행 안의 중복 읽기. 그 뒤 남은 행 일(승인 audit, quarantine 원장)을 잰다 | 지운 이름을 `rg` 로 찾으면 0. 남은 행 일의 sub-op 를 로그로 센다 |
 
 `_keeper_sem` 과 `MASC_KEEPER_SNAPSHOT_CONCURRENCY` 는 L4 의 측정 뒤 정한다. 행마다 승인 audit 일이 남아 있는 동안 세마포어를 지우면 그 일이 한꺼번에 몰린다.
 
 ## 5. 검증
 
-**차분 시험.** 실제 쓰기 함수(`append_decision_record`, `log_call`, receipt `append`, TurnRecord `write`, `append_keeper_metrics`)와 돌리기, prune, purge, runtime 디렉터리 지우기, 채우기를 무작위 순서로 부른다. 한 걸음마다 `Filled` 값이 파일에서 다시 계산한 값과 같은지 본다. 다시 계산은 지금의 읽는 함수(`latest_decision_json`, `read_latest ~keeper_name`, receipt·TurnRecord 최근 읽기, tool audit 읽기)로 한다. 40,000바이트를 넘는 결정 기록 줄과 object 가 아닌 줄도 넣는다. 시험마다 base path 를 새로 만들어서 `reset_for_tests` 를 쓰지 않는다.
+**차분 시험.** 실제 쓰기 함수(`append_decision_record`, `log_call`, receipt `append`, TurnRecord `write`, `append_keeper_metrics`)와 돌리기, prune, purge, runtime 디렉터리 지우기, 채우기를 무작위 순서로 부른다. 한 걸음마다 `Filled` 값이 파일에서 다시 계산한 값과 같은지 본다. 다시 계산은 지금의 읽는 함수(`latest_decision_json`, `read_latest ~keeper_name`, receipt·TurnRecord 최근 읽기, tool audit 읽기)로 한다. 결정 기록 줄 길이는 창의 절반 근처와 창 크기 근처를 넣는다. object 가 아닌 줄과, 끝이 줄 중간에서 끊긴 파일(디스크가 찼을 때처럼)도 넣는다. 시험마다 base path 를 새로 만들어서 `reset_for_tests` 를 쓰지 않는다.
 
 **동시 시험.** domain 둘이 같은 저장소에 N 줄씩 쓰는 동안 셋째 domain 이 채우기와 비우기를 되풀이한다. 끝나면 `Filled` 값이 파일에서 다시 계산한 값과 같다. 목록 값에 같은 행이 두 번 들어가지 않는다.
 
@@ -255,13 +272,17 @@ if not (Atomic.compare_and_set cell before after) then forget cell
 
 **취소 시험.** 쓰기가 줄을 쓴 뒤 칸을 고치기 전에 취소되게 한다. 칸이 비워져 있어야 한다.
 
-**TLA+.** `KeeperRowFacts.tla` 에 쓰는 쪽 둘, 채우는 쪽 하나, 지우는 쪽(prune·purge) 하나를 둔다. 파일은 행의 열이고, 칸은 `{ generation, slot }` 이다. 목록 사실은 끝 K 행(K = 2)으로 둔다. 쓰는 쪽의 파일 쓰기, 칸 읽기, 칸 바꾸기, 취소는 따로 떨어진 걸음이다. 불변식은 "파일을 바꾸는 중인 쪽이 없고 칸이 `Filled(v)` 면 v 는 파일 끝에서 계산한 값과 같다"이다. `Next` 는 §2 의 규칙대로 움직이고 불변식을 지킨다. `BugAction` 후보는 다섯이다.
+**heartbeat 와 겹친 채우기 시험.** Turn tool audit 칸을 채우는 동안 heartbeat 행을 계속 쓴다. 채우기가 들어가야 한다.
+
+**TLA+.** `KeeperRowFacts.tla` 에 쓰는 쪽 둘, 채우는 쪽 하나, 지우는 쪽(prune·purge) 하나를 둔다. 파일은 행의 열이고, 칸은 `{ generation, slot }` 이다. 행에는 종류(Turn, 그 밖)가 있고, 사실은 끝 K 행(K = 2)과 가장 최근 Turn 행 둘이다. 쓰기는 줄 중간에서 실패할 수 있다. 그때 파일 끝에 끊긴 줄이 남고, 다음 쓰기는 그 줄과 붙어 깨진 행 하나가 된다. 쓰는 쪽의 칸 읽기, 파일 쓰기, 칸 바꾸기, 취소는 따로 떨어진 걸음이다. 채우는 쪽의 칸 읽기, 파일 읽기, compare-and-set 도 따로 떨어진 걸음이다. 칸은 저장소 하나에만 걸리므로 모델은 저장소 하나로 충분하다. 여러 저장소를 지우는 일은 저장소마다 지우고 비우는 일을 잇달아 하는 것이다. 불변식은 "파일을 바꾸는 중인 쪽이 없고 칸이 `Filled` 면, v 는 파일에서 계산한 값과 같고 `tail` 이 줄바꿈이면 파일 끝에 끊긴 줄이 없다"이다. `Next` 는 §2 의 규칙대로 움직이고 불변식을 지킨다. `BugAction` 후보는 일곱이다.
 
 - (a) 채우는 쪽이 compare-and-set 없이 그냥 넣는다.
 - (b) 쓰는 쪽이 `Unfilled` 에 자기 행을 넣는다.
 - (c) 쓰는 쪽이 파일을 바꾼 뒤에 칸을 읽고, compare-and-set 이 실패하면 다시 읽어 행을 더한다.
 - (d) 지우는 쪽이 파일을 지운 뒤 칸을 비우지 않는다.
 - (e) 취소된 쓰기가 칸을 비우지 않는다.
+- (f) 쓰는 쪽이 `tail` 이 줄 중간인 값에서도 새 값을 만든다.
+- (g) Turn 행 쓰기도 Turn tool audit 칸을 건드리지 않는다.
 
 `NextBuggy == Next \/ BugAction` 은 후보마다 불변식을 어겨야 한다. 버그 cfg 가 통과하는 후보는 spec 에서 뺀다. 정상 cfg 와 버그 cfg 를 둘 다 돌린다. 풀 용량 때문에 멈추는 일(§6.6)은 안전 불변식으로 잡히지 않는다. 그래서 "잠금을 쥔 채 채우는 시험"이 대신 지킨다.
 
@@ -288,11 +309,13 @@ if not (Atomic.compare_and_set cell before after) then forget cell
    - 끝 읽기는 풀 밖에서 부르면 풀에 IO 작업을 내고 기다린다(`dated_jsonl.ml:582`, `domain_pool_ref.ml:45-51`). MCP `masc_operator_snapshot` 처럼 풀 밖에서 행을 만드는 쪽이 도구 호출 원장의 잠금을 쥐고 그 작업을 기다리는데, 같은 잠금을 기다리는 행 계산(weight 1.0)이 풀을 다 차지하면 아무도 진행하지 못한다. 그동안 모든 Keeper 의 도구 호출 기록도 멈춘다.
    - 결정 기록의 잠금은 system thread 안에서만 쓰는 OS mutex 다(`fs_compat_base_io.ml:274-279`). fiber 가 그 mutex 를 쥔 채 멈추면 같은 domain 의 다음 사용자가 `Mutex.lock` 에서 실패한다(#52360).
 7. **세대 번호를 쓴 뒤에 읽는다.** 쓰는 쪽이 파일을 바꾼 뒤에 칸을 읽으면, 그 사이 채우는 쪽이 넣은 값(쓴 행이 이미 들어 있는 값)에 같은 행을 또 더한다. 이 RFC 는 쓰기 전에 읽는다.
+8. **쓰는 쪽이 줄 경계를 맞춘다.** 끊긴 줄 뒤에 쓰기 전에 줄바꿈부터 쓰면 `tail` 이 필요 없다. 대신 이 RFC 밖의 쓰기 동작이 바뀌고, 모든 JSONL 쓰기에 파일 끝 확인이 붙는다. #52974 에서 따로 정한다. 그쪽이 고쳐지면 `tail` 을 지운다.
 
 ## 7. 대가와 한계
 
 - 메모리: Keeper 마다 결정 기록 1행, receipt 1행, TurnRecord 1행, metrics 121행이고, workspace 마다 도구 호출 16행이다. 행 크기는 재지 않았다. L3 에서 Keeper 하나의 metrics 값 크기(`Obj.reachable_words`)를 재서 PR 에 적는다.
 - 쓰는 쪽이 조금 길어진다. 칸 읽기 한 번과 compare-and-set 한 번이 늘어난다. 잠금을 더 오래 쥐지 않는다.
+- 쓰다가 끊긴 줄이 남은 저장소는 다음 쓰기에서 칸이 비워지고, 채우기가 한 번 더 돈다.
 - 쓰기와 채우기가 겹치면 칸이 비워져 다음 읽기가 파일을 읽는다. 재시작 직후 첫 읽기도 파일을 읽는다. 같은 칸을 여러 행이 동시에 채우면 파일 읽기가 겹친다.
 - 서버가 도는 동안 이 저장소를 손으로 지우면, 메모리 값은 재시작까지 옛 행을 보인다. 헌법 `runtime_data` 의 "지우고 새로 한다"는 멈추고 지우고 다시 띄우는 것이고, 이 RFC 는 그 순서를 그대로 지원한다. 서버가 돌 때는 대시보드 purge 로 지운다. purge 는 칸을 비운다.
 - 다른 코드가 이 저장소를 열어 바로 쓸 수 있다. `Dated_jsonl.open_store`·`append` 와 `Store.keeper` 는 공개다(`dated_jsonl.mli:72`, `:99`, `dated_jsonl_store.mli:76`). 그러면 메모리 값이 틀린다. 차분 시험은 이름 붙인 쓰는 함수만 부른다. §8.4 가 이 구멍을 다룬다.

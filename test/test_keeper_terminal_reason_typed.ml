@@ -440,6 +440,7 @@ let () =
     | Tr.Provider_runtime_failure _
     | Tr.Transcript_corruption _
     | Tr.Official_client_recovery_required _
+    | Tr.Official_client_session_refused _
     | Tr.Provider_attempt_effect_fenced _
     | Tr.Tool_correction_lost _
     | Tr.Accept_rejected _

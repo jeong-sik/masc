@@ -217,6 +217,58 @@ let test_the_trace_hears_only_the_keys_that_answer () =
   check bool "an empty list advertises n" true (List.mem "n" (advertised empty));
   check bool "a list with a row advertises j" true (List.mem "j" (advertised full))
 
+(* The one mark zone 5 gives a refused key is the key emphasis it does not get.
+   Styling a row leaves a refused item as it was, emphasises at least one item
+   that answers, and keeps every item's answer and place: the drop order reads
+   the styled row. *)
+let test_a_refused_key_takes_no_key_emphasis () =
+  let styled row =
+    Masc_tui_footer.styled_row ~key_style:"\027[1m" ~dim:"\027[2m" ~reset:"\027[0m" row
+  in
+  let check_row name row =
+    let before = Masc_tui_footer.row_items row
+    and after = Masc_tui_footer.row_items (styled row) in
+    check int (name ^ " keeps every item") (List.length before) (List.length after);
+    let pairs = List.combine before after in
+    List.iter
+      (fun ((plain : Masc_tui_footer.key_item), (drawn : Masc_tui_footer.key_item)) ->
+        check bool (name ^ " keeps the answer of " ^ plain.item) true (plain.answer = drawn.answer);
+        match plain.answer with
+        | Masc_tui_footer.Refused ->
+          check string (name ^ " leaves refused " ^ plain.item) plain.item drawn.item
+        | Masc_tui_footer.Answers -> ())
+      pairs;
+    check bool (name ^ " emphasises a key that answers") true
+      (List.exists
+         (fun ((plain : Masc_tui_footer.key_item), (drawn : Masc_tui_footer.key_item)) ->
+           (match plain.answer with
+            | Masc_tui_footer.Answers -> true
+            | Masc_tui_footer.Refused -> false)
+           && not (String.equal plain.item drawn.item))
+         pairs)
+  in
+  List.iter
+    (fun (name, surface, _, _) ->
+      check_row name (Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false surface))
+    surfaces;
+  check_row "Goals" (Keys.footer_row_planning_goal_list ~lang ~has_rows:false);
+  check_row "facts" (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:false)
+
+(* Workspace [v] is the key whose answer follows the selection rather than the
+   list: a row with no reading refuses it. The narrow row gives up the same keys
+   with and without the reading. *)
+let test_a_narrow_workspace_row_does_not_follow_the_reading () =
+  let row ~has_reading =
+    Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:true ~has_reading T.Repositories
+  in
+  List.iter
+    (fun max_cells ->
+      check string
+        (Printf.sprintf "Workspace at %d cells" max_cells)
+        (fitted ~max_cells (row ~has_reading:true))
+        (fitted ~max_cells (row ~has_reading:false)))
+    widths
+
 let contains haystack needle =
   let needle_length = String.length needle
   and haystack_length = String.length haystack in
@@ -316,6 +368,10 @@ let () =
             test_a_narrow_row_gives_up_the_same_keys_whatever_the_rows
         ; test_case "the trace hears only the keys that answer" `Quick
             test_the_trace_hears_only_the_keys_that_answer
+        ; test_case "a refused key takes no key emphasis" `Quick
+            test_a_refused_key_takes_no_key_emphasis
+        ; test_case "a narrow workspace row does not follow the reading" `Quick
+            test_a_narrow_workspace_row_does_not_follow_the_reading
         ; test_case "an empty approvals queue names only the keys that act"
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick

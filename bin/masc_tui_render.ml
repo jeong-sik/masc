@@ -224,15 +224,13 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
   let wrap line = Message_layout.wrap_styled_words ~max_cells:(max 1 cells) line in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
-  (* The capacity has no value yet: the mark says why in one cell (RFC
-     tui-one-screen-grammar §6.4), and the words after it say what the card
+  (* The capacity has no value yet. The card edge draws the mark that says
+     why ({!overview_capacity_status}), and the body says what the card
      waits on. A status word such as 미관측 is not drawn where the value
-     goes. *)
-  let absent unknown reason =
-    wrap (warning (Masc_tui_value.Unknown.glyph unknown ^ " " ^ reason)) in
+     goes (RFC tui-one-screen-grammar §6.4). *)
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      absent Masc_tui_value.Unknown.Unread (text "fleet 첫 관측 대기" "awaiting fleet reading")
+      wrap (warning (text "fleet 첫 관측 대기" "Awaiting fleet reading"))
   (* With no reading the edge draws the failure mark, and one row says why:
      the row that names the cause with its age. A general row above it
      ("not observed · fleet unreachable") said the same thing again. *)

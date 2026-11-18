@@ -5581,7 +5581,11 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
        Alcotest.(check bool) "partial entry error observed" true (after -. before >= 1.0))
 ;;
 
-let test_unsupported_version_snapshot_requires_runtime_reset () =
+(* A pending snapshot written under any other [version] is refused with the
+   operator reset message, which names the stored version and the current one
+   ([Keeper_approval_queue_codec.pending_store_version], 14). The file is left
+   byte-for-byte for the operator. *)
+let check_pending_version_refused ~version =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -5592,7 +5596,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 8
+            [ "version", `Int version
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -5600,13 +5604,14 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "unsupported version must fail install"
         | Error
-            (Masc.Keeper_approval_queue_result.Install_storage_failed
-              { reason =
-                  "gate_pending.version 8 is unsupported (current 13); reset \
-                   runtime state before restarting MASC"
-              ; _
-              }) ->
-          ()
+            (Masc.Keeper_approval_queue_result.Install_storage_failed { reason; _ }) ->
+          Alcotest.(check string)
+            "the refusal names the stored version and the current one"
+            (Printf.sprintf
+               "gate_pending.version %d is unsupported (current 14); reset \
+                runtime state before restarting MASC"
+               version)
+            reason
         | Error error ->
           Alcotest.failf
             "unsupported version returned the wrong error: %s"
@@ -5616,6 +5621,15 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
          (Sys.file_exists store_path);
        let preserved = read_pending_snapshot_bytes ~base_path in
        Alcotest.(check string) "content preserved byte-for-byte" original preserved)
+;;
+
+let test_unsupported_version_snapshot_requires_runtime_reset () =
+  check_pending_version_refused ~version:8
+;;
+
+(* The previous format, 13, is refused the same way. *)
+let test_previous_version_snapshot_requires_runtime_reset () =
+  check_pending_version_refused ~version:13
 ;;
 
 (* The durable snapshot of a store holding one pending entry with an
@@ -5711,7 +5725,7 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
        | Error
            (Masc.Keeper_approval_queue_result.Install_storage_failed
              { reason =
-                 "gate_pending.version 10 is unsupported (current 13); reset \
+                 "gate_pending.version 10 is unsupported (current 14); reset \
                   runtime state before restarting MASC"
              ; _
              }) ->
@@ -8100,6 +8114,10 @@ let () =
             "unsupported version requires runtime reset"
             `Quick
             test_unsupported_version_snapshot_requires_runtime_reset
+        ; Alcotest.test_case
+            "previous version requires runtime reset"
+            `Quick
+            test_previous_version_snapshot_requires_runtime_reset
         ; Alcotest.test_case
             "v10 store requires runtime reset before rows are read"
             `Quick

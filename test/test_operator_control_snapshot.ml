@@ -335,7 +335,9 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
 
    An age is the read's own clock minus a time in the meta, so two reads
    never agree on one. The three ages are left out and every other field is
-   compared. *)
+   compared. Each row is built from its sources: the snapshot cache and the
+   cache the trust and tool audit fields are kept in are both emptied first,
+   so the second row is not handed the first one's fields. *)
 let row_ages = [ "last_turn_ago_s"; "last_proactive_ago_s"; "last_activity_ago_s" ]
 
 let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
@@ -413,6 +415,7 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
        | None -> Alcotest.fail "the Owner holds no meta");
       let row () =
         Operator_control.invalidate_snapshot_cache ();
+        Dashboard_cache.invalidate_all ();
         let json =
           Operator_control.snapshot_json ~view:"summary"
             ~include_keepers:true ~include_messages:false
@@ -439,7 +442,20 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
       Alcotest.(check string)
         "the row from the Owner is the row from the file"
         from_file
-        from_owner)
+        from_owner;
+      (* The Owner stands for the file again. A row that still opened the
+         meta file would not be this one: the file holds no snapshot now. *)
+      Out_channel.with_open_bin
+        (Keeper_types_profile.keeper_meta_path config keeper_name)
+        (fun channel -> output_string channel "not a snapshot");
+      (match Keeper_meta_store.read_meta config keeper_name with
+       | Ok (Some _) ->
+         Alcotest.fail "the meta file still reads, so the row below shows nothing"
+       | Ok None | Error _ -> ());
+      Alcotest.(check string)
+        "the row of an owned Keeper needs no meta file"
+        from_owner
+        (row ()))
 
 let health_projection_meta ~total_turns =
   match

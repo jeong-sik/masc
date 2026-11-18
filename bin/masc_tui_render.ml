@@ -596,7 +596,7 @@ and render_memory_facts_list (state : state) =
            Render_memory.Facts_loaded { total; filter_label; query_label }) ]
   in
   surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
-    ~title ~keys:(Masc_tui_keys.footer_row_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
+    ~title ~keys:(Masc_tui_keys.footer_row_memory_facts ~lang:state.ui_language ~cols)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
@@ -680,7 +680,7 @@ let render_surface ~home (state : state) =
                              [ Masc_tui_render_board.board_step state
                              ; Terminal_text.single_line post_id ]
                            ~readings:[] ~position:None)
-                      ~hints:(Masc_tui_keys.footer_hints_board_pending ~lang:state.ui_language)
+                      ~hints:""
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->

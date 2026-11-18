@@ -83,8 +83,9 @@ let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
 
 (* A key and the two footers of its surface: the one drawn where the key
    answers and the one drawn where the dispatcher refuses it.
-   [t], [p], [/] and [n / N] act on the Work list; in a Goal detail [p] is
-   Pause and the other three have no list to act on. [c] replies to the post
+   [t] and [p] act on the Work list; in a Goal detail [p] is Pause and [t]
+   has no list to act on. The Work list's [/] and [n / N] move, so its zone 5
+   names neither (RFC tui-one-screen-grammar section 2). [c] replies to the post
    that is open, so the Board list has nothing to reply to. [/] and [n / N]
    search the list's rows, and an open Verification, Harness or System_logs
    detail has none. *)
@@ -113,14 +114,14 @@ let back_keys_of_surface name surface =
 let approvals_list_footer =
   Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
     (Keys.Approval_browsing
-       { approvals = true; asks = Keys.Ask_selected; source = true; last_answer = false })
+       { approvals = true; ask_selected = true; source = true; last_answer = false })
 
 let scoped_keys =
   [ ( "Planning",
       Masc_tui_footer.answering_text
         (Keys.footer_row_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:true),
       (Keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en),
-      [ "t"; "p"; "/"; "n / N" ] )
+      [ "t"; "p" ] )
   ; ( "Board",
       Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true Masc_tui_types.Board,
       Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false Masc_tui_types.Board,
@@ -156,10 +157,6 @@ let scoped_keys =
       approvals_list_footer,
       [ "v" ] )
   ]
-  @ back_keys "Planning"
-      ~list:(Masc_tui_footer.answering_text
-        (Keys.footer_row_planning_goal_list ~lang:Masc_tui_types.Lang_en ~has_rows:true))
-      ~detail:(Keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)
   @ back_keys_of_surface "Board" Masc_tui_types.Board
   @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules
   @ back_keys_of_surface "Verification" Masc_tui_types.Verification

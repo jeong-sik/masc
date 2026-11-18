@@ -42,6 +42,19 @@ type row_need =
       (** opens a reading: a row's details, or what replaced the list when
           its read failed. An empty list has one only after a failed read. *)
 
+(** Whether a binding moves or acts (RFC tui-one-screen-grammar sections 2 and
+    3.1). Zone 5 names the keys that act; the help sheet names both. *)
+type role =
+  | Moves
+      (** a section 3.1 key used for its section 3.1 meaning: a line, a page,
+          the ends, in ([Enter]), out ([Esc]), beside ([[ ]]), the views
+          ([v]), the next screen ([Tab]), find ([/ n]), filter and order
+          ([f o]), reload ([r]), quit ([q]), and the symbol pairs [, .],
+          [< >] and [{ }] *)
+  | Acts
+      (** everything else, a section 3.1 letter a screen still uses for
+          another meaning included; the default *)
+
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
@@ -52,6 +65,7 @@ type binding = {
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
   rows : row_need;  (** whether an empty list refuses it *)
+  role : role;  (** whether zone 5 names it *)
 }
 
 val expand_turn_key : string
@@ -157,8 +171,9 @@ val footer_actions :
   ?has_reading:bool ->
   Masc_tui_types.surface ->
   action list
-(** The surface's keys at one depth, in the footer's order: groups in
-    Navigate, Act, Search, Meta order. [detail_open] picks the depth, as in
+(** The surface's keys that act at one depth, in the footer's order: groups
+    in Navigate, Act, Search, Meta order. A [Moves] binding is not among them:
+    zone 5 does not name it. [detail_open] picks the depth, as in
     {!footer_hints}. The set and its order do not depend on [has_rows] or
     [has_reading]; those decide only each key's [availability]. A key that
     needs a row is [Unavailable No_row] when the list holds none, and one that
@@ -179,8 +194,8 @@ val footer_row_of_surface :
 (** {!footer_row} of {!footer_actions}: the row a list renderer draws. *)
 
 val planning_goal_list_actions : has_rows:bool -> action list
-(** The Goal list's keys: the Candle read first, then the groups. [has_rows]
-    is whether the list on screen holds a Goal. *)
+(** The Goal list's keys that act: the Candle read first, then the groups.
+    [has_rows] is whether the list on screen holds a Goal. *)
 
 val footer_row_planning_goal_list :
   lang:Masc_tui_types.ui_language -> has_rows:bool -> Masc_tui_footer.key_row
@@ -220,19 +235,14 @@ val footer_hints_metrics :
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)
 
-(** What the ask list offers under the cursor. *)
-type ask_supply =
-  | No_asks  (** no question is waiting *)
-  | Asks_unselected  (** questions wait and the cursor is on none of them *)
-  | Ask_selected  (** the cursor is on a question *)
-
 (** The browsing footer follows these facts: [approvals] says the queue has a
-    row, [asks] what the ask list offers, and [source] that a question source
-    is on hand to read, the last answer's included. [last_answer] exposes the
-    immutable receipt reader, independently of the current question. *)
+    row, [ask_selected] that the cursor is on a waiting question, and [source]
+    that a question source is on hand to read, the last answer's included.
+    [last_answer] exposes the immutable receipt reader, independently of the
+    current question. *)
 type approvals_footer =
   | Approval_browsing of {
-      approvals : bool; asks : ask_supply; source : bool; last_answer : bool;
+      approvals : bool; ask_selected : bool; source : bool; last_answer : bool;
     }
   | Approval_writing
   | Approval_armed
@@ -240,8 +250,10 @@ type approvals_footer =
 
 val footer_hints_approvals :
   lang:Masc_tui_types.ui_language -> approvals_footer -> string
-(** Project the Approvals queue and question reader's modal footers from the
-    same binding records as the Help sheet. *)
+(** The Approvals queue and question reader's modal footers: the keys that act
+    in each mode. Browsing and answering name no key that moves (RFC
+    tui-one-screen-grammar section 2). The answer editor takes letters, so its
+    [Enter] and [Esc] are its save and cancel and are named. *)
 
 val approval_answer_hint : string
 (** The footer's words for the key that opens the selected question. The
@@ -255,9 +267,10 @@ val has_detail_scoped_keys : Masc_tui_types.surface -> bool
     without it. *)
 
 val has_row_scoped_keys : Masc_tui_types.surface -> bool
-(** Whether this surface's table holds a key that needs a row, and so owes
-    {!footer_row_of_surface} a [~has_rows] from its list renderer. Read by the
-    test that pins the surfaces whose empty list draws those keys dim. *)
+(** Whether zone 5 names a key of this surface that needs a row, and so owes
+    {!footer_row_of_surface} a [~has_rows] from its list renderer. A [Moves]
+    binding does not count. Read by the test that pins the surfaces whose
+    empty list draws those keys dim. *)
 
 val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
@@ -426,19 +439,18 @@ val footer_hints_board_read :
   has_attachments:bool ->
   has_successor:bool ->
   string
-(** The Board read footer. [focus_posts] is whether j/k moves the post list
-    beside the open post; [focus_comments] chooses the thread instead of the
-    post within the detail pane. [layout] is the one the
-    frame drew ({!Masc_tui_types.board_read_layout}): the split is when h/l
-    and Ctrl-W have a pane to reach, and [z] crosses between the split and the
+(** The Board read footer: the keys that act on the reading. The keys that
+    move it are the help sheet's (RFC tui-one-screen-grammar section 2).
+    [focus_posts] is whether the post list beside the open post has the focus,
+    which leaves the diagram key out; [focus_comments] chooses the thread
+    instead of the post, and the vote key names the comment. [layout] is the
+    one the frame drew ({!Masc_tui_types.board_read_layout}): the split is
+    when Ctrl-W has a pane to reach, and [z] crosses between the split and the
     wide detail, its label naming where it goes -- "wide" from a split one,
     "list" from a wide one. On one pane there is nowhere to go and the key is
     not drawn. The vote, reply and copy keys are the Board surface list's own
-    bindings. *)
-
-val footer_hints_board_pending : lang:Masc_tui_types.ui_language -> string
-(** Board read controls while the post is loading, missing, or failed.
-    Projects the live [r], [Left / Esc], and [Tab] bindings. *)
+    bindings. A post still loading, missing or failed has only keys that move
+    ([r], [Left / Esc], [Tab]), so its zone 5 names none. *)
 
 val footer_hints_fusion_detail : lang:Masc_tui_types.ui_language -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because the
@@ -447,13 +459,6 @@ val footer_hints_fusion_detail : lang:Masc_tui_types.ui_language -> string
     {!Masc_tui_footer.line}'s [?position], not on the end of this string: the
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
-
-val footer_hints_lanes_run_list :
-  lang:Masc_tui_types.ui_language -> has_runs:bool -> has_older:bool -> string
-(** The Lanes run-list footer: the drill-down under a standalone lane row. A
-    key is drawn only while it can act: [j/k] and [Right / Enter] need a loaded
-    run, and [>] needs the server to have named an older page. The [?] sheet
-    opens on the same bindings while this screen is up. *)
 
 val footer_hints_lanes_run_detail_for :
   lang:Masc_tui_types.ui_language -> preflight:bool -> string
@@ -473,12 +478,12 @@ val footer_hints_git_diff : lang:Masc_tui_types.ui_language -> string
 (** The Git diff view for a changed file in repository changes. *)
 
 val footer_row_memory_facts :
-  lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> Masc_tui_footer.key_row
-(** The Memory fact browser opened by Enter on a health row: row movement,
-    the category cycle, search, and the way back to the table. Omits
-    [d:Category pane] on narrow frames where the Category rail does not fit.
-    The keys that act on a fact stay dim in their places when [has_rows] is
-    false. *)
+  lang:Masc_tui_types.ui_language -> cols:int -> Masc_tui_footer.key_row
+(** The Memory fact browser opened by Enter on a health row: the pages, the
+    category cycle, the order and the fleet. Omits [d:Category pane] on narrow
+    frames where the Category rail does not fit. The keys that need a fact
+    move, so zone 5 does not name them, and every key it names answers on an
+    empty browser. *)
 
 val footer_hints_memory_changes : lang:Masc_tui_types.ui_language -> string
 (** Shared Memory browser navigation and selected change reading. *)
@@ -610,5 +615,4 @@ val footer_hints_lane_inventory_detail :
 val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
 val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string
 val footer_hints_answering : lang:Masc_tui_types.ui_language -> string
-val footer_hints_agenda : lang:Masc_tui_types.ui_language -> openable:bool -> string
 val footer_hints_changes_diff : lang:Masc_tui_types.ui_language -> string

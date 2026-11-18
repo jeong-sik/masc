@@ -10,7 +10,10 @@
    that needs a row is [Unavailable] by variant on an empty list, a row draws
    every key in place exactly when the whole set fits and is otherwise the row
    of the answering keys alone, and a refused key stays in the dim while an
-   answering one leaves it. *)
+   answering one leaves it.
+
+   Zone 5 names the keys that act and none that move ([j/k], [Enter], [Esc],
+   the page keys, [/ n], [r], [Tab], [q]): the keys below are the ones left. *)
 
 open Alcotest
 module Keys = Masc_tui_keys
@@ -19,42 +22,20 @@ module T = Masc_tui_types
 let lang = T.Lang_en
 
 (* A surface, the keys it spells that need a row, and the keys that answer on
-   an empty list. Each is the key as the table spells it. *)
+   an empty list. Each is the key as the table spells it. Clients has no key
+   that acts, and every key Logs and Activity name answers on an empty list. *)
 let surfaces =
-  [ ( "Schedules",
-      T.Schedules,
-      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "e"; "x"; "Y"; "Home/End" ],
-      [ "n"; "< / >"; "Esc"; "r"; "q" ] )
-  ; ( "Harness",
-      T.Harness,
-      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "n / N"; "Home/End" ],
-      [ "v"; "/"; "Esc"; "r"; "q" ] )
-  ; ( "Task Review",
-      T.Verification,
-      [ "j/k"; "Right / Enter"; "a / x"; "n / N"; "PgUp/PgDn"; "Home/End" ],
-      [ "v"; "h"; "/"; "< / >"; "Esc"; "r"; "q" ] )
-  ; ( "Fusion",
-      T.Fusion,
-      [ "j/k"; "PgUp/PgDn"; "Enter"; "K"; "B"; "Y"; "/"; "n / N"; "Home/End" ],
-      [ "a"; "Esc"; "r"; "q" ] )
-  ; ( "Clients",
-      T.Clients,
-      [ "j/k"; "Enter"; "/"; "n / N"; "PgUp/PgDn"; "Home/End" ],
-      [ "p / Esc"; "r"; "q" ] )
-  ; ( "Workspace",
-      T.Repositories,
-      [ "j/k"; "Enter"; "H"; "d"; "n / N"; "PgUp/PgDn"; "Home/End" ],
-      [ "a"; "/"; "Esc"; "r"; "q" ] )
-  ; ( "Changes",
-      T.Changes,
-      [ "j/k"; "Right / Enter"; "d"; "v"; "/"; "n / N"; "o"; "PgUp/PgDn"; "Home/End" ],
-      [ "[ / ]"; "Esc"; "r"; "q" ] )
+  [ ("Schedules", T.Schedules, [ "e"; "x"; "Y" ], [ "n" ])
+  ; ("Harness", T.Harness, [ "y / x"; "Y" ], [])
+  ; ("Task Review", T.Verification, [ "a / x" ], [ "h" ])
+  ; ("Fusion", T.Fusion, [ "K"; "B"; "Y" ], [ "a" ])
+  ; ("Clients", T.Clients, [], [])
+  ; ("Workspace", T.Repositories, [ "H"; "d" ], [ "v"; "a" ])
+  ; ("Changes", T.Changes, [ "d"; "v"; "o" ], [])
   (* A level floor or category can leave the Logs list with no entry. The keys
      that change the filters are how it comes back, so they answer. *)
-  ; ( "Logs",
-      T.System_logs,
-      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "n / N"; "Home/End" ],
-      [ "o"; "e"; "l"; "v"; "c"; "/"; "Esc"; "r"; "q" ] )
+  ; ("Logs", T.System_logs, [], [ "o"; "e"; "l"; "v"; "c" ])
+  ; ("Activity", T.Acting, [], [ "e / l" ])
   ]
 
 let actions ~has_rows surface = Keys.footer_actions ~detail_open:false ~has_rows surface
@@ -88,9 +69,9 @@ let check_marks label actions ~unavailable:(reason, keys) ~available =
 
 let test_each_surface_scopes_a_key_to_a_row () =
   List.iter
-    (fun (name, surface, _, _) ->
-      check bool (name ^ " has a key that needs a row") true
-        (Keys.has_row_scoped_keys surface))
+    (fun (name, surface, needing, _) ->
+      check bool (name ^ " has a key zone 5 names that needs a row")
+        (needing <> []) (Keys.has_row_scoped_keys surface))
     surfaces
 
 let test_the_keys_and_their_order_do_not_follow_the_rows () =
@@ -115,9 +96,19 @@ let test_a_list_with_a_row_marks_every_key_available () =
         ~unavailable:(Keys.No_row, []) ~available:(needing @ answering))
     surfaces
 
+(* The table above names every key each row holds, so a key that moves cannot
+   come back to a row without this failing. *)
+let test_each_row_names_exactly_these_keys () =
+  List.iter
+    (fun (name, surface, needing, answering) ->
+      check (list string) (name ^ " names these keys")
+        (List.sort String.compare (needing @ answering))
+        (List.sort String.compare (keys_of (actions ~has_rows:true surface))))
+    surfaces
+
 (* Workspace [v] opens a reading, not a row. After a failed read there is no
    repository to select and still a failure to open, so [v] follows
-   [~has_reading] and [Enter] follows [~has_rows]. *)
+   [~has_reading] and [d] follows [~has_rows]. *)
 let test_workspace_v_follows_the_reading_and_not_the_row () =
   let actions ~has_rows ~has_reading =
     Keys.footer_actions ~detail_open:false ~has_rows ~has_reading T.Repositories
@@ -136,18 +127,16 @@ let test_workspace_v_follows_the_reading_and_not_the_row () =
     (availability_of without_reading "v");
   check availability "v after a failed read with no row" Keys.Available
     (availability_of failed_read "v");
-  check availability "Enter after a failed read with no row" (Keys.Unavailable Keys.No_row)
-    (availability_of failed_read "Enter");
+  check availability "d after a failed read with no row" (Keys.Unavailable Keys.No_row)
+    (availability_of failed_read "d");
   check availability "v with nothing to open" (Keys.Unavailable Keys.No_reading)
     (availability_of nothing "v")
 
 (* The Goal list draws from a builder of its own: it puts the Candle read first.
-   [b], [t], [p], [v], [f] and [s] act on an empty list, and [f] is how a filter
-   that left no Goal is undone. *)
-let goal_list_needing =
-  [ "z"; "j/k"; "Right / Enter"; "Y"; "/"; "n / N"; "PgUp/PgDn"; "Home/End" ]
+   [b], [t], [p] and [s] act on an empty list. *)
+let goal_list_needing = [ "z"; "Y" ]
 
-let goal_list_answering = [ "b"; "t"; "p"; "v"; "f"; "s"; "Esc"; "r"; "q" ]
+let goal_list_answering = [ "b"; "t"; "p"; "s" ]
 
 let test_the_goal_list_keeps_its_keys_and_marks_the_row_keys () =
   let empty = Keys.planning_goal_list_actions ~has_rows:false
@@ -157,7 +146,10 @@ let test_the_goal_list_keeps_its_keys_and_marks_the_row_keys () =
   check_marks "Goals empty list:" empty
     ~unavailable:(Keys.No_row, goal_list_needing) ~available:goal_list_answering;
   check_marks "Goals list with a row:" full
-    ~unavailable:(Keys.No_row, []) ~available:(goal_list_needing @ goal_list_answering)
+    ~unavailable:(Keys.No_row, []) ~available:(goal_list_needing @ goal_list_answering);
+  check (list string) "Goals names these keys"
+    (List.sort String.compare (goal_list_needing @ goal_list_answering))
+    (List.sort String.compare (keys_of full))
 
 let row_items row =
   List.map
@@ -166,17 +158,13 @@ let row_items row =
         match key.answer with Masc_tui_footer.Answers -> true | Masc_tui_footer.Refused -> false ))
     (Masc_tui_footer.row_items row)
 
-(* The fact browser's row is built from the same marks: [j/k] stays in its place
-   on a keeper with no fact, and only its answer changes. *)
-let test_the_fact_browser_keeps_its_keys () =
-  let empty = row_items (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:false)
-  and full = row_items (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:true) in
-  check (list string) "facts empty and full rows name the same items"
-    (List.map fst full) (List.map fst empty);
-  check bool "j/k is refused with no fact" true
-    (List.exists (fun (item, answers) -> String.starts_with ~prefix:"j/k:" item && not answers)
-       empty);
-  check bool "every key answers with a fact" true (List.for_all snd full)
+(* The fact browser's keys that need a fact -- [j/k], [Enter], [n / N] -- move,
+   so the row names none of them, and every key it names answers on a browser
+   with no fact. *)
+let test_the_fact_browser_names_only_keys_that_answer () =
+  let row = row_items (Keys.footer_row_memory_facts ~lang ~cols:200) in
+  check bool "the row names a key" true (row <> []);
+  check bool "every key answers with no fact" true (List.for_all snd row)
 
 (* What a row keeps at one width: its items with the colour marks taken off,
    the cut marker included. *)
@@ -293,9 +281,9 @@ let test_the_trace_hears_only_the_keys_that_answer () =
   let empty = Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false T.Schedules
   and full = Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:true T.Schedules in
   let advertised row = Masc_tui_footer.advertised_key_atoms (Masc_tui_footer.answering_text row) in
-  check bool "an empty list does not advertise j" false (List.mem "j" (advertised empty));
+  check bool "an empty list does not advertise e" false (List.mem "e" (advertised empty));
   check bool "an empty list advertises n" true (List.mem "n" (advertised empty));
-  check bool "a list with a row advertises j" true (List.mem "j" (advertised full))
+  check bool "a list with a row advertises e" true (List.mem "e" (advertised full))
 
 (* A refused key stays in the row's dim with its label; the key letter of an
    answering one leaves the dim. That holds with an empty key style too, which is
@@ -329,8 +317,7 @@ let test_a_refused_key_stays_in_the_dim () =
             (Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false surface))
         surfaces;
       check_row ("Goals with " ^ style) (Keys.footer_row_planning_goal_list ~lang ~has_rows:false);
-      check_row ("facts with " ^ style)
-        (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:false))
+      check_row ("facts with " ^ style) (Keys.footer_row_memory_facts ~lang ~cols:200))
     [ ""; "\027[1m" ]
 
 let contains haystack needle =
@@ -351,17 +338,20 @@ let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
 (* The approval queue draws from a builder of its own that still spells its row
    by hand, so it names only the keys that act: zone 5 keeps a refused key in
    place on the screens built from typed actions (RFC tui-one-screen-grammar
-   section 2), and this one keeps the old form until it moves. Its keys need three
-   different things. [j/k] and [y / n] act on an approval row and answer with a
-   notice without one. [ / ] selects a waiting question and [a] opens the
-   selected one. [o / O] read a question's source, the last answer's included.
-   [w] and [e] open a palette, so they act on an empty queue too. *)
-let approvals_footer ?(approvals = false) ?(asks = Keys.No_asks)
+   section 2), and this one keeps the old form until it moves. Its keys need
+   different things. [y / n] acts on an approval row and answers with a notice
+   without one. [a] opens the question under the cursor. [o / O] read a
+   question's source, the last answer's included. [w] and [e] open a palette,
+   so they act on an empty queue too. The keys that move -- [j/k], [[ / ]],
+   [Esc], [r], [Tab], [q] -- are never named. *)
+let approvals_footer ?(approvals = false) ?(ask_selected = false)
     ?(source = false) () =
   Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
-    (Keys.Approval_browsing { approvals; asks; source; last_answer = false })
+    (Keys.Approval_browsing { approvals; ask_selected; source; last_answer = false })
 
-let approvals_always = [ "w"; "e"; "r"; "Tab"; "Esc"; "q" ]
+let approvals_always = [ "w"; "e" ]
+
+let approvals_moves = [ "j/k"; "[ / ]"; "Esc"; "r"; "Tab"; "q" ]
 
 let check_keys label hints ~named ~absent =
   List.iter
@@ -376,43 +366,41 @@ let check_keys label hints ~named ~absent =
 let test_an_empty_approvals_queue_names_only_the_keys_that_act () =
   check_keys "Approvals with nothing waiting" (approvals_footer ())
     ~named:approvals_always
-    ~absent:[ "j/k"; "y / n"; "[ / ]"; "a"; "o / O" ]
+    ~absent:([ "y / n"; "a"; "o / O" ] @ approvals_moves)
 
 let test_an_approval_row_brings_the_keys_that_decide () =
   check_keys "Approvals with a row" (approvals_footer ~approvals:true ())
-    ~named:("j/k" :: "y / n" :: approvals_always)
-    ~absent:[ "[ / ]"; "a"; "o / O" ]
+    ~named:("y / n" :: approvals_always)
+    ~absent:([ "a"; "o / O" ] @ approvals_moves)
 
-(* Waiting questions bring [ / ] and nothing else: [a] says "Choose a question
-   with [ or ] first" until the cursor is on one. *)
-let test_a_question_brings_the_walk_and_a_selected_one_brings_answer () =
-  check_keys "Approvals with unselected questions"
-    (approvals_footer ~asks:Keys.Asks_unselected ())
-    ~named:("[ / ]" :: approvals_always)
-    ~absent:[ "j/k"; "y / n"; "a"; "o / O" ];
+(* [a] says "Choose a question with [ or ] first" until the cursor is on one,
+   so only a selected question brings it. *)
+let test_a_selected_question_brings_answer () =
+  check_keys "Approvals with no question selected" (approvals_footer ())
+    ~named:approvals_always ~absent:("a" :: approvals_moves);
   check_keys "Approvals with a selected question"
-    (approvals_footer ~asks:Keys.Ask_selected ())
-    ~named:("[ / ]" :: "a" :: approvals_always)
-    ~absent:[ "j/k"; "y / n"; "o / O" ]
+    (approvals_footer ~ask_selected:true ())
+    ~named:("a" :: approvals_always)
+    ~absent:([ "y / n"; "o / O" ] @ approvals_moves)
 
 (* The Questions heading prints [approval_answer_hint]. The footer names the
    key in the same words, or the two lines say different things about [a]. *)
 let test_the_selected_question_footer_uses_the_headings_words_for_answer () =
   check bool "the selected-question footer holds the heading's hint" true
     (contains
-       ("  " ^ approvals_footer ~asks:Keys.Ask_selected ())
+       ("  " ^ approvals_footer ~ask_selected:true ())
        ("  " ^ Keys.approval_answer_hint))
 
 let test_a_source_brings_the_source_keys_without_a_question () =
   check_keys "Approvals with only a source" (approvals_footer ~source:true ())
     ~named:("o / O" :: approvals_always)
-    ~absent:[ "j/k"; "y / n"; "[ / ]"; "a" ]
+    ~absent:([ "y / n"; "a" ] @ approvals_moves)
 
 let test_an_approvals_footer_with_everything_names_every_key () =
   check_keys "Approvals with everything"
-    (approvals_footer ~approvals:true ~asks:Keys.Ask_selected ~source:true ())
-    ~named:("j/k" :: "y / n" :: "[ / ]" :: "a" :: "o / O" :: approvals_always)
-    ~absent:[]
+    (approvals_footer ~approvals:true ~ask_selected:true ~source:true ())
+    ~named:("y / n" :: "a" :: "o / O" :: approvals_always)
+    ~absent:approvals_moves
 
 let () =
   run "tui footer row need"
@@ -425,12 +413,14 @@ let () =
             test_an_empty_list_marks_the_keys_that_need_a_row
         ; test_case "a list with a row marks every key available" `Quick
             test_a_list_with_a_row_marks_every_key_available
+        ; test_case "each row names exactly these keys" `Quick
+            test_each_row_names_exactly_these_keys
         ; test_case "workspace v follows the reading and not the row" `Quick
             test_workspace_v_follows_the_reading_and_not_the_row
         ; test_case "the goal list keeps its keys and marks the row keys" `Quick
             test_the_goal_list_keeps_its_keys_and_marks_the_row_keys
-        ; test_case "the fact browser keeps its keys" `Quick
-            test_the_fact_browser_keeps_its_keys
+        ; test_case "the fact browser names only keys that answer" `Quick
+            test_the_fact_browser_names_only_keys_that_answer
         ; test_case "a row is whole or the answering keys alone" `Quick
             test_a_row_is_whole_or_the_answering_keys_alone
         ; test_case "a refused key does not put a notice aside" `Quick
@@ -445,9 +435,8 @@ let () =
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick
             test_an_approval_row_brings_the_keys_that_decide
-        ; test_case "a question brings the walk, a selected one the answer"
-            `Quick
-            test_a_question_brings_the_walk_and_a_selected_one_brings_answer
+        ; test_case "a selected question brings the answer" `Quick
+            test_a_selected_question_brings_answer
         ; test_case "the selected question footer uses the heading's words"
             `Quick
             test_the_selected_question_footer_uses_the_headings_words_for_answer

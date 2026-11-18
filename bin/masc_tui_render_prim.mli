@@ -92,12 +92,6 @@ val frame_panes : Masc_tui_pane_selection.layout ref
     ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
     once the terminal accepts the frame. *)
 
-val frame_position : Masc_tui_value.Position.t option ref
-(** Where zone 2 of the frame being drawn says the reader is (RFC
-    tui-one-screen-grammar, section 2), set by the one function that draws
-    it: {!here_row}, or the title row {!surface_chrome} draws. [None] when
-    the frame names no position. The render clears it as each frame starts. *)
-
 val clamped_scroll_now :
   Masc_tui_types.state ->
   Masc_tui_types.clamped_scroll ->
@@ -328,6 +322,17 @@ val surface_window_height :
     budget, since the position is on the title row. A key handler that
     bounds the scroll asks this, the number the frame draws with. *)
 
+val surface_chrome_position :
+  overflow:overflow ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Masc_tui_value.Position.t option
+(** The position {!surface_chrome} draws on the title row for this [body],
+    decided the way the contract decides it: a [Scrolled] body's window, or
+    the last position any other body handed. Nothing is drawn. A test reads
+    the decision here rather than from the text. *)
+
 val surface_chrome :
   overflow:overflow ->
   ?help_door:bool ->
@@ -370,7 +375,7 @@ val here_row :
     cannot hold whole is folded in the middle, the longest first, so the last
     step stays on the row. The product name is not drawn. This,
     {!titled_row} and the title row of {!surface_chrome} are the only places a
-    position becomes text, and each records it as {!frame_position}. *)
+    position becomes text. *)
 
 val titled_row :
   cols:int ->
@@ -379,9 +384,14 @@ val titled_row :
   position:Masc_tui_value.Position.t option ->
   string
 (** A title row a surface lays out itself rather than through {!here_row},
-    with [position] at its right-hand end: [title] keeps the cells the
-    position leaves. Records the position as {!frame_position}, as
-    {!here_row} does. *)
+    with [position] at its right-hand end: [title] keeps the
+    {!titled_room} cells the position leaves and is cut to them. *)
+
+val titled_room :
+  cols:int -> Masc_tui_types.state -> position:Masc_tui_value.Position.t option -> int
+(** The cells {!titled_row} leaves its [title]. A title that lays out its own
+    parts sizes them to this, so the cut does not take the end it meant to
+    keep. *)
 
 val reading_separator : string
 (** The mark between two readings of one row. *)

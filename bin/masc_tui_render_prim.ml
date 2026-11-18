@@ -120,10 +120,6 @@ let acting_pane_context_rows = ref 0
    a drag against the copy the terminal accepted, never this one. *)
 let frame_panes = ref Masc_tui_pane_selection.no_panes
 
-(* What zone 2 of the frame being drawn says about where the reader is. Its
-   one drawer sets it; the render clears it when a frame starts, so a frame
-   that draws no position leaves [None]. *)
-let frame_position : Masc_tui_value.Position.t option ref = ref None
 
 
 
@@ -1996,9 +1992,8 @@ let position_text ~ko : Masc_tui_value.Position.t -> string =
   | Partial { at; loaded; total } ->
       row at ^ "/" ^ Masc_tui_value.Count.partial ~ko ~loaded ~total
 
-(* The position as zone 2 draws it, recorded as the frame's. *)
+(* The position as zone 2 draws it. *)
 let zone_two_position (state : state) position =
-  frame_position := position;
   Option.map
     (fun position ->
       Ansi.dim ^ position_text ~ko:(state.ui_language = Lang_ko) position ^ Ansi.reset)
@@ -2027,12 +2022,14 @@ let zone_two_row ~cols ~left = function
 
 (* A title row a surface lays out itself, with the position at its right:
    the title keeps the cells the position leaves. *)
+let titled_room ~cols (state : state) ~position =
+  max 0 (framed_inner_width cols - zone_two_position_cells (zone_two_position state position))
+
 let titled_row ~cols (state : state) ~title ~position =
-  let position = zone_two_position state position in
-  let left_cells = framed_inner_width cols - zone_two_position_cells position in
-  match position with
+  let left_cells = titled_room ~cols state ~position in
+  match zone_two_position state position with
   | None -> title
-  | Some _ -> zone_two_row ~cols ~left:(fit_width title (max 0 left_cells)) position
+  | Some _ as position -> zone_two_row ~cols ~left:(fit_width title left_cells) position
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
    itself. Everything else is the body's budget. The framed panels count the
@@ -2070,6 +2067,39 @@ let surface_window_height state ~terminal_rows ~count =
   Masc_tui_scroll.content_height
     ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
+
+(* The window the contract cuts out of a [Scrolled] body of [count] rows,
+   as its height and the scroll it draws from. The other kinds window
+   themselves, or need no window. *)
+let chrome_window (state : state) ~terminal_rows ~count = function
+  | Fits | Paged_by_cursor | Self_scrolled _ -> None
+  | Scrolled { scroll; report = _ } ->
+      let height = surface_window_height state ~terminal_rows ~count in
+      Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
+
+(* A scrolled body's window is the contract's, so its position is too; any
+   other body is drawn with the last position it handed. *)
+let chrome_position ~window ~count ~handed =
+  match window with
+  | Some (height, scroll) ->
+      Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
+  | None -> handed
+
+let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let count = ref 0 and handed = ref None in
+  let pushed () = incr count in
+  body ~budget:(max 1 (rows - surface_chrome_rows))
+    { push = (fun _ -> pushed ())
+    ; push_styled = (fun ~style:_ _ -> pushed ())
+    ; push_selected = (fun _ -> pushed ())
+    ; push_divider = pushed
+    ; push_empty = pushed
+    ; next_origin = (fun () -> (0, 0))
+    ; position = (fun position -> handed := Some position) };
+  chrome_position
+    ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
+    ~count:!count ~handed:!handed
 
 let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
@@ -2141,20 +2171,8 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
-  (* A scrolled body's window is the contract's, so its position is too. *)
-  let window =
-    match overflow with
-    | Fits | Paged_by_cursor | Self_scrolled _ -> None
-    | Scrolled { scroll; report = _ } ->
-        let height = surface_window_height state ~terminal_rows ~count in
-        Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
-  in
-  let position =
-    match window with
-    | Some (height, scroll) ->
-        Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
-    | None -> !handed
-  in
+  let window = chrome_window state ~terminal_rows ~count overflow in
+  let position = chrome_position ~window ~count ~handed:!handed in
   top buf cols;
   (* A title that already carries a position, laid out by [here_row], keeps
      it: only a position the body handed is placed here. *)
@@ -2730,10 +2748,20 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let capacity = available - List.length details - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
-  (* The heading counts the roster. Where a window stands is the title row's
-     to say, and that row belongs to the pane beside this one. *)
+  (* The heading counts the roster and, when the rows hide some of it, how
+     many: a cut count, not a position. The selected Keeper's place is the
+     title row's to say. *)
+  let hidden = count - Rows.length window in
   let header =
-    [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:(string_of_int count); rule ]
+    [ ""
+    ; sidebar_heading ~cols ~title:"KEEPERS"
+        ~count:
+          (Masc_tui_value.Count.grouped count
+          ^ (if hidden <= 0 then ""
+             else
+               " \xc2\xb7 "
+               ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
+    ; rule ]
   in
   List.iter (draw ~style:(Theme.Side_pane.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
@@ -3281,8 +3309,9 @@ let ask_question_viewport (state : state) =
                    draw_ask_context b cols ~row) in
              String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
   in
-  (* title, progress, help, two dividers, outer edges and footer *)
-  let room = max 1 (rows - 9) in
+  (* title, progress, help, the divider under them, outer edges and footer.
+     The keys are on the help row, so no row under the text repeats them. *)
+  let room = max 1 (rows - 7) in
   (lines, room)
 
 ;;
@@ -6688,10 +6717,7 @@ let keeper_deletions_lines (state : state) ~cols =
       errors @ (match selected with
         | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
         | Some row ->
-          [Printf.sprintf "%d / %d · %s · %s"
-             (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row)
-             (Keeper_control.deletion_status ~ko row)]
+          [Keeper_control.deletion_keeper_name row ^ " · " ^ Keeper_control.deletion_status ~ko row]
           @ (if row.Keeper_control.can_retry then []
              else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
           @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"

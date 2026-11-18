@@ -1052,7 +1052,9 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
       | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> "PgUp" in
     let lead = Printf.sprintf (if ko then "안내 %d · %s · " else "%d notices · %s · ")
         projection.rpp_notices door in
-    let width = framed_inner_width cols in
+    (* The parts share what the position leaves, so the cut never reaches
+       the connection notice at the end. *)
+    let width = titled_room ~cols state ~position:projection.rpp_position in
     let available = max 0 (width - Message_layout.display_width lead) in
     let connection = match reading_connection_notice state with
       | None -> ""
@@ -1673,7 +1675,14 @@ let render_runtime_pick (state : state) =
          ~readings:
            [ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
              ^ Ansi.reset ]
-         ~position:None)
+         ~position:
+           (* The cursor indexes the list the filter keeps. *)
+           (if view.Masc_tui_pick_list.shown = 0 then None
+            else
+              Some
+                (Masc_tui_value.Position.row
+                   ~selected:(Some state.runtime_pick_list.Masc_tui_pick_list.cursor)
+                   ~total:view.Masc_tui_pick_list.shown)))
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())

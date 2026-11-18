@@ -17,7 +17,7 @@ let terminal_rows = 30
 let cols = 100
 let hints = "zz:probe  Esc:close"
 
-(* The position row's words are the English screen's; the language a fresh
+(* The cut note's words are the English screen's; the language a fresh
    state starts in is Korean. *)
 let fresh () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
@@ -40,19 +40,29 @@ let index_of lines needle =
 
 let shows lines needle = Option.is_some (index_of lines needle)
 
+(* The position the contract decides for the last body drawn, read as the
+   value [surface_chrome_position] returns for that same body. *)
+let drawn_position = ref None
+
+let draw_body ~body ~overflow state =
+  drawn_position := surface_chrome_position ~overflow state ~terminal_rows ~body;
+  surface_chrome ~overflow state ~terminal_rows ~cols
+    ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints ~body
+
 let draw ?(frame = Chrome_screen) ?hand ~overflow ~count state =
-  frame_position := None;
+  let body ~budget c =
+    List.iter (fun index -> c.push (row_text index)) (List.init count Fun.id);
+    Option.iter (fun hand -> Option.iter c.position (hand ~budget)) hand
+  in
+  drawn_position := surface_chrome_position ~overflow state ~terminal_rows ~body;
   let drawn, clamped =
     surface_chrome ~overflow ~frame state ~terminal_rows ~cols
-      ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints
-      ~body:(fun ~budget c ->
-        List.iter (fun index -> c.push (row_text index)) (List.init count Fun.id);
-        Option.iter (fun hand -> Option.iter c.position (hand ~budget)) hand)
+      ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints ~body
   in
   (drawn.Masc_tui_frame_presenter.lines, clamped)
 
 let window_numbers () =
-  match !frame_position with
+  match !drawn_position with
   | Some (Masc_tui_value.Position.Window { first; last; total }) ->
       Some (first, last, total)
   | Some (Masc_tui_value.Position.Row _ | Masc_tui_value.Position.Partial _)
@@ -77,7 +87,7 @@ let test_a_cut_body_says_what_it_hides () =
   Alcotest.(check bool) "a cut body clamps nothing" true
     (Option.is_none clamped);
   Alcotest.(check bool) "a cut body that hands no position has none" true
-    (Option.is_none !frame_position);
+    (Option.is_none !drawn_position);
   let lines, _ = draw ~overflow:Fits ~count:budget state in
   Alcotest.(check bool) "a body that fits says nothing" false
     (shows lines "not shown")
@@ -116,7 +126,7 @@ let test_the_frame_windows_a_scrolled_body () =
   Alcotest.(check (option int)) "a short body is held at its top" (Some 0)
     !reported;
   Alcotest.(check bool) "and hands no position" true
-    (Option.is_none !frame_position)
+    (Option.is_none !drawn_position)
 
 (* A body the keypress windows knows where its reader is and hands it; the
    title row carries what it was handed, and a body that shows every row
@@ -132,7 +142,7 @@ let test_a_paged_body_hands_its_position () =
   let fits ~budget = Masc_tui_value.Position.window ~first:0 ~shown:budget ~total:budget in
   let _ = draw ~overflow:Paged_by_cursor ~hand:fits ~count:budget state in
   Alcotest.(check bool) "a body that shows every row hands none" true
-    (Option.is_none !frame_position)
+    (Option.is_none !drawn_position)
 
 (* The contract owns a scrolled body's window, so a position the body hands
    as well gives way to it; a paged body that hands twice is drawn with the
@@ -152,10 +162,8 @@ let test_the_contract_decides_which_position_is_drawn () =
     "a scrolled body is drawn with the contract's window"
     (Some (1, surface_window_height state ~terminal_rows ~count, count))
     (window_numbers ());
-  frame_position := None;
   let _ =
-    surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
-      ~surface_key:"surface-chrome-overflow" ~title:"probe" ~hints
+    draw_body ~overflow:Paged_by_cursor state
       ~body:(fun ~budget c ->
         c.position (Masc_tui_value.Position.row ~selected:(Some 0) ~total:3);
         Option.iter c.position

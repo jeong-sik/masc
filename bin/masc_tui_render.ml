@@ -305,7 +305,16 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
 
 let overview_header (state : state) ~cols =
   here_row ~cols state ~path:[]
-    ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
+    ~readings:[ Terminal_text.single_line state.workspace ]
+    ~position:
+      (* The roster beside the overview owns the keys while it is open, so
+         its selected Keeper is where the reader stands. *)
+      (match state.keeper_navigation_open, state.keepers with
+       | true, (_ :: _ as keepers) ->
+           Some
+             (Masc_tui_value.Position.row ~selected:(Some state.keeper_cursor)
+                ~total:(List.length keepers))
+       | true, [] | false, _ -> None)
 
 let render_overview (state : state) home =
   let terminal_rows, full_cols = get_terminal_size () in
@@ -883,7 +892,6 @@ let render ~home ~compact_recovery_notice (state : state) =
   frame_panes := Masc_tui_pane_selection.no_panes;
   frame_acting_pane := Masc_tui_acting_pane.empty_frame;
   frame_tools_task := None;
-  frame_position := None;
   reset_chat_row_actions ();
   Masc_tui_types.keeper_message_rows_begin_frame ();
   (* And the candle, and any placed picture, is on this frame only if this

@@ -661,6 +661,48 @@ let recovery_box_bottom state buf ~cols =
   draw_box_bottom_with_recovery buf ~cols selected;
   selected
 
+(* What competes for the footer's notice slot, which stands in for zone 4
+   until the frame draws that row of its own (RFC tui-one-screen-grammar §2,
+   §9 item 6). The confirmations that lead the row and the conflict notices
+   are drawn as before. *)
+type zone4_notice =
+  | Zone4_pending  (* the quit question, which takes the slot *)
+  | Zone4_action  (* what the last key did: the action text or an outcome *)
+  | Zone4_read_failure of Masc_tui_read_failure.failure
+
+let zone4_rank = function
+  | Zone4_pending -> Masc_tui_notice_order.Pending_confirmation
+  | Zone4_action -> Masc_tui_notice_order.Action_result
+  | Zone4_read_failure _ -> Masc_tui_notice_order.Read_failure
+
+let zone4_notice (state : state) ~action_text ~preferred_action =
+  let notices =
+    (match preferred_action with
+     | Some (Masc_tui_footer.Pending_question _) -> [ Zone4_pending ]
+     | Some (Masc_tui_footer.Outcome _ | Masc_tui_footer.Menu_choices _) | None -> [])
+    @ (match action_text, preferred_action with
+       | Some _, (Some _ | None) | None, Some (Masc_tui_footer.Outcome _) -> [ Zone4_action ]
+       | None, (Some (Masc_tui_footer.Pending_question _ | Masc_tui_footer.Menu_choices _) | None) ->
+           [])
+    @ List.map (fun failure -> Zone4_read_failure failure)
+        (Masc_tui_read_failure.failures state.read_failures)
+  in
+  Masc_tui_notice_order.choose ~rank:zone4_rank notices
+
+(* The slot's text once a failing read has its rank: the action result
+   stays, a read failure fills the slot only when nothing outranks it, and
+   whatever waits behind is counted as [외 N]. *)
+let zone4_action_text (state : state) ~action_text ~preferred_action =
+  let ko = state.ui_language = Lang_ko in
+  let with_more more text =
+    if more = 0 then text else text ^ "  " ^ Masc_tui_value.Count.more ~ko more in
+  match zone4_notice state ~action_text ~preferred_action with
+  | None | Some { lead = Zone4_pending; more = _ } -> action_text
+  | Some { lead = Zone4_action; more } -> Option.map (with_more more) action_text
+  | Some { lead = Zone4_read_failure failure; more } ->
+      Some (with_more more
+              (Masc_tui_read_failure.notice_text ~ko ~now:(Unix.gettimeofday ()) failure))
+
 let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room. "?:help" stays only
@@ -774,6 +816,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Rejection notice ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.rejection_text notice,
               pressable (Press_input_rejection notice)))) in
+  let action_text = zone4_action_text state ~action_text ~preferred_action in
   let identity =
     match state.server_identity with
     | None -> []

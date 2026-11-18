@@ -1,0 +1,131 @@
+(** Zone 4 decisions for a background read that keeps failing
+    (RFC tui-one-screen-grammar §2): which notice leads, how many wait behind
+    it, and what a repeated failure or a success changes. Wording is not
+    checked (constitution execution_protocol). *)
+
+module Failure = Masc_tui_read_failure
+module Order = Masc_tui_notice_order
+module Prim = Masc_tui_render_prim
+module Redraw = Masc_tui_value.Redraw
+
+let check_int = Alcotest.(check int)
+let check_bool = Alcotest.(check bool)
+
+let rfc_order =
+  Order.[ Pending_confirmation; Action_result; Read_failure; Stale_observation; Next_schedule ]
+
+let reads failures = List.map (fun (failure : Failure.failure) -> failure.read) failures
+
+let state_with failures =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
+  state.read_failures <- failures;
+  state
+
+let lead_read = function
+  | Some { Order.lead = Prim.Zone4_read_failure failure; more } -> Some (failure.Failure.read, more)
+  | Some { lead = Prim.Zone4_pending | Prim.Zone4_action; more = _ } | None -> None
+
+let test_each_rank_against_every_other () =
+  List.iteri (fun i higher ->
+    List.iteri (fun j lower ->
+      if i < j then
+        List.iter (fun notices ->
+          match Order.choose ~rank:Fun.id notices with
+          | Some { lead; more } ->
+              check_bool "the RFC's earlier rank leads" true (lead = higher);
+              check_int "the other waits behind" 1 more
+          | None -> Alcotest.fail "two notices choose one")
+          [ [ higher; lower ]; [ lower; higher ] ])
+      rfc_order)
+    rfc_order;
+  check_bool "nothing waiting draws nothing" true (Order.choose ~rank:Fun.id [] = None)
+
+let two_failures =
+  Failure.(failed (failed empty Server_health ~at:10.) Asks ~at:11.)
+
+let test_action_result_is_never_replaced () =
+  let state = state_with two_failures in
+  (* The failures came first and the action after, and the other way round:
+     the action result leads either way, and the reads wait behind it. *)
+  (match Prim.zone4_notice state ~action_text:(Some "done") ~preferred_action:None with
+   | Some { lead = Prim.Zone4_action; more } -> check_int "both reads wait" 2 more
+   | Some _ | None -> Alcotest.fail "the action result leads");
+  state.read_failures <- Failure.failed state.read_failures Failure.Confirmations ~at:20.;
+  (match Prim.zone4_notice state ~action_text:(Some "done") ~preferred_action:None with
+   | Some { lead = Prim.Zone4_action; more } -> check_int "a newer failure waits too" 3 more
+   | Some _ | None -> Alcotest.fail "a newer failure does not replace the action result");
+  (match Prim.zone4_notice state ~action_text:None
+           ~preferred_action:(Some (Masc_tui_footer.Outcome ("lost", Fun.id))) with
+   | Some { lead = Prim.Zone4_action; more = _ } -> ()
+   | Some _ | None -> Alcotest.fail "an input outcome is an action result too");
+  (match Prim.zone4_notice state ~action_text:(Some "quit?")
+           ~preferred_action:(Some (Masc_tui_footer.Pending_question ("quit?", Fun.id))) with
+   | Some { lead = Prim.Zone4_pending; more } -> check_int "action and reads wait" 4 more
+   | Some _ | None -> Alcotest.fail "a pending confirmation leads");
+  (* Menu choices are keys, not a notice: a read failure fills the slot. *)
+  check_bool "choices leave the slot to the failure" true
+    (lead_read (Prim.zone4_notice state ~action_text:None
+                  ~preferred_action:(Some (Masc_tui_footer.Menu_choices "1:a"))) <> None)
+
+let test_two_failing_reads_draw_one_and_count_one () =
+  let state = state_with two_failures in
+  check_bool "the read that failed first leads, the other is counted" true
+    (lead_read (Prim.zone4_notice state ~action_text:None ~preferred_action:None)
+     = Some (Failure.Server_health, 1))
+
+let test_success_clears_only_that_read () =
+  let state = state_with (Failure.succeeded two_failures Failure.Server_health) in
+  check_bool "the other read leads alone" true
+    (lead_read (Prim.zone4_notice state ~action_text:None ~preferred_action:None)
+     = Some (Failure.Asks, 0));
+  state.read_failures <- Failure.succeeded state.read_failures Failure.Asks;
+  check_bool "no failure, no notice" true
+    (Prim.zone4_notice state ~action_text:None ~preferred_action:None = None);
+  check_bool "a read that never failed clears nothing" true
+    (reads (Failure.failures (Failure.succeeded two_failures Failure.Refresh_pass))
+     = [ Failure.Server_health; Failure.Asks ])
+
+let test_repeating_failure_changes_only_its_count () =
+  (* /health fails every 2 s, and the questions started failing in between. *)
+  let every_two_seconds =
+    List.fold_left (fun failures at -> Failure.failed failures Failure.Server_health ~at)
+      two_failures [ 12.; 14.; 16. ] in
+  check_bool "the order stays" true
+    (reads (Failure.failures every_two_seconds) = [ Failure.Server_health; Failure.Asks ]);
+  (match Failure.failures every_two_seconds with
+   | health :: _ ->
+       check_bool "the run keeps its start" true (Float.equal health.since 10.);
+       check_int "the run counts each failure" 4 health.count
+   | [] -> Alcotest.fail "the failure is held");
+  let state = state_with every_two_seconds in
+  check_bool "the same notice leads with the same count behind it" true
+    (lead_read (Prim.zone4_notice state ~action_text:None ~preferred_action:None)
+     = Some (Failure.Server_health, 1));
+  (* Without a new failure the notice changes only when its length reads
+     differently: the next whole second under a minute, the next minute
+     after (RFC §8). *)
+  let failure = List.hd (Failure.failures every_two_seconds) in
+  Redraw.begin_frame ();
+  ignore (Failure.notice_text ~ko:true ~now:15.5 failure);
+  check_bool "under a minute, the next second of the run" true
+    (Redraw.next_change () = Some 16.);
+  Redraw.begin_frame ();
+  ignore (Failure.notice_text ~ko:true ~now:100. failure);
+  check_bool "past a minute, the next minute of the run" true
+    (Redraw.next_change () = Some 130.)
+
+let () =
+  Alcotest.run "tui_zone4_read_failure"
+    [ ( "zone 4"
+      , [ Alcotest.test_case "each rank against every other" `Quick
+            test_each_rank_against_every_other
+        ; Alcotest.test_case "an action result is never replaced" `Quick
+            test_action_result_is_never_replaced
+        ; Alcotest.test_case "two failing reads: one notice, one more" `Quick
+            test_two_failing_reads_draw_one_and_count_one
+        ; Alcotest.test_case "a success clears only that read" `Quick
+            test_success_clears_only_that_read
+        ; Alcotest.test_case "a repeating failure changes only its count" `Quick
+            test_repeating_failure_changes_only_its_count
+        ] )
+    ]

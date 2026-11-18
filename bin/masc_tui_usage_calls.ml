@@ -529,11 +529,13 @@ let legend ~cells ~at_most =
   in
   List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
 
-(* The section's arrangements, richest first: the taller chart, then the
-   two blank rows, then the two-row legend give way in that order, one step
-   at a time, so the section takes the richest arrangement the rows hold and
-   leaves no row empty that a richer one could have used. The table is never
-   what gives way: every arrangement keeps all of it. *)
+(* The section's arrangements, richest first. Each step gives up one row's
+   worth: the taller chart, then the blank row below the legend, then the
+   blank row above the chart, then the legend's second row. The section
+   draws the first arrangement the rows hold, so no row is left empty that a
+   richer one could have used. The smallest is drawn even when it does not
+   fit; the screen then scrolls the section and says so on its last row. The
+   table never gives way: every arrangement keeps all of it. *)
 let lines ~width:cells ~rows t =
   let calls, failures, deferred = totals t.series.Series.tsr_buckets in
   let heading = heading ~cells t in
@@ -549,17 +551,18 @@ let lines ~width:cells ~rows t =
       @ (if gap_below then [ "" ] else [])
       @ table
     in
-    let arrangements =
+    let richer =
       [ (fun () -> arrange ~tall:tall_rows ~gap_above:true ~gap_below:true ~legend_rows:2);
         (fun () -> arrange ~tall:1 ~gap_above:true ~gap_below:true ~legend_rows:2);
         (fun () -> arrange ~tall:1 ~gap_above:true ~gap_below:false ~legend_rows:2);
         (fun () -> arrange ~tall:1 ~gap_above:false ~gap_below:false ~legend_rows:2) ]
     in
+    let smallest () = arrange ~tall:1 ~gap_above:false ~gap_below:false ~legend_rows:1 in
     match List.find_map (fun arrangement ->
         let drawn = arrangement () in
-        if List.length drawn <= rows then Some drawn else None) arrangements with
+        if List.length drawn <= rows then Some drawn else None) richer with
     | Some drawn -> drawn
-    | None -> arrange ~tall:1 ~gap_above:false ~gap_below:false ~legend_rows:1
+    | None -> smallest ()
 
 (* The Dashboard's row names its window in as few cells as the row can spare. *)
 let short_span = function

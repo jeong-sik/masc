@@ -71,10 +71,12 @@ type failure_disposition =
 let failure_disposition = function
   | Pre_dispatch_failed | Spawn_resources_busy | Owner_stopped_turn | Retryable_turn_failed -> Transient
   (* The child reported its setup failure only as text, so nothing says the
-     same request fails again; it stays on the retry path every spawn failure
-     had before #28072 rather than waiting on an operator who may have
-     nothing to change. *)
-  | Spawn_failed_cause_unknown -> Transient
+     same request can pass either. A transient release would rewind the turn
+     as if a retry were known to be safe and leave only
+     [last_transient_release] behind; the 2026-08-10 E2BIG execve ran 237
+     times that way. Recorded as a recovery instead, with the child's text as
+     its detail, for an operator to read (#28072). *)
+  | Spawn_failed_cause_unknown -> Ambiguous
   (* The same argv, env and cwd fail the same way again: retrying spends a
      turn per attempt and changes nothing until an operator does (#28072). *)
   | Spawn_refused_same_input -> Fatal
@@ -2065,13 +2067,13 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ( Ready | Start _ | Active _ | Recovery_required _ | Settled _
       | Turn_inflight { turn_id = None; _ } ) ->
       Error "retryable official-client terminal requires an acknowledged turn identity"
-    | ( ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_failed_cause_unknown
-        | Owner_stopped_turn )
+    | ( ( Pre_dispatch_failed | Spawn_resources_busy | Owner_stopped_turn )
       , _ ) -> Ok (previous_settlement, max 0 (expected.turn_count - 1))
     (* Refused above by [failure_disposition]; refused here as well, so no
        arm of this match writes a transient release record for a failure the
        stored-record decoders reject as transient (#28072). *)
-    | ( ( Spawn_refused_same_input | Transport_interrupted | Protocol_failed
+    | ( ( Spawn_refused_same_input | Spawn_failed_cause_unknown
+        | Transport_interrupted | Protocol_failed
         | Provider_rejected | Input_rejected _ | Host_hook_failed
         | State_persistence_failed | Process_restarted | Vendor_session_full _ )
       , _ ) -> Error not_transient in

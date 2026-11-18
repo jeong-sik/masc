@@ -1417,7 +1417,7 @@ export interface DashboardOfficialClientRecoveryResolutionRecord {
 }
 
 export interface DashboardOfficialClientTransientReleaseRecord {
-  failure: 'pre_dispatch_failed' | 'spawn_resources_busy' | 'spawn_failed_cause_unknown' | 'owner_stopped_turn' | 'retryable_turn_failed'
+  failure: 'pre_dispatch_failed' | 'spawn_resources_busy' | 'owner_stopped_turn' | 'retryable_turn_failed'
   owner_epoch: string
   released_at: number
 }
@@ -1662,7 +1662,7 @@ function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialCl
   const failure = typeof raw.failure === 'string' ? raw.failure : null
   const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
   const released_at = asNumber(raw.released_at)
-  if ((failure !== 'pre_dispatch_failed' && failure !== 'spawn_resources_busy' && failure !== 'spawn_failed_cause_unknown' && failure !== 'owner_stopped_turn' && failure !== 'retryable_turn_failed') || !owner_epoch || released_at == null) return null
+  if ((failure !== 'pre_dispatch_failed' && failure !== 'spawn_resources_busy' && failure !== 'owner_stopped_turn' && failure !== 'retryable_turn_failed') || !owner_epoch || released_at == null) return null
   return { failure, owner_epoch, released_at }
 }
 

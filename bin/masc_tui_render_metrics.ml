@@ -381,12 +381,18 @@ let p95_axis microseconds =
           Printf.sprintf "%d.%ds" (tenths_s / 10) (tenths_s mod 10)
         else Layout.span_text (Float.of_int (div_up us 1_000_000))
 
+(* The quantity each engine graph draws, so it takes that quantity's ramp on
+   every screen (RFC tui-one-screen-grammar 7.3). *)
+let engine_series_tint = function
+  | Masc_tui_engine_samples.Live_heap -> Theme.series_tint Masc_tui_theme.Memory
+  | Masc_tui_engine_samples.Scheduler_p95 -> Theme.series_tint Masc_tui_theme.Latency
+
 (* A card's graph row. Before the view's first sample it is the unread mark;
    with no room for dots, the number the card already wrote. *)
 let engine_graph_row ~cells ~axis ~number series (state : state) =
   match
-    Masc_tui_engine_samples.graph ~width:cells ~axis_cells:engine_axis_cells ~axis series
-      state.engine_samples
+    Masc_tui_engine_samples.graph ~tint:(engine_series_tint series) ~width:cells
+      ~axis_cells:engine_axis_cells ~axis series state.engine_samples
   with
   | Braille.Drawn rows -> String.concat "" rows
   | Braille.Never_read -> Unknown.(glyph Unread)

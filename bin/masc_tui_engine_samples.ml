@@ -228,11 +228,11 @@ let measured = function
    moment (the terminal narrowed before the loop resized it) cannot lift the
    axis with a time no column shows. A graph with no time measured has no
    top to write, and its column stays blank. *)
-let graph ~width ~axis_cells ~axis series t =
+let graph ~tint ~width ~axis_cells ~axis series t =
   let samples = samples series t in
   let drawn = newest (Braille.graph_times ~width ~axis_cells) samples in
   let maximum = Braille.graph_maximum drawn in
   let top = if List.exists measured drawn then axis maximum else "" in
-  Braille.braille_graph ~width ~rows:1
+  Braille.braille_graph ~tint ~width ~rows:1
     ~axis:(Layout.fit_width top (Stdlib.max 0 axis_cells))
     ~maximum samples

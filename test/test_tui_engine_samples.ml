@@ -8,6 +8,9 @@ module Samples = Masc_tui_engine_samples
 module Braille = Masc_tui_braille
 module Decode = Masc.Tui_decode
 
+(* These tests read what a graph draws, not its colour. *)
+let no_tint : Braille.tint = fun _ -> ""
+
 (* The loop polls input at most 16 ms apart. *)
 let loop_step_s = 0.016
 
@@ -188,24 +191,24 @@ let test_a_failed_read_is_a_blank_and_said_once () =
      | Samples.Quiet -> true
      | Samples.Failure_began _ -> false);
   Alcotest.(check bool) "a graph of failed reads is not one never read" true
-    (match Samples.graph ~width:32 ~axis_cells ~axis Samples.Live_heap failed with
+    (match Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Live_heap failed with
      | Braille.Drawn _ -> true
      | Braille.Never_read | Braille.Too_narrow -> false)
 
 let test_a_graph_never_read_is_the_unread_variant () =
   Alcotest.(check string) "closed" "Never_read"
-    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Live_heap Samples.stopped));
+    (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Live_heap Samples.stopped));
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
   let asked, _ = Samples.tick opened ~now:0. ~newest:None in
   Alcotest.(check string) "opened, its read still out" "Never_read"
-    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 asked));
+    (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 asked));
   Alcotest.(check string) "narrower than four cells, still never read" "Never_read"
-    (graph_kind (Samples.graph ~width:2 ~axis_cells ~axis Samples.Scheduler_p95 asked));
+    (graph_kind (Samples.graph ~tint:no_tint ~width:2 ~axis_cells ~axis Samples.Scheduler_p95 asked));
   let read, _, _ = Samples.answered asked ~now:0.03 answered_point in
   Alcotest.(check string) "read" "Drawn"
-    (graph_kind (Samples.graph ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 read));
+    (graph_kind (Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Scheduler_p95 read));
   Alcotest.(check string) "read, with no room for dots" "Too_narrow"
-    (graph_kind (Samples.graph ~width:3 ~axis_cells ~axis Samples.Scheduler_p95 read))
+    (graph_kind (Samples.graph ~tint:no_tint ~width:3 ~axis_cells ~axis Samples.Scheduler_p95 read))
 
 let test_times_without_a_sample_are_blank () =
   let opened = Samples.shown Samples.stopped ~now:0. ~capacity in
@@ -311,7 +314,7 @@ let sampled_heaps ~capacity heaps =
 let axis_top ~width series sampler =
   let top = ref None in
   ignore
-    (Samples.graph ~width ~axis_cells
+    (Samples.graph ~tint:no_tint ~width ~axis_cells
        ~axis:(fun maximum -> top := Some maximum; axis maximum)
        series sampler);
   !top

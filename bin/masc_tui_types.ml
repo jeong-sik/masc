@@ -10483,6 +10483,10 @@ type state = {
      first: an outcome that stayed would go on claiming a keypress the
      operator has moved past. *)
   mutable last_action: Masc_tui_action_notice.t;
+  (* Background reads that keep failing, apart from [last_action] so a poll
+     cannot replace what the operator's last key did. Zone 4 ranks them
+     below it (RFC tui-one-screen-grammar §2). *)
+  mutable read_failures: Masc_tui_read_failure.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -21189,6 +21193,7 @@ let create_state
   voice_floor = None;
   quit_armed = None;
   last_action = Masc_tui_action_notice.empty;
+  read_failures = Masc_tui_read_failure.empty;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;

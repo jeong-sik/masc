@@ -17312,6 +17312,18 @@ let apply_keeper_chat_result state request result =
          true)
   | Some _ | None -> false
 
+(* A background read's own answer, for zone 4: a failure adds to that read's
+   run and an answer ends it (RFC tui-one-screen-grammar §2). Called where
+   the read's answer arrives, never where an error is put in place of one,
+   such as a withdrawn workspace: that read did not fail. The session event
+   list still gets its line from the caller. *)
+let note_read state read result =
+  state.read_failures <-
+    (match result with
+     | Ok _ -> Masc_tui_read_failure.succeeded state.read_failures read
+     | Error _ ->
+         Masc_tui_read_failure.failed state.read_failures read ~at:(Unix.gettimeofday ()))
+
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
     match current_error with
@@ -17483,6 +17495,7 @@ let apply_asks_load state = function
 (* A read of the questions: what it found, and whether the owed read is
    settled or waits to retry. *)
 let apply_asks_read state result =
+  note_read state Masc_tui_read_failure.Asks result;
   settle_asks_read state result;
   apply_asks_load state result
 
@@ -17504,6 +17517,9 @@ let take_approval_observation state observation =
 (* A read of the confirmations: what it found, and whether the owed read is
    settled or waits to retry. *)
 let apply_approvals_read state result =
+  (match result with
+   | Ok _ | Error (Request_failed _) -> note_read state Masc_tui_read_failure.Confirmations result
+   | Error (Request_withdrawn _) -> ());
   settle_pending_confirms_read state result;
   apply_approvals_load state result
 
@@ -19690,9 +19706,15 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
     add_event state "error" err
   end
 
+(* A refresh pass settled, and its [/health] probe read [identity]. *)
+let note_refresh_settled state identity =
+  note_read state Masc_tui_read_failure.Refresh_pass (Ok ());
+  note_read state Masc_tui_read_failure.Server_health identity
+
 let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
+  note_refresh_settled state results.http_server_identity;
   let previous_items = visible_item_revision state in
   let request = results.http_scoped.http_surface_request in
   (* Navigation joins this pass's ticket while it runs, so the ticket alone
@@ -19731,6 +19753,7 @@ let apply_http_surfaces state ~mailbox results =
 
 let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  note_refresh_settled state identity;
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
@@ -19756,6 +19779,8 @@ let account_server_reason =
 
 let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  (* The probe answered; what answered is the account server. *)
+  note_refresh_settled state (Ok ());
   (* The footer's last notice was said on the screen this one covers, such
      as the settings this server could not answer at start. *)
   (match state.connection_status with
@@ -19776,6 +19801,7 @@ let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticke
   end
 
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
+  note_refresh_settled state latest_identity;
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
@@ -26440,6 +26466,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       withdraw_currency_authority state;
       state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
+      note_read state Masc_tui_read_failure.Refresh_pass (Error err);
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight

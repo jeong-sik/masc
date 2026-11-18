@@ -522,7 +522,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move the roster cursor |
 | `Enter` | read the client's full identity and observation |
-| `p / Esc` | back to Features & plugins |
+| `p` | back to Features & plugins |
+| `Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching attached name |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
@@ -668,8 +669,8 @@ count is drawn beyond the available space.
 | `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the changes browser: move |
 | `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
-| `.` | in the changes browser: open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter |
-| `Ctrl-O` | in the changes browser: open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview |
+| `.` | in the changes browser: open the selected change as before/change/after cards with full wrapped claims, reason, and notes |
+| `Ctrl-O` | in the changes browser: open the selected change's complete connected observed memory lineage as a rich Pele graph |
 | `PgUp/PgDn` | in the changes browser: page |
 | `Esc` | in the changes browser: back to facts |
 | `Home/End` | in the changes browser: top/bottom |

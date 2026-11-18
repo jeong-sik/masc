@@ -46,14 +46,18 @@ type row_need =
     3.1). Zone 5 names the keys that act; the help sheet names both. *)
 type role =
   | Moves
-      (** a section 3.1 key used for its section 3.1 meaning: a line, a page,
-          the ends, in ([Enter]), out ([Esc]), beside ([[ ]]), the views
-          ([v]), the next screen ([Tab]), find ([/ n]), filter and order
-          ([f o]), reload ([r]), quit ([q]), and the symbol pairs [, .],
-          [< >] and [{ }] *)
+      (** a section 3.1 table key doing one of the table's moves: a line, a
+          page, the ends, in ([Enter]), out ([Esc]), beside ([[ ]]), the
+          views ([v]), the next screen ([Tab]), the place before
+          ([Backspace]), find ([/ n]), filter and order ([f o]), reload
+          ([r]), go anywhere ([:]), quit ([q]), and the symbol pairs [, .],
+          [< >] and [{ }]. Another table key doing one of them moves too:
+          the arrows that step an ask's questions are a line. *)
   | Acts
-      (** everything else, a section 3.1 letter a screen still uses for
-          another meaning included; the default *)
+      (** everything else: [Space], [?] and [i]; a table key a screen still
+          uses for another meaning; a move spelled with a key the table does
+          not have; a binding that spells both kinds. Every binding states
+          its role: there is no default. *)
 
 type binding = {
   key : string;

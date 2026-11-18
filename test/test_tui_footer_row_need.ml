@@ -22,14 +22,15 @@ module T = Masc_tui_types
 let lang = T.Lang_en
 
 (* A surface, the keys it spells that need a row, and the keys that answer on
-   an empty list. Each is the key as the table spells it. Clients has no key
-   that acts, and every key Logs and Activity name answers on an empty list. *)
+   an empty list. Each is the key as the table spells it. Clients' one key
+   that acts is [p], back to Features, and every key Logs and Activity name
+   answers on an empty list. *)
 let surfaces =
   [ ("Schedules", T.Schedules, [ "e"; "x"; "Y" ], [ "n" ])
   ; ("Harness", T.Harness, [ "y / x"; "Y" ], [])
   ; ("Task Review", T.Verification, [ "a / x" ], [ "h" ])
   ; ("Fusion", T.Fusion, [ "K"; "B"; "Y" ], [ "a" ])
-  ; ("Clients", T.Clients, [], [])
+  ; ("Clients", T.Clients, [], [ "p" ])
   ; ("Workspace", T.Repositories, [ "H"; "d" ], [ "v"; "a" ])
   ; ("Changes", T.Changes, [ "d"; "v"; "o" ], [])
   (* A level floor or category can leave the Logs list with no entry. The keys

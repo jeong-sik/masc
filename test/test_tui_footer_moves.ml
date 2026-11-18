@@ -6,7 +6,8 @@
    its place.
 
    This file pins the decisions: no zone 5 key set holds a binding of role
-   [Moves]; the help sheet still names every one of them, quit included; the
+   [Moves]; every table marks the keys that only ever move as [Moves]; the
+   help sheet still names every one of them, quit included; the
    help door ([?] or the cut marker that ends in it) is on every row; and with
    the moving keys gone, the converted list rows fit whole at 100 and 160
    cells, so a refused key stays in its place there. *)
@@ -75,6 +76,26 @@ let moving_atoms =
 
 let moving_keys = [ "/"; "[ / ]"; "< / >"; ", / ." ]
 
+(* Every table, not only the screens whose zone 5 is built from one yet: a
+   screen moved to [Keys.footer_row_of_surface] later draws whatever its table
+   marks [Acts]. These keys do nothing but move on every table (RFC
+   tui-one-screen-grammar section 10), so a binding that spells only them and
+   is marked [Acts] is a wrong mark, whichever screen holds it. *)
+let only_moving_atoms = [ "j"; "k"; "PgUp"; "PgDn"; "Home"; "End"; "q" ]
+
+let test_every_table_marks_the_keys_that_only_move () =
+  check bool "the sheet lists surfaces" true (Keys.help_surfaces <> []);
+  List.iter
+    (fun (name, surface) ->
+      List.iter
+        (fun (binding : Keys.binding) ->
+          let atoms = Keys.key_atoms binding.key in
+          if atoms <> [] && List.for_all (fun atom -> List.mem atom only_moving_atoms) atoms
+          then
+            check bool (Printf.sprintf "%s: %s moves" name binding.key) true (is_move binding))
+        (Keys.for_surface surface))
+    Keys.help_surfaces
+
 let check_no_moving_key name key =
   check bool (Printf.sprintf "%s does not name %s" name key) false
     (List.mem key moving_keys
@@ -113,11 +134,12 @@ let names_item hints key =
   scan 0
 
 (* The keys that move the approval queue, written here rather than read from
-   the table: a binding whose role was left out would drop out of a list read
+   the table: a binding marked [Acts] by mistake would drop out of a list read
    from the roles, and the row would name it unseen. [Enter] reads the whole
    ask while browsing, so the browsing row leaves it out as well. In the
-   answer form [Enter] sends the answer: there it acts. *)
-let approvals_moving_keys = [ "j/k"; "[ / ]"; "Esc"; "r"; "Tab"; "q" ]
+   answer form [Enter] sends the answer: there it acts. [Left/Right] step the
+   open ask's questions, as j/k do: a line. *)
+let approvals_moving_keys = [ "j/k"; "[ / ]"; "Left/Right"; "PgUp/PgDn"; "Esc"; "r"; "Tab"; "q" ]
 
 let flags = [ false; true ]
 
@@ -351,6 +373,8 @@ let () =
             test_the_board_read_row_names_no_moving_key
         ; test_case "the keeper roster names no moving key" `Quick
             test_the_keeper_roster_names_no_moving_key
+        ; test_case "every table marks the keys that only move" `Quick
+            test_every_table_marks_the_keys_that_only_move
         ; test_case "the sheet still names the moving keys" `Quick
             test_the_sheet_still_names_the_moving_keys
         ; test_case "every row keeps the help door" `Quick test_every_row_keeps_the_help_door

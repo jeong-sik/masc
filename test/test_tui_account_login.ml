@@ -151,6 +151,21 @@ let results_hand_their_window () =
    | Some (Masc_tui_value.Position.Row _ | Masc_tui_value.Position.Partial _) | None ->
        fail "the moved result still hands a window")
 
+(* A model list longer than its rows is a list, so it hands its selected row
+   (RFC tui-one-screen-grammar, section 2: a list names its selected row, and
+   a body that hides rows hands a position). Read as the value. *)
+let model_list_hands_its_selected_row () =
+  let t = Login.create "codex" in
+  t.phase <- Login.Models;
+  t.models <- List.init 30 model;
+  t.cursor <- 15;
+  match snd (Login.visible_lines ~height:6 ~width:80 t) with
+  | Some (Masc_tui_value.Position.Row { at; total }) ->
+      check (pair int int) "the sixteenth of thirty models" (16, 30) (at, total)
+  | Some (Masc_tui_value.Position.Window _ | Masc_tui_value.Position.Partial _) ->
+      fail "a model list hands its selected row, not a window"
+  | None -> fail "a model list that hides rows hands its selected row"
+
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
   (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
@@ -1297,6 +1312,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "results hand their window" `Quick results_hand_their_window;
+  test_case "a model list hands its selected row" `Quick model_list_hands_its_selected_row;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
   test_case "sgr text keeps what the operator reads" `Quick sgr_text_keeps_what_the_operator_reads;

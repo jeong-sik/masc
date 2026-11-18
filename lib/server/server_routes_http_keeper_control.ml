@@ -390,7 +390,7 @@ let handle_keeper_run_next state ~actor request reqd =
       | Ok None -> respond_error `Not_found Unknown_operation "operation not found"
       | Ok (Some operation) ->
         match Keeper_chat_operation_payload.source_of_json operation.source with
-        | Error error -> respond_error `Service_unavailable Store_unavailable error
+        | Error error -> respond_error `Service_unavailable Store_unreadable error
         | Ok source when not (String.equal actor source.submitted_by) ->
           respond_error `Forbidden Operation_forbidden "only your own queued message can be prioritized"
         | Ok _ ->
@@ -435,7 +435,7 @@ let handle_keeper_memory_catch_up ~actor state request reqd =
       match presence with
       | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) ->
         respond_json_value_with_cors ~status:`Service_unavailable request reqd
-          (control_error_json Store_unavailable detail)
+          (control_error_json Store_unreadable detail)
       | Ok Meta_absent -> fail `Not_found "Keeper metadata is absent"
       | Ok (Meta_present _) ->
         match Env_config.KeeperMemoryOs.librarian_config_state () with

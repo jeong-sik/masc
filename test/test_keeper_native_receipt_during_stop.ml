@@ -437,7 +437,8 @@ let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tool
        | Error Keeper_owner.Owner_stopping -> true
        | Ok ()
        | Error (Keeper_owner.Reducer_rejected _ | Keeper_owner.Operation_rejected _
-               | Keeper_owner.Store_unavailable _ | Keeper_owner.Owner_closed) -> false);
+               | Keeper_owner.Store_unavailable _ | Keeper_owner.Store_fenced _
+               | Keeper_owner.Owner_closed) -> false);
     check bool "the next process finds it settled, not requeued for a dead journal" true
       (failed_kind restarted = Some Keeper_chat_operation.Interrupted_by_restart))
 

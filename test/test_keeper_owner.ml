@@ -633,7 +633,7 @@ let test_store_failure_fences_mutations () =
        owner
        (assign_task "must-remain-fenced")
    with
-   | Error (Owner.Store_unavailable "disk unavailable") -> ()
+   | Error (Owner.Store_fenced "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "store-fenced owner accepted another mutation");
   (* The metadata persistence fault is its own slot now (#36203). A drain wake
@@ -649,7 +649,7 @@ let test_store_failure_fences_mutations () =
        owner
        (assign_task "still-fenced-after-drain")
    with
-   | Error (Owner.Store_unavailable "disk unavailable") -> ()
+   | Error (Owner.Store_fenced "disk unavailable") -> ()
    | Error error -> fail ("metadata fault was not preserved: " ^ Owner.error_to_string error)
    | Ok _ -> fail "operation drain cleared the metadata persistence fault");
   match Owner.exact_projection owner with
@@ -1448,7 +1448,7 @@ let test_health_observer_wakes_for_uncertain_metadata_write () =
     check bool "uncertain file change is observed without publishing Owner metadata" true
       (!readings = [ Some false, Some true ]);
     (match Owner.apply_meta owner pause with
-     | Error (Owner.Store_unavailable _) -> ()
+     | Error (Owner.Store_fenced _) -> ()
      | _ -> fail "fenced metadata store accepted another write");
     check int "the existing fence does not notify again" 1 (List.length !readings))
 ;;
@@ -1691,7 +1691,7 @@ let test_metadata_writes_announce_the_keeper_row () =
     check (list string) "the failure that fences the store announces, since the file may have changed"
       [ failing.name ] !heard;
     (match Owner.apply_meta fenced (operator_pause "row-fenced-again") with
-     | Error (Owner.Store_unavailable _) -> ()
+     | Error (Owner.Store_fenced _) -> ()
      | _ -> fail "a fenced store accepted a write");
     check (list string) "a fenced store announces nothing more" [ failing.name ] !heard);
   check (list string) "another workspace hears none of it" [] !elsewhere))
@@ -1763,7 +1763,7 @@ let test_health_observer_callback_cancellation_is_isolated () =
        | Error (Owner.Store_unavailable _) -> ()
        | _ -> fail "metadata failure lost its store error");
       (match Owner.apply_meta fenced pause with
-       | Error (Owner.Store_unavailable _) -> ()
+       | Error (Owner.Store_fenced _) -> ()
        | _ -> fail "fenced owner did not remain available");
       check int "each changed observation called the observer" 4 !calls)
 ;;
@@ -4739,8 +4739,16 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
          ~initial_meta:(Some (make_meta "reopen-failure")))
   in
   let fenced = operation_id "kmsg-reopen-failure" in
+  (* The submit whose commit fails is [Store_unavailable]: it may have
+     landed. Everything after it meets the fence before touching the store,
+     so it is [Store_fenced]: nothing was written (#36205). *)
   let detail_of label = function
     | Error (Owner.Store_unavailable detail) -> detail
+    | Error error -> fail (label ^ ": wrong error: " ^ Owner.error_to_string error)
+    | Ok _ -> fail (label ^ ": the fenced store answered")
+  in
+  let fence_of label = function
+    | Error (Owner.Store_fenced detail) -> detail
     | Error error -> fail (label ^ ": wrong error: " ^ Owner.error_to_string error)
     | Ok _ -> fail (label ^ ": the fenced store answered")
   in
@@ -4758,19 +4766,19 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
           closes the handle and then has nothing to open. *)
        Unix.unlink path;
        let reopen_failure =
-         detail_of "reopen"
+         fence_of "reopen"
            (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-unlink")
               ~source:operation_source ~input:(operation_input "attempts the reopen"))
        in
        check bool "the reopen failure names something other than the closure" true
          (reopen_failure <> "database handle is closed");
-       let read = detail_of "read" (Owner.exact_operation owner fenced) in
+       let read = fence_of "read" (Owner.exact_operation owner fenced) in
        check string "a read under the closed handle repeats the cause"
          reopen_failure read;
        (* The sharper half: the read must not have replaced the recorded
           fault with its own symptom. *)
        let after_read =
-         detail_of "submit after read"
+         fence_of "submit after read"
            (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-read")
               ~source:operation_source ~input:(operation_input "reads the fault back"))
        in
@@ -4837,6 +4845,13 @@ let expect_store_unavailable = function
   | Error (Owner.Store_unavailable _) -> ()
   | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
   | Ok _ -> fail "unavailable store unexpectedly admitted work"
+;;
+
+(* A command the fence refuses before it touches the store wrote nothing. *)
+let expect_store_fenced = function
+  | Error (Owner.Store_fenced _) -> ()
+  | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
+  | Ok _ -> fail "fenced store unexpectedly admitted work"
 ;;
 
 let inject_operation_failure owner id =
@@ -4911,14 +4926,14 @@ let test_recovery_keeps_integrity_failure_fenced () =
         | Sqlite3.Rc.OK -> ()
         | rc -> fail (Sqlite3.Rc.to_string rc) in
       execute "CREATE TABLE foreign_contract (value TEXT)";
-      Owner.wake_operation_drain owner |> expect_store_unavailable;
+      Owner.wake_operation_drain owner |> expect_store_fenced;
       execute "DROP TABLE foreign_contract";
       (* Even after the bytes have been repaired, a detected integrity failure
          needs explicit lifecycle reconciliation, not availability retry. *)
-      Owner.wake_operation_drain owner |> expect_store_unavailable;
+      Owner.wake_operation_drain owner |> expect_store_fenced;
       Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-integrity")
         ~source:operation_source ~input:(operation_input "must remain fenced")
-      |> expect_store_unavailable;
+      |> expect_store_fenced;
       (* The metadata store is healthy, so a metadata commit lands even while
          the operation store is fenced for integrity reconciliation (#36203).
          The two fault slots are independent: the commit does not clear the
@@ -4935,7 +4950,65 @@ let test_recovery_keeps_integrity_failure_fenced () =
         (Owner.operation_projection owner).Owner.store_unavailable;
       Owner.submit_operation owner ~operation_id:(operation_id "kmsg-still-fenced")
         ~source:operation_source ~input:(operation_input "operation path stays fenced")
-      |> expect_store_unavailable)
+      |> expect_store_fenced)
+;;
+
+(* #36205: a client holding a request whose acceptance is unknown waits for
+   the Keeper's waiting inventory to move and sends no command. The Owner
+   must lift an availability fence on its own wake once the store heals and
+   announce the lift, or the request stays held until a restart. *)
+let test_owner_lifts_an_availability_fence_without_a_command () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_context.with_test_env ~sw ~net:env#net
+    ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+    ~mono_clock:env#mono_clock @@ fun () ->
+  let keeper_name = "self-recovery" in
+  with_recovery_store ~sw ~keeper_name ~runner:None ~on_turn_slot_released:None
+    (fun owner path ->
+      let subscriber = Printf.sprintf "owner-self-recovery-%d" (Unix.getpid ()) in
+      let heard = ref 0 in
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:(Filename.dirname path))
+        ~id:subscriber
+        ~callback:(fun (event : Sse.external_event) ->
+          match
+            Json_util.assoc_string_opt "type" event.ext_payload,
+            Json_util.assoc_string_opt "keeper_name" event.ext_payload
+          with
+          | Some "keeper_waiting_inventory_changed", Some name
+            when String.equal name keeper_name -> incr heard
+          | (Some _ | None), (Some _ | None) -> ())
+        ();
+      Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber);
+      let away = path ^ ".away" in
+      Eio.Switch.on_release sw (fun () -> if Sys.file_exists away then Unix.unlink away);
+      inject_operation_failure owner (operation_id "kmsg-self-recovery-rollback");
+      (* The store file is gone, so the recovery this submission runs fails
+         and leaves the fence up. *)
+      Unix.rename path away;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-self-recovery-refused")
+        ~source:operation_source ~input:(operation_input "refused while fenced")
+      |> expect_store_fenced;
+      check bool "the failed recovery leaves the fence up" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (* The store heals. No client command follows. *)
+      Unix.rename away path;
+      heard := 0;
+      Eio.Time.sleep env#clock 0.05;
+      check bool "the fence stays up until the Owner's own wake is due" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      Eio_mock.Clock.advance clock;
+      Eio.Time.with_timeout_exn env#clock 2.0 (fun () ->
+        while (Owner.operation_projection owner).Owner.store_unavailable do
+          Eio.Time.sleep env#clock 0.01
+        done);
+      check bool "the lift is announced to waiting-inventory readers" true (!heard > 0);
+      ignore
+        (owner_ok
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-self-recovery-after")
+              ~source:operation_source ~input:(operation_input "accepted after the lift"))))
 ;;
 
 (* The Owner clears its child slot in the same mailbox turn that settles the
@@ -4985,7 +5058,7 @@ let test_recovery_settles_an_orphaned_child_row_without_replay () =
       inject_operation_failure owner (operation_id "kmsg-active-rollback");
       let active_wake = Owner.wake_operation_drain owner in
       Eio.Promise.resolve resolve_release ();
-      active_wake |> expect_store_unavailable;
+      active_wake |> expect_store_fenced;
       await_child_slot_empty owner 1_000;
       check int "the refused settlement projected nothing" 0 (List.length !settled);
       ignore (owner_ok (Owner.wake_operation_drain owner));
@@ -5056,7 +5129,7 @@ let test_recovery_closes_an_active_native_call_instead_of_running_it () =
       inject_operation_failure owner (operation_id "kmsg-native-call-rollback");
       let active_wake = Owner.wake_operation_drain owner in
       Eio.Promise.resolve resolve_release ();
-      active_wake |> expect_store_unavailable;
+      active_wake |> expect_store_fenced;
       await_child_slot_empty owner 1_000;
       ignore (owner_ok (Owner.wake_operation_drain owner));
       let durable = Option.get (owner_ok (Owner.exact_operation owner original)) in
@@ -7703,6 +7776,8 @@ let () =
             test_idle_wake_recovers_store_and_answers_queued_chat
         ; test_case "recovery keeps integrity failures fenced" `Quick
             test_recovery_keeps_integrity_failure_fenced
+        ; test_case "the Owner lifts an availability fence without a command" `Quick
+            test_owner_lifts_an_availability_fence_without_a_command
         ; test_case "recovery settles an orphaned child row without replay" `Quick
             test_recovery_settles_an_orphaned_child_row_without_replay
         ; test_case "recovery closes an active native call instead of running it" `Quick

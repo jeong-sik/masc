@@ -63,6 +63,7 @@ let describe = function
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Queue input -> "queue:" ^ input
   | Command.Run_next -> "run-next"
+  | Command.Reconcile_held -> "reconcile"
   | Command.Priority None -> "priority"
   | Command.Priority (Some opt) -> "priority:" ^ opt
   | Command.Interrupt_turn -> "interrupt"

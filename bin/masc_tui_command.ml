@@ -48,6 +48,7 @@ type t =
   | Switch_keeper_missing_name
   | Queue of string
   | Run_next
+  | Reconcile_held
   | Priority of string option
   | Answer_tool_approval of bool
   | Interrupt_turn
@@ -173,6 +174,11 @@ let catalog =
     ; aliases = []
     ; args = ""
     ; summary = "prioritize my queued message, stop the observed turn, and resume"
+    }
+  ; { word = "reconcile"
+    ; aliases = []
+    ; args = ""
+    ; summary = "check this keeper's held request again when its outcome is unverified"
     }
   ; { word = "priority"
     ; aliases = [ "autonext" ]
@@ -517,6 +523,7 @@ let parse_with_message_source text =
     | "keeper", name -> Switch_keeper name
     | "queue", args -> Queue (if body = "" then args else args ^ "\n" ^ body)
     | "run-next", "" -> Run_next
+    | "reconcile", "" -> Reconcile_held
     | "priority", args | "autonext", args ->
         Priority (if String.equal args "" then None else Some args)
     | "approve", "" -> Answer_tool_approval true

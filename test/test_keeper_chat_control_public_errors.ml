@@ -88,7 +88,9 @@ let test_non_success_error_retains_only_public_facts () =
       (Yojson.Safe.Util.to_string (member "incident_id" body));
     check_private_absent body)
     [Public.Invalid_input, `Bad_request, "invalid_input";
-     Public.Store_unavailable, `Service_unavailable, "store_unavailable"]
+     Public.Store_fenced, `Service_unavailable, "store_fenced";
+     Public.Store_commit_unknown, `Service_unavailable, "store_commit_unknown";
+     Public.Store_unreadable, `Service_unavailable, "store_unreadable"]
 
 (* 2026-10-22: every Keeper Owner refused its journal at boot, and each TUI
    message was answered store_unavailable, which the TUI must treat as a
@@ -117,8 +119,15 @@ let test_a_command_that_reached_no_owner_was_not_accepted () =
     registry;
   let store_failure = Registry.Command_rejected (Owner.Store_unavailable diagnostic) in
   check bool "a store failure inside the Owner stays possibly admitted" true
-    (Shared.pre_acceptance (Shared.of_command_error store_failure)
-     = Shared.Acceptance_unknown);
+    (Shared.of_command_error store_failure = Public.Store_commit_unknown
+     && Shared.pre_acceptance (Shared.of_command_error store_failure)
+        = Shared.Acceptance_unknown);
+  (* #36205: a fenced Owner refuses before it touches the store, so the
+     attempt wrote nothing and the client must not resend it blindly. *)
+  let fenced = Registry.Command_rejected (Owner.Store_fenced diagnostic) in
+  check bool "a fenced store refusal was not accepted" true
+    (Shared.of_command_error fenced = Public.Store_fenced
+     && Shared.pre_acceptance (Shared.of_command_error fenced) = Shared.Not_accepted);
   List.iter (fun kind ->
     check bool ("the code of " ^ Shared.code kind ^ " reads back as its kind") true
       (Shared.of_code (Shared.code kind) = Some kind))

@@ -139,6 +139,7 @@ type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Chat_operation_store.error
   | Store_unavailable of string
+  | Store_fenced of string
   | Owner_stopping
   | Owner_closed
 
@@ -454,6 +455,15 @@ let operation_fault_detail = function
   | Operation_integrity_failure detail ->
     "Keeper chat operation integrity failure: " ^ detail
 
+(* How long the Owner waits before it retries an availability fence on its
+   own, through its cooling-retry wake. A command retries the fence too, but
+   a client that waits for the fence to lift sends none, so without this wake
+   a healed store stays fenced until a restart (#36205). A store that is out of disk or permission heals on
+   an operator's timescale, so a lift within two seconds of the heal is
+   prompt; a persistent outage costs at most thirty close+reopen attempts a
+   minute, and [set_operation_fault] logs only a changed detail. *)
+let store_recovery_retry_sec = 2.0
+
 let retain_operation_fault fault previous =
   match previous with
   | Some (Operation_integrity_failure _) -> previous
@@ -520,6 +530,7 @@ let error_to_string = function
   | Reducer_rejected error -> Keeper_owner_reducer.error_to_string error
   | Operation_rejected error -> Chat_operation_store.error_to_string error
   | Store_unavailable detail -> "keeper owner store unavailable: " ^ detail
+  | Store_fenced detail -> "keeper owner store fenced; nothing was written: " ^ detail
   | Owner_stopping -> "keeper owner is stopping"
   | Owner_closed -> "keeper owner is closed"
 ;;
@@ -584,6 +595,15 @@ let publish_operation_projection t next =
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
+    (* A fence raised or lifted changes whether the waiting queue can be
+       served without any row changing. Clients holding a request whose
+       acceptance is unknown wait for this event to read it again (#36205). *)
+    if not (Bool.equal previous.store_unavailable next.store_unavailable)
+    then
+      Keeper_waiting_inventory_broadcast.changed
+        ~base_path:t.base_path
+        ~keeper_name:t.keeper_name
+        ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -921,7 +941,8 @@ let apply_transition t store old_state transition =
     set_metadata_fault t detail;
     Error (old_state, error)
   | Error
-      (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed as error) ->
+      (Reducer_rejected _ | Operation_rejected _ | Store_fenced _ | Owner_stopping
+      | Owner_closed as error) ->
     Error (old_state, error)
   | Ok state ->
     let before = (Keeper_owner_reducer.projection old_state).meta in
@@ -1178,13 +1199,31 @@ let project_settled_after_recovery t settled =
       settled
 ;;
 
+(* Recovery runs before the command it guards touches the store, so whatever
+   recovery meets, that command wrote nothing and the fence still stands:
+   every recovery failure is [Store_fenced], never [Store_unavailable], whose
+   commit may have landed, and never [Operation_rejected], which a client
+   reads as an answer about its own request (#36205). An integrity failure
+   names itself as [operation_fault_detail] does, so this refusal and every
+   later one read the same. *)
+let fenced_by_recovery t (error : Chat_operation_store.error) =
+  let (_ : error) = record_operation_error t error in
+  match error with
+  | Chat_operation_store.Store_unavailable detail -> Store_fenced detail
+  | Integrity_error detail ->
+    Store_fenced (operation_fault_detail (Operation_integrity_failure detail))
+  | Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+  | Idempotency_conflict _ | Native_call_unsettled ->
+    Store_fenced (Chat_operation_store.error_to_string error)
+;;
+
 let recover_operation_availability t =
   match !(t.operation_error) with
   | None -> Ok ()
   | Some (Operation_integrity_failure _ as fault) ->
-    Error (Store_unavailable (operation_fault_detail fault))
+    Error (Store_fenced (operation_fault_detail fault))
   | Some (Operation_availability_failure detail) when chat_child_in_flight t ->
-    Error (Store_unavailable detail)
+    Error (Store_fenced detail)
   | Some (Operation_availability_failure _) ->
     (* The Owner mailbox excludes all store commands here, and no Chat_operation
        child holds the handle (an Autonomous or Maintenance turn reaches the
@@ -1198,11 +1237,11 @@ let recover_operation_availability t =
       Chat_operation_store.open_existing ~path)
     in
     (match recovered with
-     | Error error -> Error (record_operation_error t error)
+     | Error error -> Error (fenced_by_recovery t error)
      | Ok operation_store ->
        t.operation_store <- operation_store;
        (match Chat_operation_store.block_preparing_operations operation_store ~now:(t.now ()) with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok () ->
        (* No Chat_operation child is in flight, so nothing in this process
           will commit a Running row: either the outage refused its child's
@@ -1219,15 +1258,15 @@ let recover_operation_availability t =
               Chat_operation_store.settle_running_without_executor operation_store
                 ~cause:Chat_operation_store.After_store_recovery ~now:(t.now ()))
         with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok settled ->
        (match read_operation_projection operation_store ~now:(t.now ()) with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok projection ->
           (match projection.running_operation_id with
            | Some operation_id ->
              Error
-               (record_operation_error t
+               (fenced_by_recovery t
                   (Chat_operation_store.Integrity_error
                      (Printf.sprintf
                         "operation %s is still Running after store recovery settled it"
@@ -1300,12 +1339,12 @@ let log_restart_settlement ~keeper_name ~observations ~interrupted_here =
        (List.length requeued) (List.length failed) unreadable)
 ;;
 
-(* A command is the moment the fence is re-examined, not a later wake:
-   [wake_operation_drain] fires only when a keepalive starts or a deferred
-   retry comes due, so a fence raised mid-day had no trigger to lift it and
-   every later submission was refused with a stale detail (msx-retro-mania,
+(* A command re-examines the fence before it touches the store, so a
+   submission is never refused with a stale detail (msx-retro-mania,
    2026-09-14 16:45 KST). An availability fault is retried here while no
-   child holds the handle; the other faults stay fenced. *)
+   child holds the handle; the other faults stay fenced. The Owner also
+   retries an availability fence on its own wake ([store_recovery_retry_sec]),
+   since a client waiting for the lift sends no command (#36205). *)
 let run_operation_command t ~label f =
   match recover_operation_availability t with
   | Error error -> Error error
@@ -1346,7 +1385,7 @@ let run_operation_command t ~label f =
 let run_operation_read t ~label f =
   match !(t.operation_error) with
   | Some fault when not (Chat_operation_store.is_open t.operation_store) ->
-    Error (Store_unavailable (operation_fault_detail fault))
+    Error (Store_fenced (operation_fault_detail fault))
   | Some _ | None ->
     run_operation_store ~label f
     |> Result.map_error (record_operation_error t)
@@ -1634,11 +1673,26 @@ let start
         ~delay:(Float.min (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
           (Float.max 0.0 (not_before -. t.now ())))
   in
+  (* While an availability fence is up, the Owner itself owns its recovery:
+     the cooling-retry wake runs [Observe_runtime_retry_waits], which retries
+     the fence first and publishes the lift. An integrity fence is not
+     retried in process, and no fence needs no recovery. *)
+  let arm_store_recovery_wake () =
+    match !(t.operation_error) with
+    | Some (Operation_availability_failure _) ->
+      schedule_cooling_retry_wake ~delay:store_recovery_retry_sec
+    | Some (Operation_integrity_failure _) | None -> ()
+  in
   let retry_cooling_observation () =
     (* The cached deadline may already have passed, or a failed projection
        may have lost it. A failed observation retains a positive retry wake
-       without interpreting either condition as dispatch permission. *)
-    schedule_cooling_retry_wake ~delay:(Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
+       without interpreting either condition as dispatch permission. A
+       failure that left an availability fence up retries at the recovery
+       cadence instead, since the next observation starts by retrying it. *)
+    match !(t.operation_error) with
+    | Some (Operation_availability_failure _) -> arm_store_recovery_wake ()
+    | Some (Operation_integrity_failure _) | None ->
+      schedule_cooling_retry_wake ~delay:(Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
   in
   (* A transient (non-throttle) failure defers with no cooling time: the
      continuation is immediately claimable again, but the Owner never polls
@@ -2001,6 +2055,10 @@ let start
                     { claimed_operation_id = !claimed_operation_id; execution; ended }))
           ))
     and loop state =
+        (* Every command that can raise the fence returns here, so a fence up
+           now has a recovery wake armed before the mailbox waits again; no
+           client command is needed to lift it (#36205). *)
+        arm_store_recovery_wake ();
         (* The drain is the only writer; decisions and external observers
            read the same published shutdown reservation. *)
         let shutdown_operation_id = Atomic.get t.shutdown_operation_id in
@@ -2192,7 +2250,7 @@ let start
                 operation-store fault never reaches here: it no longer blocks a
                 metadata commit. *)
              Eio.Promise.resolve resolve
-               (Error (Store_unavailable (metadata_fault_detail fault)));
+               (Error (Store_fenced (metadata_fault_detail fault)));
              loop state
            | None ->
           let operation_store_ready =
@@ -2289,7 +2347,7 @@ let start
                   ~operation_id ~execution_digest ~observed ~detail)
                 |> Result.map fst in
               (match response with
-               | Error (Store_unavailable _) ->
+               | Error (Store_unavailable _ | Store_fenced _) ->
                  unpersisted_preparation_wait := Some
                    {preparation_operation=operation_id;preparation_digest=execution_digest;
                     preparation_checkpoint=observed;preparation_failure=failure;preparation_child=child}

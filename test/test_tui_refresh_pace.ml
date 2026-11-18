@@ -3,8 +3,8 @@
 
    With no wait, a failed pass withdrew the workspace confirmation, the
    observer recovery restored it and the reopened stream asked for the next
-   pass at once: 39 [/health] reads a second (2026-11-19). These are the
-   decisions that break that ring. *)
+   pass at once, many times a second (#53205). These are the decisions that
+   break that ring, and the ones that end the wait once the server is back. *)
 
 open Alcotest
 module P = Masc_tui_refresh_pace
@@ -90,6 +90,27 @@ let test_an_answer_ends_the_wait_and_the_owed_pass_starts_now () =
   check bool "a screen answer with nothing owed owes nothing" false
     (P.due ~now:0.0 (P.answered_again P.answering))
 
+(* A server whose [/health] alone fails still opens the stream that restores
+   the workspace confirmation. That open is the ring, so it keeps the wait. *)
+let test_a_stream_open_at_every_attempt_keeps_the_wait () =
+  let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
+  let t = P.stream_opened P.Opened_each_time t in
+  check bool "the owed pass is not due before its wait" false (P.due ~now:10.1 t);
+  check bool "a pass the TUI asks for still waits" false (P.starts ~now:10.1 P.Revalidate t);
+  check int "the run of failures goes on" 2 (failures t)
+
+(* After an outage the same stream opens once the server is back. An attempt
+   that did not open before it means the server answers again. *)
+let test_a_stream_open_after_a_failed_attempt_ends_the_wait () =
+  let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
+  let t = P.stream_opened P.Opened_after_failure t in
+  check bool "the owed pass is due before its wait was over" true (P.due ~now:10.1 t);
+  check bool "a pass the TUI asks for starts" true (P.starts ~now:10.1 P.Revalidate t);
+  check (float 1e-9) "the run of failures is broken" retry_s
+    (wait_after ~now:10.2 (failed ~now:10.2 t));
+  check bool "with nothing owed it owes nothing" false
+    (P.due ~now:0.0 (P.stream_opened P.Opened_after_failure P.answering))
+
 let () =
   run "tui_refresh_pace"
     [ ( "pace",
@@ -105,5 +126,9 @@ let () =
             test_an_operator_key_skips_the_wait_and_keeps_the_count
         ; test_case "an answer ends the wait and the owed pass starts now" `Quick
             test_an_answer_ends_the_wait_and_the_owed_pass_starts_now
+        ; test_case "a stream open at every attempt keeps the wait" `Quick
+            test_a_stream_open_at_every_attempt_keeps_the_wait
+        ; test_case "a stream open after a failed attempt ends the wait" `Quick
+            test_a_stream_open_after_a_failed_attempt_ends_the_wait
         ] )
     ]

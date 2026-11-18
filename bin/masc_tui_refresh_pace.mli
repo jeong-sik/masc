@@ -6,7 +6,7 @@
     confirmation is withdrawn; the observer recovery restores it from the
     stream handshake, and the reopened stream asks for a pass. Nothing in
     that ring waits, so with no record here the TUI read [/health] again at
-    once, about 39 times a second (2026-11-19).
+    once, many times a second (#53205).
 
     {!Masc_tui_owed_read} does not fit: a change announced while it waits is
     read at once, since that failure may belong to another part of the
@@ -38,6 +38,14 @@ type ask =
           failures in a row, so a failure after it waits longer. *)
   | Owed_pass  (** The pass a failing probe owes, once its wait is over. *)
 
+(** How the stream that restores the workspace confirmation opened. *)
+type stream_open =
+  | Opened_each_time
+      (** Every attempt opened it. A server whose [/health] alone fails
+          still opens it, so this says nothing new. *)
+  | Opened_after_failure
+      (** An earlier attempt did not open it. The server answers again. *)
+
 val answering : t
 
 val probe_failed : retry_s:float -> max_retry_s:float -> now:float -> t -> t
@@ -53,6 +61,10 @@ val answered_again : t -> t
 (** The server answered again: a screen's probe answered, or a server the
     TUI started answered its liveness probe. The wait is over; a pass the
     failure owed is still owed and starts now. *)
+
+val stream_opened : stream_open -> t -> t
+(** The stream that restores the workspace confirmation opened. Only
+    {!Opened_after_failure} ends the wait, as {!answered_again} does. *)
 
 val due : now:float -> t -> bool
 (** Whether the owed pass should start now. *)

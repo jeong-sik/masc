@@ -5,6 +5,8 @@ type t =
 
 type ask = Revalidate | Operator_key | Owed_pass
 
+type stream_open = Opened_each_time | Opened_after_failure
+
 let answering = Answering
 
 let probe_failed ~retry_s ~max_retry_s ~now t =
@@ -19,6 +21,11 @@ let pass_answered (_ : t) = Answering
 let answered_again = function
   | Failing _ | Recovered -> Recovered
   | Answering -> Answering
+
+let stream_opened opened t =
+  match opened with
+  | Opened_after_failure -> answered_again t
+  | Opened_each_time -> t
 
 let due ~now = function
   | Failing { retry_at; _ } -> now >= retry_at

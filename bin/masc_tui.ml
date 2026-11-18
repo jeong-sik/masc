@@ -20775,8 +20775,22 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
         | Observer_existing_workspace _ -> report session_id
         | Observer_initial_workspace _ -> () in
       let open_refused = ref false in
+      (* Whether an earlier attempt of this recovery did not open its stream. *)
+      let failed_attempt = ref false in
       let rec follow () =
         open_refused := false;
+        let opened = ref false in
+        (* The open is reported before what it carries, so a [/health] wait
+           it ends is over before the restored identity asks for a pass. *)
+        let note_opened () =
+          if not !opened then begin
+            opened := true;
+            enqueue_async mailbox
+              (Observer_msg (Observer_recovery_opened
+                 (authority, owner,
+                  if !failed_attempt then Masc_tui_refresh_pace.Opened_after_failure
+                  else Masc_tui_refresh_pace.Opened_each_time)))
+          end in
         let outcome =
           try
             match (match !session with
@@ -20793,15 +20807,20 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
                   Masc_tui_http.observe_runtime_events ~clock ~expected_base_path ~expected_masc_root ~host ~port
                     ~session_id ~cursor:None
                     ~on_identity:(fun (handshake, identity) ->
+                      note_opened ();
                       enqueue_async mailbox
                         (Observer_msg (Observer_recovery_identity
                            (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
                             origin, identity))))
-                    ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
+                    ~on_open:(fun _ ->
+                      note_opened ();
+                      refusal_reported := false;
+                      report_existing (Some session_id))
                     ~on_chunk:(fun _ -> ()))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn)) in
+        if not !opened then failed_attempt := true;
         (match outcome with
          | Error (Masc_tui_http.Http_refused {status; detail})
            when Masc_tui_http.observer_workspace_refused ~status ~detail ->
@@ -24883,7 +24902,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -26480,6 +26499,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
               | Workspace_identity_match | Workspace_identity_mismatch _),
               Account_server _ -> ())
+  | Observer_msg (Observer_recovery_opened (authority, owner, opened)) ->
+      (* A stream that would not open opening now is the server answering
+         again (RFC tui-one-screen-grammar §2). *)
+      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then
+        state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;

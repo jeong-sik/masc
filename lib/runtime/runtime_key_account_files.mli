@@ -12,8 +12,10 @@
 
     The files of an account change only inside the call of the account, which
     whoever asks holds: the registration that makes them, and the purge that
-    removes them. The functions are called from a fiber and run their file
-    calls on a system thread. *)
+    removes them. The functions are called from a fiber. Their file calls go
+    through {!Fs_compat.Systhread_host} and {!Fs_compat.remove_tree}, which
+    choose the thread; the spelling of a path reads the runtime root
+    ([Unix.realpath]) on the fiber. *)
 
 (** Why the files of an account were not made. The detail of a home can name
     a path of the server, so it is for the log of the server. *)
@@ -54,9 +56,12 @@ type remove_error =
     A folder that is not there is removed already, so a removal that stopped
     is asked again, and an account whose files were never made is removed
     too. A runtime root that is not there holds no file of any account. A
-    link is removed and not followed. Each folder is looked at after
-    its removal, and the folder it was in is synced, so what is reported gone
-    stays gone after a crash. *)
+    link is removed and not followed. A path that leads through something
+    that is no folder names nothing, and is removed already too. Each folder
+    is looked at after its removal, and the folder it was in is synced
+    ([fsync]). A folder that went and whose parent was not synced is
+    reported as not removed; the removal asked again finds it gone and syncs
+    again. *)
 val remove
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

@@ -25,8 +25,10 @@
     line, no error and no result of this module holds it or a part of it.
 
     A process that dies between the record and the files leaves a key
-    account with no key file. It answers [key_missing] when it is used, and
-    its owner removes it. *)
+    account with no key file, and so does a request that is cancelled
+    there: a cancellation is no error of the files, so nothing removes the
+    account. It answers [key_missing] when it is used, the list of its
+    owner says so, and its owner removes it. *)
 
 type error =
   | Id_not_usable
@@ -49,8 +51,10 @@ type error =
       ; removal : Server_key_account_purge.error
       }
       (** The files of the account were not all made, and its removal did
-          not go through. The records hold the account and how far its
-          removal went, and its owner removes it
+          not go through. The records hold the account. They hold how far
+          its removal went when its start was recorded; [removal] being
+          [Not_started] says it was not, and then the account reads as one
+          in use, with whatever of its files was made. Its owner removes it
           ({!Server_key_account_purge.remove}). *)
 
 (** Registers [key] as a new key account of [person] on [integration_id] and

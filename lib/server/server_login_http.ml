@@ -360,7 +360,8 @@ let register_key_account t ~base_path request reqd =
 ;;
 
 (* The removal of a key account takes files of the person off the server, so
-   the gate of their own provider accounts judges it. The body is not read. *)
+   the gate of their own provider accounts judges it. The body is read to
+   its end and not used. *)
 let remove_key_account t ~base_path request reqd =
   with_entry ~prefix:Server_key_account.entry_prefix request reqd (fun provider_account_id ->
     as_person t request reqd (fun (_ : Authz_state.t) person ->

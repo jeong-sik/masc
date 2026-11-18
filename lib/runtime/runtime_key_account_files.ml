@@ -39,12 +39,12 @@ type remove_error =
   | Key_not_removed of string
   | Home_not_removed of string
 
-(* The folder [path] is in, synced. A folder that is not there held nothing
-   of [path]. *)
+(* The folder [path] is in, synced. A folder that is not there, or a path
+   that leads through something that is no folder, held nothing of [path]. *)
 let sync_parent path =
   match Runtime_account_home_folder.sync_folder (Filename.dirname path) with
   | () -> ()
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
 ;;
 
 (* [Fs_compat.remove_tree] removes a link without following it, and a path
@@ -55,7 +55,9 @@ let removed path =
     Fs_compat.remove_tree path;
     Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
       match Unix.lstat path with
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (* As [named] reads it: a path through something that is no folder
+         names nothing. *)
+      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
         sync_parent path;
         Ok ()
       | (_ : Unix.stats) -> Error (path ^ ": it is still there"))

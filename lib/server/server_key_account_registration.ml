@@ -100,7 +100,7 @@ let register ~(person : Login.person) ~base_path ~integration_id key =
       match made person ~base_path id ~generation key with
       | Ok () -> Ok id
       | Error detail ->
-        logged id "its files were not all made, and the account is removed" detail;
+        logged id "its files were not all made, and its removal starts" detail;
         (match Purge.remove_in_call in_call ~person ~base_path id with
          | Ok () -> Error Files_not_made
          | Error removal -> Error (Account_stays { provider_account_id = id; removal })))

@@ -522,10 +522,11 @@ let serve_preview ~base_path ~store ~port github =
           (fun line -> Printf.printf "%s.\n%!" line)
           (Server_person_integrations.start_lines ~base_path);
         (* The deletions of conversations and the removals of key accounts a
-           stopped preview left end beside the routes, as at the start of the
-           account server. *)
-        Eio.Fiber.fork ~sw (fun () -> Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
-        Eio.Fiber.fork ~sw (fun () -> Server_key_account_purge.resume ~zone ~base_path);
+           stopped preview left end beside the routes, one after the other in
+           one fiber, as at the start of the account server. *)
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_keeper_conversation_purge.resume ~env ~zone ~base_path;
+          Server_key_account_purge.resume ~zone ~base_path);
         Server_bootstrap_http.serve
           ~sw
           ~clock

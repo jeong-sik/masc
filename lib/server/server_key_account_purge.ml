@@ -62,6 +62,18 @@ let finish (_ : Login.in_call) (person : Login.person) ~base_path id =
       ~then_:(Error (Files_not_removed failed_stage))
 ;;
 
+(* Whether [id] names a key account of the person. The files of a removal
+   are those of a key account ([Files]), so no other account is removed
+   here. *)
+let key_account_of (person : Login.person) id =
+  match Authz_provider_account_state.find (state_of person).Authz_state.provider_accounts id with
+  | Some { Authz_provider_account_state.owner; kind } when User_id.equal owner person.user_id ->
+    (match kind with
+     | Authz_provider_account_state.Login -> Error Not_a_key_account
+     | Authz_provider_account_state.Key { integration_id = _; generation = _ } -> Ok ())
+  | Some (_ : Authz_provider_account_state.account) | None -> Error Not_found
+;;
+
 let remove_in_call in_call ~(person : Login.person) ~base_path id =
   let finish () = finish in_call person ~base_path id in
   let start () =
@@ -79,22 +91,24 @@ let remove_in_call in_call ~(person : Login.person) ~base_path id =
          logged id "it was not started" (Authz_purge.error_detail error);
          Error (Not_started error))
   in
-  match status_of person id with
-  | None | Some (Purges.Account_failed { failed_stage = _ }) -> start ()
-  | Some Purges.Account_pending -> finish ()
-  | Some Purges.Account_purged -> Error Not_found
+  (* Read inside the call, whoever holds it: the records of that time say
+     whose the account is and of which kind. *)
+  match key_account_of person id with
+  | Error refusal -> Error refusal
+  | Ok () ->
+    (match status_of person id with
+     | None | Some (Purges.Account_failed { failed_stage = _ }) -> start ()
+     | Some Purges.Account_pending -> finish ()
+     | Some Purges.Account_purged -> Error Not_found)
 ;;
 
 let remove ~(person : Login.person) ~base_path id =
   (* Asked before the call is taken, so whether a call of another person's
      account runs is not told. *)
-  match Authz_provider_account_state.find (state_of person).Authz_state.provider_accounts id with
-  | Some { Authz_provider_account_state.owner; kind } when User_id.equal owner person.user_id ->
-    (match kind with
-     | Authz_provider_account_state.Login -> Error Not_a_key_account
-     | Authz_provider_account_state.Key { integration_id = _; generation = _ } ->
-       Login.one_call_of id ~busy:Account_busy (fun in_call -> remove_in_call in_call ~person ~base_path id))
-  | Some (_ : Authz_provider_account_state.account) | None -> Error Not_found
+  match key_account_of person id with
+  | Error refusal -> Error refusal
+  | Ok () ->
+    Login.one_call_of id ~busy:Account_busy (fun in_call -> remove_in_call in_call ~person ~base_path id)
 ;;
 
 (* A place that could not be looked at is left as it is: a removal that went
@@ -127,7 +141,7 @@ let resume_one ~zone ~base_path ~owner ~namespace id =
   | Error Account_busy ->
     Log.Server.warn
       "The removal of account %s was not resumed: a call of the account runs. The next start of \
-       the server, or a removal by its owner, ends it."
+       the server ends it, and so does a removal by its owner while it is pending."
       name
   | Error (Files_not_removed (_ : Event.account_failed_stage) | Not_ended (_ : Authz_purge.error)) ->
     (* {!finish} logged the detail. *)

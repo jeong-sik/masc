@@ -8,7 +8,7 @@ usage: idle.py --tui BIN --out DIR --base-path DIR --upstream-port PORT
 
 One fresh TUI process per screen. It starts against readonly_proxy.py, which
 forwards reads to --upstream-port (a live server or frozen_server.py), the
-step's keys bring it to its screen, and then nothing is pressed for --idle
+step's keys (screen_steps.py) bring it to its screen, and then nothing is pressed for --idle
 seconds. In that window the tool counts what the TUI wrote to its terminal
 (bytes, and bursts: output separated by at least BURST_GAP_S of silence), the
 CPU time `ps` reports for it, its RSS at the end, which screen rows changed
@@ -74,9 +74,9 @@ from types import FrameType
 from typing import IO, cast
 
 from key_steps import NavKey, parse_keys, run_keys
-from pty_driver import (POLL_S, Child, Exit, Geometry, Jump, Key, Press, Sent, first_frame, press, read_chunk, settle,
-                        spawn, stop, take)
+from pty_driver import POLL_S, Child, Exit, Geometry, Sent, first_frame, press, read_chunk, settle, spawn, stop, take
 from relay_files import json_object, read_log
+from screen_steps import STEP_NAMES, STEPS, Planned, Refused, plan
 from vte import Vte, png_cell_size, render_png
 
 HERE = Path(__file__).resolve().parent
@@ -141,50 +141,13 @@ PROBE_SETTLE_LIMIT_S = 2.0
 
 
 @dataclass(frozen=True, slots=True)
-class Step:
-    name: str
-    keys: tuple[Key, ...]
-
-
-def go(target: str) -> Jump:
-    return Jump(f'go {target}')
-
-
-V = Press(b'v')
-
-# One row per screen with the keys that reach it. Every screen runs in a fresh
-# TUI, so its keys start from the screen the TUI opens on. Jumps are `go`
-# entries of bin/masc_tui_palette.ml; single keys are bindings of
-# bin/masc_tui_keys.ml for the screen the jump reached.
-STEPS: tuple[Step, ...] = (
-    Step('overview', (go('Operations'),)),
-    Step('usage_plan', (go('Operations / Usage'),)),
-    # Usage opens on Plan; v walks Plan, Trend, Keepers, Calls.
-    Step('usage_calls', (go('Operations / Usage'), V, V, V)),
-    Step('usage_telemetry', (go('Operations / Usage'), Press(b'p'))),
-    Step('work_goals', (go('Work'),)),
-    Step('work_tasks', (go('Work'), Press(b't'))),
-    Step('work_requests', (go('Work / Requests'),)),
-    Step('work_board', (go('Work / Board'),)),
-    # The Keeper list opens on the view tui-keepers.toml stores, so a number of
-    # `v` presses reaches a different view in each workspace.
-    Step('keepers', (go('Keepers'),)),
-    Step('features', (go('Features & plugins'),)),
-    Step('features_tools', (go('Features & plugins / Tools & Skills'),)),
-    Step('workspace', (go('Workspace'),)),
-    Step('system', (go('System'),)),
-)
-STEP_NAMES = {step.name: step for step in STEPS}
-
-
-@dataclass(frozen=True, slots=True)
 class Options:
     tui: Path
     out: Path
     base_path: Path
     geometry: Geometry
     idle_s: float
-    steps: tuple[Step, ...]
+    steps: tuple[Planned, ...]
     upstream_port: int
     relay_port: int
     record: Path | None
@@ -264,7 +227,11 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
             return f'--png-font: {measured}'
         cell = measured
     geometry = Geometry(int(sized.group(1)), int(sized.group(2)), cell[0], cell[1])
-    steps = tuple(STEP_NAMES[name] for name in names) if names else STEPS
+    planned = [plan(step) for step in (tuple(STEP_NAMES[name] for name in names) if names else STEPS)]
+    refused = [step.why() for step in planned if isinstance(step, Refused)]
+    if refused:
+        return f'keys outside the allow-list of screen_steps.py: {"; ".join(refused)}'
+    steps = tuple(step for step in planned if isinstance(step, Planned))
     return Options(tui.resolve(), out, base_path.resolve(), geometry, idle_s, steps,
                    upstream_port, relay_port, record, probes, png_fonts, keys)
 
@@ -537,7 +504,7 @@ class Running:
             return None if child is None else stop(child, STOP_GRACE_S)
 
 
-def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Mapping[str, str],
+def run_screen(step: Planned, options: Options, tui: Path, relay_port: int, env: Mapping[str, str],
                running: Running) -> dict[str, object]:
     timing_path = options.out / f'{step.name}.frame-timing.txt'
     argv = [str(tui), '--base-path', str(options.base_path), '--port', str(relay_port)]

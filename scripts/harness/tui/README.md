@@ -9,6 +9,7 @@ These tools measure what each TUI screen costs while nobody presses a key. They 
 | `idle.py` | Starts one TUI per screen through the relay, brings it to its screen and measures an idle window. |
 | `summary.py` | Prints one line per screen, and with `--reads` what the TUI read in each window. |
 | `key_steps.py` | Presses navigation keys after a window and captures the screen after each (`idle.py --keys`). |
+| `screen_steps.py` | The screens `idle.py` measures, the keys that reach each, and the allow-list those keys must stay inside. |
 | `vte.py`, `pty_driver.py` | The terminal emulator and the pseudo-terminal driver `idle.py` uses. |
 | `relay_files.py` | The decision log and the recording format that the relay and the frozen server share. |
 
@@ -27,7 +28,9 @@ python3 scripts/harness/tui/idle.py \
   --idle 20 --steps overview,keepers
 ```
 
-`--out` must be a new directory. Without `--steps`, all screens in the `STEPS` table of `idle.py` run in table order. A row of that table names a screen and the keys that reach it. Each screen starts a fresh TUI, so its keys start from the screen the TUI opens on: a command palette jump (`:go Work`), then single keys for that screen. The palette entries come from `bin/masc_tui_palette.ml` and the keys from `bin/masc_tui_keys.ml`. The Keeper list opens on the view `tui-keepers.toml` stores, so the table has no row per Keeper list view.
+`--out` must be a new directory. Without `--steps`, all screens in the `STEPS` table of `screen_steps.py` run in table order. A row of that table names a screen and the keys that reach it. Each screen starts a fresh TUI, so its keys start from the screen the TUI opens on: a command palette jump (`:go Work`), then single keys for that screen. The palette entries come from `bin/masc_tui_palette.ml` and the keys from `bin/masc_tui_keys.ml`. The Keeper list opens on the view `tui-keepers.toml` stores, so the table has no row per Keeper list view.
+
+A step jumps to a `Destination` and then presses `Move`s. A destination is one whole `go ...` palette entry, because the palette runs whichever entry ranks first for the typed text and some entries act (`gate ...`, `language: ...`, `keeper ...`). A move is allowed only from the screens `MOVES` lists for it, because one key means different things on different screens: `p` switches Usage to Telemetry but pauses a Keeper on the Keeper list. `idle.py` refuses a step whose moves leave `MOVES` before any TUI starts. A row opens with Right, not Enter: on the Keeper list Enter opens the Story window, and on the Keeper detail's Services tab it starts a login. The Keeper detail rows (`keeper_info` to `keeper_terminal`) open the Keeper under the list cursor and walk `[` or `]` to their tab.
 
 `idle.py` exits 0 when every screen opened and reached its keys and the relay's refusals were read. It exits 2 when the run stopped early (a bad argument, `/health` not answering through the relay, a stop signal) and 3 when it ran to the end but a screen failed, the relay log could not be read or the preferences could not be put back; `idle.json` says which.
 
@@ -146,7 +149,8 @@ Keep them in a directory outside the repository.
 
 ```sh
 python3 -m unittest scripts.tests.test_tui_frozen_server scripts.tests.test_tui_readonly_proxy \
-  scripts.tests.test_tui_relay_log scripts.tests.test_tui_key_steps scripts.tests.test_tui_vte_png
+  scripts.tests.test_tui_relay_log scripts.tests.test_tui_key_steps scripts.tests.test_tui_screen_steps \
+  scripts.tests.test_tui_vte_png
 ```
 
-`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. `test_tui_relay_log` reads decision logs with a cut last line. `test_tui_key_steps` checks which keys may be pressed, the layout kind of drawn screens with cards, without cards and with stray glyphs, the shape of the per-key report, and that a key written to a pseudo-terminal whose child has exited reports `closed` instead of raising. `test_tui_vte_png` draws a reverse-video wide character and checks that its second half is drawn. It needs Pillow and a font with Hangul, and is skipped without them. None of these tests needs a MASC server or a TUI binary. CI does not run them.
+`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. `test_tui_relay_log` reads decision logs with a cut last line. `test_tui_key_steps` checks which keys may be pressed, the layout kind of drawn screens with cards, without cards and with stray glyphs, the shape of the per-key report, and that a key written to a pseudo-terminal whose child has exited reports `closed` instead of raising. `test_tui_screen_steps` checks that every step of the screen table stays inside the allow-list, jumps only to `go` entries and never sends Enter, `y` or a lone Esc, that a move off its screen is refused, and that step names are unique. `test_tui_vte_png` draws a reverse-video wide character and checks that its second half is drawn. It needs Pillow and a font with Hangul, and is skipped without them. None of these tests needs a MASC server or a TUI binary. CI does not run them.

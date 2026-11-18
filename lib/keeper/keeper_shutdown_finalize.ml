@@ -118,12 +118,15 @@ let task_has_operation_receipt operation (task : Masc_domain.task) =
   (* The shutdown release writes its receipt as a readable handoff, so an
      unreadable one was not written by this operation. *)
   | Masc_domain.Todo, Some (Masc_domain.Handoff_unreadable _)
-  | Masc_domain.Claimed _, _
-  | Masc_domain.InProgress _, _
-  | Masc_domain.AwaitingVerification _, _
-  | Masc_domain.Done _, _
-  | Masc_domain.Cancelled _, _
   | Masc_domain.Todo, None -> false
+  | ( ( Masc_domain.Claimed _
+      | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ )
+    , ( None
+      | Some (Masc_domain.Handoff_decoded _ | Masc_domain.Handoff_unreadable _) ) ) ->
+    false
 ;;
 
 let find_task tasks task_id =

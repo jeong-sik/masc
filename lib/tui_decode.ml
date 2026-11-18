@@ -8242,8 +8242,12 @@ let decode_task_history json =
                | `Assoc _ as handoff ->
                    (match member "summary" handoff with
                     | `String s when String.trim s <> "" -> Some s
-                    | _ -> None)
-               | _ -> None
+                    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _
+                    | `Float _ | `Assoc _ | `List _ ->
+                        None)
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+               | `List _ ->
+                   None
              in
              (* #38219: an exit that replaced a stored note the server could
                 not read records that note; the row says so with the refusal. *)

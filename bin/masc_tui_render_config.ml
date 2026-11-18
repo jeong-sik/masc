@@ -273,8 +273,7 @@ let render_runtime_params (state : state) =
   let hidden = List.length selected_lines - detail_height in
   let cut =
     if hidden <= 0 then ""
-    else
-      Printf.sprintf (if state.ui_language = Lang_ko then "외 %d" else "%d more") hidden
+    else Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden
   in
   let detail_window = Rows.of_list ~first:scroll ~height:detail_height selected_lines in
   let visible_lines = List.init detail_height (fun index ->
@@ -602,9 +601,7 @@ let render_prompts_detail state buf ~cols ~height ~selected =
        ~tail:
          (" · " ^ ui_text state ~ko:"상세" ~en:"Detail"
           ^ (if hidden <= 0 then ""
-             else
-               Printf.sprintf (if state.ui_language = Lang_ko then " · 외 %d" else " · %d more")
-                 hidden)));
+             else " · " ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden)));
   let window = Rows.of_list ~first:scroll ~height rendered in
   for index = 0 to height - 1 do
     match Rows.at window (scroll + index) with
@@ -1549,13 +1546,29 @@ let render_config_models (state : state) =
   let projection = config_models_projection state ~terminal_rows ~cols in
   box_top buf cols;
   let path_note = config_path_note state in
+  (* The cursor walks bindings, so the selected binding among them is the
+     position whether the table or the stacked items are drawn. *)
+  let position =
+    match state.runtime_model_form, state.runtime_model_jump,
+          config_models_read_error state, state.runtime_config_view with
+    | None, None, None, Some _ ->
+        let total = List.length (config_models_drawn_rows state) in
+        if total = 0 then None
+        else
+          Some
+            (Masc_tui_value.Position.row ~selected:(Some state.config_models_cursor) ~total)
+    | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
+  in
   box_line buf cols
-    (config_pane_title ~cols
-       ~reading:(if Option.is_none state.runtime_model_form
-                    && Option.is_none state.runtime_model_jump
-                    && Option.is_none (config_models_read_error state)
-                 then projection.model_reading_hint else "")
-       ~note:path_note state);
+    (titled_row ~cols state
+       ~title:
+         (config_pane_title ~cols
+            ~reading:(if Option.is_none state.runtime_model_form
+                         && Option.is_none state.runtime_model_jump
+                         && Option.is_none (config_models_read_error state)
+                      then projection.model_reading_hint else "")
+            ~note:path_note state)
+       ~position);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_model_form with
@@ -2072,12 +2085,10 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   let head = Buffer.create 256 in
+  (* Two selectors move at once, each under its own keys, so neither is the
+     screen's one position; each names the choice it holds. *)
   let selector label items cursor draw =
-    let position =
-      if items = [] then "0/0"
-      else Printf.sprintf "%d/%d" (cursor + 1) (List.length items)
-    in
-    let prefix = Printf.sprintf "  %s %s: " label position in
+    let prefix = Printf.sprintf "  %s: " label in
     let value =
       match List.nth_opt items cursor with
       | None -> Masc_tui_theme.Glyph.no_value
@@ -2312,7 +2323,7 @@ let render_config (state : state) =
   (* The frame, its fill and the footer are the contract's. The surface
      subtracted a literal 7 and drew six fixed rows, so the footer stood one
      row above the composer; the key handler read the same short number. *)
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"config" ~title
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"config" ~title
     ~hints:
       (* Projected from the key table rather than spelled here. The literal
          named five keys and no way out -- not because the row ran out of
@@ -2385,6 +2396,10 @@ let render_config (state : state) =
           let total = List.length rows in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in
+          (* The file has a cursor line, so the selected line is the
+             position, as in any list. *)
+          c.position
+            (Masc_tui_value.Position.row ~selected:(Some state.runtime_config_cursor) ~total);
           let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
           for i = 0 to content_height - 1 do
             match Rows.at rows_window (scroll + i) with

@@ -128,7 +128,10 @@ let render_fusion_list (state : state) =
                else "")
             ; (if history_count = 0 then ""
                else Printf.sprintf "%d Board evidence" history_count) ]
-          ~position:None
+          ~position:
+            (if shown = 0 then None
+             else
+               Some (Masc_tui_value.Position.row ~selected:(Some state.fusion_cursor) ~total:shown))
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while

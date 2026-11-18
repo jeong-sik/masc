@@ -214,7 +214,8 @@ val row_text : row -> string
 val visible_lines :
   height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
 (** The rows that fit [height], the notice wrapped at [width] cells so a
-    server's reason is read whole, and the results' window when it hides
-    rows, for the title row. *)
+    server's reason is read whole, and where the reader stands for the title
+    row: the selected row of a provider or model list, or the window over
+    any other phase's rows when it hides some. *)
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

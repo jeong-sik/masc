@@ -950,11 +950,21 @@ let visible_lines ~height ~width t =
     let visible = List.filteri (fun index _ -> index >= scroll && index < scroll + content_height) rows in
     visible, Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:count)
   else
-    let skip = match t.phase with
-      | Providers _ | Models | Refreshing_models | Preparing_context _ -> max 0 (t.cursor + List.length notice + 1 - height)
-      | Removal _ -> 0
-      | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed -> max 0 (List.length rows - height) in
-    List.filteri (fun index _ -> index >= skip && index < skip + height) rows, None
+    (* A list names its selected row, hidden rows or not; the other phases
+       hand the window they draw when it hides rows. *)
+    let window skip = Masc_tui_value.Position.window ~first:skip ~shown:height ~total:(List.length rows) in
+    let skip, position = match t.phase with
+      | Providers _ | Models | Refreshing_models | Preparing_context _ ->
+          ( max 0 (t.cursor + List.length notice + 1 - height),
+            (match body with
+             | [] -> None
+             | _ :: _ ->
+                 Some (Masc_tui_value.Position.row ~selected:(Some t.cursor) ~total:(List.length body))) )
+      | Removal _ -> 0, window 0
+      | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed ->
+          let skip = max 0 (List.length rows - height) in
+          skip, window skip in
+    List.filteri (fun index _ -> index >= skip && index < skip + height) rows, position
 
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

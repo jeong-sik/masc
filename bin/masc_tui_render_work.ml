@@ -1879,6 +1879,7 @@ let render_schedule_list (state : state) =
              else 0
            in
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
+           c.position (Masc_tui_value.Position.row ~selected:(Some state.schedule_cursor) ~total:(List.length snapshot.scs_rows));
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
              match Rows.at scs_rows_window idx with

@@ -77,6 +77,11 @@ module Instant = struct
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm
 
+  let day_of ?(localtime = Unix.localtime) ~now at =
+    distance ~now:(localtime now) (localtime at)
+
+  let clock_within_day = clock
+
   let minutes_per_hour = 60
   let minutes_per_day = 24 * minutes_per_hour
 

@@ -67,6 +67,35 @@ let test_new_year_ends_the_year () =
        ~now:(day ~year:2027 ~yday:0 ~hour:0 ~minute:1)
        (day ~year:2026 ~yday:last_day_of_the_year ~hour:23 ~minute:59))
 
+(* The decision a dated moment rests on, read on whole epochs in one fixed
+   zone. 2026-11-18 20:29 UTC read at 2026-11-19 04:28 UTC is eight hours
+   old and yesterday: the Features status line drew it as a bare 20:29:21. *)
+let evening_before = 1_795_033_740.
+let small_hours_after = 1_795_062_480.
+
+let test_eight_hours_back_across_midnight_is_another_day () =
+  Alcotest.check distance "20:29 yesterday read at 04:28" Instant.Same_year
+    (Instant.day_of ~localtime:Unix.gmtime ~now:small_hours_after evening_before)
+
+let test_an_hour_back_before_midnight_is_today () =
+  Alcotest.check distance "19:29 read at 20:29" Instant.Same_day
+    (Instant.day_of ~localtime:Unix.gmtime ~now:evening_before (evening_before -. 3600.))
+
+(* Whether the moment carries a date is the value module's decision: today
+   it is the clock and nothing else, another day it is that clock with the
+   date in front. Checked against the module's own clock, not a wording. *)
+let test_only_another_day_adds_a_date () =
+  let clock at = Instant.clock_within_day Instant.To_minute (Unix.gmtime at) in
+  let detail ~now at = Instant.detail_text ~localtime:Unix.gmtime Instant.To_minute ~now at in
+  let today = evening_before -. 3600. in
+  Alcotest.(check bool) "today: the clock alone" true
+    (String.equal (detail ~now:evening_before today) (clock today));
+  let yesterday = detail ~now:small_hours_after evening_before in
+  Alcotest.(check bool) "yesterday: more than the clock" true
+    (String.length yesterday > String.length (clock evening_before));
+  Alcotest.(check bool) "yesterday: still ends on the clock" true
+    (String.ends_with ~suffix:(clock evening_before) yesterday)
+
 (* East of Greenwich the local day turns first. At 00:30 on January 1 in
    UTC+9 it is still December 31 in UTC, in another year with a larger day
    number: the clock fields alone would put the zone fifteen hours behind. *)
@@ -361,6 +390,12 @@ let () =
         ; Alcotest.test_case "the same date last year" `Quick
             test_the_same_date_last_year_is_another_year
         ; Alcotest.test_case "new year ends the year" `Quick test_new_year_ends_the_year
+        ; Alcotest.test_case "eight hours back across midnight" `Quick
+            test_eight_hours_back_across_midnight_is_another_day
+        ; Alcotest.test_case "an hour back before midnight" `Quick
+            test_an_hour_back_before_midnight_is_today
+        ; Alcotest.test_case "only another day adds a date" `Quick
+            test_only_another_day_adds_a_date
         ] )
     ; ( "zone",
         [ Alcotest.test_case "offset across new year, east" `Quick

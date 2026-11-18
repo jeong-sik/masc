@@ -76,6 +76,19 @@ module Instant : sig
       is handed its zone as an argument passes that zone, so every moment it
       draws reads in one zone. *)
 
+  val day_of : ?localtime:(float -> Unix.tm) -> now:float -> float -> distance
+  (** {!distance} of a moment from [now], both broken down by [localtime]
+      ([Unix.localtime] when it is not given). For a column too narrow for a
+      date: a moment today reads as {!detail_text}, and one on another day
+      reads as something that fits, such as a length. *)
+
+  val clock_within_day : precision -> Unix.tm -> string
+  (** The clock alone ([15:43:07]), for a row drawn under a heading that
+      already names the row's day: the chat's day rule. A moment anywhere
+      else reads as {!cell_text} or {!detail_text}, which add the date once
+      the day differs. A clock written by hand outside this module drew
+      yesterday's [20:29:21] under a screen clock reading [04:28]. *)
+
   val offset_minutes : utc:Unix.tm -> local:Unix.tm -> int
   (** How far the operator's zone runs ahead of UTC, from the two breakdowns
       of one moment. Negative west of Greenwich. *)

@@ -101,10 +101,10 @@ type step =
 
 val tick : t -> now:float -> newest:answer option -> t * step
 (** What the view's samples do at [now], given the newest [/health] answer
-    the TUI received. A sample waiting for a read takes the first answer
-    that arrives after the last one taken. A due sample takes the newest
-    answer if it arrived within {!interval_s} seconds before the sample's
-    time and was not taken already. Times that passed with no sample, while
+    the TUI received. A due sample takes the newest answer if it arrived
+    within {!interval_s} seconds before the sample's time and was not taken
+    already; otherwise it waits for a read, and nothing else is due until
+    that read answers ({!answered}). Times that passed with no sample, while
     the loop did not run or a read took long, are blank. *)
 
 type report =

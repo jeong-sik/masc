@@ -637,8 +637,8 @@ let test_the_fleet_section_escapes_the_probe_word () =
   check bool "the probe row carries no escape" false (contains output escape)
 
 (* The engine graphs read [/health] only while Telemetry's engine section is
-   on screen and its cards have room to draw them; anywhere else the loop
-   samples nothing (RFC tui-one-screen-grammar section 5.6). *)
+   on screen; anywhere else the loop samples nothing (RFC
+   tui-one-screen-grammar section 5.6). *)
 let test_the_engine_graphs_sample_only_on_the_engine_view () =
   let wide = 160 and compact = 100 in
   let state = make_state () in
@@ -649,7 +649,7 @@ let test_the_engine_graphs_sample_only_on_the_engine_view () =
   state.Types.usage_telemetry_open <- true;
   state.Types.metrics_section <- Types.Section_fleet;
   check bool "the engine section" true (sampled ());
-  check bool "the compact summaries draw numbers only" false
+  check bool "the engine section without room for cards" true
     (Option.is_some (Render_metrics.engine_graph_capacity ~cols:compact state));
   state.Types.metrics_section <- Types.Section_resources;
   check bool "the work section" false (sampled ());

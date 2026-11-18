@@ -292,16 +292,27 @@ let engine_view_open (state : state) =
       | Section_fleet -> true
       | Section_resources | Section_tools -> false)
 
-(* A graph holds two times a cell, and a card's graph row is its text width;
-   the axis label takes a few of those cells, so a narrower label shows more
-   of what is kept. The compact summaries draw the numbers only (RFC
-   tui-one-screen-grammar section 5.6). *)
+(* Without cards, the two graphs share one row under the summary that names
+   the engine and the scheduler, in that order, each half of what is left
+   after the row's lead and the gap between them. *)
+let compact_graph_lead = "  "
+let compact_graph_gap = "  "
+
+let compact_graph_cells ~cols =
+  let inner_width = max 20 (framed_inner_width cols) in
+  (inner_width - String.length compact_graph_lead - String.length compact_graph_gap) / 2
+
+(* How many cells each engine graph is wide. *)
+let engine_graph_cells ~cols =
+  match kpi_layout ~cols with
+  | Cards { card_cells; _ } -> card_cells
+  | Compact -> compact_graph_cells ~cols
+
+(* A graph holds two times a cell. The axis label takes a few of those cells,
+   so a narrower label shows more of what is kept (RFC tui-one-screen-grammar
+   section 5.6). *)
 let engine_graph_capacity ~cols (state : state) =
-  if not (engine_view_open state) then None
-  else
-    match kpi_layout ~cols with
-    | Cards { card_cells; _ } -> Some (2 * card_cells)
-    | Compact -> None
+  if engine_view_open state then Some (2 * engine_graph_cells ~cols) else None
 
 (* The top of an axis with its unit: the largest live heap a sample held, in
    the unit the Engine card writes it. *)
@@ -537,14 +548,27 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   | Compact ->
+    let graphs_row =
+      if graphs then
+        let cells = compact_graph_cells ~cols in
+        let graph ~number series ~axis =
+          Layout.fit_width (engine_graph_row ~cells ~axis ~number series state) cells
+        in
+        [ compact_graph_lead
+          ^ graph ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis
+          ^ compact_graph_gap
+          ^ graph ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis ]
+      else []
+    in
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
-        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[%s]%s %s"
-        (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
-    ; Printf.sprintf "  %s[%s]%s %s · %s"
-        c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
-    ]
+        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1 ]
+    @ graphs_row
+    @ [ Printf.sprintf "  %s[%s]%s %s"
+          (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
+      ; Printf.sprintf "  %s[%s]%s %s · %s"
+          c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
+      ]
     |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
 type session_entry = { event : event; run : int; rows : string list }

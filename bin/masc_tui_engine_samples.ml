@@ -149,27 +149,22 @@ let tick t ~now ~newest =
   match t.session with
   | None -> (t, Nothing)
   | Some session ->
-    let fresh =
-      match newest with
-      | Some answer when answer.at > session.seen_until -> Some answer
-      | Some _ | None -> None
-    in
-    let taken answer ~slot =
-      ( { t with
-          session =
-            Some (take session ~slot ~seen_until:answer.at (point_of_reading answer.reading))
-        }
-      , Sampled )
-    in
-    if session.waiting then
-      match fresh with
-      | Some answer -> taken answer ~slot:(Stdlib.max session.next_slot (current_slot session ~now))
-      | None -> (t, Nothing)
+    (* A waiting sample has a read out ([waiting] is set only with
+       [read_out]), and {!answered} hands it that read's answer. Taking
+       another answer here instead would draw the graphs once for it and
+       once more when that answer is applied. *)
+    if session.waiting then (t, Nothing)
     else if now < slot_time session session.next_slot then (t, Nothing)
     else
       let slot = current_slot session ~now in
-      match fresh with
-      | Some answer when answer.at > slot_time session slot -. interval_s -> taken answer ~slot
+      match newest with
+      | Some answer
+        when answer.at > session.seen_until && answer.at > slot_time session slot -. interval_s ->
+        ( { t with
+            session =
+              Some (take session ~slot ~seen_until:answer.at (point_of_reading answer.reading))
+          }
+        , Sampled )
       | Some _ | None ->
         (* Every answer up to now was considered for this sample and is too
            old; the read this asks for, or one already out, answers it. *)

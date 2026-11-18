@@ -154,11 +154,12 @@ related: []
 키는 provider 선언을 따라간다. 옆길을 만들지 않는다.
 
 1. `Runtime_account_runtime.of_template` 이 계정 종류를 받는다. 키 계정이면 template 을 복사할 때 `credentials = Some (File <키 파일 경로>)` 를 넣는다.
-2. `Runtime_adapter` 는 `claude-code` provider 의 `credentials` 가 `File` 이면 받는다. 그 파일을 §3.2 의 검사로 읽어 `Runtime_official_account.capture` 에 넘긴다. `Env` 와 `Inline` 은 지금처럼 거절한다.
+2. `Runtime_adapter` 는 `claude-code` provider 의 `credentials` 가 `File` 이면 받는다. `Runtime_official_account.capture_on_key` 가 그 파일을 §3.2 의 검사로 직접 읽는다. 그래서 계정이 말하는 키 파일이 곧 그 키가 나온 파일이다. `Env` 와 `Inline` 은 지금처럼 거절한다.
 3. `capture` 는 파일 자격이 있으면 계정 홈 선언(`explicit_account`)과 무관하게 기존 `base_names` 허용 목록으로 상속 환경을 좁힌다. 상속된 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, 클라우드 provider 선택·자격·endpoint 변수는 남기지 않는다. 그 뒤 파일에서 검증한 키만 `ANTHROPIC_API_KEY` 하나로 넣고, 기존 환경 이름 중복 검사를 거친다. 파일 자격이 없으면 지금의 환경 구성과 같다.
 4. 그 뒤는 지금 그대로다. 계정은 봉인된 채 실행 표에 있고, `Runtime_account_access.authorize` 가 요청을 허락해야 환경이 나온다(`runtime_account_access.mli`).
 
 - `authorize` 는 사람의 턴이면 Keeper 의 주인과 계정의 주인을, 확인이면 요청한 사람과 계정의 주인을 맞춰 본다. 키 계정도 같은 판정을 지난다. 새 문을 더하지 않는다.
+- 같은 판정이 홈과 함께 키 파일도 본다. 키 계정은 기록이 말하는 세대의 키 파일에서 읽은 키로만 허락된다. 그 파일의 경로는 요청한 사람의 runtime root 아래로 만든다. 로그인 계정과 아직 기록이 없는 계정은 파일 키를 실으면 거절된다.
 - 키 계정의 홈에는 로그인이 들어가지 않는다. 사람의 로그인 시작은 있는 계정을 고르지 못하고 매번 새 계정을 만든다(`server_setup_account_login.ml:152`). 키 계정의 홈으로 가는 길이 없다.
 - 이 변경으로 단일 사용자 서버도 `claude-code` provider 에 파일 자격을 선언할 수 있게 된다(§6 D3).
 
@@ -167,7 +168,9 @@ related: []
 - 확인과 턴의 경로는 로그인 계정과 같다. `person_runtime`(`server_setup_account_login.ml:412`)이 계정 종류를 보고, 키 계정이면 template 을 기록에서, 로그인 계정이면 영수증에서 읽는다.
 - 키 파일을 읽지 못하면 CLI 를 띄우지 않고 값으로 답한다. `key_missing`(파일이 없다)과 `key_unreadable`(소유나 권한이 다르다)이다.
 - 확인이나 턴이 `api_error_status = Some 401` 로 끝나고 계정이 키 계정이면 답의 코드는 `key_refused` 다. 문장을 보고 가르지 않는다. 다른 상태 코드는 지금처럼 provider 의 문장을 그대로 싣는다.
-- 한 계정은 한 번에 한 호출만 한다. 지금의 `one_call_of` 를 그대로 쓴다.
+- 한 계정은 한 번에 한 호출만 한다(`one_call_of`). 계정의 runtime 은 그 호출 안에서만 만든다. 기록과 키 파일을 그 안에서 읽고, 판정도 그 안에서 한다.
+- 계정의 파일은 그 호출 안에서만 바뀐다(§3.6, §3.7). 그래서 없애거나 바꾸는 중인 키로 호출이 뜨지 않는다.
+- 다른 호출이 도는 동안 온 요청은 계정의 것을 읽기 전에 409 를 받는다.
 
 ### 3.6 없애기
 
@@ -309,3 +312,4 @@ Stacked PR 로 올린다. 각 층은 아래층만 쓴다.
 ## 8. 이력
 
 - 2026-11-17: 초안.
+- 2026-11-18: §3.4, §3.5. 캡처가 키 파일을 직접 읽고 판정이 키 파일을 본다. 계정의 runtime 은 그 계정의 호출 안에서 만든다. 병합된 층의 리뷰를 반영했다.

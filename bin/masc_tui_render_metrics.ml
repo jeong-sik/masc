@@ -142,6 +142,45 @@ let scheduler_probe_text ~ko = function
   | None -> Unknown.(glyph Unreported)
   | Some probe -> scheduler_probe_word ~ko probe
 
+(* Which kind of state the probe is in (RFC tui-one-screen-grammar section
+   7.2). A probe that raised failed: [Stopped] carries the exception's
+   message. A probe whose switch was cancelled was stopped on purpose. A word
+   this build does not know, and no probe at all, are [?]. *)
+let scheduler_probe_symbol : Decode.scheduler_probe option -> Masc_tui_card.symbol =
+  function
+  | None | Some (Decode.Probe_unknown _) -> Masc_tui_card.Unknown Unknown.Unreported
+  | Some (Decode.Probe_reported Scheduler_lag.Not_started) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Waiting
+  | Some (Decode.Probe_reported Scheduler_lag.Running) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Under_way
+  | Some (Decode.Probe_reported (Scheduler_lag.Stopped _)) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Failed
+  | Some (Decode.Probe_reported Scheduler_lag.Cancelled) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Paused
+
+(* The probe as a card's status: the mark says which kind of state it is and
+   the word says which one. A word this build does not know reads [?] and the
+   word as it came (RFC tui-one-screen-grammar section 7.1); no probe at all
+   is the [?] alone. [tone] is the colour the samples give the card. A failed
+   probe takes the colour its mark means instead, so a card with no stalls
+   does not draw a failure in the colour of one that is fine. *)
+let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
+  let symbol = scheduler_probe_symbol probe in
+  let word =
+    match probe with
+    | None -> ""
+    | Some (Decode.Probe_unknown word) -> Terminal_text.single_line word
+    | Some (Decode.Probe_reported _ as reported) -> scheduler_probe_word ~ko reported
+  in
+  let tone =
+    match symbol with
+    | Masc_tui_card.Mark Masc_tui_value.Mark.Failed -> Theme.bad ()
+    | Masc_tui_card.Mark
+        Masc_tui_value.Mark.(Settled | Under_way | Waiting | Paused | Caution | Yours)
+    | Masc_tui_card.Unknown _ -> tone
+  in
+  { Masc_tui_card.symbol; word; tone }
+
 let pulse_line ~cols (state : state) kpis =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -215,21 +254,18 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let render_card ?hotkey ?badge ~title_style title line1 line2 =
+  let render_card ?status ?count ~title_style name line1 line2 =
     let style =
-      { Masc_tui_card.edge = Theme.recede ()
+      { Masc_tui_card.border = Theme.recede ()
+      ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold ^ title_style
       ; reset = Ansi.reset
       }
     in
-    let chrome =
-      { Masc_tui_card.hotkey =
-          Option.map (fun d -> (Masc_tui_theme.Glyph.superscript_digit d, Ansi.bold ^ Theme.accent ())) hotkey
-      ; badge
-      }
-    in
-    Masc_tui_card.render ~rounded:true ~chrome ~style ~width:card_w ~height:4
-      { Masc_tui_card.title; body = (fun ~cells:_ -> [ line1; line2 ]) }
+    Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
+      { Masc_tui_card.edge =
+          { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
+      ; body = (fun ~cells:_ -> [ line1; line2 ]) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
@@ -243,33 +279,47 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | Some { ssch_pool_domains = None; _ } -> Unknown.(glyph Unreported)
     | None -> Unknown.glyph identity_gap
   in
-  let c1_l1, c1_l2 = match gc_opt with
+  (* The worker count is data, so it is in the body: a card's edge holds
+     its name, status and count (RFC tui-one-screen-grammar section 2). The
+     first row is the heap and the workers: at most 29 cells for a heap under
+     100 GB and up to 999 workers, so a card's 32 cells hold it whole. The
+     live size goes to the end of the meter on the second row, the way the
+     Task card puts its done count there. The heap, the live size and the
+     workers on one row take 37 cells or more, so at the narrower card widths
+     the cut took the workers off. The compact summary is one row wide enough
+     for all three. *)
+  let workers = Printf.sprintf (if ko then "워커 %s" else "%s workers") domains in
+  let c1_l1, c1_l2, c1_compact = match gc_opt with
     | Some gc ->
+      let heap = say "힙 " "Heap " ^ format_words gc.sgc_heap_words in
+      let live = format_words gc.sgc_live_words in
       let live_line =
         if card_cells >= minimum_card_text_cells && gc.sgc_heap_words > 0 then
           Chart.meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
-            ~label:(say "점유" "Live")
+            ~label:(say "점유" "Live") ~suffix:live
             (* The heap grows as the GC asks for more, so live words against
                it are a share, not a use of a limit. *)
             ~scale:Chart.Relative
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
-          Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
-            domains (format_words gc.sgc_minor_heap_size)
+          Printf.sprintf (if ko then "사용 중 %s · 마이너 힙 %s" else "live %s · minor %s")
+            live (format_words gc.sgc_minor_heap_size)
       in
-      ( Printf.sprintf (if ko then "힙 %s · 사용 중 %s" else "Heap %s · live %s")
-          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
-      , live_line )
-    | None -> say "힙 " "Heap " ^ Unknown.glyph identity_gap, say "워커 " "Workers " ^ domains
+      ( heap ^ " · " ^ workers
+      , live_line
+      , Printf.sprintf (if ko then "%s · 사용 중 %s · %s" else "%s · live %s · %s")
+          heap live workers )
+    | None ->
+      let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
+      (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
   in
-  let c1_badge = (domains ^ say " 워커" " wk", Theme.recede ()) in
-  let c2_l1, c2_l2, c2_tone, c2_badge = match sched_opt with
+  let c2_l1, c2_l2, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
         say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
         Theme.recede (),
-        (scheduler_probe_text ~ko s.ssch_probe, Theme.recede ()) )
+        scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
     | Some s ->
       let tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.recede () in
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
@@ -278,14 +328,22 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
          (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
        tone,
-       (scheduler_probe_text ~ko s.ssch_probe, badge_tone))
+       scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
     (* One condition -- no scheduler reading at all -- so both halves of the
        card draw the same mark. *)
     | None ->
       let mark = Unknown.glyph identity_gap in
-      "p95 " ^ mark, say "표본 " "Samples " ^ mark, Theme.recede (), (mark, Theme.recede ())
+      ( "p95 " ^ mark,
+        say "표본 " "Samples " ^ mark,
+        Theme.recede (),
+        { Masc_tui_card.symbol = Masc_tui_card.Unknown identity_gap
+        ; word = ""
+        ; tone = Theme.recede () } )
   in
-  let c3_l1, c3_l2, c3_badge = match kpis.tasks with
+  (* With no task reading the edge has no count to write, and its mark says
+     why, as the Attention card's does: a card that cannot count reads
+     differently from one that has nothing to count. *)
+  let c3_l1, c3_l2, c3_count, c3_status = match kpis.tasks with
     | Some count ->
       let total = Task_flow.total_count count in
       let done_line =
@@ -304,15 +362,22 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
           (Count.grouped (Task_flow.open_count count))
           (Count.grouped count.awaiting_verification)
       , done_line
-      , (Count.grouped total ^ say "건" " total", Theme.recede ()) )
+      , Some (Masc_tui_card.Whole total)
+      , None )
     | None ->
-      let mark =
-        Unknown.glyph
-          (match state.tasks_error with
-           | Some _ -> Unknown.Read_failed
-           | None -> Unknown.Unread)
+      let why =
+        match state.tasks_error with
+        | Some _ -> Unknown.Read_failed
+        | None -> Unknown.Unread
       in
-      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark, (mark, Theme.recede ())
+      let mark = Unknown.glyph why in
+      ( say "열린 작업 " "Open " ^ mark
+      , say "완료 " "Done " ^ mark
+      , None
+      , Some
+          { Masc_tui_card.symbol = Masc_tui_card.Unknown why
+          ; word = ""
+          ; tone = Theme.recede () } )
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
   let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
@@ -323,18 +388,31 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let failed =
     is_failed (gate_observation state) || is_failed (held_observation state)
   in
-  let mark = Unknown.(glyph (if failed then Read_failed else Unread)) in
-  let c4_tone, c4_badge =
+  (* With a half unread, the edge says why and the body keeps the half that
+     was read: [Gate 3] beside [Tool holds ◌]. *)
+  let unread tone =
+    Some
+      { Masc_tui_card.symbol =
+          Masc_tui_card.Unknown (if failed then Unknown.Read_failed else Unknown.Unread)
+      ; word = ""
+      ; tone }
+  in
+  let c4_tone, c4_status, c4_count =
     match kpis.gate_pending_count, kpis.held_approvals_count with
-    | Some 0, Some 0 -> Theme.recede (), (say "정상" "clear", Theme.ok ())
-    | Some g, Some h -> Theme.warn (), (Count.grouped (g + h), Theme.warn ())
+    | Some 0, Some 0 ->
+      ( Theme.recede (),
+        Some
+          { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Settled
+          ; word = say "정상" "clear"
+          ; tone = Theme.ok () },
+        None )
+    | Some g, Some h -> Theme.warn (), None, Some (Masc_tui_card.Whole (g + h))
     | Some n, None | None, Some n ->
-      if n > 0 then Theme.warn (), (Count.grouped n ^ "+" ^ mark, Theme.warn ())
-      else if failed then Theme.warn (), (mark, Theme.warn ())
-      else Theme.recede (), (mark, Theme.recede ())
+      if n > 0 || failed then Theme.warn (), unread (Theme.warn ()), None
+      else Theme.recede (), unread (Theme.recede ()), None
     | None, None ->
-      if failed then Theme.warn (), (mark, Theme.warn ())
-      else Theme.recede (), (mark, Theme.recede ())
+      if failed then Theme.warn (), unread (Theme.warn ()), None
+      else Theme.recede (), unread (Theme.recede ()), None
   in
 
   let rec zip4 r1 r2 r3 r4 =
@@ -348,13 +426,13 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_cells >= minimum_card_text_cells then
     zip4
-      (render_card ~hotkey:1 ~badge:c1_badge ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
-      (render_card ~badge:c2_badge ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ~hotkey:2 ~badge:c3_badge ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
-      (render_card ~hotkey:3 ~badge:c4_badge ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
+      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
+      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
+      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
+      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
-        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1
+        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
         c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
     ; Printf.sprintf "  %s[%s]%s %s"
         (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1

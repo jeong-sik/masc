@@ -2333,7 +2333,7 @@ let here_row ~cols (state : state) ~path ~readings ~position =
       (fun position ->
         Ansi.dim
         ^ Masc_tui_value.Position.text
-            ~whole:(ui_text state ~ko:"전체" ~en:"of") position
+            ~ko:(state.ui_language = Lang_ko) position
         ^ Ansi.reset)
       position
   in

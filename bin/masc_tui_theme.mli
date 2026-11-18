@@ -397,8 +397,6 @@ end
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)
 
-val border_focus : string
-
 (** Content colours that stay constant: "this word is green" is a diff or a
     code literal, not a reading of state, so it stays out of [status]. The
     words a reader scans for (keyword, string, number, type, link, a JSON key)
@@ -463,10 +461,6 @@ module Glyph : sig
   val priority : int -> string
   (** ["!"] when the priority number is 1 or lower, the top priority, and an
       empty string for the rest. *)
-
-  val superscript_digit : int -> string
-  (** Unicode superscript numeral (["⁰"]..["⁹"]) for single digits [0..9], or
-      [string_of_int] outside that range, for compact border-embedded hotkeys. *)
 end
 
 val set_lift_enabled : bool -> unit

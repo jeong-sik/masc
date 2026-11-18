@@ -7,6 +7,7 @@
 module Instant = Masc_tui_value.Instant
 module Count = Masc_tui_value.Count
 module Hash = Masc_tui_value.Hash
+module Position = Masc_tui_value.Position
 
 (* [Unix.tm] counts years from 1900. *)
 let tm_year_origin = 1900
@@ -110,6 +111,33 @@ let test_only_one_is_singular () =
         (Count.reading ~ko:false Count.Entry count))
     [ (0, "0 entries"); (1, "1 entry"); (2, "2 entries"); (8347, "8,347 entries") ]
 
+(* A card edge counts a list read in part with the rows read, the word for
+   the whole and the server's total. The position on the same screen says the
+   selected row ahead of the same three, so the two cannot drift apart. *)
+let test_a_partial_count_reads_like_the_position () =
+  List.iter
+    (fun (ko, expected) ->
+      let count = Count.partial ~ko ~loaded:50 ~total:2000 in
+      Alcotest.(check string) "the card edge's count" expected count;
+      Alcotest.(check string) "the position ends with the same count"
+        ("1/" ^ count)
+        (Position.text ~ko (Position.Partial { at = 1; loaded = 50; total = 2000 })))
+    [ (true, "50 \xc2\xb7 \xec\xa0\x84\xec\xb2\xb4 2,000")
+    ; (false, "50 \xc2\xb7 of 2,000")
+    ]
+
+(* What a card cut off is a number of rows in the screen's language, grouped
+   like any other count. *)
+let test_cut_rows_are_counted_in_the_screens_language () =
+  List.iter
+    (fun (ko, rows, expected) ->
+      Alcotest.(check string) expected expected (Count.more ~ko rows))
+    [ (true, 3, "\xec\x99\xb8 3")
+    ; (false, 3, "3 more")
+    ; (true, 1234, "\xec\x99\xb8 1,234")
+    ; (false, 1234, "1,234 more")
+    ]
+
 (* A digest is drawn by its head, so the shown text is the start a reader can
    find in the copied whole. A value shorter than the cut comes back whole
    instead of raising. *)
@@ -140,6 +168,10 @@ let () =
     ; ( "count",
         [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit
         ; Alcotest.test_case "only one is singular" `Quick test_only_one_is_singular
+        ; Alcotest.test_case "a partial count reads like the position" `Quick
+            test_a_partial_count_reads_like_the_position
+        ; Alcotest.test_case "cut rows are counted in the screen's language" `Quick
+            test_cut_rows_are_counted_in_the_screens_language
         ] )
     ; ( "hash",
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )

@@ -46,8 +46,8 @@ Librarian 은 Keeper 와 종류(admission, durable)마다 끝나지 않은 원�
 바꾸지 않는 것:
 
 - slot 순서, 쉬는 slot 처리(`Runtime_exact_lane_backpressure`), 실패하면 다음 slot 으로 가는 규칙
-- CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다
-- 걷기 영수증의 형식. 지나친 slot 은 거절 사유 하나를 더해 적는다
+- CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. 입력 크기로 거절된 slot 도 실패로 센다. 지금과 같다
+- 걷기 영수증의 형식. 지나친 slot 은 거절 사유 둘(`Seats_full`, `Slot_resting`)을 더해 적는다
 - 원본 규칙, 시작 표시(`Started`)를 쓰는 때
 - 한 instance 의 cycle 은 겹치지 않는다. 요청은 cycle 마다 한 번만 시도한다
 
@@ -171,7 +171,9 @@ walk(slots):   # 선언 순서. 쉬는 slot 과 크기로 거절된 slot 은 빠
 - 지나친 slot 은 그 요청에서 다시 보지 않는다. 실패한 slot 과 같다. 그래서 방문은 지금처럼 선언 순서대로 하나씩 간다.
   - 걷기 영수증은 방문 i 가 선언된 i 번째 후보이고, 실패 다음 방문이 바로 다음 번호이기를 요구한다(`lib/keeper/keeper_exact_walk_receipt.ml` 250~273행). 원본은 영수증을 저장하고 다시 읽는다(451~458행). 순서를 바꾸면 저장된 원본을 읽을 수 없다.
   - 지나침은 거절 사유 `Seats_full` 로 적는다. `Exact_output.candidate_rejection_disposition` 과 `Keeper_exact_walk_failure.local_rejection` 에 variant 하나를 더한다. 영수증 version 은 그대로다.
-- `Seats_full` 은 provider 가 한 말이 아니다. backpressure 는 이것으로 slot 을 쉬게 하지 않는다.
+- 자리를 받은 순간 쉬는 것을 보고 지나친 slot 은 `Slot_resting` 으로 적는다. 호출자는 영수증만 보고도 크기 거절, 자리 참, 쉼을 가를 수 있다. 걷기 전부터 쉬던 slot 은 지금처럼 걷기에서 빠지고, 호출자가 `Runtime_exact_lane_backpressure.order` 로 안다.
+- `Seats_full` 과 `Slot_resting` 은 provider 가 새로 한 말이 아니다. backpressure 는 이것으로 slot 을 쉬게 하지 않는다.
+- 줄에 선 채 취소되면 걷기는 결과를 돌려주지 않는다. 취소는 Eio 취소로 나간다. 지금과 같다.
 - 여러 줄에 같이 서는 일은 대기자 하나를 여러 scheduler 에 올리는 것으로 한다.
   - 처음 자리를 주는 scheduler 가 compare-and-set 으로 그 대기자를 차지한다. 다른 scheduler 는 차지된 대기자를 건너뛴다(`slot_scheduler.ml` 141행의 `take_waiting` 이 건너뛰게 바뀐다).
   - 그래서 자리를 두 번 받지 않는다. 등급 순서를 세는 값(`foreground_run`)도 실제로 준 자리만 센다.
@@ -321,7 +323,7 @@ native stack 으로 올린다. 층마다 Draft PR 이다.
 | 층 | 무엇 | 확인 |
 |---|---|---|
 | L1 | §3.2 의 로드 요구(Exact slot 의 `max-concurrent`, 공유 provider 의 run limit), setup·lane 편집기가 키를 씀, fixture | 로드 시험: 선언 없는 Exact slot 거절, run limit 없는 공유 provider 거절. setup·편집기 결과에 키가 있다 |
-| L2 | §3.1 걷기(Agent-Core 와 Exact 소비자 넷), 여러 줄 대기자, 자리 받고 놓기, `Seats_full`, 본문 한도를 보낼 때부터, Exact flow 의 `Permit_wait_*` 삭제 | mock clock 시험: A 꽉 참·B 빔 → B 즉시. 모두 꽉 참 → 먼저 빈 자리, 앞 slot 은 `Seats_full`. 같은 때 → 앞 slot, 두 번 받지 않음. 받을 때 쉬는 slot → 돌려주고 지나침. 재기·생성이 자리 하나. 취소 → 모든 줄에서 나오고 새는 자리 없음. 영수증 검사 통과 |
+| L2 | §3.1 걷기(Agent-Core 와 Exact 소비자 넷), 여러 줄 대기자, 자리 받고 놓기, `Seats_full`·`Slot_resting`, 본문 한도를 보낼 때부터, Exact flow 의 `Permit_wait_*` 삭제. `Context_overflow` 같은 결과 타입은 건드리지 않는다 | mock clock 시험: A 꽉 참·B 빔 → B 즉시. 모두 꽉 참 → 먼저 빈 자리, 앞 slot 은 `Seats_full`. 같은 때 → 앞 slot, 두 번 받지 않음. 받을 때 쉬는 slot → 돌려주고 지나침. 재기·생성이 자리 하나. 취소 → 모든 줄에서 나오고 새는 자리 없음. 영수증 검사 통과 |
 | L3 | §3.2 official client 자리, run limit 거절 완화, watchdog 의 자리 대기 | CLI 층에서 자리 수를 넘는 프로세스가 뜨지 않는 시험. 자리를 기다리는 Keeper 턴을 watchdog 이 멈춤으로 세지 않는 시험 |
 | L4 | §3.3 host 가 수를 세지 않음, 다시 읽는 조건, 목록 빼기와 `exact_protocol`, 키 삭제 | host walk 시험: 전달 하나 뒤 나머지를 기다리지 않고 다시 읽는다. cycle 도중 host 사건이 다시 읽게 한다. 마지막 요청이 전달 없이 끝나면 cycle 이 끝난다. 돌고 있는 id 는 목록에 없다. 키가 있는 선언은 거절 |
 | L5 | §6 문서 | 문서 안의 `max_exact_in_flight` 가 0개 |

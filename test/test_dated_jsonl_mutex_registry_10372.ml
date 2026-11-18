@@ -1,14 +1,14 @@
 (** Pin the file-scope mutex registry contract.
 
     The registry forces every store rooted at the same canonical
-    [base_dir] to share one mutex.  An explicit [?mutex] argument
-    overrides the registry for isolated callers.
+    [base_dir] to share one mutex.  A [Reader] reads the store and takes
+    no registry entry.
 
     Tests pin:
 
     1. Same [base_dir] → physically identical mutex.
     2. Different [base_dir] → distinct mutexes.
-    3. Explicit [?mutex] bypasses the registry.
+    3. A [Reader] leaves no registry entry and reads the store's rows.
     4. Trailing-slash variants normalize to the same mutex.
     5. Behavioural: concurrent appends through two store
        instances at the same dir produce all-parseable lines,
@@ -52,18 +52,32 @@ let test_different_base_dir_distinct_mutex () =
   check bool "distinct base_dir → distinct mutex" false
     (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex b)
 
-(* --- 3. explicit ?cross_context_mutex bypasses the registry --------- *)
+(* --- 3. a reader takes no registry entry ------------------------- *)
 
-let test_explicit_mutex_overrides_registry () =
-  let location = temp_store "djmr_explicit" in
+let test_reader_takes_no_registry_entry () =
+  let location = temp_store "djmr_reader" in
   let dir = D.Store.dir location in
-  let registry_mutex = D.For_testing.cross_context_mutex_for_base_dir dir in
-  let injected = Cross_context_mutex.create () in
-  let store = D.open_store ~cross_context_mutex:injected location in
-  check bool "explicit mutex used verbatim" true
-    (D.For_testing.cross_context_mutex store == injected);
-  check bool "explicit mutex differs from registry entry" false
-    (D.For_testing.cross_context_mutex store == registry_mutex)
+  let month = Filename.concat dir "2026-02" in
+  Fs_compat.mkdir_p month;
+  Fs_compat.append_file (Filename.concat month "01.jsonl") "{\"i\":1}\n";
+  let reader = D.Reader.open_store location in
+  check string "the reader names the store's directory" dir (D.Reader.base_dir reader);
+  (match D.Reader.read_recent_lines_result reader 10 with
+   | Ok rows ->
+     check
+       (list (pair string string))
+       "the reader reads the store's rows"
+       [ Filename.concat month "01.jsonl", "{\"i\":1}" ]
+       rows
+   | Error error -> failf "the reader failed: %s" (D.read_error_to_string error));
+  (match D.Reader.read_recent_result reader 10 with
+   | Ok rows -> check int "the parsed read returns the row" 1 (List.length rows)
+   | Error error -> failf "the reader failed: %s" (D.read_error_to_string error));
+  check bool "opening and reading through a reader leaves no registry entry" false
+    (D.For_testing.in_registry location);
+  ignore (D.open_store location : D.t);
+  check bool "opening the store itself takes the entry" true
+    (D.For_testing.in_registry location)
 
 (* --- 4. trailing-slash variants share the mutex -------- *)
 
@@ -210,8 +224,8 @@ let () =
         [
           test_case "different base_dir distinct mutex" `Quick
             test_different_base_dir_distinct_mutex;
-          test_case "explicit ?mutex bypasses registry" `Quick
-            test_explicit_mutex_overrides_registry;
+          test_case "a reader takes no registry entry" `Quick
+            test_reader_takes_no_registry_entry;
           test_case "trailing slash normalises" `Quick
             test_trailing_slash_normalizes;
         ] );

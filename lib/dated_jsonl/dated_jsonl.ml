@@ -153,13 +153,9 @@ let mutex_for_base_dir ~base_dir =
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let open_store ?cross_context_mutex ?max_bytes location =
+let open_store ?max_bytes location =
   let base_dir = Store.dir location in
-  let cross_context_mutex =
-    match cross_context_mutex with
-    | Some mutex -> Atomic.make mutex
-    | None -> mutex_for_base_dir ~base_dir
-  in
+  let cross_context_mutex = mutex_for_base_dir ~base_dir in
   let max_bytes =
     match max_bytes with
     | Some bytes when bytes > 0 -> Some bytes
@@ -2322,4 +2318,26 @@ module For_testing = struct
     let cell = mutex_for_base_dir ~base_dir in
     Atomic.get cell
 
+  let in_registry location =
+    let key = mutex_key (Store.dir location) in
+    Stdlib.Mutex.protect mutex_registry_mu (fun () -> Hashtbl.mem mutex_registry key)
+
+end
+
+(* The handle's own mutex is never taken: only the functions that write or
+   prune take a handle's mutex, and none of them is in [Reader]'s
+   signature. *)
+module Reader = struct
+  type nonrec t = t
+
+  let open_store location =
+    { location
+    ; base_dir = Store.dir location
+    ; cross_context_mutex = Atomic.make (Cross_context_mutex.create ())
+    ; max_bytes = None
+    }
+
+  let base_dir = base_dir
+  let read_recent_result = read_recent_result
+  let read_recent_lines_result = read_recent_lines_result
 end

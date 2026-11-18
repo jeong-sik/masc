@@ -4864,8 +4864,11 @@
   str
   masc_tui_task_flow
   masc
+  ; the scheduler probe's states, which the probe mark decides from
+  masc.masc_core
   masc_test_deps
   masc_types
+  masc_tui_card
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_render_metrics

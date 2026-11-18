@@ -185,18 +185,20 @@ let operator_actions_reading (state : state) =
 
    The capacity card's status. The mark follows the same reading the colour
    already followed: a retained reading is stale, a fleet that needs the
-   operator is the operator's turn, a grade that is not ok needs a look. *)
+   operator is the operator's turn, a grade that is not ok needs a look.
+   With no reading the mark stands alone, as on every other card: RFC
+   tui-one-screen-grammar section 6.4 keeps "not observed" out of a value's
+   place, and the card's body already says why. *)
 let overview_capacity_status (state : state) : Masc_tui_card.status =
-  let text ko en = ui_text state ~ko ~en in
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Unread
-      ; word = text "미관측" "unread"
+      ; word = ""
       ; tone = Theme.recede () }
   | Unreachable _ | Unavailable _ | Cannot_read _ ->
       { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Read_failed
-      ; word = text "관측 불가" "unavailable"
+      ; word = ""
       ; tone = Theme.warn () }
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in

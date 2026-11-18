@@ -141,24 +141,42 @@ let scheduler_probe_text ~ko = function
   | None -> Unknown.(glyph Unreported)
   | Some probe -> scheduler_probe_word ~ko probe
 
+(* Which kind of state the probe is in (RFC tui-one-screen-grammar section
+   7.2). A probe that raised failed: [Stopped] carries the exception's
+   message. A probe whose switch was cancelled was stopped on purpose. A word
+   this build does not know, and no probe at all, are [?]. *)
+let scheduler_probe_symbol : Decode.scheduler_probe option -> Masc_tui_card.symbol =
+  function
+  | None | Some (Decode.Probe_unknown _) -> Masc_tui_card.Unknown Unknown.Unreported
+  | Some (Decode.Probe_reported Scheduler_lag.Not_started) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Waiting
+  | Some (Decode.Probe_reported Scheduler_lag.Running) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Under_way
+  | Some (Decode.Probe_reported (Scheduler_lag.Stopped _)) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Failed
+  | Some (Decode.Probe_reported Scheduler_lag.Cancelled) ->
+      Masc_tui_card.Mark Masc_tui_value.Mark.Paused
+
 (* The probe as a card's status: the mark says which kind of state it is and
    the word says which one. A word this build does not know reads [?] and the
    word as it came (RFC tui-one-screen-grammar section 7.1); no probe at all
-   is the [?] alone. *)
+   is the [?] alone. [tone] is the colour the samples give the card. A failed
+   probe takes the colour its mark means instead, so a card with no stalls
+   does not draw a failure in the colour of one that is fine. *)
 let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
-  let symbol, word =
+  let symbol = scheduler_probe_symbol probe in
+  let word =
     match probe with
-    | None -> (Masc_tui_card.Unknown Unknown.Unreported, "")
-    | Some (Decode.Probe_unknown word) ->
-        (Masc_tui_card.Unknown Unknown.Unreported, Terminal_text.single_line word)
-    | Some (Decode.Probe_reported lag as reported) ->
-        let mark =
-          match lag with
-          | Scheduler_lag.Not_started -> Masc_tui_value.Mark.Waiting
-          | Scheduler_lag.Running -> Masc_tui_value.Mark.Under_way
-          | Scheduler_lag.Stopped _ | Scheduler_lag.Cancelled -> Masc_tui_value.Mark.Paused
-        in
-        (Masc_tui_card.Mark mark, scheduler_probe_word ~ko reported)
+    | None -> ""
+    | Some (Decode.Probe_unknown word) -> Terminal_text.single_line word
+    | Some (Decode.Probe_reported _ as reported) -> scheduler_probe_word ~ko reported
+  in
+  let tone =
+    match symbol with
+    | Masc_tui_card.Mark Masc_tui_value.Mark.Failed -> Theme.bad ()
+    | Masc_tui_card.Mark
+        Masc_tui_value.Mark.(Settled | Under_way | Waiting | Paused | Caution | Yours)
+    | Masc_tui_card.Unknown _ -> tone
   in
   { Masc_tui_card.symbol; word; tone }
 
@@ -260,26 +278,39 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | Some { ssch_pool_domains = None; _ } -> Unknown.(glyph Unreported)
     | None -> Unknown.glyph identity_gap
   in
-  let c1_l1, c1_l2 = match gc_opt with
+  (* The worker count is data, so it is in the body: a card's edge holds
+     its name, status and count (RFC tui-one-screen-grammar section 2). The
+     first row is the heap and the workers: at most 29 cells for a heap under
+     100 GB and up to 999 workers, so a card's 32 cells hold it whole. The
+     live size goes to the end of the meter on the second row, the way the
+     Task card puts its done count there. The heap, the live size and the
+     workers on one row take 37 cells or more, so at the narrower card widths
+     the cut took the workers off. The compact summary is one row wide enough
+     for all three. *)
+  let workers = Printf.sprintf (if ko then "워커 %s" else "%s workers") domains in
+  let c1_l1, c1_l2, c1_compact = match gc_opt with
     | Some gc ->
+      let heap = say "힙 " "Heap " ^ format_words gc.sgc_heap_words in
+      let live = format_words gc.sgc_live_words in
       let live_line =
         if card_cells >= minimum_card_text_cells && gc.sgc_heap_words > 0 then
           Chart.meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
-            ~label:(say "점유" "Live")
+            ~label:(say "점유" "Live") ~suffix:live
             ~cell_style:(fun ~index ~width ->
               Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
-          Printf.sprintf (if ko then "마이너 힙 %s" else "minor %s")
-            (format_words gc.sgc_minor_heap_size)
+          Printf.sprintf (if ko then "사용 중 %s · 마이너 힙 %s" else "live %s · minor %s")
+            live (format_words gc.sgc_minor_heap_size)
       in
-      (* The worker count is data, so it is in the body: a card's edge holds
-         its name, status and count (RFC tui-one-screen-grammar section 2). *)
-      ( Printf.sprintf (if ko then "힙 %s · 사용 중 %s · 워커 %s" else "Heap %s · live %s · %s workers")
-          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words) domains
-      , live_line )
-    | None -> say "힙 " "Heap " ^ Unknown.glyph identity_gap, say "워커 " "Workers " ^ domains
+      ( heap ^ " · " ^ workers
+      , live_line
+      , Printf.sprintf (if ko then "%s · 사용 중 %s · %s" else "%s · live %s · %s")
+          heap live workers )
+    | None ->
+      let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
+      (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
   in
   let c2_l1, c2_l2, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
@@ -307,7 +338,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
         ; word = ""
         ; tone = Theme.recede () } )
   in
-  let c3_l1, c3_l2, c3_count = match kpis.tasks with
+  (* With no task reading the edge has no count to write, and its mark says
+     why, as the Attention card's does: a card that cannot count reads
+     differently from one that has nothing to count. *)
+  let c3_l1, c3_l2, c3_count, c3_status = match kpis.tasks with
     | Some count ->
       let total = Task_flow.total_count count in
       let done_line =
@@ -327,15 +361,22 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
           (Count.grouped (Task_flow.open_count count))
           (Count.grouped count.awaiting_verification)
       , done_line
-      , Some (Masc_tui_card.Whole total) )
+      , Some (Masc_tui_card.Whole total)
+      , None )
     | None ->
-      let mark =
-        Unknown.glyph
-          (match state.tasks_error with
-           | Some _ -> Unknown.Read_failed
-           | None -> Unknown.Unread)
+      let why =
+        match state.tasks_error with
+        | Some _ -> Unknown.Read_failed
+        | None -> Unknown.Unread
       in
-      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark, None
+      let mark = Unknown.glyph why in
+      ( say "열린 작업 " "Open " ^ mark
+      , say "완료 " "Done " ^ mark
+      , None
+      , Some
+          { Masc_tui_card.symbol = Masc_tui_card.Unknown why
+          ; word = ""
+          ; tone = Theme.recede () } )
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
   let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
@@ -386,11 +427,11 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     zip4
       (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
       (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
+      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
-        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1
+        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
         c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
     ; Printf.sprintf "  %s[%s]%s %s"
         (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1

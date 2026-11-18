@@ -86,6 +86,9 @@ FAILURE_CAUSES = {
                         'Check the model name against the endpoint\'s model list, then choose connections again.'),
     'provider_auth_refused': ('Credential refused', 'fail',
                               'Check the API key variable or sign in again, then retry.'),
+    'key_refused': ('API key refused', 'fail',
+                    'The provider answered 401 to the key in the declared key file. '
+                    'Put a key the provider takes in that file, then retry.'),
     'missing_credential': ('Credential missing', 'fail',
                            'Export the named variable in the shell that runs MASC, then retry.'),
     'invalid_credential': ('Credential unusable', 'fail',

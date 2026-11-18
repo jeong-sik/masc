@@ -204,6 +204,7 @@ read of the conversation shows for that turn.
 | 409 | `not_signed_in` | The subscription of the Runtime is not signed in. |
 | 409 | `key_missing` | The account of the Runtime runs on an API key, and the key is not on the server. No client started. Remove the account and register the key again. |
 | 409 | `key_unreadable` | The account of the Runtime runs on an API key, and the server cannot read its key file. No client started. Remove the account and register the key again. |
+| 409 | `key_refused` | The account of the Runtime runs on an API key, and the vendor answered 401 to it. The client started, and the conversation holds the turn as one that failed. Remove the account and register a key the vendor takes. |
 | 429 | `no_quota` | The subscription has no quota left. |
 | 500 | `configuration_refused` | The client refused the configuration of the Runtime. |
 | 500 | `conversation_row_not_understood` | The record of the conversation has a row the server does not understand. |

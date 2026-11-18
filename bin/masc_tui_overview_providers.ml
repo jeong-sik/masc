@@ -936,6 +936,9 @@ let layout_for ~show_names ~width entries =
   ; continuation_cells = max 1 (budget - name_cells - 1)
   }
 
+(* How far the text of an entry named on its own row starts under the name. *)
+let under_name_gap = "  "
+
 (* One entry's rows, at the columns [layout] settled on. With [~named:false]
    the name column stays blank: the name is drawn above the rows. *)
 let draw_entry ?(named = true) layout tone entry =
@@ -1012,18 +1015,34 @@ let draw_entry ?(named = true) layout tone entry =
          | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
          | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
   in
+  (* An entry named on the row above that reports a state has no bar to line
+     up with the list: its text and notes start just under the name and take
+     the rest of the row, not the room after an empty name column. *)
+  let under_name =
+    (not named)
+    && (match entry.de_body with
+        | State_text _ | Not_reported -> true
+        | Window_lines _ -> false)
+  in
+  let body_prefix = if under_name then indent ^ under_name_gap else layout.continuation in
+  let body_cells =
+    if under_name then max 1 (layout.width - indent_cells - cells_of under_name_gap)
+    else layout.continuation_cells
+  in
   let note_lines ?tone text =
     List.map
-      (fun wrapped -> layout.continuation ^ style tone wrapped)
-      (Text.wrap_words ~max_cells:layout.continuation_cells text)
+      (fun wrapped -> body_prefix ^ style tone wrapped)
+      (Text.wrap_words ~max_cells:body_cells text)
   in
-  let name_or_blank = if named then name_cell tone entry.de_name else layout.blank_name in
   let state_rows text =
-    match Text.wrap_words ~max_cells:layout.continuation_cells text with
-    | [] -> if named then [ indent ^ name_or_blank ] else []
-    | first :: rest ->
-        (indent ^ name_or_blank ^ " " ^ first)
-        :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
+    if not named then
+      List.map (fun wrapped -> body_prefix ^ wrapped) (Text.wrap_words ~max_cells:body_cells text)
+    else
+      match Text.wrap_words ~max_cells:layout.continuation_cells text with
+      | [] -> [ indent ^ name_cell tone entry.de_name ]
+      | first :: rest ->
+          (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+          :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
   in
   let rows =
     match entry.de_body with

@@ -6,6 +6,10 @@ type initialization_failure =
 type verification_failure =
   | Guest_shim_missing of Unix.error
   | Sidecar_rejected of string
+  | Shim_relay_version_mismatch of
+      { installed : Keeper_sandbox_microvm.relay_declaration
+      ; required : int
+      }
 
 type config_failure =
   | Config_missing
@@ -94,6 +98,27 @@ let write_failure (error : Fs_compat.capability_write_error) =
     (Fs_compat.capability_write_target_effect_to_string error.target_effect)
     primary (List.length error.cleanup_failures)
 
+(* The fix names both ways a shim reaches the workspace: the release
+   installer, and a checkout build whose relay version no release ships yet. *)
+let relay_version_mismatch_message ~installed ~required =
+  let declared = match (installed : Shim.relay_declaration) with
+    | Shim.Relay_version version -> Printf.sprintf "declares relay version %d" version
+    | Shim.No_relay_version -> "declares no relay version (it was built before shims declared one)"
+    | Shim.Several_relay_versions versions ->
+      "declares several relay versions ("
+      ^ String.concat ", " (List.map string_of_int versions) ^ ")" in
+  Printf.sprintf
+    "microvm_shim_relay_version_mismatch: the mounted guest shim \
+     .masc/microvm/shim/%s %s and this server speaks relay version %d, so no \
+     guest is booted, adopted or replaced with it. Install the shim built from \
+     this server's source: a release server runs `scripts/install.sh --version v%s`; \
+     a checkout build runs `scripts/remote-ssh/build-shim.sh --arch arm64` \
+     (amd64 on an x86-64 Linux host), copies \
+     dist/remote-ssh/masc-exec-shim-linux-<arch> to .masc/microvm/shim/%s and \
+     removes .masc/microvm/shim/%s (docs/MICROVM-REMOTE-RUNBOOK.md)"
+    Shim.shim_binary_name declared required Build_version.current
+    Shim.shim_binary_name Shim.shim_sidecar_name
+
 let rec error_message = function
   | Invalid_base_path _ -> "microvm shim base path is invalid"
   | Not_initialized -> "microvm shim startup initialization has not run"
@@ -102,6 +127,8 @@ let rec error_message = function
   | Verification_failed (Guest_shim_missing _) ->
     "microvm_shim_missing: install the architecture-matched guest shim for this base"
   | Verification_failed (Sidecar_rejected _) -> "microvm shim sidecar verification failed; check the installed binary and sidecar"
+  | Verification_failed (Shim_relay_version_mismatch {installed; required}) ->
+    relay_version_mismatch_message ~installed ~required
   | Verification_invalidated -> "microvm shim guest verification was invalidated by guest replacement"
   | Config_unavailable Config_missing ->
     "microvm_shim_config_missing: the host shim config disappeared during recovery"
@@ -356,15 +383,19 @@ let verify_files ~base =
     match Unix.access (Filename.concat dir Shim.shim_binary_name) [Unix.X_OK] with
     | () -> Ok ()
     | exception Unix.Unix_error (error, _, _) -> Error (Verification_failed (Guest_shim_missing error))) in
-  let* provenance = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-    Eio_guard.run_in_systhread ~label:"microvm-shim-sidecar" (fun () -> Shim.verify_shim_sidecar ~dir))
+  let* {Shim.provenance; relay} = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+    Eio_guard.run_in_systhread ~label:"microvm-shim-sidecar" (fun () -> Shim.inspect_shim ~dir))
     |> Result.map_error (fun detail -> Verification_failed (Sidecar_rejected detail)) in
   (match provenance with
    | Shim.Shim_verified {sha256} ->
      Log.Keeper.info "microvm guest shim verified against its sidecar: sha256 %s" sha256
    | Shim.Shim_unverified ->
      Log.Keeper.info "microvm guest shim has no sidecar; running a hand-built shim unverified");
-  Ok ()
+  let required = Exec_ssh_protocol.Relay.version in
+  match relay with
+  | Shim.Relay_version version when version = required -> Ok ()
+  | Shim.Relay_version _ | Shim.No_relay_version | Shim.Several_relay_versions _ ->
+    Error (Verification_failed (Shim_relay_version_mismatch {installed = relay; required}))
 
 let new_verification key =
   let base, _, _ = key in

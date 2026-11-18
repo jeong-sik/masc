@@ -69,7 +69,7 @@ CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 
 |---|------|--------|
 | 1 | `container` CLI 1.3+ 와 실행 중인 container system | `microvm_cli_unavailable` / `microvm_image_probe_failed` |
 | 2 | Keeper 의 `sandbox_image` 이름에 이미지 목록(`<base-path>/.masc/config/sandbox-image-builds.toml`)이 `apple_container` 빌드를 올려 두었고, 그 태그가 container 이미지 저장소에 있음 (`container image inspect <목록의 reference>`) | 목록에 없으면 `sandbox_image_unresolved`, 저장소에 없으면 `microvm_image_missing` |
-| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부 |
+| 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부. shim 이 이 서버와 다른 relay version 을 적었거나 아무것도 적지 않았으면 `microvm_shim_relay_version_mismatch` — 붙어 있는 게스트를 멈추지도, 새로 띄우지도 않는다 |
 | 4 | 디스크 여유. 볼륨 상한은 `MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE` (기본 256g, sparse) | `microvm_work_volume_create_failed` |
 
 shim 설정(`masc-exec-shim.conf`)은 서버가 시작할 때 같은 디렉터리에 다시
@@ -172,8 +172,13 @@ install -m 755 /tmp/shim/masc-exec-shim-linux-arm64 "$shim_dir/masc-exec-shim"
 grep ' masc-exec-shim-linux-arm64$' /tmp/shim/SHA256SUMS > "$shim_dir/masc-exec-shim.sha256"
 ```
 
-서버와 shim 은 한 major 차이를 서로 참으므로(위 계약 표 아래 문단) 순서는 상관없다.
-릴리즈 없이 지금 트리로 만들어야 할 때만 아래처럼 직접 빌드한다. 손으로 빌드한
+게스트 agent 는 이 디렉터리의 shim 이다. 그래서 shim 은 서버와 같은 relay version 을
+말해야 한다. shim 바이너리에는 `MASC_EXEC_SHIM_RELAY_VERSION=<n>;` 이 글자 그대로
+들어 있고(`Exec_ssh_protocol.Relay.version_declaration`), 서버는 게스트를 띄우거나
+붙기 전에 이 값을 읽는다. 값이 다르거나 없으면 `microvm_shim_relay_version_mismatch`
+로 거절한다. 이 값이 생기기 전에 빌드한 shim(0.73.1 이하 릴리즈)은 값이 없다.
+릴리즈가 아직 싣지 않은 relay version 으로 서버를 빌드했으면 지금 트리로 shim 도
+빌드한다. 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.
 

@@ -73,7 +73,7 @@ from typing import IO
 
 from pty_driver import (POLL_S, Child, Exit, Geometry, Jump, Key, Press, Sent, first_frame, press, read_chunk, settle,
                         spawn, stop, take)
-from relay_files import json_object
+from relay_files import json_object, read_log
 from vte import Vte, png_cell_size, render_png
 
 HERE = Path(__file__).resolve().parent
@@ -723,21 +723,13 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def refused_requests(log_path: Path) -> list[dict[str, object]] | str:
-    """The relay's refusals, or why they cannot be counted. The count is the
-    evidence that only reads went through, so an unreadable log is not zero."""
-    try:
-        lines = log_path.read_text(encoding='utf-8').splitlines()
-    except OSError as exc:
-        return f'{log_path}: {exc.strerror}'
-    refused: list[dict[str, object]] = []
-    for lineno, line in enumerate(lines, 1):
-        fields = json_fields(line)
-        if fields is None:
-            return f'{log_path}:{lineno}: not a JSON object'
-        if fields.get('decision') == 'refused':
-            refused.append({name: fields.get(name) for name in ('t', 'verb', 'path', 'why')})
-    return refused
+def refused_requests(log_path: Path, relay_exit: int) -> list[dict[str, object]] | str:
+    """The relay's refusals, or why they cannot be counted (read_log)."""
+    entries = read_log(log_path, relay_exit)
+    if isinstance(entries, str):
+        return entries
+    return [{name: fields.get(name) for name in ('t', 'verb', 'path', 'why')}
+            for fields in entries if fields.get('decision') == 'refused']
 
 
 def screen_failed(result: Mapping[str, object]) -> bool:
@@ -826,7 +818,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with stop_signals_held():
                 running.stop_tui()
                 relay_exit = stop_relay(relay.process)
-                refused = refused_requests(options.out / RELAY_LOG_NAME)
+                refused = refused_requests(options.out / RELAY_LOG_NAME, relay_exit)
                 restored = restore_or_why(preferences)
                 report |= {'relay': {'exit': relay_exit,
                                      'refused': refused if isinstance(refused, list) else {'error': refused}},

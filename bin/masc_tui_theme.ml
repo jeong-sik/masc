@@ -617,17 +617,4 @@ module Glyph = struct
      shout — on the live Overview five of eight rows carried a red tail —
      and a mark on most rows distinguishes nothing. *)
   let priority p = if p <= 1 then "!" else ""
-
-  let superscript_digit = function
-    | 0 -> "\xe2\x81\xb0"
-    | 1 -> "\xc2\xb9"
-    | 2 -> "\xc2\xb2"
-    | 3 -> "\xc2\xb3"
-    | 4 -> "\xe2\x81\xb4"
-    | 5 -> "\xe2\x81\xb5"
-    | 6 -> "\xe2\x81\xb6"
-    | 7 -> "\xe2\x81\xb7"
-    | 8 -> "\xe2\x81\xb8"
-    | 9 -> "\xe2\x81\xb9"
-    | n -> string_of_int n
 end

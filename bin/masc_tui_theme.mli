@@ -422,10 +422,6 @@ module Glyph : sig
   val priority : int -> string
   (** ["!"] when the priority number is 1 or lower, the top priority, and an
       empty string for the rest. *)
-
-  val superscript_digit : int -> string
-  (** Unicode superscript numeral (["⁰"]..["⁹"]) for single digits [0..9], or
-      [string_of_int] outside that range, for compact border-embedded hotkeys. *)
 end
 
 val set_lift_enabled : bool -> unit

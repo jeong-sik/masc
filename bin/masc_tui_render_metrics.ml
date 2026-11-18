@@ -214,19 +214,14 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let render_card ?hotkey ?badge ~title_style title line1 line2 =
+  let render_card ?badge ~title_style title line1 line2 =
     let style =
       { Masc_tui_card.edge = Theme.recede ()
       ; title_style = Ansi.bold ^ title_style
       ; reset = Ansi.reset
       }
     in
-    let chrome =
-      { Masc_tui_card.hotkey =
-          Option.map (fun d -> (Masc_tui_theme.Glyph.superscript_digit d, Ansi.bold ^ Theme.accent ())) hotkey
-      ; badge
-      }
-    in
+    let chrome = { Masc_tui_card.hotkey = None; badge } in
     Masc_tui_card.render ~rounded:true ~chrome ~style ~width:card_w ~height:4
       { Masc_tui_card.title; body = (fun ~cells:_ -> [ line1; line2 ]) }
   in
@@ -347,10 +342,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_cells >= minimum_card_text_cells then
     zip4
-      (render_card ~hotkey:1 ~badge:c1_badge ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
+      (render_card ~badge:c1_badge ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
       (render_card ~badge:c2_badge ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ~hotkey:2 ~badge:c3_badge ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
-      (render_card ~hotkey:3 ~badge:c4_badge ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
+      (render_card ~badge:c3_badge ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
+      (render_card ~badge:c4_badge ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1

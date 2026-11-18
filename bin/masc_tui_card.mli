@@ -31,7 +31,7 @@ type style =
 type chrome =
   { hotkey : (string * string) option
       (** Optional [(tag, style)] drawn immediately before the title in the top
-          border (e.g. [("¹", accent)]). *)
+          border (e.g. [("p", accent)]). *)
   ; badge : (string * string) option
       (** Optional [(text, style)] right-aligned inside the top border when the
           card is wide enough to hold both the title and the badge. *)

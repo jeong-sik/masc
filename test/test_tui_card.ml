@@ -218,7 +218,7 @@ let test_a_cut_body_with_styled_rows_keeps_the_width () =
 
 let test_rounded_chrome_with_hotkey_and_badge_keeps_exact_width () =
   let chrome =
-    { Card.hotkey = Some ("\xc2\xb9", "\027[1;36m")
+    { Card.hotkey = Some ("p", "\027[1;36m")
     ; badge = Some ("27/27 \xec\xa0\x95\xec\x83\x81", "\027[32m")
     }
   in

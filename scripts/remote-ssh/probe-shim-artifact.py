@@ -7,9 +7,23 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import struct
 import subprocess
 import tempfile
+
+
+# Exec_ssh_protocol.Relay.version_declaration, read with the grammar the host
+# uses on the mounted shim (Keeper_sandbox_microvm_shim): the host refuses a
+# shim that carries none, or several (#52968).
+RELAY_DECLARATION = re.compile(rb"MASC_EXEC_SHIM_RELAY_VERSION=([0-9]{1,4});")
+
+
+def relay_version(shim_bytes):
+    found = sorted({int(version) for version in RELAY_DECLARATION.findall(shim_bytes)})
+    if len(found) != 1:
+        raise SystemExit(f"candidate shim must declare exactly one relay version; found {found}")
+    return found[0]
 
 
 def main():
@@ -26,7 +40,9 @@ def main():
     if platform.system() != "Linux" or platform.machine() != expected_machine:
         raise SystemExit("shim must be exercised on its native Linux architecture")
     shim = args.shim.resolve(strict=True)
-    binary_sha = hashlib.sha256(shim.read_bytes()).hexdigest()
+    shim_bytes = shim.read_bytes()
+    binary_sha = hashlib.sha256(shim_bytes).hexdigest()
+    relay = relay_version(shim_bytes)
     file_description = subprocess.check_output(["file", str(shim)], text=True).strip()
     if "statically linked" not in file_description:
         raise SystemExit("candidate shim is not statically linked")
@@ -88,6 +104,7 @@ def main():
                    run_id=os.environ.get("GITHUB_RUN_ID"), run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT"),
                    platform="linux-" + args.arch, binary_sha256=binary_sha,
                    binary_bytes=shim.stat().st_size, file_description=file_description,
+                   relay_version=relay,
                    probe=probe, framed_config_execution=dict(exit=status, stdout=output.decode(), trailer=trailer),
                    driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                    installed=False, ssh_transport_exercised=False, keeper_exercised=False,

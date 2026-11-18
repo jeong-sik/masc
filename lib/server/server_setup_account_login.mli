@@ -100,7 +100,12 @@ val status : owner:owner -> base_path:string ->
     One call of an account runs at a time ({!one_call_of}): a request while a
     verification or a Keeper turn of the account runs is answered 409. A key
     account whose key file is not there or is not read as a key is a 409 too,
-    with the [code] [key_missing] or [key_unreadable] beside the [error]. *)
+    with the [code] [key_missing] or [key_unreadable] beside the [error].
+
+    A call the provider answered with HTTP 401 on a key account is a 200
+    whose [verification] failed with the code [key_refused]
+    ({!Runtime_verification.failure}); on a login account the code stays
+    [provider_auth_refused]. *)
 val verify : person:person -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 

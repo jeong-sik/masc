@@ -2231,7 +2231,7 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
 let fetch_keeper_chat_events ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(source : Masc_tui_keeper_chat_log.journal_source)
     ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
-    ~(since_offset : Masc.Keeper_chat_event_log.page_start) ~(limit : int) :
+    ~(since_offset : Masc.Keeper_chat_event_log.page_start) ~(limit : int) ~(follow : bool) :
     ( Masc_tui_keeper_chat_log.events_page
     , Masc_tui_keeper_chat_log.events_error )
     result =
@@ -2240,7 +2240,7 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
      test can reach it. *)
   let path =
     Masc_tui_keeper_chat_log.journal_path ~encode_value:percent_encode_path_segment
-      ~keeper_name ~source ~since_seq ~since_offset ~limit
+      ~keeper_name ~source ~since_seq ~since_offset ~limit ~follow
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error (Masc_tui_keeper_chat_log.Events_transport detail)

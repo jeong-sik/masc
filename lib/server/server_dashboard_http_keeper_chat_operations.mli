@@ -85,12 +85,20 @@ val chat_events_page :
     persisted epoch is 409 [journal_unsupported_version]. Exposed so the
     wire contract is tested without an HTTP listener. *)
 
+type turn_state = Turn_running | Turn_ended
+(** Whether the turn was running when its page read began. *)
+
 val turn_events_page :
   turn_ref:Ids.Turn_ref.t ->
+  turn_state:turn_state ->
   since_seq:Keeper_chat_event_log.replay_position ->
   redact_text:(string -> string) ->
   Keeper_chat_event_log.page -> Yojson.Safe.t
-(** [masc.keeper_turn_events.v1], with [turn_ref] instead of [operation_id]. *)
+(** [masc.keeper_turn_events.v1], with [turn_ref] instead of [operation_id]
+    and [turn_state] ("running" or "ended"). An [ended] page holds every row
+    the turn wrote past the cursor. With [follow=true], a read of a running
+    turn with nothing past the cursor waits up to 8 s for a row or the
+    turn's end, then answers an empty [running] page. *)
 
 val get_route : string -> get_route option
 val mutation_route : string -> mutation_route option

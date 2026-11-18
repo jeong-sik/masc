@@ -398,8 +398,14 @@ let add_journaled t (lines : Journal.journaled_event list) =
   |> List.rev
 ;;
 
+(* Whether an autonomous turn was running when its page read began. An
+   [Turn_ended] page holds every row the turn wrote past the cursor. *)
+type turn_state = Turn_running | Turn_ended
+
 type events_page =
   { source : journal_source
+  ; turn_state : turn_state option
+      (** [Some] on an autonomous turn's page, [None] on an operation's. *)
   ; events : Journal.journaled_event list
   ; has_more : bool
   ; next_since_seq : Journal.replay_position
@@ -427,6 +433,14 @@ let decode_events_page (json : Yojson.Safe.t) =
            | Some _ | None -> Error "events body has no turn_ref")
       | Some (`String schema) -> Error ("unexpected events schema: " ^ schema)
       | Some _ | None -> Error "events body has no schema"
+    in
+    let* turn_state =
+      match source, List.assoc_opt "turn_state" fields with
+      | Operation _, _ -> Ok None
+      | Autonomous_turn _, Some (`String "running") -> Ok (Some Turn_running)
+      | Autonomous_turn _, Some (`String "ended") -> Ok (Some Turn_ended)
+      | Autonomous_turn _, (Some _ | None) ->
+          Error "turn events body has no turn_state of running or ended"
     in
     let* has_more =
       match List.assoc_opt "has_more" fields with
@@ -470,7 +484,7 @@ let decode_events_page (json : Yojson.Safe.t) =
         raw_events
       |> Result.map List.rev
     in
-    Ok { source; events; has_more; next_since_seq; next_since_offset }
+    Ok { source; turn_state; events; has_more; next_since_seq; next_since_offset }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "events body is not an object"
 ;;
@@ -500,17 +514,18 @@ let events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit =
     limit
 ;;
 
-let journal_path ~encode_value ~keeper_name ~source ~since_seq ~since_offset ~limit =
+let journal_path ~encode_value ~keeper_name ~source ~since_seq ~since_offset ~limit ~follow =
   match source with
   | Operation operation_id ->
       Printf.sprintf "/api/v1/keepers/%s/chat/events?%s" (encode_value keeper_name)
         (events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit)
   | Autonomous_turn turn_ref ->
       let cursor name = function None -> "" | Some value -> Printf.sprintf "&%s=%d" name value in
-      Printf.sprintf "/api/v1/keepers/%s/turns/%s/events?limit=%d%s%s"
+      Printf.sprintf "/api/v1/keepers/%s/turns/%s/events?limit=%d%s%s%s"
         (encode_value keeper_name) (encode_value (Ids.Turn_ref.to_string turn_ref)) limit
         (cursor "since_seq" (Journal.replay_position_to_wire since_seq))
         (cursor "since_offset" (Journal.page_start_to_wire since_offset))
+        (if follow then "&follow=true" else "")
 ;;
 
 type events_error =

@@ -196,8 +196,6 @@ type event =
       ; frame : string option
       ; at : float
       }
-  | Keeper_turn_stream_frame of
-      { keeper : string; turn_ref : Ids.Turn_ref.t; seq : int; at : float }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
   | Keeper_async_requests_changed of { keeper : string }
@@ -269,7 +267,7 @@ let chat_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -280,7 +278,7 @@ let composite_changed_keeper = function
   | Keeper_metrics_appended _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -291,7 +289,7 @@ let metrics_appended_keeper = function
   | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -304,7 +302,7 @@ let tool_call_keeper = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -317,7 +315,7 @@ let memory_journal_appended_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -333,7 +331,7 @@ let held_calls_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -348,7 +346,7 @@ let tool_modes_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -361,7 +359,7 @@ let async_requests_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
@@ -373,7 +371,7 @@ let async_requests_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
@@ -385,7 +383,7 @@ let skill_activations_keeper = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
@@ -398,7 +396,7 @@ let skill_catalog_published = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
@@ -411,7 +409,7 @@ let lane_addon_exports_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
@@ -427,7 +425,7 @@ let dataset_owed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
@@ -442,7 +440,7 @@ let gate_connector_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
@@ -455,7 +453,7 @@ let goal_projection_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Skill_catalog | Runtime_config | Lane_addon_exports) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
@@ -472,7 +470,7 @@ let transport_health_measured = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
@@ -485,7 +483,7 @@ let turn_change = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_roster_change _ | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -497,7 +495,7 @@ let runtime_journal_appended = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -509,7 +507,7 @@ let schedules_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Pending_confirms | Goal_projection | Skill_catalog | Runtime_config | Lane_addon_exports) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -521,7 +519,7 @@ let event_queue_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
@@ -537,7 +535,7 @@ let pending_confirms_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Goal_projection | Skill_catalog | Runtime_config | Lane_addon_exports) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -553,7 +551,7 @@ let runtime_config_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Skill_catalog | Lane_addon_exports) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -569,7 +567,7 @@ let asks_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -581,7 +579,7 @@ let board_changed_post = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Approval_change _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -599,7 +597,7 @@ let gate_snapshot_changed = function
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
@@ -918,19 +916,6 @@ let decode_keeper_chat_operation_event fields =
   let* seq = optional_int_field fields "seq" ~event in
   Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at })
 
-let decode_keeper_turn_stream_event fields =
-  let event = "keeper_turn_stream_event" in
-  let* keeper = required string_field fields "name" ~event in
-  let* raw = required string_field fields "turn_ref" ~event in
-  let* turn_ref = match Ids.Turn_ref.of_string raw with
-    | Some turn_ref -> Ok turn_ref
-    | None -> Error "keeper_turn_stream_event has invalid turn_ref" in
-  let* at = required float_field fields "ts_unix" ~event in
-  let* seq = optional_int_field fields "seq" ~event in
-  match seq with
-  | Some seq when seq >= 0 -> Ok (Keeper_turn_stream_frame {keeper; turn_ref; seq; at})
-  | Some _ | None -> Error "keeper_turn_stream_event requires a nonnegative seq"
-
 (* Names the keeper in [keeper_name] rather than [name] -- the one broadcast
    in this family that does. Reading the field it actually sends is why this
    needs its own decoder instead of [decode_named_keeper_event]. *)
@@ -998,7 +983,6 @@ let reading_of_type type_name =
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_metrics_appended { keeper; at }))
   | "keeper_chat_operation_event" -> From_fields decode_keeper_chat_operation_event
-  | "keeper_turn_stream_event" -> From_fields decode_keeper_turn_stream_event
   | "keeper_waiting_inventory_changed" ->
       From_fields decode_keeper_waiting_inventory_changed
   | "fusion_run_status" ->

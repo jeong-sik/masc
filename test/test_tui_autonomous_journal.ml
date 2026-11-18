@@ -4,7 +4,6 @@ module Log = Masc_tui_keeper_chat_log
 module Journal = Masc.Keeper_chat_event_log
 module E = Masc.Keeper_chat_events
 module Types = Masc_tui_types
-module Observer = Masc_tui_observer
 
 let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-journal-fixture" ~absolute_turn:7
 let source = Log.Autonomous_turn turn_ref
@@ -12,33 +11,36 @@ let source = Log.Autonomous_turn turn_ref
 let test_source_routes_and_decodes () =
   let raw = Ids.Turn_ref.to_string turn_ref in
   let page = `Assoc ["schema", `String "masc.keeper_turn_events.v1";
-    "turn_ref", `String raw; "events", `List []; "has_more", `Bool false;
-    "next_since_seq", `Null; "next_since_offset", `Int 0] in
+    "turn_ref", `String raw; "turn_state", `String "running"; "events", `List [];
+    "has_more", `Bool false; "next_since_seq", `Null; "next_since_offset", `Int 0] in
   (match Log.decode_events_page page with
-   | Ok decoded -> check bool "autonomous source retained" true (decoded.source = source)
+   | Ok decoded ->
+       check bool "autonomous source retained" true (decoded.source = source);
+       check bool "turn state read" true (decoded.turn_state = Some Log.Turn_running)
    | Error detail -> fail detail);
+  (match page with
+   | `Assoc fields ->
+       (match Log.decode_events_page (`Assoc (List.remove_assoc "turn_state" fields)) with
+        | Error _ -> ()
+        | Ok _ -> fail "a turn page without turn_state was accepted")
+   | _ -> fail "fixture page is an object");
   check string "autonomous URL has no operation query"
     ("/api/v1/keepers/alpha/turns/" ^ raw ^ "/events?limit=20&since_seq=4")
     (Log.journal_path ~encode_value:Fun.id ~keeper_name:"alpha" ~source
-       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20);
+       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20 ~follow:false);
+  check string "a followed turn read asks the server to wait"
+    ("/api/v1/keepers/alpha/turns/" ^ raw ^ "/events?limit=20&since_seq=4&follow=true")
+    (Log.journal_path ~encode_value:Fun.id ~keeper_name:"alpha" ~source
+       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20 ~follow:true);
   check string "operation URL remains separate"
     "/api/v1/keepers/alpha/chat/events?operation_id=op-1&since_seq=4&limit=20"
     (Log.journal_path ~encode_value:Fun.id ~keeper_name:"alpha" ~source:(Log.Operation "op-1")
-       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20);
+       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20 ~follow:true);
   let log = Log.create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   check bool "log retains typed provenance" true (Log.source log = source);
   check string "display key joins persisted turn rows" raw (Log.request_id log)
 
-let test_notification_only_triggers_journal_read () =
-  let wire = "data: " ^ Yojson.Safe.to_string (`Assoc [
-    "type", `String "keeper_turn_stream_event"; "name", `String "alpha";
-    "turn_ref", `String (Ids.Turn_ref.to_string turn_ref);
-    "seq", `Int 2; "ts_unix", `Float 12.]) ^ "\n\n" in
-  let events = Observer.feed (Observer.create ()) wire in
-  (match events with
-   | [{Observer.decoded=Event (Keeper_turn_stream_frame {keeper="alpha"; turn_ref=observed; seq=2; at=12.}); _}] ->
-       check bool "exact autonomous turn observed" true (observed = turn_ref)
-   | _ -> fail "autonomous journal growth was not decoded");
+let test_follow_resumes_after_held_position () =
   let state = Types.create_state ~workspace:"test" ~port:8935 () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   let line seq ts event : Journal.journaled_event = {seq; ts; event} in
@@ -49,8 +51,7 @@ let test_notification_only_triggers_journal_read () =
   (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source
       ~seq:(Some 2) ~at:12. with
    | Types.Follow_read {since_seq=Journal.After_seq 1; _} -> ()
-   | _ -> fail "notification did not resume after the last journal position");
-  check int "notice itself appended no content" 2 (List.length (Log.entries log.tl_log));
+   | _ -> fail "follow did not resume after the last journal position");
   ignore (Types.turn_log_add_journaled log (lines @ [line 2 12. (E.Text_delta {text=" second"; response=Unobserved_scope (None)})]));
   let texts = Log.entries log.tl_log |> List.filter_map (fun entry ->
     match entry.Log.delta with
@@ -209,6 +210,6 @@ let () =
     ["consumer", [test_case "typed history closes visuals without retiring replay" `Quick test_history_closes_only_matching_autonomous_progress;
       test_case "the pane names the runtime of the turn answering" `Quick test_pane_execution_names_the_answering_runtime;
       test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
-      test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
+      test_case "follow resumes after the held journal position" `Quick test_follow_resumes_after_held_position;
       test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;
       test_case "autonomous checkpoint closes its journal source" `Quick test_autonomous_checkpoint_closes_its_source]]

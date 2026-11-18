@@ -1504,6 +1504,46 @@ let test_native_content_cannot_become_assistant_text () =
     [false; true]
 ;;
 
+(* A reader following a running turn waits on the turn's signal: an append
+   wakes it, and closing the turn wakes it once more, after which the turn
+   has no signal. *)
+let test_autonomous_turn_journal_wakes_its_follower () =
+  let module Stream = Masc.Keeper_autonomous_stream in
+  let base_dir = temp_base_path "keeper-autonomous-follow" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"follow-trace" ~absolute_turn:3 in
+      let stream = Stream.create ~base_path:base_dir ~keeper_name:"k" ~turn_ref in
+      let path = L.turn_journal_path ~base_dir ~keeper_name:"k" ~turn_ref in
+      let rows () = List.length (read_ok (L.read_journal_path_result path)) in
+      let grew =
+        match Stream.journal_grew ~base_path:base_dir ~keeper_name:"k" ~turn_ref with
+        | Some grew -> grew
+        | None -> Alcotest.fail "a running turn has no journal signal" in
+      Alcotest.(check bool) "another turn of the Keeper has no signal" true
+        (Option.is_none (Stream.journal_grew ~base_path:base_dir ~keeper_name:"k"
+           ~turn_ref:(Ids.Turn_ref.make ~trace_id:"follow-trace" ~absolute_turn:4)));
+      let before = rows () in
+      let woken = ref 0 in
+      Eio.Fiber.both
+        (fun () ->
+          Eio.Condition.loop_no_mutex grew (fun () ->
+            if rows () > before then (woken := rows (); Some ()) else None))
+        (fun () ->
+          Stream.on_event stream
+            (Agent_core.Types.ContentBlockDelta {index=1; delta=ThinkingDelta "checking\n"}));
+      Alcotest.(check bool) "an append wakes the follower" true (!woken > before);
+      Eio.Fiber.both
+        (fun () ->
+          Eio.Condition.loop_no_mutex grew (fun () ->
+            match Stream.current ~base_path:base_dir ~keeper_name:"k" with
+            | None -> Some ()
+            | Some _ -> None))
+        (fun () -> Stream.finish stream Stream.Cancelled);
+      Alcotest.(check bool) "a closed turn has no signal" true
+        (Option.is_none (Stream.journal_grew ~base_path:base_dir ~keeper_name:"k" ~turn_ref))))
+;;
+
 let test_autonomous_turn_journal_is_live_and_replayable () =
   let module Stream = Masc.Keeper_autonomous_stream in
   let base_dir = temp_base_path "keeper-autonomous-stream" in
@@ -1563,7 +1603,10 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (Sys.file_exists (L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:(Ids.Turn_ref.to_string turn_ref)));
       let page = {L.events=entries;has_more=false;next_offset=123} in
       let body = Server_dashboard_http_keeper_chat_operations.turn_events_page ~turn_ref
+          ~turn_state:Server_dashboard_http_keeper_chat_operations.Turn_ended
           ~since_seq:L.Whole_turn ~redact_text:Fun.id page in
+      Alcotest.(check string) "a closed turn's page says ended" "ended"
+        Yojson.Safe.Util.(body |> member "turn_state" |> to_string);
       let open Yojson.Safe.Util in
       Alcotest.(check string) "typed autonomous wire schema" "masc.keeper_turn_events.v1"
         (body |> member "schema" |> to_string);
@@ -1723,6 +1766,8 @@ let () =
             test_native_content_cannot_become_assistant_text
         ; Alcotest.test_case "autonomous turn stream is live and replayable" `Quick
             test_autonomous_turn_journal_is_live_and_replayable
+        ; Alcotest.test_case "autonomous turn journal wakes its follower" `Quick
+            test_autonomous_turn_journal_wakes_its_follower
         ; Alcotest.test_case
             "bus journal records every published event"
             `Quick

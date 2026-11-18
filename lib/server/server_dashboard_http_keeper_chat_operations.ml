@@ -325,7 +325,7 @@ let no_journal_for_settled_operation_message ~operation_id =
   "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
-let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper_chat_event_log.page) =
+let journal_events_page ~schema ~identity ~extra ~since_seq ~redact_text (page : Keeper_chat_event_log.page) =
   (* The position to feed back: after the last event served, or the caller's
      own position when the page is empty — [null] when that was the whole
      journal, since a response field cannot be absent the way a request field
@@ -337,7 +337,7 @@ let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper
       Keeper_chat_event_log.After_seq last.seq
   in
   `Assoc
-    [ "schema", `String schema
+    ([ "schema", `String schema
     ; identity
     ; ( "events"
       , `List
@@ -350,16 +350,40 @@ let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper
     ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
     ; "next_since_offset", `Int page.next_offset
     ]
+    @ extra)
 ;;
 
 let chat_events_page ~operation_id ~since_seq ~redact_text page =
   journal_events_page ~schema:"masc.keeper_chat_events.v2"
-    ~identity:("operation_id", `String operation_id) ~since_seq ~redact_text page
+    ~identity:("operation_id", `String operation_id) ~extra:[] ~since_seq ~redact_text page
 ;;
 
-let turn_events_page ~turn_ref ~since_seq ~redact_text page =
+type turn_state = Turn_running | Turn_ended
+
+let turn_state_to_wire = function Turn_running -> "running" | Turn_ended -> "ended"
+
+let turn_events_page ~turn_ref ~turn_state ~since_seq ~redact_text page =
   journal_events_page ~schema:"masc.keeper_turn_events.v1"
-    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_text page
+    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref))
+    ~extra:[ "turn_state", `String (turn_state_to_wire turn_state) ]
+    ~since_seq ~redact_text page
+;;
+
+(* How long a [follow=true] read waits for the turn's journal to grow. It
+   stays below the TUI's 10 s request timeout ([bin/masc_tui_http.ml]), so a
+   quiet turn's read ends as an empty page rather than a client timeout. It
+   also ends a read whose client left: with the serving domain off, the
+   handler runs on the connection's fiber and cannot see the client go. *)
+let follow_wait_s = 8.0
+
+let parse_follow request =
+  match Server_utils.query_param request "follow" with
+  | None -> Ok false
+  | Some raw ->
+    (match String.trim raw with
+     | "true" -> Ok true
+     | "false" -> Ok false
+     | _ -> Error (invalid_input "follow must be true or false"))
 ;;
 
 (* Everything the events route reads off the query, parsed once. The handler
@@ -417,44 +441,73 @@ let handle_get state request reqd = function
       let* since_seq = parse_since_seq request in
       let* start = parse_since_offset request in
       let* limit = parse_limit request in
-      Ok (turn_ref, since_seq, start, limit)
+      let* follow = parse_follow request in
+      Ok (turn_ref, since_seq, start, limit, follow)
     in
     (match query with
      | Error error -> respond_error request reqd error
-     | Ok (turn_ref, since_seq, start, limit) ->
+     | Ok (turn_ref, since_seq, start, limit, follow) ->
        let base_path = base_path state in
        let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-       let render page =
-         page
-         |> Result.map (turn_events_page ~turn_ref ~since_seq
-              ~redact_text:(Keeper_secret_redaction.redact_text redaction))
-         |> Result.map_error page_failure_error
+       let redact_text = Keeper_secret_redaction.redact_text redaction in
+       let running () =
+         Option.is_some (Keeper_autonomous_stream.journal_grew ~base_path ~keeper_name ~turn_ref)
        in
-       (* Reading the page's rows, decoding them and building the JSON are one
-          job off the serving fiber; the read covers the page, not the
-          journal. *)
-       let page =
+       (* Reading the page's rows and decoding them are one job off the
+          serving fiber; the read covers the page, not the journal. *)
+       let read_page () =
          match
            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-             Keeper_chat_event_log.read_page_path ~path ~since_seq ~start ~limit
-             |> Result.map render)
+             Keeper_chat_event_log.read_page_path ~path ~since_seq ~start ~limit)
          with
-         | Ok rendered -> rendered
+         | Ok page -> Result.map_error page_failure_error page
          | Error Keeper_chat_event_log.Journal_missing ->
-             (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
-              | Some current when Ids.Turn_ref.equal current turn_ref ->
-                render (Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit "")
-              | Some _ | None -> Error (public_error Public_error.Journal_missing "No autonomous event journal exists for this turn"))
+             if running () then
+               Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit ""
+               |> Result.map_error page_failure_error
+             else Error (public_error Public_error.Journal_missing "No autonomous event journal exists for this turn")
          | Error (Journal_unreadable detail) -> Error (unavailable Public_error.Journal_unreadable detail)
          | Error (Journal_corrupt detail) -> Error (unavailable Public_error.Journal_corrupt detail)
          | Error (Journal_unsupported_version version) ->
              Error (public_error Public_error.Journal_unsupported_version
                (Keeper_chat_event_log.version_mismatch_to_string version))
        in
-       (match page with
-        | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
-        | Error error -> respond_error request reqd error))
+       (* The state is sampled before the page is read. A closing turn
+          appends its last rows before it leaves the running table, so a
+          page read after an [ended] sample holds every row the turn wrote. *)
+       let sample () =
+         let turn_state = if running () then Turn_running else Turn_ended in
+         turn_state, read_page ()
+       in
+       (* A followed read of a running turn with nothing past the cursor
+          waits for the turn's journal to grow or the turn to close. The
+          signal is registered before each read, so a row appended while a
+          page is read wakes the read at once. *)
+       let answer =
+         match follow, Keeper_autonomous_stream.journal_grew ~base_path ~keeper_name ~turn_ref,
+               Eio_context.get_clock_opt () with
+         | true, Some grew, Some clock ->
+             (match
+                Eio.Time.with_timeout clock follow_wait_s (fun () ->
+                  Ok (Eio.Condition.loop_no_mutex grew (fun () ->
+                    match sample () with
+                    | Turn_running, Ok (page : Keeper_chat_event_log.page) when page.events = [] -> None
+                    | ((Turn_running | Turn_ended), (Ok _ | Error _)) as answer -> Some answer)))
+              with
+              | Ok answer -> answer
+              | Error `Timeout -> sample ())
+         | true, Some _, None | true, None, (Some _ | None) | false, (Some _ | None), (Some _ | None) ->
+             sample ()
+       in
+       (match answer with
+        | turn_state, Ok page ->
+            let body =
+              Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+                turn_events_page ~turn_ref ~turn_state ~since_seq ~redact_text page)
+            in
+            Server_auth.respond_json_value_with_cors request reqd body
+        | (Turn_running | Turn_ended), Error error -> respond_error request reqd error))
   | Chat_events { keeper_name } ->
     (match parse_events_request request with
      | Error error -> respond_error request reqd error

@@ -20,10 +20,17 @@ import {
   fetchKeeperChatHistory,
   fetchKeeperChatHistoryPage,
   fetchKeeperToolApprovals,
+  interruptKeeperChatOperation,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
 } from './api/keeper'
-import type { KeeperChatOperation, KeeperStreamSurfaceContext, KeeperToolApprovalRow } from './api/keeper'
+import { keeperChatOperationRefusalCode } from './api/keeper-chat-operation-refusal'
+import type {
+  KeeperChatOperation,
+  KeeperChatOperationInterrupt,
+  KeeperStreamSurfaceContext,
+  KeeperToolApprovalRow,
+} from './api/keeper'
 import { answerKeeperToolApproval } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
@@ -109,12 +116,21 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const EMPTY_VISIBLE_REPLY_TEXT =
   'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
-type KeeperThreadCancelOutcome = 'cancelling' | 'cancelled'
+/** What stopping one chat operation came to.
+ *  - `cancelled`: it was still queued, and the server cancelled it.
+ *  - `interrupting`: a turn of it was running, and the server signalled that
+ *    turn. The operation ends when the signal reaches the turn; its own state
+ *    says when.
+ *  - `nothing_to_stop`: it had left the queue and no turn of it was running.
+ *  - `not_stopped`: the stop did not take, and `message` says why. The
+ *    operation is where it was. */
+type KeeperThreadCancelOutcome =
+  | { readonly kind: 'cancelled' }
+  | { readonly kind: 'interrupting' }
+  | { readonly kind: 'nothing_to_stop' }
+  | { readonly kind: 'not_stopped'; readonly message: string }
 
-const pendingKeeperThreadCancels = new Map<
-  string,
-  Promise<KeeperThreadCancelOutcome | null>
->()
+const pendingKeeperThreadCancels = new Map<string, Promise<KeeperThreadCancelOutcome>>()
 const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
 const keeperStreamSignalWrites = new Map<string, number>()
 
@@ -177,32 +193,87 @@ function clearKeeperStreamSignal(keeperName: string): void {
   setRecordValue(keeperStreamLastEventAt, name, null)
 }
 
+/** Stop one chat operation the way its state allows. Cancelling applies to a
+ *  queued operation. When the server does not cancel, a turn of the operation
+ *  may be running, and the stop goes to that turn, named by the same id. That
+ *  holds whatever the refusal says: a message bound to a shared execution is
+ *  refused as input the cancel does not take, and the server finds the
+ *  execution that carries it from the message's id. The cancel is asked first
+ *  because an operation moves from the queue into a turn, so the second
+ *  request meets the state the first one missed. */
+async function stopKeeperChatOperation(
+  name: string,
+  id: string,
+  signal: AbortSignal | undefined,
+): Promise<KeeperThreadCancelOutcome> {
+  let refused: unknown
+  try {
+    await (signal ? cancelKeeperChatOperation(name, id, { signal }) : cancelKeeperChatOperation(name, id))
+    removeTrackedKeeperChatOperation(id)
+    releaseLiveSendRequest(id)
+    return { kind: 'cancelled' }
+  } catch (err) {
+    refused = err
+  }
+  // Only this refusal says the operation is out of the queue. After any other
+  // one it may still be queued, so a turn that is not running leaves the
+  // operation as it was and the refusal is the answer.
+  const leftQueue = keeperChatOperationRefusalCode(refused) === 'not_queued'
+  let interrupt: KeeperChatOperationInterrupt
+  try {
+    interrupt = await (signal
+      ? interruptKeeperChatOperation(name, id, { signal })
+      : interruptKeeperChatOperation(name, id))
+  } catch (err) {
+    throw leftQueue ? err : refused
+  }
+  if (interrupt.kind === 'signalled') return { kind: 'interrupting' }
+  if (!leftQueue) throw refused
+  switch (interrupt.kind) {
+    case 'not_current':
+    case 'settling':
+    case 'paused_pending_admission':
+      return { kind: 'nothing_to_stop' }
+    case 'maintenance_running':
+      throw new Error(keeperTurnEndedUnsettledMessage('a maintenance run', interrupt.kind))
+    case 'slot_held_by_autonomous_turn':
+      throw new Error(keeperTurnEndedUnsettledMessage('an autonomous turn', interrupt.kind))
+    case 'cancel_failed':
+    case 'owner_unavailable':
+      throw new Error(`the running turn was not stopped (${interrupt.kind}${interrupt.detail ? `: ${interrupt.detail}` : ''})`)
+  }
+}
+
+/** The operation still reads as running, but its own turn has ended and only
+ *  its record is unwritten. What holds the Keeper now is not this operation's,
+ *  and a stop that names the operation does not reach it. */
+function keeperTurnEndedUnsettledMessage(holder: string, code: string): string {
+  return `the turn of this operation has ended and its record is not written yet; ${holder} holds the Keeper and was not stopped (${code})`
+}
+
+/** Ask the server to stop one chat operation and say what came of it. A stop
+ *  already on the wire for the same operation is the one that answers. */
 export function cancelKeeperThreadRequest(
   keeperName: string,
   requestId: string,
   opts: { signal?: AbortSignal } = {},
-): Promise<KeeperThreadCancelOutcome | null> {
+): Promise<KeeperThreadCancelOutcome> {
   const name = keeperName.trim()
   const id = requestId.trim()
-  if (!name || !id) return Promise.resolve(null)
+  if (!name || !id) {
+    return Promise.resolve({ kind: 'not_stopped', message: 'A stop needs the Keeper and the operation it names.' })
+  }
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
-  const promise = (opts.signal
-    ? cancelKeeperChatOperation(name, id, { signal: opts.signal })
-    : cancelKeeperChatOperation(name, id))
-    .then(result => {
-      if (result.state.kind === 'cancelled') {
-        removeTrackedKeeperChatOperation(id)
-        releaseLiveSendRequest(id)
-      }
-      setRecordValue(keeperActionErrors, name, null)
-      return 'cancelled' as const
-    })
-    .catch((err) => {
+  const promise = stopKeeperChatOperation(name, id, opts.signal)
+    .catch((err): KeeperThreadCancelOutcome => {
       const message = keeperThreadCancelFailureMessage(name, id, err)
-      console.warn('[keeper] server cancel failed', message)
-      setRecordValue(keeperActionErrors, name, message)
-      return null
+      console.warn('[keeper] server stop failed', message)
+      return { kind: 'not_stopped', message }
+    })
+    .then(outcome => {
+      setRecordValue(keeperActionErrors, name, outcome.kind === 'not_stopped' ? outcome.message : null)
+      return outcome
     })
     .finally(() => {
       pendingKeeperThreadCancels.delete(id)
@@ -1148,13 +1219,21 @@ export async function hydrateTrackedKeeperChatOperations(name: string): Promise<
   await Promise.all(trackedKeeperChatOperationsForKeeper(keeperName).map(request => hydrateTrackedKeeperChatOperation(request)))
 }
 
+/** Watch an operation whose stream the operator stopped and whose stop did not
+ *  end it. `stopFailure` is why the stop did not take, when it did not. */
 async function handoffCancelledStreamToOperationHydration(
   request: TrackedKeeperChatOperation,
   localEntryIds: readonly string[],
+  stopFailure: string | null,
 ): Promise<void> {
   removeThreadEntries(request.keeperName, localEntryIds)
   releaseLiveSendRequest(request.operationId)
-  await hydrateTrackedKeeperChatOperation(request)
+  const settled = hydrateTrackedKeeperChatOperation(request)
+  // Resuming the watch starts the Keeper's action error from nothing, in the
+  // same task the stop answered in. Said before that, the reason the turn is
+  // still running would never reach the screen.
+  if (stopFailure !== null) setRecordValue(keeperActionErrors, request.keeperName, stopFailure)
+  await settled
 }
 
 /** React to a server `keeper_chat_appended` push: re-merge the
@@ -1668,11 +1747,12 @@ export async function sendKeeperThreadMessage(
           streamState: 'cancelling',
           error: null,
         })
-        const outcome = await cancelKeeperThreadRequest(keeperName, operationId)
-        if (outcome !== 'cancelled') {
+        const stop = await cancelKeeperThreadRequest(keeperName, operationId)
+        if (stop.kind !== 'cancelled') {
           await handoffCancelledStreamToOperationHydration(
             pendingRequest,
             [localId, assistantId],
+            stop.kind === 'not_stopped' ? stop.message : null,
           )
           throw err
         }

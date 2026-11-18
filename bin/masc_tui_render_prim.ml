@@ -1174,7 +1174,8 @@ let surface_strip (state : state) ~cols =
      how the operator moves. The mark and its word are always drawn, because
      a screen that draws nothing is explained by them. *)
   let connection_style, connection = strip_connection_reading state in
-  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:(Unix.gettimeofday ()) in
+  let clock_now = Unix.gettimeofday () in
+  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:clock_now in
   let ring_cells =
     let cells = ref 0 in
     Array.iteri
@@ -1194,7 +1195,10 @@ let surface_strip (state : state) ~cols =
     if 1 + ring_cells + badge_reserved + strip_reading_gap_cells
        + Message_layout.display_width connection + strip_reading_gap_cells
        + Message_layout.display_width wall_clock <= cols
-    then Some wall_clock
+    then begin
+      Masc_tui_value.Redraw.note_change_at (Masc_tui_value.Instant.next_minute ~now:clock_now);
+      Some wall_clock
+    end
     else None
   in
   let reading_cells =

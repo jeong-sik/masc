@@ -362,67 +362,33 @@ let test_terminal_size_retains_raw_resize_signal () =
       (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
        = Schedule.Terminal_size_cache.Unchanged (24,4))) [1;2;3;4;2;1]
 
-let test_activity_motion_only_uses_the_fast_clock_when_visible () =
-  let module Tick = Schedule.Activity_tick in
-  let count ~visible =
-    let tick = Tick.create ~motion_interval_ns:(ms 150) ~now_ns:0L in
-    let advances = ref 0 in
-    for offset = 1 to 5000 do
-      match Tick.take tick ~now_ns:(ms offset) ~running:true ~motion_visible:visible with
-      | Tick.Advance -> incr advances
-      | Quiet -> ()
-      | Stop -> fail "running work was stopped"
-    done;
-    !advances in
-  check int "hidden work retains the seconds needed by age/read notices" 5
-    (count ~visible:false);
-  check int "visible motion retains its existing interval" 33
-    (count ~visible:true)
+(* RFC tui-one-screen-grammar §8 and §10: a frame that only time asks for is
+   drawn on the first whole second at or after the first change of visible
+   time text, and never at or before the moment it is scheduled from. *)
+let test_time_renders_on_the_second_after_the_first_change () =
+  let module Time = Schedule.Time_redraw in
+  check (option (float 1e-9)) "a change within a second waits for its boundary"
+    (Some 101.) (Time.due ~now:99.2 (Some 100.3));
+  check (option (float 1e-9)) "a change on a boundary is drawn on it" (Some 100.)
+    (Time.due ~now:99.5 (Some 100.));
+  check (option (float 1e-9)) "a change already passed is drawn on the next boundary"
+    (Some 101.) (Time.due ~now:100.2 (Some 100.));
+  check (option (float 1e-9)) "a change far ahead keeps its own boundary" (Some 160.)
+    (Time.due ~now:100.2 (Some 159.01))
 
-let test_activity_visibility_changes_and_stops_do_not_add_delays () =
-  let module Tick = Schedule.Activity_tick in
-  let tick = Tick.create ~motion_interval_ns:(ms 150) ~now_ns:0L in
-  let take at ~running ~visible =
-    Tick.take tick ~now_ns:(ms at) ~running ~motion_visible:visible in
-  check bool "hidden clock is not a motion deadline" true
-    (take 900 ~running:true ~visible:false = Tick.Quiet);
-  check bool "showing motion does not wait for the hidden seconds deadline" true
-    (take 900 ~running:true ~visible:true = Tick.Advance);
-  check bool "covering motion returns to the age/read clock" true
-    (take 1050 ~running:true ~visible:false = Tick.Quiet);
-  check bool "age/read notices keep advancing" true
-    (take 1900 ~running:true ~visible:false = Tick.Advance);
-  check bool "finishing resets the old mark once" true
-    (take 1901 ~running:false ~visible:true = Tick.Stop);
-  check bool "idle needs no further work" true
-    (take 2901 ~running:false ~visible:true = Tick.Quiet);
-  check bool "new visible work resumes after an idle gap" true
-    (take 3000 ~running:true ~visible:true = Tick.Advance)
-
-let test_activity_demand_belongs_to_one_top_frame_and_domain () =
-  let module Tick = Schedule.Activity_tick in
-  Tick.begin_frame ();
-  check bool "a new top frame has no inherited motion" false (Tick.motion_visible ());
-  Tick.note_motion ();
-  check bool "an emitted running mark requests motion" true (Tick.motion_visible ());
-  let worker = Domain.spawn Tick.motion_visible in
-  check bool "a preparation domain cannot inherit the UI demand" false (Domain.join worker);
-  check bool "the UI still owns its recorded demand" true (Tick.motion_visible ());
-  Tick.begin_frame ();
-  check bool "an overlay or external picture retires the prior demand" false
-    (Tick.motion_visible ())
+let test_no_time_text_schedules_nothing () =
+  check (option (float 1e-9)) "a frame with no time text" None
+    (Schedule.Time_redraw.due ~now:100.2 None)
 
 let () =
   test_terminal_size_retains_raw_resize_signal ();
   test_terminal_size_retains_raw_resize_signal ();
   run "tui_render_schedule"
     [ ( "render scheduling"
-      , [ test_case "activity motion follows visible demand" `Quick
-            test_activity_motion_only_uses_the_fast_clock_when_visible
-        ; test_case "activity visibility and stop transitions keep their deadlines" `Quick
-            test_activity_visibility_changes_and_stops_do_not_add_delays
-        ; test_case "activity demand belongs to the top frame and UI domain" `Quick
-            test_activity_demand_belongs_to_one_top_frame_and_domain
+      , [ test_case "time renders on the second after the first change" `Quick
+            test_time_renders_on_the_second_after_the_first_change
+        ; test_case "no time text schedules nothing" `Quick
+            test_no_time_text_schedules_nothing
         ; test_case "idle performs no render work" `Quick
             test_idle_has_no_render_work
         ; test_case "1000 invalidations coalesce" `Quick

@@ -32392,8 +32392,9 @@ let main
 
   (* Main loop *)
   let machine_input_timeout_s = 0.3 in
-  let activity_tick = Render_schedule.Activity_tick.create
-      ~motion_interval_ns:Masc_tui_types.motion_step_ns ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  (* The wall-clock second at which the time text of the last built frame
+     next reads differently, [None] when that frame drew none. *)
+  let time_redraw_due = ref None in
   let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
@@ -44899,43 +44900,16 @@ Use relative paths for resources already held in the package. -->
       (* Pending HTTP readers keep the last observed contact. Their own
          progress carries elapsed time; a slow reader is not a reconnect. *)
       let now_ns = Mtime_clock.elapsed_ns () in
-      (* Periodic refresh *)
-      (* Only a moving mark emitted by the top frame needs the motion
-         interval. Hidden work still keeps a whole-second clock for visible
-         elapsed/read/age notices, including overlays and the Activity pane.
-         About keeps its independent clock below. *)
-      let awaiting_detail_read =
-        state.view = Keepers Keeper_detail
-        && (match Masc_tui_types.selected_keeper state with
-            | None -> false
-            | Some keeper ->
-                Masc_tui_types.detail_read_waiting state
-                  ~tab:state.detail_tab ~keeper:keeper.k_name)
-      in
-      (* Turns are not read while nothing uses them, so the rows kept from the
-         last read may still say running; they drive no motion then. *)
-      let anything_running =
-        Masc_tui_answering.anything_running
-          ~turns:(if keeper_turns_in_use state then state.keeper_turns else [])
-          ~live_transcript:(Option.is_some state.msg_live)
-          ~lanes:state.standalone_lanes ~awaiting_detail_read
-      in
-      (* An in-flight read keeps its age-gated row current without fetching
-         again or advancing a running mark. The existing activity controller
-         supplies its read clock when no moving mark is visible. *)
-      let pending_row_live =
-        Option.is_some (local_source_pending state Local_keepers)
-        || Option.is_some (local_source_pending state Local_work)
-        || Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read)
-      in
-      (match Render_schedule.Activity_tick.take activity_tick ~now_ns
-          ~running:(anything_running || pending_row_live)
-          ~motion_visible:(anything_running
-            && Render_schedule.Activity_tick.motion_visible ()
-            && not state.image_open && not state.msx_open) with
-       | Quiet -> ()
-       | Stop | Advance ->
-           Render_schedule.request render_schedule Render_schedule.Background);
+      (* Without new data only time text changes: the zone-1 clock, moments
+         and lengths (RFC tui-one-screen-grammar §8). The last built frame
+         said when its first such text reads differently; the frame for that
+         is drawn on the following whole second, and a frame with no such
+         text schedules none. About keeps its independent clock below. *)
+      (match !time_redraw_due with
+       | Some due when Unix.gettimeofday () >= due ->
+           time_redraw_due := None;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Some _ | None -> ());
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew
          motion immediately before the reader left. *)
@@ -45047,11 +45021,13 @@ Use relative paths for resources already held in the package. -->
               last frame comes down rather than float over the picture.
               Closing the picture repaints in full, and the candle steps
               again from that frame. *)
-           Render_schedule.Activity_tick.begin_frame ();
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
            Masc_tui_approval_detail.begin_frame ();
+           (* The picture draws no time text. Closing it repaints in full,
+              and that frame says when time next changes its text. *)
+           time_redraw_due := None;
            Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
@@ -45077,6 +45053,7 @@ Use relative paths for resources already held in the package. -->
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
+                 Masc_tui_value.Redraw.begin_frame ();
                  Masc_tui_message_layout.begin_frame ();
                  Masc_tui_approval_detail.begin_frame ();
                  Masc_tui_approvals_model.reconcile_value_reading state;
@@ -45133,6 +45110,9 @@ Use relative paths for resources already held in the package. -->
                    | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)
            in
+           time_redraw_due :=
+             Render_schedule.Time_redraw.due ~now:(Unix.gettimeofday ())
+               (Masc_tui_value.Redraw.next_change ());
            let terminal_rows, cols = get_terminal_size () in
            let change_authority = Masc_tui_render_repositories.repository_changes_authority state
                ~surface_key:frame.Frame_presenter.surface_key ~terminal_rows ~cols in

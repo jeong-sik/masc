@@ -853,7 +853,6 @@ let render ~home ~compact_recovery_notice (state : state) =
   Masc_tui_types.keeper_message_rows_begin_frame ();
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
-  Render_schedule.Activity_tick.begin_frame ();
   Masc_tui_emblem_screen.begin_frame ();
   Masc_tui_portrait_view.begin_frame ();
   let frame, clamped, approval, drawn =

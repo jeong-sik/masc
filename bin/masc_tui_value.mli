@@ -74,8 +74,12 @@ module Instant : sig
 
   val wall_clock : now:float -> string
   (** The current time with the zone every other moment on the screen is
-      drawn in ([15:43 UTC+9]). The one place a screen names the zone. Notes
-      the next local minute with {!Redraw.note_change_at}. *)
+      drawn in ([15:43 UTC+9]). The one place a screen names the zone. *)
+
+  val next_minute : now:float -> float
+  (** The instant the local minute next turns over: when {!wall_clock} next
+      reads differently. A screen that draws the clock notes it with
+      {!Redraw.note_change_at}; one too narrow to draw it does not. *)
 end
 
 (** The length of something still going, how long ago something happened, or

@@ -95,12 +95,12 @@ module Instant = struct
 
   let seconds_per_minute = 60
 
+  let next_minute ~now =
+    let local = Unix.localtime now in
+    Float.floor now +. Float.of_int (seconds_per_minute - local.Unix.tm_sec)
+
   let wall_clock ~now =
     let local = Unix.localtime now in
-    (* The clock reads to the minute, so it next reads differently when the
-       local minute turns over. *)
-    Redraw.note_change_at
-      (Float.floor now +. Float.of_int (seconds_per_minute - local.Unix.tm_sec));
     clock To_minute local ^ " "
     ^ zone_label ~offset_minutes:(offset_minutes ~utc:(Unix.gmtime now) ~local)
 end

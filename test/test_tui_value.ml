@@ -182,6 +182,18 @@ let test_a_countdown_changes_below_its_reading_floor () =
         (String.equal (Ongoing.text left) (Ongoing.text (floor -. 0.001))))
     [ 1.5; 59.9; 60.; 125.3; 3600.; 7322.; 86_400.5; 101. *. seconds_per_day ]
 
+(* The zone-1 clock next reads differently when the local minute turns. *)
+let test_the_clock_changes_on_the_next_minute () =
+  List.iter
+    (fun now ->
+      let next = Instant.next_minute ~now in
+      Alcotest.(check bool) "within a minute" true (next > now && next -. now <= 60.);
+      Alcotest.(check bool) "the same reading just before" true
+        (String.equal (Instant.wall_clock ~now) (Instant.wall_clock ~now:(next -. 0.001)));
+      Alcotest.(check bool) "another from then" false
+        (String.equal (Instant.wall_clock ~now) (Instant.wall_clock ~now:next)))
+    [ 1_794_050_000.; 1_794_050_059.9; 1_794_050_060.; 1_794_052_799.5 ]
+
 (* What a frame notes is when its earliest time text changes. *)
 let test_a_frame_notes_its_earliest_change () =
   Redraw.begin_frame ();
@@ -232,6 +244,8 @@ let () =
             test_next_change_is_the_first_instant_the_reading_differs
         ; Alcotest.test_case "a countdown changes below its floor" `Quick
             test_a_countdown_changes_below_its_reading_floor
+        ; Alcotest.test_case "the clock changes on the next minute" `Quick
+            test_the_clock_changes_on_the_next_minute
         ; Alcotest.test_case "a frame notes its earliest change" `Quick
             test_a_frame_notes_its_earliest_change
         ] )

@@ -12673,7 +12673,16 @@ let board_census_values (state : state) =
    age and the elapsed seconds say how long it has been stuck. *)
 let pending_display_bar_ns = 1_000_000_000L
 
-let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+(* A read inside the bar draws its row when it crosses the bar, with no new
+   data, so the crossing is when time next changes the frame (RFC
+   tui-one-screen-grammar §8). *)
+let past_pending_display_bar age =
+  let past = Int64.compare age pending_display_bar_ns >= 0 in
+  if not past then
+    Masc_tui_value.Redraw.note_change_at
+      (Unix.gettimeofday ()
+       +. Int64.to_float (Int64.sub pending_display_bar_ns age) /. 1e9);
+  past
 
 (* Totals stay borrowable while an ordinary poll is in flight -- the census
    on screen is the last reading until a newer one lands, and dropping the
@@ -18123,8 +18132,16 @@ let pending_seconds_floor = 2
 let loading_notice ?elapsed_s what =
   match elapsed_s with
   | Some seconds when seconds >= pending_seconds_floor ->
-      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
-  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+      Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
+        (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) (float_of_int seconds))
+  | Some seconds ->
+      (* The seconds appear when the read reaches the floor, with no new
+         data, so that is when time next changes this text (RFC
+         tui-one-screen-grammar §8). *)
+      Masc_tui_value.Redraw.note_change_at
+        (Unix.gettimeofday () +. float_of_int (pending_seconds_floor - seconds));
+      Printf.sprintf "(%s\xe2\x80\xa6)" what
+  | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
 
 let nanoseconds_per_second = 1_000_000_000L
 

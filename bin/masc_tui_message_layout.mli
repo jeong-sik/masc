@@ -568,15 +568,12 @@ val compact_count : int -> string
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 
-    Exported because the marquee in {!Masc_tui_roster_pane} is a cut this
-    module does not make: it holds a window open and moves the name behind it,
-    marking whichever end still has text. Spelling the glyph there again is how
-    one cut site gets left behind when the mark changes. *)
+    Exported for the cuts other modules make themselves. Spelling the glyph
+    there again is how one cut site gets left behind when the mark changes. *)
 
 val cut_mark_cells : int
-(** Cells {!cut_mark} spends, so a caller budgeting around one mark -- or, in
-    the marquee's case, around two -- takes the number from the mark rather
-    than writing it. *)
+(** Cells {!cut_mark} spends, so a caller budgeting around the mark takes
+    the number from the mark rather than writing it. *)
 
 val fitted_source_bytes : string -> int -> int
 (** Length in bytes of the unstyled semantic prefix retained by [fit_width],

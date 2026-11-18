@@ -48,9 +48,11 @@ val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
 val engine_graph_capacity : cols:int -> state -> int option
 (** How many [/health] samples the engine graphs keep at this terminal width
-    ([Some]) while Telemetry's engine section is on screen and its cards draw
-    them; [None] otherwise, when nothing is sampled (RFC tui-one-screen-grammar
-    section 5.6). *)
+    ([Some]) while Telemetry's engine section is the surface's view; [None]
+    for any other view, when nothing is sampled (RFC tui-one-screen-grammar
+    section 5.6). This reads the view alone; a screen drawn over the whole terminal (the
+    frame [Masc_tui_render.frame_choice] picks) hides it too, and the loop
+    asks only while the surface is the frame. *)
 
 type session_entry = {
   event : event;

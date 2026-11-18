@@ -10455,11 +10455,29 @@ let launch_engine_sample_read state ~mailbox =
    own. Off the engine view its samples go and nothing is due. On it, a due
    sample takes the newest [/health] answer of the last two seconds, whoever
    asked for it, or asks [/health] itself, one read at a time. A sample taken
-   is new data, so it is drawn as any answer is (section 8). *)
+   is new data, so it is drawn as any answer is (section 8).
+   The view is on screen only while the surface is the frame: the help sheet,
+   a reader, the account server's screen or the too-small notice draws over
+   the whole terminal, and the graphs under it are not sampled. *)
 let step_engine_samples state ~mailbox ~render_schedule =
-  let _, cols = get_terminal_size () in
+  let terminal_rows, cols = get_terminal_size () in
   let now = monotonic_now_s () in
-  match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
+  let capacity =
+    match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
+    | None -> None
+    | Some capacity ->
+      (match
+         Masc_tui_render.frame_choice state ~terminal_rows
+           ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+           ~now:(Unix.gettimeofday ())
+       with
+       | `Surface -> Some capacity
+       | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Queue _ | `Link
+       | `Client_detail _ -> None)
+  in
+  match capacity with
   | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
   | Some capacity ->
     let samples, step =

@@ -51,6 +51,7 @@ let read_error_text : Store.read_error -> string = function
   | Row_undecodable { offset; reason = Malformed error } ->
     Printf.sprintf "row at %d: %s" offset (Masc.Keeper_memory_os_types.wire_error_to_string error)
   | Log_start_missing -> "log start missing"
+  | Moved_while_reading -> "moved while reading"
 ;;
 
 let append_error_text : Store.append_error -> string = function
@@ -157,6 +158,22 @@ let test_stale_end_writes_nothing () =
   check string "the file is as it was" before (file_bytes path)
 ;;
 
+(* The file was replaced by one of the same length that ends in a fragment.
+   The end that was read is its length, yet no row ends there. *)
+let test_replaced_by_a_file_that_ends_in_a_fragment () =
+  let path = new_path () in
+  let after_start = appended path ~at_end:0 (started, []) in
+  let replacement = String.make after_start 'x' in
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel replacement);
+  (match Store.append ~path ~at_end:after_start (opened 5, []) with
+   | Error (End_moved { expected; actual }) ->
+     check (pair int int) "the caller is told to read the tail again" (after_start, after_start)
+       (expected, actual)
+   | Error other -> failf "expected End_moved, got %s" (append_error_text other)
+   | Ok (_ : Store.appended) -> fail "an append after a fragment that was counted as rows");
+  check string "the file is as it was" replacement (file_bytes path)
+;;
+
 (* A crash can leave the start of a line with no line break. It was never a
    line: the tail stops before it and the next append cuts it. *)
 let test_torn_fragment () =
@@ -221,6 +238,8 @@ let () =
     ; ( "append"
       , [ test_case "two lines in one append" `Quick test_two_lines_in_one_append
         ; test_case "a stale end writes nothing" `Quick test_stale_end_writes_nothing
+        ; test_case "a file replaced by one that ends in a fragment" `Quick
+            test_replaced_by_a_file_that_ends_in_a_fragment
         ] )
     ]
 ;;

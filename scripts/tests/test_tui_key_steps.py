@@ -124,6 +124,17 @@ class LayoutTest(unittest.TestCase):
     def test_a_card_whose_bottom_is_off_screen_still_counts(self) -> None:
         self.assertIs(layout_of(screen(CARDS[:3])).kind, Kind.CARDS)
 
+    def test_one_edge_alone_makes_cards(self) -> None:
+        layout = layout_of(screen(('', '╰──────────╯', '')))
+        self.assertIs(layout.kind, Kind.CARDS)
+        self.assertEqual(layout.card_rows, (1,))
+
+    def test_an_opening_before_a_closing_starts_the_edge_over(self) -> None:
+        # The first opening has no closing of its own, so the edge runs from
+        # the second opening (cell 5) to the closing (cell 11), not from cell 0.
+        edges = layout_of(screen(('╭─ a ╭─ b ─╮',))).edges
+        self.assertEqual([(edge.start, edge.end, edge.shape) for edge in edges], [(5, 11, Shape.TOP)])
+
 
 class ChangedRowsTest(unittest.TestCase):
     def test_a_moved_highlight_changes_cells_but_not_text(self) -> None:

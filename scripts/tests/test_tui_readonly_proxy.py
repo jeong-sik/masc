@@ -30,6 +30,8 @@ from typing import cast
 import unittest
 
 RELAY = Path(__file__).resolve().parent.parent / 'harness' / 'tui' / 'readonly_proxy.py'
+sys.path.insert(0, str(RELAY.parent))
+from readonly_proxy import CONTENT_LENGTH_DIGITS  # noqa: E402
 LOOPBACK = '127.0.0.1'
 START_TIMEOUT_S = 10.0
 REQUEST_TIMEOUT_S = 5.0
@@ -255,6 +257,18 @@ class ReadonlyProxyTest(unittest.TestCase):
         self.assertEqual(self.send_raw(request), FORBIDDEN)
         # The relay logs a refusal before it answers, so the line is there now.
         self.assertIn('bad-content-length', refusal_reasons(self.log_path))
+
+    def test_the_digit_cap_counts_digits_not_the_value(self) -> None:
+        # Leading zeros keep the declared length equal to the body's, so the
+        # two requests differ only in how many digits declare it.
+        at_cap = str(len(PING)).zfill(CONTENT_LENGTH_DIGITS)
+        for digits, status, reached in ((at_cap, OK, [Received('POST', '/mcp', PING)]), ('0' + at_cap, FORBIDDEN, [])):
+            with self.subTest(len(digits)):
+                before = len(self.received())
+                request = raw_request(f'POST /mcp HTTP/1.1\nHost: relay\nContent-Type: application/json\n'
+                                      f'Content-Length: {digits}\nConnection: close\n', PING)
+                self.assertEqual(self.send_raw(request), status)
+                self.assertEqual(self.received()[before:], reached)
 
     def test_a_get_declaring_no_body_reaches_the_upstream(self) -> None:
         # The TUI sends Content-Length: 0 on its GETs.

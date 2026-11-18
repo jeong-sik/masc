@@ -66,6 +66,13 @@ class RelayLogTest(unittest.TestCase):
         self.log.write_bytes(line(REFUSED) + line(DONE)[:-1])
         self.assertEqual(read_log(self.log, SIGKILL_EXIT), [REFUSED, DONE])
 
+    def test_a_line_separator_inside_an_entry_does_not_split_it(self) -> None:
+        # json.dumps(ensure_ascii=False) writes U+2028 and U+0085 as they are;
+        # str.splitlines() would break the entry there, the relay's newline does not.
+        entry: dict[str, object] = {**DONE, 'path': '/api/v1/keepers/a b\x85c'}
+        self.log.write_bytes(line(REFUSED) + line(entry))
+        self.assertEqual(read_log(self.log, 0), [REFUSED, entry])
+
     def test_idle_counts_refusals_and_reports_a_cut_log(self) -> None:
         self.log.write_bytes(line(REFUSED) + line(DONE))
         refused = idle.refused_requests(self.log, 0)

@@ -13510,13 +13510,12 @@ let place_keeper_list_stop (state : state) stop =
 
 (* Every move key on the Keeper list lands here, over the same stops. A
    stop is placed, never chosen: a folded group stays folded, which only the
-   heading's Enter and Esc change (RFC tui-one-screen-grammar §3.1). [page]
-   is read by the page keys alone. *)
-let move_keeper_list_stop (state : state) ~page move =
+   heading's Enter and Esc change (RFC tui-one-screen-grammar §3.1). *)
+let move_keeper_list_stop (state : state) move =
   Option.iter
     (fun current ->
       Option.iter (place_keeper_list_stop state)
-        (Masc_tui_keeper_list_model.move_stop ~page move (keeper_list_stops state) current))
+        (Masc_tui_keeper_list_model.move_stop move (keeper_list_stops state) current))
     (keeper_list_stop state)
 
 let jump_keeper_list_group (state : state) direction =

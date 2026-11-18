@@ -35,7 +35,10 @@ type body = private {
 val home_body : prepared -> scroll:int -> budget:int -> body
 (** Renderer and loop share this body allocation. A positive available body
     reserves a selected destination row before optional chrome and notices. *)
-val home_move : Masc_tui_types.state -> page:int -> Masc_tui_scroll.key_move -> unit
-(** Select the destination a move key lands on, over the rows {!home_body}
-    draws in the order it draws them. Every move key of the list goes
-    through here; [page] is read by the page keys alone. *)
+val home_move : Masc_tui_types.state -> Masc_tui_scroll.Cursor_move.t -> unit
+(** Select the destination a move key lands on. Every move key of the list
+    goes through here. The order is the plain list's, the one {!home_body}
+    windows: decisions, then the reasons the server needs the operator, then
+    conversations. The two-column cards draw conversations under decisions
+    and the reasons in the right column, so there j and k cross between the
+    columns and Home and End are not the top-left and bottom-right rows. *)

@@ -305,10 +305,11 @@ val placement : view:view -> group option list -> stop -> (focus option * int) o
 (** The focus and row cursor a stop is placed with. A heading rests the
     cursor on its group's first row; [None] for a heading no row is under. *)
 
-val move_stop : page:int -> Masc_tui_scroll.key_move -> stop list -> stop -> stop option
+val move_stop : Masc_tui_scroll.Cursor_move.t -> stop list -> stop -> stop option
 (** The stop a move key lands on from [current]: every one of the six keys
     counts [stops], so Home is the first stop (World or the first heading),
-    End the last, and a page is [page] stops ({!Masc_tui_scroll.cursor_apply}).
+    End the last, and a page is its count of stops
+    ({!Masc_tui_scroll.cursor_apply}).
     The answer is always one of [stops], so a move never reaches a row of a
     folded group and never unfolds one. [None] when [current] is not one of
     [stops]. *)

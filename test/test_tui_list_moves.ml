@@ -1,13 +1,38 @@
 (* The move keys of the lists RFC tui-one-screen-grammar §3.1 names, as
-   decisions over the TUI state: which place each key selects, that no move
-   key folds or unfolds a group, and that the Workspace detail card keeps
-   one height for every selection (§8). Nothing here reads drawn text. *)
+   decisions over the TUI state: which list a move key walks on the surface
+   on screen, which place each key selects, that no move key folds or
+   unfolds a group, and that a detail beside or above a list keeps one
+   height for every selection (§8). Nothing here reads drawn text.
+
+   Every move goes through [Masc_tui_list_moves.moves], the choice the
+   dispatcher makes, and never calls a list's own walk directly: a test that
+   called the walk could not see the dispatcher send the key to the wrong
+   list. *)
 
 open Masc_tui_types
 module Model = Masc_tui_keeper_list_model
-module Scroll = Masc_tui_scroll
+module Moves = Masc_tui_list_moves
+module Move = Masc_tui_scroll.Cursor_move
 
-let every_move = Scroll.[ Line_down; Line_up; Page_down; Page_up; To_top; To_end ]
+let every_move ~page = Move.[ Line_down; Line_up; Page_down page; Page_up page; To_top; To_end ]
+
+(* The rows the dispatcher hands over on the Keeper list: every Keeper,
+   placed by choosing it, which opens its group (what a search does). The
+   move keys must not use them; if they did, Home would open the first
+   group again. *)
+let keeper_rows state () =
+  Some
+    { Moves.rl_count = List.length state.keepers
+    ; rl_cursor = state.keeper_cursor
+    ; rl_place = choose_keeper_row state }
+
+(* Overview has no row cursor, so the dispatcher hands over none. *)
+let no_rows () = None
+
+let press ?(rows = fun () -> None) state move =
+  match Moves.moves state ~rows with
+  | Some moves -> moves move
+  | None -> Alcotest.fail "no list answered the move key"
 
 let roster_keeper name : Tui_decode.keeper =
   { k_origin = Tui_decode.Persisted_keeper
@@ -27,6 +52,8 @@ let keeper_list ~view names =
   state.keeper_list_density <- Model.One_line;
   state.keepers <- List.map roster_keeper names;
   state
+
+let press_keeper state move = press ~rows:(keeper_rows state) state move
 
 let stop_index state =
   Option.bind (keeper_list_stop state) (fun stop ->
@@ -52,19 +79,19 @@ let test_no_move_key_unfolds_a_group () =
   List.iter
     (fun move ->
       place_keeper_list_stop state (Model.Stop_heading group);
-      move_keeper_list_stop state ~page:5 move;
+      press_keeper state move;
       Alcotest.(check bool) "the group stays folded" true
         (state.keeper_list_folded = [ group ]);
       Alcotest.(check bool) "the selection is World or the heading" true
         (match keeper_list_stop state with
          | Some (Model.Stop_world | Model.Stop_heading _) -> true
          | Some (Model.Stop_row _) | None -> false))
-    every_move;
+    (every_move ~page:5);
   place_keeper_list_stop state (Model.Stop_heading group);
-  move_keeper_list_stop state ~page:5 Scroll.To_top;
+  press_keeper state Move.To_top;
   Alcotest.(check bool) "Home is the World row" true
     (keeper_list_stop state = Some Model.Stop_world);
-  move_keeper_list_stop state ~page:5 Scroll.To_end;
+  press_keeper state Move.To_end;
   Alcotest.(check bool) "End is the folded heading" true
     (keeper_list_stop state = Some (Model.Stop_heading group))
 
@@ -77,19 +104,19 @@ let test_every_move_key_walks_the_stops () =
   state.keeper_list_folded <- [];
   Alcotest.(check int) "World, one heading and three rows" 5
     (List.length (keeper_list_stops state));
-  let from_index index move ~page =
+  let from_index index move =
     Option.iter (place_keeper_list_stop state) (List.nth_opt (keeper_list_stops state) index);
-    move_keeper_list_stop state ~page move;
+    press_keeper state move;
     stop_index state
   in
   List.iter
-    (fun (from, move, page, expected) ->
+    (fun (from, move, expected) ->
       Alcotest.(check (option int)) (Printf.sprintf "from stop %d" from) (Some expected)
-        (from_index from move ~page))
-    Scroll.
-      [ 0, Line_down, 2, 1; 1, Line_down, 2, 2; 0, Line_up, 2, 0; 4, Line_down, 2, 4
-      ; 3, Line_up, 2, 2; 0, Page_down, 2, 2; 1, Page_down, 9, 4; 4, Page_up, 2, 2
-      ; 2, Page_up, 9, 0; 3, To_top, 2, 0; 1, To_end, 2, 4 ]
+        (from_index from move))
+    Move.
+      [ 0, Line_down, 1; 1, Line_down, 2; 0, Line_up, 0; 4, Line_down, 4
+      ; 3, Line_up, 2; 0, Page_down 2, 2; 1, Page_down 9, 4; 4, Page_up 2, 2
+      ; 2, Page_up 9, 0; 3, To_top, 0; 1, To_end, 4 ]
 
 (* Every view the Keeper list has, every move key, from every stop, with every
    group folded and then with none: the key lands on a stop of that list,
@@ -114,7 +141,7 @@ let test_every_view_moves_over_its_stops () =
               List.iter
                 (fun move ->
                   place_keeper_list_stop state stop;
-                  move_keeper_list_stop state ~page:2 move;
+                  press_keeper state move;
                   let label = Printf.sprintf "view %d folded %d from %d"
                       (Option.value ~default:(-1)
                          (List.find_index (( = ) view) every_view))
@@ -124,12 +151,12 @@ let test_every_view_moves_over_its_stops () =
                   Alcotest.(check bool) (label ^ ": lands on a stop") true
                     (Option.is_some (stop_index state));
                   match move with
-                  | Scroll.To_top ->
+                  | Move.To_top ->
                       Alcotest.(check (option int)) (label ^ ": Home") (Some 0) (stop_index state)
-                  | Scroll.To_end ->
+                  | Move.To_end ->
                       Alcotest.(check (option int)) (label ^ ": End") (Some last) (stop_index state)
-                  | Scroll.Line_down | Scroll.Line_up | Scroll.Page_down | Scroll.Page_up -> ())
-                every_move)
+                  | Move.Line_down | Move.Line_up | Move.Page_down _ | Move.Page_up _ -> ())
+                (every_move ~page:2))
             stops)
         [ all_groups; [] ])
     every_view
@@ -138,23 +165,23 @@ let test_every_view_moves_over_its_stops () =
 let test_plain_and_empty_lists () =
   let state = keeper_list ~view:Model.Plain [ "alpha"; "beta" ] in
   Alcotest.(check int) "one stop per row" 2 (List.length (keeper_list_stops state));
-  move_keeper_list_stop state ~page:2 Scroll.To_end;
+  press_keeper state Move.To_end;
   Alcotest.(check (option int)) "End is the last row" (Some 1) (stop_index state);
-  move_keeper_list_stop state ~page:2 Scroll.To_top;
+  press_keeper state Move.To_top;
   Alcotest.(check (option int)) "Home is the first row" (Some 0) (stop_index state);
   let empty = keeper_list ~view:Model.Plain [] in
   List.iter (fun move ->
-    move_keeper_list_stop empty ~page:2 move;
+    press_keeper empty move;
     Alcotest.(check int) "an empty list keeps its cursor" 0 empty.keeper_cursor)
-    every_move;
+    (every_move ~page:2);
   let world = keeper_list ~view:Model.By_memory [] in
   List.iter (fun move ->
-    move_keeper_list_stop world ~page:2 move;
+    press_keeper world move;
     Alcotest.(check bool) "an empty World view stays on World" true
       (keeper_list_stop world = Some Model.Stop_world))
-    every_move
+    (every_move ~page:2)
 
-(* Overview's destinations, in the order the list draws them. *)
+(* Overview's destinations, in the order the plain list draws them. *)
 let destinations state =
   let prepared = Masc_tui_home.prepare state in
   List.map fst
@@ -177,34 +204,85 @@ let overview_with_goals count =
          ; since_iso = "2026-11-19T00:00:00Z" }));
   state
 
-(* PgDn, PgUp, Home and End did nothing here: only j and k had a handler. *)
+(* PgDn, PgUp, Home and End did nothing here: only j and k had a handler.
+   Overview has no row list, so a choice that sent it to one answers no key. *)
 let test_overview_answers_every_move_key () =
   let state = overview_with_goals 4 in
   let count = List.length (destinations state) in
   Alcotest.(check bool) "the list has more than a page of two" true (count > 4);
   let last = count - 1 in
-  let from_index index move ~page =
+  let from_index index move =
     state.home_selected <- List.nth_opt (destinations state) index;
-    Masc_tui_home.home_move state ~page move;
+    press ~rows:no_rows state move;
     home_index state
   in
   List.iter
-    (fun (from, move, page, expected) ->
+    (fun (from, move, expected) ->
       Alcotest.(check (option int)) (Printf.sprintf "from destination %d" from) (Some expected)
-        (from_index from move ~page))
-    Scroll.
-      [ 0, Line_down, 2, 1; 0, Line_up, 2, 0; 0, Page_down, 2, 2; 3, Page_up, 2, 1
-      ; 1, Page_up, 9, 0; 1, Page_down, 99, last; 2, To_top, 2, 0; 0, To_end, 2, last
-      ; last, Line_down, 2, last ];
+        (from_index from move))
+    Move.
+      [ 0, Line_down, 1; 0, Line_up, 0; 0, Page_down 2, 2; 3, Page_up 2, 1
+      ; 1, Page_up 9, 0; 1, Page_down 99, last; 2, To_top, 0; 0, To_end, last
+      ; last, Line_down, last ];
   (* A selection the list no longer holds starts again at an edge. *)
   state.home_selected <- Some (Home_request (Home_goal_confirmation "gone"));
-  Masc_tui_home.home_move state ~page:2 Scroll.Line_down;
+  press ~rows:no_rows state Move.Line_down;
   Alcotest.(check (option int)) "a lost selection steps to the first row" (Some 0)
     (home_index state);
   state.home_selected <- Some (Home_request (Home_goal_confirmation "gone"));
-  Masc_tui_home.home_move state ~page:2 Scroll.To_end;
+  press ~rows:no_rows state Move.To_end;
   Alcotest.(check (option int)) "a lost selection's End is the last row" (Some last)
     (home_index state)
+
+(* A list that moves its row cursor: the landing for every move key, over an
+   empty list, one row and six, from the first row, a middle row and the
+   last. [None] when the key placed nothing. *)
+let landing state ~count ~cursor move =
+  let placed = ref None in
+  let rows () =
+    Some { Moves.rl_count = count; rl_cursor = cursor; rl_place = (fun index -> placed := Some index) }
+  in
+  press ~rows state move;
+  !placed
+
+let test_row_lists_move_their_cursor () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  List.iter
+    (fun view ->
+      state.view <- view;
+      List.iter
+        (fun (count, cursor, move, expected) ->
+          Alcotest.(check (option int))
+            (Printf.sprintf "%d rows from %d" count cursor) expected
+            (landing state ~count ~cursor move))
+        Move.
+          [ 0, 0, Line_down, None; 0, 0, To_end, None; 0, 0, Page_down 3, None
+          ; 1, 0, Line_down, Some 0; 1, 0, Line_up, Some 0; 1, 0, Page_down 3, Some 0
+          ; 1, 0, To_top, Some 0; 1, 0, To_end, Some 0
+          ; 6, 0, Line_down, Some 1; 6, 0, Line_up, Some 0; 6, 0, Page_down 3, Some 3
+          ; 6, 0, Page_up 3, Some 0; 6, 0, To_top, Some 0; 6, 0, To_end, Some 5
+          ; 6, 3, Line_down, Some 4; 6, 3, Line_up, Some 2; 6, 3, Page_down 3, Some 5
+          ; 6, 3, Page_up 3, Some 0; 6, 3, To_top, Some 0; 6, 3, To_end, Some 5
+          ; 6, 5, Line_down, Some 5; 6, 5, Page_down 9, Some 5; 6, 5, Page_up 9, Some 0 ])
+    [ Repositories; Verification; Harness; Clients; Memory; Changes; Connectors; Runtime
+    ; System_logs; Board; Fusion; Schedules; Planning; Lanes; Code; Resources ]
+
+(* An overlay drawn over a surface moves its own list, even over the two
+   surfaces that walk something else: the Git changes list over the Keeper
+   list moved the roster before its keys were gathered here. *)
+let test_an_overlay_moves_its_own_rows () =
+  let state = keeper_list ~view:Model.By_memory [ "alpha"; "beta" ] in
+  state.repository_changes_open <- true;
+  let before = keeper_list_stop state in
+  Alcotest.(check (option int)) "the overlay's End is its last row" (Some 3)
+    (landing state ~count:4 ~cursor:1 Move.To_end);
+  Alcotest.(check bool) "the roster under it does not move" true
+    (keeper_list_stop state = before);
+  state.repository_changes_open <- false;
+  state.view <- Overview;
+  state.context_inspector_open <- true;
+  Alcotest.(check (option int)) "the inspector's Home is its first row" (Some 0)
+    (landing state ~count:4 ~cursor:2 Move.To_top)
 
 let repository ?(status = Repo_manager_types.Active) ?(keepers = []) name path :
     Tui_decode.repository =
@@ -254,6 +332,12 @@ let () =
     ; ( "overview"
       , [ Alcotest.test_case "every move key moves the selection" `Quick
             test_overview_answers_every_move_key
+        ] )
+    ; ( "row lists"
+      , [ Alcotest.test_case "every move key moves the cursor" `Quick
+            test_row_lists_move_their_cursor
+        ; Alcotest.test_case "an overlay moves its own rows" `Quick
+            test_an_overlay_moves_its_own_rows
         ] )
     ; ( "workspace"
       , [ Alcotest.test_case "the detail card keeps one height" `Quick

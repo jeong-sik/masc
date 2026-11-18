@@ -337,32 +337,33 @@ let test_the_list_height_is_the_rows_that_are_left () =
    specification of RFC tui-one-screen-grammar §3.1 for cursors. *)
 let test_every_move_key_lands_inside_the_list () =
   let open Masc_tui_scroll in
+  let open Cursor_move in
   let cases =
-    (* count, page, move, from, expected *)
-    [ 0, 2, Line_down, 0, 0; 0, 2, Line_up, 0, 0; 0, 2, Page_down, 0, 0
-    ; 0, 2, Page_up, 0, 0; 0, 2, To_top, 0, 0; 0, 2, To_end, 0, 0
-    ; 1, 2, Line_down, 0, 0; 1, 2, Line_up, 0, 0; 1, 2, Page_down, 0, 0
-    ; 1, 2, Page_up, 0, 0; 1, 2, To_top, 0, 0; 1, 2, To_end, 0, 0
-    ; 6, 2, Line_down, 0, 1; 6, 2, Line_up, 0, 0; 6, 2, Page_down, 0, 2
-    ; 6, 2, Page_up, 0, 0; 6, 2, To_top, 0, 0; 6, 2, To_end, 0, 5
-    ; 6, 2, Line_down, 3, 4; 6, 2, Line_up, 3, 2; 6, 2, Page_down, 3, 5
-    ; 6, 2, Page_up, 3, 1; 6, 2, To_top, 3, 0; 6, 2, To_end, 3, 5
-    ; 6, 2, Line_down, 5, 5; 6, 2, Line_up, 5, 4; 6, 2, Page_down, 5, 5
-    ; 6, 2, Page_up, 5, 3; 6, 2, To_top, 5, 0; 6, 2, To_end, 5, 5
+    (* count, move, from, expected *)
+    [ 0, Line_down, 0, 0; 0, Line_up, 0, 0; 0, Page_down 2, 0, 0
+    ; 0, Page_up 2, 0, 0; 0, To_top, 0, 0; 0, To_end, 0, 0
+    ; 1, Line_down, 0, 0; 1, Line_up, 0, 0; 1, Page_down 2, 0, 0
+    ; 1, Page_up 2, 0, 0; 1, To_top, 0, 0; 1, To_end, 0, 0
+    ; 6, Line_down, 0, 1; 6, Line_up, 0, 0; 6, Page_down 2, 0, 2
+    ; 6, Page_up 2, 0, 0; 6, To_top, 0, 0; 6, To_end, 0, 5
+    ; 6, Line_down, 3, 4; 6, Line_up, 3, 2; 6, Page_down 2, 3, 5
+    ; 6, Page_up 2, 3, 1; 6, To_top, 3, 0; 6, To_end, 3, 5
+    ; 6, Line_down, 5, 5; 6, Line_up, 5, 4; 6, Page_down 2, 5, 5
+    ; 6, Page_up 2, 5, 3; 6, To_top, 5, 0; 6, To_end, 5, 5
     (* A page longer than the list holds at the ends. *)
-    ; 6, 9, Page_down, 1, 5; 6, 9, Page_up, 4, 0
+    ; 6, Page_down 9, 1, 5; 6, Page_up 9, 4, 0
     (* A page of zero rows still moves one row. *)
-    ; 6, 0, Page_down, 1, 2; 6, 0, Page_up, 1, 0
+    ; 6, Page_down 0, 1, 2; 6, Page_up 0, 1, 0
     (* A cursor left past the end by a list that shrank answers from the
        last row. *)
-    ; 3, 2, Line_up, 7, 1; 3, 2, Line_down, 7, 2
+    ; 3, Line_up, 7, 1; 3, Line_down, 7, 2
     ]
   in
   List.iter
-    (fun (count, page, move, from, expected) ->
+    (fun (count, move, from, expected) ->
       Alcotest.(check int)
-        (Printf.sprintf "count %d page %d from %d" count page from)
-        expected (cursor_apply ~count ~page move from))
+        (Printf.sprintf "count %d from %d" count from)
+        expected (cursor_apply ~count move from))
     cases
 
 let () =

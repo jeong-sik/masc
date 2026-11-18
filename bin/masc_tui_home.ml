@@ -424,7 +424,7 @@ let home_body prepared ~scroll ~budget =
    End reached no handler and did nothing (RFC tui-one-screen-grammar §3.1).
    A selection the list no longer holds starts again from the first row, or
    from the last for End. *)
-let home_move state ~page move =
+let home_move state (move : Masc_tui_scroll.Cursor_move.t) =
   let prepared = prepare state in
   let actions = List.map fst (destinations prepared) in
   let count = List.length actions in
@@ -434,10 +434,10 @@ let home_move state ~page move =
         (fun action -> Option.equal equal_home_action (Some action) prepared.selected)
         actions
     with
-    | Some index -> Masc_tui_scroll.cursor_apply ~count ~page move index
+    | Some index -> Masc_tui_scroll.cursor_apply ~count move index
     | None ->
         (match move with
-         | Masc_tui_scroll.To_end -> Masc_tui_scroll.cursor_last ~count
-         | Line_down | Line_up | Page_down | Page_up | To_top -> 0)
+         | To_end -> Masc_tui_scroll.cursor_last ~count
+         | Line_down | Line_up | Page_down _ | Page_up _ | To_top -> 0)
   in
   state.home_selected <- List.nth_opt actions index

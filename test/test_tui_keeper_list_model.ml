@@ -439,8 +439,10 @@ let test_stops_open_each_group_with_its_heading () =
 let test_steps_stop_on_headings_and_hold_at_the_ends () =
   let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
   let step delta stop =
-    let move = if delta > 0 then Masc_tui_scroll.Line_down else Line_up in
-    Option.map stop_label (Model.move_stop ~page:1 move stops stop) in
+    let move =
+      if delta > 0 then Masc_tui_scroll.Cursor_move.Line_down else Masc_tui_scroll.Cursor_move.Line_up
+    in
+    Option.map stop_label (Model.move_stop move stops stop) in
   Alcotest.(check (option string)) "down from a heading reaches its first row" (Some "row 0")
     (step 1 (Model.Stop_heading attention_group));
   Alcotest.(check (option string)) "down from a group's last row reaches the next heading"
@@ -453,7 +455,7 @@ let test_steps_stop_on_headings_and_hold_at_the_ends () =
     (step 1 (Model.Stop_row 4));
   Alcotest.(check (option string)) "a folded group's row is not a stop" None
     (Option.map stop_label
-       (Model.move_stop ~page:1 Masc_tui_scroll.Line_down
+       (Model.move_stop Masc_tui_scroll.Cursor_move.Line_down
           (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
 
 (* Home, End and the page keys count the same stops j and k do (RFC
@@ -461,28 +463,27 @@ let test_steps_stop_on_headings_and_hold_at_the_ends () =
    heading, never a row of a folded group, and a page past an end holds there. *)
 let test_edge_and_page_keys_count_the_stops () =
   let folded = Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped in
-  let move ?(page = 2) stops move stop =
-    Option.map stop_label (Model.move_stop ~page move stops stop) in
+  let move stops move stop = Option.map stop_label (Model.move_stop move stops stop) in
+  let open Masc_tui_scroll.Cursor_move in
   Alcotest.(check (option string)) "Home is the first heading" (Some "heading attention")
-    (move folded Masc_tui_scroll.To_top (Model.Stop_row 4));
+    (move folded To_top (Model.Stop_row 4));
   Alcotest.(check (option string)) "End is the last row" (Some "row 4")
-    (move folded Masc_tui_scroll.To_end (Model.Stop_heading attention_group));
+    (move folded To_end (Model.Stop_heading attention_group));
   Alcotest.(check (option string)) "a page counts headings as stops"
-    (Some "heading failing") (move folded Masc_tui_scroll.Page_down (Model.Stop_row 0));
+    (Some "heading failing") (move folded (Page_down 2) (Model.Stop_row 0));
   Alcotest.(check (option string)) "a page up past the top holds on the first stop"
-    (Some "heading attention") (move ~page:9 folded Masc_tui_scroll.Page_up (Model.Stop_row 3));
+    (Some "heading attention") (move folded (Page_up 9) (Model.Stop_row 3));
   Alcotest.(check (option string)) "a page down past the end holds on the last stop"
-    (Some "row 4") (move ~page:9 folded Masc_tui_scroll.Page_down (Model.Stop_row 3));
+    (Some "row 4") (move folded (Page_down 9) (Model.Stop_row 3));
   let world = Model.stops ~view:Model.By_memory ~folded:[] grouped in
   Alcotest.(check bool) "Home in a World view is the World row" true
-    (Model.move_stop ~page:2 Masc_tui_scroll.To_top world (Model.Stop_row 3)
-     = Some Model.Stop_world);
+    (Model.move_stop To_top world (Model.Stop_row 3) = Some Model.Stop_world);
   Alcotest.(check bool) "a stop the list does not hold moves nowhere" true
-    (Model.move_stop ~page:2 Masc_tui_scroll.To_top folded (Model.Stop_row 2) = None);
+    (Model.move_stop To_top folded (Model.Stop_row 2) = None);
   List.iter (fun key ->
     Alcotest.(check bool) "a single stop answers every key with itself" true
-      (Model.move_stop ~page:2 key [ Model.Stop_world ] Model.Stop_world = Some Model.Stop_world))
-    Masc_tui_scroll.[ Line_down; Line_up; Page_down; Page_up; To_top; To_end ]
+      (Model.move_stop key [ Model.Stop_world ] Model.Stop_world = Some Model.Stop_world))
+    [ Line_down; Line_up; Page_down 2; Page_up 2; To_top; To_end ]
 
 let test_group_jumps_reach_the_nearest_heading () =
   let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
@@ -824,7 +825,7 @@ let test_world_is_a_distinct_non_keeper_stop () =
     Alcotest.(check bool) "world placement cannot become row zero" true
       (Model.placement ~view grouped Model.Stop_world = Some (Some Model.Focus_world, 0));
     Alcotest.(check bool) "down from world reaches first heading" true
-      (Model.move_stop ~page:1 Masc_tui_scroll.Line_down stops Model.Stop_world
+      (Model.move_stop Masc_tui_scroll.Cursor_move.Line_down stops Model.Stop_world
        = Some (Model.Stop_heading attention_group)))
     [Model.By_memory; Model.By_age];
   Alcotest.(check bool) "other views reject world placement" true

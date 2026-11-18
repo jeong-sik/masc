@@ -94,12 +94,26 @@ val cursor_last : count:int -> int
 (** The last row a cursor can name, and 0 for an empty list. What End lands
     on. *)
 
-val cursor_apply : count:int -> page:int -> key_move -> int -> int
-(** The row [move] puts a cursor on in a list of [count] rows (RFC
-    tui-one-screen-grammar §3.1). [Line_down] and [Line_up] move one row,
-    [Page_down] and [Page_up] move [page] rows (at least one), [To_top] is
-    the first row and [To_end] {!cursor_last}. Every landing is held inside
-    the list, and an empty list answers 0. Only the page moves read [page].
+(** A move of a row cursor, one per move key (RFC tui-one-screen-grammar
+    §3.1). A page move carries the rows its page counts, so a line or edge
+    move has no page to pass and a page move cannot leave its page out. The
+    [key_move] above is the same key over a scrolled body, whose page is its
+    window. *)
+module Cursor_move : sig
+  type t =
+    | Line_down
+    | Line_up
+    | Page_down of int  (** the rows one page counts; at least one *)
+    | Page_up of int
+    | To_top
+    | To_end
+end
+
+val cursor_apply : count:int -> Cursor_move.t -> int -> int
+(** The row [move] puts a cursor on in a list of [count] rows. [Line_down]
+    and [Line_up] move one row, [Page_down] and [Page_up] their page (at
+    least one row), [To_top] is the first row and [To_end] {!cursor_last}.
+    Every landing is held inside the list, and an empty list answers 0.
 
     A list whose j and k land on more than its data rows, such as group
     headings, counts those places here too, so Home and End reach the same

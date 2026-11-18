@@ -154,12 +154,15 @@ module Viewport = struct
   (* One composer row, and only where the surface above can still meet its own
      fixed-row budget without it. A surface pushed under the budget shows the
      too-small screen instead of itself, so a convenience row that costs the
-     surface is worse than no row: the composer yields. *)
-  let composer_rows ~terminal_rows =
-    if terminal_rows > minimum_fixed_chrome_rows then 1 else 0
+     surface is worse than no row: the composer yields. The agenda strip's rows
+     are spent first: weighing the composer against the terminal alone gave a
+     16-row terminal with the strip up a 13-row body and the too-small screen,
+     where 14 rows fit without the composer. *)
+  let composer_rows ~terminal_rows ~agenda_rows =
+    if terminal_rows - agenda_rows > minimum_fixed_chrome_rows then 1 else 0
 
   let body_rows ~terminal_rows ~agenda_rows =
-    max 1 (terminal_rows - composer_rows ~terminal_rows - agenda_rows)
+    max 1 (terminal_rows - composer_rows ~terminal_rows ~agenda_rows - agenda_rows)
 
   let body_fits ~terminal_rows ~agenda_rows =
     body_rows ~terminal_rows ~agenda_rows >= minimum_fixed_chrome_rows
@@ -172,9 +175,9 @@ module Viewport = struct
 
   (* The fewest rows below the strip that the body fits in, counting up from
      [terminal_rows] with the predicate the decision itself uses. The body
-     never shrinks as the terminal grows and gains a row for each row past the
-     composer's, so the count stops by
-     [minimum_fixed_chrome_rows + agenda_rows + 1]. *)
+     never shrinks as the terminal grows, and it reaches the budget once the
+     terminal holds the budget and the agenda rows, so the count stops by
+     [minimum_fixed_chrome_rows + agenda_rows]. *)
   let rec rows_needed ~agenda_rows terminal_rows =
     if body_fits ~terminal_rows ~agenda_rows then terminal_rows
     else rows_needed ~agenda_rows (terminal_rows + 1)

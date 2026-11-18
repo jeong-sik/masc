@@ -3066,6 +3066,7 @@
 (include stanzas/test_docker_playground_gc_script.inc)
 
 (include stanzas/test_tui_lane_read_decision.inc)
+(include stanzas/test_tui_layout_geometry.inc)
 (include stanzas/test_tui_lane_inventory_notifications.inc)
 (include stanzas/test_tui_lane_inventory_push.inc)
 (include stanzas/test_tui_spectator_push.inc)

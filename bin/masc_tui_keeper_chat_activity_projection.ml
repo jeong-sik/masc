@@ -314,7 +314,10 @@ let native_progress_text (key : native_progress_key) =
     | Progress_message message -> message
     | Progress_output_arriving -> "output arriving"
     | Progress_output_observed -> "output observed"
-    | Progress_heartbeat seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
+    (* The provider's elapsed time is the length of work still going, so it
+       reads on the ongoing ladder (RFC tui-one-screen-grammar §6.2). *)
+    | Progress_heartbeat seconds ->
+        "heartbeat · provider elapsed " ^ Masc_tui_value.Ongoing.text (float_of_int seconds)
     | Progress_activity_observed -> "native activity observed")
     key.observation in
   let retry = Option.map (function
@@ -371,7 +374,8 @@ let native_progress_details ?(include_elapsed=false) (activity : tool_activity) 
       let provider_elapsed = match progress.provider_elapsed_seconds,
           progress.message, progress.output_bytes with
         | Some seconds, Some _, _
-        | Some seconds, None, Some _ -> [Printf.sprintf "provider elapsed %ds" seconds]
+        | Some seconds, None, Some _ ->
+            ["provider elapsed " ^ Masc_tui_value.Ongoing.text (float_of_int seconds)]
         | None, _, _ | Some _, None, None -> [] in
       Some (String.concat " · " (summary :: bytes @ provider_elapsed))
   | summary, _ -> summary

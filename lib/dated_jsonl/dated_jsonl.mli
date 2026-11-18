@@ -11,7 +11,7 @@
     coordination; each reader retains its existing captured extent/tail policy. *)
 
 type t
-(** Opaque handle.  Holds [base_dir] and the append mutex. *)
+(** Opaque handle. Holds the store's location. *)
 
 type read_operation =
   | Inspect
@@ -70,15 +70,23 @@ module Layout = Dated_jsonl_layout
 (** Shared calendar and numeric rotation ordering for read continuations. *)
 
 val open_store :
-  ?cross_context_mutex:Cross_context_mutex.t ->
   ?max_bytes:int ->
   Store.location ->
   t
 (** Open the store at a listed location. A store can be opened only where
     {!Store} puts it.
 
-    An optional [mutex] can be injected to bypass the shared registry
-    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    The writers of one store directory take one mutex, whichever spelling
+    reached the directory. The process registry keeps it under the name the
+    file system gives the directory ({!Store.directory_name}). A handle asks
+    for it on each write or prune, so a handle opened before its directory
+    existed takes the directory's mutex once the directory is there. The
+    file system is asked once for each spelling of a directory that exists;
+    a spelling keeps that answer while the process runs, also when the
+    directory is later removed and made again under another name. A caller
+    that only reads and must leave no entry behind opens a {!Reader}.
+
+    When [?max_bytes] is positive, [append] prunes
     oldest completed day-files until the store is at or below the cap, while
     preserving the current day-file. Day files are removed by age only by
     {!prune_listed_stores_bound}. *)
@@ -270,7 +278,9 @@ val read_recent_result :
     non-empty JSONL rows, including {!Malformed_json} rows. Missing stores are
     [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
     regular day files; symbolic links, other file kinds, and I/O failures are
-    returned explicitly. Results are chronological (oldest first). *)
+    returned explicitly. In the store's own directory it passes over the
+    entries the store declares as side files ({!Store.is_side_file}).
+    Results are chronological (oldest first). *)
 
 val find_latest_entry_result :
   t -> (recent_entry -> 'a option) -> ('a option, read_error) result
@@ -588,12 +598,32 @@ val map_tail_rows_result :
     [Ok []]. A path that cannot be opened, is not a regular file once opened,
     or cannot be read is [Error]. *)
 
+(** A handle that reads one store and is not in the store registry.
+
+    A reader never asks for the store's mutex, so a route that reads the
+    store of whatever Keeper name a client sent does not grow the registry
+    by one entry per made-up name. No function that writes or prunes takes
+    a reader: every change of a store's files goes through a handle that
+    takes the store's mutex. *)
+module Reader : sig
+  type t
+
+  val open_store : Store.location -> t
+  val base_dir : t -> string
+
+  val read_recent_result :
+    ?offset:int -> t -> int -> (recent_entry list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_result} of the reader's store. *)
+
+  val read_recent_lines_result :
+    ?offset:int -> t -> int -> ((string * string) list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_lines_result} of the reader's store. *)
+end
+
 module For_testing : sig
   val cross_context_mutex : t -> Cross_context_mutex.t
-  (** Expose the internal mutex so tests can verify sharing. *)
+  (** The mutex a write through the handle would take now. *)
 
-  val cross_context_mutex_for_base_dir : string -> Cross_context_mutex.t
-  (** Lookup or insert the registry entry for [base_dir].
-      Equivalent to the default-mutex path of {!open_store}. *)
-
+  val in_registry : Store.location -> bool
+  (** Whether the registry holds an entry for the store. *)
 end

@@ -119,7 +119,10 @@ type bottom_fit =
   | Number_only
       (** The number alone, [1,234]: the word goes before the number. *)
   | Plain
-      (** A plain rule: nothing was cut, or not even the number fits. *)
+      (** A plain rule: nothing was cut, or not even the number fits. In the
+          second case the cut rows go unsaid: a card narrower than the number
+          plus its corners cannot carry it. Callers that cut rows keep their
+          cards wide enough for the number. *)
 
 val bottom_fit : ko:bool -> width:int -> hidden:int -> bottom_fit
 (** What the bottom edge of a card [width] cells wide writes for the [hidden]

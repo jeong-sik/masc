@@ -286,11 +286,26 @@ K1·K2·K4 다. 읽기를 숫자로 막는 gate, cap, cooldown 은 없다. 기�
 
 ### 4.3 keepers/turns
 
-**K1. 몸통에서 읽는 시각으로 센 값을 뺀다.**
+**K1. turns 의 waiting 에는 TUI 가 그리는 것만 싣는다.**
 
-- turns 행의 waiting 에는 TUI 가 읽는 여섯 필드만 싣는다. `current_execution` 과 `queue_residence` 가
-  빠진다.
-- 대기 목록을 싣는 다른 응답(MCP 도구 등)의 모양은 그대로다.
+- 2026-11-18 운영에서 잰 키퍼 목록의 turns 몸통은 약 585 KB 다(키퍼 31). 그 가운데 559 KB(96%)가
+  waiting 항목 목록이다.
+  - 항목은 1,270개다. 1,204개가 `event_queue_pending` 이고, 키퍼 하나에 876개가 몰려 있다.
+  - 읽는 시각으로 센 값(`queue_residence`, `current_execution`)은 약 3 KB 다.
+  - TUI 가 해석하지 않는 항목 필드(`detail`, `since_iso`, `due_at_iso`, 항목의 `keeper_name`)가 218 KB 다.
+- TUI 가 그리는 것은 출처마다 첫 항목, 위임 결과 항목, 개수다. 모든 항목을 그리는 곳은 없다.
+  - 키퍼 목록 행: 위임 결과 항목이나 첫 항목 하나와 "외 N"(`bin/masc_tui_render_keepers.ml`)
+  - 행의 활동·배지: 출처가 있는지와 그 출처의 첫 항목(`bin/masc_tui_keeper_list_model.ml`)
+  - acting pane: 첫 일정, 일정 수, 위임 결과가 있는지, 읽기 오류가 있는지(`bin/masc_tui_acting_pane.ml`)
+- 그래서 turns 행의 waiting 은 일곱 필드만 싣는다: `keeper_name`, `state`, `waiting_count`,
+  `sources`(출처마다 행 수), `since`, `due_at`, `waiting_heads`.
+  - `waiting_heads` 는 (source, wake producer) 짝마다 첫 행이다. inventory 순서를 지킨다.
+  - 항목도 일곱 필드다: `source`, `waiting_on`, `what`, `wake_producer`, `since`, `due_at`,
+    `next_action`.
+- 읽는 시각으로 센 값은 싣지 않는다. 같은 inventory 는 같은 바이트가 된다.
+- 몸통은 대기 종류 수만큼 자라고, 큐 길이만큼 자라지 않는다. 같은 시각의 운영 답을 이 모양으로 바꾸면
+  27~28 KB 다. 30초 동안 연달아 읽은 다섯 쌍 가운데 넷은 바꾼 몸통이 같았다.
+- 모든 행과 `detail` 은 대기 목록을 싣는 다른 응답(`dashboard_json`, MCP 도구)이 그대로 싣는다.
 
 **K2. preview 는 요청한 만큼만 싣는다.**
 
@@ -358,7 +373,7 @@ K1·K2·K4 다. 읽기를 숫자로 막는 gate, cap, cooldown 은 없다. 기�
 | TUI turns·대기 목록 | 화면과 상관없이 알림마다 200 | 쓰는 동안만 읽고, 같으면 304 | L1, L4 |
 | TUI 줄 선 채팅 | turns 답마다 보내 본다 | 그대로. 보낼 줄이 있으면 화면과 상관없이 읽는다 | L1 |
 | `@` 창의 방금 끝남 | 두 읽기를 견준다 | 서버가 준 끝난 시각 | L1 |
-| web 의 turns 읽기 | preview 와 시계 값을 받고 버린다 | preview 가 빠지고 waiting 은 여섯 필드인 몸통 | L4 |
+| web 의 turns 읽기 | preview 와 시계 값을 받고 버린다 | preview 가 빠지고 waiting 은 짝마다 첫 항목인 몸통 | L4, L4b |
 | 대기 목록을 싣는 다른 응답 | 그대로 | 그대로 | |
 | 성능 하네스 둘(`scripts/harness/perf/server_artifact_session.py`, `compare_server_artifacts.py`) | GET 몸통의 `execution_invalidated` 를 본다 | 그대로 | |
 
@@ -416,7 +431,8 @@ K1·K2·K4 다. 읽기를 숫자로 막는 gate, cap, cooldown 은 없다. 기�
 | L1 | K3 전부: 읽는 때, 두 읽기 합치기, 끝난 시각. 질의는 지금 것 그대로 | 서버, TUI. hard cut 이 아니다 | Overview 화면의 turns 읽기 0번 |
 | L2 | E2 | 서버 먼저, 그다음 TUI. hard cut 이 아니다 | backlog 읽기 수가 backlog 커밋 수와 같다 |
 | L3 | E1 | 서버와 web 한 묶음. hard cut | execution 바이트 = 알림 수 × 수백 바이트, 서버 계산 횟수 그대로 |
-| L4 | K1, K2 | TUI 먼저, 그다음 서버. hard cut | 키퍼 목록의 304 비율 |
+| L4 | K1 | 서버와 TUI 한 묶음. hard cut | 키퍼 목록의 turns 바이트, 304 비율 |
+| L4b | K2 | TUI 먼저, 그다음 서버. hard cut | preview 바이트 |
 | L5 | T1~T3 | 서버 먼저, 그다음 TUI. hard cut | 조각 알림 0, 채팅 지연 그대로 |
 | L6 | 다시 잰다 | 없음 | §7 표 |
 
@@ -428,7 +444,8 @@ K1·K2·K4 다. 읽기를 숫자로 막는 gate, cap, cooldown 은 없다. 기�
 | L1 | 옛 TUI 는 끝난 시각 필드를 모르고 지금처럼 돈다 | 끝난 시각이 오지 않는다. "방금 끝남"이 보이지 않는다. 받아들인다 |
 | L2 | 옛 TUI 는 `Backlog` 를 풀지 못한 알림으로 세고 넘어간다(`bin/masc_tui.ml:25952-25954`). execution 알림으로 지금처럼 읽는다 | `Backlog` 가 오지 않는다. backlog 읽기가 `[r]` 전까지 멈춘다. 그래서 서버를 먼저 올린다 |
 | L3 | 이미 열린 옛 web 탭은 몸통 없는 알림을 그리지 못한다. 다시 열 때까지 execution 화면이 멈춘다. 받아들인다. web bundle 은 서버가 내려 준다(`lib/server/server_routes_http_routes_frontend.ml:187`) | TUI 와 상관없다 |
-| L4 | 옛 TUI 는 질의를 보내지 않아 preview 를 잃는다(`lib/tui_decode.ml:5144-5146`). 그래서 TUI 를 먼저 올린다 | 옛 서버는 새 질의를 모르고 지금 몸통을 준다. 새 TUI 는 그대로 읽는다 |
+| L4 | 옛 TUI 는 `waiting_on` 이 없는 waiting 행을 풀지 못한다. turn 행은 그대로 읽고, 대기 칸만 조회 불가로 보인다(`Keeper_waiting_invalid`). 그래서 서버와 TUI 를 한 묶음으로 올린다 | `waiting_heads` 와 `sources` 가 없다. 같은 일이 새 TUI 에서 생긴다 |
+| L4b | 옛 TUI 는 질의를 보내지 않아 preview 를 잃는다(`lib/tui_decode.ml:5144-5146`). 그래서 TUI 를 먼저 올린다 | 옛 서버는 새 질의를 모르고 지금 몸통을 준다. 새 TUI 는 그대로 읽는다 |
 | L5 | 옛 TUI 는 자율 turn 의 글을 실시간으로 못 본다. 채팅 화면을 다시 열면 journal 에서 읽는다. 받아들인다 | 옛 서버는 `follow` 를 모르고 바로 답한다. 상태 필드도 없다. 새 TUI 의 따라가기가 돌지 않는다. 그래서 서버를 먼저 올린다 |
 
 ## 9. 하지 않는 것

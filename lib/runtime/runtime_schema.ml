@@ -152,6 +152,11 @@ type provider =
     (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
         catalog does not know. [None] means the catalog answers, and a
         provider that has a catalog row is refused if it states this. *)
+  ; catalog_provider : string option
+    (** The AGENT_CORE catalog provider row this provider speaks as when its own
+        id names no row, as an account of a catalog provider with its own
+        credential does. Catalog lookups read {!catalog_provider_id}; the
+        account keeps [id]. [None] means [id] is the only name it has. *)
   ; request_path : string option
     (** Explicit HTTP request surface; None uses the catalog/protocol. *)
   ; transport : transport
@@ -203,6 +208,12 @@ type provider =
   ; usage_read : usage_read option
   }
 [@@deriving show, eq]
+
+let catalog_provider_key = "catalog-provider"
+
+let catalog_provider_id (provider : provider) =
+  Option.value provider.catalog_provider ~default:provider.id
+;;
 
 (** {1 Layer 2: Model — what it can do} *)
 

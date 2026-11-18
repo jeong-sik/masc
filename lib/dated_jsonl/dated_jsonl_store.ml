@@ -109,6 +109,35 @@ let decision_audit root ~keeper_dirname =
   under root Decision_audit [ decision_audit_dirname; keeper_dirname ]
 
 let dir location = location.dir
+
+type directory_name =
+  | Existing of string
+  | Not_yet of string
+
+(* [path] with its nearest existing ancestor named by the file system and the
+   pieces below that ancestor as spelled. *)
+let name_through_nearest_existing path =
+  let rec resolve dir below =
+    match Unix.realpath dir with
+    | real -> List.fold_left Filename.concat real below
+    | exception Unix.Unix_error _ ->
+      let parent = Filename.dirname dir in
+      if String.equal parent dir
+      then List.fold_left Filename.concat dir below
+      else resolve parent (Filename.basename dir :: below)
+  in
+  resolve path []
+
+let absolute_dir location =
+  if Filename.is_relative location.dir
+  then Filename.concat (Config_dir_resolver.current_working_dir ()) location.dir
+  else location.dir
+
+let directory_name location =
+  let spelled = absolute_dir location in
+  match Unix.realpath spelled with
+  | name -> Existing name
+  | exception Unix.Unix_error _ -> Not_yet (name_through_nearest_existing spelled)
 let of_location location = location.store
 let keeper_store location = location.keeper_store
 
@@ -163,6 +192,49 @@ let retention = function
   | Root store -> root_retention store
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
+
+(* What a store's owner keeps in the store's own directory, beside the month
+   directories: a file made from the day files, which no reader of the day
+   files reads. Each store answers for itself, so a new store has to.
+
+   The activity events keep [_seq] there and do not say so here. The one
+   strict reader of that store, the task history inventory, passes over it
+   in its own listing. *)
+let root_side_file store name =
+  match store with
+  (* The SQLite read index of [Keeper_tool_call_index] and its sidecars. *)
+  | Root.Tool_calls -> Common.is_tool_call_read_index_file name
+  | Root.Transition_audit
+  | Root.Audit_approvals
+  | Root.Tool_events
+  | Root.Verdicts
+  | Root.Audit
+  | Root.Telemetry
+  | Root.Events
+  | Root.Activity_events
+  | Root.Tool_usage
+  | Root.Agent_core_events
+  | Root.Costs
+  | Root.Provider_usage_history
+  | Root.Wire_capture
+  | Root.Schedule_signals
+  | Root.Telemetry_coverage_gaps -> false
+
+let keeper_side_file store (_ : string) =
+  match store with
+  | Keeper.Metrics
+  | Keeper.Execution_receipts
+  | Keeper.Turn_records
+  | Keeper.Provider_inputs
+  | Keeper.Memory_recall_artifacts
+  | Keeper.Crash_events
+  | Keeper.Continuity_requests -> false
+
+let is_side_file store name =
+  match store with
+  | Root store -> root_side_file store name
+  | Keeper store -> keeper_side_file store name
+  | Reaction_ledger | Decision_audit -> false
 
 let with_retention_root (Masc_dir dir) f =
   (* BasePath admission allows aliases, including macOS /var and /tmp.

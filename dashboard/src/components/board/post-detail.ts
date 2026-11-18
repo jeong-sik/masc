@@ -1,13 +1,12 @@
 import { html } from 'htm/preact'
 import { focusedCommentNeedsAncestors } from './comment-context'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { useSignal } from '@preact/signals'
+import { computed, useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { SectionCard, SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
-import { EmptyState } from '../common/feedback-state'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, ErrorRecoverable, LoadingState } from '../common/feedback-state'
 import { RichComposer } from '../common/rich-composer'
 import { BoardRichContent } from './board-rich-content'
 import { TextInput } from '../common/input'
@@ -34,10 +33,11 @@ import {
   detailPostId,
   detailFocusedCommentId,
   loadOlderPostComments,
-  commentText,
-  commentSubmitting,
-  replyingTo,
+  commentDraft,
+  setCommentText,
+  setReplyingTo,
   loadPostDetail,
+  refreshPostDetail,
   submitComment,
   authorAvatar,
   kindBadgeColor,
@@ -237,7 +237,15 @@ function CommentItem({
   const displayText = needsTruncation && !expanded
     ? `${contentChars.slice(0, 297).join('')}...`
     : comment.content
-  const isReplying = replyingTo.value === comment.id
+  // A comment reads two facts of the post's draft and draws again only when one
+  // of them changes. The text is read by the reply form alone, so a keystroke
+  // draws that form and not every comment of the thread.
+  const draftFacts = useMemo(() => ({
+    replying: computed(() => commentDraft(postId).replyingTo === comment.id),
+    submitting: computed(() => commentDraft(postId).submitting),
+  }), [postId, comment.id])
+  const isReplying = draftFacts.replying.value
+  const draftSubmitting = draftFacts.submitting.value
   const visualDepth = Math.min(depth, MAX_INLINE_COMMENT_DEPTH)
   const indentStyle = visualDepth > 0 ? { marginLeft: `${visualDepth * 16}px` } : undefined
   const replies = childrenMap.get(comment.id) ?? []
@@ -276,7 +284,7 @@ function CommentItem({
     if (!voteKnown) return
     try {
       await voteComment(comment.id, dir)
-      await loadPostDetail(postId)
+      await refreshPostDetail(postId)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] comment vote failed (comment=${comment.id}, dir=${dir})`, err instanceof Error ? err.message : err)
@@ -333,7 +341,8 @@ function CommentItem({
             variant="subtle"
             size="sm"
             class="text-2xs hover:text-[var(--color-accent-fg)] bg-transparent border-0"
-            onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
+            disabled=${draftSubmitting}
+            onClick=${() => setReplyingTo(postId, isReplying ? null : comment.id)}
           >${isReplying ? '취소' : '답글'}<//>
         </div>
         <div class="text-sm text-[var(--color-fg-primary)] leading-paragraph"><${BoardRichContent} text=${displayText} previewLimit=${1} /></div>
@@ -354,31 +363,7 @@ function CommentItem({
             supportedEmojis=${comment.supported_reaction_emojis}
           />
         </div>
-        ${isReplying ? html`
-          <div class="mt-2">
-            <${RichComposer}
-              value=${commentText.value}
-              placeholder="답글 작성..."
-              rows=${4}
-              disabled=${commentSubmitting.value}
-              onValueChange=${(next: string) => { commentText.value = next }}
-              helpText="Markdown과 코드 스니펫을 그대로 붙일 수 있습니다."
-              previewLimit=${1}
-            />
-            <div class="mt-2 flex justify-end">
-              <${ActionButton}
-                variant="ghost"
-                size="md"
-                class="text-xs bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]"
-                disabled=${commentSubmitting.value || commentText.value.trim() === ''}
-                ariaBusy=${commentSubmitting.value}
-                onClick=${() => submitComment(postId, comment.id)}
-              >
-                ${commentSubmitting.value ? '...' : '등록'}
-              <//>
-            </div>
-          </div>
-        ` : null}
+        ${isReplying ? html`<${ReplyForm} postId=${postId} parentId=${comment.id} />` : null}
         ${collapsedByUser && replyCount > 0 ? html`
           <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">답글 ${replyCount}개 접힘</div>
         ` : null}
@@ -540,16 +525,47 @@ function CommentRouteFocusPanel({
   `
 }
 
+// ── Reply form ─────────────────────────────────────────────────────
+function ReplyForm({ postId, parentId }: { postId: string; parentId: string }) {
+  const draft = commentDraft(postId)
+  return html`
+    <div class="mt-2" data-reply-form=${parentId}>
+      <${RichComposer}
+        value=${draft.text}
+        placeholder="답글 작성..."
+        rows=${4}
+        disabled=${draft.submitting}
+        onValueChange=${(next: string) => setCommentText(postId, next)}
+        helpText="Markdown과 코드 스니펫을 그대로 붙일 수 있습니다."
+        previewLimit=${1}
+      />
+      <div class="mt-2 flex justify-end">
+        <${ActionButton}
+          variant="ghost"
+          size="md"
+          class="text-xs bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]"
+          disabled=${draft.submitting || draft.text.trim() === ''}
+          ariaBusy=${draft.submitting}
+          onClick=${() => submitComment(postId, parentId)}
+        >
+          ${draft.submitting ? '...' : '등록'}
+        <//>
+      </div>
+    </div>
+  `
+}
+
 // ── Comment form ───────────────────────────────────────────────────
 export function CommentForm({ postId }: { postId: string }) {
+  const draft = commentDraft(postId)
   return html`
     <div class="mt-4">
       <${RichComposer}
-        value=${commentText.value}
+        value=${draft.text}
         placeholder="댓글 추가..."
         rows=${5}
-        disabled=${commentSubmitting.value}
-        onValueChange=${(next: string) => { commentText.value = next }}
+        disabled=${draft.submitting}
+        onValueChange=${(next: string) => setCommentText(postId, next)}
         helpText="Markdown, 코드 스니펫, URL 링크 카드를 지원합니다."
         previewLimit=${1}
       />
@@ -558,11 +574,11 @@ export function CommentForm({ postId }: { postId: string }) {
           variant="ghost"
           size="lg"
           class="text-sm bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]"
-          disabled=${commentSubmitting.value || commentText.value.trim() === ''}
-          ariaBusy=${commentSubmitting.value}
+          disabled=${draft.submitting || draft.text.trim() === ''}
+          ariaBusy=${draft.submitting}
           onClick=${() => submitComment(postId)}
         >
-          ${commentSubmitting.value ? '...' : '등록'}
+          ${draft.submitting ? '...' : '등록'}
         <//>
       </div>
     </div>
@@ -587,7 +603,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
     if (post.current_vote === undefined) return
     try {
       await votePost(post.id, dir)
-      await loadPostDetail(post.id)
+      await refreshPostDetail(post.id)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
@@ -751,15 +767,21 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ` : null}
           ${detailLoading.value
             ? html`<${LoadingState}>댓글 불러오는 중...<//>`
-            : html`<${CommentThread}
-                comments=${detailComments.value}
-                postId=${post.id}
-                focusedCommentId=${focusedCommentId}
-                totalCount=${detailCommentPage.value.total}
-                olderCount=${detailCommentPage.value.offset}
-                loadingOlder=${detailLoadingOlder.value}
-                onLoadOlder=${() => loadOlderPostComments(post.id)}
-              />`}
+            : detailPostId.value === post.id && detailReadPhase.value === 'failed'
+              // The thread was not read, so nothing is said about how many comments it has.
+              ? html`<${ErrorRecoverable}
+                  title="댓글을 불러오지 못했습니다"
+                  onRetry=${() => { void loadPostDetail(post.id, focusedCommentId) }}
+                />`
+              : html`<${CommentThread}
+                  comments=${detailComments.value}
+                  postId=${post.id}
+                  focusedCommentId=${focusedCommentId}
+                  totalCount=${detailCommentPage.value.total}
+                  olderCount=${detailCommentPage.value.offset}
+                  loadingOlder=${detailLoadingOlder.value}
+                  onLoadOlder=${() => loadOlderPostComments(post.id)}
+                />`}
           <${CommentForm} postId=${post.id} />
         <//>
       </div>

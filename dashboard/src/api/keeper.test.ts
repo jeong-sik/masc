@@ -20,6 +20,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperChatOperation,
+  interruptKeeperChatOperation,
   listQueuedKeeperChatOperations,
   editQueuedKeeperChatOperation,
   fetchKeeperChatHistory,
@@ -647,6 +648,60 @@ describe('fetchKeeperChatOperation', () => {
       '/api/v1/keepers/sangsu/chat/operations/kmsg-restart-1',
       expect.any(Object),
     )
+  })
+})
+
+describe('interruptKeeperChatOperation', () => {
+  // #52952: the stop of a running operation names that operation, so the
+  // server stops its turn and no other.
+  function answerWith(body: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ chat_control_token: 'token-1', ...body }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('names the operation whose turn it stops', async () => {
+    const fetchMock = answerWith({ request_id: 'kmsg-1', signalled: true })
+
+    await expect(interruptKeeperChatOperation('sangsu', 'kmsg-1')).resolves.toEqual({ kind: 'signalled' })
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/v1/keepers/turn/interrupt', expect.any(Object))
+    const init = fetchMock.mock.calls[0]?.[1] as { method: string; body: string }
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ name: 'sangsu', request_id: 'kmsg-1' })
+  })
+
+  it.each([
+    [{ reason: 'operation_not_current', current_request_id: 'kmsg-2' },
+      { kind: 'not_current', currentOperationId: 'kmsg-2' }],
+    [{ reason: 'operation_not_current' }, { kind: 'not_current', currentOperationId: null }],
+    [{ reason: 'settling' }, { kind: 'settling' }],
+    [{ reason: 'paused_pending_admission', paused: true }, { kind: 'paused_pending_admission' }],
+    [{ reason: 'maintenance_running' }, { kind: 'maintenance_running' }],
+    [{ reason: 'slot_held_by_autonomous_turn' }, { kind: 'slot_held_by_autonomous_turn' }],
+    [{ reason: 'cancel_failed', detail: 'The active turn could not be interrupted.',
+      error_code: 'interrupt_failed', incident_id: 'incident-1' },
+      { kind: 'cancel_failed', detail: 'The active turn could not be interrupted.' }],
+    [{ reason: 'owner_unavailable' }, { kind: 'owner_unavailable', detail: null }],
+  ])('reads an answer that stopped nothing: %j', async (body, expected) => {
+    answerWith({ request_id: 'kmsg-1', signalled: false, ...body })
+
+    await expect(interruptKeeperChatOperation('sangsu', 'kmsg-1')).resolves.toEqual(expected)
+  })
+
+  it('refuses an answer about another operation', async () => {
+    answerWith({ request_id: 'kmsg-other', signalled: true })
+
+    await expect(interruptKeeperChatOperation('sangsu', 'kmsg-1')).rejects.toThrow()
+  })
+
+  it('refuses an answer whose reason it does not know', async () => {
+    answerWith({ request_id: 'kmsg-1', signalled: false, reason: 'reason_added_later' })
+
+    await expect(interruptKeeperChatOperation('sangsu', 'kmsg-1')).rejects.toThrow()
   })
 })
 

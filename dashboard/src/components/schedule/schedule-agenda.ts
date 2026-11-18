@@ -94,6 +94,16 @@ function startOfDayMs(ms: number): number {
   return date.getTime()
 }
 
+/** Local midnight `days` calendar days after the local day of `ms`. The day is
+ *  stepped on the calendar: where daylight time starts or ends a local day is
+ *  23 or 25 hours long, and adding 24 hours lands on the wrong date. */
+function startOfDayAfterMs(ms: number, days: number): number {
+  const date = new Date(ms)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + days)
+  return date.getTime()
+}
+
 // ── polling strip (interval schedules) ─────────────────────────────
 
 export interface PollingRow {
@@ -148,7 +158,7 @@ export function buildAgenda(
   const todayStart = startOfDayMs(options.nowMs)
   const columns: AgendaColumn[] = []
   for (let index = 0; index < days; index += 1) {
-    columns.push({ offset: index, dateMs: todayStart + index * MS_PER_DAY, events: [] })
+    columns.push({ offset: index, dateMs: startOfDayAfterMs(todayStart, index), events: [] })
   }
   for (const request of requests) {
     if (isTerminalRequest(request)) continue

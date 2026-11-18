@@ -315,6 +315,22 @@ val start
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
 
+val meta_write_unsettled : t -> bool
+(** Whether a meta write of this Owner ended without a known outcome: the
+    store returned an error, or the write raised. The meta file may then hold
+    the value that write carried while {!projection} keeps the value before
+    it, and no later commit closes the gap before a restart.
+
+    While this is [false], the file and the projected meta differ only inside
+    a commit, which writes the file first and publishes the projection before
+    it announces the row. Outside one, the file holds the snapshot encoding of
+    the projected meta once the Owner has written, and the bytes the Owner
+    was started from before that.
+
+    Lock-free. The Owner sets it before it announces the Keeper's row, so a
+    reader woken by that announcement already sees [true]. It is never
+    cleared. *)
+
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
 

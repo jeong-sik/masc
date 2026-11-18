@@ -145,6 +145,40 @@ let declared_provider_kind = function
   | None -> None
 ;;
 
+(* The catalog row a provider speaks as. A provider whose own id is a row
+   speaks as it; an account of a catalog provider names the row with
+   [catalog-provider] and keeps its own id for its credential, quota scope,
+   runtime ids and rest cells (RFC account-provider-speaks-as-a-catalog-row
+   §3.2). Every catalog lookup on a provider goes through here or through
+   [Runtime_schema.catalog_provider_id], so the two names cannot drift. *)
+type catalog_row_refusal =
+  | Catalog_row_not_declared of string
+  | Catalog_row_beside_own_row of string
+
+let catalog_declaration declarations (provider : Runtime_schema.provider) =
+  match provider.catalog_provider with
+  | None -> Ok (Declarations.find declarations provider.id)
+  | Some row ->
+    (match Declarations.find declarations provider.id, Declarations.find declarations row with
+     | Some (_ : Declarations.entry), (Some _ | None) -> Error (Catalog_row_beside_own_row row)
+     | None, None -> Error (Catalog_row_not_declared row)
+     | None, (Some _ as entry) -> Ok entry)
+;;
+
+let catalog_row_refusal_text (provider : Runtime_schema.provider) = function
+  | Catalog_row_not_declared row ->
+    Printf.sprintf "provider %S declares %s %S, which names no AGENT_CORE catalog provider row"
+      provider.id Runtime_schema.catalog_provider_key row
+  | Catalog_row_beside_own_row row ->
+    Printf.sprintf "provider %S declares %s %S, but its own id is a catalog provider row"
+      provider.id Runtime_schema.catalog_provider_key row
+;;
+
+let check_catalog_row provider =
+  Result.map (fun (_ : Declarations.entry option) -> ())
+    (catalog_declaration (Declarations.current ()) provider)
+;;
+
 (* The catalog answers for a provider it has a row for; a deployment's [kind]
    answers only for an endpoint it does not. Preferring the registry keeps the
    catalog the single authority, so a restated kind is dead weight rather than
@@ -372,10 +406,12 @@ let http_protocol_metadata provider =
   | Cli _ -> Error "An HTTP connection is required"
   | Http base_url ->
     let declarations = Declarations.current () in
-    let declaration = Declarations.find declarations provider.id in
-    Result.map (fun kind -> kind,
-      request_path_for_http_provider ~provider ~declaration ~kind ~base_url)
-      (provider_kind_for_http_provider ?declaration provider)
+    (match catalog_declaration declarations provider with
+     | Error refusal -> Error (catalog_row_refusal_text provider refusal)
+     | Ok declaration ->
+       Result.map (fun kind -> kind,
+         request_path_for_http_provider ~provider ~declaration ~kind ~base_url)
+         (provider_kind_for_http_provider ?declaration provider))
 ;;
 
 let agent_core_thinking_control_format = function
@@ -771,9 +807,11 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
   let open Result.Syntax in
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
       ~supports_parallel_tool_suppression:(Declarations.supports_parallel_tool_suppression
-        declarations ~provider_id:provider.id)
+        declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
       ~disable_parallel_tool_use in
-  let declaration = Declarations.find declarations provider.id in
+  let* declaration =
+    Result.map_error (catalog_row_refusal_text provider) (catalog_declaration declarations provider)
+  in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -793,7 +831,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     (match provider_kind_for_http_provider ?declaration provider with
      | Ok kind ->
        let request_policy = Llm_provider.Capabilities.resolve_snapshot_request_policy ~snapshot:declarations ~wire:kind
-           ~provider_id:provider.id ~model_id:spec.api_name in
+           ~provider_id:(Runtime_schema.catalog_provider_id provider) ~model_id:spec.api_name in
        let catalog_capabilities =
          Llm_provider.Capabilities.request_policy_capabilities request_policy in
        let model_capabilities_override =
@@ -840,7 +878,10 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
        let provider_config =
          Llm_provider.Provider_config.make
             ~kind
-            (* [provider_id] is the runtime.toml [providers.<id>] table name. It is
+            (* [provider_id] is the catalog row this provider speaks as: the
+               runtime.toml [providers.<id>] table name, or its [catalog-provider]
+               for an account of a catalog provider. The account keeps its own id
+               in the credential admission and quota scope above. It is
                the capability-catalog qualification key: [capability_provider_label]
                prefers it over the wire [kind], so provider-qualified catalog rows
                ([provider_name = "<id>"]) resolve per declared provider instead of
@@ -848,7 +889,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
                label (which no catalog row carries — the 2026-07-15 boot-gate
                wipeout). AGENT_CORE's own binding layer passes it the same way
                (provider_runtime_binding.ml [runtime_binding_provider_config]). *)
-            ~provider_id:provider.id
+            ~provider_id:(Runtime_schema.catalog_provider_id provider)
             ~model_id:spec.api_name
             ~base_url
             ~api_key:(credential.api_key :> string)

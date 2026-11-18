@@ -255,7 +255,7 @@ let plot ~width trend row =
             if index = 0 && List.mem cx above_cells then Buffer.add_string buf "↑"
             else
               Buffer.add_string buf
-                (Masc_tui_chart.braille_cell ~mask:grid.(index).(cx))
+                (Masc_tui_braille.braille_cell ~mask:grid.(index).(cx))
           done;
           Printf.sprintf "%3d%% │ %s" ((band + 1) * 100 / plot_height)
             (Buffer.contents buf))

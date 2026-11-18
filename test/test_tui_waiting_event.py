@@ -257,7 +257,8 @@ class WaitingHandler(FixtureHandler):
                         "waiting_count": 1,
                         "since": None,
                         "due_at": None,
-                        "waiting_on": [
+                        "sources": {"event_queue_pending": 1},
+                        "waiting_heads": [
                             {
                                 "source": "event_queue_pending",
                                 "waiting_on": "fixture",

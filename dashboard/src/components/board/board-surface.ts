@@ -7,7 +7,7 @@ import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
-import { EmptyState, LoadingState } from '../state-surfaces'
+import { EmptyState, ErrorState, LoadingState } from '../state-surfaces'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
@@ -66,6 +66,7 @@ import {
   boardFlairs,
   boardLoading,
   boardLoadingMore,
+  boardListReadFailed,
   boardHasMore,
   boardTotal,
   boardHiddenCategories,
@@ -718,14 +719,21 @@ function BdThreadDetail({
         </div>
         ${detailLoading.value
           ? html`<${LoadingState} title="댓글 불러오는 중…" />`
-          : html`<${CommentThread}
-              comments=${detailComments.value}
-              postId=${post.id}
-              totalCount=${detailCommentPage.value.total}
-              olderCount=${detailCommentPage.value.offset}
-              loadingOlder=${detailLoadingOlder.value}
-              onLoadOlder=${() => loadOlderPostComments(post.id)}
-            />`}
+          : detailPostId.value === post.id && detailReadPhase.value === 'failed'
+            // The thread was not read, so nothing is said about how many comments it has.
+            ? html`<${ErrorState}
+                compact
+                title="댓글을 불러오지 못했습니다"
+                onAction=${() => { void loadPostDetail(post.id, null) }}
+              />`
+            : html`<${CommentThread}
+                comments=${detailComments.value}
+                postId=${post.id}
+                totalCount=${detailCommentPage.value.total}
+                olderCount=${detailCommentPage.value.offset}
+                loadingOlder=${detailLoadingOlder.value}
+                onLoadOlder=${() => loadOlderPostComments(post.id)}
+              />`}
         <${CommentForm} postId=${post.id} />
       </div>
     </aside>
@@ -772,6 +780,13 @@ function BdDetail({
       </div>
     </aside>
   `
+}
+
+/** State updater for a composer field whose submit just succeeded: the field
+ *  empties only while it still holds what was sent. The answer settles the
+ *  draft that went out; text typed while it was on the wire stays. */
+function clearSent(sent: string): (current: string) => string {
+  return current => (current === sent ? '' : current)
 }
 
 function BdComposer() {
@@ -918,18 +933,21 @@ function BdComposer() {
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
     event?.stopPropagation()
-    const body = localBody.trim()
-    const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
+    const sentTitle = localTitle
+    const sentBody = localBody
+    const sentFlair = localFlair
+    const body = sentBody.trim()
+    const title = options.compactMobile ? mobilePostTitle(body) : sentTitle.trim()
     if (!title || !body) return
     setSubmitting(true)
     try {
-      const contentWithFlair = localFlair
-        ? `[flair:${localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
+      const contentWithFlair = sentFlair
+        ? `[flair:${sentFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
         : body
       await createPost(title, contentWithFlair, 'dashboard-user', { hearth: localHearth || undefined })
-      setLocalTitle('')
-      setLocalBody('')
-      setLocalFlair('')
+      setLocalTitle(clearSent(sentTitle))
+      setLocalBody(clearSent(sentBody))
+      setLocalFlair(clearSent(sentFlair))
       setMobileOpen(false)
       showToast('글을 등록했습니다', 'success')
       refreshBoard()
@@ -948,10 +966,11 @@ function BdComposer() {
     }
 
     event?.stopPropagation()
-    const body = localBody.trim()
+    const sentBody = localBody
+    const body = sentBody.trim()
     if (mobileQuickDisabled) return
     const message = mode === 'mention'
-      ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
+      ? serializeComposerBody({ text: sentBody, attachments: [], voice: null })
       : body
     if (!message) return
     setSubmitting(true)
@@ -969,14 +988,14 @@ function BdComposer() {
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), message)
         if (!receipt.ok) {
-          setLocalBody('')
+          setLocalBody(clearSent(sentBody))
           resetMobileMentionDrafts()
           setMobileOpen(false)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
-      setLocalBody('')
+      setLocalBody(clearSent(sentBody))
       resetMobileMentionDrafts()
       setMobileOpen(false)
       showToast('Message sent.', 'success')
@@ -1374,6 +1393,37 @@ function UnifiedBoardFeed({
   `
 }
 
+/** The search box filters the posts already loaded. When none of them match
+ *  and the server holds more, the next page is read from here: the feed's own
+ *  pagination is not drawn while the feed has no rows. */
+function BdSearchMiss({ loadedCount, hiddenMatchCount }: { loadedCount: number; hiddenMatchCount: number }) {
+  if (!boardHasMore.value) {
+    return html`<div class="ov-empty">필터 결과 없음 (${loadedCount} items)</div>`
+  }
+  const reading = boardLoadingMore.value || boardLoading.value
+  // The feed is empty either because no loaded post matches, or because every
+  // match is in a category the operator has hidden. A next page finds a post
+  // in the first case only, so the two are not said with one sentence.
+  const searched = hiddenMatchCount > 0
+    ? `불러온 글 ${loadedCount}개 중 일치하는 ${hiddenMatchCount}개는 숨긴 분류에 있습니다`
+    : `불러온 글 ${loadedCount}개 중에는 일치하는 글이 없습니다`
+  return html`
+    <div class="ov-empty flex flex-col items-center gap-2">
+      <span data-testid="bd-search-miss">${searched}</span>
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        disabled=${reading}
+        ariaBusy=${reading}
+        testId="bd-search-more"
+        onClick=${() => { void loadMoreBoardPosts() }}
+      >
+        ${reading ? '불러오는 중...' : '다음 페이지 불러오기'}
+      <//>
+    </div>
+  `
+}
+
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
   const [contentQuery, setContentQuery] = useState('')
   const visibleLimit = feedVisibleLimit.value
@@ -1387,7 +1437,13 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
     [filteredPosts, boardHiddenCategories.value],
   )
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
-  const countLabel = isFiltering
+  // The list the operator is on could not be read. Nothing on screen answers
+  // it, so the feed says that and offers the read again; a count or "no posts
+  // yet" would describe a board that was never read.
+  const readFailed = boardListReadFailed.value && !boardLoading.value
+  const countLabel = readFailed
+    ? '불러오지 못함'
+    : isFiltering
     ? `${visiblePosts.length}개 표시`
     : boardTotal.value !== null
       ? `전체 ${boardTotal.value}개`
@@ -1418,8 +1474,14 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         onMentions=${onMentions}
       />
       <div class="bd-list">
-        ${isFiltering && visiblePosts.length === 0 && posts.length > 0
-          ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
+        ${readFailed
+          ? html`<${ErrorState}
+              compact
+              title="게시판을 불러오지 못했습니다"
+              onAction=${() => { void refreshBoard() }}
+            />`
+          : isFiltering && visiblePosts.length === 0 && posts.length > 0
+          ? html`<${BdSearchMiss} loadedCount=${posts.length} hiddenMatchCount=${filteredPosts.length} />`
           : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
             : visiblePosts.length === 0
@@ -1469,6 +1531,11 @@ export function BoardSurface() {
     }
   }, [postId, post?.id, route.value.params.comment])
 
+  // A post outside the loaded list is drawn from the detail read alone, so a
+  // failed read leaves no post to draw. That is not a post known to be missing:
+  // the screen says the read failed and offers it again.
+  const detailReadFailed = detailPostId.value === postId && detailReadPhase.value === 'failed'
+
   if (postId) {
     return post
       ? html`
@@ -1486,7 +1553,13 @@ export function BoardSurface() {
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<${LoadingState} title="글 불러오는 중…" />`
-              : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
+              : detailReadFailed
+                ? html`<${ErrorState}
+                    compact
+                    title="글을 불러오지 못했습니다"
+                    onAction=${() => { void loadPostDetail(postId, route.value.params.comment ?? null) }}
+                  />`
+                : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
           </div>
         `
   }

@@ -19,6 +19,18 @@ val default_http_request_path :
     next to [api_key], and hidden from the dashboard's provider header list.
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
+type catalog_row_refusal =
+  | Catalog_row_not_declared of string
+      (** [catalog-provider] names no AGENT_CORE catalog provider row. *)
+  | Catalog_row_beside_own_row of string
+      (** The provider's own id is a catalog row and it declares [catalog-provider] too. *)
+
+val check_catalog_row : Runtime_schema.provider -> (unit, catalog_row_refusal) result
+(** Whether the catalog row this provider speaks as exists in the current
+    declarations, read the same way every catalog lookup in this module reads
+    it. A provider with no [catalog-provider] always passes: its id is the row
+    or it has none. *)
+
 val http_protocol_metadata : Runtime_schema.provider ->
   ((Llm_provider.Provider_config.provider_kind * string), string) result
 (** Resolve the actual HTTP kind and request path without a model or credential. *)

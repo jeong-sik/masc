@@ -811,7 +811,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
        Alcotest.(check string) "rejected slot" "verifier-missing" rejected.slot_id;
        (match
           Runtime_exact_output_registry.diagnose_rejected_slot
-            registry
+            (Runtime_exact_output_registry.resolver_snapshot registry)
             rejected
             ~configured_runtime:(fun _ -> None)
         with
@@ -821,7 +821,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
           Alcotest.fail "a slot no registry knows is unknown to both");
        (match
           Runtime_exact_output_registry.diagnose_rejected_slot
-            registry
+            (Runtime_exact_output_registry.resolver_snapshot registry)
             rejected
             ~configured_runtime:(fun _ -> Some ("ollama_cloud", "deepseek-v4-flash:0731"))
         with

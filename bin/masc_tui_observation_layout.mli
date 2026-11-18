@@ -20,6 +20,10 @@ type context_pressure =
   | Pressure
   | Danger
 
+val percentage_tenths_full : int
+(** A whole in tenths of one percent: [1000]. A bar of {!percentage_tenths}
+    against it is full at the whole. *)
+
 val percentage_tenths : float -> int
 (** A ratio projected to tenths of one percent, using the rounding visible in
     the Keeper detail row. For example, [0.4999] becomes [500] ([50.0%]). *)

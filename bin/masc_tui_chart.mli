@@ -1,7 +1,8 @@
 (** Visual charting and graphing primitives for the MASC TUI.
 
-    Provides UTF-8 block sparklines, context and resource gauges, tool
-    distribution bars, and the 2x4 Braille cell.
+    Provides UTF-8 block sparklines, context and resource gauges, meters,
+    and tool distribution bars. Braille cells and graphs are
+    {!Masc_tui_braille}.
 
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions.
     Safe across wide/narrow widths, non-ASCII multi-byte text, and empty/negative inputs. *)
@@ -45,26 +46,57 @@ val gauge :
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
 
+(** What a meter's maximum is, which decides its colour (RFC
+    tui-one-screen-grammar section 7.3). *)
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.limit_paint
+      (** A cap set in settings or stated by a provider, where reaching it
+          refuses or holds work: a plan window that blocks model calls when
+          full, a context window's used tokens against its maximum. Each
+          filled cell takes the colour of its position against the cap. *)
+  | Relative
+      (** Anything else: a completion ratio, a share of a total, a size
+          against the largest, a cap no one has confirmed is a limit. The fill
+          draws no colour of its own, so it takes the foreground or whatever
+          state colour the caller drew around the bar. *)
+
+val meter_cell_colour :
+  meter_scale ->
+  index:int ->
+  width:int ->
+  value:int ->
+  max_value:int ->
+  Masc_tui_theme.meter_cell_colour
+(** The colour filled cell [index] of a [width]-cell bar drawing [value]
+    against [max_value] takes: {!Masc_tui_theme.limit_cell_colour} at the
+    paint's depth for a declared limit, [Cell_plain] for a relative bar at
+    every depth. *)
+
+val meter_cell_style :
+  meter_scale -> index:int -> width:int -> value:int -> max_value:int -> string
+(** The SGR drawn before that cell's glyph: {!meter_cell_colour} through
+    {!Masc_tui_theme.meter_cell_readable}, and [""] for a relative bar. *)
+
 val meter_bar :
   width:int ->
   value:int ->
   max_value:int ->
-  ?cell_style:(index:int -> width:int -> string) ->
+  scale:meter_scale ->
   ?track_style:string ->
   ?reset:string ->
   unit ->
   string
 (** Bracketless segmented bar of exactly [width] display cells ([""] when
-    [width <= 0]): filled cells draw ["■"] with optional per-cell [cell_style]
-    (for Oklab gradient ramps), and remaining cells draw ["·"] in [track_style]. *)
+    [width <= 0]): filled cells draw ["■"] coloured by [scale] (see
+    {!meter_cell_colour}), and remaining cells draw ["·"] in [track_style]. *)
 
 val meter :
   width:int ->
   value:int ->
   max_value:int ->
+  scale:meter_scale ->
   ?label:string ->
   ?suffix:string ->
-  ?cell_style:(index:int -> width:int -> string) ->
   ?track_style:string ->
   ?suffix_style:string ->
   ?reset:string ->
@@ -101,27 +133,3 @@ val distribution_bars :
     use a neutral colour. Shares are rounded down exactly, so displayed
     percentages need not sum to 100; a positive count has at least one filled
     cell when a track is available. Output is bounded within [width] display cells. *)
-
-(** {1 High-Resolution Braille Curve Plots} *)
-
-val braille_cell : mask:int -> string
-(** Encodes a Braille pattern (0x2800 + mask) to UTF-8. *)
-
-val braille_levels : ?min:int -> ?max:int -> int list -> int list
-(** Maps each input onto the 5-step Braille subcolumn scale ([0..4]) without
-    integer overflow. When the lower bound is zero, strictly positive values
-    map to at least [1] so non-zero activity never disappears. *)
-
-val braille_pair : left:int -> right:int -> string
-(** One 2x4 Braille cell pairing two bottom-up dot heights ([0..4]) into the
-    left and right subcolumns (e.g. ["⠀"], ["⢀"], ["⣀"], ["⣠"], ["⣤"], ["⣴"],
-    ["⣶"], ["⣾"], ["⣿"]). *)
-
-val braille_bar_mark : level:int -> string
-(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
-    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. *)
-
-val braille_sparkline : ?min:int -> ?max:int -> int list -> string
-(** High-density single-row Braille sparkline packing two consecutive samples
-    per terminal cell (2x horizontal resolution). An odd sample count left-pads
-    with [0] so the newest sample sits in the rightmost subcolumn. *)

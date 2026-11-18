@@ -72,3 +72,45 @@ Use `Streaming_first_chunk.requested_at` and `Streaming_summary.total_ms` to
 separate queue delay from the upstream request. A lower queue count can include
 expired requests; it does not establish successful throughput. One successful
 stream is also distinct from a complete final answer or sustained fleet health.
+
+## Several accounts of one catalog provider
+
+Give each account its own `[providers.<id>]` table and credential, and name
+the catalog row it speaks as with `catalog-provider`. The catalog then answers
+for the account's dialect, capabilities and request policy, and the account can
+be an Exact-output lane slot. Permits, quota windows and slot rests stay per
+account, because they are keyed by credential and runtime id, not by the
+catalog row.
+
+```toml
+[providers.claude_a]
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+catalog-provider = "claude"
+exact-body-timeout-s = 1200.0
+[providers.claude_a.credentials]
+type = "env"
+key = "ANTHROPIC_API_KEY_A"
+
+[models.haiku]
+api-name = "claude-haiku-5-5"
+
+[claude_a.haiku]
+max-concurrent = 4
+```
+
+- Do not state `kind` beside `catalog-provider`: the catalog owns it, and the
+  binding is left out. `endpoint` and `request-path` still override the
+  catalog's values when written.
+- A `catalog-provider` that names no catalog row refuses the whole file, as a
+  binding that names a missing `[providers.<id>]` row does. So does a provider
+  whose own id is already a catalog row.
+- An official client (`claude-code`, `codex-app-server`, …) may not declare it.
+- A lane slot the catalog cannot admit — an account without `catalog-provider`,
+  a mistyped id — is left out at boot, and the lane runs with the slots that
+  remain. The deployment preflight refuses the same runtime.toml and names
+  the lane, the slot's position and id, and what to write, so an install does
+  not quietly shorten a lane.
+- The admission wait record carries the catalog row in its provider field, so
+  `masc:provider_admission:waited` no longer separates these accounts by
+  provider.

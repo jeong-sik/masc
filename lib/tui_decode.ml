@@ -4959,7 +4959,11 @@ type keeper_waiting_row = {
   kwr_waiting_count : int;
   kwr_since : float option;
   kwr_due_at : float option;
-  kwr_waiting_on : waiting_item list;
+  kwr_source_counts : (waiting_source * int) list;
+      (** Rows per source. A source with no rows is absent. *)
+  kwr_waiting_heads : waiting_item list;
+      (** The first row of each (source, wake producer) pair, in inventory
+          order. [kwr_waiting_count] and [kwr_source_counts] count every row. *)
 }
 
 type keeper_waiting_failure =
@@ -5041,8 +5045,8 @@ let decode_waiting_item json =
   let* kwi_next_action = required_string_field json "next_action" in
   Ok { kwi_source; kwi_waiting_on; kwi_what; kwi_wake_producer; kwi_since; kwi_due_at; kwi_next_action }
 
-let decode_waiting_items json =
-  let* items = required_list_field json "waiting_on" in
+let decode_waiting_heads json =
+  let* items = required_list_field json "waiting_heads" in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | item :: rest ->
@@ -5051,6 +5055,29 @@ let decode_waiting_items json =
   in
   loop [] items
 
+let decode_waiting_source_counts json =
+  match member "sources" json with
+  | `Assoc pairs ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (raw, count) :: rest ->
+            let* source = waiting_source_of_string raw in
+            let* count =
+              match count with
+              | `Int count when count >= 0 -> Ok count
+              | bad -> field_type_error ("sources." ^ raw) "a non-negative int" bad
+            in
+            loop ((source, count) :: acc) rest
+      in
+      loop [] pairs
+  | `Null -> missing_field "sources"
+  | bad -> field_type_error "sources" "an object" bad
+
+let waiting_source_count row source =
+  match List.assoc_opt source row.kwr_source_counts with
+  | Some count -> count
+  | None -> 0
+
 let decode_keeper_waiting_row json =
   let* kwr_keeper_name = required_string_field json "keeper_name" in
   let* state_raw = required_string_field json "state" in
@@ -5058,8 +5085,10 @@ let decode_keeper_waiting_row json =
   let* kwr_waiting_count = required_int_field json "waiting_count" in
   let* kwr_since = required_nullable_float_field json "since" in
   let* kwr_due_at = required_nullable_float_field json "due_at" in
-  let* kwr_waiting_on = decode_waiting_items json in
-  Ok { kwr_keeper_name; kwr_state; kwr_waiting_count; kwr_since; kwr_due_at; kwr_waiting_on }
+  let* kwr_source_counts = decode_waiting_source_counts json in
+  let* kwr_waiting_heads = decode_waiting_heads json in
+  Ok { kwr_keeper_name; kwr_state; kwr_waiting_count; kwr_since; kwr_due_at;
+       kwr_source_counts; kwr_waiting_heads }
 
 let decode_optional_keeper_waiting json =
   match Json_util.assoc_member_opt "waiting" json with

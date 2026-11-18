@@ -32,7 +32,9 @@
     the file after its length was read, and on a target that reports a
     length but has no byte there. The appended lines then never join an
     unfinished line; where the file did end at a line start, they leave
-    an empty line before them, which the readers of these files skip.
+    an empty line before them. [Fs_compat.load_jsonl] and the [Dated_jsonl]
+    reads pass over an empty line; a reader that splits the file into lines
+    itself has to as well.
 
     The last byte is read from the file on every such call and nothing about
     the file's end is remembered between calls. A remembered end would be

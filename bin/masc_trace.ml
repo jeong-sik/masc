@@ -17,8 +17,11 @@ let read_lines path =
   if not (Sys.file_exists path) then []
   else
     let ic = open_in path in
+    (* A line of whitespace is not a row: the line appends leave an empty
+       line when another descriptor cut the file under them. *)
     let rec loop acc =
       match input_line ic with
+      | line when String.equal (String.trim line) "" -> loop acc
       | line -> loop (line :: acc)
       | exception End_of_file -> List.rev acc
     in

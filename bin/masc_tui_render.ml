@@ -119,8 +119,7 @@ let acting_pane_columns (state : state) ~terminal_cols =
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~now =
-  let below_strip =
-    max 1 (terminal_rows - Render_schedule.Viewport.navigation_rows) in
+  let below_strip = Render_schedule.Viewport.below_strip ~terminal_rows in
   if acting_pane_columns_at state ~terminal_cols ~now = 0
      || Option.is_some (too_small state ~terminal_rows:below_strip ~terminal_cols ~now)
      || state.acting_pane_tab = Masc_tui_acting_pane.Tab_changes

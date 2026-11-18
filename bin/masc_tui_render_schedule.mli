@@ -68,14 +68,17 @@ module Viewport : sig
       fewer rows holds no surface (RFC tui-one-screen-grammar §2). *)
 
   val navigation_rows : int
-  (** The surface strip's row above every surface (zone 1). Callers measure
-      the terminal and pass [terminal_rows] without it. *)
+  (** The surface strip's row above every surface (zone 1). *)
+
+  val below_strip : terminal_rows:int -> int
+  (** The rows below the strip of a terminal [terminal_rows] tall, at least
+      one. Every surface and the too-small decision measure from this. *)
 
   val body_rows : terminal_rows:int -> agenda_rows:int -> int
   (** The rows a surface may draw in below the strip: [terminal_rows] less the
-      composer's row and the [agenda_rows] the agenda strip took. The composer
-      takes a row only where the body keeps {!minimum_fixed_chrome_rows}
-      without it. At least one. *)
+      composer's row and the [agenda_rows] the agenda strip took. The
+      composer's row is counted at every size, because it is drawn at every
+      size. At least one. *)
 
   type size = { cols : int; rows : int }
   (** A terminal's size as the operator counts it: every column, and every
@@ -84,9 +87,10 @@ module Viewport : sig
   type too_small =
     | Rows_short of { have : size; need_rows : int }
         (** The body is under {!minimum_fixed_chrome_rows}. [have] is the size
-            the decision was given and [need_rows] the fewest terminal rows
-            for which the same decision fits: [have.rows < need_rows].
-            Columns never decide, so there is no column need. *)
+            the decision was given and [need_rows] the terminal rows the
+            decision compares it with: it fits from [need_rows] up and
+            [have.rows < need_rows]. Columns never decide, so there is no
+            column need. *)
     | Notice_needs_full_frame
         (** The rows fit, but a notice is wider than the footer row and takes
             the whole frame. The size is not why. *)

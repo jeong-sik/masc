@@ -1263,37 +1263,15 @@ let render_agenda (state : state) =
 ;;
 
 (* The size line writes the decision's own numbers: the terminal's size now
-   and the rows it needs (RFC tui-one-screen-grammar §2). No column count is
-   needed, so none is written. A count cut to its first digit reads as another
-   count, so narrower forms drop words first: the size now, then the words
-   around the count. The count and the key that leaves stay to the end; under
-   that only the key stays, cut by the frame if even it is too wide. *)
-let terminal_too_small_quit state = ui_text state ~ko:"q 끝내기" ~en:"q: quit"
+   and the rows it needs (RFC tui-one-screen-grammar §2). The typed form
+   choice drops words before numbers on a narrow terminal. *)
+let terminal_too_small_quit state =
+  Masc_tui_too_small_hint.quit ~ko:(state.ui_language = Lang_ko)
 
-let terminal_too_small_hint state ~cols
-    ~(have : Render_schedule.Viewport.size) ~need_rows =
-  let size =
-    Printf.sprintf "%dx%d" have.Render_schedule.Viewport.cols have.rows in
-  let quit = terminal_too_small_quit state in
-  let forms =
-    if state.ui_language = Lang_ko then
-      [ Printf.sprintf "창이 작음 · 지금 %s · %d줄 필요" size need_rows
-      ; Printf.sprintf "지금 %s · %d줄 필요" size need_rows
-      ; Printf.sprintf "%d줄 필요" need_rows
-      ; Printf.sprintf "%d줄" need_rows ]
-    else
-      [ Printf.sprintf "terminal too small · now %s · needs %d rows" size need_rows
-      ; Printf.sprintf "now %s · needs %d rows" size need_rows
-      ; Printf.sprintf "needs %d rows" need_rows
-      ; Printf.sprintf "%d rows" need_rows ]
-  in
-  match
-    List.find_opt
-      (fun text -> Message_layout.display_width text <= cols)
-      (List.map (fun form -> form ^ " · " ^ quit) forms)
-  with
-  | Some text -> text
-  | None -> quit
+let terminal_too_small_hint state ~cols ~have ~need_rows =
+  let ko = state.ui_language = Lang_ko in
+  Masc_tui_too_small_hint.text ~ko ~have ~need_rows
+    (Masc_tui_too_small_hint.choose ~ko ~cols ~have ~need_rows)
 ;;
 
 let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small)

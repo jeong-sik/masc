@@ -151,21 +151,23 @@ module Viewport = struct
   let minimum_fixed_chrome_rows = 14
   let navigation_rows = 1
 
-  (* One composer row, and only where the surface above can still meet its own
-     fixed-row budget without it. A surface pushed under the budget shows the
-     too-small screen instead of itself, so a convenience row that costs the
-     surface is worse than no row: the composer yields. The agenda strip's rows
-     are spent first: weighing the composer against the terminal alone gave a
-     16-row terminal with the strip up a 13-row body and the too-small screen,
-     where 14 rows fit without the composer. *)
-  let composer_rows ~terminal_rows ~agenda_rows =
-    if terminal_rows - agenda_rows > minimum_fixed_chrome_rows then 1 else 0
+  (* The composer's row. [finish_surface] draws it at every size, empty when
+     there is nothing to write to, so every budget counts it at every size.
+     Giving the row to the body on a short terminal would make the frame one
+     row taller than the terminal: the composer would fall off the bottom and
+     a focused caret would land on the row above it. *)
+  let composer_rows = 1
+
+  let below_strip ~terminal_rows = max 1 (terminal_rows - navigation_rows)
 
   let body_rows ~terminal_rows ~agenda_rows =
-    max 1 (terminal_rows - composer_rows ~terminal_rows ~agenda_rows - agenda_rows)
+    max 1 (terminal_rows - composer_rows - agenda_rows)
 
-  let body_fits ~terminal_rows ~agenda_rows =
-    body_rows ~terminal_rows ~agenda_rows >= minimum_fixed_chrome_rows
+  (* The fewest rows below the strip whose body holds the budget. The
+     decision is this comparison, so the count the screen writes and the
+     decision cannot part. *)
+  let rows_needed ~agenda_rows =
+    minimum_fixed_chrome_rows + composer_rows + agenda_rows
 
   type size = { cols : int; rows : int }
 
@@ -173,23 +175,15 @@ module Viewport = struct
     | Rows_short of { have : size; need_rows : int }
     | Notice_needs_full_frame
 
-  (* The fewest rows below the strip that the body fits in, counting up from
-     [terminal_rows] with the predicate the decision itself uses. The body
-     never shrinks as the terminal grows, and it reaches the budget once the
-     terminal holds the budget and the agenda rows, so the count stops by
-     [minimum_fixed_chrome_rows + agenda_rows]. *)
-  let rec rows_needed ~agenda_rows terminal_rows =
-    if body_fits ~terminal_rows ~agenda_rows then terminal_rows
-    else rows_needed ~agenda_rows (terminal_rows + 1)
-
   let too_small ~terminal_rows ~terminal_cols ~agenda_rows ~notice_needs_full_frame =
-    if body_fits ~terminal_rows ~agenda_rows then
+    let need = rows_needed ~agenda_rows in
+    if terminal_rows >= need then
       if notice_needs_full_frame () then Some Notice_needs_full_frame else None
     else
       Some
         (Rows_short
            { have = { cols = terminal_cols; rows = terminal_rows + navigation_rows }
-           ; need_rows = rows_needed ~agenda_rows terminal_rows + navigation_rows })
+           ; need_rows = need + navigation_rows })
 end
 
 (* Keeper roster columns.

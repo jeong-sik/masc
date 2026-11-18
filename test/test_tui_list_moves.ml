@@ -1,6 +1,7 @@
 (* The move keys of the lists RFC tui-one-screen-grammar §3.1 names, as
-   decisions over the TUI state: which place each key selects and that no
-   move key folds or unfolds a group. Nothing here reads drawn text. *)
+   decisions over the TUI state: which place each key selects, that no move
+   key folds or unfolds a group, and that the Workspace detail card keeps
+   one height for every selection (§8). Nothing here reads drawn text. *)
 
 open Masc_tui_types
 module Model = Masc_tui_keeper_list_model
@@ -162,6 +163,41 @@ let test_overview_answers_every_move_key () =
   Alcotest.(check (option int)) "a lost selection's End is the last row" (Some last)
     (home_index state)
 
+let repository ?(status = Repo_manager_types.Active) ?(keepers = []) name path :
+    Tui_decode.repository =
+  { rp_id = name; rp_name = name; rp_codebase = None; rp_url = ""
+  ; rp_local_path = path; rp_resolved_local_path = path
+  ; rp_default_branch = "main"
+  ; rp_status = Tui_decode.Repository_status status
+  ; rp_keepers = keepers
+  ; rp_auto_sync = false }
+
+(* Three repositories whose details differ in length: a short one, one whose
+   Keepers wrap, one with a failure row. The card is as tall for each. *)
+let test_workspace_detail_keeps_one_height () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Repositories;
+  let repos =
+    [ repository "short" "/tmp/short"
+    ; repository "wrapped"
+        ~keepers:(List.init 8 (fun index -> Printf.sprintf "keeper-with-a-long-name-%d" index))
+        "/Users/example/me/.masc/repos/a-repository-with-a-long-hyphenated-name"
+    ; repository "failed" ~status:(Repo_manager_types.Error "clone failed: remote hung up")
+        "/tmp/failed" ]
+  in
+  state.repositories <- Some { Tui_decode.rs_repositories = repos; rs_total = 3 };
+  List.iter
+    (fun (cols, budget) ->
+      let rows cursor =
+        Masc_tui_render_repositories.repository_detail_rows state ~cols ~budget ~cursor in
+      let first = rows 0 in
+      Alcotest.(check bool) (Printf.sprintf "%dx%d draws a card" cols budget) true (first > 0);
+      List.iter (fun cursor ->
+        Alcotest.(check int) (Printf.sprintf "%dx%d cursor %d" cols budget cursor) first
+          (rows cursor))
+        [ 1; 2 ])
+    [ 80, 18; 120, 34; 200, 54; 60, 40 ]
+
 let () =
   Alcotest.run "tui list moves"
     [ ( "keeper list"
@@ -173,5 +209,9 @@ let () =
     ; ( "overview"
       , [ Alcotest.test_case "every move key moves the selection" `Quick
             test_overview_answers_every_move_key
+        ] )
+    ; ( "workspace"
+      , [ Alcotest.test_case "the detail card keeps one height" `Quick
+            test_workspace_detail_keeps_one_height
         ] )
     ]

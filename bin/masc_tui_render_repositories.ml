@@ -232,15 +232,25 @@ let repository_preview_lines state ~width (repo : Tui_decode.repository) =
         | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
         | names -> String.concat ", " names)
     ; ui_text state ~ko:"기준 브랜치 (등록)" ~en:"Default branch (registered)", repo.rp_default_branch
-    ; ui_text state ~ko:"작업 경로" ~en:"Checkout", repo.rp_resolved_local_path
     ] in
   let failure = match Tui_decode.repository_status_reason repo.rp_status with
     | None -> []
     | Some reason -> [ui_text state ~ko:"등록 상태의 문제" ~en:"Repository issue", reason] in
-  (failure @ fields)
-  |> List.concat_map (fun (label, value) ->
-      Message_layout.wrap_words ~max_cells:(max 1 width)
-        (label ^ "  " ^ Terminal_text.single_line value))
+  (* The checkout is a path: one row, cut in the middle (RFC
+     tui-one-screen-grammar §5.1, §5.2). Wrapped as words it broke inside a
+     repository name at its hyphen, and the two halves read as two values. *)
+  let checkout =
+    let lead = ui_text state ~ko:"작업 경로" ~en:"Checkout" ^ "  " in
+    let path = Terminal_text.single_line repo.rp_resolved_local_path in
+    let room = width - Message_layout.display_width lead in
+    if room > 0 then lead ^ Message_layout.truncate_middle room path
+    else Message_layout.truncate_middle (max 1 width) (lead ^ path)
+  in
+  ((failure @ fields)
+   |> List.concat_map (fun (label, value) ->
+       Message_layout.wrap_words ~max_cells:(max 1 width)
+         (label ^ "  " ^ Terminal_text.single_line value)))
+  @ [checkout]
 
 let repository_inventory_intro (state : state) ~width =
   let observation = match state.repositories, state.repositories_error,
@@ -300,22 +310,31 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
     else width in
   let list_width = if split then width - detail_width - 2 else width in
   let selected = List.nth_opt repos cursor in
+  let preview repo = repository_preview_lines state ~width:(detail_width - 4) repo in
   let context_lines = match selected with
     | None -> []
-    | Some repo -> repository_preview_lines state ~width:(detail_width - 4) repo in
+    | Some repo -> preview repo in
   let context_budget = max 0
       (if split then panel_budget - 2
        else min (panel_budget / 2 - 2) (panel_budget - 6)) in
+  (* The card is as tall as the tallest detail among the loaded repositories
+     (RFC tui-one-screen-grammar §8), so j and k move the selection and not
+     the card's bottom edge. Sized by the selected one, the edge moved a row
+     each time a repository's path or Keepers took one row more. *)
+  let card_rows =
+    min context_budget
+      (List.fold_left (fun tallest repo -> max tallest (List.length (preview repo))) 0 repos) in
   let truncated = List.length context_lines > context_budget in
   let show_notice = truncated && context_budget >= 2 in
   let visible_context = List.take
       (max 0 (context_budget - if show_notice then 1 else 0)) context_lines in
   let detail = match selected with
     | Some repo when context_budget > 0 ->
+        let lines = visible_context @ if show_notice then
+            [ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context"] else [] in
         studio_panel ~width:detail_width
           ~title:(Terminal_text.single_line repo.rp_name)
-          ~lines:(visible_context @ if show_notice then
-            [ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context"] else [])
+          ~lines:(lines @ List.init (max 0 (card_rows - List.length lines)) (fun _ -> ""))
     | Some _ | None -> [] in
   let list_budget = if split then panel_budget else panel_budget - List.length detail in
   let errors = match state.repositories_error with
@@ -333,6 +352,9 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
   (repository_studio_geometry state ~cols ~budget ~cursor).rsg_content_height
+
+let repository_detail_rows state ~cols ~budget ~cursor =
+  List.length (repository_studio_geometry state ~cols ~budget ~cursor).rsg_detail
 
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in

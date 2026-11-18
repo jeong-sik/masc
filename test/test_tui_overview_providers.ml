@@ -999,6 +999,26 @@ let test_hidden_limit_group_omits_entries () =
   check bool "hidden draws fewer lines" true
     (List.length hidden < List.length shown)
 
+(* Only a window that blocks model calls when full is a declared limit and
+   colours its cells by place (RFC tui-one-screen-grammar section 7.3). *)
+let test_only_a_gating_window_is_a_declared_limit () =
+  let fill_t =
+    testable
+      (fun formatter fill ->
+        Format.pp_print_string formatter
+          (match fill with
+           | Providers.Limit_fill -> "Limit_fill"
+           | Providers.Foreground_fill -> "Foreground_fill"
+           | Providers.Row_tone_fill -> "Row_tone_fill"))
+      ( = )
+  in
+  check fill_t "a window that blocks model calls is a limit" Providers.Limit_fill
+    (Providers.bar_fill Masc.Tui_decode_usage.Role_gates_model_calls);
+  check fill_t "an unclassified cap draws in the foreground" Providers.Foreground_fill
+    (Providers.bar_fill Masc.Tui_decode_usage.Role_unclassified_limit);
+  check fill_t "an other-use window recedes with its row" Providers.Row_tone_fill
+    (Providers.bar_fill Masc.Tui_decode_usage.Role_counts_other_use)
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -1051,5 +1071,7 @@ let () =
             test_at_limit_is_the_header_decision
         ; test_case "hidden limit group omits its entries" `Quick
             test_hidden_limit_group_omits_entries
+        ; test_case "only a gating window is a declared limit" `Quick
+            test_only_a_gating_window_is_a_declared_limit
         ] )
     ]

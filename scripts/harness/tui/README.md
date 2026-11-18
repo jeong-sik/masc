@@ -28,6 +28,8 @@ python3 scripts/harness/tui/idle.py \
 
 `--out` must be a new directory. Without `--steps`, all screens in the `STEPS` table of `idle.py` run in table order. A row of that table names a screen and the keys that reach it. Each screen starts a fresh TUI, so its keys start from the screen the TUI opens on: a command palette jump (`:go Work`), then single keys for that screen. The palette entries come from `bin/masc_tui_palette.ml` and the keys from `bin/masc_tui_keys.ml`. The Keeper list opens on the view `tui-keepers.toml` stores, so the table has no row per Keeper list view.
 
+`idle.py` exits 0 when every screen opened and reached its keys and the relay's refusals were read. It exits 2 when the run stopped early (a bad argument, `/health` not answering through the relay, a stop signal) and 3 when it ran to the end but a screen failed, the relay log could not be read or the preferences could not be put back; `idle.json` says which.
+
 For each screen, `idle.json` records:
 
 - `opened` (the first frame arrived), `keys` and `keys_ok` (each palette jump found the palette open), and `top_rows`, the first three screen rows when the window starts, which show where the keys landed;

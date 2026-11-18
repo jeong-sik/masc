@@ -5,6 +5,15 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+(* The Skills list's name column is as wide as its longest name, between
+   these two. The floor is the width the column always had. The cap keeps a
+   row on an 80-column screen: 32 name cells and an instruction Skill's
+   other fields (mark, execution, sizes) come to about 74 cells. A longer
+   name is cut in the middle, so two names that share a head still differ
+   on screen. *)
+let skill_name_min_cells = 22
+let skill_name_max_cells = 32
+
 module Tool_tree = Masc_tui_tool_tree
 module Tool_table = Masc_tui_tool_table
 let json_assoc_member_opt = Masc_tui_json.member_opt
@@ -847,15 +856,21 @@ let tools_selection_document ~cols state =
   | Some profile ->
       let reference = profile.esp_reference in
       let name = Terminal_text.single_line profile.esp_name in
+      (* Where the Skill comes from is one fact in three parts, so it takes
+         one row: the list below gets the two rows the parts used to take
+         each. A row too long for the frame wraps rather than cutting an
+         identity. *)
+      let field ko en value = ui_text state ~ko ~en ^ " " ^ value in
       named_again ~selection_row:(skill_selection_prefix state ^ name)
         ~title:(Ansi.bold, "Action Skill: " ^ name)
-      @ [ Ansi.dim, "Source: " ^ Terminal_text.single_line
-            (Skill_reference.identity_source_id_to_string reference.identity)
-        ; Ansi.dim, "Package: " ^ Terminal_text.single_line
-            (Skill_reference.identity_package_id_to_string reference.identity)
-        ; Ansi.dim, "Revision: " ^ Masc_tui_value.Hash.short (Terminal_text.single_line
-            (Skill_reference.content_revision_to_string reference.content_revision))
-        ]
+      @ [ Ansi.dim,
+          String.concat " · "
+            [ field "출처" "Source" (Terminal_text.single_line
+                (Skill_reference.identity_source_id_to_string reference.identity));
+              field "패키지" "Package" (Terminal_text.single_line
+                (Skill_reference.identity_package_id_to_string reference.identity));
+              field "리비전" "Revision" (Masc_tui_value.Hash.short (Terminal_text.single_line
+                (Skill_reference.content_revision_to_string reference.content_revision))) ] ]
 
 (* The Effective Keeper Surface's diagnostics: what the runtime says about
    itself, the two digests and the byte budgets. [hash] draws a digest: its
@@ -1045,6 +1060,18 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         let ets_skill_profiles = tools_skill_profiles state in
         let is_normal profile = match profile.Masc.Tui_decode_tools.esp_io with
           | Model_orchestrated -> true | Composition_io _ -> false in
+        (* The name column is as wide as the longest name, up to a cap, so a
+           long name such as [verify-before-claiming-done] no longer pushes
+           its row's execution and sizes past every other row's. *)
+        let skill_name_cells =
+          List.fold_left
+            (fun widest (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
+              max widest
+                (Masc_tui_message_layout.display_width
+                   (Terminal_text.single_line profile.esp_name)))
+            skill_name_min_cells ets_skill_profiles
+          |> min skill_name_max_cells
+        in
         let skill_profile_lines =
           List.mapi
             (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
@@ -1087,9 +1114,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                heading @ [ ( (if index = state.tools_skill_cursor
                   then Theme.selection
                   else Ansi.dim)
-               , Printf.sprintf " %s %-22s %-11s%s discovery=%dB body=%dB"
+               , Printf.sprintf " %s %s %-11s%s discovery=%dB body=%dB"
                    (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
-                   (Terminal_text.single_line profile.esp_name)
+                   (Masc_tui_message_layout.fit_middle skill_name_cells
+                      (Terminal_text.single_line profile.esp_name))
                    (Terminal_text.single_line execution)
                    flow
                    profile.esp_discovery_bytes

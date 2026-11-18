@@ -19,14 +19,20 @@ val braille_pair : left:int -> right:int -> string
     ["⣶"], ["⣾"], ["⣿"]). *)
 
 val braille_bar_mark : level:int -> string
+(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
+    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
+    measured zero draws. *)
 
 val braille_bar_rows : rows:int -> level:int -> string list
 (** A column [rows] cells tall drawn to [level] dots, top cell first. The
     base cell holds levels 1 to 4, the next one up 5 to 8, and so on; a cell
     the column does not reach is the blank Braille cell. *)
-(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
-    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
-    measured zero draws. *)
+
+val value_share : dots:int -> int -> float
+(** Where a column [level] dots tall on a [dots]-dot scale stands on a
+    ramp, in [[0, 1]]: the lowest value, one level above the baseline, at
+    [0], the top at [1]. The baseline itself, a zero, also reads [0]. Every
+    graph that colours a column by its own height reads it here. *)
 
 (** {1 Samples} *)
 
@@ -97,7 +103,7 @@ val braille_graph :
 
     A graph more than one row tall colours each row by its height, from [0]
     at the base row to [1] at the top; a one-row graph colours each cell by
-    the taller of its two times, from [0] at the baseline to [1] at the top.
+    the taller of its two times through {!value_share}.
     A colour code goes out only where it changes, a blank cell opens none, an
     empty tint after a colour resets to the foreground, and each row that
     opened a colour ends with a reset. The axis text draws in the

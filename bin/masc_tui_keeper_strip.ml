@@ -152,7 +152,7 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
   in
   String.concat "  " (List.map2 draw mark_budgets groups)
 
-type wake_style = Keeper_wakes of { paused : bool } | Wake_counts
+type wake_style = Keeper_wakes | Wake_counts
 
 let window_label ~cells full narrow =
   Theme.recede ()
@@ -198,6 +198,15 @@ let wake_strip ~ko ~style slots =
       | Next.Wakes count -> max peak count
       | Next.Wakes_with_unknown count -> max peak count
       | Wakes_unknown -> peak) 0 slots in
+    (* A Keeper's own row is a small graph inside a list, so it recedes, as
+       btop's process rows do (RFC tui-one-screen-grammar section 7.3). A
+       group or fleet row sums its Keepers: each slot walks the wakes ramp
+       by its share of the busiest slot. *)
+    let tone = match style with
+      | Keeper_wakes -> fun _ -> Theme.recede ()
+      | Wake_counts ->
+          let tint = Theme.series_tint Masc_tui_theme.Wakes in
+          fun count -> tint (float_of_int count /. float_of_int (max 1 peak)) in
     String.concat "" (List.mapi (fun index slot ->
       let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
       match slot with
@@ -205,11 +214,10 @@ let wake_strip ~ko ~style slots =
       | Next.Wakes_with_unknown count when count <= 0 -> quiet Grid.Strip_unknown
       | Next.Wakes_with_unknown count | Wakes count ->
           if count <= 0 then quiet Grid.Strip_empty else
-          let tone, mark = match style with
-            | Keeper_wakes { paused } ->
-                (if paused then Theme.recede () else Theme.info ()), Grid.strip_mark Grid.Strip_wake
-            | Wake_counts -> Theme.info (), Grid.level_glyph ~peak count in
-          (if index = 0 then Ansi.bold else "") ^ tone ^ mark ^ Ansi.reset) slots)
+          let mark = match style with
+            | Keeper_wakes -> Grid.strip_mark Grid.Strip_wake
+            | Wake_counts -> Grid.level_glyph ~peak count in
+          (if index = 0 then Ansi.bold else "") ^ tone count ^ mark ^ Ansi.reset) slots)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 

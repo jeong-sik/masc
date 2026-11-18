@@ -769,12 +769,9 @@ let grid_wake_window state ~style slots =
 
 (* Scheduled wakes per half hour, the now slot first. Unknown windows get
    one label; the shared renderer keeps mixed unknown and empty slots apart. *)
-let grid_wake_strip state (grid : Grid.t) ~now verdict ~keeper_name =
-  let paused = match verdict with
-    | Grid.Paused -> true
-    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> false in
+let grid_wake_strip state (grid : Grid.t) ~now ~keeper_name =
   grid_wake_window state
-    ~style:(Masc_tui_keeper_strip.Keeper_wakes { paused })
+    ~style:Masc_tui_keeper_strip.Keeper_wakes
     (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
        ~keeper_name)
 
@@ -851,7 +848,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
       let scale =
         match gap with
         | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
-            Masc_tui_chart.Anomaly { paint = Theme.paint (); status = Masc_tui_theme.Warn }
+            Masc_tui_chart.Anomaly { paint = Theme.paint (); alarm = Masc_tui_chart.Alarm_warn }
         | Memory_reading.No_gap ->
             Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Backlog }
       in
@@ -993,7 +990,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          ; name
          ; pulse = pulse ()
          ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) row
-         ; strip = grid_wake_strip state grid ~now verdict ~keeper_name
+         ; strip = grid_wake_strip state grid ~now ~keeper_name
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
          }

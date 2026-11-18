@@ -314,9 +314,17 @@ type series =
   | Capacity  (** Running against bootable, capacity against a target. Blue. *)
   | Backlog  (** Work behind: a lag, a queue. Yellow. *)
   | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
+  | Wakes
+      (** Scheduled Keeper wakes per half hour ahead. Cyan, the hue of the
+          calls they become. *)
 
 val ramp_steps : int
 (** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)
+
+val ramp_reader : paint -> series -> position:float -> string
+(** [ramp_reader paint series] finds the ramp's table once and returns the
+    reader of its steps, for a drawing that colours many cells: each
+    [~position] is then one array read. The colours are {!ramp_style}'s. *)
 
 val ramp_style : paint -> series -> position:float -> string
 (** The SGR a cell at [position] on [series]' ramp draws before its glyph.

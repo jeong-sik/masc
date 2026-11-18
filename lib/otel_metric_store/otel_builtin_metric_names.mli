@@ -103,7 +103,8 @@ val metric_telemetry_scanned_bytes : string
 (** Reads of a fact a dated JSONL store keeps in memory
     ([Dated_jsonl.read_fact]). Labels: [store] (the kind of store), [fact],
     [outcome] ([held]: no file was read; [read_and_kept]; [read_not_kept]:
-    the files changed during the read; [read_failed]). *)
+    the files changed during the read, or this process keeps no facts;
+    [read_failed]). *)
 val metric_dated_jsonl_fact_reads : string
 
 (** A keeper lifecycle event reached the dashboard cache patcher without a

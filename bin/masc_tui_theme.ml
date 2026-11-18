@@ -527,6 +527,7 @@ type series =
   | Capacity
   | Backlog
   | Usage
+  | Wakes
 
 type hue = Green | Yellow | Blue | Magenta | Cyan
 
@@ -543,6 +544,7 @@ let series_hue = function
   | Capacity -> Blue
   | Backlog -> Yellow
   | Usage -> Blue
+  | Wakes -> Cyan
 ;;
 
 (* The bright palette entry of each hue, the top of its ramp. *)
@@ -681,7 +683,7 @@ let same_ramp_key left right =
       | None, Some _ | Some _, None -> false)
 ;;
 
-(* Eight series on two grounds is sixteen tables; the rest leaves room for a
+(* Nine series on two grounds is eighteen tables; the rest leaves room for a
    palette change without ever building a table per frame. *)
 let ramp_table_capacity = 32
 
@@ -714,11 +716,15 @@ let ramp_table paint series =
     table
 ;;
 
-let ramp_style paint series ~position =
+let ramp_reader paint series =
   match paint.depth with
-  | No_color -> ""
-  | Colors_16 | Colors_256 | Truecolor -> (ramp_table paint series).(step_index position)
+  | No_color -> fun ~position:_ -> ""
+  | Colors_16 | Colors_256 | Truecolor ->
+    let table = ramp_table paint series in
+    fun ~position -> table.(step_index position)
 ;;
+
+let ramp_style paint series ~position = ramp_reader paint series ~position
 
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment

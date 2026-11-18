@@ -302,7 +302,7 @@
       "name": "goal_verifier_refute_reenter_prove",
       "actors": ["coordinator", "reviewer"],
       "capabilities": ["Goal", "Verification", "Cross-Verification", "Sandbox", "Dashboard", "Browser", "Restart"],
-      "user_story": "Goal 완료는 독립 verifier가 owner playground의 실제 artifact를 읽은 판정으로만 일어난다. 실패 artifact는 Proof_refuted와 Executing 복귀를 만들고, 같은 Goal의 수정 artifact는 새 run으로 재진입해 Proof_proven과 Completed를 만든다. 최종 ledger run ID, durable evaluator/tool run, 실제 backend Dashboard의 펼친 verification_read_file 행과 screenshot이 같은 Goal/run을 가리켜야 한다.",
+      "user_story": "독립 Verifier가 공유 playground에서 작업자의 파일을 읽는다. 조건에 못 미치면 Proof_refuted를 남기고 Executing으로 돌아간다. 파일을 고쳐 다시 요청하면 새 실행이 Proof_proven을 기록하고 Goal은 Awaiting_confirmation으로 옮겨진다. 완료 원장, 검증 실행, 대시보드에서 펼친 tool_read_file 행이 같은 Goal과 검증 실행을 가리키는지 확인한다.",
       "assertions": ["goal_verifier_refutation_observed", "goal_verifier_reentry_proven", "goal_verifier_dashboard_browser_observed"],
       "evidence": ["observations/goal-verifier-task-refuted.json", "observations/goal-verifier-task-proven.json", "observations/goal-verifier-refuted.json", "observations/goal-verifier-proven.json", "observations/goal-verification-runs.json", "browser/goal-verification-run-proof.json", "browser/goal-verification-run-proof.png"]
     },

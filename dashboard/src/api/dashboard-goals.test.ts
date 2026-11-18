@@ -372,10 +372,10 @@ describe('fetchDashboardGoalsTree decoding', () => {
             },
             {
               ts: '2026-08-07T18:42:22Z',
-              kind: 'goal_owner',
+              kind: 'goal_proof_reopened',
               lane: 'goal',
               title: 'Goal Event',
-              summary: 'goal_owner',
+              summary: 'goal_proof_reopened',
               severity: 'ok',
             },
             {
@@ -404,10 +404,10 @@ describe('fetchDashboardGoalsTree decoding', () => {
       },
       {
         ts: '2026-08-07T18:42:22Z',
-        kind: 'goal_owner',
+        kind: 'goal_proof_reopened',
         lane: 'goal',
         title: 'Goal Event',
-        summary: 'goal_owner',
+        summary: 'goal_proof_reopened',
         severity: 'ok',
       },
     ])

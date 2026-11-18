@@ -5,6 +5,7 @@ is operator authority; this does not attest physical human presence.
 """
 import argparse
 import json
+import math
 import re
 import sys
 import uuid
@@ -123,6 +124,24 @@ def valid_instance(value):
         return False
 
 
+def valid_measure_label(value):
+    return nonblank(value) and '\r' not in value and '\n' not in value
+
+
+def valid_measure(measure):
+    match measure:
+        case {'kind': 'count', 'noun': noun, 'total': total}:
+            return (len(measure) == 3 and valid_measure_label(noun)
+                    and type(total) is int and total > 0)
+        case {'kind': 'quantity', 'unit': unit, 'direction': direction, 'target': target}:
+            return (len(measure) == 4 and valid_measure_label(unit) and direction in ('at_least', 'at_most')
+                    and (type(target) is int or (type(target) is float and math.isfinite(target))))
+        case {'kind': 'done_when', 'condition': condition}:
+            return len(measure) == 2 and valid_measure_label(condition)
+        case _:
+            return False
+
+
 def proven_evidence(result, goal_id):
     goal = result['goal']
     verification = result['verification']
@@ -134,9 +153,9 @@ def proven_evidence(result, goal_id):
         or verification['goal_id'] != goal_id or completion['state'] not in ('proof_proven', 'human_confirmed')
         or not nonblank(criterion.get('revision')) or criterion['revision'] != goal['criterion_revision']
         or not isinstance(criterion.get('title'), str) or criterion['title'] != goal['title']
-        or criterion.get('metric') != goal['metric'] or criterion.get('target_value') != goal['target_value']
-        or not (criterion['metric'] is None or isinstance(criterion['metric'], str))
-        or not (criterion['target_value'] is None or isinstance(criterion['target_value'], str))
+        or not valid_measure(goal.get('measure')) or not valid_measure(criterion.get('measure'))
+        or criterion['measure'] != goal['measure']
+        or not nonblank(criterion.get('procedure')) or criterion['procedure'] != goal.get('procedure')
         or verdict.get('outcome') != 'proven' or verdict.get('reason', 'missing') is not None
         or not nonblank(verdict.get('request_id')) or not nonblank(verdict.get('verification_run_id'))
         or not nonblank(verdict.get('evidence')) or not nonblank(verdict.get('recorded_at'))

@@ -45,14 +45,15 @@ for (const item of await readdir(root, { recursive: true, withFileTypes: true })
   }
 }
 await mkdir(output, { recursive: false })
-const criterion = { revision: 'fixture-revision-1', title: 'Browser synthetic Goal', metric: 'verified artifacts', target_value: '1' }
+const criterion = { revision: 'fixture-revision-1', title: 'Browser synthetic Goal', measure: { kind: 'count', noun: 'artifacts', total: 1 },
+  procedure: 'Count the verified artifacts in the submitted result.' }
 const verdict = { criterion, request_id: 'fixture-request-1', verification_run_id: 'fixture-run-1', outcome: 'proven', reason: null,
   authority: { kind: 'system_llm_agent', actor: 'synthetic-verifier' }, evidence: 'Exact synthetic evidence: artifact 1/1. <script>literal</script>', recorded_at: '2026-09-10T00:00:00Z' }
 let completed = false, mode = 'success', readCount = 0
 const posts = [], reads = [], blocked = []
 function payload() {
-  return { inspection_operator_id: 'synthetic-operator', goal: { id: 'fixture-goal', title: criterion.title, metric: criterion.metric,
-      target_value: criterion.target_value, criterion_revision: criterion.revision,
+  return { inspection_operator_id: 'synthetic-operator', goal: { id: 'fixture-goal', title: criterion.title, measure: criterion.measure,
+      procedure: criterion.procedure, criterion_revision: criterion.revision,
       phase: completed ? 'completed' : 'awaiting_confirmation' },
     verification: { goal_id: 'fixture-goal', updated_at: '2026-09-10T00:00:00Z', completion: completed
       ? { state: 'human_confirmed', verdict, operator_id: 'synthetic-operator', confirmed_at: '2026-09-10T01:00:00Z' }
@@ -62,7 +63,7 @@ function goal() {
   const phase = completed ? 'completed' : 'awaiting_confirmation'
   return { id: 'fixture-goal', title: criterion.title, criterion_revision: criterion.revision, phase, phase_color: '', priority: 3,
     goal_fsm: { state: phase, source: 'goal.phase', next_actions: [], activity_observation: 'goal_metadata' },
-    metric: criterion.metric, target_value: criterion.target_value, due_date: null, tasks: [], task_count: 0, task_done_count: 0,
+    measure: criterion.measure, procedure: criterion.procedure, due_date: null, tasks: [], task_count: 0, task_done_count: 0,
     timeline_events: [], children: [], child_count: 0, linked_keeper_names: [], pending_approval_count: 0,
     activity_observation: 'goal_metadata', last_activity_at: '2026-09-10T00:00:00Z', stagnation_seconds: 0,
     created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z', verification: payload().verification }

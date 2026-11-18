@@ -12,11 +12,13 @@ from urllib.parse import parse_qs, urlsplit
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'goal-confirmation.py'
+MEASURE = {'kind': 'count', 'noun': 'cases', 'total': 10}
+PROCEDURE = 'Count the passing cases in the submitted result.'
 PROOF = {'inspection_operator_id': 'operator-a',
     'goal': {'id': 'goal-1', 'phase': 'awaiting_confirmation', 'criterion_revision': 'revision-1',
-        'title': 'Goal', 'metric': 'cases', 'target_value': '10'},
+        'title': 'Goal', 'measure': MEASURE, 'procedure': PROCEDURE},
     'verification': {'goal_id': 'goal-1', 'completion': {'state': 'proof_proven',
-        'verdict': {'criterion': {'revision': 'revision-1', 'title': 'Goal', 'metric': 'cases', 'target_value': '10'},
+        'verdict': {'criterion': {'revision': 'revision-1', 'title': 'Goal', 'measure': MEASURE, 'procedure': PROCEDURE},
                     'request_id': 'request-1', 'verification_run_id': 'run-1', 'outcome': 'proven', 'reason': None,
                     'evidence': '10 cases', 'recorded_at': '2026-11-01T00:00:00Z',
                     'authority': {'kind': 'system_llm_agent', 'actor': 'verifier'}}}}}
@@ -242,11 +244,30 @@ class ConfirmationCliTest(unittest.TestCase):
         self.server.completed = False
         self.assertNotEqual(self.run_cli('--confirm-evidence', str(evidence_path)).returncode, 0)
         changed_criterion = json.loads(json.dumps(COMPLETED))
-        changed_criterion['goal']['metric'] = 'other metric'
-        changed_criterion['verification']['completion']['verdict']['criterion']['metric'] = 'other metric'
+        changed_criterion['goal']['procedure'] = 'Count cases in another result.'
+        changed_criterion['verification']['completion']['verdict']['criterion']['procedure'] = changed_criterion['goal']['procedure']
         self.server.post_response = changed_criterion
         self.server.completed = False
         self.assertNotEqual(self.run_cli('--confirm-evidence', str(evidence_path)).returncode, 0)
+
+    def test_confirmation_binds_the_current_measure_and_procedure_before_post(self):
+        inspected = self.run_cli()
+        self.assertEqual(inspected.returncode, 0, inspected.stderr)
+        evidence_path = Path(self.directory.name) / 'evidence.json'
+        for field, changed, change_goal in (
+            ('measure', {'kind': 'count', 'noun': 'cases', 'total': 9}, False),
+            ('measure', {'kind': 'count', 'noun': 'cases', 'total': True}, True),
+            ('procedure', 'Count cases in another result.', False),
+        ):
+            with self.subTest(field=field, changed=changed):
+                evidence = json.loads(inspected.stdout)
+                if change_goal:
+                    evidence['goal'][field] = changed
+                evidence['verification']['completion']['verdict']['criterion'][field] = changed
+                evidence_path.write_text(json.dumps(evidence))
+                refused = self.run_cli('--confirm-evidence', str(evidence_path))
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertFalse(any(call[0] == 'POST' for call in self.server.calls))
 
     def test_interrupt_after_dispatch_reports_uncertainty_without_replay(self):
         inspected = self.run_cli()

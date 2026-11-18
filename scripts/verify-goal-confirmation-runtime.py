@@ -148,7 +148,8 @@ def main():
     base = out / 'base'
     config = base / '.masc/config'
     config.mkdir(parents=True)
-    artifact = base / '.masc/playground/fixture/evidence.txt'
+    artifact_ref = 'fixture/evidence.txt'
+    artifact = base / '.masc/playground' / artifact_ref
     artifact.parent.mkdir(parents=True)
     artifact.write_text('synthetic goal evidence: exactly one marker\n')
     requests = []
@@ -177,7 +178,7 @@ def main():
             if index == 0:
                 assert 'tool_read_file' in names
                 name = 'tool_read_file'
-                arguments = {'file_path': str(artifact)}
+                arguments = {'path': artifact_ref}
             else:
                 assert 'report_review_verdict' in names
                 results = [m for m in body['messages'] if m['role'] == 'tool']
@@ -298,7 +299,11 @@ def main():
                               'masc_root': health['paths']['effective_masc_root']}
         safe_save(out / 'health.json', health)
         http('/mcp', {'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'goal-confirmation-fixture', 'version': '1'}}})
-        created = mcp('masc_goal_upsert', {'title': 'Synthetic marker inspection', 'metric': 'marker count in fixture/evidence.txt', 'target_value': '1'})
+        created = mcp('masc_goal_upsert', {
+            'title': 'Synthetic marker inspection',
+            'measure': {'kind': 'count', 'noun': 'markers', 'total': 1},
+            'procedure': f'Read {artifact_ref} and count the marker.',
+        })
         goal_id = created['goal']['id']
         mcp('masc_goal_transition', {'goal_id': goal_id, 'action': 'request_complete'})
         path = '/api/v1/goals/confirmation?' + urlencode({'goal_id': goal_id,

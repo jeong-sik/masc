@@ -832,6 +832,14 @@ module Terminal_text = struct
      a row from the day before overflowed its frame and lost its seconds. *)
   let clock_timestamp_cells =
     Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_second
+  (* A moment in a list column, to the minute: another year reads as its
+     date alone (§6.1), so the column is as wide as a moment within this
+     year. [short_timestamp] is the form for a value on a line of its own. *)
+  let column_timestamp text =
+    moment_of_iso ~unreadable:Masc.Tui_terminal_text.short_timestamp_for_terminal
+      (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute) text
+  let column_timestamp_cells =
+    Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
 end
 
 (** Task status icon *)

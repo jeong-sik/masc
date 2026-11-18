@@ -4708,7 +4708,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let rule_cells =
                  min table_inner (Message_layout.display_width header) in
                let occurrence_clock = function
-                 | Some iso -> Terminal_text.short_timestamp iso
+                 | Some iso -> Terminal_text.column_timestamp iso
                  | None -> Masc_tui_theme.Glyph.no_value
                in
                let row_line (row : schedule_row) =
@@ -4754,7 +4754,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                          Terminal_text.single_line row.sch_recurrence_summary
                      ; krow_by = Terminal_text.single_line row.sch_requested_by
                      ; krow_requested =
-                         Terminal_text.short_timestamp row.sch_requested_at_iso
+                         Terminal_text.column_timestamp row.sch_requested_at_iso
                      ; krow_what =
                          Terminal_text.single_line
                            (Option.value ~default:row.sch_schedule_id

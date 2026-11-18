@@ -171,11 +171,9 @@ let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_re
     if not provider.enabled
     then Error (Provider_disabled provider.id)
     else
-      (match Runtime_adapter.check_catalog_row provider with
-      | Error (Runtime_adapter.Catalog_row_not_declared catalog_provider) ->
-        Error (Catalog_provider_not_declared { provider_id = provider.id; catalog_provider })
-      | Error (Runtime_adapter.Catalog_row_beside_own_row catalog_provider) ->
-        Error (Catalog_provider_beside_own_row { provider_id = provider.id; catalog_provider })
+      (match Runtime_adapter.check_catalog_row ~construction provider with
+      | Error (catalog_provider, refusal) ->
+        Error (Catalog_provider_refused { provider_id = provider.id; catalog_provider; refusal })
       | Ok () ->
       (match Runtime_adapter.materialize_execution ~construction cfg b with
        | Ok selected ->

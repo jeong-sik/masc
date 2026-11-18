@@ -145,38 +145,66 @@ let declared_provider_kind = function
   | None -> None
 ;;
 
+type catalog_provider_refusal =
+  | Names_no_row
+  | Beside_own_row
+  | Names_alias of string
+  | Beside_kind
+
+let catalog_provider_refusal_text ~provider_id ~catalog_provider = function
+  | Names_no_row ->
+    Printf.sprintf
+      "provider %S declares %s %S, which names no AGENT_CORE catalog provider row"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider
+  | Beside_own_row ->
+    Printf.sprintf
+      "provider %S declares %s %S, but %S is itself a catalog provider row, so it already speaks as that row"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider provider_id
+  | Names_alias row_id ->
+    Printf.sprintf
+      "provider %S declares %s %S, which the catalog reads as row %S; write %S, because an exact-output target matches the row id as written"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider row_id row_id
+  | Beside_kind ->
+    Printf.sprintf
+      "provider %S declares %s %S and kind too; the catalog row owns the dialect, so remove kind"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider
+;;
+
 (* The catalog row a provider speaks as. A provider whose own id is a row
    speaks as it; an account of a catalog provider names the row with
    [catalog-provider] and keeps its own id for its credential, quota scope,
    runtime ids and rest cells (RFC account-provider-speaks-as-a-catalog-row
    §3.2). Every catalog lookup on a provider goes through here or through
    [Runtime_schema.catalog_provider_id], so the two names cannot drift. *)
-type catalog_row_refusal =
-  | Catalog_row_not_declared of string
-  | Catalog_row_beside_own_row of string
-
 let catalog_declaration declarations (provider : Runtime_schema.provider) =
   match provider.catalog_provider with
   | None -> Ok (Declarations.find declarations provider.id)
   | Some row ->
-    (match Declarations.find declarations provider.id, Declarations.find declarations row with
-     | Some (_ : Declarations.entry), (Some _ | None) -> Error (Catalog_row_beside_own_row row)
-     | None, None -> Error (Catalog_row_not_declared row)
-     | None, (Some _ as entry) -> Ok entry)
+    let refuse refusal = Error (row, refusal) in
+    (match
+       provider.wire_kind,
+       Declarations.find declarations provider.id,
+       Declarations.find declarations row
+     with
+     | Some (_ : Runtime_schema.provider_wire_kind), (Some _ | None), (Some _ | None) ->
+       refuse Beside_kind
+     | None, Some (_ : Declarations.entry), (Some _ | None) ->
+       refuse Beside_own_row
+     | None, None, None -> refuse Names_no_row
+     (* [find] reads aliases and any spelling of the id; the exact-output
+        resolver matches the row id as written, so only that spelling holds. *)
+     | None, None, Some entry when not (String.equal entry.id row) ->
+       refuse (Names_alias entry.id)
+     | None, None, (Some _ as entry) -> Ok entry)
 ;;
 
-let catalog_row_refusal_text (provider : Runtime_schema.provider) = function
-  | Catalog_row_not_declared row ->
-    Printf.sprintf "provider %S declares %s %S, which names no AGENT_CORE catalog provider row"
-      provider.id Runtime_schema.catalog_provider_key row
-  | Catalog_row_beside_own_row row ->
-    Printf.sprintf "provider %S declares %s %S, but its own id is a catalog provider row"
-      provider.id Runtime_schema.catalog_provider_key row
+let catalog_row_refusal_text (provider : Runtime_schema.provider) (catalog_provider, refusal) =
+  catalog_provider_refusal_text ~provider_id:provider.id ~catalog_provider refusal
 ;;
 
-let check_catalog_row provider =
+let check_catalog_row ~construction provider =
   Result.map (fun (_ : Declarations.entry option) -> ())
-    (catalog_declaration (Declarations.current ()) provider)
+    (catalog_declaration (Lazy.Mutexed.force construction) provider)
 ;;
 
 (* The catalog answers for a provider it has a row for; a deployment's [kind]

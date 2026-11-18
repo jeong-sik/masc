@@ -69,6 +69,151 @@ let test_an_interval_reads_as_exactly_its_setting () =
            (Masc_tui_fleet_line.interval_text interval))
     [ 300, "5m"; 3600, "1h"; 90, "1m30s"; 45, "45s" ]
 
+module Line = Masc_tui_fleet_line
+
+let fleet ~owners ~unread : Masc.Fleet_stream.fleet =
+  let interval =
+    match Masc.Fleet_stream.Proactive_interval.of_seconds 300 with
+    | Some interval -> interval
+    | None -> failwith "300 seconds is a proactive interval"
+  in
+  { Masc.Fleet_stream.fs_status = Masc.Keeper_fleet_grade.Fleet_degraded
+  ; fs_blocker = None
+  ; fs_operator_action_required = false
+  ; fs_bootable_count = 0
+  ; fs_running_count = 0
+  ; fs_executable_count = 0
+  ; fs_failing_count = 0
+  ; fs_recovering_count = 0
+  ; fs_turn_configuration_error_count = 0
+  ; fs_official_client_recovery_required_count = 0
+  ; fs_paused_count = 0
+  ; fs_target_reaction_capacity = 0
+  ; fs_reaction_capacity_shortfall = 0
+  ; fs_bootable_names = Masc.Fleet_stream.Names.empty
+  ; fs_running_names = Masc.Fleet_stream.Names.empty
+  ; fs_executable_names = Masc.Fleet_stream.Names.empty
+  ; fs_turn_configuration_error_names = Masc.Fleet_stream.Names.empty
+  ; fs_official_client_recovery_required_names = Masc.Fleet_stream.Names.empty
+  ; fs_active_task_owner_without_fiber_count = owners
+  ; fs_completion_authority_pending_count = 0
+  ; fs_active_task_owner_scan_error_count = unread
+  ; fs_proactive_interval = interval
+  }
+
+let pp_owner_count ppf = function
+  | Line.Exactly owners -> Format.fprintf ppf "exactly %d" owners
+  | Line.At_least { owners; unread } ->
+      Format.fprintf ppf "at least %d (%d sources unread)" owners unread
+
+let owner_count = testable pp_owner_count ( = )
+
+(* A zero over a complete scan says nothing; a count over one is exact; any
+   unread source makes the count a lower bound, a zero included, since the
+   unread sources held whatever they held. *)
+let test_the_owner_count_is_a_lower_bound_while_sources_are_unread () =
+  List.iter
+    (fun (label, owners, unread, expected) ->
+       check (option owner_count) label expected
+         (Line.owner_count (fleet ~owners ~unread)))
+    [ "nothing found, all read", 0, 0, None
+    ; "found, all read", 5, 0, Some (Line.Exactly 5)
+    ; "found, some unread", 5, 2, Some (Line.At_least { owners = 5; unread = 2 })
+    ; "none found, some unread", 0, 2, Some (Line.At_least { owners = 0; unread = 2 })
+    ]
+
+(* What a cause row says, read from its constructor rather than its words. *)
+type fact =
+  | Says_blocker of Keeper_fleet_blocker.t
+  | Says_owner_count of Line.owner_count
+
+let pp_fact ppf = function
+  | Says_blocker blocker ->
+      Format.fprintf ppf "blocker %s" (Keeper_fleet_blocker.wire_name blocker)
+  | Says_owner_count count -> Format.fprintf ppf "owners %a" pp_owner_count count
+
+let fact = testable pp_fact ( = )
+
+let facts_of_row = function
+  | Line.Blocker_alone blocker -> [ Says_blocker blocker ]
+  | Line.Blocker_with_owners count ->
+      [ Says_blocker Keeper_fleet_blocker.Active_task_owner_without_executable_fiber
+      ; Says_owner_count count
+      ]
+  | Line.Owners_alone count -> [ Says_owner_count count ]
+
+let blockers =
+  ("no blocker", None)
+  :: List.map
+       (fun blocker -> (Keeper_fleet_blocker.wire_name blocker, Some blocker))
+       Keeper_fleet_blocker.all
+
+let owner_readings =
+  [ ("no owner count", None)
+  ; ("a count", Some (Line.Exactly 5))
+  ; ("a count with unread sources", Some (Line.At_least { owners = 5; unread = 2 }))
+  ]
+
+(* The capacity card drew the task-owner blocker's phrase and then the same
+   phrase with the owner count, one fact on two rows. For every blocker and
+   every owner reading the rows carry the blocker and the count that were
+   read, and each of them once: the sorted facts equal the sorted readings,
+   so a fact said twice shows as an extra entry. *)
+let test_the_cause_rows_say_each_fact_once () =
+  List.iter
+    (fun (blocker_label, blocker) ->
+       List.iter
+         (fun (owner_label, owners) ->
+            let said =
+              List.concat_map facts_of_row (Line.cause_rows ~blocker owners)
+            in
+            let read =
+              Option.to_list (Option.map (fun b -> Says_blocker b) blocker)
+              @ Option.to_list (Option.map (fun c -> Says_owner_count c) owners)
+            in
+            check (list fact)
+              (blocker_label ^ " with " ^ owner_label)
+              (List.sort compare read) (List.sort compare said))
+         owner_readings)
+    blockers
+
+(* The facts alone do not tell one row from two: the task-owner blocker and
+   its count must share a row, and any other blocker keeps its count on a
+   row of its own. With each fact said once, a shared row leaves no other
+   row for either. *)
+let test_only_the_task_owner_blocker_shares_a_row_with_the_count () =
+  List.iter
+    (fun (blocker_label, blocker) ->
+       List.iter
+         (fun (owner_label, owners) ->
+            let label = blocker_label ^ " with " ^ owner_label in
+            let rows = Line.cause_rows ~blocker owners in
+            let shared =
+              List.exists
+                (function
+                  | Line.Blocker_with_owners _ -> true
+                  | Line.Blocker_alone _ | Line.Owners_alone _ -> false)
+                rows
+            in
+            let expected_shared =
+              match blocker, owners with
+              | Some Keeper_fleet_blocker.Active_task_owner_without_executable_fiber, Some _ ->
+                  true
+              | ( Some
+                    Keeper_fleet_blocker.(
+                      Keeper_bootstrap_disabled | No_executable_keeper_fibers
+                      | Turn_configuration_error | Official_client_recovery_required
+                      | Reaction_capacity_below_target
+                      | Active_task_owner_without_executable_fiber
+                      | Durable_paused_autoboot_enabled)
+                , (None | Some _) )
+              | None, (None | Some _) ->
+                  false
+            in
+            check bool label expected_shared shared)
+         owner_readings)
+    blockers
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -82,7 +227,13 @@ let () =
     ; ( "blocker words"
       , [] )
     ; ( "task owner scan"
-      , [] )
+      , [ test_case "the owner count is a lower bound while sources are unread" `Quick
+            test_the_owner_count_is_a_lower_bound_while_sources_are_unread
+        ; test_case "the cause rows say each fact once" `Quick
+            test_the_cause_rows_say_each_fact_once
+        ; test_case "only the task-owner blocker shares a row with the count" `Quick
+            test_only_the_task_owner_blocker_shares_a_row_with_the_count
+        ] )
     ; ( "server words"
       , [ test_case "the server's words are drawn as text" `Quick
             test_the_servers_words_are_drawn_as_text

@@ -45,7 +45,47 @@ val trouble_text : ko:bool -> now:float -> Masc_tui_fleet_stream.trouble -> stri
     ago] while the connection is down. The age is counted from [now], and
     left out when [now] is behind the time it counts from. *)
 
+(** How many task owners the scan found with no fiber that can run a turn. *)
+type owner_count =
+  | Exactly of int
+      (** The scan read every source, and this many owners, more than zero,
+          have no fiber. *)
+  | At_least of { owners : int; unread : int }
+      (** [unread] sources, more than zero, could not be read. Their tasks
+          are missing from [owners], so it is a lower bound and may be
+          zero. *)
+
+val owner_count : Masc.Fleet_stream.fleet -> owner_count option
+(** [None] when the count is zero and the scan read everything: there is
+    nothing to say. *)
+
+val owner_count_text : ko:bool -> owner_count -> string
+(** [task owner without fiber N], or [N+ (M sources unread)] for a lower
+    bound. The words are the task-owner blocker's phrase. *)
+
 val owner_scan_text : ko:bool -> Masc.Fleet_stream.fleet -> string option
-(** [task owner without fiber N], and how many sources the scan could not read
-    when any were unread -- their tasks are missing from [N]. [None] when the
-    count is zero and the scan read everything. *)
+(** {!owner_count_text} of {!owner_count}. The Keepers screen's counts line
+    draws it under a header that names the blocker without a number. *)
+
+(** One row of a card body that says why the fleet is short of what it is
+    configured to run. Each row says its facts and no other row says them. *)
+type cause_row =
+  | Blocker_alone of Masc.Keeper_fleet_blocker.t
+      (** The blocker's phrase, with no count. *)
+  | Blocker_with_owners of owner_count
+      (** The task-owner blocker and the owner count on one row: the
+          blocker's phrase names the Keepers the count counts. *)
+  | Owners_alone of owner_count
+      (** The owner count, beside a blocker that names another reason or
+          with no blocker. *)
+
+val cause_rows :
+  blocker:Masc.Keeper_fleet_blocker.t option -> owner_count option -> cause_row list
+(** The blocker and the owner count, each once. The task-owner blocker with a
+    count is one {!Blocker_with_owners} row. Any other blocker is its phrase
+    alone, followed by the count when there is one. With no blocker the count
+    stands alone. *)
+
+val cause_row_text : ko:bool -> cause_row -> string
+(** The row in the screen language: the blocker's phrase, or
+    {!owner_count_text} for a row that carries the count. *)

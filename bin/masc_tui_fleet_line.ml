@@ -148,6 +148,10 @@ let trouble_text ~ko ~now trouble =
        | Some _ -> stale ^ " \xc2\xb7 " ^ stream_lost_text ~ko ~now ~since
        | None -> Printf.sprintf "%s (%s)" stale (stream_lost_text ~ko ~now ~since))
 
+type owner_count =
+  | Exactly of int
+  | At_least of { owners : int; unread : int }
+
 (* The task owners the fleet has no fiber for, and how much of that reading is
    missing. A Keeper whose profile does not load is a scan error: its tasks are
    left out of the count, and only a backlog failure moves the fleet status off
@@ -156,21 +160,60 @@ let trouble_text ~ko ~now trouble =
 
    [None] where there is neither: a zero over a complete reading is a row spent
    saying nothing happened. *)
-let owner_scan_text ~ko (fleet : F.fleet) =
+let owner_count (fleet : F.fleet) =
   let owners = fleet.fs_active_task_owner_without_fiber_count in
   let unread = fleet.fs_active_task_owner_scan_error_count in
-  if owners = 0 && unread = 0 then None
-  else if unread = 0 then
-    Some
-      (Printf.sprintf "%s %d" (say ko "턴 못 도는 작업 담당" "task owner without fiber") owners)
-  else
-    (* [+] because the number is a lower bound, not a total: the unread
-       sources held whatever they held. The Changes pane spells an open
-       record's call count the same way for the same reason. Without it a
-       scan that read nothing said "0", which reads as "there are none"
-       while the row's own parenthesis says nobody looked. *)
-    Some
-      (if ko then Printf.sprintf "턴 못 도는 작업 담당 %d+ (출처 %d곳 못 읽음)" owners unread
-       else
-         Printf.sprintf "task owner without fiber %d+ (%s unread)" owners
-           (Masc_tui_message_layout.count_noun unread "source"))
+  if unread > 0 then Some (At_least { owners; unread })
+  else if owners > 0 then Some (Exactly owners)
+  else None
+
+(* The count takes the blocker's own phrase, so the row that carries both and
+   the row that carries the count alone name these Keepers in one way. *)
+let owner_count_text ~ko count =
+  let phrase = blocker_phrase ~ko Keeper_fleet_blocker.Active_task_owner_without_executable_fiber in
+  match count with
+  | Exactly owners -> Printf.sprintf "%s %d" phrase owners
+  | At_least { owners; unread } ->
+      (* [+] because the number is a lower bound, not a total: the unread
+         sources held whatever they held. The Changes pane spells an open
+         record's call count the same way for the same reason. Without it a
+         scan that read nothing said "0", which reads as "there are none"
+         while the row's own parenthesis says nobody looked. *)
+      if ko then Printf.sprintf "%s %d+ (출처 %d곳 못 읽음)" phrase owners unread
+      else
+        Printf.sprintf "%s %d+ (%s unread)" phrase owners
+          (Masc_tui_message_layout.count_noun unread "source")
+
+let owner_scan_text ~ko fleet = Option.map (owner_count_text ~ko) (owner_count fleet)
+
+type cause_row =
+  | Blocker_alone of Keeper_fleet_blocker.t
+  | Blocker_with_owners of owner_count
+  | Owners_alone of owner_count
+
+(* The task-owner blocker names the Keepers the owner count counts, so the two
+   are one fact and take one row. Every other blocker names another reason,
+   and the count beside it is a second fact with a row of its own. A reading
+   that names the task-owner blocker with no count left to say keeps the
+   phrase: the server names it only when the count is above zero, and the
+   reason is still the reason. *)
+let cause_rows ~blocker owners =
+  let owners_alone = Option.to_list (Option.map (fun count -> Owners_alone count) owners) in
+  match blocker with
+  | None -> owners_alone
+  | Some Keeper_fleet_blocker.Active_task_owner_without_executable_fiber -> (
+      match owners with
+      | Some count -> [ Blocker_with_owners count ]
+      | None -> [ Blocker_alone Keeper_fleet_blocker.Active_task_owner_without_executable_fiber ])
+  | Some
+      (( Keeper_fleet_blocker.Keeper_bootstrap_disabled
+       | Keeper_fleet_blocker.No_executable_keeper_fibers
+       | Keeper_fleet_blocker.Turn_configuration_error
+       | Keeper_fleet_blocker.Official_client_recovery_required
+       | Keeper_fleet_blocker.Reaction_capacity_below_target
+       | Keeper_fleet_blocker.Durable_paused_autoboot_enabled ) as other) ->
+      Blocker_alone other :: owners_alone
+
+let cause_row_text ~ko = function
+  | Blocker_alone blocker -> blocker_phrase ~ko blocker
+  | Blocker_with_owners count | Owners_alone count -> owner_count_text ~ko count

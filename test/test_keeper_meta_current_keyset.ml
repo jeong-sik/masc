@@ -4,7 +4,6 @@ open Masc
 
 let target_keys =
   [ "instructions"
-  ; "last_runtime_attempt"
   ; "current_task_id"
   ; "keeper_id"
   ; "agent_core_env"

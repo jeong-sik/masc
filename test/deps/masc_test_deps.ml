@@ -285,7 +285,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Message_scope_ack_id
         | Schema.Usage_cursor
         | Schema.Last_usage_resolution
-        | Schema.Last_runtime_attempt
         | Schema.Latched_reason
         | Schema.Current_task_id
         | Schema.Keeper_id -> `Null

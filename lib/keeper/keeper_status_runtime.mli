@@ -41,8 +41,6 @@ val keeper_next_action_path_of_string_opt :
     first, which would paint an operator's screen for work that was never
     asked for. *)
 
-val active_model_of_meta : keeper_meta -> string
-val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string
 val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
 (** Turn-record freshness window.  A record is emitted after a Keeper cycle,

@@ -41,7 +41,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Message_scope_ack_id
-  | Last_runtime_attempt
   | Paused
   | Latched_reason
   | Current_task_id
@@ -75,7 +74,6 @@ let all_fields =
   ; Last_proactive_reason
   ; Last_proactive_preview
   ; Message_scope_ack_id
-  ; Last_runtime_attempt
   ; Paused
   ; Latched_reason
   ; Current_task_id
@@ -110,7 +108,6 @@ let field_name = function
   | Last_proactive_reason -> "last_proactive_reason"
   | Last_proactive_preview -> "last_proactive_preview"
   | Message_scope_ack_id -> "message_scope_ack_id"
-  | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"
   | Latched_reason -> "latched_reason"
   | Current_task_id -> "current_task_id"

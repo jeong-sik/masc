@@ -116,7 +116,7 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
                 ; last_visible_ts = 0.0
                 ; last_outcome = Keeper_meta_contract.Proactive_never_started
                 ; last_reason = ""; last_preview = "" }
-            ; trace_id; last_runtime_attempt = None; message_scope_ack_id = None }
+            ; trace_id; message_scope_ack_id = None }
         ; keeper_id = None; agent_core_env = [] } in
       let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults placeholder
         |> Result.map_error (fun detail -> Profile_rejected detail) in

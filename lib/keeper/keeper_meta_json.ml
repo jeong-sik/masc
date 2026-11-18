@@ -52,10 +52,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.message_scope_ack_id with
         | Some id -> `String id
         | None -> `Null )
-    ; ( Last_runtime_attempt
-      , match rt.last_runtime_attempt with
-        | Some record -> runtime_attempt_record_to_json record
-        | None -> `Null )
     ; Paused, `Bool m.paused
     ; ( Latched_reason
       , match m.latched_reason with

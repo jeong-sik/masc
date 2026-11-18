@@ -55,7 +55,6 @@ let nullable_field_names =
   [ "message_scope_ack_id"
   ; "usage_cursor"
   ; "last_usage_resolution"
-  ; "last_runtime_attempt"
   ; "latched_reason"
   ; "current_task_id"
   ; "keeper_id"

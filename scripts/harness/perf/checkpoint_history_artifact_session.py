@@ -32,7 +32,7 @@ def metadata():
         'proactive_count_total last_proactive_ts proactive_visible_count_total '
         'last_visible_proactive_ts').split()}
     row.update({key: None for key in (
-        'usage_cursor last_usage_resolution message_scope_ack_id last_runtime_attempt '
+        'usage_cursor last_usage_resolution message_scope_ack_id '
         'latched_reason current_task_id keeper_id').split()})
     row.update(schema='masc.keeper_meta.v2', name=NAME, trace_id=TRACE,
                instructions='Synthetic checkpoint inventory fixture; never start this Keeper.',

@@ -402,7 +402,6 @@ let keepers_json
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
                          ; "last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s
-                         ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)
                          ]
                          @ keeper_runtime_identity_fields meta
                          @ [ keeper_current_task_field meta ]

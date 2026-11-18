@@ -31,7 +31,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Message_scope_ack_id
-  | Last_runtime_attempt
   | Paused
   | Latched_reason
   | Current_task_id

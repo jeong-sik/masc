@@ -137,27 +137,6 @@ let runtime_blocker_surface_opt config meta =
     (runtime_blocker_observation_opt config meta)
 ;;
 
-let runtime_attempt_outcome_json = function
-  | `Success -> `Assoc [ "kind", `String "success"; "detail", `Null ]
-  | `Failure detail ->
-    `Assoc [ "kind", `String "failure"; "detail", `String detail ]
-;;
-
-let runtime_attempt_record_json (attempt : runtime_attempt_record) =
-  `Assoc
-    [ "provider_id", `String attempt.provider_id
-    ; "http_status", Json_util.int_opt_to_json attempt.http_status
-    ; "outcome", runtime_attempt_outcome_json attempt.outcome
-    ; "timestamp_unix", `Float attempt.timestamp
-    ]
-;;
-
-let last_runtime_attempt_json (meta : keeper_meta) =
-  match meta.runtime.last_runtime_attempt with
-  | None -> `Null
-  | Some attempt -> runtime_attempt_record_json attempt
-;;
-
 let runtime_blocker_fields_json_of_surface = function
   | Some blocker ->
     [ "runtime_blocker_class", `String (runtime_blocker_class_to_string blocker.blocker_class)
@@ -406,7 +385,6 @@ let runtime_surface_json config (meta : keeper_meta) =
          | None -> `Null
          | Some fenced -> `Bool fenced )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
-     ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
      @ runtime_state_fields_json config meta
      @ runtime_blocker_fields_json config meta

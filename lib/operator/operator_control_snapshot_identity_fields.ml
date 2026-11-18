@@ -21,14 +21,10 @@ let keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
      (matching the degraded-fallback shape below) instead of the silent
      [Keeper_turn] default the legacy [resolve_live] would have written. *)
   let canonical_json = runtime_id_json in
-  let active_model = Keeper_status_runtime.active_model_of_meta meta in
-  let active_model_label = Keeper_status_runtime.active_model_label_of_meta meta in
   [ "runtime_id", runtime_id_json
   ; "runtime_canonical", canonical_json
   ; "selected_runtime_canonical", canonical_json
   ; "primary_model", `String runtime_id
-  ; "active_model", `String active_model
-  ; "active_model_label", `String active_model_label
   ]
 ;;
 

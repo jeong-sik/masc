@@ -344,7 +344,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
             ("activation_mode", member_assoc "activation_mode" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
-              Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" keeper)) );
+              Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" (member_assoc "runtime_trust" keeper))) );
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
           ]);

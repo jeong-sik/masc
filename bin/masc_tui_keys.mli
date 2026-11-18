@@ -167,7 +167,7 @@ val footer_actions :
 
 val footer_row : lang:Masc_tui_types.ui_language -> action list -> Masc_tui_footer.key_row
 (** The actions as zone 5 draws them: an [Unavailable] one is a refused item,
-    drawn dim in its place. *)
+    drawn dim in its place when every key fits. *)
 
 val footer_row_of_surface :
   lang:Masc_tui_types.ui_language ->

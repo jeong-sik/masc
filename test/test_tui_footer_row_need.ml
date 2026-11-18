@@ -5,10 +5,12 @@
    moved under the reader's eye.
 
    Zone 5 now keeps each key in its place and marks the one that does not
-   answer (RFC tui-one-screen-grammar section 2). This file pins the three
-   decisions behind that: the key set and its order do not depend on the rows,
-   a key that needs a row is [Unavailable] by variant on an empty list, and a
-   narrow row gives up the same keys whatever the rows. *)
+   answer (RFC tui-one-screen-grammar section 2). This file pins the decisions
+   behind that: the key set and its order do not depend on the rows, a key
+   that needs a row is [Unavailable] by variant on an empty list, a row draws
+   every key in place exactly when the whole set fits and is otherwise the row
+   of the answering keys alone, and a refused key stays in the dim while an
+   answering one leaves it. *)
 
 open Alcotest
 module Keys = Masc_tui_keys
@@ -176,35 +178,113 @@ let test_the_fact_browser_keeps_its_keys () =
        empty);
   check bool "every key answers with a fact" true (List.for_all snd full)
 
-(* The width the fitter keeps is a decision over the whole set, so it does not
-   depend on which keys answer: an empty and a full list give up the same items
-   at every width. Compared with the colour marks taken off, because only the
-   key emphasis differs between the two. *)
-let fitted ~max_cells row =
-  Masc_tui_footer.line ~ko:false ~key_style:"\027[1m" ~dim:"" ~reset:"\027[0m" ~max_cells
-    ~hints:row ()
+(* What a row keeps at one width: its items with the colour marks taken off,
+   the cut marker included. *)
+let kept ?status ~max_cells row =
+  Masc_tui_footer.line ?status ~ko:false ~key_style:"\027[1m" ~dim:"" ~reset:"\027[0m"
+    ~max_cells ~hints:row ()
   |> Masc_tui_theme.strip_sgr
+  |> String.trim
+  |> Masc_tui_footer.split_on_double_space
+  |> List.map String.trim
 
 let widths = List.init 33 (fun step -> 24 + (step * 6))
 
-let test_a_narrow_row_gives_up_the_same_keys_whatever_the_rows () =
-  let check_rows name ~empty ~full =
+let answering (action : Keys.action) =
+  match action.availability with Keys.Available -> true | Keys.Unavailable _ -> false
+
+(* The same keys with every one answering: the row a full list draws. *)
+let every_key_answering actions =
+  Keys.footer_row ~lang
+    (List.map (fun (action : Keys.action) -> { action with availability = Keys.Available })
+       actions)
+
+(* The keys that answer, the refused ones left out: the row zone 5 drew before
+   refused keys stayed, and what a cut row still is. *)
+let answering_keys_alone actions =
+  Keys.footer_row ~lang (List.filter answering actions)
+
+let wide = 10_000
+
+(* Whether a row of every key fits at all is read off the keys, refused or not,
+   so it is the same whatever answers. When it fits, the row is every key in
+   its place, the same as the row where every key answers. When it does not,
+   every refused key goes first and the row is the answering keys' own, so a
+   refused key never costs a key that answers or a notice: measured before this
+   rule, the empty Fusion list lost [a:new run] at 80 to 120 cells and Harness
+   lost [q:quit] at 40 to 60. *)
+let check_whole_or_answering ?status name actions =
+  let row = Keys.footer_row ~lang actions
+  and all = every_key_answering actions in
+  List.iter
+    (fun max_cells ->
+      let whole_fits = kept ?status ~max_cells all = kept ?status ~max_cells:wide all in
+      let expected =
+        if whole_fits then kept ?status ~max_cells all
+        else kept ?status ~max_cells (answering_keys_alone actions)
+      in
+      check (list string)
+        (Printf.sprintf "%s at %d cells (%s)" name max_cells
+           (if whole_fits then "whole" else "cut"))
+        expected (kept ?status ~max_cells row))
+    widths
+
+let test_a_row_is_whole_or_the_answering_keys_alone () =
+  List.iter
+    (fun (name, surface, _, _) ->
+      List.iter
+        (fun has_rows ->
+          check_whole_or_answering
+            (Printf.sprintf "%s %s" name (if has_rows then "full" else "empty"))
+            (actions ~has_rows surface))
+        [ false; true ])
+    surfaces;
+  check_whole_or_answering "Goals empty" (Keys.planning_goal_list_actions ~has_rows:false);
+  check_whole_or_answering "Workspace without a reading"
+    (Keys.footer_actions ~detail_open:false ~has_rows:true ~has_reading:false T.Repositories)
+
+(* The notices are what a refused key put aside: measured before this rule, on
+   the empty Goal list at 90 and 100 cells, a refused [Right / Enter] counted as
+   a key the row cannot drop and the build mismatch notice went. *)
+let test_a_refused_key_does_not_put_a_notice_aside () =
+  let mismatch =
+    match
+      Masc_tui_footer.build_mismatch_item ~tui_commit:(Some "aaaaaaa1111111")
+        ~tui_age_s:(Some 100.) ~server_commit:"bbbbbbb2222222" ~server_age_s:(Some 5000.)
+    with
+    | Some item -> item
+    | None -> fail "two different commits with known ages are a mismatch"
+  in
+  let operator =
+    Masc_tui_footer.Operator_action { notice = "ACTION NEEDED 5"; detail = "Open Operations" }
+  in
+  check_whole_or_answering ~status:[ mismatch; operator ] "Goals empty with notices"
+    (Keys.planning_goal_list_actions ~has_rows:false)
+
+(* Two selections that answer different keys draw the same row wherever the
+   whole set fits. *)
+let test_a_whole_row_is_the_same_whatever_answers () =
+  let same name ~one ~other =
+    let all = every_key_answering one in
     List.iter
       (fun max_cells ->
-        check string
-          (Printf.sprintf "%s at %d cells" name max_cells)
-          (fitted ~max_cells full) (fitted ~max_cells empty))
-      widths
+        if kept ~max_cells all = kept ~max_cells:wide all then
+          check (list string)
+            (Printf.sprintf "%s at %d cells" name max_cells)
+            (kept ~max_cells (Keys.footer_row ~lang one))
+            (kept ~max_cells (Keys.footer_row ~lang other)))
+      (widths @ [ wide ])
   in
   List.iter
     (fun (name, surface, _, _) ->
-      check_rows name
-        ~empty:(Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false surface)
-        ~full:(Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:true surface))
+      same name ~one:(actions ~has_rows:true surface) ~other:(actions ~has_rows:false surface))
     surfaces;
-  check_rows "Goals"
-    ~empty:(Keys.footer_row_planning_goal_list ~lang ~has_rows:false)
-    ~full:(Keys.footer_row_planning_goal_list ~lang ~has_rows:true)
+  same "Goals" ~one:(Keys.planning_goal_list_actions ~has_rows:true)
+    ~other:(Keys.planning_goal_list_actions ~has_rows:false);
+  let workspace has_reading =
+    Keys.footer_actions ~detail_open:false ~has_rows:true ~has_reading T.Repositories
+  in
+  same "Workspace" ~one:(workspace true) ~other:(workspace false)
 
 (* A refused key is drawn, but it is not a key the screen promises: the
    navigation trace hears only the keys that answer, so pressing [j] on an empty
@@ -217,57 +297,41 @@ let test_the_trace_hears_only_the_keys_that_answer () =
   check bool "an empty list advertises n" true (List.mem "n" (advertised empty));
   check bool "a list with a row advertises j" true (List.mem "j" (advertised full))
 
-(* The one mark zone 5 gives a refused key is the key emphasis it does not get.
-   Styling a row leaves a refused item as it was, emphasises at least one item
-   that answers, and keeps every item's answer and place: the drop order reads
-   the styled row. *)
-let test_a_refused_key_takes_no_key_emphasis () =
-  let styled row =
-    Masc_tui_footer.styled_row ~key_style:"\027[1m" ~dim:"\027[2m" ~reset:"\027[0m" row
-  in
-  let check_row name row =
+(* A refused key stays in the row's dim with its label; the key letter of an
+   answering one leaves the dim. That holds with an empty key style too, which is
+   what the key letters keep once they lose their colour and weight (RFC
+   tui-one-screen-grammar section 7.3). Styling keeps every item's answer and
+   place: the fit reads the styled row. *)
+let test_a_refused_key_stays_in_the_dim () =
+  let check_row ~key_style name row =
+    let styled = Masc_tui_footer.styled_row ~key_style ~dim:"<dim>" ~reset:"<reset>" row in
     let before = Masc_tui_footer.row_items row
-    and after = Masc_tui_footer.row_items (styled row) in
+    and after = Masc_tui_footer.row_items styled in
     check int (name ^ " keeps every item") (List.length before) (List.length after);
-    let pairs = List.combine before after in
     List.iter
       (fun ((plain : Masc_tui_footer.key_item), (drawn : Masc_tui_footer.key_item)) ->
         check bool (name ^ " keeps the answer of " ^ plain.item) true (plain.answer = drawn.answer);
         match plain.answer with
         | Masc_tui_footer.Refused ->
           check string (name ^ " leaves refused " ^ plain.item) plain.item drawn.item
-        | Masc_tui_footer.Answers -> ())
-      pairs;
-    check bool (name ^ " emphasises a key that answers") true
-      (List.exists
-         (fun ((plain : Masc_tui_footer.key_item), (drawn : Masc_tui_footer.key_item)) ->
-           (match plain.answer with
-            | Masc_tui_footer.Answers -> true
-            | Masc_tui_footer.Refused -> false)
-           && not (String.equal plain.item drawn.item))
-         pairs)
+        | Masc_tui_footer.Answers ->
+          check bool (name ^ " lifts " ^ plain.item ^ " out of the dim") true
+            (String.starts_with ~prefix:"<reset>" drawn.item))
+      (List.combine before after)
   in
   List.iter
-    (fun (name, surface, _, _) ->
-      check_row name (Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false surface))
-    surfaces;
-  check_row "Goals" (Keys.footer_row_planning_goal_list ~lang ~has_rows:false);
-  check_row "facts" (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:false)
-
-(* Workspace [v] is the key whose answer follows the selection rather than the
-   list: a row with no reading refuses it. The narrow row gives up the same keys
-   with and without the reading. *)
-let test_a_narrow_workspace_row_does_not_follow_the_reading () =
-  let row ~has_reading =
-    Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:true ~has_reading T.Repositories
-  in
-  List.iter
-    (fun max_cells ->
-      check string
-        (Printf.sprintf "Workspace at %d cells" max_cells)
-        (fitted ~max_cells (row ~has_reading:true))
-        (fitted ~max_cells (row ~has_reading:false)))
-    widths
+    (fun key_style ->
+      let check_row = check_row ~key_style in
+      let style = if String.equal key_style "" then "no key style" else "a key style" in
+      List.iter
+        (fun (name, surface, _, _) ->
+          check_row (name ^ " with " ^ style)
+            (Keys.footer_row_of_surface ~lang ~detail_open:false ~has_rows:false surface))
+        surfaces;
+      check_row ("Goals with " ^ style) (Keys.footer_row_planning_goal_list ~lang ~has_rows:false);
+      check_row ("facts with " ^ style)
+        (Keys.footer_row_memory_facts ~lang ~cols:200 ~has_rows:false))
+    [ ""; "\027[1m" ]
 
 let contains haystack needle =
   let needle_length = String.length needle
@@ -284,7 +348,10 @@ let contains haystack needle =
    an item only right after a separator: "e:" is inside "Left / Esc:". *)
 let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
 
-(* The approval queue draws from a builder of its own, and its keys need three
+(* The approval queue draws from a builder of its own that still spells its row
+   by hand, so it names only the keys that act: zone 5 keeps a refused key in
+   place on the screens built from typed actions (RFC tui-one-screen-grammar
+   section 2), and this one keeps the old form until it moves. Its keys need three
    different things. [j/k] and [y / n] act on an approval row and answer with a
    notice without one. [ / ] selects a waiting question and [a] opens the
    selected one. [o / O] read a question's source, the last answer's included.
@@ -364,14 +431,16 @@ let () =
             test_the_goal_list_keeps_its_keys_and_marks_the_row_keys
         ; test_case "the fact browser keeps its keys" `Quick
             test_the_fact_browser_keeps_its_keys
-        ; test_case "a narrow row gives up the same keys whatever the rows" `Quick
-            test_a_narrow_row_gives_up_the_same_keys_whatever_the_rows
+        ; test_case "a row is whole or the answering keys alone" `Quick
+            test_a_row_is_whole_or_the_answering_keys_alone
+        ; test_case "a refused key does not put a notice aside" `Quick
+            test_a_refused_key_does_not_put_a_notice_aside
+        ; test_case "a whole row is the same whatever answers" `Quick
+            test_a_whole_row_is_the_same_whatever_answers
         ; test_case "the trace hears only the keys that answer" `Quick
             test_the_trace_hears_only_the_keys_that_answer
-        ; test_case "a refused key takes no key emphasis" `Quick
-            test_a_refused_key_takes_no_key_emphasis
-        ; test_case "a narrow workspace row does not follow the reading" `Quick
-            test_a_narrow_workspace_row_does_not_follow_the_reading
+        ; test_case "a refused key stays in the dim" `Quick
+            test_a_refused_key_stays_in_the_dim
         ; test_case "an empty approvals queue names only the keys that act"
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick

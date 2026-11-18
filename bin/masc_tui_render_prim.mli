@@ -208,8 +208,9 @@ val footer_line_keys :
   ?choices:string ->
   Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
 (** {!footer_line} for a row of typed keys: a key that does not answer on the
-    screen as drawn keeps its place, drawn without the key emphasis. The
-    navigation trace hears only the keys that answer. *)
+    screen as drawn keeps its place in the row's dim when every key fits, and
+    is the first to go when the row is cut. The navigation trace hears only
+    the keys that answer. *)
 
 val keeper_split_threshold_cols : int
 

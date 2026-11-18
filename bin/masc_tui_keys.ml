@@ -1667,9 +1667,9 @@ let has_detail_scoped_keys surface =
     (for_surface surface)
 
 (* The same question for rows: whether this surface's table holds a key that
-   needs one, and so owes [footer_hints] a [~has_rows] from its list renderer.
-   [test_tui_footer_row_need] reads this rather than a list written by hand
-   beside it. *)
+   needs one, and so owes [footer_row_of_surface] a [~has_rows] from its list
+   renderer. [test_tui_footer_row_need] reads this rather than a list written
+   by hand beside it. *)
 let has_row_scoped_keys surface =
   List.exists
     (fun binding ->

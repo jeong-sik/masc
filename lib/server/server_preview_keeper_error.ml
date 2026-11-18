@@ -29,6 +29,10 @@ type t =
   | Conversation_on_other_subscription
   | Runtime_reassigned of string
   | Not_signed_in
+  | Key_unusable of
+      { reason : Runtime_api_key_file.read_error
+      ; sentence : string
+      }
   | No_quota
   | Silent of { after_s : float }
   | Not_started
@@ -118,6 +122,8 @@ let parts = function
     ( R.Conflict_409
     , failure_code Conversation.Not_signed_in
     , "The account of this Runtime is not signed in to a subscription." )
+  | Key_unusable { reason; sentence } ->
+    R.Conflict_409, Runtime_api_key_file.read_error_code reason, sentence
   | No_quota ->
     ( R.Too_many_requests_429
     , failure_code Conversation.No_quota

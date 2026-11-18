@@ -71,6 +71,14 @@ type t =
       (** 409 [runtime_reassigned]: the owner gave the Keeper another Runtime
           after the route read it. *)
   | Not_signed_in  (** 409 [not_signed_in]: the account is not signed in to a subscription. *)
+  | Key_unusable of
+      { reason : Runtime_api_key_file.read_error
+      ; sentence : string
+      }
+      (** 409 [key_missing] or [key_unreadable], as [reason] says
+          ({!Runtime_api_key_file.read_error_code}): the account of the
+          Runtime is a key account and its key file gave no key. No client
+          started. *)
   | No_quota  (** 429 [no_quota] *)
   | Silent of { after_s : float }  (** 504 [silent]: the client sent nothing for [after_s]. *)
   | Not_started  (** 503 [not_started]: the client did not start. *)

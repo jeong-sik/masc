@@ -58,6 +58,8 @@ function refusalWords(code: TalkRefusal): string | null {
     case 'conversation_on_other_subscription':
     case 'runtime_reassigned':
     case 'not_signed_in':
+    case 'key_missing':
+    case 'key_unreadable':
     case 'no_quota':
     case 'silent':
     case 'not_started':

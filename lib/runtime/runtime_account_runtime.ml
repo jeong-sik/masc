@@ -52,8 +52,8 @@ let error_code = function
   | Template_not_declared _ -> "template_not_declared"
   | Model_not_bound _ -> "model_not_bound"
   | Runtime_not_bound _ -> "runtime_not_bound"
-  | Key_missing -> "key_missing"
-  | Key_unreadable (_ : Runtime_api_key_file.unreadable) -> "key_unreadable"
+  | Key_missing -> Runtime_api_key_file.(read_error_code Key_missing)
+  | Key_unreadable why -> Runtime_api_key_file.(read_error_code (Key_unreadable why))
   | Not_materialized _ -> "not_materialized"
 ;;
 

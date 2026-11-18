@@ -105,7 +105,10 @@ let execution_of (person : Login.person) ~base_path provider_account_id =
          ~provider_account_id
          ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string runtime_id))
      with
-     | Error ((`Bad_request | `Not_found | `Service_unavailable), sentence) -> Error sentence
+     | Error (Login.Refused ((`Bad_request | `Not_found | `Service_unavailable), sentence)) ->
+       Error sentence
+     | Error (Login.Key_unusable reason) ->
+       Error (Runtime_api_key_file.read_error_to_string reason)
      | Ok prepared ->
        (match prepared.Login.runtime.Runtime_instance.execution with
         | Runtime_execution.Claude_code execution -> Ok execution

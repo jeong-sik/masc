@@ -72,11 +72,12 @@ let assigned person keeper_id =
        Error (E.Internal "The Runtime of this Keeper is not in the log."))
 ;;
 
-let login_error (status, sentence) =
-  match status with
-  | `Bad_request -> E.Account_runtime_invalid sentence
-  | `Not_found -> E.Unknown_account sentence
-  | `Service_unavailable -> E.Server_unavailable sentence
+let login_error = function
+  | Login.Refused (`Bad_request, sentence) -> E.Account_runtime_invalid sentence
+  | Login.Refused (`Not_found, sentence) -> E.Unknown_account sentence
+  | Login.Refused (`Service_unavailable, sentence) -> E.Server_unavailable sentence
+  | Login.Key_unusable reason ->
+    E.Key_unusable { reason; sentence = Login.key_unusable_message reason }
 ;;
 
 let refusal_error (refusal : Runtime_account_access.refusal) =

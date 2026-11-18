@@ -490,8 +490,8 @@ describe('a message and a new conversation of the Keeper', () => {
   })
 
   it('knows which refusals of a message come after the server took the message in', () => {
-    const codes = ['not_signed_in', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded', 'message_blank', 'account_call_running', 'runtime_reassigned', 'conversation_record_unavailable'] as const
-    expect(codes.map((code) => refusalOf(code)?.sent)).toEqual([true, true, true, true, true, true, true, false, false, false, false])
+    const codes = ['not_signed_in', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded', 'message_blank', 'account_call_running', 'runtime_reassigned', 'conversation_record_unavailable', 'key_missing', 'key_unreadable'] as const
+    expect(codes.map((code) => refusalOf(code)?.sent)).toEqual([true, true, true, true, true, true, true, false, false, false, false, false, false])
   })
 
   it('says a start was refused with the step it was', async () => {

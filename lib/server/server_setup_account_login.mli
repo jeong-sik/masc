@@ -108,18 +108,40 @@ type prepared =
   ; runtime : Runtime_instance.t
   }
 
+(** Why {!person_runtime} made no runtime. *)
+type runtime_error =
+  | Refused of [ `Bad_request | `Not_found | `Service_unavailable ] * string
+      (** The status and the sentence of the answer. *)
+  | Key_unusable of Runtime_api_key_file.read_error
+      (** The account is a key account and its key file gave no key. No
+          client starts (RFC a-persons-api-key-is-their-own-provider-account
+          3.5). The reason is in the server log. *)
+
+(** What a person is told of a key file that gave no key. It names no path
+    and nothing of the key. The code of the answer is
+    {!Runtime_api_key_file.read_error_code}. *)
+val key_unusable_message : Runtime_api_key_file.read_error -> string
+
 (** The runtime of [binding] on the home of the person's account
-    [provider_account_id]: the workspace provider the login receipt of the
-    account names, with the account's home ({!Runtime_account_runtime}).
-    {!verify} chooses a model, and a turn of a Keeper the Runtime its owner
-    gave it (plan D2-8). An account the person does not own, or one with no
-    login receipt of theirs, is a 404 with the same sentence. *)
+    [provider_account_id]: a provider of the workspace with the home of the
+    account ({!Runtime_account_runtime}). {!verify} chooses a model, and a
+    turn of a Keeper the Runtime its owner gave it (plan D2-8).
+
+    The record that linked the account says what it runs on. A login account
+    is of the provider its login receipt names and runs on the login in its
+    home. A key account is of the provider its record names and runs on the
+    key in the file of the generation the records say. That file is read
+    before the home is looked at: an account whose record was written and
+    whose files were not is [Key_unusable Key_missing].
+
+    An account the person does not own, or a login account with no login
+    receipt of theirs, is a 404 with the same sentence. *)
 val person_runtime
   :  person
   -> base_path:string
   -> provider_account_id:Authz_types.Provider_account_id.t
   -> binding:Runtime_account_runtime.binding
-  -> (prepared, [ `Bad_request | `Not_found | `Service_unavailable ] * string) result
+  -> (prepared, runtime_error) result
 
 (** Runs [f] when no other call of the account runs, and gives [busy]
     otherwise. A call starts the official client on the home of the account,

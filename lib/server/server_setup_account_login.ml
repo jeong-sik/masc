@@ -5,9 +5,13 @@ module Receipt = Runtime_setup_login_receipt
 open Result.Syntax
 let prefix = "/api/v1/setup/accounts/login/"
 
-let respond ~status ~request reqd message =
+(* [code] is there for a case a screen tells apart by it. *)
+let respond ?code ~status ~request reqd message =
+  let code = match code with
+    | None -> []
+    | Some code -> [ "code", `String code ] in
   Http.Response.json_value ~status ~request ~extra_headers:["cache-control", "no-store"]
-    (`Assoc ["error", `String message]) reqd
+    (`Assoc (("error", `String message) :: code)) reqd
 
 let parse body =
   try
@@ -387,20 +391,39 @@ type prepared =
   ; runtime : Runtime_instance.t
   }
 
+type runtime_error =
+  | Refused of [ `Bad_request | `Not_found | `Service_unavailable ] * string
+  | Key_unusable of Runtime_api_key_file.read_error
+
+let key_unusable_message = function
+  | Runtime_api_key_file.Key_missing ->
+    "The key of this account is not on this server. Remove the account and register the key again."
+  | Runtime_api_key_file.Key_unreadable (_ : Runtime_api_key_file.unreadable) ->
+    "This server cannot read the key of this account. Remove the account and register the key \
+     again."
+
+(* Why the key file gave no key names no path and nothing of the key, and the
+   person is told only the code, so it goes to the server log. *)
+let key_unusable id reason =
+  Log.Server.warn "The key of the account %s was not read: %s"
+    (Authz_types.Provider_account_id.to_string id)
+    (Runtime_api_key_file.read_error_to_string reason);
+  Key_unusable reason
+
 (* The diagnostic of a runtime that does not load can name a path of the
    server, so it goes to the server log (issue #50018). The other errors name
    only the provider and the model the person chose. *)
-let template_error (error : Runtime_account_runtime.error) =
+let template_error id (error : Runtime_account_runtime.error) =
   match error with
   | Runtime_account_runtime.Not_materialized _ ->
     Log.Server.warn "Account runtime did not load: %s" (Runtime_account_runtime.error_to_string error);
-    `Bad_request, "The runtime of this account does not load."
+    Refused (`Bad_request, "The runtime of this account does not load.")
   | Runtime_account_runtime.Template_not_declared _ | Runtime_account_runtime.Model_not_bound _
-  | Runtime_account_runtime.Runtime_not_bound _
-  | Runtime_account_runtime.Key_missing | Runtime_account_runtime.Key_unreadable _ ->
-    (* The two of a key file name no path and no key. An account of a login
-       has no key file. *)
-    `Bad_request, Runtime_account_runtime.error_to_string error
+  | Runtime_account_runtime.Runtime_not_bound _ ->
+    Refused (`Bad_request, Runtime_account_runtime.error_to_string error)
+  | Runtime_account_runtime.Key_missing -> key_unusable id Runtime_api_key_file.Key_missing
+  | Runtime_account_runtime.Key_unreadable why ->
+    key_unusable id (Runtime_api_key_file.Key_unreadable why)
 
 (* The state a route of a person decides on. A zone that cannot be trusted
    gives none, and the route answers a 503. *)
@@ -409,37 +432,67 @@ let trusted_state person =
   | Ok trusted -> Ok (trusted :> Authz_zone.snapshot).Authz_zone.state
   | Error uncertain -> Error (`Service_unavailable, Login_routes.zone_uncertain_message uncertain)
 
-(* The account of the person, its integration as the login receipt names it,
-   and the runtime of [binding] on its home. An account of another person is
-   answered as one that does not exist (design 4.2: an id grants nothing). *)
+(* The account of the person and the runtime of [binding] on its home. The
+   record that linked the account says what it runs on. A login account is of
+   the integration its login receipt names. A key account is of the
+   integration its record names, and its key is the file of the generation the
+   records say (RFC a-persons-api-key-is-their-own-provider-account 3.5). An
+   account of another person is answered as one that does not exist (design
+   4.2: an id grants nothing). *)
 let person_runtime person ~base_path ~provider_account_id:id ~binding =
   let provider_account_id = Authz_types.Provider_account_id.to_string id in
-  let* state = trusted_state person in
-  let* () = match Authz_provider_account_state.owner state.Authz_state.provider_accounts id with
-    | Some owner when Authz_types.User_id.equal owner person.user_id -> Ok ()
-    | Some _ | None -> Error (`Not_found, unknown_account) in
-  let* receipt = Receipt.load ~workspace:base_path ~actor:(actor_of (Person person)) ~login_id:provider_account_id
-    |> Result.map_error (function
-      | Receipt.Not_found -> `Not_found, unknown_account
-      | Receipt.Unavailable -> `Service_unavailable, receipt_failure) in
-  let setup_error error =
-    `Bad_request, Server_runtime_setup_actions.error_message error in
-  let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id:receipt.integration_id
-    |> Result.map_error setup_error in
-  let* runtime_root = runtime_root_of ~base_path (Person person)
-    |> Result.map_error (fun message -> `Service_unavailable, message) in
-  let* account_home = Client.account_home ~runtime_root ~account_id:provider_account_id
-      ~client:target.Server_runtime_setup_actions.client
-    |> Result.map_error (fun message -> `Service_unavailable, message) in
-  let* config = Server_runtime_setup_actions.config ~base_path |> Result.map_error setup_error in
-  let* runtime = Runtime_account_runtime.of_template config ~template:receipt.integration_id
-      ~provider_id:provider_account_id ~account_home ~account:Runtime_account_runtime.Login ~binding
-    |> Result.map_error template_error in
+  let refused result =
+    Result.map_error (fun (status, message) -> Refused (status, message)) result in
+  let unavailable result =
+    Result.map_error (fun message -> Refused (`Service_unavailable, message)) result in
+  let setup result = Result.map_error (fun error ->
+    Refused (`Bad_request, Server_runtime_setup_actions.error_message error)) result in
+  let* state = trusted_state person |> refused in
+  let* account = match Authz_provider_account_state.find state.Authz_state.provider_accounts id with
+    | Some account when Authz_types.User_id.equal account.Authz_provider_account_state.owner person.user_id ->
+      Ok account
+    | Some _ | None -> Error (Refused (`Not_found, unknown_account)) in
+  let* template = match account.Authz_provider_account_state.kind with
+    | Authz_provider_account_state.Key { integration_id; generation = _ } ->
+      Ok (Authz_types.Integration_id.to_string integration_id)
+    | Authz_provider_account_state.Login ->
+      Receipt.load ~workspace:base_path ~actor:(actor_of (Person person)) ~login_id:provider_account_id
+      |> Result.map (fun (receipt : Receipt.t) -> receipt.integration_id)
+      |> Result.map_error (function
+        | Receipt.Not_found -> Refused (`Not_found, unknown_account)
+        | Receipt.Unavailable -> Refused (`Service_unavailable, receipt_failure)) in
+  let* config = Server_runtime_setup_actions.config ~base_path |> setup in
+  let* target =
+    Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
+  let client = target.Server_runtime_setup_actions.client in
+  let* runtime_root = runtime_root_of ~base_path (Person person) |> unavailable in
+  let home () =
+    Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+  let runtime ~account_home ~account =
+    Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
+      ~account_home ~account ~binding
+    |> Result.map_error (template_error id) in
+  let* runtime = match account.Authz_provider_account_state.kind with
+    | Authz_provider_account_state.Login ->
+      let* account_home = home () in
+      runtime ~account_home ~account:Runtime_account_runtime.Login
+    | Authz_provider_account_state.Key { integration_id = _; generation } ->
+      (* The key is read before the home is looked at. A process that died
+         between the record of the account and its files left neither, and
+         that account answers that its key is missing (the same RFC, 3.3). *)
+      let* key_file =
+        Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
+      let* account_home =
+        Client.account_home_path ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+      let* runtime =
+        runtime ~account_home ~account:(Runtime_account_runtime.Key { key_file }) in
+      let* (_ : string) = home () in
+      Ok runtime in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was
      chosen by, which is one. *)
   let* runtime_id = Authz_types.Runtime_id.of_string runtime.Runtime_instance.id
-    |> Result.map_error (fun _ -> `Bad_request, "This model makes no valid Runtime id.") in
+    |> Result.map_error (fun _ -> Refused (`Bad_request, "This model makes no valid Runtime id.")) in
   Ok { provider_account_id = id; runtime_id; runtime }
 
 (* One call of an account at a time, a verification or a turn of a Keeper:
@@ -512,26 +565,37 @@ let call ~env ~person prepared =
           { user_id = person.user_id; provider_account_id = prepared.provider_account_id })
         prepared.runtime))
 
+(* The status, the sentence and the code of a runtime that was not made. A
+   key file that gave no key has a code, and no client started (RFC
+   a-persons-api-key-is-their-own-provider-account 3.5). *)
+let runtime_error_answer = function
+  | Refused ((`Bad_request | `Not_found | `Service_unavailable) as status, message) ->
+    status, message, None
+  | Key_unusable reason ->
+    `Conflict, key_unusable_message reason, Some (Runtime_api_key_file.read_error_code reason)
+
 let verify ~person ~base_path ~body request reqd =
   let answer =
+    let uncoded result = Result.map_error (fun (status, message) -> status, message, None) result in
     let* provider_account_id, model = verify_request body
-      |> Result.map_error (fun message -> `Bad_request, message) in
+      |> Result.map_error (fun message -> `Bad_request, message, None) in
     let* provider_account_id = Authz_types.Provider_account_id.of_string provider_account_id
-      |> Result.map_error (fun _ -> `Not_found, unknown_account) in
+      |> Result.map_error (fun _ -> `Not_found, unknown_account, None) in
     let* prepared = person_runtime person ~base_path ~provider_account_id
-        ~binding:(Runtime_account_runtime.Model model) in
+        ~binding:(Runtime_account_runtime.Model model)
+      |> Result.map_error runtime_error_answer in
     let* env = Option.to_result (Eio_context.get_env_opt ())
-      ~none:(`Service_unavailable, "Verification requires the server process environment.") in
-    one_call_of prepared.provider_account_id ~busy:(`Conflict, call_running) (fun () ->
-      let* result = call ~env ~person prepared in
+      ~none:(`Service_unavailable, "Verification requires the server process environment.", None) in
+    one_call_of prepared.provider_account_id ~busy:(`Conflict, call_running, None) (fun () ->
+      let* result = call ~env ~person prepared |> uncoded in
       log_detail result;
       let* runtime = match result.Runtime_verification.failure with
         | Some _ -> Ok `Null
         | None ->
-          let* recorded = record_runtime person prepared in
+          let* recorded = record_runtime person prepared |> uncoded in
           Ok (`Assoc [ "runtime_id", `String (Authz_types.Runtime_id.to_string prepared.runtime_id);
                        "record", `String (recorded_label recorded) ]) in
       Ok (`Assoc [ "verification", Runtime_verification.to_member_json result; "runtime", runtime ])) in
   match answer with
-  | Error (status, message) -> respond ~status ~request reqd message
+  | Error (status, message, code) -> respond ?code ~status ~request reqd message
   | Ok json -> Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"] json reqd

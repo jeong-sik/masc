@@ -44,9 +44,11 @@ let commit zone ~author ~kind body =
 ;;
 
 (* The CLI of the template. It answers [auth status] as a signed-in
-   subscription, and a turn with "echo: " and the message. It writes the home
-   it was started on, its directory, its arguments and the message to
-   [<script>.turn.json]. While [<script>.hold] is there it writes
+   subscription, or as an API key when its environment holds one, and a turn
+   with "echo: " and the message. It writes the home it was started on, its
+   directory, its arguments and the message to [<script>.turn.json], and with
+   them the names of its environment and the BLAKE2b-256 of the API key it
+   was given, or null. While [<script>.hold] is there it writes
    [<script>.started] after the message and waits. While [<script>.fail] is
    there it ends after the message with no answer, and while [<script>.lost]
    is there it ends so when it was started to resume a session. The session
@@ -55,6 +57,7 @@ let commit zone ~author ~kind body =
    arguments to [<script>.purge.jsonl] and exits 0, or 1 while
    [<script>.purge-fail] is there. *)
 let fake_claude = {|#!/usr/bin/env python3
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -63,8 +66,12 @@ import time
 
 args = sys.argv[1:]
 script = sys.argv[0]
+api_key = os.environ.get("ANTHROPIC_API_KEY")
 if "auth" in args and "status" in args:
-    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
+    if api_key is None:
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
+    else:
+        print(json.dumps({"loggedIn": True, "authMethod": "api_key", "apiProvider": "firstParty"}))
     sys.exit(0)
 if args == ["--version"]:
     version = Path(script + ".version")
@@ -91,7 +98,8 @@ assert user["type"] == "user"
 content = user["message"]["content"]
 prompt = content if isinstance(content, str) else "".join(block.get("text", "") for block in content)
 Path(script + ".turn.json").write_text(json.dumps({"home": os.environ.get("CLAUDE_CONFIG_DIR"),
-    "cwd": os.getcwd(), "args": args, "prompt": prompt}))
+    "cwd": os.getcwd(), "args": args, "prompt": prompt, "environment": sorted(os.environ),
+    "api_key": None if api_key is None else hashlib.blake2b(api_key.encode(), digest_size=32).hexdigest()}))
 if Path(script + ".fail").exists():
     sys.exit(1)
 if Path(script + ".lost").exists() and any(arg.startswith("--resume=") for arg in args):
@@ -356,11 +364,8 @@ let login_home ~base_path ~namespace ~account_id ~client =
   | Error detail -> Alcotest.failf "the login home was not made: %s" detail
 ;;
 
-(* One person joins through an invitation and links one account of
-   [integration], whose login receipt names that integration, and makes the
-   Runtime of [model] on it. The id of the account is the id of its login,
-   which has the shape of a generated token. *)
-let join zone ~base_path ~name ~hex ~integration ~client ~model =
+(* One person joins through an invitation. *)
+let admit zone ~name ~hex =
   let user_id = get (User_id.of_string (String.make 32 hex)) in
   let invite_id = get (Invite_id.of_string ("invite-" ^ name)) in
   let namespace = get (Account_home_namespace.of_string ("ns-" ^ name)) in
@@ -387,6 +392,33 @@ let join zone ~base_path ~name ~hex ~integration ~client ~model =
           ; through = Authz_admission_event.Invite invite_id
           ; membership = { workspace_id = workspace; account_home_namespace = namespace }
           }));
+  user_id, namespace
+;;
+
+(* The Runtime of [model] on the account of the person: the binding of the
+   model on the account makes this Runtime id. *)
+let runtime_on zone ~name ~user_id ~account ~model =
+  let runtime_id = get (Runtime_id.of_string (Provider_account_id.to_string account ^ "." ^ model)) in
+  (match
+     Authz_runtime.make
+       zone
+       ~user_id
+       ~provider_account_id:account
+       ~runtime_id
+       ~self_effects:Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
+       ~draw:(fun () -> "grant-" ^ name)
+   with
+   | Ok (_ : Grant_id.t) -> ()
+   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
+  runtime_id
+;;
+
+(* One person joins through an invitation and links one account of
+   [integration], whose login receipt names that integration, and makes the
+   Runtime of [model] on it. The id of the account is the id of its login,
+   which has the shape of a generated token. *)
+let join zone ~base_path ~name ~hex ~integration ~client ~model =
+  let user_id, namespace = admit zone ~name ~hex in
   let account = get (Provider_account_id.of_string (String.make 64 hex)) in
   login_home ~base_path ~namespace ~account_id:(Provider_account_id.to_string account) ~client;
   (match Authz_provider_account.link zone ~user_id ~provider_account_id:account with
@@ -404,19 +436,28 @@ let join zone ~base_path ~name ~hex ~integration ~client ~model =
    with
    | Ok () -> ()
    | Error (Receipt.Not_found | Receipt.Unavailable) -> Alcotest.fail "the login receipt was not saved");
-  (* The binding of [model] on the account makes this Runtime id. *)
-  let runtime_id = get (Runtime_id.of_string (Provider_account_id.to_string account ^ "." ^ model)) in
+  let runtime_id = runtime_on zone ~name ~user_id ~account ~model in
+  { person = { Login.zone; user_id; namespace }; account_id = Provider_account_id.to_string account }, runtime_id
+;;
+
+(* One person joins through an invitation and has one key account of
+   [integration], as the record that links it says, with the Runtime of
+   [model] on it. Neither its home nor its key file is made: the record of a
+   key account comes before its files (RFC
+   a-persons-api-key-is-their-own-provider-account 3.3). *)
+let join_on_key zone ~name ~hex ~integration ~model =
+  let user_id, namespace = admit zone ~name ~hex in
+  let account = get (Provider_account_id.of_string (String.make 64 hex)) in
   (match
-     Authz_runtime.make
+     Authz_provider_account.link_key
        zone
        ~user_id
        ~provider_account_id:account
-       ~runtime_id
-       ~self_effects:Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
-       ~draw:(fun () -> "grant-" ^ name)
+       ~integration_id:(get (Integration_id.of_string integration))
    with
-   | Ok (_ : Grant_id.t) -> ()
-   | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+  let runtime_id = runtime_on zone ~name ~user_id ~account ~model in
   { person = { Login.zone; user_id; namespace }; account_id = Provider_account_id.to_string account }, runtime_id
 ;;
 
@@ -1847,7 +1888,176 @@ let test_turn () =
                   ; "code", `String "native_tools_refused"
                   ]) )
           (reply carol (body ~keeper:"keeper-carol" ~message:"hello"));
-        Alcotest.(check bool) "Codex ran no turn" false (Sys.file_exists (codex ^ ".turn.json"))))
+        Alcotest.(check bool) "Codex ran no turn" false (Sys.file_exists (codex ^ ".turn.json"));
+        (* A key account (RFC a-persons-api-key-is-their-own-provider-account
+           3.3 to 3.5). Dave has no login: the record of his account says it
+           holds a key of the Claude Code provider. *)
+        let dave, dave_runtime =
+          join_on_key zone ~name:"dave" ~hex:'d' ~integration:"claude_code" ~model:"claude-sonnet-5"
+        in
+        keeper zone dave "keeper-dave" ~runtime:dave_runtime ();
+        let dave_account = get (Provider_account_id.of_string dave.account_id) in
+        let turn_record = claude ^ ".turn.json" in
+        let forget () = if Sys.file_exists turn_record then Sys.remove turn_record in
+        (* The status and the code of an answer that is an error. *)
+        let refused (status, answer) =
+          match Yojson.Safe.from_string answer with
+          | `Assoc fields ->
+            (match List.assoc_opt "code" fields with
+             | Some (`String code) -> status, code
+             | Some _ | None -> Alcotest.failf "the answer has no code: %d" status)
+          | _ -> Alcotest.failf "the answer is not an object: %d" status
+        in
+        let dave_turn () = reply dave (body ~keeper:"keeper-dave" ~message:"hello") in
+        (* The record of the account is there and its files are not, as a
+           process that died between the two leaves it. *)
+        forget ();
+        Alcotest.(check (pair int string))
+          "a key account whose files were not made: its key is missing"
+          (409, "key_missing")
+          (refused (dave_turn ()));
+        Alcotest.(check bool) "and no client started" false (Sys.file_exists turn_record);
+        (* Another person names the account and is told it is not theirs,
+           the answer of an account that is not there. *)
+        (match
+           Login.person_runtime
+             bob.person
+             ~base_path
+             ~provider_account_id:dave_account
+             ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string dave_runtime))
+         with
+         | Error (Login.Refused (`Not_found, (_ : string))) -> ()
+         | Error (Login.Refused ((`Bad_request | `Service_unavailable), detail)) ->
+           Alcotest.failf "another person was refused for another reason: %s" detail
+         | Error (Login.Key_unusable (_ : Runtime_api_key_file.read_error)) ->
+           Alcotest.fail "another person was told of the key of the account"
+         | Ok (_ : Login.prepared) -> Alcotest.fail "another person got the runtime of the account");
+        (* The home and the key file of the account. *)
+        login_home
+          ~base_path
+          ~namespace:dave.person.namespace
+          ~account_id:dave.account_id
+          ~client:Runtime_setup_login_client.Claude;
+        let key_text = "sk-test-the-key-of-dave" in
+        let key_file =
+          get_text
+            (Layout.key_file
+               ~runtime_root:(Layout.person_runtime_root ~base_path ~namespace:dave.person.namespace)
+               ~account_id:dave_account
+               ~generation:Key_generation.first)
+        in
+        (match Runtime_api_key_file.key_of_string key_text with
+         | None -> Alcotest.fail "the fixture key is no key"
+         | Some key ->
+           (match
+              Runtime_api_key_file.write
+                ~runtime_root:(Layout.person_runtime_root ~base_path ~namespace:dave.person.namespace)
+                ~account_id:dave_account
+                ~generation:Key_generation.first
+                key
+            with
+            | Ok () -> ()
+            | Error
+                ( Runtime_api_key_file.Root_unavailable _
+                | Runtime_api_key_file.Folder_not_private _
+                | Runtime_api_key_file.Generation_taken
+                | Runtime_api_key_file.Not_written _ ) -> Alcotest.fail "the key file was not written"));
+        (* What the server process itself runs on: a key, two tokens, the
+           choice of another provider, its credential and an endpoint. None
+           of them is of a person. *)
+        let of_the_server =
+          [ "ANTHROPIC_API_KEY", "the-key-of-the-server"
+          ; "ANTHROPIC_AUTH_TOKEN", "the-token-of-the-server"
+          ; "CLAUDE_CODE_OAUTH_TOKEN", "the-oauth-token-of-the-server"
+          ; "CLAUDE_CODE_USE_BEDROCK", "1"
+          ; "AWS_SECRET_ACCESS_KEY", "the-cloud-secret-of-the-server"
+          ; "ANTHROPIC_BASE_URL", "https://endpoint-of-the-server.example"
+          ]
+        in
+        let held_before = List.map (fun (name, (_ : string)) -> name, Sys.getenv_opt name) of_the_server in
+        Fun.protect
+          ~finally:(fun () ->
+            List.iter
+              (fun (name, value) ->
+                 match value with
+                 | Some value -> Unix.putenv name value
+                 | None -> Unix.unsetenv name)
+              held_before)
+          (fun () ->
+            List.iter (fun (name, value) -> Unix.putenv name value) of_the_server;
+            (* The names of the environment the client was started with, and
+               the digest of the API key in it. *)
+            let ran_on () =
+              let fields = seen claude in
+              let names =
+                match List.assoc_opt "environment" fields with
+                | Some (`List names) ->
+                  List.filter_map
+                    (function
+                      | `String name -> Some name
+                      | _ -> None)
+                    names
+                | Some _ | None -> Alcotest.fail "the CLI record has no environment"
+              in
+              let api_key =
+                match List.assoc_opt "api_key" fields with
+                | Some (`String digest) -> Some digest
+                | Some `Null -> None
+                | Some _ | None -> Alcotest.fail "the CLI record has no API key member"
+              in
+              ( text_of fields "home"
+              , api_key
+              , List.filter (fun (name, (_ : string)) -> List.mem name names) of_the_server
+                |> List.map fst )
+            in
+            let ran_on_t = Alcotest.(triple string (option string) (list string)) in
+            (* His Keeper answers on his key: the client has his home, his
+               key as its one API key, and nothing else the server runs on. *)
+            forget ();
+            let (_ : string) =
+              answered
+                "the Keeper of a key account answers"
+                ~keeper:"keeper-dave"
+                ~runtime:dave_runtime
+                ~text:"echo: hello"
+                ~continued:false
+                (dave_turn ())
+            in
+            Alcotest.check
+              ran_on_t
+              "on his home and his key, with nothing the server runs on beside it"
+              ( home_of ~base_path dave
+              , Some Digest.BLAKE256.(to_hex (string key_text))
+              , [ "ANTHROPIC_API_KEY" ] )
+              (ran_on ());
+            (* A login account is given no API key, and nothing the server
+               runs on either. The Keeper is new, so its turn starts a
+               conversation. *)
+            keeper zone bob "keeper-bob-beside-a-key" ~runtime:bob_runtime ();
+            forget ();
+            let (_ : string) =
+              answered
+                "the Keeper of a login account answers beside the key of the server"
+                ~keeper:"keeper-bob-beside-a-key"
+                ~runtime:bob_runtime
+                ~text:"echo: hello"
+                ~continued:false
+                (reply bob (body ~keeper:"keeper-bob-beside-a-key" ~message:"hello"))
+            in
+            Alcotest.check
+              ran_on_t
+              "a login account runs on its home and no API key"
+              (home_of ~base_path bob, None, [])
+              (ran_on ());
+            (* A key file its group reads is not read, and no client
+               starts. *)
+            Unix.chmod key_file 0o640;
+            forget ();
+            Alcotest.(check (pair int string))
+              "a key file open to its group is not read"
+              (409, "key_unreadable")
+              (refused (dave_turn ()));
+            Alcotest.(check bool) "and no client started" false (Sys.file_exists turn_record))))
 ;;
 
 let () =

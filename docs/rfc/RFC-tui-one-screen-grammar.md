@@ -894,6 +894,19 @@ unit` 로 줄을 낸다. 옮긴 화면은 새 수집기로 줄을 낸다. 그 �
   바뀐다. 구역 1 시계, §6.1 시각, §6.2 길이가 그렇다.
 - 이 글자들은 벽시계 초 경계에서 함께 다시 그린다. 그 초에 바뀌는 글자가 없으면 그리지
   않는다. 정해진 간격으로 화면 전체를 다시 그리지 않는다.
+- 비동기 답이 그려진 내용을 바꿨는지는 답을 적용한 갈래가 타입으로 말한다.
+  `apply_async_message` 는 `Drawn_changed` 나 `Drawn_unchanged` 를 돌려준다.
+  지금 있는 갈래는 모두 `Drawn_changed` 에서 시작한다.
+  `drain_async_messages` 는 `Drawn_changed` 가 하나라도 있을 때만 Background 프레임을 요청한다.
+- 같은 읽기를 다시 답하는 reader 는 타입 있는 view 를 만든다. view 는 행이 읽는 값과,
+  그 읽기가 진행 중으로 그려지는지를 담는다. 렌더러는 그 view 만 읽는다.
+- 프레임을 만들 때 그 프레임이 그린 view 를 적어 둔다. 답을 적용한 reader 는 새 view 를
+  적어 둔 view 와 비교한다. 같으면 `Drawn_unchanged` 다.
+- 마지막 답과 비교하지 않는다. 실패한 읽기 뒤의 304 는 그려진 오류(`tools_error`,
+  `keeper_turns_error`)를 지운다. 읽기를 시작해도 프레임을 요청하지 않는다. 그래도 읽는 동안
+  만든 프레임은 진행 중이라고 그리고, 그 표시는 답의 프레임만 지운다.
+- view 를 가진 reader 는 Tools inventory, Keeper turns, Keeper waiting 이다. 답이 304 라는
+  것만으로 다시 그리지 않기로 정하지 않는다.
 
 ## 9. 넣는 순서
 

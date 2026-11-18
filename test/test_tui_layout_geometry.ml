@@ -503,7 +503,7 @@ let overview_cards_fit () =
                  let at = Printf.sprintf "inner %d, %d rows, %d actions" inner rows (List.length actions) in
                  match
                    Masc_tui_overview_cards.draw ~ko:true ~edges:overview_edges
-                     ~empty_decisions:"없음" ~inner ~rows ~is_selected:(fun action -> action = 1)
+                     ~inner ~rows ~is_selected:(fun action -> action = 1)
                      ~decisions ~decisions_whole:true ~continuation ~status ~actions
                  with
                  | None -> ()

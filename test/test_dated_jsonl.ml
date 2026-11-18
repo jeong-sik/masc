@@ -693,6 +693,154 @@ let test_read_recent_result_skips_dot_entries () =
       (Dated_jsonl.read_error_to_string error)
 ;;
 
+(* {1 Side files}
+
+   The owner of the tool call ledger keeps a SQLite read index in the
+   ledger's own directory, beside the month directories. The ledger says so,
+   and its strict reads pass over those names. The names are the ones an
+   installed ledger holds. *)
+let read_index_names =
+  [ "read-index.sqlite3"
+  ; "read-index.sqlite3-wal"
+  ; "read-index.sqlite3-shm"
+  ; "read-index.sqlite3-journal"
+  ]
+;;
+
+let temp_tool_call_ledger prefix =
+  let location =
+    Dated_jsonl.Store.(at (root_of_masc_dir (tmpdir prefix)) Root.Tool_calls)
+  in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+  location
+;;
+
+let test_strict_reads_pass_over_the_ledgers_read_index () =
+  let location = temp_tool_call_ledger "dated_jsonl_side_files" in
+  let base_dir = Dated_jsonl.Store.dir location in
+  write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|} ];
+  List.iter
+    (fun name -> Fs_compat.append_file (Filename.concat base_dir name) "not dated")
+    read_index_names;
+  let store = Dated_jsonl.open_store location in
+  let month = Filename.concat base_dir "2026-02" in
+  check
+    (list string)
+    "the month listing holds the month and nothing else"
+    [ month ]
+    (require_recent_result
+       "month listing"
+       (Dated_jsonl.month_dir_paths_newest_first_result store));
+  check
+    int
+    "the recent read returns the row"
+    1
+    (List.length
+       (require_recent_result "recent read" (Dated_jsonl.read_recent_result store 10)));
+  check
+    (list (pair string string))
+    "the raw recent read returns the row"
+    [ Filename.concat month "01.jsonl", {|{"i":1}|} ]
+    (require_recent_result
+       "raw recent read"
+       (Dated_jsonl.read_recent_lines_result store 10));
+  check
+    (option int)
+    "the latest read returns the row"
+    (Some 1)
+    (require_recent_result
+       "latest read"
+       (Dated_jsonl.find_latest_entry_result store (function
+          | Dated_jsonl.Parsed json -> Some (json_i json)
+          | Dated_jsonl.Malformed_json _ -> None)))
+;;
+
+(* The telemetry summary counts a store's rows and reads its newest ones
+   through one view, and keeps the answer while the day files hold. A listing
+   that failed sent it to the readers that keep nothing, so the ledger's rows
+   were read and projected again on every summary. *)
+let test_the_ledgers_summary_keeps_its_answer_beside_the_read_index () =
+  let location = temp_tool_call_ledger "dated_jsonl_side_files_summary" in
+  let base_dir = Dated_jsonl.Store.dir location in
+  write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|} ];
+  List.iter
+    (fun name -> Fs_compat.append_file (Filename.concat base_dir name) "not dated")
+    read_index_names;
+  let store = Dated_jsonl.open_store location in
+  let projected = ref 0 in
+  let view = Dated_jsonl.recent_view 2 ~f:(fun j -> incr projected; Some (json_i j)) in
+  let read () = Dated_jsonl.count_and_read_recent_view view store in
+  check
+    (pair int (list int))
+    "the summary is the one the readers that keep nothing give"
+    ( Dated_jsonl.count_entries store
+    , Dated_jsonl.filter_map_recent store 2 ~f:(fun j -> Some (json_i j)) )
+    (read ());
+  check (pair int (list int)) "the rows are counted and the newest two read" (3, [ 2; 3 ]) (read ());
+  let first_projection = !projected in
+  ignore (read () : int * int list);
+  check int "the second summary projects no row again" first_projection !projected;
+  write_dated_file base_dir "2026-02" "01" [ {|{"i":4}|} ];
+  check (pair int (list int)) "an appended row is seen" (4, [ 3; 4 ]) (read ())
+;;
+
+(* A store answers for its own side files. The ledger's read index is not a
+   side file of any other store, so there it is still a wrong entry. *)
+let test_a_side_file_name_fails_the_read_of_another_store () =
+  let root = Dated_jsonl.Store.root_of_masc_dir (tmpdir "dated_jsonl_side_file_elsewhere") in
+  let name = List.hd read_index_names in
+  List.iter
+    (fun (label, location) ->
+      let base_dir = Dated_jsonl.Store.dir location in
+      write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|} ];
+      Fs_compat.append_file (Filename.concat base_dir name) "not dated";
+      match Dated_jsonl.read_recent_result (Dated_jsonl.open_store location) 1 with
+      | Error
+          (Dated_jsonl.Invalid_layout_entry
+            { parent; entry; expected = Dated_jsonl.Month_directory }) ->
+        check string (label ^ ": the store's directory") base_dir parent;
+        check string (label ^ ": the entry") name entry
+      | Error error ->
+        failf "%s: unexpected error: %s" label (Dated_jsonl.read_error_to_string error)
+      | Ok _ -> failf "%s: the read passed over an entry the store did not declare" label)
+    [ "audit", Dated_jsonl.Store.(at root Root.Audit)
+    ; "keeper metrics", Dated_jsonl.Store.(keeper root ~keeper:"side-file" Keeper.Metrics)
+    ]
+;;
+
+(* Only the declared names are passed over, and only in the store's own
+   directory. *)
+let test_the_ledger_still_fails_on_what_it_did_not_declare () =
+  let stray = "notes.txt" in
+  let location = temp_tool_call_ledger "dated_jsonl_side_file_stray" in
+  let base_dir = Dated_jsonl.Store.dir location in
+  write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|} ];
+  Fs_compat.append_file (Filename.concat base_dir stray) "not dated";
+  (match Dated_jsonl.read_recent_result (Dated_jsonl.open_store location) 1 with
+   | Error
+       (Dated_jsonl.Invalid_layout_entry
+         { parent; entry; expected = Dated_jsonl.Month_directory }) ->
+     check string "the ledger's directory" base_dir parent;
+     check string "the stray entry" stray entry
+   | Error error ->
+     failf "unexpected error: %s" (Dated_jsonl.read_error_to_string error)
+   | Ok _ -> fail "the ledger passed over an entry it did not declare");
+  let name = List.hd read_index_names in
+  let in_month = temp_tool_call_ledger "dated_jsonl_side_file_in_month" in
+  let month = Filename.concat (Dated_jsonl.Store.dir in_month) "2026-02" in
+  write_dated_file (Dated_jsonl.Store.dir in_month) "2026-02" "01" [ {|{"i":1}|} ];
+  Fs_compat.append_file (Filename.concat month name) "not dated";
+  match Dated_jsonl.read_recent_result (Dated_jsonl.open_store in_month) 1 with
+  | Error
+      (Dated_jsonl.Invalid_layout_entry
+        { parent; entry; expected = Dated_jsonl.Day_file }) ->
+    check string "the month directory" month parent;
+    check string "the read index inside a month" name entry
+  | Error error ->
+    failf "unexpected error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "a read index inside a month directory was passed over"
+;;
+
 let test_read_recent_result_rejects_invalid_layout () =
   let location = temp_store "dated_jsonl_invalid_layout" in
   let base_dir = Dated_jsonl.Store.dir location in
@@ -2118,6 +2266,14 @@ let () =
             test_read_recent_result_rejects_invalid_layout;
           test_case "strict read skips dot entries" `Quick
             test_read_recent_result_skips_dot_entries;
+          test_case "strict reads pass over the ledger's read index" `Quick
+            test_strict_reads_pass_over_the_ledgers_read_index;
+          test_case "the ledger's summary keeps its answer beside the read index" `Quick
+            test_the_ledgers_summary_keeps_its_answer_beside_the_read_index;
+          test_case "a side file name fails the read of another store" `Quick
+            test_a_side_file_name_fails_the_read_of_another_store;
+          test_case "the ledger still fails on what it did not declare" `Quick
+            test_the_ledger_still_fails_on_what_it_did_not_declare;
           test_case "strict read accepts leap day" `Quick
             test_read_recent_result_accepts_leap_day;
           test_case "strict read rejects FIFO without blocking" `Quick

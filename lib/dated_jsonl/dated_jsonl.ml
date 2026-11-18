@@ -261,14 +261,17 @@ let validate_layout_entries ~parent ~expected ~is_valid entries =
   loop [] entries
 ;;
 
-let list_month_dirs_result base_dir =
+(* The store's side files sit among the month directories and belong to
+   the store, so they are passed over by name. They are never opened here. *)
+let list_month_dirs_result t =
   let open Result.Syntax in
-  let* entries = list_directory_result ~missing_is_empty:true base_dir in
+  let* entries = list_directory_result ~missing_is_empty:true t.base_dir in
+  let is_side_file = Store.is_side_file (Store.of_location t.location) in
   validate_layout_entries
-    ~parent:base_dir
+    ~parent:t.base_dir
     ~expected:Month_directory
     ~is_valid:month_directory_name_is_valid
-    entries
+    (List.filter (fun entry -> not (is_side_file entry)) entries)
 ;;
 
 let list_day_entries_result month_path =
@@ -301,7 +304,7 @@ let list_day_files_result month_path =
 ;;
 
 let month_dir_paths_newest_first_result t =
-  list_month_dirs_result t.base_dir
+  list_month_dirs_result t
   |> Result.map (List.map (Filename.concat t.base_dir))
 ;;
 
@@ -1293,7 +1296,7 @@ let read_recent_using_result ?(offset=0) t n ~decode =
         let* () = visit_days month_path days in
         visit_months rest
     in
-    let* months = list_month_dirs_result t.base_dir in
+    let* months = list_month_dirs_result t in
     let* () = visit_months months in
     Ok !collected
 ;;
@@ -1331,7 +1334,7 @@ let find_latest_entry_result t f =
        | Some _ -> Ok found
        | None -> visit_months rest)
   in
-  let* months = list_month_dirs_result t.base_dir in
+  let* months = list_month_dirs_result t in
   visit_months months
 ;;
 
@@ -1419,7 +1422,7 @@ let iter_all_entries_result t f =
       let* () = iter_days month_path (List.rev days) in
       iter_months rest
   in
-  let* months = list_month_dirs_result t.base_dir in
+  let* months = list_month_dirs_result t in
   iter_months (List.rev months)
 ;;
 

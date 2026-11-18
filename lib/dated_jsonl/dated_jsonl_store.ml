@@ -164,6 +164,49 @@ let retention = function
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
 
+(* What a store's owner keeps in the store's own directory, beside the month
+   directories: a file made from the day files, which no reader of the day
+   files reads. Each store answers for itself, so a new store has to.
+
+   The activity events keep [_seq] there and do not say so here. The one
+   strict reader of that store, the task history inventory, passes over it
+   in its own listing. *)
+let root_side_file store name =
+  match store with
+  (* The SQLite read index of [Keeper_tool_call_index] and its sidecars. *)
+  | Root.Tool_calls -> Common.is_tool_call_read_index_file name
+  | Root.Transition_audit
+  | Root.Audit_approvals
+  | Root.Tool_events
+  | Root.Verdicts
+  | Root.Audit
+  | Root.Telemetry
+  | Root.Events
+  | Root.Activity_events
+  | Root.Tool_usage
+  | Root.Agent_core_events
+  | Root.Costs
+  | Root.Provider_usage_history
+  | Root.Wire_capture
+  | Root.Schedule_signals
+  | Root.Telemetry_coverage_gaps -> false
+
+let keeper_side_file store (_ : string) =
+  match store with
+  | Keeper.Metrics
+  | Keeper.Execution_receipts
+  | Keeper.Turn_records
+  | Keeper.Provider_inputs
+  | Keeper.Memory_recall_artifacts
+  | Keeper.Crash_events
+  | Keeper.Continuity_requests -> false
+
+let is_side_file store name =
+  match store with
+  | Root store -> root_side_file store name
+  | Keeper store -> keeper_side_file store name
+  | Reaction_ledger | Decision_audit -> false
+
 let with_retention_root (Masc_dir dir) f =
   (* BasePath admission allows aliases, including macOS /var and /tmp.
      Resolve that trusted base only; the runtime root and every descendant

@@ -177,11 +177,11 @@ let catalog_provider_id (provider : provider) =
 - 851행을 바꾸면 `Provider_config.provider_id` 는 catalog 행 id 가 된다.
   - Agent-Core 는 이 필드를 catalog 를 고르는 열쇠로 쓴다(`provider_runtime_binding.ml` 102~110행도 catalog declaration id 를 넘긴다).
   - 그래서 계정 provider 에서도 이 필드의 뜻이 Agent-Core 의 계약과 맞는다.
-- `runtime_setup_spec.ml` 518~524행, `server_runtime_setup_actions.ml` 501·523·539행은 runtime 행 id 를 catalog id 로 쓴다. 이 셋도 같은 함수를 지나게 한다.
-- 고치는 범위를 사람이 세지 않게 하는 방법:
-  - `Runtime_schema.provider` 의 `id` 를 catalog 조회에 넘기는 호출을 `rg` 로 찾는 시험을 둔다. 대상은 `Declarations.find`, `supports_parallel_tool_suppression`, `resolve_snapshot_request_policy` 셋이다.
-  - 두 번째 사용처가 생기면 이 시험이 실패한다.
-  - 대신 타입으로 막을 수도 있다. catalog 조회 함수가 `Catalog_provider_id.t` 같은 private 타입만 받게 하는 방법이다(§8.5). 구현 층에서 둘 중 하나를 고른다.
+- `runtime_setup_spec.ml` 518~524행은 runtime 행 id 를 catalog id 로 쓴다. 이곳도 같은 함수를 지난다.
+- `server_runtime_setup_actions.ml` 501·523·539행은 설치 선택지의 id 를 catalog id 로 넘긴다. 이 층에서는 그대로 둔다(§9).
+- 사용처를 소스 문구 검사로 막지 않는다. 헌법은 기능 고장과 이어지지 않는 문구 검사를 만들지 않게 한다.
+  - catalog 조회 함수가 private 타입만 받게 하려면 Agent-Core `Declarations` API 를 바꿔야 한다. 이 RFC 범위 밖이다.
+  - 대신 행동 시험이 catalog 대조 경로를 잡는다. 계정 slot 이 Exact lane 에 남는지, quota 창이 계정마다 따로인지를 본다. 851행을 계정 id 로 되돌리면 이 시험이 실패한다.
 
 ### 3.3 계정은 그대로 나뉜다
 
@@ -259,7 +259,7 @@ let catalog_provider_id (provider : provider) =
 | 층 | 내용 | 확인 |
 |---|---|---|
 | L1 | `catalog_provider` 필드와 parse, `catalog_provider_id` 함수, §3.1 의 거절 셋 | 거절마다 시험. 없는 행이 로드 오류가 되는지 |
-| L2 | §3.2 의 사용처가 모두 그 함수를 지난다. 사용처를 막는 시험이나 타입 | `catalog-provider` 를 적은 계정 slot 이 Exact lane 에 남는 시험. 두 계정의 자리와 쉼이 섞이지 않는 시험 |
+| L2 | §3.2 의 사용처가 모두 그 함수를 지난다 | `catalog-provider` 를 적은 계정 slot 이 Exact lane 에 남는 시험. 두 계정의 자리와 쉼이 섞이지 않는 시험 |
 | L3 | `check_publication` 이 버린 slot 을 돌려주고 설치 검사가 거절한다 | 계정 slot 에 `catalog-provider` 가 없는 runtime.toml 을 설치 검사가 거절하는 시험 |
 | L4 | 문서와 changelog Upgrade notes | `changelog-fragments.py check` |
 
@@ -306,6 +306,7 @@ L1 과 L2 는 한 배포로 나간다. L1 만 나가면 키는 받고 뜻은 없
 - 설치 마법사가 Anthropic 계정을 하나 더 만들 때 무엇을 쓰는지 보지 않았다. 지금 setup 은 이름 있는 provider(`claude`)를 그 id 로 쓴다(`runtime_setup_spec.ml` 458~468행). 같은 이름의 두 번째 계정을 만들 수 있는지, `catalog-provider` 를 써야 하는지는 이 RFC 범위 밖이다.
 - `runtime_wizard_inventory.ml` 98~102·137행은 runtime 행이 catalog 원형과 같은 id 면 원형을 숨긴다. `catalog-provider` 를 적은 provider 가 원형을 숨겨야 하는지는 정하지 않았다. id 가 다르므로 지금 코드로는 숨기지 않는다.
 - `provider_kind_resolver.ml` 25행의 호출자를 세지 않았다.
+- `server_runtime_setup_actions.ml` 501·523·539행이 넘기는 설치 선택지 id 가 runtime 행 id 일 수 있는지 보지 않았다. 그럴 수 있다면 그 행의 `catalog-provider` 를 읽어야 한다.
 - 설치 스크립트가 마법사 기록의 `id` 를 어떻게 쓰는지(`bin/main_eio.ml` 2055·2070·2091행) 보지 않았다.
 - `Provider_config.make` 는 `provider_id` 를 소문자로 바꾼다. `resolve_exact` 는 `String.equal` 로 그대로 비교한다. catalog 행 id 가 모두 소문자라서 지금은 문제가 없다.
 - 운영 계정 key 가 크레딧을 가졌는지는 이 RFC 와 상관없이 따로 확인해야 한다. 크레딧 없는 key 는 매번 바로 실패해서, 자리가 늘 빈 slot 이 된다(RFC exact-request-waits-only-for-a-seat §5).

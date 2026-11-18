@@ -514,14 +514,17 @@ let matches_existing_selection spec (config:Runtime_schema.config) =
        (match List.find_opt (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models with
         | None -> false
         | Some model ->
+          let catalog_provider =
+            Option.fold provider ~none:binding.provider_id ~some:Runtime_schema.catalog_provider_id
+          in
           let catalog_context =
             match Llm_provider.Catalog_snapshot.model_catalog_for_provider
                     (Llm_provider.Catalog_snapshot.current ())
-                    (Llm_provider.Model_catalog.Declared_provider binding.provider_id),
+                    (Llm_provider.Model_catalog.Declared_provider catalog_provider),
                   Llm_provider.Model_identifiers.Model_id.of_string model.api_name with
             | Some catalog, Ok model_id ->
               (match Llm_provider.Model_catalog.lookup_model_for_provider catalog
-                       ~provider:(Llm_provider.Model_catalog.Declared_provider binding.provider_id)
+                       ~provider:(Llm_provider.Model_catalog.Declared_provider catalog_provider)
                        ~model_id with
                | Some entry ->
                  (match entry.max_context_tokens with

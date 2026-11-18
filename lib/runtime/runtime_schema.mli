@@ -133,6 +133,11 @@ type provider =
     (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
         catalog does not know. [None] means the catalog answers, and a
         provider that has a catalog row is refused if it states this. *)
+  ; catalog_provider : string option
+    (** The AGENT_CORE catalog provider row this provider speaks as when its own
+        id names no row, as an account of a catalog provider with its own
+        credential does. Catalog lookups read {!catalog_provider_id}; the
+        account keeps [id]. [None] means [id] is the only name it has. *)
   ; request_path : string option
     (** Explicit HTTP request surface, relative to the endpoint. None uses the catalog/protocol. *)
   ; transport : transport
@@ -177,6 +182,17 @@ type provider =
     (** [providers.<id>.usage-read]; [None] when not declared. *)
   }
 [@@deriving show, eq]
+
+val catalog_provider_key : string
+(** ["catalog-provider"], the [\[providers.<id>\]] key that fills
+    [catalog_provider]. *)
+
+val catalog_provider_id : provider -> string
+(** The id every AGENT_CORE catalog lookup for this provider uses:
+    [catalog_provider] when declared, otherwise [id]. Credentials, quota
+    scope, runtime ids and rest cells keep [id], so two accounts of one
+    catalog row stay apart (RFC account-provider-speaks-as-a-catalog-row
+    §3.2). *)
 
 (** {1 Layer 2: Model} *)
 

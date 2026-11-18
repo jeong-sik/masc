@@ -3,6 +3,8 @@ type drop_reason =
   | Provider_disabled of string (* provider id *)
   | Provider_not_declared of string (* provider id the binding names *)
   | Model_not_declared of string (* model id the binding names *)
+  | Catalog_provider_not_declared of { provider_id : string; catalog_provider : string }
+  | Catalog_provider_beside_own_row of { provider_id : string; catalog_provider : string }
   | Execution_unbuildable of string (* adapter's own reason *)
 
 let string_of_drop_reason = function
@@ -11,6 +13,14 @@ let string_of_drop_reason = function
   | Provider_not_declared id -> Printf.sprintf "provider not found: %s" id
   | Model_not_declared id -> Printf.sprintf "model not found: %s" id
   | Execution_unbuildable reason -> reason
+  | Catalog_provider_not_declared { provider_id; catalog_provider } ->
+    Printf.sprintf
+      "provider %S declares %s %S, which names no AGENT_CORE catalog provider row"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider
+  | Catalog_provider_beside_own_row { provider_id; catalog_provider } ->
+    Printf.sprintf
+      "provider %S declares %s %S, but %S is itself a catalog provider row, so it already speaks as that row"
+      provider_id Runtime_schema.catalog_provider_key catalog_provider provider_id
 ;;
 (* A list entry renders as "field entry \"id\"" and a scalar as "field = \"id\"".
    Keeping both is not cosmetic: [runtime].media_failover = "x" would tell the
@@ -116,6 +126,11 @@ let dangling_reference_reason = function
     Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
   | Model_not_declared id ->
     Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
+  (* A catalog-provider the catalog does not have is the same typo one table
+     over: the operator named a row, and dropping the binding would leave the
+     account as absent as a missing [providers.x] row would. *)
+  | Catalog_provider_not_declared _ | Catalog_provider_beside_own_row _ as reason ->
+    Some (string_of_drop_reason reason)
   | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
 ;;
 

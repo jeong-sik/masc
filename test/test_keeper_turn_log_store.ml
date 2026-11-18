@@ -69,8 +69,9 @@ let tail_text path =
     Printf.sprintf "end %d, next unit from %d, %s, last %s" rows_end point.closed_messages
       (match open_turn with
        | None -> "no open turn"
-       | Some { opened; baseline } ->
-         Printf.sprintf "turn open at %d from %d" opened baseline.closed_messages)
+       | Some { opened; baseline; reset_since } ->
+         Printf.sprintf "turn open at %d from %d%s" opened baseline.closed_messages
+           (if reset_since then " and reset since" else ""))
       (match last with
        | Log_started _ -> "log_started"
        | Opened _ -> "opened"
@@ -78,11 +79,13 @@ let tail_text path =
        | Reset _ -> "reset")
 ;;
 
-let appended path ~at_end lines =
+let appended_at path ~at_end lines =
   match Store.append ~path ~at_end lines with
-  | Ok new_end -> new_end
+  | Ok appended -> appended
   | Error error -> failf "append at %d: %s" at_end (append_error_text error)
 ;;
+
+let appended path ~at_end lines = (appended_at path ~at_end lines).new_end
 
 let length_of line = String.length (Yojson.Safe.to_string (Codec.to_json line)) + 1
 
@@ -108,7 +111,8 @@ let test_tail_after_each_line () =
     (tail_text path);
   let after_resets = appended path ~at_end:after_opened (reset 6 0, [ reset 0 2 ]) in
   check string "resets inside the turn move the point and leave the turn open"
-    (Printf.sprintf "end %d, next unit from 2, turn open at %d from 5, last reset" after_resets
+    (Printf.sprintf "end %d, next unit from 2, turn open at %d from 5 and reset since, last reset"
+       after_resets
        after_start)
     (tail_text path);
   let after_closed = appended path ~at_end:after_resets (closed after_start 9, []) in
@@ -128,8 +132,11 @@ let test_two_lines_in_one_append () =
   let after_start = appended path ~at_end:0 (started, []) in
   let after_opened = appended path ~at_end:after_start (opened 5, []) in
   let missing = closed ~outcome:Close_missing after_start 8 in
-  let after_both = appended path ~at_end:after_opened (missing, [ opened 8 ]) in
+  let both = appended_at path ~at_end:after_opened (missing, [ opened 8 ]) in
+  let after_both = both.new_end in
   check int "both lines landed" (after_opened + length_of missing + length_of (opened 8)) after_both;
+  check int "the append says where its last line starts" (after_opened + length_of missing)
+    both.last_at;
   check string "the second line is the open turn"
     (Printf.sprintf "end %d, next unit from 8, turn open at %d from 8, last opened" after_both
        (after_opened + length_of missing))
@@ -146,7 +153,7 @@ let test_stale_end_writes_nothing () =
      check (pair int int) "the append names both ends" (after_start, after_opened)
        (expected, actual)
    | Error other -> failf "expected End_moved, got %s" (append_error_text other)
-   | Ok (_ : int) -> fail "an append at a stale end was written");
+   | Ok (_ : Store.appended) -> fail "an append at a stale end was written");
   check string "the file is as it was" before (file_bytes path)
 ;;
 

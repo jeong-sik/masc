@@ -15,6 +15,9 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 type open_turn =
   { opened : int (** Byte offset of the [Opened] line. A [Closed] names it. *)
   ; baseline : Keeper_turn_log.mark
+  ; reset_since : bool
+  (** A [Reset] follows the [Opened]. What was closed since is then not this
+      turn's to claim. *)
   }
 
 type tail =
@@ -65,11 +68,18 @@ type append_error =
       ; detail : string
       }
 
+type appended =
+  { new_end : int
+  ; last_at : int
+  (** Byte offset of the last line appended. An admission's [Opened] is the
+      last line of its append, and the turn's [Closed] names this offset. *)
+  }
+
 (** Appends one or more lines in one write: all of them land or none does.
     [at_end] is [rows_end] of the tail the caller read, or [0] for
-    [Nothing_written]. Returns the new end. *)
+    [Nothing_written]. *)
 val append
   :  path:string
   -> at_end:int
   -> Keeper_turn_log.line * Keeper_turn_log.line list
-  -> (int, append_error) result
+  -> (appended, append_error) result

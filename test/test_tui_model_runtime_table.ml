@@ -290,6 +290,66 @@ let test_a_page_counts_the_bindings_the_window_holds () =
     (reads ~starts:[ 0; 20 ] ~total:30 ~height:5 0);
   check bool "a table row never is" false (reads ~table:true ~starts:[] ~total:31 ~height:1 3)
 
+(* The line a binding is drawn on: under the column names in the table, the
+   item's first line when stacked. A binding is on screen when this line is
+   in the window, the way [drawn_bindings] counts it. *)
+let binding_line ~table ~starts binding =
+  if table then binding + 1 else List.nth starts binding
+
+let shown ~table ~starts ~height ~first binding =
+  let line = binding_line ~table ~starts binding in
+  line >= first && line < first + height
+
+(* RFC tui-one-screen-grammar §3.1 on the models pane, put together the way
+   the dispatcher does it: the window the pane draws, the bindings that
+   window holds, a page of them less one, and the window that follows the
+   landing. From every selection and every window that shows it, PgDn keeps
+   the binding drawn last on screen and lands on a binding the pane draws.
+   The parts were tested one by one; this is the decision they make. *)
+let test_a_page_down_keeps_the_binding_drawn_last () =
+  let check_pane ~label ~table ~starts ~total ~count ~height =
+    for cursor = 0 to count - 1 do
+      if not (T.reads_selected ~table ~starts ~total ~height cursor) then
+        for scroll = 0 to total do
+          let first = T.window ~table ~starts ~total ~height ~cursor scroll in
+          let last =
+            List.fold_left
+              (fun last binding ->
+                if shown ~table ~starts ~height ~first binding then binding else last)
+              (-1) (List.init count Fun.id)
+          in
+          let drawn = T.drawn_bindings ~table ~starts ~total ~height ~first in
+          let landing = Int.min (count - 1) (cursor + Masc_tui_scroll.page_step ~height:drawn) in
+          let next = T.window ~table ~starts ~total ~height ~cursor:landing first in
+          let at = Printf.sprintf "%s %d tall, binding %d, window %d" label height cursor first in
+          (* A window of one binding pages by one and keeps nothing. *)
+          check bool (at ^ ": the binding drawn last stays") true
+            (drawn < 2 || last < 0 || shown ~table ~starts ~height ~first:next last);
+          check bool (at ^ ": the landing is drawn") true
+            (shown ~table ~starts ~height ~first:next landing)
+        done
+    done
+  in
+  List.iter
+    (fun count ->
+      List.iter
+        (fun height ->
+          check_pane ~label:(Printf.sprintf "table of %d" count) ~table:true ~starts:[]
+            ~total:(count + 1) ~count ~height)
+        [ 2; 3; 4; 9; 14 ])
+    [ 1; 2; 5; 30 ];
+  (* Stacked items of one height: [lines] lines and the blank after them. *)
+  List.iter
+    (fun (count, lines) ->
+      let starts = List.init count (fun index -> index * (lines + 1)) in
+      let total = (count * (lines + 1)) - 1 in
+      List.iter
+        (fun height ->
+          check_pane ~label:(Printf.sprintf "%d items of %d lines" count lines) ~table:false
+            ~starts ~total ~count ~height)
+        [ lines; lines + 1; 7; 15 ])
+    [ 1, 2; 6, 2; 40, 2; 12, 3 ]
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -314,5 +374,7 @@ let () =
       , [ Alcotest.test_case "the window moves only when the selection leaves it" `Quick
             test_the_window_moves_only_when_the_selection_leaves_it
         ; Alcotest.test_case "a page counts the bindings the window holds" `Quick
-            test_a_page_counts_the_bindings_the_window_holds ] )
+            test_a_page_counts_the_bindings_the_window_holds
+        ; Alcotest.test_case "a page down keeps the binding drawn last" `Quick
+            test_a_page_down_keeps_the_binding_drawn_last ] )
     ]

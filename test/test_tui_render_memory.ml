@@ -305,6 +305,71 @@ let test_memory_overview_keeps_one_height () =
     [ 80, 17; 120, 33; 200, 53 ]
 ;;
 
+(* QA N01: a page key moves the Keeper list by the height its layout reports
+   ([memory_overview_scrolled], which the dispatcher reads for the list's
+   page), less one. That is only a page of what the reader saw when the body
+   draws the list in exactly those rows, at every size, in both readings and
+   whichever Keeper is selected. The list is the run of list rows the body
+   pushes right before it hands over its position. *)
+let test_memory_list_draws_the_height_its_page_is_cut_from () =
+  let module H = Masc.Tui_decode_memory_health in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let keepers =
+    errors
+    :: List.init 33 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <- Some { (make_fleet_health errors) with H.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  let list_rows ~cols ~budget =
+    let calls = ref [] in
+    let note call = calls := call :: !calls in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~hand_position:(fun _ -> note `Hand)
+      ~push:(fun _ -> note `Row) ~push_selected:(fun _ -> note `Row)
+      ~push_empty:(fun () -> note `Row)
+      ~push_styled:(fun ~style:_ _ -> note `Other) ~push_divider:(fun () -> note `Other);
+    let rec before_hand = function
+      | `Hand :: earlier -> Some earlier
+      | (`Row | `Other) :: earlier -> before_hand earlier
+      | [] -> None
+    in
+    let rec run rows = function
+      | `Row :: earlier -> run (rows + 1) earlier
+      | (`Hand | `Other) :: _ | [] -> rows
+    in
+    Option.map (run 0) (before_hand !calls)
+  in
+  let reported ~cols ~budget =
+    let layout = Render_memory.memory_overview_scrolled ~cols ~budget state in
+    Masc_tui_scroll.content_height ~rows:(budget + Masc_tui_frame.chrome_rows)
+      ~chrome:layout.sc_chrome ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun detail ->
+          state.memory_overview_detail <- detail;
+          List.iter
+            (fun cursor ->
+              state.memory_health_cursor <- cursor;
+              check (option int)
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: list rows" cols budget detail
+                   cursor)
+                (Some (reported ~cols ~budget)) (list_rows ~cols ~budget))
+            [ 0; 1; count / 2; count - 1 ])
+        [ false; true ])
+    [ 80, 15; 80, 17; 100, 23; 120, 33; 200, 53 ]
+;;
+
 (* The Keeper list hands its selected row to the title row; the body writes
    no position of its own (RFC tui-one-screen-grammar, section 2). *)
 let test_memory_list_hands_its_selected_row () =
@@ -819,6 +884,8 @@ let () =
           test_memory_list_hands_its_selected_row
       ; test_case "the overview keeps one height for every selection" `Quick
           test_memory_overview_keeps_one_height
+      ; test_case "the list draws the height its page is cut from" `Quick
+          test_memory_list_draws_the_height_its_page_is_cut_from
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
     ; "one place per fact",

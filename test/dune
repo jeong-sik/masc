@@ -4858,7 +4858,8 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout
+  masc_tui_scroll))
 
 (test
  (name test_tui_decode_overview_goals)

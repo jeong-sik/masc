@@ -1616,6 +1616,40 @@ streaming = true
 
 [antigravity_subscription.antigravity-gemini-4-hydrogen-low]
 
+# Gemini 4 Neon, listed by `agy models` (agy 1.5.12, 2026-11-19) with the
+# level in each name, xhigh included. The window is the catalog row's 1,048,576.
+[models.antigravity-gemini-4-neon-xhigh]
+api-name = "gemini-4-neon-xhigh"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-neon-xhigh]
+
+[models.antigravity-gemini-4-neon-high]
+api-name = "gemini-4-neon-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-neon-high]
+
+[models.antigravity-gemini-4-neon-medium]
+api-name = "gemini-4-neon-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-neon-medium]
+
+[models.antigravity-gemini-4-neon-low]
+api-name = "gemini-4-neon-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-neon-low]
+
 [models.antigravity-gemini-3-8-flash-high]
 api-name = "gemini-3.8-flash-high"
 max-context = 1048576

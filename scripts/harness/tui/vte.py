@@ -348,6 +348,11 @@ def mix(a: Rgb, b: Rgb, t: float) -> Rgb:
     return (round(a[0] * (1 - t) + b[0] * t), round(a[1] * (1 - t) + b[1] * t), round(a[2] * (1 - t) + b[2] * t))
 
 
+def cell_colours(cell: Cell) -> tuple[Rgb, Rgb]:
+    """The foreground and background a cell is drawn with, reverse video applied."""
+    return (cell.pen.bg, cell.pen.fg) if cell.pen.reverse else (cell.pen.fg, cell.pen.bg)
+
+
 def png_cell_size(font_path: Path, font_size: int = PNG_FONT_SIZE) -> tuple[int, int] | str:
     """The pixel size of one cell drawn with this font, or why the font cannot draw."""
     try:
@@ -393,19 +398,22 @@ def render_png(vte: Vte, path: Path, font_paths: Sequence[Path], font_size: int 
         return found
     image = Image.new('RGB', (vte.columns * cell_w + 2 * PNG_PAD, vte.rows * cell_h + 2 * PNG_PAD), DEFAULT_BG)
     draw = ImageDraw.Draw(image)
-    for row in range(vte.rows):
-        y = PNG_PAD + row * cell_h
-        for column, cell in enumerate(vte.row_cells(row)):
-            x = PNG_PAD + column * cell_w
-            fg, bg = (cell.pen.bg, cell.pen.fg) if cell.pen.reverse else (cell.pen.fg, cell.pen.bg)
-            if bg != DEFAULT_BG:
-                draw.rectangle((x, y, x + cell_w - 1, y + cell_h - 1), fill=bg)
-            if cell.wide_tail or cell.text in (' ', ''):
-                continue
-            ink = mix(fg, bg, FAINT_MIX) if cell.pen.faint else fg
-            draw.text((x, y + 2), cell.text, font=font_for(cell.text), fill=ink)
-            if cell.pen.underline:
-                draw.line((x, y + cell_h - 2, x + cell_w - 1, y + cell_h - 2), fill=ink)
+    cells = [(PNG_PAD + column * cell_w, PNG_PAD + row * cell_h, cell)
+             for row in range(vte.rows) for column, cell in enumerate(vte.row_cells(row))]
+    # Every background before any glyph: a wide glyph runs into the next
+    # cell, and that cell's background would cover its right half.
+    for x, y, cell in cells:
+        _, bg = cell_colours(cell)
+        if bg != DEFAULT_BG:
+            draw.rectangle((x, y, x + cell_w - 1, y + cell_h - 1), fill=bg)
+    for x, y, cell in cells:
+        if cell.wide_tail or cell.text in (' ', ''):
+            continue
+        fg, bg = cell_colours(cell)
+        ink = mix(fg, bg, FAINT_MIX) if cell.pen.faint else fg
+        draw.text((x, y + 2), cell.text, font=font_for(cell.text), fill=ink)
+        if cell.pen.underline:
+            draw.line((x, y + cell_h - 2, x + cell_w - 1, y + cell_h - 2), fill=ink)
     try:
         image.save(path)
     except OSError as exc:

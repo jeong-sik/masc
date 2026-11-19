@@ -4,7 +4,7 @@
 
 usage: idle.py --tui BIN --out DIR --base-path DIR --upstream-port PORT
                [--size 160x46] [--idle 20] [--steps a,b] [--relay-port 0]
-               [--record DIR] [--probes 0] [--png-font FONT ...]
+               [--record DIR] [--probes 0] [--png-font FONT ...] [--keys j,k]
 
 One fresh TUI process per screen. It starts against readonly_proxy.py, which
 forwards reads to --upstream-port (a live server or frozen_server.py), the
@@ -15,7 +15,9 @@ CPU time `ps` reports for it, its RSS at the end, which screen rows changed
 and which cells of them moved, and the frames the TUI itself recorded
 (MASC_TUI_FRAME_TIMING) with their build and present times. With --probes N
 it then presses Down N times and Up N times, each timed from the write to the
-first byte back, skipping a press when the screen was still drawing.
+first byte back, skipping a press when the screen was still drawing. With
+--keys, navigation keys are pressed before the probes, and the screen is
+captured once quiet after each (key_steps.py).
 
 The frame report's times count from the TUI's start, so the window is placed
 in it by the time since the fork; the exec delay is the error. The TUI keeps
@@ -69,11 +71,12 @@ import sys
 import tempfile
 import time
 from types import FrameType
-from typing import IO
+from typing import IO, cast
 
+from key_steps import NavKey, parse_keys, run_keys
 from pty_driver import (POLL_S, Child, Exit, Geometry, Jump, Key, Press, Sent, first_frame, press, read_chunk, settle,
                         spawn, stop, take)
-from relay_files import json_object
+from relay_files import json_object, read_log
 from vte import Vte, png_cell_size, render_png
 
 HERE = Path(__file__).resolve().parent
@@ -187,6 +190,7 @@ class Options:
     record: Path | None
     probes: int
     png_fonts: tuple[Path, ...]
+    keys: tuple[NavKey, ...]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -209,6 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help='monospace font file; draws each screen to <name>.png at the window start (needs '
                              'Pillow). Repeat it to add fallbacks: the first sets the cell size, and each glyph '
                              'uses the first font that has it')
+    parser.add_argument('--keys', default='',
+                        help='comma-separated navigation keys pressed after each window, before the probes; the '
+                             'screen is captured once quiet after each (with --png-font also drawn). Known: '
+                             + ','.join(key.value for key in NavKey))
     return parser
 
 
@@ -225,6 +233,7 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
     record: Path | None = args.record
     probes: int = args.probes
     png_fonts: tuple[Path, ...] = tuple(args.png_font)
+    keys = parse_keys(args.keys)
     if not (tui.is_file() and os.access(tui, os.X_OK)):
         return f'--tui {tui} is not an executable file'
     if tui.resolve().name == SERVER_BINARY:
@@ -242,6 +251,8 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
         return '--idle must be positive'
     if probes < 0:
         return '--probes must not be negative'
+    if isinstance(keys, str):
+        return f'--keys: {keys}'
     names = [name for name in steps_text.split(',') if name]
     unknown = [name for name in names if name not in STEP_NAMES]
     if unknown:
@@ -255,7 +266,7 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
     geometry = Geometry(int(sized.group(1)), int(sized.group(2)), cell[0], cell[1])
     steps = tuple(STEP_NAMES[name] for name in names) if names else STEPS
     return Options(tui.resolve(), out, base_path.resolve(), geometry, idle_s, steps,
-                   upstream_port, relay_port, record, probes, png_fonts)
+                   upstream_port, relay_port, record, probes, png_fonts, keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,7 +562,19 @@ def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Ma
         window = idle_window(child, vte, options.idle_s)
         result |= window.report()
         result['rss_mb'] = rss_mb(child.pid)
-        if options.probes:
+        # Keys pressed after the window need an open terminal. When it closed
+        # in the window, the presses asked for are missing, and the error
+        # names the window.
+        closed = window.terminal_closed
+        if closed and (options.keys or options.probes):
+            result['error'] = 'terminal: closed during the idle window, so no key after it was pressed'
+        if options.keys and not closed:
+            steps = run_keys(child, vte, options.keys, options.out, step.name, options.png_fonts)
+            result['key_steps'] = steps.report()
+            closed = steps.closed
+            if closed:
+                result['error'] = 'terminal: closed during the key steps'
+        if options.probes and not closed:
             down, down_busy = probe(child, vte, DOWN, options.probes)
             up, up_busy = probe(child, vte, UP, options.probes)
             result |= {'key_latency_ms': stats(down + up).report(), 'key_busy_skipped': down_busy + up_busy}
@@ -723,21 +746,13 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def refused_requests(log_path: Path) -> list[dict[str, object]] | str:
-    """The relay's refusals, or why they cannot be counted. The count is the
-    evidence that only reads went through, so an unreadable log is not zero."""
-    try:
-        lines = log_path.read_text(encoding='utf-8').splitlines()
-    except OSError as exc:
-        return f'{log_path}: {exc.strerror}'
-    refused: list[dict[str, object]] = []
-    for lineno, line in enumerate(lines, 1):
-        fields = json_fields(line)
-        if fields is None:
-            return f'{log_path}:{lineno}: not a JSON object'
-        if fields.get('decision') == 'refused':
-            refused.append({name: fields.get(name) for name in ('t', 'verb', 'path', 'why')})
-    return refused
+def refused_requests(log_path: Path, relay_exit: int) -> list[dict[str, object]] | str:
+    """The relay's refusals, or why they cannot be counted (read_log)."""
+    entries = read_log(log_path, relay_exit)
+    if isinstance(entries, str):
+        return entries
+    return [{name: fields.get(name) for name in ('t', 'verb', 'path', 'why')}
+            for fields in entries if fields.get('decision') == 'refused']
 
 
 def screen_failed(result: Mapping[str, object]) -> bool:
@@ -756,7 +771,9 @@ def restore_or_why(snapshot: Snapshot) -> str:
 def screen_line(result: Mapping[str, object]) -> str:
     idle = result.get('idle')
     idle_text = json.dumps(idle) if isinstance(idle, dict) else str(result.get('error', 'no window'))
-    return f'[{result.get("name")}] keys_ok={result.get("keys_ok")} {idle_text}'
+    kinds = (json_object(result.get('key_steps')) or {}).get('kinds')
+    kinds_text = f' layout {",".join(map(str, cast(list[object], kinds)))}' if isinstance(kinds, list) else ''
+    return f'[{result.get("name")}] keys_ok={result.get("keys_ok")} {idle_text}{kinds_text}'
 
 
 def write_report(path: Path, report: Mapping[str, object]) -> None:
@@ -805,7 +822,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     report: dict[str, object] = {
         'tui': options.tui.name, 'tui_sha256': sha256_of(options.tui),
         'size': f'{options.geometry.columns}x{options.geometry.rows}', 'idle_s': options.idle_s,
-        'probes': options.probes, 'upstream_port': options.upstream_port,
+        'probes': options.probes, 'keys': [key.value for key in options.keys],
+        'upstream_port': options.upstream_port,
         'recorded': options.record is not None, 'screens': screens,
     }
     running = Running()
@@ -826,7 +844,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with stop_signals_held():
                 running.stop_tui()
                 relay_exit = stop_relay(relay.process)
-                refused = refused_requests(options.out / RELAY_LOG_NAME)
+                refused = refused_requests(options.out / RELAY_LOG_NAME, relay_exit)
                 restored = restore_or_why(preferences)
                 report |= {'relay': {'exit': relay_exit,
                                      'refused': refused if isinstance(refused, list) else {'error': refused}},

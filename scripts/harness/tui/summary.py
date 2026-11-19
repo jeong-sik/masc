@@ -27,7 +27,7 @@ from pathlib import Path
 import sys
 from typing import cast
 
-from relay_files import json_object, path_of
+from relay_files import json_object, path_of, read_log
 
 REPORT_NAME = 'idle.json'
 RELAY_LOG_NAME = 'relay.jsonl'
@@ -166,21 +166,10 @@ def window_reads(log: Sequence[Mapping[str, object]], low: float, high: float) -
     return lines
 
 
-def read_log(path: Path) -> list[dict[str, object]] | str:
-    try:
-        lines = path.read_text(encoding='utf-8').splitlines()
-    except OSError as exc:
-        return f'{path}: {exc.strerror}'
-    entries: list[dict[str, object]] = []
-    for lineno, line in enumerate(lines, 1):
-        try:
-            fields = json_object(json.loads(line))
-        except (ValueError, RecursionError):
-            fields = None
-        if fields is None:
-            return f'{path}:{lineno}: not a JSON object'
-        entries.append(fields)
-    return entries
+def relay_exit(report: Mapping[str, object]) -> int | None:
+    """The relay's exit as idle.py wrote it; None when the run ended before it was written."""
+    code = field(report, 'relay', 'exit')
+    return code if isinstance(code, int) and not isinstance(code, bool) else None
 
 
 def summarize(out: Path, reads: bool) -> list[str]:
@@ -195,7 +184,7 @@ def summarize(out: Path, reads: bool) -> list[str]:
              f'preferences={text(report.get("preferences"))}',
              f'{"screen":16s} {"frames/s":>8s} {"bytes/s":>9s} {"cpu%":>6s} {"rss MB":>7s} '
              f'{"build p50/p95 ms":>17s}  rows changed (row x count, cells that moved)']
-    log = read_log(out / RELAY_LOG_NAME) if reads else []
+    log = read_log(out / RELAY_LOG_NAME, relay_exit(report)) if reads else []
     if isinstance(log, str):
         lines.append(f'   no relay log: {log}')
         log = []

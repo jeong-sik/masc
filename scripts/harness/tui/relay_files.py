@@ -25,6 +25,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import signal
 import threading
 import time
 from typing import cast
@@ -90,6 +91,54 @@ def json_object(value: object) -> dict[str, object] | None:
     if isinstance(value, dict):
         return cast(dict[str, object], value)
     return None
+
+
+def json_line(line: bytes) -> dict[str, object] | None:
+    try:
+        decoded: object = json.loads(line.decode('utf-8'))
+    except (ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
+        return None
+    return json_object(decoded)
+
+
+def exit_text(code: int | None) -> str:
+    """How a process ended, from its Popen return code (negative for a signal)."""
+    if code is None:
+        return 'is not known'
+    if code < 0:
+        names = {member.value: member.name for member in signal.Signals}
+        return f'was {names.get(-code, f"signal {-code}")}'
+    return f'was code {code}'
+
+
+def read_log(path: Path, relay_exit: int | None) -> list[dict[str, object]] | str:
+    """Every entry of a decision log, or why it cannot be read. A log that
+    cannot be read is not an empty one: its refusals are the evidence that
+    only reads went through.
+
+    The relay writes each line whole and ends it with a newline, so a last
+    line with neither was cut while it was written. The error then names the
+    relay's exit: a relay killed by a signal stops wherever its write was."""
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        return f'{path}: {exc.strerror}'
+    lines = data.split(b'\n')
+    unterminated = lines.pop()  # b'' when the log ends with a newline
+    entries: list[dict[str, object]] = []
+    for lineno, line in enumerate(lines, 1):
+        fields = json_line(line)
+        if fields is None:
+            return f'{path}:{lineno}: not a JSON object'
+        entries.append(fields)
+    if unterminated:
+        fields = json_line(unterminated)
+        if fields is None:
+            return (f'{path}:{len(lines) + 1}: the last line is cut off (no newline at its end, not a JSON '
+                    f'object); the relay\'s exit {exit_text(relay_exit)}, and a relay stopped by a signal '
+                    f'can leave the line it was writing cut')
+        entries.append(fields)
+    return entries
 
 
 def key_part(params: Mapping[str, object], name: str) -> str:

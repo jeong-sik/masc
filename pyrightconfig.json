@@ -2,7 +2,7 @@
   "executionEnvironments": [
     {
       "root": "scripts/tests",
-      "extraPaths": ["scripts", "test", "scripts/tinker/librarian"]
+      "extraPaths": ["scripts", "test", "scripts/tinker/librarian", "scripts/harness/tui"]
     },
     {
       "root": "scripts/tinker/librarian"

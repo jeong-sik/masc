@@ -616,14 +616,21 @@ let keepalive_keeper_names config =
     to keep it alive after restart.
 
     Mirrors [keepalive_keeper_names] for readers that care about
-    durability rather than the keepalive fiber. *)
-let persistent_agent_names_with_unread config =
+    durability rather than the keepalive fiber.
+
+    [read_meta] reads the stored meta of a Keeper by name. The operator
+    snapshot calls this for every snapshot it builds and gives the read that
+    asks the Keeper's Owner ([Keeper_stored_meta.read], a module above this
+    one), so a Keeper whose Owner stands for its meta file has no file
+    opened here. *)
+let persistent_agent_names_with_unread
+      config
+      ~(read_meta : string -> (Keeper_meta_contract.keeper_meta option, string) result)
+  =
   let results = configured_keeper_names config
   |> List.map (fun name ->
     let path = keeper_meta_path config name in
-    match
-      read_meta_file_path path
-    with
+    match read_meta name with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
         Problem_report_state.clear ~site:Persistent_scan ~path;
@@ -656,10 +663,6 @@ let persistent_agent_names_with_unread config =
     | Ok (Some name) -> name :: names, unread
     | Ok None -> names, unread
     | Error failed -> names, failed :: unread) results ([], [])
-;;
-
-let persistent_agent_names config =
-  fst (persistent_agent_names_with_unread config)
 ;;
 
 let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =

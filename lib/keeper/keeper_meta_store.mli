@@ -156,16 +156,19 @@ val effective_autoboot_enabled :
     (issue #28844). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
-(** Names of keepers expected to persist across sessions. Mirrors
-    [keepalive_keeper_names] for readers caring about durability
-    rather than the keepalive fiber. *)
-val persistent_agent_names : Workspace.config -> string list
-
 val persistent_agent_names_with_unread :
-  Workspace.config -> string list * Keeper_snapshot_unread.t list
-(** The same persistence scan with its actual metadata read failures. The
-    readable, eligible names keep their original order; missing metadata is
-    absent, while an unread row remains a partial-read obligation. *)
+  Workspace.config
+  -> read_meta:(string -> (Keeper_meta_contract.keeper_meta option, string) result)
+  -> string list * Keeper_snapshot_unread.t list
+(** Names of keepers expected to persist across sessions, with the metadata
+    reads that failed. Mirrors [keepalive_keeper_names] for readers caring
+    about durability rather than the keepalive fiber. The readable, eligible
+    names keep their original order; missing metadata is absent, while an
+    unread row remains a partial-read obligation.
+
+    [read_meta] reads the stored meta of a configured Keeper by its name:
+    {!read_meta} for the file, or a read that asks the Keeper's Owner first
+    ([Keeper_stored_meta.read]). The scan opens no meta file itself. *)
 
 (** Read the keeper meta for [name]. The name is the canonical keeper
     filename component; agent-name aliases are not retried here. Callers

@@ -209,7 +209,12 @@ Owner 의 meta 가 파일과 어긋난 채 남는 때가 둘 있다.
 
 서버가 도는 동안 밖에서 meta 파일을 고치면 보이는 값이 지금과 달라진다(`scripts/migrate-keeper-meta-sandbox.sh`, §1.4). 지금 행은 Owner 의 다음 커밋 전까지 고친 파일 값을 보인다. L1 뒤에는 처음부터 Owner 값을 보인다. 고친 파일 값은 어느 쪽이든 Owner 의 다음 커밋이 덮는다.
 
-snapshot 은 Keeper 행과 따로 Keeper 마다 meta 파일을 한 번 더 연다(#53113). L1 은 그 읽기를 옮기지 않았다.
+snapshot 은 Keeper 행과 따로, 계속 떠 있어야 하는 Keeper 를 고르려고 설정된 Keeper 마다 저장된 meta 를 읽는다(`Keeper_meta_store.persistent_agent_names_with_unread`, #53113). 이 훑기도 행과 같은 읽기(`Keeper_stored_meta.read`)를 쓴다. `Keeper_meta_store` 는 `Keeper_stored_meta` 아래 모듈이라, 훑는 함수가 읽는 함수를 인자로 받는다(`~read_meta`). snapshot 은 행과 훑기에 같은 함수 하나(`stored_meta`)를 넘긴다.
+
+옮기지 않은 읽기가 둘 있다.
+
+- supervisor 의 keepalive reconcile(`keepalive_keeper_names`)은 지금처럼 meta 파일을 읽는다. 30초에 한 번 돈다(`env_config_keeper_supervisor.ml`).
+- 이 훑기는 Keeper TOML 을 Keeper 마다 두 번 읽는다. 설정된 이름을 찾을 때 한 번, autoboot 를 정할 때 한 번이다. 풀이는 내용이 같으면 다시 하지 않는다(`keeper_types_profile_toml_io.ml` 의 `parsed_toml_cache`). TOML 은 서버 밖에서 고치는 파일이라 '쓰는 곳이 메모리에도 고친다'에 들지 않는다.
 
 ### 3.2 칸과 사실
 

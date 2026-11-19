@@ -214,11 +214,12 @@ let mask_secret text =
   |> List.map (fun word -> if String.equal word secret then "[REDACTED]" else word)
   |> String.concat " "
 
-let test_the_listing_shows_what_the_stream_showed () =
-  (* An operator reads a held call in two places: the question on the stream
-     and the listing of open waits. The listing is read while the wait is
-     open, so it is taken here before the answer. A secret in the call is
-     masked in both, by the same redaction. *)
+let test_the_listing_carries_what_the_gate_published () =
+  (* An operator reads a held call in two places: the request the gate
+     publishes to the stream and the listing of open waits. The listing is
+     read while the wait is open, so it is taken here before the answer. A
+     secret in the call is masked in both: the gate redacts the three texts
+     once and gives both the same values. *)
   with_gate ~redact_text:mask_secret ~timeout_sec:5.0
     (fun ~clock ~registry ~events ~gate ->
       let listed = ref [] in
@@ -253,7 +254,7 @@ let test_the_listing_shows_what_the_stream_showed () =
           , "policy saw [REDACTED] in the call" )
         ]
         !listed;
-      check texts "the stream carried the same three texts" !listed
+      check texts "the published request carries the same three texts" !listed
         (drain events []
          |> List.filter_map (function
               | Events.Tool_approval_requested { args; question; because; _ } ->
@@ -311,7 +312,7 @@ let () =
             test_nobody_answering_does_not_admit_the_call
         ; test_case "the settled event is sent on every path" `Quick
             test_the_settled_event_is_sent_on_every_path
-        ; test_case "the listing shows what the stream showed" `Quick
-            test_the_listing_shows_what_the_stream_showed
+        ; test_case "the listing carries what the gate published" `Quick
+            test_the_listing_carries_what_the_gate_published
         ] )
     ]

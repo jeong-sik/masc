@@ -681,10 +681,10 @@ let runtime_picker_title ~ko ~notices pick =
         Printf.sprintf (if ko then "%s 런타임 교체" else "Replace runtime in %s") lane
   in
   let heading = match notices with
-    | [] -> " MASC Runtime / "
+    | [] -> if ko then " 런타임 › " else " Runtime › "
     | _ :: _ ->
         Printf.sprintf
-          (if ko then "안내 %d개 · 닫고 v · Runtime / " else "%d notices · close, v · Runtime / ")
+          (if ko then "안내 %d개 · 닫고 v · 런타임 › " else "%d notices · close, v · Runtime › ")
           (List.length notices)
   in
   screen_title (heading ^ purpose)
@@ -1101,11 +1101,11 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
   let text korean english = if ko then korean else english in
   let title = match projection.rpp_parent with
     | Runtime_media_parent -> text "미디어 호출 순서" "Media call order"
-    | Runtime_prompt_parent (Lane_name_prompt _) -> text "Runtime / 새 경로 이름" "Runtime / new lane name"
+    | Runtime_prompt_parent (Lane_name_prompt _) -> text "런타임 › 새 경로 이름" "Runtime › new lane name"
     | Runtime_prompt_parent (Lane_rename_prompt (lane, _)) ->
-        text "이름 변경 / " "Rename / " ^ Terminal_text.single_line lane
+        text "이름 변경 › " "Rename › " ^ Terminal_text.single_line lane
     | Runtime_prompt_parent (Lane_remove_prompt lane) ->
-        text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
+        text "제거 확인 › " "Remove › " ^ Terminal_text.single_line lane in
   let header = if projection.rpp_notices = 0 then
     here_row ~cols state ~path:[ title ] ~readings:[] ~position:projection.rpp_position
   else

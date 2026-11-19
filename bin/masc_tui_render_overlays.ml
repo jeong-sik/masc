@@ -146,7 +146,7 @@ let render_context_inspector state =
     tab_strip
       ~width:
         (tab_strip_width ~cols
-           ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
+           ~before:(screen_title " Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
            ~after:search_marker)
       ~press:(fun tab text -> pressable (Press_context_tab tab) text)
       (List.map
@@ -198,7 +198,7 @@ let render_context_inspector state =
     ~help_door:(Option.is_none state.search)
     ~frame:Chrome_overlay
     ~title:
-      (screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
+      (screen_title " Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
        ^ search_marker)
     ~hints
     ~body:(fun ~budget:content_height c ->
@@ -423,20 +423,20 @@ let render_palette (state : state) =
   let title, prompt, action =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
-        (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
+        (" Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s · %s on line %d" choice_question
             (palette_count state.palette_mode names) choice_line
         , "filter:", "ask" )
     | Masc_tui_types.Palette_files _ ->
-        (" MASC Find file", "filter:", "open")
+        (" Find file", "filter:", "open")
     | Masc_tui_types.Palette_branches _ ->
-        (" MASC Branches", "filter:", "close")
+        (" Branches", "filter:", "close")
     | Masc_tui_types.Palette_worktrees _ ->
-        (" MASC Worktrees", "filter:", "close")
+        (" Worktrees", "filter:", "close")
     | Masc_tui_types.Palette_search _ ->
-        (" MASC Search in files", "search:",
+        (" Search in files", "search:",
          (match Masc_tui_palette.search_enter state with
           | Masc_tui_palette.Enter_opens _ -> "open"
           | Masc_tui_palette.Enter_searches -> "search"))
@@ -701,7 +701,7 @@ let render_link_preview_modal (state : state) =
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
         ~title:
-          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+          (screen_title " Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
            ^ Ansi.reset)
         ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
@@ -715,7 +715,7 @@ let render_link_preview_modal (state : state) =
         ~frame:Chrome_overlay
         ~overflow:(Self_scrolled (fun () -> Link_modal_scroll scroll))
         ~title:
-          (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
+          (screen_title " Link preview" ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset)
         ~hints:
           (Masc_tui_link_preview.modal_hints ~total_links
@@ -753,7 +753,7 @@ let render_play_card (state : state) card =
                           report = (fun scroll -> Play_invite_scroll (card, scroll)) })
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
-    ~title:(screen_title " MASC Play invite")
+    ~title:(screen_title " Play invite")
     ~hints:(Masc_tui_keys.footer_hints_play_invite ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let width = framed_inner_width cols - String.length play_card_indent in
@@ -1044,7 +1044,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     let lines = queue_panel_detail_lines state panel ~cols in
     surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
-      ~title:(title " MASC Queue item")
+      ~title:(title " Queue item")
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
@@ -1100,7 +1100,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
   let frame, clamped = surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
     ?sidebar
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
-    ~title:(title " MASC Queue")
+    ~title:(title " Queue")
     ~hints
     ~body:(fun ~budget c ->
       (match placement with
@@ -1484,7 +1484,7 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
 let render_account_login state view =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
+    ~surface_key:"account-login" ~title:(screen_title " Account Login")
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
       let lines, position =
@@ -1556,7 +1556,7 @@ let render_account_server state ~version =
 let render_collab state view =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"collab" ~title:(screen_title " MASC Collab")
+    ~surface_key:"collab" ~title:(screen_title " Collab")
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
       Option.iter c.position (Masc_tui_collab.position view);
@@ -1566,7 +1566,7 @@ let render_collab state view =
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols ~surface_key:"lanes"
-    ~title:(screen_title " MASC Plugins")
+    ~title:(screen_title " Plugins")
     ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
       else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
       else if Option.is_some view.installer then Option.fold ~none:"" ~some:Masc_tui_lane_installer.hints view.installer

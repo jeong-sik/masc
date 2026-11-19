@@ -325,7 +325,7 @@ let task_detail_viewport (state : state) =
 
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let header = screen_title (ui_text state ~ko:" 작업" ~en:" Task")
-    ^ "  " ^ connection_badge state in
+    ^ quiet_connection_tail state in
   let lines = task_detail_lines state ~cols task in
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
@@ -804,7 +804,7 @@ let render_planning_list (state : state) =
       (planning_sort_label state.planning_sort) (planning_filter_label state.planning_filter) in
   let show_modes = state.planning_sort <> Planning_sort_phase_priority
     || state.planning_filter <> Planning_filter_active in
-  let badge = "  " ^ connection_badge state in
+  let badge = quiet_connection_tail state in
   let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
   surface_chrome_keys
     ~overflow:Paged_by_cursor

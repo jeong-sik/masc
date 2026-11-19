@@ -198,7 +198,7 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
        ~title:(fun ~cols:_ -> screen_title
          (if input_unreadable then say "!창 넓히기 필요 · 승인" "!WIDEN Approval"
           else match value_hint, key_has_bytes with
-            | Masc_tui_keys.No_value_reading, false -> say " 승인 상세" " MASC Approval"
+            | Masc_tui_keys.No_value_reading, false -> say " 승인 상세" " Approval"
             | No_value_reading, true -> say "*N=bN 바이트 | 승인" "*N=bN bytes | Approval"
             | Readable_values, false -> say "v:바이트 | 최상위 문자열" "v:bytes | top-level strings"
             | Readable_values, true -> say "v:바이트 *N=bN | 승인" "v:bytes *N=bN | Approval"
@@ -1286,7 +1286,7 @@ let render_question_reader (state : state) =
          (Masc_tui_value.Position.window ~first:scroll ~shown:room
             ~total:(List.length lines))
        ~title:(fun ~cols:_ -> screen_title
-         (say " 승인 › 질문" " MASC Approvals / Questions"
+         (say " 승인 › 질문" " Approvals › Questions"
           ^ Masc_tui_approvals_model.approval_list_note ~ko
               ~name:(say "질문" "questions")
               (Masc_tui_approvals_model.approvals_questions_reading state))));

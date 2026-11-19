@@ -209,23 +209,23 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                  let ko = state.ui_language = Lang_ko in
                  let summary = match Browser_lane_view.scene_summary scene with
                    | None -> ""
-                   | Some text -> " • " ^ text in
+                   | Some text -> " · " ^ text in
                  let delta = match view.scene_delta with
                    | None -> ""
                    | Some {added; removed; unchanged; changed} ->
                        let changed_text = if changed = 0 then ""
                          else Printf.sprintf (if ko then " · 변경 %d" else " · %d changed") changed in
                        Printf.sprintf
-                         (if ko then " • Δ +%d 신규 · -%d 제거 · =%d 유지%s"
-                          else " • Δ +%d new · -%d out · =%d same%s")
+                         (if ko then " · Δ +%d 신규 · -%d 제거 · =%d 유지%s"
+                          else " · Δ +%d new · -%d out · =%d same%s")
                          added removed unchanged changed_text in
                  let truncation =
-                   if scene.content.truncated then ui_text state ~ko:" • 일부 생략" ~en:" • truncated"
+                   if scene.content.truncated then ui_text state ~ko:" · 일부 생략" ~en:" · truncated"
                    else ""
                  in
                  Printf.sprintf
-                   (if ko then "화면 %.1f ms • 노드 %d개%s%s%s"
-                    else "Scene %.1f ms • %d nodes%s%s%s")
+                   (if ko then "화면 %.1f ms · 노드 %d개%s%s%s"
+                    else "Scene %.1f ms · %d nodes%s%s%s")
                    scene.elapsed_ms
                    (List.length scene.content.nodes)
                    truncation summary delta, Theme.ok ()
@@ -234,8 +234,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | None -> ui_text state ~ko:"아직 조회되지 않음" ~en:"Not read yet", Theme.recede ()
             | Some reading ->
                 Printf.sprintf
-                  (if state.ui_language = Lang_ko then "조회 %.1f ms • 탭 %d개"
-                   else "Read %.1f ms • %d tabs")
+                  (if state.ui_language = Lang_ko then "조회 %.1f ms · 탭 %d개"
+                   else "Read %.1f ms · %d tabs")
                   reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
       (* The global coordinator status is not the result of the browser HTTP
@@ -344,15 +344,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              Terminal_text.single_line scene.content.url
          | None, None -> ui_text state ~ko:"  페이지 본문 없음" ~en:"  No page content"
          | None, Some page ->
-             Printf.sprintf "  %s • %s%s%s"
+             Printf.sprintf "  %s · %s%s%s"
                (Terminal_text.single_line page.url)
                (if state.ui_language = Lang_ko then Printf.sprintf "%d자" page.chars
                 else Masc_tui_message_layout.count_noun page.chars "char")
-               (if page.truncated then ui_text state ~ko:" • 일부 생략" ~en:" • truncated" else "")
+               (if page.truncated then ui_text state ~ko:" · 일부 생략" ~en:" · truncated" else "")
                (match view.load with
                 | Idle -> ""
                 | No_browser | Loading _ | Failed _ ->
-                    ui_text state ~ko:" • 이전 조회" ~en:" • previous read"));
+                    ui_text state ~ko:" · 이전 조회" ~en:" · previous read"));
       (match browser_lane_source_hint view with
        | None -> ()
        | Some hint -> c.push_styled ~style:(Theme.recede ())

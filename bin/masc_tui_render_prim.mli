@@ -511,6 +511,10 @@ val reading_connection_notice : Masc_tui_types.state -> string option
     [None], as does an exceptional state with nothing to add to the top row's
     word; each view keeps its own pending-read indication. *)
 
+val quiet_connection_tail : Masc_tui_types.state -> string
+(** Two-space-prefixed {!reading_connection_notice} for Zone 2 headers; returns
+    [""] when healthy so Zone 2 does not churn on ordinary background reads. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
 

@@ -1543,7 +1543,7 @@ let selected_model_reading (state : state) =
                     ~en:"Account / Model & Keepers");
              body=String.concat "\n" (config_models_detail state row)}]) in
       Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
-        ~title:(ui_text state ~ko:"시스템 › 모델 › " ~en:"System / Models / "
+        ~title:(ui_text state ~ko:"시스템 › 모델 › " ~en:"System › Models › "
                 ^ row.provider ^ " / " ^ row.model) sections))
 
 type model_scope_line = Model_identity of string | Model_observation of string

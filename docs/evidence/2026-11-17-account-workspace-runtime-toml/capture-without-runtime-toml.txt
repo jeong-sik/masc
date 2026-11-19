@@ -1,3 +1,0 @@
-status 503
-{"error":"The workspace configuration could not be read."}
-

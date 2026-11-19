@@ -853,6 +853,8 @@ type log_line =
 ```
 
 - 마지막 줄 하나면 다시 시작할 수 있다. 그래서 하던 일(`working_state`)을 줄마다 다시 적는다. 크기는 §10 에 있다.
+- `seq` 는 `Started` 뒤의 첫 `Committed` 가 1 이다. 그 뒤로 줄마다 1 씩 는다. `Started` 를 다시 쓰면 1 부터 다시 센다.
+- `Started.revision` 은 그 줄이 가리키는 스냅샷의 revision 이다. `Committed.revision` 은 그 줄 뒤의 스냅샷의 revision 이다.
 - `Sha256.t` 는 checkpoint object 가 쓰는 digest 타입이다(`Agent_core.Checkpoint_objects.digest`). 스냅샷 바이트의 sha256 을 소문자 16진수 64자로 적는다.
 - 위치를 적는 값 셋은 쓰임이 다르다. `turn_log_offset` 은 읽는 쪽이 훑지 않고 시작하는 곳이다. `covers_through` 는 화면이 견주는 값이다. `covered` 는 턴 기록을 읽을 수 없을 때도 Keeper 요청의 시작점을 정한다.
 - 줄에 넣지 않는 것: 기다린 시간, 호출 시간, 버린 답의 본문, 센 token 수. 이것들은 metric 과 구조화 로그로 간다.
@@ -880,6 +882,7 @@ type log_line =
 덧붙이기 결과가 분명하지 않으면 꼬리를 다시 읽는다.
 - 이 `seq` 와 `after` 를 가진 줄이 있으면 들어간 것이다. 다시 쓰지 않는다.
 - 끝이 달라졌는데 꼬리가 다른 줄이면 `Log_diverged` 다. 파일이 없어졌을 때도 같다.
+- 끝이 그대로고 꼬리도 덧붙이기 전의 줄이면 들어가지 않은 것이다. `Stopped Store_unwritable` 로 간다.
 - 덧붙이는 helper 는 마지막 줄바꿈 뒤의 찢긴 조각을 먼저 잘라낸다. 되돌리기까지 실패한 경우에만 바이트가 남을 수 있어서, 그때도 꼬리를 다시 읽고 판단한다.
 
 계획의 규칙이다.
@@ -983,13 +986,17 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
 | 있다 | 꼬리 줄이 해석되지 않는다 | `Stopped Log_unreadable`. 읽은 자리가 그 줄에 있었다 |
 | 있다 | 스냅샷이 없거나 해석되지 않는다 | `Stopped Memory_unreadable`. 파일을 되돌려 놓고 `Resume` 한다 |
 | 있다 | 스냅샷 sha 가 꼬리 줄의 `after` 다 | 복구됐다 |
-| 있다 | 스냅샷 sha 가 꼬리 줄의 `basis` 다 | 5단계를 그 줄에서 다시 한다. 결과의 sha 가 `after` 가 아니면 `Stopped (Log_diverged _)` |
+| 있다 | 스냅샷 sha 가 꼬리 줄의 `basis` 다 | 5단계를 그 줄에서 다시 한다. 결과의 sha 가 `after` 가 아니면 `Stopped (Log_diverged _)`. 그 줄에서 스냅샷이 만들어지지 않을 때도 같다. 쓰지 않는다 |
 | 있다 | 둘 다 아니다 | `Stopped (Log_diverged _)` |
-| 없다 | 턴 기록 파일이 없다 | `Stopped Store_unwritable`. `Started` 는 턴 기록의 id 를 적어야 하고, 쓰는 쪽은 그 파일을 만들지 않는다 |
+| 없다 | 턴 기록 파일이 없다 | `Stopped Store_unwritable`. `Started` 는 턴 기록의 id 를 적어야 하고, 쓰는 쪽은 그 파일을 만들지 않는다. 턴 기록의 첫 줄이 `Log_started` 가 아닐 때도 같다 |
+| – | 반영 기록을 읽는 I/O 가 실패한다 | `Stopped Store_unwritable`. 해석되지 않는 꼬리와 다르다. `Adopt` 가 아니라 `Resume` 이 다시 해 본다 |
 | – | 잠금을 잡지 못한다 | `Stopped Store_unwritable`. `Resume` 이 다시 해 본다 |
 | – | boot 가 하는 쓰기(빈 envelope, `Started`, 스냅샷 다시 쓰기)가 실패한다 | `Stopped Store_unwritable` |
 
 - boot 는 첫 boot 행에서만 줄을 쓴다. 두 번 복구해도 한 번 한 것과 같다.
+- 첫 boot 는 스냅샷을 먼저 쓰고 `Started` 를 나중에 쓴다. 그 사이에 죽으면 다음 boot 가 그 스냅샷으로 첫 boot 를 다시 한다.
+- 스냅샷의 sha 는 파일에 있는 바이트의 sha 다. 해석한 값을 다시 인코딩해서 내지 않는다.
+- 스냅샷과 반영 기록은 설정 쪽 Keeper 디렉터리에 있고, 턴 기록은 실행 쪽 Keeper 디렉터리에 있다. 저장소는 두 디렉터리를 따로 받는다.
 - **반영 기록이 없으면 언제나 첫 boot 다.** 턴 기록에 무엇이 있든 같다. 「반영 기록이 없다」는 읽었다는 기록이 없다는 뜻이다. 아무것도 읽지 않았다는 주장이 아니다. 그래서 `Log_started` 부터 읽고, 틀리는 방향은 한 번 더 읽는 쪽뿐이다.
   - 첫 boot 가 멈춘 사이에 Keeper 가 닫은 턴과, 서버가 없을 때 CLI purge 가 쓴 `Reset` 줄이 그렇게 읽힌다. `Adopt` 는 이 길에 없다.
   - 「반영 기록이 없는데 턴 줄이 있으면 잃은 기록」으로 가르지 않는다. 그렇게 가르려면 Keeper 의 첫 턴이 `Started` 를 기다려야 하고, 그 기다림을 Keeper 를 띄우는 길마다 넣어야 한다. 길 하나가 빠지면 `Adopt` 가 턴을 안 읽고 지나간다.
@@ -1887,7 +1894,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5b | 반영 기록의 줄: 줄 타입(`Librarian_log`)과 codec(`Librarian_log_codec`, §8.1). 파일을 읽거나 쓰지 않는다. `cause` 는 전환이 만드는 둘(`Direct`, `Adopt`)만 넣는다. `Read`, `Make_room`, `Skip` 과 그것이 싣는 타입은 그것을 만드는 층(L6, L7)이 더한다. fact 는 스냅샷 codec 으로, 끝자리는 턴 기록 codec 으로 쓴다 | 생성자마다 왕복 시험과 글로 박은 모양. object 마다 field 집합이 정확히 맞아야 한다. 읽기는 쓰기가 실은 글(claim, 이유, 이름)을 거절하지 않는다. 쓰는 쪽이 쓴 줄을 읽는 쪽이 거절하면 저장소가 선다 |
 | L5c | 반영 기록의 파일(`Librarian_log_store`): 꼬리 줄 읽기와 끝을 확인하는 덧붙임. 꼬리 줄 하나만 읽는다. 메모리에 두는 것은 없다. 파일은 스냅샷 옆에 있다(`<k>.memory-log.jsonl`) | 덧붙인 줄이 꼬리가 된다. 꼬리 앞의 줄은 읽지 않는다. 끊긴 조각은 줄이 아니고 다음 덧붙임이 잘라 낸다. 해석 안 되는 꼬리는 그 offset 과 함께 오류다. 낡은 끝으로 덧붙이면 아무것도 쓰지 않는다 |
 | L5d | 줄에서 스냅샷을 만드는 순수 함수(`Librarian_envelope.after`, §8.2 의 3단계)와 첫 boot 의 빈 envelope. 직접 쓰기의 줄이 그 쓰기가 온 trace 를 싣는다(`Direct.trace`). 계획이 빈 trace 를 거절한다 | 만든 스냅샷마다 스냅샷 codec 으로 다시 읽는다. 같은 줄에서 두 번 만들면 바이트가 같다. 철회가 지운 fact 와 근거를 잃은 fact 가 `change` 에 실린다. 맡김은 바이트를 바꾸지 않는다. 다음 revision 이 아닌 줄은 거절한다 |
-| L5 | **전환.** 반영 기록의 boot 표, 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기의 반영), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L5e | Keeper 하나의 Memory 저장소(`Librarian_store`): boot 표와 직접 쓰기의 반영 2~5단계. 잠금과 fiber 는 없다. 턴 기록의 첫 줄을 읽는 함수(`Keeper_turn_log_store.read_start`). 줄에서 만든 스냅샷이 바이트와 함께 나온다(`Librarian_envelope.next`) | boot 표의 행마다 하나. 반영이 `basis` 와 `after` 로 이어진다. 스냅샷이 한 줄 늦으면 boot 가 그 줄에서 다시 쓰고, 두 번 해도 같다. 밖에서 바꾼 스냅샷은 반영과 boot 를 `Log_diverged` 로 세운다. 읽은 뒤에 다른 줄이 붙으면 덧붙이지 않는다. 스냅샷 쓰기만 실패하는 갈래는 시험이 없다 |
+| L5 | **전환.** 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기를 받는 문), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |

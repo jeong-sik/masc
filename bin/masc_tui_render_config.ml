@@ -1190,7 +1190,7 @@ let render_presets (state : state) =
       (* The mark at the head of a row ([▸], [!], [✓]) says the same thing in
          words, so a terminal without colour loses nothing. *)
       let style = match row.tone with
-        | Masc_tui_preset_text.Heading -> Theme.info () ^ Ansi.bold
+        | Masc_tui_preset_text.Heading -> Masc_tui_ansi.Section.style
         | Masc_tui_preset_text.Confirmed -> Theme.ok ()
         | Masc_tui_preset_text.Caution -> Theme.warn ()
         | Masc_tui_preset_text.Failure -> Theme.bad ()

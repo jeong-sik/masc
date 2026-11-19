@@ -5,11 +5,16 @@ List the subscriptions you connected to this server and the Runtimes made \
 on them. The answer is JSON: provider_accounts holds each \
 provider_account_id with its kind (login, or key for an API key you \
 registered) and the integration_id its login or its key named. A key \
-account also has key, what the server found of its key file, and an \
-account whose removal did not go through has removal, where it stopped: \
-nothing runs on that account. runtimes holds each runtime_id with the \
-provider_account_id it runs on and its model, the model id this server's \
-runtime.toml declares; no Runtime of an account with removal is listed. A \
-fact that could not be read is null, and unread names why. A Keeper takes \
-one of these runtime_id values in masc_my_keeper_assign."""
+account also has key: readable, the code of why its key file was not \
+read, or not_looked_at when the server could not look. An account whose \
+removal did not go through has removal, where it stopped, and one whose \
+key replacement started and was not recorded has replacement: nothing \
+runs on either, and sending the new key again ends a replacement. An \
+account you removed, or whose removal is under way, is not listed. \
+runtimes holds each runtime_id with the provider_account_id it runs on \
+and its model, the model id this server's runtime.toml declares; no \
+Runtime of an account with removal or replacement is listed. An \
+integration_id or a model that could not be read is null, and unread \
+names why. A Keeper takes one of these runtime_id values in \
+masc_my_keeper_assign."""
 additional_properties = false

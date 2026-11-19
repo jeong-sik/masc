@@ -129,22 +129,31 @@ val key_state
     reader opens the file of the generation the state names and no other, so
     a file of another generation is a key nothing reads, kept on disk. *)
 
+(** What a look at the folder of the keys of an account did. *)
+type other_keys_swept =
+  { gone : int  (** How many of its other files went. *)
+  ; stayed : string option
+      (** The first, in the order of the names, that is still there. The
+          detail can name a path of the server, so it is for the log of
+          the server. *)
+  }
+
 (** Removes everything in the folder of the keys of [account_id] but the key
     file of [generation]: the key of any other generation, and a file a
     write did not put in place. A link is removed and not followed, and so
     is a folder with what is in it.
 
     Each is tried in the order of the names, whatever became of the one
-    before it. [Ok] gives how many went. [Error] names the first that is
-    still there or was not looked at; the detail can name a path of the
-    server, so it is for the log of the server. Asked again, it finds what
-    went gone and tries what stayed.
+    before it, so [gone] and [stayed] are both said of one look. Asked
+    again, it finds what went gone and tries what stayed.
 
     A folder of keys that is not there holds nothing, and neither does a
-    runtime root that is not there. What stands in the place of the folder
-    and is no folder, a link among them, is not read and is left:
-    [Error]. The key file of [generation] is not looked at, so this says
-    nothing of whether the account has its key ({!key_state}).
+    runtime root that is not there. [Error] is a folder that was not looked
+    at: what stands in its place is no folder, a link among them, and is
+    not read and is left, or its names could not be read. The detail is for
+    the log of the server too. The key file of [generation] is not looked
+    at, so this says nothing of whether the account has its key
+    ({!key_state}).
 
     The start of the server asks this of each key account, for the
     generation its record names, inside the call of the account. *)
@@ -152,7 +161,7 @@ val remove_other_keys
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
-  -> (int, string) result
+  -> (other_keys_swept, string) result
 
 (** What became of the other files of the folder of the keys once the new
     key was in place. *)

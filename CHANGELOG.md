@@ -6,7 +6,7 @@
 
 ### 요약
 
-1. 이번 0.74.0 은 0.73.1 이후 병합 395건을 담았습니다. 조각 286개를 접었고, 절 기준 Added 141·Changed 211·Fixed 341·Performance 37·Removed 8·Deprecated 1 항목이며 Documentation 41건과 Internal 57건이 따로 있습니다.
+1. [0.74.0] 항목은 changelog.d 조각 파일 282개와 backfill 4항목(#52827·#52829·#52874·#53265 — 파일로 존재한 적 없이 절에 바로 쓴 항목), 총 286개입니다. 절 기준(접힌 조각 파일의 `###` 절 수): Added 31·Changed 92·Fixed 116·Performance 20·Removed 4·Documentation 29·Internal 39(외 Fresh state required 11·Upgrade notes 9). 결과 불릿 수는 [Unreleased] 이월 항목과 backfill 이 합쳐져 이 절 수와 다릅니다. [정정 2026-11-19] 앞선 「병합 395건·조각 286개 접기·Added 141·Changed 211·Fixed 341·Performance 37·Removed 8·Deprecated 1·Documentation 41·Internal 57」는 이 head 에서 재현되는 셈 방법이 없는 수치였고 Deprecated 절은 접힌 조각 어디에도 없습니다. 참고로 동결 head(e99eb0ac) 기준 v0.73.1 이후 main PR 병합 커밋은 304건, v0.73.0 이후는 515건입니다.
 2. TUI 대화면이 btop 계열의 반응형 짜임으로 다시 짜였습니다(#53291–#53294). Metrics KPI 카드가 폭에 따라 4x1→2x2→Compact 로 접히고, 탭 스트립이 활성 탭을 화면 밖으로 잃지 않으며, Overview 가 좁은 폭에서 1열 카드로 내려가 색 카테고리 슬롯이 256/Truecolor 확장을 받고, ? 단축키 도움말이 3열 매트릭스로 바뀌었습니다.
 3. 작성된 설정 원문을 통째로 다루는 축이 늘었습니다. Keeper·Runtime TOML 과 프롬프트 오버라이드 근거를 버전 붙은 world 묶음으로 남기고(#52827), Admin 전용 HTTP API 로 그 원문을 내보내며(#52829), Keeper 선언 전체를 설정 소유자의 리비전 검사 아래에서 커밋합니다(#52874).
 4. 업그레이드 주의는 Upgrade notes 를 먼저 읽으세요. addon 최소 리비전(keeper-librarian 0.2.8 등)이 올라가고(#52778), exact 출력을 선언하는 패키지는 `[world] exact_protocol` 을 적어야 붙습니다(#52826). Fresh state required 14건도 함께 확인하세요.

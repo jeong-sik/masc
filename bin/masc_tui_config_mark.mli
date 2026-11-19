@@ -21,4 +21,5 @@ val param_glyph : has_override:bool -> string
 (** The mark for one row of the params list, uncoloured. *)
 
 val param_legend : (string * string) list
-(** Both param marks, paired with what a row wearing one reads as. *)
+(** The param override mark, paired with what a row wearing it reads as. The
+    registered default draws a blank, so the row names it too. *)

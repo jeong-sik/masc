@@ -3,11 +3,16 @@
 
 usage: list_callers.py <repository root> > callers.tsv
 
-The deleted set is the one the RFC's section 19.2 names in items a to e:
-every `lib/keeper/keeper_librarian*.ml` except the five that stay, and the
-modules listed by name below. A file outside that set that names one of the
-modules has to change at the cut. The output has one row per such file: the
-file, how many deleted modules it names, and their names.
+The deleted set is the one the RFC's section 19.2 names in items a to e and
+in the first row of item k: every `lib/keeper/keeper_librarian*.ml` except
+the six that stay, the modules listed by name below, and the units outside
+that set whose whole job is the old path. A file outside the deleted set that
+names one of the modules has to change at the cut. The output has one row per
+such file: the file, how many deleted modules it names, and their names.
+
+The units deleted whole are written here by hand, because whether a caller
+goes whole or is rewritten is read from the caller. After a unit is added to
+that list, run again: its own callers are rows of the next output.
 
 A module is found by its capitalised name on a word boundary in `.ml` and
 `.mli` files under `lib/` and `bin/`. A call hidden behind `open` or
@@ -43,6 +48,13 @@ keeper_continuity_observation keeper_external_read_cursor
 keeper_turn_boundaries typesafeai_librarian_preflight
 librarian_working_state_evaluation librarian_production_evaluation
 """.split()
+# RFC section 19.2 k, first row. Each of these named a deleted module in an
+# earlier output and does nothing but the old path.
+DELETED_WHOLE = """
+masc_librarian_continuity masc_librarian_replay masc_librarian_preflight_eval
+server_librarian_addon_validation server_librarian_addon_wake
+server_dashboard_http_keeper_memory_history_resolution
+""".split()
 
 sources = sorted(
     path
@@ -53,8 +65,8 @@ sources = sorted(
 stems = {path.stem for path in sources}
 deleted = {
     stem for stem in stems if stem.startswith("keeper_librarian") and stem not in STAYS
-} | {stem for stem in NAMED if stem in stems}
-missing = sorted(stem for stem in NAMED if stem not in stems)
+} | {stem for stem in NAMED + DELETED_WHOLE if stem in stems}
+missing = sorted(stem for stem in NAMED + DELETED_WHOLE if stem not in stems)
 if missing:
     sys.exit("named in the RFC but not in the tree: " + " ".join(missing))
 

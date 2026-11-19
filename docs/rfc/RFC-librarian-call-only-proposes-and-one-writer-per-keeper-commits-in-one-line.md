@@ -465,8 +465,8 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
 - 답 전체를 버리는 이유는 `rejection` 넷뿐이다. op 하나의 흠은 그 op 만 반영하지 않고 줄에 적는다(§8.2).
-  - 그 op 만 빼는 흠은 이름과 상태의 흠이다. 표에 없는 이름, 두 번 쓴 이름, 그사이 지워진 fact 다. 계획이 본다.
-  - 모양의 흠은 다르다. 모르는 op 이름, 빈 claim, 모르는 category, 파생 basis 는 `Schema_violation` 이고 답 전체를 버린다. 모양이 틀린 답의 나머지를 믿을 근거가 없다.
+  - 그 op 만 빼는 흠은 이름과 상태의 흠이다. 표에 없는 이름, 앞의 op 가 이미 쓴 이름, 그사이 지워진 fact 다. 계획이 본다.
+  - 모양의 흠은 다르다. 모르는 op 이름, 빈 claim, 모르는 category, 파생 basis, `Merge` 하나의 `refs` 안에 두 번 적은 이름은 `Schema_violation` 이고 답 전체를 버린다. 모양이 틀린 답의 나머지를 믿을 근거가 없다.
 - 답의 새 fact 는 관측한 것만이다. 대화에서 읽었거나 Board 에서 읽었다. 파생 fact 는 Keeper 의 직접 쓰기(§8.5)만 만든다. 지금과 같다.
 - wire 모양은 `lib/librarian/librarian_answer.mli` 가 정한다. object 마다 field 집합이 정확히 맞아야 한다. 새 fact 의 `basis` 는 Memory 에 실린 fact 의 `basis` 와 같은 모양이다. 모델은 읽은 모양대로 쓴다.
 - 답 글은 JSON 문서 하나다. code fence 나 앞뒤의 말이 붙으면 `Not_json` 이다. 고쳐서 읽지 않는다. slot 이 그렇게 답하는 비율은 채점기가 알린다.
@@ -1691,7 +1691,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 63개를 지우고 하나는 이름을 바꾼다. 64개가 20,334줄이다.
 
-- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
+- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
 - 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. `submit_durable`(`keeper_librarian_queue_refresh`)과 그것을 부르는 곳 다섯은 지운다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
 - 이름을 바꾼다: `keeper_librarian_input_refusal` → `keeper_exact_input_refusal`. 생성자 셋짜리 타입이고 Librarian 것이 아니다. Exact 걷기가 쓴다(`keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure`). 그 걷기와 그것을 쓰는 HITL 요약은 이 RFC 가 고치지 않는다. 새 Librarian 은 이 타입을 쓰지 않고 §7.2 의 slot 결과를 쓴다.
 
@@ -1703,12 +1703,12 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
   | 단위 | 남는 것 | 없어지는 것 |
   |---|---|---|
-  | `keeper_memory_os_current_types` | 스냅샷 envelope 의 타입(`source`, `change`, `support_invalidation`, `t`) | `journal_entry`, range id 둘, `successor_program_*`, `revision_evidence`. 옛 직접 쓰기의 오류 타입은 §8.5 의 표가 대신한다 |
+  | `keeper_memory_os_current_types` | 스냅샷 파일을 읽는 데 드는 타입 다섯: `source_kind`, `source`, `support_invalidation`, `change`, `t` | 그 밖의 타입 전부. `removal` 은 `Librarian_effects.removal` 이, `supersession` 과 직접 쓰기의 오류 타입 넷, `retraction`, `commit_effect` 는 §8.5 의 표가, `librarian_failure_kind` 는 §7.2 의 slot 결과가 대신한다. `journal_entry`, range id 둘, `admission_recall*`, `explicit_candidate_id`, `consumed_range`, `durable_range_receipt`, `revision_evidence`, `recall_unresolved*`, `successor_program_*`, `successor_recall*` 는 대신하는 것 없이 없어진다 |
   | `keeper_memory_os_current_change_metrics` | `of_change` | publication 과 stage 로 세던 것 |
   | `keeper_memory_os_current_layout` | 스냅샷 경로 | journal, receipt, epoch, unread ledger 의 경로 |
   | `keeper_memory_os_current` | 스냅샷 읽기 | 쓰기, 복구, journal 읽기. 쓰는 쪽(§8)이 대신한다 |
   | `keeper_memory_os_current_fact_ops` | 스냅샷 파일을 옆으로 치우는 일(`move_aside_for_keepers_dir`). boot 의 저장소 맞춤이 부른다 | 직접 쓰기 넷과 journal 꼬리 읽기. 쓰는 쪽이 대신한다 |
-  | `keeper_memory_os_successor_recall` | 뒤이은 fact 후보를 내는 일(§11.5) | 입력이 journal 에서 반영 기록으로 바뀐다 |
+  | `keeper_memory_os_successor_recall` | 뒤이은 fact 후보를 내는 일(§11.5) | 입력이 journal 에서 반영 기록으로 바뀐다. 후보의 타입도 새로 쓴다. 지금 타입(`successor_recall_candidate`)은 지우는 `revision_evidence` 와 `successor_program_step` 을 담는다. 새 후보는 반영 줄의 `removed` 한 항목이다 |
   | `keeper_memory_activity`, `keeper_memory_journal_outcome` | 화면에 내는 값 | 입력이 journal 에서 반영 기록과 쓰는 쪽 view 로 바뀐다(§12) |
 
   golden fixture 시험(`test_keeper_memory_snapshot_golden`)이 envelope 타입의 첫 소비자다. 타입 파일을 추릴 때 그 시험의 바이트가 그대로여야 한다.
@@ -1724,9 +1724,9 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **e. 반영 경로의 판정자.** `Typesafeai_librarian_preflight`, `bin/masc_librarian_preflight_eval.ml`, TUI 의 preflight 표시, `absorb_gate` 와 `librarian_preflight` 키.
 
-**f. add-on.** `addons/keeper-librarian/` 와 `addons/tests/test_keeper_librarian.py`. `addons/exact_worker.py` 와 Lane Add-on 틀은 고치지 않는다.
+**f. add-on.** `addons/keeper-librarian/` 와 `addons/tests/test_keeper_librarian.py`. `addons/exact_worker.py` 는 고치지 않는다. Lane Add-on 틀의 서버 쪽은 Librarian 을 가르던 곳 둘만 지운다(아래 k). 틀은 Workspace-memory add-on 을 그대로 싣는다.
 
-**g. route 와 도구.** `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
+**g. route 와 도구.** `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. history resolution route 는 지운다(`server_routes_http_routes_keepers` 의 등록과 그 handler 단위). `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
 
 **h. 시험과 release 목록.**
 
@@ -1744,16 +1744,23 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 층마다 확인하는 것은 같다. 지운 이름을 부르는 곳이 `lib/`, `bin/`, `test/` 에 없고, 타입 검사가 통과하고, 새 기능 시험이 통과한다.
 
-**k. 지우는 모듈을 부르는 바깥 코드.** 지우거나 이름을 바꾸는 모듈은 93개다. 그것을 직접 부르는 바깥 단위는 62개다(`lib/`, `bin/`). 목록은 근거 폴더의 `cut-callers/callers.tsv` 이고, 같은 폴더의 스크립트가 다시 만든다. 컷 층은 이 목록이 빌 때까지 간다.
+**k. 지우는 모듈을 부르는 바깥 코드.** 지우거나 이름을 바꾸는 모듈은 99개다. 위 a~e 의 93개와, 하는 일이 전부 옛 경로라 같이 지우는 단위 여섯이다. 그것을 직접 부르는 바깥 단위는 59개다(`lib/`, `bin/`). 목록은 근거 폴더의 `cut-callers/callers.tsv` 이고, 같은 폴더의 스크립트가 다시 만든다.
 
 | 처분 | 단위 |
 |---|---|
-| 같이 지운다. 하는 일이 전부 옛 경로다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake`, `server_dashboard_http_keeper_memory_history_resolution` |
+| 같이 지운다. 하는 일이 전부 옛 경로다. 지우는 집합에 넣었다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake`, `server_dashboard_http_keeper_memory_history_resolution` |
 | 이름만 따라 바꾼다 | `keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure` (위 a) |
-| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12), purge(§5.6) |
+| Librarian 을 가르던 곳만 지운다. 나머지는 다른 add-on 이 쓴다 | `server_lane_addon_exact`(`authorize_request` 가 Librarian 요청이면 `Background` 와 Librarian 의 출력 검사를 골랐다), `server_unowned_exact_sweep`(`original_required` 의 Librarian 항), `server_settled_archive_sweep`(Librarian 의 gate 모듈로 기록을 가르던 갈래) |
+| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12, 위 g), purge(§5.6), boot 의 등록(`server_runtime_bootstrap` 은 `queue_refresh` 와 add-on wake 설치 둘을 지운다) |
 
-- 이 목록은 이름을 직접 부르는 단위만 잡는다. `keeper_memory_os_current` 를 거쳐 부르는 곳(`recover_publication` 을 부르는 `keeper_store_boot_reconcile` 등)은 그 단위를 추릴 때 드러난다. 추린 뒤에 목록을 다시 만든다.
-- `server_settled_archive_sweep` 은 Librarian 의 gate 모듈로 기록을 가른다. Librarian scope 가 없어지면 그 갈래를 지운다. 다른 add-on 의 기록이 남으므로 pass 는 남는다.
+- 같이 지우는 단위를 집합에 넣으면 그 단위를 부르는 곳이 다음 출력에 나온다. 그렇게 다시 돌려 새로 나온 단위가 셋이다(`server_lane_addon_exact`, `server_unowned_exact_sweep`, `server_routes_http_routes_keepers`). 셋 다 통째로 지우는 단위가 아니어서 거기서 멈춘다.
+- Librarian 이 Lane Add-on 틀에서 나가면(§4) 틀의 Exact 요청은 모두 `Standard` 로 받는다. 틀 안에서 `Background` 를 고르던 곳은 Librarian 갈래 하나였다(`server_lane_addon_exact.ml:351`).
+- **이 목록은 하한이다.** 모듈 이름을 직접 적은 `.ml`, `.mli` 만 잡는다. 다음은 잡지 못한다.
+  - 지우지 않는 facade 를 거쳐 부르는 곳. `keeper_memory_os_current` 를 거쳐 `recover_publication` 을 부르는 `keeper_store_boot_reconcile` 이 그렇다. facade 를 추릴 때 드러난다.
+  - dune 파일. `lib/dune` 의 `private_modules` 에 오른 지우는 모듈과 `bin/dune` 의 실행 파일 정의 셋이다.
+  - 모듈이 아니라 함수나 값을 지우는 곳. `check_facts_budget`, `facts_max_bytes`, `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES` 를 정의하거나 읽는 단위다(§11.6, §19.3).
+  - 생성자 이름으로만 닿는 곳. `keeper_shutdown_types` 의 `Keeper_turn_boundaries_artifact` 가 그렇다(위 d).
+- 컷이 끝났다는 기준은 이 목록이 아니다. 지운 이름이 `lib/`, `bin/`, `test/` 와 dune 파일에 없고 타입 검사가 통과하는 것이다.
 - 처분은 단위의 머리말과 부르는 이름을 읽고 정했다. 컷 층이 단위를 열어 보고 바꾸면 이 표를 같이 고친다.
 
 ### 19.3 지우는 층에서 다시 확인할 것

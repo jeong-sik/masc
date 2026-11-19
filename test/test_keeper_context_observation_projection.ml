@@ -167,6 +167,56 @@ let test_storage_read_failure_and_raw_repair_keep_same_read_completeness () =
         (field repaired.fields "context_metrics_unavailable" = `Null)))
 ;;
 
+let remove_day_files config ~keeper_name =
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Dated_jsonl.close store;
+  let base_dir = Dated_jsonl.base_dir store in
+  Array.iter
+    (fun month ->
+       let month_path = Filename.concat base_dir month in
+       Array.iter (fun day -> Sys.remove (Filename.concat month_path day)) (Sys.readdir month_path))
+    (Sys.readdir base_dir)
+;;
+
+let context_tokens fields =
+  match field fields "context_tokens" with
+  | `Int tokens -> Some tokens
+  | _ -> None
+;;
+
+(* The newest TurnRecord is kept in memory by its store. The second
+   projection has to come from there: the files it would read are gone. Once
+   the store is told of a removal the projection reads the files again and
+   finds none. *)
+let test_a_kept_record_is_projected_without_the_files () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ());
+    let project () =
+      Projection.context_observation ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    check (option int) "read from the files" (Some 18_000) (context_tokens (project ()).fields);
+    remove_day_files config ~keeper_name:"beta";
+    let kept = project () in
+    check (option int) "projected again with the files gone" (Some 18_000) (context_tokens kept.fields);
+    check bool "and complete" true (kept.completeness = Masc.Dashboard_projection_read.Complete);
+    Dated_jsonl.directories_removed ();
+    check_not_observed (project ()).fields ~reason:"context_measurement_missing")
+;;
+
+(* The append of a record moves the kept one: the projection after it is the
+   new record's, with no read of the files in between. *)
+let test_an_appended_record_replaces_the_kept_one () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ());
+    let project () =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    check (option int) "the first record" (Some 18_000) (context_tokens (project ()));
+    append_record config (sample_record ~absolute_turn:4072 ~input_tokens:(Some 21_000) ());
+    remove_day_files config ~keeper_name:"beta";
+    check (option int) "the appended record, with the files gone" (Some 21_000) (context_tokens (project ())))
+;;
+
 let test_measured_record_projects () =
   with_temp_workspace (fun config ->
     let record = sample_record () in
@@ -463,7 +513,10 @@ let test_every_projected_shape_decodes () =
       (absent <> measured))
 ;;
 
+(* This executable stands for the server, the process that writes the
+   TurnRecords, so the stores keep their newest row in memory. *)
 let () =
+  Dated_jsonl.keep_facts_in_this_process ();
   run
     "keeper_context_observation_projection"
     [ ( "projection"
@@ -474,6 +527,10 @@ let () =
         ; test_case "measured record projects tokens/window/provenance" `Quick
             test_measured_record_projects
         ; test_case "newest record wins" `Quick test_newest_record_wins
+        ; test_case "a kept record is projected without the files" `Quick
+            test_a_kept_record_is_projected_without_the_files
+        ; test_case "an appended record replaces the kept one" `Quick
+            test_an_appended_record_replaces_the_kept_one
         ; test_case "record without usage is typed" `Quick
             test_record_without_usage_is_typed
         ; test_case "undecodable newest line is typed" `Quick

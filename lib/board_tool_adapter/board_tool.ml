@@ -17,7 +17,7 @@
     - {!Board_tool_dispatch}  — [handle_tool] routing and
                                 {!Tool_dispatch} registration.
 
-    Sub-domain (extracted to satisfy the new-file LOC cap):
+    Post, sub-board and curation handlers:
     - {!Board_tool_post}      — post lifecycle (create / list / get /
                                 comment_add).
     - {!Board_tool_sub_board} — sub-board CRUD handlers.

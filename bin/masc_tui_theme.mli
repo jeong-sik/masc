@@ -161,13 +161,60 @@ end
     names, so one remap moves every reading at once. *)
 type status = Ok | Warn | Bad | Info | Muted
 
-(** Semantic multi-stop Oklab ramps for continuous meters and sparklines.
-    [Pressure] walks [Ok -> Warn -> Bad] for utilization, memory, and saturation;
-    [Progress] walks [Bright_blue -> Info -> Ok] for completion and throughput so
-    100% completion never reads as failure. *)
-type ramp =
-  | Pressure
-  | Progress
+(** How many colours the terminal draws, which is what decides how a meter
+    against a declared limit colours its cells (RFC tui-one-screen-grammar
+    section 7.3). *)
+type color_depth =
+  | No_color  (** Colours are off: the meter draws its glyphs alone. *)
+  | Colors_16  (** The palette's sixteen entries, one per band. *)
+  | Colors_256  (** A colour between the bands, from the 256-colour cube. *)
+  | Truecolor  (** A colour between the bands, as 24-bit RGB. *)
+
+val color_depth : unit -> color_depth
+(** This process's depth: [No_color] when {!colors_enabled} is false,
+    otherwise the stdout capability. A capability the terminal does not state
+    draws sixteen colours, which is what every other colour here sends it. *)
+
+(** Where a cell sits against a declared limit. Each band draws in one status
+    colour: success, warning, danger. *)
+type limit_band =
+  | Near_zero  (** Under half the limit: [Ok]. *)
+  | Midway  (** Under four fifths of the limit: [Warn]. *)
+  | Near_limit  (** The rest, up to the limit: [Bad]. *)
+
+(** The colour one filled meter cell draws in. *)
+type meter_cell_colour =
+  | Cell_plain
+      (** No colour of its own: the glyph takes the colour around it. *)
+  | Cell_band of limit_band  (** The band's status colour. *)
+  | Cell_blend of { band : limit_band; position : float }
+      (** A colour between success, warning and danger at [position], the
+          cell's reach as a share of the limit in [[0, 1]]. [band] is what the
+          cell draws when the blend cannot be drawn. *)
+
+val limit_cell_colour :
+  depth:color_depth ->
+  index:int ->
+  width:int ->
+  value:int ->
+  limit:int ->
+  meter_cell_colour
+(** The colour cell [index] (from 0) of a [width]-cell meter takes when the
+    meter draws [value] against a declared [limit]. The cell reaches the
+    smaller of its far edge, [(index + 1) / width], and [value / limit]
+    ([value] clamped into [[0, limit]]), so a cell the value only enters, or
+    the one cell a small value is rounded up to, takes the value's band. Under
+    one half is [Near_zero], under four fifths [Midway], the rest
+    [Near_limit]. [No_color] draws [Cell_plain], [Colors_16] the band,
+    [Colors_256] and [Truecolor] a blend. *)
+
+(** What a picture (meter, graph) needs to draw its colours: the terminal's
+    depth, and the ground and palette its colours are measured against. *)
+type paint = {
+  depth : color_depth;
+  surface : surface;
+  palette : Masc_tui_terminal_palette.t option;
+}
 
 (** The ANSI colours masc names. Only the ones something draws a meaning
     through: a colour absent here is one nothing reads a meaning out of. *)
@@ -237,18 +284,63 @@ val status_text_readable
     ANSI colour when the reader has explicitly disabled
     colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
 
-val ramp_readable
-  :  surface:surface
-  -> Masc_tui_terminal_palette.t option
-  -> ramp
-  -> t:float
-  -> string
-(** Continuous Oklab interpolation along [ramp] at normalized position [t]
-    (clamped to [[0.0, 1.0]]), lifted against [surface]'s ground to clear the
-    4.5:1 WCAG floor and projected through [best_color]. Falls back to the
-    corresponding discrete ANSI colour when no palette is reported, colour
-    lifting is disabled, or projection is unavailable, and emits [""] under
-    [NO_COLOR]. *)
+val meter_cell_readable : paint -> meter_cell_colour -> string
+(** The SGR a meter cell draws before its glyph. [Cell_plain] is [""].
+    [Cell_band] is the band's status colour through {!status_readable}.
+    [Cell_blend] is an Oklab interpolation of the palette's success, warning
+    and danger entries, lifted against the paint's ground to clear 4.5:1 and
+    projected through [best_color]. It draws the band's colour instead when no
+    palette is reported, lifting is off, or the projection misses the floor.
+    Under [NO_COLOR] every cell is [""]. *)
+
+(** {1 Picture ramps}
+
+    Every filled meter cell and every graph dot that is not against a
+    declared limit takes a colour from its series' ramp, the way btop paints
+    its memory and network boxes (RFC tui-one-screen-grammar section 7.3). The
+    position on the ramp is the cell's reach along the bar, or the dot's
+    height in the graph, in [[0, 1]]. *)
+
+(** The quantity a picture draws. One quantity draws in one hue on every
+    screen, so a reader who learned its colour once finds it again. *)
+type series =
+  | Calls  (** Tool calls, requests: how much ran. Cyan. *)
+  | Failures
+      (** Failed calls. Magenta: red is the status colour of a bucket in which
+          every call failed, and a legend says so. *)
+  | Latency  (** p95 and other waits. Yellow. *)
+  | Memory  (** Heap words, memory facts. Magenta. *)
+  | Completion  (** Done against a total, finished per day. Green. *)
+  | Capacity  (** Running against bootable, capacity against a target. Blue. *)
+  | Backlog  (** Work behind: a lag, a queue. Yellow. *)
+  | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
+  | Wakes
+      (** Scheduled Keeper wakes per half hour ahead. Cyan, the hue of the
+          calls they become. *)
+
+val ramp_steps : int
+(** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)
+
+val ramp_reader : paint -> series -> position:float -> string
+(** [ramp_reader paint series] finds the ramp's table once and returns the
+    reader of its steps, for a drawing that colours many cells: each
+    [~position] is then one array read. The colours are {!ramp_style}'s. *)
+
+val ramp_style : paint -> series -> position:float -> string
+(** The SGR a cell at [position] on [series]' ramp draws before its glyph.
+    [position] is clamped into [[0, 1]] and [nan] is [0]; the colour is the
+    ramp's step at or below it. Under [No_color] it is [""].
+
+    With a reported palette, at 256 colours or truecolor and lifting on, the
+    ramp interpolates in Oklab from the hue stepped toward the ground, clearing
+    3:1 (a graphical object), to the palette's bright entry of that hue lifted
+    to clear 4.5:1, so every hue spans at least that band. A ramp is blended
+    whole or not at all: where any step cannot be drawn above the floor -- or
+    at sixteen colours, with no palette, with lifting off -- every step is the
+    hue's bright code.
+
+    The colours of one ramp are computed once per palette, depth, ground and
+    lift switch and then read from a table. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -329,17 +421,25 @@ module For_testing : sig
     -> string
   (** Capability fixture for {!val:status_text_readable}. *)
 
-  val ramp_readable
+  val ramp_style
+    :  colors_enabled:bool
+    -> project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option)
+    -> paint
+    -> series
+    -> position:float
+    -> string
+  (** {!ramp_style} without the table, with the colour switch and projection
+      given. *)
+
+  val meter_cell_readable
     :  colors_enabled:bool
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
-    -> surface:surface
-    -> Masc_tui_terminal_palette.t option
-    -> ramp
-    -> t:float
+    -> paint
+    -> meter_cell_colour
     -> string
-  (** Capability fixture for {!val:ramp_readable}. *)
+  (** Capability fixture for {!val:meter_cell_readable}. *)
 
   val recede
     :  colors_enabled:bool
@@ -355,8 +455,6 @@ end
 
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)
-
-val border_focus : string
 
 (** Content colours that stay constant: "this word is green" is a diff or a
     code literal, not a reading of state, so it stays out of [status]. The
@@ -422,10 +520,6 @@ module Glyph : sig
   val priority : int -> string
   (** ["!"] when the priority number is 1 or lower, the top priority, and an
       empty string for the rest. *)
-
-  val superscript_digit : int -> string
-  (** Unicode superscript numeral (["⁰"]..["⁹"]) for single digits [0..9], or
-      [string_of_int] outside that range, for compact border-embedded hotkeys. *)
 end
 
 val set_lift_enabled : bool -> unit

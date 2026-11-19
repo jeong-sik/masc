@@ -214,11 +214,16 @@ describe('ScheduleSurface', () => {
       .toContain('관측 전용')
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
       .toContain('keeper turn을 자동 구동하지 않습니다')
-    // Calendar is the default view; with no projection it renders the empty
-    // agenda/polling states rather than the diagnostic panel's placeholder.
+    // Calendar is the default view. With no projection nothing was read, so
+    // no calendar is drawn: empty days and an empty polling strip would be
+    // statements about schedules nobody has looked at.
     expect(container.querySelector('[data-testid="schedule-viewbar"]')).not.toBeNull()
-    expect(container.textContent).toContain('다가오는 7일에 예정된 예약이 없습니다')
-    expect(container.textContent).toContain('활성 폴링 없음')
+    expect(container.querySelector('[data-testid="sch-agenda"]')).toBeNull()
+    expect(container.querySelector('[data-testid="sch-agenda-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="sch-polling-empty"]')).toBeNull()
+    // Nor cadence counts, which would read zero.
+    expect(container.querySelector('[data-testid="sch-cadsum"]')).toBeNull()
+    expect(container.textContent).toContain('예약 자동화 projection 없음')
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
@@ -472,6 +477,28 @@ describe('ScheduleSurface', () => {
     expect(totalKpi?.textContent).toContain('42')
     expect(container.querySelector('[data-testid="schedule-page-metadata"]')?.textContent)
       .toContain('표시 1 / 전체 42 · 최대 20 · 일부만 표시')
+    // The rows left out are terminal ones: the one active schedule is on the
+    // page, so the calendar is not short of anything.
+    expect(container.querySelector('[data-testid="sch-calendar"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="sch-calendar-partial"]')).toBeNull()
+  })
+
+  it('says the calendar is partial when the page leaves active schedules out (#52961)', async () => {
+    const automation = sampleAutomation()
+    automation.request_count = 42
+    automation.truncated = true
+    // One active row on the page; the server counts five in the ledger.
+    automation.fsm = { ...automation.fsm, active_count: 5 }
+    setAutomation(automation)
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="sch-calendar-partial"]')?.textContent).toContain('4건')
   })
 
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
@@ -504,6 +531,7 @@ describe('ScheduleSurface', () => {
   })
 
   it('defaults to the calendar view with a cadence filter strip', async () => {
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -605,6 +633,117 @@ describe('ScheduleSurface', () => {
 
     container.querySelector<HTMLButtonElement>('.turn-close')?.click()
     expect(mocks.replaceRoute).toHaveBeenCalledWith('schedule', { view: 'calendar' })
+  })
+
+  describe('a selected schedule outside the page when the projection is refreshed', () => {
+    // #52962: the detail was read once, when the schedule was selected.
+    const outside: DashboardScheduledAutomationRequest = {
+      ...sampleAutomation().requests[0]!,
+      schedule_id: 'sched-outside-page',
+      payload_summary: 'payload before the refresh',
+    }
+    const panel = () => container.querySelector('[data-schedule-detail-panel="sched-outside-page"]')
+    const lookupStatus = () => container.querySelector('[data-testid="schedule-exact-lookup-status"]')
+    const openOutsidePage = async () => {
+      setAutomation(sampleAutomation())
+      mocks.route.value = {
+        tab: 'schedule',
+        params: { schedule_id: outside.schedule_id, view: 'calendar' },
+        postId: null,
+      }
+      render(html`<${ScheduleSurface} />`, container)
+      await flush()
+    }
+    // The projection is a signal in the app and a plain object here, so a
+    // changed prop stands in for the signal telling the surface to draw again.
+    let drawn = 0
+    const drawAgain = async () => {
+      drawn += 1
+      render(html`<${ScheduleSurface} drawn=${drawn} />`, container)
+      await flush()
+    }
+    // The observation refresh publishes a new projection; the selected id is still not on its page.
+    const refreshProjection = async () => {
+      setAutomation(sampleAutomation())
+      await drawAgain()
+    }
+
+    it('reads the schedule again and shows its new state', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockResolvedValueOnce({
+          status: 'found',
+          scheduleId: outside.schedule_id,
+          request: { ...outside, status: 'cancelled', payload_summary: 'payload after the refresh' },
+        })
+      await openOutsidePage()
+      expect(panel()?.textContent).toContain('payload before the refresh')
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(2)
+      expect(panel()?.textContent).toContain('payload after the refresh')
+    })
+
+    it('closes the detail of a schedule the refresh no longer finds', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockResolvedValueOnce({ status: 'not_found', scheduleId: outside.schedule_id })
+      await openOutsidePage()
+      expect(panel()).not.toBeNull()
+
+      await refreshProjection()
+
+      expect(panel()).toBeNull()
+      expect(lookupStatus()).not.toBeNull()
+    })
+
+    it('keeps the detail on screen while it is being read again', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockImplementationOnce(() => new Promise(() => {}))
+      await openOutsidePage()
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(2)
+      expect(panel()?.textContent).toContain('payload before the refresh')
+      expect(lookupStatus()).toBeNull()
+    })
+
+    it('keeps the last answer open and says it was not read again when the read fails', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockRejectedValueOnce(new Error('fixture: lookup timed out'))
+        .mockResolvedValueOnce({
+          status: 'found',
+          scheduleId: outside.schedule_id,
+          request: { ...outside, payload_summary: 'payload after the second refresh' },
+        })
+      await openOutsidePage()
+
+      await refreshProjection()
+
+      // One failed read does not close a detail the operator is reading.
+      expect(panel()?.textContent).toContain('payload before the refresh')
+      expect(lookupStatus()?.textContent).toContain('fixture: lookup timed out')
+
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(3)
+      expect(panel()?.textContent).toContain('payload after the second refresh')
+      expect(lookupStatus()).toBeNull()
+    })
+
+    it('does not read again when the same projection is drawn again', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValue({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+      await openOutsidePage()
+
+      await drawAgain()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('uses an in-page route row without issuing a redundant exact lookup', async () => {

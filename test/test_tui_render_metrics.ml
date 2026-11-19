@@ -244,6 +244,68 @@ let test_identity_gap_tells_a_failed_probe_from_one_not_made () =
   check unknown "a later failure replaces the earlier reading"
     Masc_tui_value.Unknown.Read_failed (gap ())
 
+(* The scheduler card's mark says which kind of state the probe is in. A
+   probe that raised failed, so it is the failure mark, not the paused one a
+   cancelled probe takes (RFC tui-one-screen-grammar section 7.2). *)
+let test_a_probe_that_raised_is_marked_failed () =
+  let symbol =
+    testable
+      (fun ppf -> function
+         | Masc_tui_card.Mark mark ->
+           Format.pp_print_string ppf (Masc_tui_value.Mark.glyph mark)
+         | Masc_tui_card.Unknown why ->
+           Format.fprintf ppf "unknown %s" (Masc_tui_value.Unknown.glyph why))
+      ( = )
+  in
+  List.iter
+    (fun (label, probe, expected) ->
+       check symbol label expected (Render_metrics.scheduler_probe_symbol probe))
+    [ ( "stopped"
+      , Some (Decode.Probe_reported (Scheduler_lag.Stopped "Failure(\"boom\")"))
+      , Masc_tui_card.Mark Masc_tui_value.Mark.Failed )
+    ; ( "cancelled"
+      , Some (Decode.Probe_reported Scheduler_lag.Cancelled)
+      , Masc_tui_card.Mark Masc_tui_value.Mark.Paused )
+    ; ( "running"
+      , Some (Decode.Probe_reported Scheduler_lag.Running)
+      , Masc_tui_card.Mark Masc_tui_value.Mark.Under_way )
+    ; ( "not started"
+      , Some (Decode.Probe_reported Scheduler_lag.Not_started)
+      , Masc_tui_card.Mark Masc_tui_value.Mark.Waiting )
+    ; ( "a word this build does not know"
+      , Some (Decode.Probe_unknown "warming")
+      , Masc_tui_card.Unknown Masc_tui_value.Unknown.Unreported )
+    ; ( "no probe"
+      , None
+      , Masc_tui_card.Unknown Masc_tui_value.Unknown.Unreported )
+    ]
+
+(* A stopped probe's reason was part of the card edge's status word, which a
+   narrow edge drops whole, and the body's probe row had gone: at the
+   narrowest cards the reason was nowhere. The edge word is now the state
+   alone -- the same word whatever the probe raised -- and the reason is the
+   body's, for a stopped probe only. *)
+let test_a_stopped_probe_writes_its_reason_in_the_body () =
+  let stopped reason = Some (Decode.Probe_reported (Scheduler_lag.Stopped reason)) in
+  List.iter
+    (fun ko ->
+       let word probe = (Render_metrics.scheduler_probe_status ~ko ~tone:"" probe).word in
+       check string "the edge word does not carry the reason"
+         (word (stopped "Failure(\"boom\")"))
+         (word (stopped "Invalid_argument(\"a much longer exception message\")")))
+    [ true; false ];
+  check (option string) "the body has the reason" (Some "Failure(\"boom\")")
+    (Render_metrics.scheduler_stop_reason (stopped "Failure(\"boom\")"));
+  List.iter
+    (fun (label, probe) ->
+       check (option string) label None (Render_metrics.scheduler_stop_reason probe))
+    [ "running", Some (Decode.Probe_reported Scheduler_lag.Running)
+    ; "not started", Some (Decode.Probe_reported Scheduler_lag.Not_started)
+    ; "cancelled", Some (Decode.Probe_reported Scheduler_lag.Cancelled)
+    ; "a word this build does not know", Some (Decode.Probe_unknown "warming")
+    ; "no probe", None
+    ]
+
 (* The fleet row draws how many keepers are configured and how many are
    paused. It used to draw the unpaused ones and leave the reader to
    subtract, and the subtraction is where the bug was: the count skipped a
@@ -661,6 +723,10 @@ let () =
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "a failed identity probe is not drawn as one not made" `Quick
             test_identity_gap_tells_a_failed_probe_from_one_not_made
+        ; test_case "a probe that raised is marked failed" `Quick
+            test_a_probe_that_raised_is_marked_failed
+        ; test_case "a stopped probe writes its reason in the body" `Quick
+            test_a_stopped_probe_writes_its_reason_in_the_body
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "a declared keeper is not counted as paused" `Quick
             test_a_declared_keeper_is_not_counted_as_paused

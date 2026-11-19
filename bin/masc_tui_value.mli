@@ -7,6 +7,38 @@
     on the next, the first in the operator's zone and the second in UTC with
     nothing marking which was which (RFC tui-one-screen-grammar, section 6). *)
 
+(** When the text of the frame being built next reads differently with no new
+    data. Without new data only time text changes: the zone-1 clock, moments
+    and lengths (RFC tui-one-screen-grammar §8). Each function in this module
+    that draws such text notes the instant its reading next changes, and the
+    loop redraws on the first whole second at or after the earliest one. *)
+module Redraw : sig
+  val begin_frame : unit -> unit
+  (** Forget what the previous frame noted. Called where a frame starts. *)
+
+  val note_change_at : float -> unit
+  (** A text drawn on this frame reads differently from this wall-clock
+      instant on. A non-finite instant is no instant and is not noted. *)
+
+  val next_change : unit -> float option
+  (** The earliest instant noted since {!begin_frame}, [None] when the frame
+      drew no text that changes with time. Read in the domain that built the
+      frame. *)
+
+  val holds : now:float -> until:float -> bool
+  (** Whether a reading that lasts until the instant [until] still holds at
+      [now] ([now <= until]): a notice shown for a while, a clause added once
+      a stream has been quiet for a time. A frame that words a text one way
+      while it holds and another way after asks this, and while it holds
+      [until] is noted ({!note_change_at}), since without new data that text
+      changes then. *)
+
+  val measuring : (unit -> 'a) -> 'a
+  (** Run a computation whose text is measured and not drawn, such as the
+      widest of every row's sentence, offscreen rows included. What it notes
+      is forgotten: only drawn text asks for a redraw. *)
+end
+
 (** A moment, drawn in the time zone of the machine the TUI runs on. *)
 module Instant : sig
   type distance =
@@ -56,6 +88,74 @@ module Instant : sig
   val wall_clock : now:float -> string
   (** The current time with the zone every other moment on the screen is
       drawn in ([15:43 UTC+9]). The one place a screen names the zone. *)
+
+  val next_minute : now:float -> float
+  (** The instant the local minute next turns over: when {!wall_clock} next
+      reads differently. A screen that draws the clock notes it with
+      {!Redraw.note_change_at}; one too narrow to draw it does not. *)
+end
+
+(** The length of something still going, how long ago something happened, or
+    how long until something comes: a length that changes while the reader
+    looks at it (RFC tui-one-screen-grammar §6.2). It has no decimal, and past
+    a minute it has no seconds, so past a minute it changes at most once a
+    minute. A finished length keeps the finer ladder
+    ({!Masc_tui_message_layout.elapsed_text}). *)
+module Ongoing : sig
+  val text : float -> string
+  (** [45s], [3m], [1h04m], [2d03h], [120d]: whole seconds below a minute,
+      whole minutes below an hour, then two units, and days alone from a
+      hundred days. Never wider than six cells. A span at or below zero, or
+      one that is not a number, reads [0s]. *)
+
+  val next_change : float -> float option
+  (** The shortest span longer than the given one that {!text} reads
+      differently: the next whole second below a minute, the next whole
+      minute below a day, then the next hour, then the next day. [None] past
+      the longest span the ladder reads. *)
+
+  val reading_floor : float -> float
+  (** The shortest span {!text} reads the same as the given one. A
+      countdown changes when what is left drops below it. *)
+
+  val since : now:float -> float -> string
+  (** {!text} of the span from a past moment to [now], noting when it next
+      reads differently ({!Redraw.note_change_at}). A moment ahead of [now]
+      (clocks that disagree) reads [0s]. *)
+
+  val age : now:float -> float -> string
+  (** {!since} for a length measured on another clock, such as the monotonic
+      age of a pending read: [age ~now seconds] reads [seconds] and notes when
+      it next reads differently, counting from the wall-clock [now]. *)
+
+  val until : now:float -> float -> string
+  (** {!text} of the span from [now] to a coming moment, noting when it next
+      reads differently and when the moment arrives, since a screen words an
+      arrived moment differently. A moment already passed reads [0s] and
+      notes nothing. *)
+
+  (** The same lengths in a narrow column, in one unit cut down to a whole
+      count: [45s], [3m], [1h], [2d] (RFC tui-one-screen-grammar §6.2). A
+      column reads every row on this ladder or none. *)
+  module Narrow : sig
+    val text : float -> string
+    (** Whole seconds below a minute, whole minutes below an hour, whole hours
+        below a day, then whole days. A span at or below zero, or one that is
+        not a number, reads [0s]. *)
+
+    val next_change : float -> float option
+    (** As {!Ongoing.next_change}, for {!text}: the next whole second, minute,
+        hour or day. *)
+
+    val reading_floor : float -> float
+    (** As {!Ongoing.reading_floor}, for {!text}. *)
+
+    val since : now:float -> float -> string
+    (** As {!Ongoing.since}, read with {!text}. *)
+
+    val until : now:float -> float -> string
+    (** As {!Ongoing.until}, read with {!text}. *)
+  end
 end
 
 (** The mark ahead of a state word. One mark has one meaning on every screen
@@ -125,10 +225,25 @@ module Count : sig
       Korean names the thing first and counts it with the counter that
       thing takes. The figure is {!grouped}. *)
 
+  val lower_bound : int -> string
+  (** The figure of a lower bound, with nothing it counts: [≥3], [≥1,250]
+      (RFC tui-one-screen-grammar, section 6.3). *)
+
   val at_least : ko:bool -> noun -> int -> string
   (** {!reading} for a lower bound: [≥3 tasks], [작업 ≥3개]. A list read
       in part holds this many and may hold more (RFC tui-one-screen-grammar,
       section 6.3). *)
+
+  val partial : ko:bool -> loaded:int -> total:int -> string
+  (** A list read in part: the rows read, then how many the server holds,
+      [50 · 전체 2,000] and [50 · of 2,000]. The word ahead of the total is the
+      one {!Position.text} writes, so a card edge and the position on the
+      same screen say a partial read the same way (RFC tui-one-screen-grammar,
+      section 2). *)
+
+  val more : ko:bool -> int -> string
+  (** Rows that were cut off, not where the reader is: [외 3], [3 more]
+      (RFC tui-one-screen-grammar, section 6.3). *)
 end
 
 (** A digest, such as a revision or a SHA-256. *)
@@ -148,9 +263,10 @@ module Position : sig
             the row's place. *)
     | Partial of { at : int; loaded : int; total : int }
         (** A list read in part: the selected row among the rows read, and
-            how many the server holds: [1/50 · whole 8,347]. *)
+            how many the server holds: [1/50 · 전체 8,347],
+            [1/50 · of 8,347]. *)
 
-  val text : whole:string -> t -> string
-  (** [whole] is the word ahead of the server's total, in the screen's
-      language. *)
+  val text : ko:bool -> t -> string
+  (** [7/29], or [1/50 · 전체 8,347] and [1/50 · of 8,347] for a list read in
+      part. *)
 end

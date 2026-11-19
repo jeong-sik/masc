@@ -9,8 +9,8 @@
       "last_activity_at": "2026-09-24T10:00:00Z",
       "created_at": "2026-09-23T10:00:00Z",
       "updated_at": "2026-09-24T10:00:00Z",
-      "metric": "passed cases",
-      "target_value": "10",
+      "measure": { "kind": "count", "noun": "passed cases", "total": 10 },
+      "procedure": "Count the passing cases in the CI summary.",
       "measurement": {
         "state": "reported",
         "record": {
@@ -33,8 +33,8 @@
           "last_activity_at": "2026-09-24T10:00:00Z",
           "created_at": "2026-09-23T10:00:00Z",
           "updated_at": "2026-09-24T10:00:00Z",
-          "metric": "readbacks",
-          "target_value": "1",
+          "measure": { "kind": "done_when", "condition": "the current criterion reads back" },
+          "procedure": "Read the Goal back through masc_goal_list.",
           "measurement": { "state": "not_recorded" },
           "tasks": [],
           "children": []
@@ -49,8 +49,8 @@
       "last_activity_at": "2026-09-24T10:00:00Z",
       "created_at": "2026-09-23T10:00:00Z",
       "updated_at": "2026-09-24T10:00:00Z",
-      "metric": "runs",
-      "target_value": "5",
+      "measure": { "kind": "quantity", "unit": "runs", "direction": "at_least", "target": 5.0 },
+      "procedure": "Count the measured runs after the store recovers.",
       "measurement": { "state": "unavailable", "reason": "goal_measurement: store read failed" },
       "tasks": [],
       "children": []

@@ -223,6 +223,7 @@
 .sch-day-now { margin-left: 4px; font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); border-radius: var(--radius-pill); padding: 1px 8px; }
 .sch-day-n { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); }
 .sch-day-empty { font-size: var(--fs-11); color: var(--text-dim); padding: 2px 2px 4px; opacity: 0.6; }
+.sch-calendar-partial { font-size: var(--fs-12); color: var(--text-dim); padding: 2px 4px 12px; }
 .sch-day-evs { display: flex; flex-direction: column; gap: 7px; }
 .sch-ev { display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border-main); border-left: 3px solid var(--tone, var(--border-main)); border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: 0.14s; --tone: var(--border-highlight); }
 .sch-ev.st-ok { --tone: var(--status-ok); } .sch-ev.st-warn { --tone: var(--status-warn); } .sch-ev.st-bad { --tone: var(--status-bad); } .sch-ev.st-info { --tone: var(--info); } .sch-ev.st-neutral { --tone: var(--border-highlight); }

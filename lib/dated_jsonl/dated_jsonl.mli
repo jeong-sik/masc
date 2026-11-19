@@ -11,7 +11,7 @@
     coordination; each reader retains its existing captured extent/tail policy. *)
 
 type t
-(** Opaque handle.  Holds [base_dir] and the append mutex. *)
+(** Opaque handle. Holds the store's location. *)
 
 type read_operation =
   | Inspect
@@ -70,15 +70,22 @@ module Layout = Dated_jsonl_layout
 (** Shared calendar and numeric rotation ordering for read continuations. *)
 
 val open_store :
-  ?cross_context_mutex:Cross_context_mutex.t ->
   ?max_bytes:int ->
   Store.location ->
   t
 (** Open the store at a listed location. A store can be opened only where
     {!Store} puts it.
 
-    An optional [mutex] can be injected to bypass the shared registry
-    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    The writers of one store directory take one mutex, whichever spelling
+    reached the directory. The process registry keeps it under the name the
+    file system gives the directory ({!Store.directory_name}). A handle asks
+    for it on each write or prune, so a handle opened before its directory
+    existed takes the directory's mutex once the directory is there. The
+    file system is asked once for each spelling of a directory that exists;
+    a spelling keeps that answer until {!directories_removed} is called. A
+    caller that only reads and must leave no entry behind opens a {!Reader}.
+
+    When [?max_bytes] is positive, [append] prunes
     oldest completed day-files until the store is at or below the cap, while
     preserving the current day-file. Day files are removed by age only by
     {!prune_listed_stores_bound}. *)
@@ -94,7 +101,19 @@ val close : t -> unit
 val prepare_for_directory_removal : t -> unit
 (** Close the current append writer and forget its memoized month directory
     and row count before application-owned code removes [base_dir t]. A later
-    append can then recreate the directory and observe the new file identity. *)
+    append can then recreate the directory and observe the new file identity.
+    The removal is followed by {!directories_removed}. *)
+
+val directories_removed : unit -> unit
+(** Tell this module that store directories, or files inside them, were
+    removed or renamed by code outside it. Called after the removal, on every
+    way out of it: a removal that failed half-way has changed files too.
+
+    Every fact kept in memory ({!read_fact}) is forgotten, for every store,
+    and so is every directory name the file system gave; the next read of a
+    fact reads the files and the next write asks the file system again. Which
+    directories were removed is not looked at. A removal that is not followed
+    by this call leaves the facts of the removed store as they were. *)
 
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
@@ -270,7 +289,9 @@ val read_recent_result :
     non-empty JSONL rows, including {!Malformed_json} rows. Missing stores are
     [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
     regular day files; symbolic links, other file kinds, and I/O failures are
-    returned explicitly. Results are chronological (oldest first). *)
+    returned explicitly. In the store's own directory it passes over the
+    entries the store declares as side files ({!Store.is_side_file}).
+    Results are chronological (oldest first). *)
 
 val find_latest_entry_result :
   t -> (recent_entry -> 'a option) -> ('a option, read_error) result
@@ -305,6 +326,58 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     shrinkage, same-size metadata changes and storage errors remain explicit
     failures. Only files visited by a successful read remain in the view;
     no full retained row count is taken. *)
+
+(** {1 Facts kept in memory}
+
+    A fact is one value read from a store's files that this module also keeps
+    in memory, so that a reader does not open a file for it (RFC "Keeper row
+    facts are kept in memory by their writers"). The files stay the
+    authority: while nothing is changing them, the kept value is the value
+    the fact's strict read gives.
+
+    The functions of this module that change a store's files keep the facts
+    right themselves: {!append}, {!append_notifying_commit} and
+    {!append_rotating} move a kept value over the row they wrote, and
+    {!prune}, {!prune_listed_stores_bound}, an append's own byte-budget prune
+    and any append that fails forget the store's facts. A change made any
+    other way is told with {!directories_removed}.
+
+    That holds for the appends of one process. A row another process appends
+    moves nothing here, so a fact is kept only by the process that has said
+    it is the one that writes the stores ({!keep_facts_in_this_process}). *)
+
+type 'a fact
+
+val keep_facts_in_this_process : unit -> unit
+(** From now on {!read_fact} keeps what it reads. Said once by the one
+    process that appends to the stores whose facts it reads: the server, when
+    it holds the BasePath writer lease. It is not taken back.
+
+    A process that has not said it (the TUI, a command line tool) reads the
+    files on every {!read_fact}, as it did before there were facts. *)
+
+val last_row : recent_entry option fact
+(** The store's newest physical row, as [read_recent_result t 1] reads it:
+    [None] for a store without rows, and a row that is not JSON is
+    {!Malformed_json}. *)
+
+val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
+(** The fact's value for the store. When the store keeps it, no file is read
+    and no system call is made for a directory that exists
+    ({!Fact_cell.Held}). Otherwise the fact's strict read runs, in one pool job
+    for a caller outside the pool, and the store keeps the value unless its
+    files changed meanwhile. A failed read keeps nothing.
+
+    A store whose directory does not exist yet is asked about each time, as
+    for a write.
+
+    In a process that has not said {!keep_facts_in_this_process} the strict
+    read runs on every call and nothing is kept: the answer is
+    {!Fact_cell.Read_not_kept} or {!Fact_cell.Read_failed}.
+
+    Each call is counted in
+    [Otel_builtin_metric_names.metric_dated_jsonl_fact_reads] by the kind of
+    store, the fact and the constructor of the answer. *)
 
 val month_dir_paths_newest_first_result : t -> (string list, read_error) result
 (** The store's month directories, newest first, listed and validated as
@@ -588,12 +661,45 @@ val map_tail_rows_result :
     [Ok []]. A path that cannot be opened, is not a regular file once opened,
     or cannot be read is [Error]. *)
 
+(** A handle that reads one store and is not in the store registry.
+
+    A reader never asks for the store's mutex, so a route that reads the
+    store of whatever Keeper name a client sent does not grow the registry
+    by one entry per made-up name. No function that writes or prunes takes
+    a reader: every change of a store's files goes through a handle that
+    takes the store's mutex. *)
+module Reader : sig
+  type t
+
+  val open_store : Store.location -> t
+  val base_dir : t -> string
+
+  val read_recent_result :
+    ?offset:int -> t -> int -> (recent_entry list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_result} of the reader's store. *)
+
+  val read_recent_lines_result :
+    ?offset:int -> t -> int -> ((string * string) list, read_error) result
+  (** {!val:Dated_jsonl.read_recent_lines_result} of the reader's store. *)
+end
+
 module For_testing : sig
   val cross_context_mutex : t -> Cross_context_mutex.t
-  (** Expose the internal mutex so tests can verify sharing. *)
+  (** The mutex a write through the handle would take now. *)
 
-  val cross_context_mutex_for_base_dir : string -> Cross_context_mutex.t
-  (** Lookup or insert the registry entry for [base_dir].
-      Equivalent to the default-mutex path of {!open_store}. *)
+  val in_registry : Store.location -> bool
+  (** Whether the registry holds an entry for the store. *)
 
+  val after_row :
+    'a fact ->
+    value:'a ->
+    newest:(string * string) option ->
+    row:recent_entry ->
+    written:string * string ->
+    ('a * (string * string) option) option
+  (** What an append makes of a kept value. [value] saw its newest row in the
+      day file [newest], and [row] went to the end of the day file [written];
+      a day file is its month directory and its file name. The result is the
+      value after the row with the newest day file it saw, or [None] when the
+      append forgets the fact instead. It reads no file and no clock. *)
 end

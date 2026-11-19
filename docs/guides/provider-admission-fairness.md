@@ -99,18 +99,28 @@ api-name = "claude-haiku-5-5"
 max-concurrent = 4
 ```
 
-- Do not state `kind` beside `catalog-provider`: the catalog owns it, and the
-  binding is left out. `endpoint` and `request-path` still override the
-  catalog's values when written.
+- Remove `kind` when you add `catalog-provider`: the catalog owns it, and a
+  file that states both is refused with the key to remove. `endpoint` and
+  `request-path` still override the catalog's values when written.
+- Write the row id exactly as the catalog spells it (`claude`, not `Claude`
+  or an alias). The exact-output resolver matches the id as written, so
+  another spelling is refused with the id to write.
 - A `catalog-provider` that names no catalog row refuses the whole file, as a
   binding that names a missing `[providers.<id>]` row does. So does a provider
-  whose own id is already a catalog row.
+  whose own id is already a catalog row. These checks run for a provider an
+  enabled binding names.
+- The setup wizard and model discovery still look the account up by its own
+  id, so their model list and context window for it come from runtime.toml,
+  not from the catalog row.
 - An official client (`claude-code`, `codex-app-server`, …) may not declare it.
-- A lane slot the catalog cannot admit — an account without `catalog-provider`,
-  a mistyped id — is left out at boot, and the lane runs with the slots that
-  remain. The deployment preflight refuses the same runtime.toml and names
-  the lane, the slot's position and id, and what to write, so an install does
-  not quietly shorten a lane.
+- A lane slot the catalog cannot admit is left out at boot, and the lane runs
+  with the slots that remain. The deployment preflight refuses the same
+  runtime.toml and names the lane, the slot's position and id, and what to
+  write, so an install does not quietly shorten a lane. That covers an
+  account without `catalog-provider`, a mistyped or removed id, a binding
+  switched off with `enabled = false` that a lane still names, and a
+  subscription CLI binding in `slots` instead of `cli_slots`. A lane switched
+  off with `enabled = false` is not checked.
 - The admission wait record carries the catalog row in its provider field, so
   `masc:provider_admission:waited` no longer separates these accounts by
   provider.

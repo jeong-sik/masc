@@ -16,12 +16,14 @@ const {
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperChatHistoryPage,
+  interruptKeeperChatOperation,
   streamKeeperMessage,
 } = vi.hoisted(() => ({
   cancelKeeperChatOperation: vi.fn(),
   fetchKeeperChatOperation: vi.fn(),
   fetchKeeperChatHistory: vi.fn(),
   fetchKeeperChatHistoryPage: vi.fn(),
+  interruptKeeperChatOperation: vi.fn(),
   streamKeeperMessage: vi.fn(),
 }))
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
@@ -38,6 +40,7 @@ vi.mock('./api/keeper', () => ({
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperChatHistoryPage,
+  interruptKeeperChatOperation,
   streamKeeperMessage,
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
@@ -58,6 +61,7 @@ import {
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
+  keeperSending,
   keeperStatusDetails,
   keeperStreamLastEventAt,
   keeperThreads,
@@ -72,6 +76,7 @@ import {
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
+  cancelKeeperThreadRequest,
   dispatchKeeperInterjectAction,
   hydrateTrackedKeeperChatOperations,
   hydrateKeeperChatHistory,
@@ -724,6 +729,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     _resetCancelledKeeperThreadRequestsForTests()
     streamKeeperMessage.mockReset()
     cancelKeeperChatOperation.mockReset()
+    interruptKeeperChatOperation.mockReset()
     fetchKeeperChatOperation.mockReset()
     fetchKeeperChatHistory.mockReset()
   })
@@ -1304,7 +1310,25 @@ describe('sendKeeperThreadMessage operation stream', () => {
     await second
   })
 
-  it('cancels the FIFO-head operation by exact operation id', async () => {
+  // The refusal the server answers with when a cancel names an operation that
+  // has left the queue.
+  function chatOperationRefusal(code: string, status = 409): ApiRequestError {
+    return new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/echo/chat/operations/op/cancel',
+      status,
+      responseData: {
+        schema: 'masc.keeper_chat_operation.error.v1',
+        error: code,
+        message: 'fixture refusal',
+        incident_id: 'incident-1',
+      },
+    })
+  }
+
+  // A stream that accepts the operation in `state`, optionally shows part of
+  // an answer, and then stays open until the operator stops it.
+  function holdAcceptedStream(state: 'Queued' | 'Running', partialAnswer?: string): { operationId: () => string } {
     let acceptedOperationId = ''
     streamKeeperMessage.mockImplementation(async (
       _name: string,
@@ -1321,10 +1345,11 @@ describe('sendKeeperThreadMessage operation stream', () => {
         name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
         value: {
           operation_id: opts.operationId,
-          state: 'Running',
-          queued_count: 0,
+          state,
+          queued_count: state === 'Queued' ? 1 : 0,
         },
       })
+      if (partialAnswer !== undefined) opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: partialAnswer })
       return new Promise<{ terminal: boolean }>((_resolve, reject) => {
         opts.signal.addEventListener('abort', () => {
           const error = new Error('Aborted')
@@ -1333,71 +1358,188 @@ describe('sendKeeperThreadMessage operation stream', () => {
         }, { once: true })
       })
     })
-    cancelKeeperChatOperation.mockImplementation(async (
-      _keeperName: string,
-      operationId: string,
-    ) => ({
-      operationId,
-      sequence: '1',
-      createdAt: 1,
-      input: null,
-      state: { kind: 'cancelled', completedAt: 2 },
+    return { operationId: () => acceptedOperationId }
+  }
+
+  it('cancels the FIFO-head operation by exact operation id', async () => {
+    const stream = holdAcceptedStream('Queued')
+    fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+      operationId: id, state: { kind: 'queued' },
     }))
+    let answerCancel!: (value: unknown) => void
+    cancelKeeperChatOperation.mockImplementation(() => new Promise(resolve => { answerCancel = resolve }))
 
     const send = sendKeeperThreadMessage('echo', 'cancel me').catch(() => undefined)
     await Promise.resolve()
     await cancelActiveKeeperThreadMessage('echo')
-    await send
-    await Promise.resolve()
+    await vi.waitFor(() => expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', stream.operationId()))
+    // Until the server confirms, nothing says the operation was cancelled.
+    expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
 
-    expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
+    answerCancel({
+      operationId: stream.operationId(), sequence: '1', createdAt: 1, input: null,
+      state: { kind: 'cancelled', completedAt: 2 },
+    })
+    await send
+
+    expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+    expect((keeperThreads.value.echo ?? []).some(entry => entry.role === 'assistant' && entry.delivery === 'cancelled')).toBe(true)
   })
 
-  it('waits for server cancellation confirmation', async () => {
-    let acceptedOperationId = ''
-    streamKeeperMessage.mockImplementation(async (
-      _name: string,
-      _message: string,
-      opts: {
-        operationId: string
-        signal: AbortSignal
-        onEvent: (event: KeeperChatStreamEvent) => void
-      },
-    ) => {
-      acceptedOperationId = opts.operationId
-      opts.onEvent({
-        type: 'CUSTOM',
-        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
-        value: {
-          operation_id: opts.operationId,
-          state: 'Running',
-          queued_count: 0,
-        },
-      })
-      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial answer' })
-      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
-        opts.signal.addEventListener('abort', () => {
-          const error = new Error('Aborted')
-          error.name = 'AbortError'
-          reject(error)
-        }, { once: true })
-      })
-    })
-    let confirm!: (value: unknown) => void
-    cancelKeeperChatOperation.mockImplementation(() => new Promise(resolve => { confirm = resolve }))
+  it('stops the turn of a running operation and shows how the server ended it', async () => {
+    // #52952: the stop button reached only the cancel that applies to queued
+    // operations. For a running one the server refused it and the turn kept running.
+    const stream = holdAcceptedStream('Running', 'Partial answer')
+    cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+    let answerInterrupt!: (value: unknown) => void
+    interruptKeeperChatOperation.mockImplementation(() => new Promise(resolve => { answerInterrupt = resolve }))
+    fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+      operationId: id,
+      state: { kind: 'failed', completedAt: 3, failureKind: 'Turn_cancelled', detail: 'stopped by the operator', outcomeRef: null },
+    }))
+    fetchKeeperChatHistory.mockRejectedValue(new Error('history unavailable'))
 
-    const send = sendKeeperThreadMessage('echo', 'cancel me').catch(() => undefined)
+    const send = sendKeeperThreadMessage('echo', 'stop me').catch(() => undefined)
     await Promise.resolve()
     await cancelActiveKeeperThreadMessage('echo')
-    await Promise.resolve()
+    await vi.waitFor(() => expect(interruptKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream.operationId()))
+    // Until the server answers, nothing says the operation was cancelled.
     expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
     expect((keeperThreads.value.echo ?? []).some(entry => entry.text === 'Partial answer' && entry.streamState === 'cancelling')).toBe(true)
-    confirm({ operationId: acceptedOperationId, sequence: '1', createdAt: 1, input: null,
-      state: { kind: 'cancelled', completedAt: 2 } })
-    await send
-    await Promise.resolve()
 
-    expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
+    answerInterrupt({ kind: 'signalled' })
+    await send
+
+    await vi.waitFor(() => expect(fetchKeeperChatOperation).toHaveBeenCalledWith(
+      'echo', stream.operationId(), expect.anything()))
+    await vi.waitFor(() => expect((keeperThreads.value.echo ?? [])
+      .some(entry => entry.role === 'user' && entry.delivery === 'error')).toBe(true))
+    expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+  })
+
+  it('says why the turn is still running when the stop does not take', async () => {
+    // The watch that takes over from the stopped stream starts the action
+    // error from nothing. The reason has to be on screen after that, while the
+    // turn the operator tried to stop runs on.
+    const stream = holdAcceptedStream('Running', 'Partial answer')
+    cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+    interruptKeeperChatOperation.mockResolvedValue({ kind: 'cancel_failed', detail: 'The active turn could not be interrupted.' })
+    fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+      operationId: id, state: { kind: 'running', startedAt: 2 },
+    }))
+    fetchKeeperChatHistory.mockRejectedValue(new Error('history unavailable'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const send = sendKeeperThreadMessage('echo', 'stop me').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      await vi.waitFor(() => expect(fetchKeeperChatOperation).toHaveBeenCalledWith(
+        'echo', stream.operationId(), expect.anything()))
+
+      expect(keeperSending.value.echo).toBe(true)
+      expect(keeperActionErrors.value.echo).toContain('The active turn could not be interrupted.')
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+
+      // The turn ends by itself; the reply the operator kept is not lost.
+      fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id, state: { kind: 'succeeded', completedAt: 3, outcomeRef: 'outcome' },
+      }))
+      publishDashboardObservationChange({ topic: 'chat_operation', keeperName: 'echo', operationId: stream.operationId() })
+      await send
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.text === 'Partial answer' && entry.delivery === 'delivered')).toBe(true)
+    } finally { warn.mockRestore() }
+  })
+
+  describe('stopping one chat operation', () => {
+    it('cancels an operation that is still queued', async () => {
+      cancelKeeperChatOperation.mockResolvedValue({
+        operationId: 'op-1', sequence: '1', createdAt: 1, input: null,
+        state: { kind: 'cancelled', completedAt: 2 },
+      })
+
+      await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual({ kind: 'cancelled' })
+
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+    })
+
+    it('stops the turn of an operation that has left the queue', async () => {
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+      interruptKeeperChatOperation.mockResolvedValue({ kind: 'signalled' })
+
+      await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual({ kind: 'interrupting' })
+
+      expect(interruptKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', 'op-1')
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    })
+
+    it('stops the running turn of a message bound to a shared execution', async () => {
+      // The cancel refuses such a message as input it does not take, whatever
+      // the execution is doing. The turn that carries it is found by the same id.
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('invalid_input', 400))
+      interruptKeeperChatOperation.mockResolvedValue({ kind: 'signalled' })
+
+      await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual({ kind: 'interrupting' })
+
+      expect(interruptKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', 'op-1')
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    })
+
+    it.each([
+      { kind: 'not_current', currentOperationId: null },
+      { kind: 'settling' },
+      { kind: 'paused_pending_admission' },
+    ])('has nothing to stop when the operation left the queue and the answer is $kind', async interrupt => {
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+      interruptKeeperChatOperation.mockResolvedValue(interrupt)
+
+      await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual({ kind: 'nothing_to_stop' })
+
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    })
+
+    it.each([
+      { interrupt: { kind: 'maintenance_running' }, says: 'a maintenance run holds the Keeper' },
+      { interrupt: { kind: 'slot_held_by_autonomous_turn' }, says: 'an autonomous turn holds the Keeper' },
+      { interrupt: { kind: 'cancel_failed', detail: 'The active turn could not be interrupted.' }, says: 'The active turn could not be interrupted.' },
+      { interrupt: { kind: 'owner_unavailable', detail: null }, says: 'owner_unavailable' },
+    ])('tells the operator the stop did not take when the answer is $interrupt.kind', async ({ interrupt, says }) => {
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+      interruptKeeperChatOperation.mockResolvedValue(interrupt)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const outcome = await cancelKeeperThreadRequest('echo', 'op-1')
+
+        expect(outcome).toEqual({ kind: 'not_stopped', message: expect.stringContaining(says) })
+        expect(keeperActionErrors.value.echo).toBe(outcome.kind === 'not_stopped' ? outcome.message : null)
+      } finally { warn.mockRestore() }
+    })
+
+    it('answers with the refusal when the cancel was refused and no turn of the operation is running', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        interruptKeeperChatOperation.mockResolvedValue({ kind: 'not_current', currentOperationId: null })
+        cancelKeeperChatOperation.mockRejectedValueOnce(chatOperationRefusal('store_unreadable', 503))
+        await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual(
+          { kind: 'not_stopped', message: expect.stringContaining('503') })
+        // A failure whose text happens to hold the code does not say the
+        // operation left the queue: it may be queued still, and is not stopped.
+        cancelKeeperChatOperation.mockRejectedValueOnce(new Error('POST /chat/operations/op-1/cancel: not_queued'))
+        await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual(
+          { kind: 'not_stopped', message: expect.stringContaining('POST /chat/operations/op-1/cancel') })
+
+        expect(keeperActionErrors.value.echo).toEqual(expect.stringContaining('POST /chat/operations/op-1/cancel'))
+      } finally { warn.mockRestore() }
+    })
+
+    it('tells the operator the stop did not take when the turn could not be asked', async () => {
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+      interruptKeeperChatOperation.mockRejectedValue(new Error('POST /api/v1/keepers/turn/interrupt: 503'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await expect(cancelKeeperThreadRequest('echo', 'op-1')).resolves.toEqual(
+          { kind: 'not_stopped', message: expect.stringContaining('/api/v1/keepers/turn/interrupt: 503') })
+      } finally { warn.mockRestore() }
+    })
   })
 
   it('aborts locally without server cancel before operation acceptance', async () => {

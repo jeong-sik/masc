@@ -1,7 +1,7 @@
 (** How the runtime names, asks about and stops the container or guest of a
     turn: whether a runtime is a microvm and which backend it declares, the
     Docker exec prefix and the refusal of a microvm guest, whether a container
-    exists or runs, the state probe of a microvm guest, what a failed exec
+    runs, the state probe of a microvm guest, what a failed exec
     leads to, the guest name and the egress proxy port bound for it, the
     binding of a registered identity snapshot, and the stop and delete of a
     guest.
@@ -28,9 +28,6 @@ val exec_prefix :
 
 val docker_exec_only :
   t -> (unit, string) result
-
-val inspect_container_exists :
-  ?timeout_sec:float -> string -> (unit, string) result
 
 val probe_microvm_container_state :
   ?timeout_sec:float ->

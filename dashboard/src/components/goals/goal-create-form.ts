@@ -1,13 +1,16 @@
 import { isDismissEscape } from '../../lib/keyboard'
 // Goal creation form — right-hand side panel in the Work surface.
 // Design reference: prototype NewGoalComposer (work.jsx ~line 437).
-// A new Goal declares its measured quantity and target alongside its title.
+// A new Goal declares its measure (a count, a quantity against a limit, or a
+// condition) and how it is read, alongside its title.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import type { RenderableProps } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-import { TextInput } from '../common/input'
+import { TextArea, TextInput } from '../common/input'
+import { Select } from '../common/select'
+import type { GoalMeasureDirection } from '../../api/goal-measure'
 import { ActionButton } from '../common/button'
 import { goalStoreUnavailable } from '../../goal-tree-state'
 import { goalStoreUnavailableSummary } from '../../lib/goal-store-unavailable-labels'
@@ -30,6 +33,9 @@ import {
   currentGoalCreateDraft,
   resetGoalCreateForm,
   goalCreateErrorMessage,
+  parseGoalMeasureDraft,
+  malformedMeasureNumber,
+  type GoalMeasureDraft,
   GOAL_PRIORITY_MIN,
   GOAL_PRIORITY_MAX,
   GOAL_PRIORITY_DEFAULT,
@@ -37,17 +43,56 @@ import {
 
 // ── Local form state signals ─────────────────────────────────────────────────
 
+type MeasureKind = GoalMeasureDraft['kind']
+
+const MEASURE_KIND_OPTIONS: Array<{ value: MeasureKind; label: string }> = [
+  { value: 'count', label: '개수 — 전체 중 몇 개를 끝냈나' },
+  { value: 'quantity', label: '수치 — 목표 수치 이상·이하' },
+  { value: 'done_when', label: '조건 — 참이 되면 끝' },
+]
+const DIRECTION_OPTIONS: Array<{ value: GoalMeasureDirection; label: string }> = [
+  { value: 'at_most', label: '이하 (≤)' },
+  { value: 'at_least', label: '이상 (≥)' },
+]
+
+function measureKindOf(value: string): MeasureKind | null {
+  return MEASURE_KIND_OPTIONS.find(option => option.value === value)?.value ?? null
+}
+function directionOf(value: string): GoalMeasureDirection | null {
+  return DIRECTION_OPTIONS.find(option => option.value === value)?.value ?? null
+}
+
 const titleSignal = signal('')
-const metricSignal = signal('')
+const kindSignal = signal<MeasureKind>('count')
+const nounSignal = signal('')
+const totalSignal = signal('')
+const directionSignal = signal<GoalMeasureDirection>('at_most')
 const targetSignal = signal('')
+const unitSignal = signal('')
+const conditionSignal = signal('')
+const procedureSignal = signal('')
 const prioritySignal = signal(GOAL_PRIORITY_DEFAULT)
 
 export function resetGoalCreateFormLocal(): void {
   titleSignal.value = ''
-  metricSignal.value = ''
+  kindSignal.value = 'count'
+  nounSignal.value = ''
+  totalSignal.value = ''
+  directionSignal.value = 'at_most'
   targetSignal.value = ''
+  unitSignal.value = ''
+  conditionSignal.value = ''
+  procedureSignal.value = ''
   prioritySignal.value = GOAL_PRIORITY_DEFAULT
   resetGoalCreateForm()
+}
+
+function measureDraft(): GoalMeasureDraft {
+  switch (kindSignal.value) {
+    case 'count': return { kind: 'count', noun: nounSignal.value, total: totalSignal.value }
+    case 'quantity': return { kind: 'quantity', unit: unitSignal.value, direction: directionSignal.value, target: targetSignal.value }
+    case 'done_when': return { kind: 'done_when', condition: conditionSignal.value }
+  }
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -89,8 +134,8 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
     const owner = currentGoalCreateDraft()
     void createGoal({
       title: titleSignal.value,
-      metric: metricSignal.value,
-      targetValue: targetSignal.value,
+      measure: measureDraft(),
+      procedure: procedureSignal.value,
       priority: prioritySignal.value,
     }, unavailableNow, workspace => {
       const view = workspaceView.current
@@ -108,8 +153,16 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
   }
 
   const isTitleEmpty = !titleSignal.value.trim()
-  const isMetricEmpty = !metricSignal.value.trim()
-  const isTargetEmpty = !targetSignal.value.trim()
+  const draft = measureDraft()
+  const parsedMeasure = parseGoalMeasureDraft(draft)
+  const isProcedureEmpty = !procedureSignal.value.trim()
+  const submitted = goalCreateError.value
+  // A number that does not read says why, since the disabled button alone
+  // would not; a blank field says nothing.
+  const measureError = malformedMeasureNumber(draft)
+    ?? (submitted?.kind === 'measure_label' || submitted?.kind === 'measure_total' || submitted?.kind === 'measure_target'
+      ? submitted : null)
+  const measureMessage = goalCreateErrorMessage(measureError)
   // RFC-0444 §2.2: every Goal write is refused while the store cannot be read,
   // so the form does not offer a submit that the server would reject.
   // Only the standalone form falls back to the shared observation. A Work
@@ -128,7 +181,7 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
     && !goalCreateOutcomeIsCurrent(outcome))
   const managedRefused = getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
     && (managedDashboardRefusal.value === storedTokenRevision.value || managedDashboardUnverified.value === storedTokenRevision.value)
-  const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
+  const isSubmitDisabled = goalCreating.value || isTitleEmpty || !parsedMeasure.ok || isProcedureEmpty
     || sourceUnavailable !== null || goalCreateDraftHasOutcome(outcomes) || managedRefused
   const error = goalCreateError.value
   const visibleError = error?.kind === 'uncertain'
@@ -181,37 +234,121 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
         </div>
 
         <div class="wk-goal-create-sec">
-          <label for="goal-create-metric" class="wk-goal-create-label">
-            측정 지표<span class="wk-goal-create-req">*</span>
+          <label for="goal-create-measure-kind" class="wk-goal-create-label">
+            성공 조건<span class="wk-goal-create-req">*</span>
           </label>
-          <${TextInput}
-            id="goal-create-metric"
-            testId="goal-create-metric"
-            required=${true}
+          <${Select}
+            id="goal-create-measure-kind"
+            testId="goal-create-measure-kind"
+            value=${kindSignal.value}
+            options=${MEASURE_KIND_OPTIONS}
             disabled=${goalCreating.value}
-            value=${metricSignal.value}
-            placeholder="예) 24시간 운전 중 scheduler 지연 p99"
-            onInput=${(e: Event) => { metricSignal.value = (e.target as HTMLInputElement).value }}
+            onInput=${(value: string) => { const kind = measureKindOf(value); if (kind) kindSignal.value = kind }}
           />
-          ${goalCreateError.value?.kind === 'metric_empty' ? html`
-            <p class="wk-goal-create-err" role="alert">${goalCreateErrorMessage(goalCreateError.value)}</p>
-          ` : null}
         </div>
 
+        ${kindSignal.value === 'count' ? html`
+          <div class="wk-goal-create-sec">
+            <label for="goal-create-total" class="wk-goal-create-label">
+              개수<span class="wk-goal-create-req">*</span>
+            </label>
+            <${TextInput}
+              id="goal-create-total"
+              testId="goal-create-total"
+              required=${true}
+              disabled=${goalCreating.value}
+              value=${totalSignal.value}
+              placeholder="예) 14"
+              onInput=${(e: Event) => { totalSignal.value = (e.target as HTMLInputElement).value }}
+            />
+            <label for="goal-create-noun" class="wk-goal-create-label">
+              세는 대상<span class="wk-goal-create-req">*</span>
+            </label>
+            <${TextInput}
+              id="goal-create-noun"
+              testId="goal-create-noun"
+              required=${true}
+              disabled=${goalCreating.value}
+              value=${nounSignal.value}
+              placeholder="예) 병합된 PR"
+              onInput=${(e: Event) => { nounSignal.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
+        ` : null}
+
+        ${kindSignal.value === 'quantity' ? html`
+          <div class="wk-goal-create-sec">
+            <label for="goal-create-direction" class="wk-goal-create-label">방향</label>
+            <${Select}
+              id="goal-create-direction"
+              testId="goal-create-direction"
+              value=${directionSignal.value}
+              options=${DIRECTION_OPTIONS}
+              disabled=${goalCreating.value}
+              onInput=${(value: string) => { const direction = directionOf(value); if (direction) directionSignal.value = direction }}
+            />
+            <label for="goal-create-target" class="wk-goal-create-label">
+              목표 수치<span class="wk-goal-create-req">*</span>
+            </label>
+            <${TextInput}
+              id="goal-create-target"
+              testId="goal-create-target"
+              required=${true}
+              disabled=${goalCreating.value}
+              value=${targetSignal.value}
+              placeholder="예) 400"
+              onInput=${(e: Event) => { targetSignal.value = (e.target as HTMLInputElement).value }}
+            />
+            <label for="goal-create-unit" class="wk-goal-create-label">
+              단위<span class="wk-goal-create-req">*</span>
+            </label>
+            <${TextInput}
+              id="goal-create-unit"
+              testId="goal-create-unit"
+              required=${true}
+              disabled=${goalCreating.value}
+              value=${unitSignal.value}
+              placeholder="예) ms"
+              onInput=${(e: Event) => { unitSignal.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
+        ` : null}
+
+        ${kindSignal.value === 'done_when' ? html`
+          <div class="wk-goal-create-sec">
+            <label for="goal-create-condition" class="wk-goal-create-label">
+              완료 조건<span class="wk-goal-create-req">*</span>
+            </label>
+            <${TextInput}
+              id="goal-create-condition"
+              testId="goal-create-condition"
+              required=${true}
+              disabled=${goalCreating.value}
+              value=${conditionSignal.value}
+              placeholder="예) TUI 가 첫 실행에서 키퍼 목록을 그린다"
+              onInput=${(e: Event) => { conditionSignal.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
+        ` : null}
+
+        ${measureMessage ? html`
+          <p class="wk-goal-create-err" role="alert" data-testid="goal-create-measure-error">${measureMessage}</p>
+        ` : null}
+
         <div class="wk-goal-create-sec">
-          <label for="goal-create-target" class="wk-goal-create-label">
-            목표 값<span class="wk-goal-create-req">*</span>
+          <label for="goal-create-procedure" class="wk-goal-create-label">
+            측정 방법<span class="wk-goal-create-req">*</span>
           </label>
-          <${TextInput}
-            id="goal-create-target"
-            testId="goal-create-target"
+          <${TextArea}
+            id="goal-create-procedure"
+            rows=${3}
             required=${true}
             disabled=${goalCreating.value}
-            value=${targetSignal.value}
-            placeholder="예) 400ms 이하"
-            onInput=${(e: Event) => { targetSignal.value = (e.target as HTMLInputElement).value }}
+            value=${procedureSignal.value}
+            placeholder="예) 이슈 본문의 1단계 줄이 [x] 이고 줄마다 병합된 PR 이 있는지 센다"
+            onInput=${(e: Event) => { procedureSignal.value = (e.target as HTMLTextAreaElement).value }}
           />
-          ${goalCreateError.value?.kind === 'target_empty' ? html`
+          ${goalCreateError.value?.kind === 'procedure_empty' ? html`
             <p class="wk-goal-create-err" role="alert">${goalCreateErrorMessage(goalCreateError.value)}</p>
           ` : null}
         </div>

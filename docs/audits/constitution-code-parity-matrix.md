@@ -24,13 +24,13 @@
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| B1 | Goal 생성 시 정량 성공조건 필수화 — 생성 경로가 non-blank `metric`+`target_value` 요구 | `goal_store.mli`, `workspace_goals.ml` | PR #29152 |
-| B2 | Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록, `request_complete` 시 `Proof_pending` 기록과 `Verifying` 진입 | `lib/goal/goal_verification.ml`, `lib/workspace_goals.ml` | #29152, #29221 병합 |
+| B1 | Goal 생성 시 타입이 있는 `measure`와 비어 있지 않은 `procedure` 요구 | `lib/goal/goal_store.mli`, `lib/workspace_goals.ml` | #29152, #52903 병합 |
+| B2 | Goal 성공 조건의 실재성과 도달 가능성을 revision별로 비동기 검토한다. 검토 판정은 완료 요청 접수에 관여하지 않는다 | `lib/goal_criterion_review.ml`, `lib/workspace_goals.ml` | #50341 병합 |
 | B3 | Goal 완료 = 독립 Verifier의 proof proven + 사람 최종 확인 — 공개 lifecycle API에서 verifier verdict 제거, 고정 `verifier_exact` typed authority만 proof를 commit. `Record_proof_proven → Awaiting_confirmation → Confirm_completion → Completed` 전이와 operator 최종 확인(`workspace_goals.ml confirm_completion`, human_operator 권한)이 현행 계약 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml`, RFC-0387 | #29240, #34976 병합 |
 | B4 | ParallelTool — 선언된 Concurrent 호출은 병렬 실행한다. producer 가 확정한 자원 충돌은 개별 선행 호출의 settlement 를 기다리며, opaque Concurrent·Serial 구간은 경계로 남는다. 실행 좌표와 실제 대기는 구분한다. | `packages/agent_core/lib/agent/agent_tool_batch_plan.ml`, `packages/agent_core/lib/agent/agent_tools.ml`, [실행·측정 범위](../guides/keeper-tool-ready-scheduling.md) | PR #43498 소스 구현; 이 변경의 실행·실측은 미검증 |
 | B5 | 스트리밍 문자열 의미 — 일반 `TextDelta`는 append-only이며, producer가 명시한 `TextSnapshot`만 canonical state에서 suffix/replay를 정규화한다. 실제 비준수 endpoint capability 연결은 #30782에서 추적한다. | `packages/agent_core/lib/llm_provider/complete_stream_state.ml` | PR #29149, #30782 |
 | B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
-| B7 | Goal Verifier standalone worker — durable criterion/proof pending ledger를 `verifier_exact` lane으로 drain하고 typed verifier boundary에 verdict를 commit. artifact lookup surface와 live 동일-run 증거는 후속 | `lib/goal_verification_agent.ml`, `lib/workspace_goals.ml`, RFC-0387 | #29221, #29240 병합; live 증거 대기 |
+| B7 | Goal Verifier standalone worker — 완료 검증 요청을 `verifier_exact` lane으로 처리하고 typed verifier boundary에 verdict를 commit. artifact lookup surface와 live 동일-run 증거는 후속 | `lib/goal_verification_agent.ml`, `lib/workspace_goals.ml`, RFC-0387 | #29221, #29240 병합; live 증거 대기 |
 | B8 | Goal `Paused`/`Blocked` phase와 `Pause`/`Resume`/`Block`/`Unblock` action — constitution `<goal>` lifecycle이 목표 지점으로 선언하지만 `Goal_phase` ADT에는 없음. 공개 phase 문자열은 `Goal_phase.all`에서 유도하므로 문서상의 이 phase들로는 필터/전이 불가 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml:56` | 미구현 — 구현하거나 계약서에서 정리하는 결정 필요 |
 
 ## C. 코드 정리 (헌법 금지 패턴 잔여)

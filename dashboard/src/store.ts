@@ -161,6 +161,8 @@ export const executionTaskTotal = signal<number | null>(null)
 export const executionWorkspaceRevision = signal(0)
 // Accepted roster observations drive retries without changing workspace identity.
 export const keeperRosterObservationRevision = signal(0)
+// Callers waiting for the next execution observation this client accepts.
+let executionObservationWaiters: Array<() => void> = []
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -334,6 +336,10 @@ export const boardHasMore = signal<boolean>(true)
 export const boardTotal = signal<number | null>(null)
 /** true while a loadMore (append) request is in flight. Distinct from boardLoading (initial/reset). */
 export const boardLoadingMore = signal<boolean>(false)
+/** true when the list the operator is on could not be read and nothing on
+ *  screen answers it. The feed then says the read failed; an empty `boardPosts`
+ *  alone would read as a board with no posts. */
+export const boardListReadFailed = signal<boolean>(false)
 
 export function removeBoardPost(postId: string | undefined): void {
   if (!postId) return
@@ -375,6 +381,7 @@ import {
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
+import { decodeGoalMeasure } from './api/goal-measure'
 
 const agentCoreAgentEventsRing = new RingBuffer<AgentCoreAgentEvent>(AGENT_CORE_AGENT_EVENT_BUFFER)
 export const agentCoreAgentEvents = signal<AgentCoreAgentEvent[]>([])
@@ -862,8 +869,8 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         resume_phase: decodeGoalResumePhase(phase, row.resume_phase),
         id,
         title,
-        metric: asString(row.metric) ?? null,
-        target_value: asString(row.target_value) ?? null,
+        measure: decodeGoalMeasure(row.measure),
+        procedure: asString(row.procedure) ?? null,
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         phase,
@@ -1462,6 +1469,10 @@ export function hydrateExecutionSnapshot(
   } else {
     executionReadRecovery.succeeded()
   }
+  // Told last, so a waiter is released exactly when this returns true.
+  const observationWaiters = executionObservationWaiters
+  executionObservationWaiters = []
+  for (const resolve of observationWaiters) resolve()
   return true
 }
 
@@ -1478,6 +1489,14 @@ export function isInitializingExecutionPayload(data: DashboardExecutionResponse)
 const executionReadRecovery = createReadRecovery()
 
 class ExecutionRefreshUnavailable extends ObservationPending {}
+
+/** Resolves once the store accepts another execution observation, read or
+ *  pushed: `hydrateExecutionSnapshot` returned true, so `tasks` and the other
+ *  execution signals hold what it said. An observation the store refuses (an
+ *  older generation, a reconnect still in progress) does not resolve it. */
+export function nextExecutionObservation(): Promise<void> {
+  return new Promise(resolve => { executionObservationWaiters.push(resolve) })
+}
 
 async function doFetchExecution(): Promise<void> {
   executionReadRecovery.started()
@@ -1664,19 +1683,83 @@ function boardPageSize(): number {
   return hasFilter ? BOARD_PAGE_SIZE_FILTERED : BOARD_PAGE_SIZE_DEFAULT
 }
 
+/** What a list read asks the server for. Reads with equal queries read the same list. */
+interface BoardListQuery {
+  readonly sort: BoardSortMode
+  readonly excludeSystem: boolean
+  readonly excludeAutomation: boolean
+  readonly author: string
+  readonly hearth: string
+}
+
+function boardListQuery(): BoardListQuery {
+  return {
+    sort: boardSortMode.value,
+    excludeSystem: boardExcludeSystem.value,
+    excludeAutomation: boardExcludeAutomation.value,
+    author: boardAuthorFilter.value,
+    hearth: boardHearthFilter.value,
+  }
+}
+
+function sameBoardListQuery(a: BoardListQuery, b: BoardListQuery): boolean {
+  return a.sort === b.sort
+    && a.excludeSystem === b.excludeSystem
+    && a.excludeAutomation === b.excludeAutomation
+    && a.author === b.author
+    && a.hearth === b.hearth
+}
+
+// The operator changes the sub-board, the sort and the filters while reads are
+// on the wire, Board events start more reads of the same list, and the answers
+// come back in any order. Three facts decide what an answer may do:
+// - a first page is shown when it answers the query the operator has now, and
+//   no first page of a later read of that query is already on screen;
+// - a next page is appended when the list it continues is still the one on
+//   screen;
+// - a list that answers another query is never continued, and it leaves the
+//   screen when the read of the query the operator has now fails.
+
+/** Id of the newest first-page request. Ids grow in the order the requests start. */
+let boardListRequestId = 0
+/** The list in `boardPosts`: the query it answers and the first-page request
+ *  that filled it. null until a first page has answered, and after the list of
+ *  another query was taken off the screen. */
+let boardListOnScreen: { readonly query: BoardListQuery; readonly requestId: number } | null = null
+/** Id of the next-page request that may still be appended. It moves on whenever
+ *  the list on screen is replaced, which leaves a next page still on the wire
+ *  with nothing to continue. */
+let boardNextPageRequestId = 0
+
+function abandonBoardNextPage(): void {
+  boardNextPageRequestId += 1
+  boardLoadingMore.value = false
+}
+
 export async function refreshBoard(): Promise<void> {
+  const requestId = ++boardListRequestId
   boardLoading.value = true
+  let asked: BoardListQuery | null = null
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard-execution')
+    const query = boardListQuery()
+    asked = query
     const limit = boardPageSize()
-    const data = await timeBoardRequest('list', () => fetchDashboardMemory(boardSortMode.value, {
-      excludeSystem: boardExcludeSystem.value,
-      excludeAutomation: boardExcludeAutomation.value,
-      author: boardAuthorFilter.value || undefined,
-      hearth: boardHearthFilter.value || undefined,
+    const data = await timeBoardRequest('list', () => fetchDashboardMemory(query.sort, {
+      excludeSystem: query.excludeSystem,
+      excludeAutomation: query.excludeAutomation,
+      author: query.author || undefined,
+      hearth: query.hearth || undefined,
       limit,
       offset: 0,
     }))
+    if (!sameBoardListQuery(query, boardListQuery())) return
+    // Only a later read of this same query makes this answer the older one. A
+    // later read of another query filled the screen while the operator was
+    // away; this answer is for the list they came back to.
+    if (boardListOnScreen !== null
+      && sameBoardListQuery(boardListOnScreen.query, query)
+      && boardListOnScreen.requestId > requestId) return
     const next = data.posts ?? []
     boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
     boardOffset.value = next.length
@@ -1685,11 +1768,29 @@ export async function refreshBoard(): Promise<void> {
       : next.length >= limit
     boardTotal.value = typeof data.total === 'number' ? data.total : null
     lastBoardRefreshAt.value = new Date().toISOString()
+    boardListOnScreen = { query, requestId }
+    boardListReadFailed.value = false
+    abandonBoardNextPage()
   } catch (err) {
     console.warn('[Board] fetch error:', err)
+    // A later request has answered or is still on the wire; it speaks for the list.
+    if (requestId !== boardListRequestId) return
+    const wanted = boardListQuery()
+    // The operator has moved to another list; the request for that one speaks for it.
+    if (asked !== null && !sameBoardListQuery(asked, wanted)) return
+    if (boardListOnScreen !== null && !sameBoardListQuery(boardListOnScreen.query, wanted)) {
+      // What is on screen answers another query, and this one has no answer to show.
+      boardPosts.value = []
+      boardOffset.value = 0
+      boardHasMore.value = false
+      boardTotal.value = null
+      boardListOnScreen = null
+      abandonBoardNextPage()
+    }
+    boardListReadFailed.value = boardListOnScreen === null
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
-    boardLoading.value = false
+    if (requestId === boardListRequestId) boardLoading.value = false
   }
 }
 
@@ -1706,24 +1807,33 @@ export function hydrateBoardSnapshot(data: DashboardMemoryResponse): void {
   lastBoardRefreshAt.value = data.generated_at ?? new Date().toISOString()
 }
 
-/** Append the next page of board posts onto boardPosts. Noop if a request is
- *  already in flight or the server indicated no more pages. */
+/** Append the next page of board posts onto boardPosts. Noop if a next page is
+ *  already on the wire, the server indicated no more pages, or the list on
+ *  screen answers another query than the operator has now. A first-page read
+ *  on the wire does not hold it back: the page is dropped if that read
+ *  replaces the list first. */
 export async function loadMoreBoardPosts(): Promise<void> {
-  if (boardLoadingMore.value || boardLoading.value) return
+  if (boardLoadingMore.value) return
   if (!boardHasMore.value) return
+  const query = boardListQuery()
+  if (boardListOnScreen !== null && !sameBoardListQuery(boardListOnScreen.query, query)) return
+  const requestId = ++boardNextPageRequestId
+  const limit = boardPageSize()
+  const offset = boardOffset.value
   boardLoadingMore.value = true
+  const continuesListOnScreen = () =>
+    requestId === boardNextPageRequestId && sameBoardListQuery(query, boardListQuery())
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard-execution')
-    const limit = boardPageSize()
-    const offset = boardOffset.value
-    const data = await timeBoardRequest('list_more', () => fetchDashboardMemory(boardSortMode.value, {
-      excludeSystem: boardExcludeSystem.value,
-      excludeAutomation: boardExcludeAutomation.value,
-      author: boardAuthorFilter.value || undefined,
-      hearth: boardHearthFilter.value || undefined,
+    const data = await timeBoardRequest('list_more', () => fetchDashboardMemory(query.sort, {
+      excludeSystem: query.excludeSystem,
+      excludeAutomation: query.excludeAutomation,
+      author: query.author || undefined,
+      hearth: query.hearth || undefined,
       limit,
       offset,
     }))
+    if (!continuesListOnScreen()) return
     const incoming = data.posts ?? []
     const merged = appendBoardPosts(boardPosts.value, incoming)
     boardPosts.value = merged
@@ -1734,9 +1844,9 @@ export async function loadMoreBoardPosts(): Promise<void> {
     boardTotal.value = typeof data.total === 'number' ? data.total : null
   } catch (err) {
     console.warn('[Board] loadMore error:', err)
-    showToast('다음 페이지를 불러오지 못했습니다', 'error')
+    if (continuesListOnScreen()) showToast('다음 페이지를 불러오지 못했습니다', 'error')
   } finally {
-    boardLoadingMore.value = false
+    if (requestId === boardNextPageRequestId) boardLoadingMore.value = false
   }
 }
 

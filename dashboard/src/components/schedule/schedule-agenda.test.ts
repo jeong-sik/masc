@@ -6,9 +6,12 @@ import {
   Agenda,
   CadenceSummary,
   PollingStrip,
+  ScheduleCalendar,
   buildAgenda,
   cadenceCounts,
   cadenceOfRequest,
+  calendarCoverage,
+  dayIsComplete,
   fireTimestampMs,
   isTerminalRequest,
   selectPollingSchedules,
@@ -129,6 +132,7 @@ describe('the subject on a row', () => {
               scheduled_by: { id: 'codex-mcp-client', kind: 'automated_actor' },
             }),
           ]}
+          coverage=${{ kind: 'complete' }}
           nowMs=${NOW_MS}
           onOpen=${() => {}}
         />`,
@@ -167,6 +171,7 @@ describe('the subject on a row', () => {
               scheduled_by: { id: 'dashboard-admin', kind: 'human_operator' },
             }),
           ]}
+          coverage=${{ kind: 'complete' }}
           onOpen=${() => {}}
         />`,
         container,
@@ -250,6 +255,101 @@ describe('buildAgenda', () => {
   })
 })
 
+describe('buildAgenda on a local day that is not 24 hours long', () => {
+  // #52963: America/New_York leaves daylight time on 2026-11-01, which makes
+  // that local day 25 hours long.
+  const runnerTimeZone = process.env.TZ
+
+  beforeEach(() => {
+    process.env.TZ = 'America/New_York'
+  })
+
+  afterEach(() => {
+    if (runnerTimeZone === undefined) delete process.env.TZ
+    else process.env.TZ = runnerTimeZone
+  })
+
+  it('dates every column by the local calendar', () => {
+    const nextMidnight = new Date(2026, 10, 2).getTime()
+    // The case below means nothing unless this runtime applied the time zone.
+    expect(nextMidnight - new Date(2026, 10, 1).getTime()).toBe(25 * HOUR_MS)
+
+    const columns = buildAgenda(
+      [req({ schedule_id: 'next-morning', due_at: localEpochSeconds(2026, 10, 2, 9) })],
+      { nowMs: new Date(2026, 10, 1, 12, 0, 0).getTime(), days: 3 },
+    )
+
+    expect(columns.map(column => {
+      const date = new Date(column.dateMs)
+      return [date.getMonth() + 1, date.getDate(), date.getHours()]
+    })).toEqual([[11, 1, 0], [11, 2, 0], [11, 3, 0]])
+    expect(columns[1]!.dateMs).toBe(nextMidnight)
+    expect(columns[1]!.events.map(event => event.request.schedule_id)).toEqual(['next-morning'])
+  })
+})
+
+describe('calendarCoverage', () => {
+  const at = (hour: number, minute = 0) => localEpochSeconds(2026, 6, 7, hour, minute)
+
+  it('is complete when the page holds every active schedule', () => {
+    const page = [
+      req({ schedule_id: 'a', due_at: at(13) }),
+      req({ schedule_id: 'b', status: 'running', due_at: at(11) }),
+      // Terminal rows fill the rest of a page only after every active one.
+      req({ schedule_id: 'done', status: 'succeeded', due_at: at(9) }),
+    ]
+    expect(calendarCoverage(page, 2)).toEqual({ kind: 'complete' })
+    expect(calendarCoverage(page.slice(0, 2), 2)).toEqual({ kind: 'complete' })
+    expect(calendarCoverage([], 0)).toEqual({ kind: 'complete' })
+  })
+
+  it('is partial from the last row returned when the server left active schedules out', () => {
+    const page = [
+      req({ schedule_id: 'a', due_at: at(12, 10) }),
+      req({ schedule_id: 'b', due_at: at(12, 40) }),
+      req({ schedule_id: 'c', recurrence: { kind: 'interval', interval_sec: 600 }, due_at: at(12, 25) }),
+    ]
+    expect(calendarCoverage(page, 7)).toEqual({
+      kind: 'partial',
+      omittedActive: 4,
+      omittedFromMs: at(12, 40) * 1000,
+    })
+  })
+
+  it('has no such point when no row on the page carries a time', () => {
+    expect(calendarCoverage([req({ schedule_id: 'a' })], 3)).toEqual({
+      kind: 'partial',
+      omittedActive: 2,
+      omittedFromMs: null,
+    })
+    expect(calendarCoverage([], 1)).toEqual({ kind: 'partial', omittedActive: 1, omittedFromMs: null })
+  })
+})
+
+describe('dayIsComplete', () => {
+  const dayStart = new Date(2026, 6, 7, 0, 0, 0).getTime()
+  const dayEnd = new Date(2026, 6, 8, 0, 0, 0).getTime()
+  const omittedFrom = (omittedFromMs: number | null) =>
+    ({ kind: 'partial', omittedActive: 1, omittedFromMs }) as const
+
+  it('holds for every day when every active schedule is on hand', () => {
+    expect(dayIsComplete({ kind: 'complete' }, dayEnd)).toBe(true)
+  })
+
+  it('holds for a day that ends by the time the omitted schedules start', () => {
+    expect(dayIsComplete(omittedFrom(dayEnd), dayEnd)).toBe(true)
+    expect(dayIsComplete(omittedFrom(dayEnd + HOUR_MS), dayEnd)).toBe(true)
+  })
+
+  it('does not hold for a day an omitted schedule may fall in', () => {
+    // One of them may be due in the last millisecond of the day.
+    expect(dayIsComplete(omittedFrom(dayEnd - 1), dayEnd)).toBe(false)
+    expect(dayIsComplete(omittedFrom(dayStart + 12 * HOUR_MS), dayEnd)).toBe(false)
+    expect(dayIsComplete(omittedFrom(dayStart), dayEnd)).toBe(false)
+    expect(dayIsComplete(omittedFrom(null), dayEnd)).toBe(false)
+  })
+})
+
 describe('schedule calendar components', () => {
   let container: HTMLDivElement
 
@@ -282,6 +382,7 @@ describe('schedule calendar components', () => {
     render(
       html`<${PollingStrip}
         requests=${[req({ schedule_id: 'poll-1', recurrence: { kind: 'interval', interval_sec: 21600 }, due_at_iso: '2026-07-07T18:00:00Z' })]}
+        coverage=${{ kind: 'complete' }}
         onOpen=${() => {}}
       />`,
       container,
@@ -290,7 +391,7 @@ describe('schedule calendar components', () => {
     expect(container.querySelector('[data-testid="sch-polling-empty"]')).toBeNull()
 
     render(
-      html`<${PollingStrip} requests=${[req({ schedule_id: 'one', recurrence: { kind: 'one_shot' } })]} onOpen=${() => {}} />`,
+      html`<${PollingStrip} requests=${[req({ schedule_id: 'one', recurrence: { kind: 'one_shot' } })]} coverage=${{ kind: 'complete' }} onOpen=${() => {}} />`,
       container,
     )
     expect(container.querySelector('[data-testid="sch-polling-empty"]')).not.toBeNull()
@@ -300,6 +401,7 @@ describe('schedule calendar components', () => {
     render(
       html`<${Agenda}
         requests=${[req({ schedule_id: 'ev-1', due_at_iso: '2026-07-07T18:00:00Z' })]}
+        coverage=${{ kind: 'complete' }}
         nowMs=${NOW_MS}
         onOpen=${() => {}}
       />`,
@@ -307,8 +409,142 @@ describe('schedule calendar components', () => {
     )
     expect(container.querySelector('[data-schedule-id="ev-1"]')).not.toBeNull()
 
-    render(html`<${Agenda} requests=${[]} nowMs=${NOW_MS} onOpen=${() => {}} />`, container)
+    render(html`<${Agenda} requests=${[]} coverage=${{ kind: 'complete' }} nowMs=${NOW_MS} onOpen=${() => {}} />`, container)
     expect(container.querySelector('[data-testid="sch-agenda-empty"]')).not.toBeNull()
+  })
+
+  describe('when the server left active schedules out of the page (#52961)', () => {
+    // The issue's page: every row is a polling loop due within the hour, and
+    // the schedule for tomorrow is the one the server did not return. The last
+    // row is due 20 minutes after NOW_MS (12:00), at 12:20.
+    const pollingPage = Array.from({ length: 20 }, (_, index) => req({
+      schedule_id: `poll-${index}`,
+      recurrence: { kind: 'interval', interval_sec: 600 },
+      due_at: (NOW_MS + (index + 1) * 60_000) / 1000,
+    }))
+    const calendar = (
+      requests: readonly DashboardScheduledAutomationRequest[],
+      activeCount: number,
+      cadenceFilter: 'scheduled' | 'interval' | 'oneshot' | null = null,
+    ) => render(
+      html`<${ScheduleCalendar} requests=${requests} activeCount=${activeCount} nowMs=${NOW_MS} cadenceFilter=${cadenceFilter} onOpen=${() => {}} />`,
+      container,
+    )
+    const shown = (testId: string) => container.querySelector(`[data-testid="${testId}"]`) !== null
+    const note = () => container.querySelector('[data-testid="sch-calendar-partial"]')?.textContent ?? ''
+    const emptyDays = () => Array.from(container.querySelectorAll('[data-testid="sch-day-empty"]'))
+      .map(node => node.textContent)
+    const todayCount = () => container.querySelector('.sch-day.today .sch-day-n')?.textContent
+
+    it('does not call the coming days empty', () => {
+      // With every active schedule on hand these rows do mean empty days.
+      calendar(pollingPage, 20)
+      expect(shown('sch-agenda-empty')).toBe(true)
+      expect(shown('sch-calendar-partial')).toBe(false)
+      const [knownEmpty] = emptyDays()
+      expect(emptyDays()).toEqual([knownEmpty, knownEmpty])
+
+      calendar(pollingPage, 21)
+      expect(shown('sch-agenda-empty')).toBe(false)
+      // The schedule left out may be due today after 12:20 or tomorrow:
+      // neither day reads like a day known to be empty.
+      const [today, tomorrow] = emptyDays()
+      expect(today).not.toBe(knownEmpty)
+      expect(tomorrow).toBe(today)
+    })
+
+    it('says how many active schedules were left out and from when they are due', () => {
+      calendar(pollingPage, 23)
+      expect(note()).toContain('3건')
+      expect(note()).toContain('7/7 (화) 12:20')
+      // Every row is on the page: nothing to say.
+      calendar(pollingPage, 20)
+      expect(shown('sch-calendar-partial')).toBe(false)
+    })
+
+    it('says it under a cadence filter too', () => {
+      calendar(pollingPage, 21, 'interval')
+      expect(note()).toContain('1건')
+      calendar(pollingPage, 21, 'oneshot')
+      expect(note()).toContain('1건')
+    })
+
+    it('names no time when no row on the page carries one', () => {
+      calendar([req({ schedule_id: 'untimed' })], 4)
+      expect(note()).toContain('3건')
+      expect(note()).not.toMatch(/\d{1,2}:\d{2}/)
+      expect(shown('sch-agenda-empty')).toBe(false)
+    })
+
+    it('does not call the polling strip empty either', () => {
+      const oneShots = pollingPage.map(row => ({ ...row, recurrence: { kind: 'one_shot' } }))
+      const pollingEmpty = () => container.querySelector('[data-testid="sch-polling-empty"]')?.textContent
+      calendar(oneShots, 20)
+      const complete = pollingEmpty()
+      expect(complete).toBeDefined()
+      // The schedule left out may be a polling loop.
+      calendar(oneShots, 21)
+      expect(pollingEmpty()).toBeDefined()
+      expect(pollingEmpty()).not.toBe(complete)
+    })
+
+    it('reads coverage from the whole page, not from the rows a cadence filter keeps', () => {
+      // Every active schedule is on the page; the filter hides them all. The
+      // days are still known to be empty of one-shot schedules.
+      calendar(pollingPage, 20, 'oneshot')
+      expect(shown('sch-agenda-empty')).toBe(true)
+      expect(shown('sch-calendar-partial')).toBe(false)
+    })
+
+    it('still calls the window empty when the page reaches past it', () => {
+      const beyond = req({ schedule_id: 'far', due_at: (NOW_MS + 30 * DAY_MS) / 1000 })
+      calendar([beyond], 5)
+      // Whatever was left out is due after `far`, so after the window too. The
+      // calendar as a whole is still short of four schedules.
+      expect(shown('sch-agenda-empty')).toBe(true)
+      expect(note()).toContain('4건')
+      const days = emptyDays()
+      calendar([beyond], 1)
+      expect(days).toEqual(emptyDays())
+    })
+
+    it('does not call the window empty when the page ends inside its last day', () => {
+      const lastDayNoon = new Date(2026, 6, 13, 12, 0, 0).getTime()
+      const poll = req({
+        schedule_id: 'poll-late',
+        recurrence: { kind: 'interval', interval_sec: 600 },
+        due_at: lastDayNoon / 1000,
+      })
+      // The schedule left out may be due that afternoon.
+      calendar([poll], 2)
+      expect(shown('sch-agenda-empty')).toBe(false)
+      // Today and tomorrow end before it: they are known to be empty.
+      const days = emptyDays()
+      calendar([poll], 1)
+      expect(shown('sch-agenda-empty')).toBe(true)
+      expect(days).toEqual(emptyDays())
+    })
+
+    it('marks a day count that may be short', () => {
+      const lunch = req({ schedule_id: 'lunch', due_at: (NOW_MS + HOUR_MS) / 1000 })
+      calendar([lunch], 1)
+      expect(todayCount()).toBe('1건')
+      calendar([lunch], 2)
+      expect(todayCount()).toBe('1건 이상')
+    })
+
+    it('marks the count of a day the page ended before', () => {
+      // Overdue rows are drawn on today; the page ended yesterday, so the
+      // schedules left out may be due today as well.
+      const overdue = [1, 2, 3].map(hour => req({
+        schedule_id: `late-${hour}`,
+        due_at: (NOW_MS - DAY_MS + hour * HOUR_MS) / 1000,
+      }))
+      calendar(overdue, 3)
+      expect(todayCount()).toBe('3건')
+      calendar(overdue, 5)
+      expect(todayCount()).toBe('3건 이상')
+    })
   })
 
   it('surfaces a queue-drain miss on the agenda row (queue not_found + reaction not_found)', () => {
@@ -322,6 +558,7 @@ describe('schedule calendar components', () => {
             keeper_reaction_evidence: { projection_status: 'not_found' },
           }),
         ]}
+        coverage=${{ kind: 'complete' }}
         nowMs=${NOW_MS}
         onOpen=${() => {}}
       />`,
@@ -342,6 +579,7 @@ describe('schedule calendar components', () => {
             keeper_reaction_evidence: { projection_status: 'matched_consumed_ack' },
           }),
         ]}
+        coverage=${{ kind: 'complete' }}
         nowMs=${NOW_MS}
         onOpen=${() => {}}
       />`,

@@ -25,6 +25,25 @@ val identity_gap : state -> Masc_tui_value.Unknown.t
     [Unread] before a probe answers, [Read_failed] after the probe that
     cleared it failed, [Unreported] when the identity read did not carry the
     block. *)
+
+val scheduler_probe_symbol :
+  Masc.Tui_decode.scheduler_probe option -> Masc_tui_card.symbol
+(** The scheduler card's status mark for the probe's state (RFC
+    tui-one-screen-grammar section 7.2): [Running] is under way,
+    [Not_started] waiting, [Cancelled] paused, and [Stopped], a probe that
+    raised, failed. A word this build does not know, and no probe at all,
+    are [?]. *)
+
+val scheduler_probe_status :
+  ko:bool -> tone:string -> Masc.Tui_decode.scheduler_probe option -> Masc_tui_card.status
+(** The scheduler card's status: {!scheduler_probe_symbol} and the state's
+    word. A stopped probe's word is the state alone; its reason is
+    {!scheduler_stop_reason}, which the card writes in its body. *)
+
+val scheduler_stop_reason : Masc.Tui_decode.scheduler_probe option -> string option
+(** The exception a stopped probe raised, escaped to one line. [None] for any
+    other state, and with no probe. *)
+
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
 type session_entry = {

@@ -147,7 +147,7 @@ deadline 을 적었더라도 부팅이 그 slot 을 버렸을 것이다.
 1. provider 는 `catalog-provider = "<catalog 행 id>"` 를 적을 수 있다. 적지 않으면 지금처럼 provider id 가 곧 catalog 행 id 다.
 2. catalog 를 찾는 곳은 모두 한 함수에서 catalog 행 id 를 얻는다. 그 함수는 `catalog-provider` 가 있으면 그 값을, 없으면 provider id 를 준다.
 3. 계정을 나누는 곳은 runtime provider id 와 자격을 그대로 쓴다. 자격 materialize, quota scope, runtime id, 쉼 칸, 자리가 그렇다.
-4. `catalog-provider` 를 적은 provider 는 id 가 그 행인 provider 와 같은 규칙을 받는다. `kind` 는 catalog 의 몫이라 적으면 거절된다. `request-path` 와 `endpoint` 는 지금처럼 적으면 catalog 값 대신 쓰인다.
+4. `catalog-provider` 를 적은 provider 는 id 가 그 행인 provider 와 같은 규칙을 받는다. `kind` 는 catalog 의 몫이라 적으면 로드가 거절된다(§3.1). `request-path` 와 `endpoint` 는 지금처럼 적으면 catalog 값 대신 쓰인다.
 5. 설치 검사는 부팅 때 Exact registry 가 버릴 slot 을 까닭과 상관없이 모두 거절한다.
 
 ## 3. 설계
@@ -156,10 +156,13 @@ deadline 을 적었더라도 부팅이 그 slot 을 버렸을 것이다.
 
 - `Runtime_schema.provider` 에 `catalog_provider : string option` 을 더한다(`runtime_schema.ml` 143행 근처).
 - `runtime_toml_providers.ml` 의 `provider_keys`(460~466행)에 `catalog-provider` 를 더한다. 값은 빈 문자열이 아닌 한 줄 문자열이다.
-- 거절은 셋이다.
-  - **없는 행**: catalog 에 그 id 의 provider 행이 없다. `Runtime_config_error.drop_reason` 에 `Catalog_provider_not_declared of string` 을 더한다. `dangling_reference_reason` 이 이것을 `Some _` 로 돌려주므로 `Runtime.load_list` 에서 로드 오류가 된다. 오타를 binding 하나 빠지는 것으로 넘기지 않는다.
-  - **자기 id 가 이미 catalog 행**: provider id 가 catalog 행인데 `catalog-provider` 도 적었다. 한 provider 가 두 행으로 말할 수 없다. `drop_reason` 에 `Catalog_provider_beside_own_row of string` 을 더하고, 이것도 `dangling_reference_reason` 이 `Some _` 로 돌려줘 로드 오류가 된다.
-  - **catalog 의 몫을 적음**: `kind` 를 같이 적었다. 지금 id 가 catalog 행인 provider 에 `kind` 를 적었을 때와 같은 경로(`refuse_unread_wire_kind`, 212~216행)로 거절한다. 그 binding 은 빠진다.
+- 거절은 넷이다. 모두 `drop_reason` 의 `Catalog_provider_refused { provider_id; catalog_provider; refusal }` 하나로 모이고, `refusal` 은 닫힌 타입 `catalog_provider_refusal` 이다. `dangling_reference_reason` 이 이것을 `Some _` 로 돌려주므로 `Runtime.load_list` 에서 로드 오류가 된다. 오타를 binding 하나 빠지는 것으로 넘기지 않는다.
+  - **없는 행**(`Names_no_row`): catalog 에 그 id 의 provider 행이 없다.
+  - **자기 id 가 이미 catalog 행**(`Beside_own_row`): provider id 가 catalog 행인데 `catalog-provider` 도 적었다. 한 provider 가 두 행으로 말할 수 없다.
+  - **다른 표기**(`Names_alias row_id`): catalog 조회(`Catalog_snapshot.find`)는 별칭과 대소문자가 다른 표기도 받는다. 그런데 exact-output resolver 는 행 id 를 글자 그대로 맞춘다. 그래서 `"Claude"` 는 로드되고 Exact lane 에서만 빠진다. 행 id 를 그대로 적게 거절하고, 적을 id 를 알려 준다.
+  - **catalog 의 몫을 적음**(`Beside_kind`): `kind` 를 같이 적었다. 처음 판(#53030)은 id 가 catalog 행인 provider 처럼 binding 만 뺐다. 그런데 기존 계정에 `catalog-provider` 만 더하고 `kind` 를 남기는 실수가 가장 흔할 것이고, 빠진 binding 은 보고만 남는다. 운영자가 고른 선택을 두 번 적은 것이라 로드 오류로 올린다(#53030 리뷰).
+- 거절 검사는 binding 을 만드는 construction 과 같은 catalog snapshot 을 읽는다. 두 번 읽으면 그 사이 catalog 가 다시 게시될 때 검사와 binding 이 다른 답을 낸다.
+- 검사는 켜진 binding 이 가리키는 provider 만 본다. 어느 binding 도 쓰지 않는 `[providers.x]` 행을 따로 검사하지 않는 것과 같다.
 - `request-path` 와 `endpoint` 는 지금 id 가 catalog 행인 provider 에서처럼 적어도 된다. 적으면 catalog 값 대신 쓰인다(`runtime_adapter.ml` 324~325행). 운영의 `[providers.claude]` 가 이미 `endpoint` 를 적는다.
 - `catalog-provider` 는 HTTP provider 만 적는다. official client 가 적으면 parse 가 거절한다. official client 는 catalog 의 wire 행으로 말하지 않는다.
 

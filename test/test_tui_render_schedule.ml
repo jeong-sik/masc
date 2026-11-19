@@ -362,67 +362,164 @@ let test_terminal_size_retains_raw_resize_signal () =
       (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
        = Schedule.Terminal_size_cache.Unchanged (24,4))) [1;2;3;4;2;1]
 
-let test_activity_motion_only_uses_the_fast_clock_when_visible () =
-  let module Tick = Schedule.Activity_tick in
-  let count ~visible =
-    let tick = Tick.create ~motion_interval_ns:(ms 150) ~now_ns:0L in
-    let advances = ref 0 in
-    for offset = 1 to 5000 do
-      match Tick.take tick ~now_ns:(ms offset) ~running:true ~motion_visible:visible with
-      | Tick.Advance -> incr advances
-      | Quiet -> ()
-      | Stop -> fail "running work was stopped"
-    done;
-    !advances in
-  check int "hidden work retains the seconds needed by age/read notices" 5
-    (count ~visible:false);
-  check int "visible motion retains its existing interval" 33
-    (count ~visible:true)
+(* RFC tui-one-screen-grammar §8 and §10: a frame that only time asks for is
+   drawn on the first whole second at or after the first change of visible
+   time text, and never at or before the moment it is scheduled from. *)
+let test_time_renders_on_the_second_after_the_first_change () =
+  let module Time = Schedule.Time_redraw in
+  check (option (float 1e-9)) "a change within a second waits for its boundary"
+    (Some 101.) (Time.due ~now:99.2 (Some 100.3));
+  check (option (float 1e-9)) "a change on a boundary is drawn on it" (Some 100.)
+    (Time.due ~now:99.5 (Some 100.));
+  check (option (float 1e-9)) "a change already passed is drawn on the next boundary"
+    (Some 101.) (Time.due ~now:100.2 (Some 100.));
+  check (option (float 1e-9)) "a change far ahead keeps its own boundary" (Some 160.)
+    (Time.due ~now:100.2 (Some 159.01))
 
-let test_activity_visibility_changes_and_stops_do_not_add_delays () =
-  let module Tick = Schedule.Activity_tick in
-  let tick = Tick.create ~motion_interval_ns:(ms 150) ~now_ns:0L in
-  let take at ~running ~visible =
-    Tick.take tick ~now_ns:(ms at) ~running ~motion_visible:visible in
-  check bool "hidden clock is not a motion deadline" true
-    (take 900 ~running:true ~visible:false = Tick.Quiet);
-  check bool "showing motion does not wait for the hidden seconds deadline" true
-    (take 900 ~running:true ~visible:true = Tick.Advance);
-  check bool "covering motion returns to the age/read clock" true
-    (take 1050 ~running:true ~visible:false = Tick.Quiet);
-  check bool "age/read notices keep advancing" true
-    (take 1900 ~running:true ~visible:false = Tick.Advance);
-  check bool "finishing resets the old mark once" true
-    (take 1901 ~running:false ~visible:true = Tick.Stop);
-  check bool "idle needs no further work" true
-    (take 2901 ~running:false ~visible:true = Tick.Quiet);
-  check bool "new visible work resumes after an idle gap" true
-    (take 3000 ~running:true ~visible:true = Tick.Advance)
+let test_no_time_text_schedules_nothing () =
+  check (option (float 1e-9)) "a frame with no time text" None
+    (Schedule.Time_redraw.due ~now:100.2 None)
 
-let test_activity_demand_belongs_to_one_top_frame_and_domain () =
-  let module Tick = Schedule.Activity_tick in
-  Tick.begin_frame ();
-  check bool "a new top frame has no inherited motion" false (Tick.motion_visible ());
-  Tick.note_motion ();
-  check bool "an emitted running mark requests motion" true (Tick.motion_visible ());
-  let worker = Domain.spawn Tick.motion_visible in
-  check bool "a preparation domain cannot inherit the UI demand" false (Domain.join worker);
-  check bool "the UI still owns its recorded demand" true (Tick.motion_visible ());
-  Tick.begin_frame ();
-  check bool "an overlay or external picture retires the prior demand" false
-    (Tick.motion_visible ())
+module Redraw = Masc_tui_value.Redraw
+module Ongoing = Masc_tui_value.Ongoing
+
+(* The two halves the loop joins: what a frame notes while it draws a length
+   that changes with time, and the second [Time_redraw.due] turns that into.
+   [reading t] is the text that length shows at wall-clock [t]. The render
+   must fall on the first whole second at or after the first instant the
+   reading differs: by that second the reading has changed, and a second
+   earlier, unless that is already behind the frame, it had not. A reading of
+   these ladders holds over one stretch of time, so checking the two ends of
+   the wait is enough. [settle] is how long after the render the reading is
+   read: a countdown notes the instant it reaches a reading's floor and shows
+   the next reading only just after it. *)
+let check_first_change_second ~label ~settle ~now ~reading =
+  match Schedule.Time_redraw.due ~now (Redraw.next_change ()) with
+  | None -> failf "%s: a length that changes with time schedules a render" label
+  | Some due ->
+      check bool (label ^ ": the render comes after the frame") true (due > now);
+      check bool (label ^ ": on a whole second") true (Float.is_integer due);
+      check bool (label ^ ": the reading has changed by then") false
+        (String.equal (reading now) (reading (due +. settle)));
+      if due -. 1. >= now then
+        check bool (label ^ ": and had not a second earlier") true
+          (String.equal (reading now) (reading (due -. 1.)))
+
+(* Frames are built at any instant, so the wall clock is taken on a second,
+   a quarter past one and a millisecond before the next. *)
+let frame_instants = [ 1_794_050_000.; 1_794_050_000.25; 1_794_050_059.999 ]
+
+(* RFC tui-one-screen-grammar §10, the second decision test: the render
+   asked of time is the first second boundary after the first visible change
+   of a length still going. *)
+let test_an_ongoing_length_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun span ->
+          let at = now -. span in
+          Redraw.begin_frame ();
+          ignore (Ongoing.since ~now at);
+          check_first_change_second ~settle:0.
+            ~label:(Printf.sprintf "%.3f s ago at %.3f" span now)
+            ~now ~reading:(fun t -> Ongoing.text (t -. at)))
+        [ 0.; 0.3; 1.7; 59.2; 59.999; 60.; 61.5; 119.9; 3_599.2; 3_600.; 3_661.7;
+          86_399.5; 86_400.; 90_061.3; 8_639_999.5; 8_640_000. ])
+    frame_instants
+
+(* The same for the narrow one-unit ladder a short column draws ([45s], [3m],
+   [1h], [2d]) and the countdown it draws in the due column. *)
+let test_a_narrow_length_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun span ->
+          let at = now -. span in
+          Redraw.begin_frame ();
+          ignore (Ongoing.Narrow.since ~now at);
+          check_first_change_second ~settle:0.
+            ~label:(Printf.sprintf "narrow %.3f s ago at %.3f" span now)
+            ~now ~reading:(fun t -> Ongoing.Narrow.text (t -. at)))
+        [ 0.; 1.7; 59.999; 60.; 89.5; 3_599.2; 3_600.; 7_322.; 86_399.5; 90_061.3 ];
+      List.iter
+        (fun left ->
+          let at = now +. left in
+          Redraw.begin_frame ();
+          ignore (Ongoing.Narrow.until ~now at);
+          check_first_change_second ~settle:0.001
+            ~label:(Printf.sprintf "narrow %.3f s left at %.3f" left now)
+            ~now ~reading:(fun t -> Ongoing.Narrow.text (at -. t)))
+        [ 1.5; 60.4; 3_661.7; 86_400.5; 190_000. ])
+    frame_instants
+
+(* The same for a countdown ("in 3m"): what is left shrinks, and its reading
+   turns when what is left drops below the reading's floor. *)
+let test_a_countdown_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun left ->
+          let at = now +. left in
+          Redraw.begin_frame ();
+          ignore (Ongoing.until ~now at);
+          check_first_change_second ~settle:0.001
+            ~label:(Printf.sprintf "%.3f s left at %.3f" left now)
+            ~now ~reading:(fun t -> Ongoing.text (at -. t)))
+        [ 1.; 1.5; 59.9; 60.; 60.4; 125.3; 3_600.; 3_661.7; 86_400.5; 8_726_400.5 ])
+    frame_instants
+
+(* §6.2 and §8: a finished length ([243ms], [29.2s], [3m15s]) does not change
+   while the reader looks, so a frame that draws only finished lengths asks
+   time for nothing. An age drawn beside them does. *)
+let test_finished_lengths_ask_time_for_nothing () =
+  Redraw.begin_frame ();
+  ignore (Masc_tui_message_layout.span_text 195.);
+  ignore (Masc_tui_message_layout.elapsed_text 29.2);
+  ignore (Masc_tui_message_layout.elapsed_text 0.243);
+  check (option (float 1e-9)) "finished lengths schedule nothing" None
+    (Schedule.Time_redraw.due ~now:1000.2 (Redraw.next_change ()));
+  ignore (Masc_tui_message_layout.age_text ~now:1000.2 ~since:900.);
+  check bool "an age beside them schedules a render" true
+    (Option.is_some (Schedule.Time_redraw.due ~now:1000.2 (Redraw.next_change ())))
+
+(* §8 and §10: time alone redraws at most once a second. Whatever a frame
+   noted, even an instant already behind it, the render it asks for is a
+   whole second strictly after the frame, so the frame built for it asks for
+   the following second at the earliest. *)
+let test_time_alone_renders_at_most_once_a_second () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun offset ->
+          match Schedule.Time_redraw.due ~now (Some (now +. offset)) with
+          | None -> fail "a noted change schedules a render"
+          | Some due ->
+              check bool "a whole second" true (Float.is_integer due);
+              check bool "after the frame" true (due > now);
+              check bool "no later than the second after the change" true
+                (due <= Float.max (Float.ceil (now +. offset)) (Float.floor now +. 1.)))
+        [ -5.; -0.001; 0.; 0.001; 0.4; 0.999; 1.; 59.5 ])
+    frame_instants
 
 let () =
   test_terminal_size_retains_raw_resize_signal ();
   test_terminal_size_retains_raw_resize_signal ();
   run "tui_render_schedule"
     [ ( "render scheduling"
-      , [ test_case "activity motion follows visible demand" `Quick
-            test_activity_motion_only_uses_the_fast_clock_when_visible
-        ; test_case "activity visibility and stop transitions keep their deadlines" `Quick
-            test_activity_visibility_changes_and_stops_do_not_add_delays
-        ; test_case "activity demand belongs to the top frame and UI domain" `Quick
-            test_activity_demand_belongs_to_one_top_frame_and_domain
+      , [ test_case "time renders on the second after the first change" `Quick
+            test_time_renders_on_the_second_after_the_first_change
+        ; test_case "no time text schedules nothing" `Quick
+            test_no_time_text_schedules_nothing
+        ; test_case "an ongoing length renders on the second it changes" `Quick
+            test_an_ongoing_length_renders_on_the_second_it_changes
+        ; test_case "a countdown renders on the second it changes" `Quick
+            test_a_countdown_renders_on_the_second_it_changes
+        ; test_case "a narrow length renders on the second it changes" `Quick
+            test_a_narrow_length_renders_on_the_second_it_changes
+        ; test_case "finished lengths ask time for nothing" `Quick
+            test_finished_lengths_ask_time_for_nothing
+        ; test_case "time alone renders at most once a second" `Quick
+            test_time_alone_renders_at_most_once_a_second
         ; test_case "idle performs no render work" `Quick
             test_idle_has_no_render_work
         ; test_case "1000 invalidations coalesce" `Quick

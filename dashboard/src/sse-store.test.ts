@@ -47,6 +47,7 @@ const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
 const refreshKnownKeeperChatHistories = vi.fn<() => void>()
+const hydrateKeeperToolApprovals = vi.fn<() => Promise<void>>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -121,6 +122,7 @@ async function loadSseStore() {
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
     refreshKnownKeeperChatHistories,
+    hydrateKeeperToolApprovals,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -157,6 +159,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     replayAgentCoreRuntimeTelemetry.mockResolvedValue(undefined)
     hydrateAgentCoreTelemetrySample.mockClear()
     refreshKnownKeeperChatHistories.mockReset()
+    hydrateKeeperToolApprovals.mockReset().mockResolvedValue(undefined)
     hydrateOperatorSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -245,6 +248,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     // keeper_chat_appended events dropped outside the server replay buffer are
     // unrecoverable through the live stream, so the open panel must re-fetch.
     expect(refreshKnownKeeperChatHistories).toHaveBeenCalledWith()
+    // A held tool call that ended during the gap told nobody here.
+    expect(hydrateKeeperToolApprovals).toHaveBeenCalledTimes(1)
 
     vi.clearAllTimers()
     cleanup()
@@ -268,6 +273,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
       '[server-push] reconnect keeper chat re-hydration unavailable',
       'keeper chat reconnect refresh exploded',
     )
+    // The held tool calls are read again whether or not the transcripts were.
+    expect(hydrateKeeperToolApprovals).toHaveBeenCalledTimes(1)
     expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
     expect(requestNamespaceTruthNow).toHaveBeenCalledTimes(1)
 
@@ -682,6 +689,17 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined)
+  })
+
+  it('reads the held tool calls again when the server says the waits changed', async () => {
+    // #52954: a wait that ends with its turn sends nothing on the chat stream,
+    // so an open chat kept a card nobody could answer until it was reopened.
+    const { sseStore } = await loadSseStore()
+
+    sseStore.routeServerPushEvent({ type: 'keeper_tool_approval_waits_changed' })
+    await flushAsyncWork()
+
+    expect(hydrateKeeperToolApprovals).toHaveBeenCalledTimes(1)
   })
 
   it('delivers every Keeper chat-operation inventory invalidation immediately', async () => {

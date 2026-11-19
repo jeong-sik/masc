@@ -265,20 +265,30 @@ module Theme = struct
     Masc_tui_terminal_palette.snapshot ()
     |> Masc_tui_terminal_palette.snapshot_palette
     |> Masc_tui_theme.sidebar_selection
-  let border_focus = Masc_tui_theme.border_focus
+  (* A focused card's border, the border.focused token. RFC
+     tui-one-screen-grammar section 7.3 gives status.info to "under way" and
+     to focus, so it is [info] and goes through the same lift: a raw bright
+     cyan reads under 4.5:1 in 11 of the 53 bundled themes. *)
+  let border_focus () = (resolved ()).info
 
   let recede () = (resolved ()).recede
 
-  let ramp_on surface ramp ~t =
-    let palette =
-      Masc_tui_terminal_palette.snapshot ()
-      |> Masc_tui_terminal_palette.snapshot_palette
-    in
-    Masc_tui_theme.ramp_readable ~surface palette ramp ~t
+  (* What a picture draws its colours with on the page: the process's colour
+     depth and the palette the terminal reported. *)
+  let paint () =
+    { Masc_tui_theme.depth = Masc_tui_theme.color_depth ()
+    ; surface = Masc_tui_theme.Page
+    ; palette =
+        Masc_tui_terminal_palette.snapshot ()
+        |> Masc_tui_terminal_palette.snapshot_palette
+    }
 
-  let ramp ramp ~t = ramp_on Masc_tui_theme.Page ramp ~t
-  let pressure ~t = ramp Masc_tui_theme.Pressure ~t
-  let progress ~t = ramp Masc_tui_theme.Progress ~t
+  (* A graph's tint: the colour a dot at a height share takes on [series]'
+     ramp, on the page. The paint is read once per graph, the colours from the
+     ramp's table. *)
+  let series_tint series =
+    let read = Masc_tui_theme.ramp_reader (paint ()) series in
+    fun position -> read ~position
 
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)
@@ -321,8 +331,6 @@ module Theme = struct
        through their own names rather than borrowing [ok] and [bad]. *)
     let action_probe () = (resolved ()).probe
     let action_message () = (resolved ()).message
-    let pressure ~t = ramp_on Masc_tui_theme.Side_pane Masc_tui_theme.Pressure ~t
-    let progress ~t = ramp_on Masc_tui_theme.Side_pane Masc_tui_theme.Progress ~t
   end
 
   module Syntax = struct
@@ -838,33 +846,6 @@ let ctx_color ratio =
   | Masc_tui_observation_layout.Danger -> Theme.bad ()
   | Masc_tui_observation_layout.Pressure -> Theme.warn ()
   | Masc_tui_observation_layout.Quiet -> Theme.muted ()
-
-(** Format context ratio as a visual bar *)
-let ctx_bar ratio width =
-  let width = Masc_tui_layout.nonnegative_width width in
-  let visible_ratio =
-    Float.of_int (Masc_tui_observation_layout.percentage_tenths ratio) /. 1000.0
-  in
-  let filled = int_of_float (visible_ratio *. float_of_int width) in
-  let filled = max 0 (min width filled) in
-  let empty = width - filled in
-  let filled_part =
-    if filled <= 0 then ""
-    else
-      String.concat ""
-        (List.init filled (fun index ->
-           let t = float_of_int (index + 1) /. float_of_int (max 1 width) in
-           Theme.pressure ~t ^ "\xe2\x96\xa0"))
-      ^ Ansi.reset
-  in
-  let empty_part =
-    if empty <= 0 then ""
-    else
-      Theme.recede ()
-      ^ String.concat "" (List.init empty (fun _ -> "\xc2\xb7"))
-      ^ Ansi.reset
-  in
-  filled_part ^ empty_part
 
 (* The framed family keeps the full border box. Modals (palette, help) and
    side-by-side panes still need it: a border is what separates an overlay

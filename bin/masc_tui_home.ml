@@ -107,14 +107,14 @@ let decision_rows_of_state (state : state) =
       | Some _ | None -> unread
     in
     match notes with
-    | [] ->
-        let count =
-          List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
-        in
-        if count = 0 then []
-        else [Home_approvals, Printf.sprintf (if state.ui_language = Lang_ko then
-            "승인·질문 %d건 · 전체 보기"
-          else "Approvals and questions: %d need you · all requests") count]
+    | [] -> (
+        (* The decisions card's edge counts the requests listed above this
+           row (decision_count_of_state), so the row is the way to the whole
+           list and does not count them a second time. *)
+        match approval_rows, questions with
+        | [], [] -> []
+        | _ :: _, _ | [], _ :: _ ->
+            [Home_approvals, text "승인·질문 전체 보기" "All approvals and questions"])
     | _ :: _ -> [Home_approvals, text "승인·질문: " "Approvals and questions: " ^ String.concat "; " notes]
   in
   let goals = match state.goals_to_confirm with
@@ -128,6 +128,29 @@ let decision_rows_of_state (state : state) =
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
   ordered_decision_rows (approval_rows @ questions @ goals @ approvals)
+
+type decision_count =
+  | Every_source_read of int
+  | Some_source_unread of int
+
+(* The decisions the card lists: the request rows, not the row that opens the
+   whole list or a row that says a source was not read. While a source is
+   unread its requests are missing, so the count is a lower bound. *)
+let decision_count_of_state state decisions =
+  let is_request (action, _) =
+    match action with
+    | Home_request _ -> true
+    | Home_approvals | Home_agenda | Home_resume _ | Home_read_last _
+    | Home_choose_keeper | Home_create_keeper | Home_operator_action _ -> false
+  in
+  let requests = List.length (List.filter is_request decisions) in
+  let goals_read =
+    match state.goals_to_confirm with
+    | Masc_tui_agenda.Read _ -> true
+    | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read_failed _ -> false
+  in
+  if approvals_reading_current state && goals_read then Every_source_read requests
+  else Some_source_unread requests
 
 let clear_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
@@ -346,6 +369,7 @@ let notice_lines_of_state state =
 
 type prepared = {
   decisions : (home_action * string) list;
+  decision_count : decision_count;
   continuation : (home_action * string) list;
   operator_rows : (home_action * string) list;
   selected : home_action option;
@@ -372,13 +396,15 @@ let prepare (state : state) =
          | Some _ as action -> action
          | None -> (match find operator_rows with Some _ as action -> action | None -> find continuation))
   in
-  { decisions; continuation; operator_rows; selected;
+  { decisions; decision_count = decision_count_of_state state decisions;
+    continuation; operator_rows; selected;
     selection_changed = Option.is_some state.home_selected && Option.is_none selected;
     notices = notice_lines_of_state state;
     help_hint_shown = state.help_hint_shown;
     initial_ready = initial_reading_ready state selected }
 
 let home_decision_rows prepared = prepared.decisions
+let home_decision_count prepared = prepared.decision_count
 let home_continue_rows prepared = prepared.continuation
 let home_operator_rows prepared = prepared.operator_rows
 let home_selected_action prepared = prepared.selected
@@ -390,8 +416,12 @@ type body = {
   hb_selection_changed : bool; hb_rows : (home_action * string) list;
   hb_first : int; hb_total : int; hb_spare : int;
 }
+(* The rows the list draws and the move keys walk, in one order. *)
+let destinations prepared =
+  prepared.decisions @ prepared.operator_rows @ prepared.continuation
+
 let home_body prepared ~scroll ~budget =
-  let destinations = prepared.decisions @ prepared.operator_rows @ prepared.continuation in
+  let destinations = destinations prepared in
   let budget = max 0 budget in
   let reserve = if destinations = [] then 0 else min 1 budget in
   let extra = max 0 (budget - reserve) in
@@ -416,15 +446,24 @@ let home_body prepared ~scroll ~budget =
    hb_rows=List.drop first destinations |> List.take height;
    hb_first=first;hb_total;hb_spare=room-height}
 
-let home_step state ~backwards =
+(* Only j and k moved this list: it had no row list, so PgDn, PgUp, Home and
+   End reached no handler and did nothing (RFC tui-one-screen-grammar §3.1).
+   A selection the list no longer holds starts again from the first row, or
+   from the last for End. *)
+let home_move state (move : Masc_tui_scroll.Cursor_move.t) =
   let prepared = prepare state in
-  let actions = List.map fst (prepared.decisions @ prepared.operator_rows @ prepared.continuation) in
-  let current = prepared.selected in
+  let actions = List.map fst (destinations prepared) in
+  let count = List.length actions in
   let index =
-    match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with
-    | None -> 0
-    | Some index ->
-        if backwards then max 0 (index - 1)
-        else min (List.length actions - 1) (index + 1)
+    match
+      List.find_index
+        (fun action -> Option.equal equal_home_action (Some action) prepared.selected)
+        actions
+    with
+    | Some index -> Masc_tui_scroll.cursor_apply ~count move index
+    | None ->
+        (match move with
+         | To_end -> Masc_tui_scroll.cursor_last ~count
+         | Line_down | Line_up | Page_down _ | Page_up _ | To_top -> 0)
   in
   state.home_selected <- List.nth_opt actions index

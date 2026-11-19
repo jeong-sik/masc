@@ -7,7 +7,7 @@ updated: 2026-09-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0356", "0380", "event-queue-admit-all-ready", "0362", "0445"]
+related: ["0356", "0380", "event-queue-admit-all-ready", "0445"]
 implementation_prs: []
 ---
 
@@ -21,7 +21,7 @@ implementation_prs: []
 - RFC-0356 (approval owns the effect) 을 **확장**한다. 승인 페이로드가 durable 하다는 전제 위에 `approval_progress` 단계를 얹는다. Held 승인이 부팅 뒤 재개될 수 있는 근거가 0356 의 저장 페이로드다.
 - RFC-0380 (queue age needs the holder cycle) 을 **좁힌다**. 0380 은 도는 keeper 의 stale 판정을 다뤘다. 이 RFC 는 멈춘 keeper 의 행에 `held` 상태와 다음 행동을 붙여, 그 행이 `operator_action_required` 의 stale 로 오르지 않게 한다.
 - RFC-event-queue-admit-all-ready 를 **확장**한다. 그 RFC 는 같은 `schedule_id` 의 occurrence 를 턴 컨텍스트에서 한 행으로 투영한다. 이 RFC 는 멈춘 manual keeper 에게는 occurrence 를 만들지 않는다. 도는 keeper 에는 그 규칙이 그대로 적용된다.
-- RFC-0362 (goal owner and intake contract) 의 "책임자 없는 작업은 아무도 안 한다" 를 durable demand 에 **확장**한다. 대기 항목마다 `next_actor` 를 붙인다.
+- 처리할 주체가 다음 행동을 알 수 있도록 durable demand 항목마다 `next_actor` 를 붙인다.
 
 ## 1. 배경 (실측)
 

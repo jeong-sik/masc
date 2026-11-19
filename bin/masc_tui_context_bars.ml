@@ -134,17 +134,28 @@ let wrap ~width text =
     match List.rev !lines with [] -> [ "" ] | wrapped -> wrapped
   end
 
-let ratio_bar ~width ~numerator ~denominator =
+(* The fill walks the meter's ramp (RFC tui-one-screen-grammar section 7.3):
+   a declared limit by each cell's place against the limit, a series by its
+   hue from deep to bright. *)
+let ratio_bar ~width ~numerator ~denominator ~scale =
   let filled = fill_cells ~width ~numerator ~denominator in
-  Sgr.cyan ^ repeat bar_full filled ^ Sgr.reset ^ Sgr.dim
-  ^ repeat bar_light (max 0 (width - filled))
-  ^ Sgr.reset
+  let fill =
+    Masc_tui_chart.meter_fill_run ~scale ~width ~value:numerator
+      ~max_value:denominator ~reset:Sgr.reset
+      (List.init (max 0 filled) (fun _ -> bar_full))
+  in
+  fill ^ Sgr.dim ^ repeat bar_light (max 0 (width - filled)) ^ Sgr.reset
 
-let reach_bar ~width ~transmitted ~total ~sent_style =
+(* The kept atoms are a share of the history, not a use of a limit; the
+   caller names the series their run walks. *)
+let reach_bar ~width ~transmitted ~total ~scale =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
   Sgr.dim
   ^ repeat bar_light (max 0 (width - sent))
-  ^ Sgr.reset ^ Sgr.bold ^ sent_style ^ repeat bar_full sent ^ Sgr.reset
+  ^ Sgr.reset
+  ^ Masc_tui_chart.meter_fill_run ~scale ~width ~value:transmitted ~max_value:total
+      ~reset:Sgr.reset
+      (List.init (max 0 sent) (fun _ -> bar_full))
 
 let reach_pointer ~label:pointer_label ~width ~transmitted ~total =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in

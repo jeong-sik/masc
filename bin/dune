@@ -346,7 +346,7 @@
  (name masc_tui_context_bars)
  (wrapped false)
  (modules masc_tui_context_bars)
- (libraries masc_tui_theme))
+ (libraries masc_tui_chart masc_tui_theme))
 
 (library
  (name masc_tui_chart)
@@ -354,13 +354,28 @@
  (modules masc_tui_chart)
  (libraries masc_tui_theme masc_tui_message_layout zarith))
 
+;; Braille cells and graphs (RFC tui-one-screen-grammar 5.6), apart from the
+;; chart's bars so the graph rules and their sample type stand on their own.
+(library
+ (name masc_tui_braille)
+ (wrapped false)
+ (modules masc_tui_braille)
+ (libraries masc_tui_message_layout masc_tui_theme zarith))
+
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
 (library
  (name masc_tui_usage_trend)
  (wrapped false)
  (modules masc_tui_usage_trend)
- (libraries masc masc_tui_chart masc_tui_message_layout unix))
+ (libraries
+  masc
+  masc_tui_ansi
+  masc_tui_braille
+  masc_tui_chart
+  masc_tui_message_layout
+  masc_tui_theme
+  unix))
 
 ;; Usage's Calls section: the tool-call series of one window, kept to the
 ;; buckets the window draws when its answer arrives.
@@ -372,9 +387,11 @@
   masc
   masc_tui_value
   masc_tui_ansi
+  masc_tui_braille
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_table
+  masc_tui_theme
   unix))
 
 (library
@@ -725,7 +742,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_transcript masc_tui_keeper_chat_activity_projection)
  (private_modules masc_tui_keeper_chat_activity_projection)
- (libraries masc_string_util masc.tool_types masc.runtime
+ (libraries masc_tui_value masc_string_util masc.tool_types masc.runtime
   masc.keeper_chat_operations
   masc
   masc.agent_core
@@ -740,6 +757,13 @@
  (name masc_tui_scroll)
  (wrapped false)
  (modules masc_tui_scroll))
+
+; The rows a selected row's detail takes beside, above or under its list
+; (RFC tui-one-screen-grammar section 8).
+(library
+ (name masc_tui_detail_height)
+ (wrapped false)
+ (modules masc_tui_detail_height))
 
 ; The choose-one-of-N list the pickers share: cursor, typed filter, window.
 (library
@@ -774,7 +798,7 @@
  (name masc_tui_card)
  (wrapped false)
  (modules masc_tui_card)
- (libraries masc_tui_message_layout masc_tui_theme))
+ (libraries masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (library
  (name masc_tui_overview_cards)
@@ -786,8 +810,9 @@
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
- ; masc_tui_message_layout owns the span ladder both this and [age_text] read.
- (libraries masc masc_tui_message_layout))
+ ; masc_tui_message_layout measures and fits the row's text.
+ ; masc_tui_value owns the running mark and the ladder of a length still going.
+ (libraries masc masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_keys)
@@ -1072,7 +1097,8 @@
  (private_modules masc_tui_grapheme_segmentation)
  ; masc_tui_frame for the margin the chat composer's caret and the chat
  ; pane's width gate count from.
- (libraries masc_string_util masc_tui_frame uucp uuseg))
+ ; masc_tui_value for the ladder of a length that is still going.
+ (libraries masc_string_util masc_tui_frame masc_tui_value uucp uuseg))
 
 (library
  (name masc_tui_hint_lines)
@@ -1243,7 +1269,7 @@
  (name masc_tui_tool_table)
  (wrapped false)
  (modules masc_tui_tool_table)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_table))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_say masc_tui_table))
 
 (library
  (name masc_tui_fleet_summary)
@@ -1254,7 +1280,8 @@
  (name masc_tui_fleet_line)
  (wrapped false)
  (modules masc_tui_fleet_line)
- (libraries masc masc_tui_ansi masc_tui_fleet_stream masc_tui_message_layout))
+ (libraries masc masc_tui_ansi masc_tui_fleet_stream masc_tui_message_layout
+  masc_tui_words))
 
 (library
  (name masc_tui_fleet_stream)
@@ -1301,10 +1328,30 @@
  (modules masc_tui_value)
  (libraries unix))
 
+; Zone 4: which waiting notice is drawn (RFC tui-one-screen-grammar §2).
+(library
+ (name masc_tui_notice_order)
+ (wrapped false)
+ (modules masc_tui_notice_order))
+
+; Background reads that keep failing, held apart from the action result.
+(library
+ (name masc_tui_read_failure)
+ (wrapped false)
+ (modules masc_tui_read_failure)
+ (libraries masc_tui_value))
+
 (library
  (name masc_tui_words)
  (wrapped false)
  (modules masc_tui_words))
+
+; Screen text in both languages (RFC tui-one-screen-grammar section 7.1).
+; Depends on nothing, like the words table, so every renderer can use it.
+(library
+ (name masc_tui_say)
+ (wrapped false)
+ (modules masc_tui_say))
 
 (library
  (name masc_tui_alloc_profile)
@@ -1413,19 +1460,20 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc yojson))
+ (libraries masc masc_tui_say yojson))
 
 (library
  (name masc_tui_storage)
  (wrapped false)
  (modules masc_tui_storage)
- (libraries masc))
+ (libraries masc masc_tui_say))
 
 (library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
- (libraries masc masc_tui_theme masc_tui_keeper_age_ladder masc_tui_keeper_list_model))
+ (libraries masc masc_tui_theme masc_tui_keeper_age_ladder masc_tui_keeper_list_model
+  masc_tui_value))
 
 (library
  (name masc_tui_board_kind_mark)
@@ -1601,7 +1649,8 @@
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict))
+ (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict
+  masc_tui_scroll))
 
 (library
  (name masc_tui_keeper_story)
@@ -1644,6 +1693,13 @@
  (wrapped false)
  (modules masc_tui_owed_read))
 
+;; When the next refresh pass may read /health after the probe failed
+;; (RFC tui-one-screen-grammar section 2). Pure; the main loop starts it.
+(library
+ (name masc_tui_refresh_pace)
+ (wrapped false)
+ (modules masc_tui_refresh_pace))
+
 ;; Which Keeper rows, or the whole roster, the TUI owes a read after the
 ;; server says they changed (RFC-0481 section 3.3). Pure; the main loop
 ;; starts the reads.
@@ -1667,7 +1723,7 @@
  (name masc_tui_board_quarantine)
  (wrapped false)
  (modules masc_tui_board_quarantine)
- (libraries masc masc_tui_ansi masc_tui_fetched yojson))
+ (libraries masc_tui_value masc masc_tui_ansi masc_tui_fetched yojson))
 
 (library
  (name masc_tui_fork_guard)
@@ -1903,7 +1959,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc.fs_compat masc_tui_chat_facts masc_tui_keeper_efficiency masc_tui_help masc_tui_owed_read masc_tui_approval_value_reading masc_tui_roster_owed masc_tui_candle masc_tui_chat_row_actions masc_tui_board_publication masc_tui_execute_terminal masc_tui_execute_stream masc_tui_action_notice masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc_tui_system_log_stream masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_preference_writer masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft masc_tui_editor masc_tui_words
+ (libraries masc_tui_value masc_tui_read_failure masc_tui_refresh_pace masc.fs_compat masc_tui_chat_facts masc_tui_keeper_efficiency masc_tui_help masc_tui_owed_read masc_tui_approval_value_reading masc_tui_roster_owed masc_tui_candle masc_tui_chat_row_actions masc_tui_board_publication masc_tui_execute_terminal masc_tui_execute_stream masc_tui_action_notice masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc_tui_system_log_stream masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_preference_writer masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft masc_tui_editor masc_tui_words
    masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_board_reader
@@ -2047,7 +2103,7 @@
  (name masc_tui_keeper_next_run)
  (wrapped false)
  (modules masc_tui_keeper_next_run)
- (libraries
+ (libraries masc_tui_value
   masc
   masc.masc_schedule
   masc.time_codec
@@ -2109,7 +2165,7 @@
  (name masc_tui_keeper_memory_reading)
  (wrapped false)
  (modules masc_tui_keeper_memory_reading)
- (libraries
+ (libraries masc_tui_value
   masc
   masc_tui_types
   masc_tui_theme
@@ -2127,7 +2183,7 @@
  (name masc_tui_keeper_grid)
  (wrapped false)
  (modules masc_tui_keeper_grid)
- (libraries
+ (libraries masc_tui_value
   masc
   masc.config
   masc_tui_keeper_list_model
@@ -2154,6 +2210,7 @@
   masc_tui_keeper_next_run
   masc_tui_keeper_pulse
   masc_tui_message_layout
+  masc_tui_theme
   unix))
 
 (library
@@ -2179,7 +2236,15 @@
  (wrapped false)
  (modules masc_tui_home)
  (libraries masc_tui_credential_preparation masc_tui_types masc_tui_ask_projection masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
-  masc_tui_message_layout masc_tui_config masc.keeper_registry masc))
+  masc_tui_message_layout masc_tui_config masc.keeper_registry masc masc_tui_scroll))
+
+; Which list the move keys walk on the surface on screen (RFC
+; tui-one-screen-grammar section 3.1), outside the executable so a test links it.
+(library
+ (name masc_tui_list_moves)
+ (wrapped false)
+ (modules masc_tui_list_moves)
+ (libraries masc_tui_types masc_tui_home masc_tui_scroll))
 
 (library
  (name masc_tui_surface_navigation)
@@ -2363,6 +2428,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_say
   masc_tui_nested_result
   masc_tui_pick_list
   masc_tui_fetched
@@ -2410,6 +2476,7 @@
   masc_tui_task_flow
   masc
   masc_tui_ansi
+  masc_tui_braille
   masc_tui_card
   masc_tui_chart
   masc_tui_context_inspector
@@ -2559,7 +2626,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_value masc_tui_page_line masc_tui_page_reading masc_tui_nav_trace_log masc_tui_execute_terminal masc_tui_action_notice masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_value masc_tui_read_failure masc_tui_refresh_pace masc_tui_notice_order masc_tui_page_line masc_tui_page_reading masc_tui_nav_trace_log masc_tui_execute_terminal masc_tui_action_notice masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
@@ -2688,11 +2755,12 @@
  (name masc_tui_overview_providers)
  (wrapped false)
  (modules masc_tui_overview_providers)
- (libraries
+ (libraries masc_tui_value
   masc
   masc.runtime
   masc_string_util
   masc_tui_card
+  masc_tui_chart
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme
@@ -2848,7 +2916,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc.masc_candle masc_tui_usage_calls masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
+ (libraries masc_tui_refresh_pace masc.masc_candle masc_tui_usage_calls masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
   masc_tui_code_results
   masc_tui_context_results
   masc_tui_fleet_results
@@ -2916,7 +2984,7 @@
   masc_tui_frame_presenter masc_tui_keeper_chat_projection masc_tui_keys
   masc_tui_message_layout masc_tui_render_prim masc_tui_render_schedule
   masc_tui_rows masc_tui_scroll masc_tui_span masc_tui_table masc_tui_text_block
-  masc_tui_theme masc_tui_types masc_tui_value unix))
+  masc_tui_theme masc_tui_types masc_tui_value unix masc_tui_detail_height))
 
 ;; The real Board request path is linkable by route/transport integration
 ;; scenarios, using the same workspace result and HTTP owners as the UI.
@@ -2968,9 +3036,11 @@
  (package masc)
  (libraries
   masc_tui_memory_lineage
+  masc_tui_read_failure
+  masc_tui_refresh_pace
   ; render_work compares the planning and tree measures.
   masc.goal_measure
-  threads masc_tui_terminal_out masc_tui_activity_notice masc_tui_alloc_profile masc_tui_nav_trace_log masc_tui_owed_read masc_tui_lane_read_decision masc_tui_roster_owed masc_tui_image_requests masc_tui_board_preview_work masc_tui_execute_terminal masc_tui_execute_stream masc_tui_execute_result masc_tui_render_repositories masc_tui_chat_row_actions masc_tui_fleet_stream masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_reading masc_tui_board_reader masc_tui_artifact_checks masc_tui_resource_document masc_tui_resource_catalog masc_tui_system_logs masc_tui_system_log_stream masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_followup_observation masc_tui_original_task_read masc_tui_task_dispatch masc_tui_credential_preparation masc_tui_preference_writer masc_tui_local_read_observation masc_tui_chat_call_reader masc_tui_task_document_observation masc_tui_task_document masc_tui_detail_reading masc_tui_runtime_config_snapshot masc_tui_preparation_details masc_tui_attachment_action masc_tui_child_content masc_tui_editor_wire masc.skill_config masc_tui_native_tasks masc_tui_message_input masc_tui_play_room masc_tui_collab masc_tui_memory_usage masc_tui_keeper_turns masc_tui_approvals_window masc_tui_page_line masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation masc_tui_code_draft
+  threads masc_tui_terminal_out masc_tui_activity_notice masc_tui_alloc_profile masc_tui_nav_trace_log masc_tui_owed_read masc_tui_lane_read_decision masc_tui_roster_owed masc_tui_image_requests masc_tui_board_preview_work masc_tui_execute_terminal masc_tui_execute_stream masc_tui_execute_result masc_tui_render_repositories masc_tui_chat_row_actions masc_tui_fleet_stream masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_reading masc_tui_board_reader masc_tui_artifact_checks masc_tui_resource_document masc_tui_resource_catalog masc_tui_system_logs masc_tui_system_log_stream masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_followup_observation masc_tui_original_task_read masc_tui_task_dispatch masc_tui_credential_preparation masc_tui_preference_writer masc_tui_local_read_observation masc_tui_chat_call_reader masc_tui_task_document_observation masc_tui_task_document masc_tui_detail_reading masc_tui_runtime_config_snapshot masc_tui_preparation_details masc_tui_attachment_action masc_tui_child_content masc_tui_editor_wire masc.skill_config masc_tui_native_tasks masc_tui_message_input masc_tui_play_room masc_tui_collab masc_tui_memory_usage masc_tui_keeper_turns masc_tui_approvals_window masc_tui_page_line masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_list_moves masc_tui_detail_height masc_tui_approvals_model masc_tui_surface_navigation masc_tui_code_draft
    masc_tui_board_selection
   masc_tui_palette
   masc_tui_hint_lines
@@ -3572,10 +3642,12 @@
  (wrapped false)
  (modules masc_tui_presented))
 
+; masc_tui_value so a notice shown for a while notes when it leaves.
 (library
  (name masc_tui_action_notice)
  (wrapped false)
- (modules masc_tui_action_notice))
+ (modules masc_tui_action_notice)
+ (libraries masc_tui_value))
 
 (library
  (name masc_tui_input_reader)

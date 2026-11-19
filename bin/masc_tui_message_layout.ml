@@ -480,8 +480,7 @@ let split_at_cells text cells =
 (* What a cut leaves behind in place of the text it dropped.
 
    One mark for every cut -- the tail, the middle, and the composer's head in
-   this module, and the roster marquee in {!Masc_tui_roster_pane}, which is the
-   fourth and the only one that spends two at once.
+   this module, and the cuts other modules make with it.
    The middle cut spelled it "…" and the other two "~", and a single frame
    drew both: a roster name cut to [some…-name] sat beside a notice cut to
    [http://127.0.0.1:~], so the reader had to learn two spellings of one fact.
@@ -497,10 +496,9 @@ let split_at_cells text cells =
    The cell cost is derived rather than written as 1, so each budget subtracts
    what the mark actually spends. That is one cell today, the same number the
    literals said. A wider mark would not be safe by derivation alone: where a
-   column is narrower than the mark, each of the four floors its budget at zero
-   and draws the mark anyway rather than cutting it, so the mark would overrun.
-   The marquee would overrun first, since it spends two. A two-cell mark needs
-   those four sites decided, not just this value changed. *)
+   column is narrower than the mark, each cut floors its budget at zero and
+   draws the mark anyway rather than cutting it, so the mark would overrun. A
+   two-cell mark needs those sites decided, not just this value changed. *)
 (* A count and the noun it counts, in the number the count asks for. Four
    modules each wrote this as a local [plural], and thirty-odd rows wrote
    "%d lines" with no plural at all, so a single draft line read "1 lines". *)
@@ -2798,4 +2796,5 @@ let age_text ~now ~since =
   (* A clock that moved backwards, or a stamp that is not a number, says
      nothing rather than an age. The row that shows this has no way to draw
      "-4s" a reader could use. *)
-  if is_readable_span seconds then Some (span_text seconds) else None
+  if is_readable_span seconds then Some (Masc_tui_value.Ongoing.since ~now since)
+  else None

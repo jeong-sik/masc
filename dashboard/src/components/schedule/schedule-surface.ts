@@ -51,7 +51,9 @@ type ScheduleView = 'calendar' | 'list'
 type ExactScheduleState =
   | { kind: 'idle' }
   | { kind: 'loading'; scheduleId: string }
-  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup }
+  // `rereadFailure` is why the newest read of this schedule did not replace
+  // `lookup`: the answer on screen is then older than the projection beside it.
+  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup; rereadFailure: string | null }
   | { kind: 'failed'; scheduleId: string; reason: string }
 
 function countLabel(count: number | null): string {
@@ -146,25 +148,40 @@ export function ScheduleSurface() {
       || projection?.state !== 'available'
       || inPageRequest !== null
     ) {
-      setExactSchedule({ kind: 'idle' })
+      // Keeping the same state object leaves a projection that selects nothing
+      // without a second draw of the surface.
+      setExactSchedule(current => current.kind === 'idle' ? current : { kind: 'idle' })
       return
     }
     const controller = new AbortController()
-    setExactSchedule({ kind: 'loading', scheduleId: selectedScheduleId })
+    // Every projection the observation publishes is a newer read of the
+    // ledger, and a schedule outside its page is not in it: that schedule is
+    // read again with each one. Its last answer stays on screen until the new
+    // one arrives.
+    setExactSchedule(current =>
+      current.kind === 'resolved' && current.lookup.scheduleId === selectedScheduleId
+        ? current
+        : { kind: 'loading', scheduleId: selectedScheduleId })
     void fetchDashboardScheduledAutomationLookup(selectedScheduleId, {
       signal: controller.signal,
     })
-      .then(lookup => { setExactSchedule({ kind: 'resolved', lookup }) })
+      .then(lookup => {
+        if (controller.signal.aborted) return
+        setExactSchedule({ kind: 'resolved', lookup, rereadFailure: null })
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setExactSchedule({
-          kind: 'failed',
-          scheduleId: selectedScheduleId,
-          reason: error instanceof Error ? error.message : String(error),
-        })
+        const reason = error instanceof Error ? error.message : String(error)
+        // A read that fails after this schedule was answered keeps that answer
+        // open and says it was not read again; the next projection reads it
+        // once more. Only a schedule never answered has nothing to show.
+        setExactSchedule(current =>
+          current.kind === 'resolved' && current.lookup.scheduleId === selectedScheduleId
+            ? { ...current, rereadFailure: reason }
+            : { kind: 'failed', scheduleId: selectedScheduleId, reason })
       })
     return () => { controller.abort() }
-  }, [selectedScheduleId, projection?.state, inPageRequest !== null])
+  }, [selectedScheduleId, projection, inPageRequest !== null])
 
   function selectSchedule(scheduleId: string | null) {
     const params = { ...route.value.params }
@@ -224,8 +241,11 @@ export function ScheduleSurface() {
     if (
       exactSchedule.kind !== 'resolved'
       || exactSchedule.lookup.scheduleId !== selectedScheduleId
-      || exactSchedule.lookup.status === 'found'
     ) return null
+    if (exactSchedule.rereadFailure !== null) {
+      return `최신 상태를 다시 읽지 못했습니다 · ${exactSchedule.rereadFailure}`
+    }
+    if (exactSchedule.lookup.status === 'found') return null
     return exactSchedule.lookup.status === 'not_found'
       ? 'schedule store에서 정확한 예약을 찾지 못했습니다.'
       : exactSchedule.lookup.reason
@@ -339,7 +359,9 @@ export function ScheduleSurface() {
               onClick=${() => switchView('list')}
             >≡ 목록</button>
           </div>
-          <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
+          ${automation
+            ? html`<${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />`
+            : null}
           <${ActionButton}
             variant="danger"
             size="sm"
@@ -356,9 +378,14 @@ export function ScheduleSurface() {
           ? null
           : loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
-          : view === 'calendar'
+          // Without a projection nothing was read. A calendar drawn from no
+          // rows would call the coming days empty (as the cadence counts above
+          // would read zero), so that case goes to the panel, which says there
+          // is no projection.
+          : view === 'calendar' && automation
             ? html`<${ScheduleCalendar}
                 requests=${requests}
+                activeCount=${automation.fsm.active_count}
                 nowMs=${Date.now()}
                 cadenceFilter=${cadenceFilter}
                 onOpen=${selectSchedule}

@@ -122,6 +122,7 @@ let usage_limit (failure : Runtime_verification.failure) =
   match failure with
   | Runtime_verification.(Rate_limited _ | Quota_exhausted _) -> true
   | Runtime_verification.(Unavailable _ | Provider_overloaded _ | Provider_auth_refused _
+    | Key_refused _
     | Provider_unreachable _ | Model_not_found _ | Provider_rejected _ | Timed_out
     | Tool_not_called | Tool_result_not_consumed | Empty_response | Model_unreported) -> false
 type probe = Probe_verified | Probe_usage_limited of usage_limited

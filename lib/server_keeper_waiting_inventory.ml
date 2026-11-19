@@ -1265,6 +1265,12 @@ let source_next_actions rows =
     source, `List (List.map (fun action -> `String action) (List.rev rev_actions)))
 ;;
 
+let earliest field rows =
+  rows
+  |> List.filter_map field
+  |> List.fold_left (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts)) None
+;;
+
 let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
   let paused =
     match Keeper_owner_registry.get ~base_path ~keeper_name with
@@ -1273,16 +1279,8 @@ let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
         (Keeper_owner.projection owner).meta
   in
   let state = keeper_state ~busy rows in
-  let since =
-    rows
-    |> List.filter_map (fun row -> row.since)
-    |> List.fold_left (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts)) None
-  in
-  let due_at =
-    rows
-    |> List.filter_map (fun row -> row.due_at)
-    |> List.fold_left (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts)) None
-  in
+  let since = earliest (fun row -> row.since) rows in
+  let due_at = earliest (fun row -> row.due_at) rows in
   `Assoc
     [ "keeper_name", `String keeper_name
     ; "paused", Option.fold ~none:`Null ~some:(fun value -> `Bool value) paused
@@ -1572,7 +1570,51 @@ let keeper_json_by_name_snapshot snapshot =
     snapshot.per_keeper
 ;;
 
-let keeper_json_by_name config =
+(* The turns route's waiting for one Keeper: what the TUI's Keeper list and
+   acting pane draw, and nothing a read's own clock moves. The rows collapse to
+   the first row of each (source, wake producer) pair, in inventory order, and
+   [sources] keeps every row's count. Hundreds of pending queue events are one
+   head and one count, so the body grows with the kinds of waiting, not with
+   the queue. [queue_residence] and [current_execution] count from the read's
+   own clock, so they stay on the dashboard projection. *)
+let waiting_head_json (row : waiting_row) =
+  `Assoc
+    [ "source", `String (source_to_string row.source)
+    ; "waiting_on", `String row.waiting_on
+    ; "what", `String row.what
+    ; "wake_producer", `String (wake_producer_to_string row.wake_producer)
+    ; "since", Json_util.float_opt_to_json row.since
+    ; "due_at", Json_util.float_opt_to_json row.due_at
+    ; "next_action", `String row.next_action
+    ]
+;;
+
+let waiting_heads rows =
+  List.fold_left
+    (fun heads row ->
+      if List.exists
+           (fun (head : waiting_row) ->
+             head.source = row.source && head.wake_producer = row.wake_producer)
+           heads
+      then heads
+      else row :: heads)
+    [] rows
+  |> List.rev
+;;
+
+let keeper_turns_json keeper_name ~busy rows =
+  `Assoc
+    [ "keeper_name", `String keeper_name
+    ; "state", `String (keeper_state_to_string (keeper_state ~busy rows))
+    ; "waiting_count", `Int (List.length rows)
+    ; "sources", `Assoc (source_counts rows)
+    ; "since", Json_util.float_opt_to_json (earliest (fun row -> row.since) rows)
+    ; "due_at", Json_util.float_opt_to_json (earliest (fun row -> row.due_at) rows)
+    ; "waiting_heads", `List (List.map waiting_head_json (waiting_heads rows))
+    ]
+;;
+
+let keeper_turns_json_by_name config =
   let snapshot =
     read_inventory_snapshot
       ~read_pending:Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
@@ -1596,7 +1638,12 @@ let keeper_json_by_name config =
     | Ok (_, (Uninitialized | Primary_ledger)) | Error _ -> []
   in
   match fleet_read_errors @ recovery_errors with
-  | [] -> Ok (keeper_json_by_name_snapshot snapshot)
+  | [] ->
+    Ok
+      (List.map
+         (fun (keeper_name, busy, _queue_residence, rows) ->
+           keeper_name, keeper_turns_json keeper_name ~busy rows)
+         snapshot.per_keeper)
   | errors -> Error (List.map waiting_row_json errors)
 ;;
 
@@ -1861,4 +1908,6 @@ module For_testing = struct
 
 
   let rows_for_queue_snapshot = rows_for_queue_snapshot
+
+  let keeper_turns_json = keeper_turns_json
 end

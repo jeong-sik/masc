@@ -13,6 +13,14 @@ type stage =
       (** The turn the wake started finished, with the turn's own disposition. *)
   | Consumed
   | Completed
+  | Receipt_is_the_record
+      (** Dispatch finished the occurrence in one step: a delivered
+          tool-result receipt or a handed-over Lane action. That receipt is
+          its whole record; no queue or reaction evidence follows it
+          ([Schedule_occurrence_consumption.Receipt_is_the_record]). For a
+          Lane action it says the action was handed to its worker, not that
+          the action succeeded; a failure inside the worker does not show
+          here. *)
   | Cancelled of string option
   | Settling of string
       (** The terminal result is recorded but not yet projected into the
@@ -32,6 +40,10 @@ val decode : Yojson.Safe.t -> (t, string) result
     the row's instance, schedule and exact dispatch stimulus. Queue evidence
     also binds the wake's due time and payload digest. A queue or reaction
     [projection_status] outside [Schedule_contract_values] returns [Error].
+    The dispatch receipt in [last_wake.detail] is read with
+    [Schedule_dispatch_receipt.dispatch_receipt_of_detail]. A receipt that
+    decoder refuses is [Unknown] for its row alone, so one newer receipt kind
+    does not drop the page; an identity mismatch stays [Error].
     A supported receipt without an exact stimulus stays
     [Unknown] after checking the schedule and Keeper target; malformed or
     contradictory identities still return [Error].

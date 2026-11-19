@@ -20,31 +20,10 @@ let filesystem action =
   try Eio_guard.run_in_systhread ~label:"setup-login-account-storage" action with
   | Unix.Unix_error _ | Sys_error _ -> Error "The selected private account directory is unavailable."
 
-let directory ~private_ path =
-  let stat = Unix.lstat path in
-  if stat.st_kind = Unix.S_DIR && stat.st_uid = Unix.geteuid ()
-     && stat.st_perm land (if private_ then 0o077 else 0o022) = 0
-  then Ok () else Error "The selected account path must be an owned, protected directory."
+let directory = Runtime_account_home_folder.directory
 
-let child parent leaf =
-  let path = Filename.concat parent leaf in
-  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  let* () = directory ~private_:true path in
-  let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
-  Ok path
-
-(* Each directory on the way is made from the spelling of the layout, so the
-   home made here is the home every later reader computes. *)
-let new_home ~runtime_root ~account_id ~client = filesystem (fun () ->
-  let* home = Runtime_account_home_layout.home ~runtime_root client ~account_id in
-  let client_root = Filename.dirname home in
-  let clients = Filename.dirname client_root in
-  let root = Filename.dirname clients in
-  let* () = directory ~private_:false root in
-  let* (_ : string) = child root (Filename.basename clients) in
-  let* (_ : string) = child clients (Filename.basename client_root) in
-  child client_root account_id)
+let new_home ~runtime_root ~account_id ~client =
+  filesystem (fun () -> Runtime_account_home_folder.make ~runtime_root ~account_id ~client)
 
 let account_home_path ~runtime_root ~account_id ~client =
   let* native = match client with

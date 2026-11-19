@@ -5,7 +5,7 @@ status: Draft
 created: 2026-11-17
 updated: 2026-11-17
 author: claude
-related: ["0387", "0267", "0444", "0362", "goal-candle-ledger", "tui-one-screen-grammar"]
+related: ["0387", "0267", "0444", "goal-candle-ledger", "tui-one-screen-grammar"]
 ---
 
 # Goal 의 성공 조건을 타입 있는 측정으로 적고, 목록과 상세가 그 값을 읽는다
@@ -128,7 +128,7 @@ val reach : paired -> reach
 - 종류가 셋인 이유: OKR 도구들이 쓰는 핵심 결과 종류(수, 백분율, 늘림·줄임·유지, 이정표·예/아니오)를
   세 모양으로 접으면 이 셋이 된다(§10). 늘림과 줄임은 방향 하나로 충분하다. `유지` 는
   `At_least`/`At_most` 한 쪽으로 적힌다. 시작값(baseline)은 넣지 않는다. 지금 Goal 32개 가운데
-  시작값을 쓰는 화면이 없고, 넣을 소비자가 생기면 그때 넣는다(RFC-0362 §3).
+  시작값을 쓰는 화면이 없고, 넣을 소비자가 생기면 그때 넣는다.
 
 ### 2.1 바깥에서 들어오는 모양
 

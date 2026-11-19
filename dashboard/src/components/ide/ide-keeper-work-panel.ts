@@ -24,6 +24,7 @@ import { buildCompositeByKeeperKey } from '../../composite-signals'
 import { useFleetComposite } from '../../lib/use-fleet-composite'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
+import { goalMeasureText, MEASURE_UNREADABLE } from '../../api/goal-measure'
 
 interface IdeKeeperWorkPanelProps {
   readonly keeperName: string
@@ -193,8 +194,7 @@ function GoalProgressCard(
       </div>
       <div class="ide-keeper-work-goal-meta">
         <span>${taskCountLabel}</span>
-        ${goal.metric ? html`<span title=${goal.metric}>${goal.metric}</span>` : null}
-        ${goal.target_value ? html`<span title=${goal.target_value}>target ${goal.target_value}</span>` : null}
+        ${goal.measure !== undefined ? html`<span title=${goal.procedure ?? ''}>target ${goal.measure ? goalMeasureText(goal.measure) : MEASURE_UNREADABLE}</span>` : null}
       </div>
       ${GoalRouteLinks(goal.id, taskId)}
     </div>

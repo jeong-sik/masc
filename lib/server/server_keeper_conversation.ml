@@ -29,6 +29,7 @@ type conversation =
 
 type failure =
   | Not_signed_in
+  | Key_refused
   | No_quota
   | Silent
   | Not_started
@@ -87,6 +88,7 @@ let failed_kind = "failed"
 
 let failure_to_string = function
   | Not_signed_in -> "not_signed_in"
+  | Key_refused -> "key_refused"
   | No_quota -> "no_quota"
   | Silent -> "silent"
   | Not_started -> "not_started"
@@ -94,14 +96,16 @@ let failure_to_string = function
   | No_answer -> "no_answer"
 ;;
 
-let failures = [ Not_signed_in; No_quota; Silent; Not_started; Configuration_refused; No_answer ]
+let failures =
+  [ Not_signed_in; Key_refused; No_quota; Silent; Not_started; Configuration_refused; No_answer ]
+;;
 
 (* Whether the client of a failed turn was started with the message. A client
    that did not start and a configuration refused before the start gave the
    message to no session. *)
 let reached_client = function
   | Not_started | Configuration_refused -> false
-  | Not_signed_in | No_quota | Silent | No_answer -> true
+  | Not_signed_in | Key_refused | No_quota | Silent | No_answer -> true
 ;;
 
 let failure_of_string name =
@@ -572,7 +576,7 @@ let start root keeper_id provider_account_id ~deleted ~draw ~now_ms ~one_call_of
     match current ~deleted (of_keeper keeper_id started) with
     | None -> begin_new ()
     | Some followed ->
-      one_call_of followed.provider_account_id ~busy:Account_busy (fun () ->
+      one_call_of followed.provider_account_id ~busy:Account_busy (fun (_ : _) ->
         let* () = settle root followed |> recorded in
         begin_new ()))
 ;;

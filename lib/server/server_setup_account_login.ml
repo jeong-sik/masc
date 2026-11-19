@@ -94,6 +94,8 @@ let runtime_root_of ~base_path = function
        Ok (private_child accounts (Filename.basename root))
      with Unix.Unix_error _ | Sys_error _ -> Error account_failure)
 
+let person_runtime_root person ~base_path = runtime_root_of ~base_path (Person person)
+
 let person_reference_refused =
   "In multi-account mode a login makes a new account, and account_ref is not read."
 
@@ -432,14 +434,54 @@ let trusted_state person =
   | Ok trusted -> Ok (trusted :> Authz_zone.snapshot).Authz_zone.state
   | Error uncertain -> Error (`Service_unavailable, Login_routes.zone_uncertain_message uncertain)
 
-(* The account of the person and the runtime of [binding] on its home. The
+(* One call of an account at a time, a verification or a turn of a Keeper:
+   each starts the official client on the home of the account, and no two
+   clients refresh the credential of one home at once. A call while another
+   runs gets [busy] (issue #50018). An account has one owner, so its id is
+   the key. *)
+let calling = Hashtbl.create 8
+let calling_mutex = Mutex.create ()
+let call_running = "A call of this account is running."
+
+(* The call of an account that is running. Only [one_call_of] makes one, so
+   what takes one runs inside the call of that account. *)
+type in_call = { of_account : Authz_types.Provider_account_id.t }
+
+let one_call_of provider_account_id ~busy f =
+  let key = Authz_types.Provider_account_id.to_string provider_account_id in
+  let claimed = Mutex.protect calling_mutex (fun () ->
+    if Hashtbl.mem calling key then false else (Hashtbl.replace calling key (); true)) in
+  if not claimed then Error busy
+  else Fun.protect (fun () -> f { of_account = provider_account_id }) ~finally:(fun () ->
+    Mutex.protect calling_mutex (fun () -> Hashtbl.remove calling key))
+
+(* The account of the person among the accounts of [state]. An account of
+   another person is answered as one that does not exist (design 4.2: an id
+   grants nothing). *)
+let own_account person (state : Authz_state.t) id =
+  match Authz_provider_account_state.find state.Authz_state.provider_accounts id with
+  | Some account when Authz_types.User_id.equal account.Authz_provider_account_state.owner person.user_id ->
+    Ok account
+  | Some _ | None -> Error (Refused (`Not_found, unknown_account))
+
+(* Asked before the call of an account is taken, so whether a call of
+   another person's account runs is not told. *)
+let owned person id =
+  let* state = trusted_state person
+    |> Result.map_error (fun (status, message) -> Refused (status, message)) in
+  Result.map (fun (_ : Authz_provider_account_state.account) -> ()) (own_account person state id)
+
+(* The account of the call and the runtime of [binding] on its home. The
    record that linked the account says what it runs on. A login account is of
    the integration its login receipt names. A key account is of the
    integration its record names, and its key is the file of the generation the
-   records say (RFC a-persons-api-key-is-their-own-provider-account 3.5). An
-   account of another person is answered as one that does not exist (design
-   4.2: an id grants nothing). *)
-let person_runtime person ~base_path ~provider_account_id:id ~binding =
+   records say (RFC a-persons-api-key-is-their-own-provider-account 3.5).
+
+   HIGH-RISK-UNREVIEWED: it takes the call of the account, so the records of
+   the account and its key file are read inside that call. The files of an
+   account change only inside its call too, so a runtime is never made on a
+   key that a removal or a replacement was taking away. *)
+let person_runtime { of_account = id } person ~base_path ~binding =
   let provider_account_id = Authz_types.Provider_account_id.to_string id in
   let refused result =
     Result.map_error (fun (status, message) -> Refused (status, message)) result in
@@ -448,10 +490,7 @@ let person_runtime person ~base_path ~provider_account_id:id ~binding =
   let setup result = Result.map_error (fun error ->
     Refused (`Bad_request, Server_runtime_setup_actions.error_message error)) result in
   let* state = trusted_state person |> refused in
-  let* account = match Authz_provider_account_state.find state.Authz_state.provider_accounts id with
-    | Some account when Authz_types.User_id.equal account.Authz_provider_account_state.owner person.user_id ->
-      Ok account
-    | Some _ | None -> Error (Refused (`Not_found, unknown_account)) in
+  let* account = own_account person state id in
   let* template = match account.Authz_provider_account_state.kind with
     | Authz_provider_account_state.Key { integration_id; generation = _ } ->
       Ok (Authz_types.Integration_id.to_string integration_id)
@@ -494,23 +533,6 @@ let person_runtime person ~base_path ~provider_account_id:id ~binding =
   let* runtime_id = Authz_types.Runtime_id.of_string runtime.Runtime_instance.id
     |> Result.map_error (fun _ -> Refused (`Bad_request, "This model makes no valid Runtime id.")) in
   Ok { provider_account_id = id; runtime_id; runtime }
-
-(* One call of an account at a time, a verification or a turn of a Keeper:
-   each starts the official client on the home of the account, and no two
-   clients refresh the credential of one home at once. A call while another
-   runs gets [busy] (issue #50018). An account has one owner, so its id is
-   the key. *)
-let calling = Hashtbl.create 8
-let calling_mutex = Mutex.create ()
-let call_running = "A call of this account is running."
-
-let one_call_of provider_account_id ~busy f =
-  let key = Authz_types.Provider_account_id.to_string provider_account_id in
-  let claimed = Mutex.protect calling_mutex (fun () ->
-    if Hashtbl.mem calling key then false else (Hashtbl.replace calling key (); true)) in
-  if not claimed then Error busy
-  else Fun.protect f ~finally:(fun () ->
-    Mutex.protect calling_mutex (fun () -> Hashtbl.remove calling key))
 
 type recorded = Made | Existing
 
@@ -581,12 +603,13 @@ let verify ~person ~base_path ~body request reqd =
       |> Result.map_error (fun message -> `Bad_request, message, None) in
     let* provider_account_id = Authz_types.Provider_account_id.of_string provider_account_id
       |> Result.map_error (fun _ -> `Not_found, unknown_account, None) in
-    let* prepared = person_runtime person ~base_path ~provider_account_id
-        ~binding:(Runtime_account_runtime.Model model)
-      |> Result.map_error runtime_error_answer in
+    let* () = owned person provider_account_id |> Result.map_error runtime_error_answer in
     let* env = Option.to_result (Eio_context.get_env_opt ())
       ~none:(`Service_unavailable, "Verification requires the server process environment.", None) in
-    one_call_of prepared.provider_account_id ~busy:(`Conflict, call_running, None) (fun () ->
+    one_call_of provider_account_id ~busy:(`Conflict, call_running, None) (fun in_call ->
+      let* prepared = person_runtime in_call person ~base_path
+          ~binding:(Runtime_account_runtime.Model model)
+        |> Result.map_error runtime_error_answer in
       let* result = call ~env ~person prepared |> uncoded in
       log_detail result;
       let* runtime = match result.Runtime_verification.failure with

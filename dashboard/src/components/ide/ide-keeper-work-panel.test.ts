@@ -311,8 +311,8 @@ function goalFixture(partial: Partial<Goal> = {}): Goal {
   return {
     id: 'goal-runtime',
     title: 'Runtime goal',
-    metric: 'green CI',
-    target_value: '100%',
+    measure: { kind: 'quantity', unit: '% green CI', direction: 'at_least', target: 100 },
+    procedure: 'Read the share of green CI runs.',
     priority: 1,
     phase: 'executing',
     created_at: '2026-05-13T00:00:00Z',

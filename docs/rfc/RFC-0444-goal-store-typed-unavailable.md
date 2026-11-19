@@ -7,7 +7,7 @@ updated: 2026-09-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0420", "0352", "0362", "0387", "0044"]
+related: ["0420", "0352", "0387", "0044"]
 implementation_prs: []
 ---
 
@@ -27,7 +27,6 @@ implementation_prs: []
 
 - **RFC-0420 을 확장한다.** 0420 은 keeper meta·memory current 두 store 에 대해 "못 읽으면 부팅 거부" 다. 이 RFC 는 store 별 부팅 정책을 `Refuse_boot | Degrade_typed` 두 갈래로 나누고, goal store 를 `Degrade_typed` 로 둔다. 어느 store 가 어느 갈래인지는 §2.4 의 표가 정하고, 부팅 코드는 그 표를 읽을 뿐 스스로 판단하지 않는다. 0420 의 examine/quarantine 분리와 `--accept-store-quarantine` 플래그는 그대로다. 그 플래그는 goal store 에 아무 효과가 없다.
 - **RFC-0352 를 따른다.** goal 은 1급 엔티티이고 옛 shape 를 읽는 코드는 만들지 않는다. 이 RFC 도 마이그레이션·호환 reader 를 만들지 않는다.
-- **RFC-0362 와 겹치지 않는다.** 0362 는 goal 의 owner 와 intake 를 다룬다. store 가 `Unavailable` 이면 intake 도 같은 값을 본다는 것 외에 건드리는 것이 없다.
 - **RFC-0387 을 좁힌다.** 0387 의 verifier 는 `list_goals_result` 로 이미 typed 로 읽는다. 이 RFC 는 그 결과가 `Unavailable` 일 때 verifier 가 무엇을 기록하는지(§2.3 항목 7)를 정한다.
 
 ## 1. 배경 (실측)

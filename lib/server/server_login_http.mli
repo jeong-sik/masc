@@ -75,6 +75,12 @@ val github_callback_path : string
       home under the workspace [base_path] (plan D1-4)
     - [POST /api/v1/setup/accounts/verify], one call of the person's own
       account ({!Server_setup_account_login.verify}, plan D1-6a)
+    - [POST /api/v1/setup/accounts/key], the registration of an API key of
+      the person as a key account ({!Server_key_account.register}, RFC
+      a-persons-api-key-is-their-own-provider-account 3.3)
+    - [DELETE] under [/api/v1/setup/accounts/key/], the removal of a key
+      account of the person ({!Server_key_account.remove}, RFC
+      a-persons-api-key-is-their-own-provider-account 3.6)
     - [GET] and [POST /api/v1/auth/keepers] and
       [POST /api/v1/auth/keepers/assign], the Keepers of the person
       ({!Auth_preview_keeper}, plan D1-5)

@@ -1,13 +1,13 @@
 # RFCs — masc
 
-이 디렉토리는 masc 의 설계 RFC(Request for Comments) 를 보관한다. 새 RFC 를 작성하기 전 본 README 의 §정책 + §Frontmatter 표준 을 읽고 진행한다.
+이 디렉터리는 MASC의 설계 제안과 결정 기록을 보관한다. 현재 개발 규칙은 [헌장](../constitution.xml)과 [기여 가이드](../guides/CONTRIBUTOR-WORKFLOW.ko.md)에서 확인한다.
 
 ## 정책
 
 - **파일명**: 신규 RFC 는 `RFC-<slug>.md` (예: `RFC-keeper-background-wait-tool.md`). slug 는 소문자/숫자/하이픈이다.
 - **삭제 정합성**: RFC 파일을 삭제할 때는 frontmatter 관계, 본문 cross-reference를 같은 변경에서 함께 정리한다.
 - **Multi-phase RFC**: 한 설계를 여러 문서로 나눌 때는 같은 slug prefix를 사용하고 본문에서 현재 main spec을 직접 참조한다.
-- **인덱스 조회**: `python3 scripts/rfc-generate-index.py` 가 frontmatter 로부터 색인 표를 생성해 stdout 에 출력한다 (표는 커밋하지 않는다 — #35498). CI 에서 `--check` 로 frontmatter 정합성과 번호 유일성을 검증한다.
+- **인덱스 조회**: `python3 scripts/rfc-generate-index.py` 가 frontmatter 로부터 색인 표를 생성해 stdout 에 출력한다 (표는 커밋하지 않는다 — #35498). `--check` 로 파일명, RFC 식별자와 번호 중복을 확인한다.
 
 ## Frontmatter 표준 (신규 RFC 부터 강제)
 
@@ -52,11 +52,8 @@ RFC 를 죽은 것으로 읽었고, 되돌리는 데 한 라운드가 들었다.
 python3 scripts/rfc-generate-index.py
 ```
 
-커밋되는 사본이 없으므로 표와 파일이 어긋날 자리도 없다. CI 의 `--check` 는
-표 대신 frontmatter 정합성(파일명↔`rfc:` 일치, 참조 유효성, sub-doc 부모
-일치)과 번호 유일성을 검사한다. Status 값의 의미와 부여 기준(명시적
-closeout commit 또는 본문 Implementation summary 가 있는 RFC 만 `Implemented`)은 위 §Frontmatter 표준과
-같다.
+`--check` 는 파일명과 `rfc:`의 일치, 번호가 붙은 하위 문서의 부모 관계, 번호 중복을
+확인한다. RFC를 지울 때는 본문 링크와 frontmatter의 관계 필드도 함께 확인한다.
 
 ### 신규 RFC
 

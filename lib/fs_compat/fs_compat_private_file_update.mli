@@ -134,4 +134,6 @@ val append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing :
 
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
+val append_jsonl_rows : string -> string -> unit
+
 val append_jsonl_batch : string -> Yojson.Safe.t list -> unit

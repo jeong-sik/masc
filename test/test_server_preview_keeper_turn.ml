@@ -51,7 +51,9 @@ let commit zone ~author ~kind body =
    was given, or null. While [<script>.hold] is there it writes
    [<script>.started] after the message and waits. While [<script>.fail] is
    there it ends after the message with no answer, and while [<script>.lost]
-   is there it ends so when it was started to resume a session. The session
+   is there it ends so when it was started to resume a session. While
+   [<script>.refused] is there it ends the turn as the provider's refusal
+   with the HTTP status the file holds. The session
    is the one it was started with, new or resumed. It prints the version
    [<script>.version] holds, or 2.1.322. A purge appends the home and the
    arguments to [<script>.purge.jsonl] and exits 0, or 1 while
@@ -110,6 +112,14 @@ if hold.exists():
     while hold.exists():
         time.sleep(0.02)
 emit({"type": "system", "subtype": "init", "session_id": session})
+refused = Path(script + ".refused")
+if refused.exists():
+    emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
+        "uuid": "turn-result", "result": "the provider refused the request",
+        "api_error_status": int(refused.read_text())})
+    for line in sys.stdin:
+        pass
+    sys.exit(0)
 text = "echo: " + prompt
 emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session, "uuid": "turn-assistant",
     "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]}})
@@ -672,7 +682,7 @@ let test_turn () =
         Alcotest.(check (pair int string))
           "the integrations a person is offered"
           ( 200
-          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
           )
           (let { R.status; headers = _; body } = Server_person_integrations.answer ~base_path in
            R.status_code status, body);
@@ -697,6 +707,13 @@ let test_turn () =
           (List.map
              (fun (offer : Server_person_integrations.integration) ->
                offer.integration_id, offer.models)
+             offered);
+        Alcotest.(check (list string))
+          "the integrations a person registers an API key for"
+          [ "claude_code" ]
+          (List.filter_map
+             (fun (offer : Server_person_integrations.integration) ->
+               if offer.takes_key then Some offer.integration_id else None)
              offered);
         Alcotest.(check (list string))
           "the integrations whose models are called here"
@@ -726,7 +743,7 @@ let test_turn () =
          Alcotest.(check (pair int string))
            "the models a person is offered and the one left out, with why"
            ( 200
-           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","connect":["login"],"models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
            )
            (let { R.status; headers = _; body } =
               Server_person_integrations.answer ~base_path:every_kind_base
@@ -748,7 +765,7 @@ let test_turn () =
          Alcotest.(check (pair int string))
            "the bindings of a provider, offered and withheld, in declared order"
            ( 200
-           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[{"model":"claude-ghost","reason":"model_undeclared"},{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":[],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[{"model":"claude-ghost","reason":"model_undeclared"},{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","connect":["login"],"models":[],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
            )
            (let { R.status; headers = _; body } =
               Server_person_integrations.answer ~base_path:withheld_base
@@ -807,6 +824,7 @@ let test_turn () =
            ; models
            ; withheld = []
            ; calls
+           ; takes_key = true
            }
          in
          Alcotest.(check (list note))
@@ -1057,15 +1075,27 @@ let test_turn () =
             Eio.Time.sleep clock 0.02;
             started (tries - 1))
         in
-        let held, busy =
+        let held, (busy, refused_meanwhile) =
           Eio.Fiber.pair
             (fun () -> reply alice (body ~keeper:"keeper-alice" ~message:"first"))
             (fun () ->
               started 500;
               let busy = reply alice (body ~keeper:"keeper-alice-second" ~message:"second") in
+              (* A turn the log refuses takes no call of the account: it is
+                 answered as refused, and not told that a call runs. *)
+              let refused =
+                reply
+                  ~pat:(token Effect.[ Manage_own_keeper; Read_state ])
+                  alice
+                  (body ~keeper:"keeper-alice-second" ~message:"refused")
+              in
               Sys.remove hold;
-              busy)
+              busy, refused)
         in
+        Alcotest.(check int)
+          "a turn the log refuses, while a call of the account runs"
+          403
+          (fst refused_meanwhile);
         check_reply
           "a turn while another runs on the account"
           (409, {|{"error":"A call of the account of this Keeper's Runtime is running. Try again when it ends.","code":"account_call_running"}|})
@@ -1452,7 +1482,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (renew alice (only_keeper "keeper-alice")))
+             (fun (_ : Login.in_call) -> Ok (renew alice (only_keeper "keeper-alice")))
          with
          | Ok answer ->
            check_reply
@@ -1692,7 +1722,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string bob.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (delete bob his_conversation))
+             (fun (_ : Login.in_call) -> Ok (delete bob his_conversation))
          with
          | Ok answer ->
            check_reply
@@ -1837,7 +1867,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (resume ()))
+             (fun (_ : Login.in_call) -> Ok (resume ()))
          with
          | Ok () -> ()
          | Error busy -> Alcotest.fail busy);
@@ -1920,11 +1950,15 @@ let test_turn () =
         (* Another person names the account and is told it is not theirs,
            the answer of an account that is not there. *)
         (match
-           Login.person_runtime
-             bob.person
-             ~base_path
-             ~provider_account_id:dave_account
-             ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string dave_runtime))
+           Login.one_call_of
+             dave_account
+             ~busy:(Login.Refused (`Service_unavailable, "the call of the test did not start"))
+             (fun in_call ->
+                Login.person_runtime
+                  in_call
+                  bob.person
+                  ~base_path
+                  ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string dave_runtime)))
          with
          | Error (Login.Refused (`Not_found, (_ : string))) -> ()
          | Error (Login.Refused ((`Bad_request | `Service_unavailable), detail)) ->
@@ -2014,7 +2048,7 @@ let test_turn () =
             (* His Keeper answers on his key: the client has his home, his
                key as its one API key, and nothing else the server runs on. *)
             forget ();
-            let (_ : string) =
+            let dave_conversation =
               answered
                 "the Keeper of a key account answers"
                 ~keeper:"keeper-dave"
@@ -2049,6 +2083,57 @@ let test_turn () =
               "a login account runs on its home and no API key"
               (home_of ~base_path bob, None, [])
               (ran_on ());
+            (* The provider refuses the request with an HTTP status (RFC
+               3.5). A 401 on the key account is the refusal of its key: the
+               answer and the record of the turn say so. *)
+            let refused_file = claude ^ ".refused" in
+            let refused_with status =
+              Out_channel.with_open_bin refused_file (fun channel ->
+                Out_channel.output_string channel (string_of_int status))
+            in
+            let dave_turns =
+              List.fold_left
+                Filename.concat
+                (records_of ~base_path dave)
+                [ dave_conversation; "turns.jsonl" ]
+            in
+            let last_failure () =
+              match List.rev (rows dave_turns) with
+              | failed :: _ -> text_of failed "kind", text_of failed "failure"
+              | [] -> Alcotest.fail "the conversation of the key account has no row"
+            in
+            Fun.protect
+              ~finally:(fun () -> if Sys.file_exists refused_file then Sys.remove refused_file)
+              (fun () ->
+                refused_with 401;
+                forget ();
+                Alcotest.(check (pair int string))
+                  "a 401 of the provider on a key account: its key was refused"
+                  (409, "key_refused")
+                  (refused (dave_turn ()));
+                Alcotest.(check bool)
+                  "the client was started with the message"
+                  true
+                  (Sys.file_exists turn_record);
+                Alcotest.(check (pair string string))
+                  "the record of the turn keeps the kind the answer gave"
+                  ("failed", "key_refused")
+                  (last_failure ());
+                (* The same status on an account of a login names no key. *)
+                Alcotest.(check (pair int string))
+                  "a 401 of the provider on a login account is a turn without an answer"
+                  (502, "no_answer")
+                  (refused (reply bob (body ~keeper:"keeper-bob-beside-a-key" ~message:"hello")));
+                (* Another status says nothing of the key. *)
+                refused_with 403;
+                Alcotest.(check (pair int string))
+                  "a 403 of the provider on a key account is a turn without an answer"
+                  (502, "no_answer")
+                  (refused (dave_turn ()));
+                Alcotest.(check (pair string string))
+                  "and is recorded as one"
+                  ("failed", "no_answer")
+                  (last_failure ()));
             (* A key file its group reads is not read, and no client
                starts. *)
             Unix.chmod key_file 0o640;

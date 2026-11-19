@@ -59,16 +59,30 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
     setWorking(false); setRunning(false); setCode(''); setPending(false); onBusy(false)
   }
   function retain(source: Source) { setRecovered(source); onAccount(source) }
+  // A login ended with `source` as its account, however the result arrived.
+  // An account here is its account_ref. The server gives a native home the
+  // same ref each time it logs in, and an Antigravity login a new one every
+  // time. The models chosen under a ref stand while that ref logs in again,
+  // and are dropped when another ref takes its place. Answers whether the
+  // ref changed.
+  function settle(source: Source): boolean {
+    const changed = source.account_ref !== selected?.account_ref
+    if (changed) onReplaceAccount()
+    retain(source)
+    return changed
+  }
   async function readReceipt(operation: Operation, id: string, resumeLogin = false) {
     const receipt = await fetchLoginReceipt(id, integrationId, operation.controller.signal)
     if (!current(operation)) return
     if (receipt.account_ref) setRecovered({ integration_id: integrationId, account_ref: receipt.account_ref })
     if (receipt.status === 'complete' && receipt.account_ref) {
-      const changed = receipt.account_ref !== selected?.account_ref
-      if (changed || resumeLogin) onReplaceAccount()
-      retain({ integration_id: integrationId, account_ref: receipt.account_ref })
+      const source = { integration_id: integrationId, account_ref: receipt.account_ref }
+      const changed = settle(source)
       setNotice('로그인 절차가 완료되었습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
-      if (changed || resumeLogin) await onComplete({ integration_id: integrationId, account_ref: receipt.account_ref })
+      // `onComplete` reads the account's models. Another account always
+      // needs that. The same one needs it when a login just ran, and not when
+      // its result is only read again.
+      if (changed || resumeLogin) await onComplete(source)
     } else setNotice(receipt.status === 'running' ? '로그인 종료 여부를 아직 확인하지 못했습니다. 잠시 후 상태를 다시 확인하세요.'
       : '로그인이 중단되었습니다. 현재 모델 선택은 유지됩니다. 로그인 상태를 다시 확인하거나 다시 로그인하세요.')
   }
@@ -100,7 +114,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
         else if (event.event === 'screen') setOutput({ text: event.text, screen: true })
         else if (event.event === 'input_ready') { inputPending.current = false; setPending(false) }
         else if (event.event === 'complete') {
-          completed = event.source; onReplaceAccount(); retain(event.source); setRunning(false)
+          completed = event.source; settle(event.source); setRunning(false)
           setNotice(event.authentication === 'authenticated'
             ? '계정 인증을 확인했습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.'
             : '로그인 자료를 받았습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')

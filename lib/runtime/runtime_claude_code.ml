@@ -104,6 +104,20 @@ let runs_on_environment_credential account =
     || List.exists (set (fun value -> value <> "")) credentials_before_login
 ;;
 
+(* HTTP 401 is the provider not taking the credential of a request. A child
+   of an account that runs on a key of a file has that key as its one
+   credential ([Runtime_official_account.capture_on_key] keeps no other
+   beside it), so on such an account the status says the key was refused. A
+   403 says the request was not allowed, which a key that was taken can be
+   told too. *)
+let key_refused (account : authorized_account) ~api_error_status =
+  match
+    api_error_status, Runtime_official_account.key_file (Runtime_account_access.account account)
+  with
+  | Some 401, Some (_ : string) -> true
+  | Some _, (Some _ | None) | None, (Some _ | None) -> false
+;;
+
 let timeout_s_for_phase config ~turn_admitted =
   if turn_admitted
   then config.timeout_s

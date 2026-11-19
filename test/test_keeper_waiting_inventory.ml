@@ -1346,7 +1346,7 @@ let test_health_retains_recovery_observation_without_known_totals () =
     check int "mirror schedules remain observed" 1 U.(health |> member "schedule_ledger" |> member "observed_schedule_count" |> to_int);
     check bool "no authoritative ledger total" true U.(health |> member "schedule_ledger" |> member "schedule_count" = `Null);
     check (list string) "stable repair reason" [reason] U.(health |> member "status_reasons" |> to_list |> List.map to_string);
-    (match Server_keeper_waiting_inventory.keeper_json_by_name config with
+    (match Server_keeper_waiting_inventory.keeper_turns_json_by_name config with
      | Error errors ->
        check bool "turns waiting observation names the incomplete primary" true
          (List.exists (fun row -> U.(row |> member "waiting_on" |> to_string) = reason) errors)
@@ -1366,9 +1366,45 @@ let test_health_retains_recovery_observation_without_known_totals () =
   check bool "unreadable work total unknown" true U.(health |> member "total_row_count" = `Null);
   check int "read failure remains separate from work" 1 (json_int_member "read_error_count" health);
   save_text primary original_primary;
-  (match Server_keeper_waiting_inventory.keeper_json_by_name config with
+  (match Server_keeper_waiting_inventory.keeper_turns_json_by_name config with
    | Ok _ -> ()
    | Error _ -> fail "restored primary must clear the incomplete waiting observation")
+;;
+
+let test_turns_waiting_keeps_one_head_per_source_and_producer () =
+  let module W = Server_keeper_waiting_inventory in
+  let row ?(wake_producer = W.Keeper_owner_actor) ~source ~waiting_on since =
+    { W.keeper_name = Some "alpha"; source; bearing = W.Holds_state; waiting_on
+    ; what = waiting_on ^ " what"; wake_producer; since = Some since; due_at = None
+    ; next_action = "wait"; detail = `Assoc [ "private", `String "detail-text" ] }
+  in
+  let rows =
+    [ row ~source:W.Event_queue_pending ~waiting_on:"e1" 3.0
+    ; row ~source:W.Event_queue_pending ~waiting_on:"e2" 1.0
+    ; row ~source:W.Event_queue_pending ~wake_producer:W.Keeper_delegate ~waiting_on:"d1" 5.0
+    ; row ~source:W.Schedule_waiting ~wake_producer:W.Schedule_runner ~waiting_on:"s1" 4.0
+    ; row ~source:W.Event_queue_pending ~waiting_on:"e3" 2.0
+    ; row ~source:W.Schedule_waiting ~wake_producer:W.Schedule_runner ~waiting_on:"s2" 6.0
+    ]
+  in
+  let json = W.For_testing.keeper_turns_json "alpha" ~busy:false rows in
+  check (list string) "the first row of each source and producer, in inventory order"
+    [ "e1"; "d1"; "s1" ]
+    U.(json |> member "waiting_heads" |> to_list
+       |> List.map (fun head -> head |> member "waiting_on" |> to_string));
+  check int "every row is counted" 6 (json_int_member "waiting_count" json);
+  check (list (pair string int)) "rows per source"
+    [ "event_queue_pending", 4; "schedule_waiting", 2 ]
+    U.(json |> member "sources" |> to_assoc |> List.map (fun (k, v) -> k, to_int v));
+  check (float 0.0) "the earliest row starts the wait" 1.0 U.(json |> member "since" |> to_number);
+  check (list string) "the row fields the TUI reads"
+    [ "keeper_name"; "state"; "waiting_count"; "sources"; "since"; "due_at"; "waiting_heads" ]
+    U.(json |> to_assoc |> List.map fst);
+  check (list string) "the head fields the TUI reads"
+    [ "source"; "waiting_on"; "what"; "wake_producer"; "since"; "due_at"; "next_action" ]
+    U.(json |> member "waiting_heads" |> index 0 |> to_assoc |> List.map fst);
+  check bool "no row detail reaches the turns body" false
+    (String_util.contains_substring (Yojson.Safe.to_string json) "detail-text")
 ;;
 
 let test_health_partial_source_failure_and_exception_are_not_empty () =
@@ -1595,6 +1631,7 @@ let () =
         ; test_case "health counts waiting without alarm" `Quick test_health_counts_normal_waiting_without_alarm
         ; test_case "health preserves recovery observation with unknown totals" `Quick test_health_retains_recovery_observation_without_known_totals
         ; test_case "health source failures remain unknown and redacted" `Quick test_health_partial_source_failure_and_exception_are_not_empty
+        ; test_case "turns waiting keeps one head per source and producer" `Quick test_turns_waiting_keeps_one_head_per_source_and_producer
         ; test_case "health placeholder has unknown counts" `Quick test_health_placeholder_has_unknown_counts
         ] )
     ]

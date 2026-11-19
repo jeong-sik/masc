@@ -46,6 +46,10 @@ type integration =
           binding of the provider once, in declared order. A provider with
           neither has no binding. *)
   ; calls : calls
+  ; takes_key : bool
+      (** Whether a person registers an API key of their own for it
+          ({!Server_key_account.takes_key}), beside the login every
+          integration of this list takes. *)
   }
 
 (** The providers of runtime.toml a person may log in to, in declared order:
@@ -92,7 +96,10 @@ val start_lines : base_path:string -> string list
 val path : string
 
 (** The answer of [GET path] for a signed-in person:
-    [{"integrations":[{"integration_id":...,"display_name":...,"models":[...],"withheld":[...],"calls":"allowed"}]}],
+    [{"integrations":[{"integration_id":...,"display_name":...,"connect":[...],"models":[...],"withheld":[...],"calls":"allowed"}]}],
+    where ["connect"] holds how a person connects it: ["login"], and ["key"]
+    for one that takes an API key (RFC
+    a-persons-api-key-is-their-own-provider-account 3.8),
     and ["calls":"refused","refusal":<code>] for a refused one, where the code
     names the {!Runtime_account_access.native_refusal}. A member of
     ["withheld"] is [{"model":<id>,"reason":<code>}]: the code is

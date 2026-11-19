@@ -141,6 +141,42 @@ let test_purge_removes_muse_identity_directory () =
     (Sys.file_exists identity_dir)
 ;;
 
+(* The purged Keeper's newest TurnRecord is also held in memory, by its store
+   ([Dated_jsonl.read_fact]). The purge removes the store's files itself, so
+   it tells the stores, and a same-name successor reads its own files: here
+   none. *)
+let test_purge_forgets_the_kept_turn_record () =
+  with_base_path @@ fun config base_path ->
+  let oauth_source = Filename.concat base_path "operator-oauth.json" in
+  let account_home = Filename.concat base_path "muse-account" in
+  write_runtime_toml
+    base_path
+    (runtime_toml ~oauth_source ~account_home
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  let row = `Assoc [ "row", `Int 1 ] in
+  Dated_jsonl.append store row;
+  let newest () =
+    match Dated_jsonl.read_fact store Dated_jsonl.last_row with
+    | Fact_cell.Held (Some (Dated_jsonl.Parsed json)) -> "held " ^ Yojson.Safe.to_string json
+    | Fact_cell.Held None -> "held, no row"
+    | Fact_cell.Read_and_kept (Some (Dated_jsonl.Parsed json))
+    | Fact_cell.Read_not_kept (Some (Dated_jsonl.Parsed json)) ->
+      "read " ^ Yojson.Safe.to_string json
+    | Fact_cell.Read_and_kept None | Fact_cell.Read_not_kept None -> "read, no row"
+    | Fact_cell.Held (Some (Dated_jsonl.Malformed_json _))
+    | Fact_cell.Read_and_kept (Some (Dated_jsonl.Malformed_json _))
+    | Fact_cell.Read_not_kept (Some (Dated_jsonl.Malformed_json _)) -> "a row that is not JSON"
+    | Fact_cell.Read_failed error -> "failed: " ^ Dated_jsonl.read_error_to_string error
+  in
+  check string "the row is read" ("read " ^ Yojson.Safe.to_string row) (newest ());
+  check string "and kept" ("held " ^ Yojson.Safe.to_string row) (newest ());
+  purge config;
+  check bool "the purge removes the TurnRecord store" false
+    (Sys.file_exists (Dated_jsonl.base_dir store));
+  check string "and the kept row with it" "read, no row" (newest ())
+;;
+
 (* A home whose derivation inputs are gone (the runtime configuration no
    longer assigns this Keeper) cannot be named by the purge either. The purge
    stays complete, the entry is omitted rather than failing, and the resolver
@@ -264,13 +300,18 @@ candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
     (Sys.file_exists identity_dir)
 ;;
 
+(* The purge runs in the server, the process that writes the stores and
+   keeps their facts in memory. *)
 let () =
+  Dated_jsonl.keep_facts_in_this_process ();
   run "Keeper shutdown official-client purge"
     [ ( "official-client homes"
       , [ test_case "purge removes the Antigravity HOME and prepare lock" `Quick
             test_purge_removes_antigravity_home_and_lock
         ; test_case "purge removes the Muse identity directory" `Quick
             test_purge_removes_muse_identity_directory
+        ; test_case "purge forgets the kept TurnRecord" `Quick
+            test_purge_forgets_the_kept_turn_record
         ; test_case "purge omits a home it can no longer derive" `Quick
             test_purge_omits_home_it_cannot_derive
         ; test_case

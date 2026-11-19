@@ -377,12 +377,17 @@ val exact_output_resolver_catalog :
     [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
     required set. *)
 
-val report_exact_output_registry : runtimes:t list -> Runtime_exact_output_registry.t -> unit
+val report_exact_output_registry
+  :  runtimes:t list
+  -> gaps:exact_slot_body_deadline_gap list
+  -> Runtime_exact_output_registry.t
+  -> unit
 (** Log what [registry] left out: targets whose binding has no catalog row,
     rejected lane slots (a slot rule 3 left out is counted, not diagnosed
     again), [verifier_exact] slots that cannot judge, and the optional lanes
-    with nothing admitted. A rejected slot's binding is read from [runtimes],
-    the runtimes [registry] was built from. Boot runs it after publishing and
+    with nothing admitted. A rejected slot's binding is read from [runtimes]
+    and its rule-3 gap from [gaps], both the ones [registry] was built from.
+    Boot runs it after publishing and
     every config commit that replaces the registry runs it when what it
     reports changed (a kept registry's rejected slots are listed, not
     diagnosed, because it was built from an earlier text). The rule-3 slots
@@ -390,15 +395,19 @@ val report_exact_output_registry : runtimes:t list -> Runtime_exact_output_regis
 
 val rejected_exact_slot_refusals
   :  runtimes:t list
+  -> gaps:exact_slot_body_deadline_gap list
   -> Agent_core.Exact_output.resolver_snapshot
   -> Runtime_exact_output_registry.rejected_slot list
   -> string list
 (** One sentence per slot that a publication against [resolver_snapshot] goes
     without: its lane, position and id, why it is left out, and what to
-    write. They are the words {!report_exact_output_registry} logs, and a
-    rule-3 slot is named for its missing whole-request deadline. A slot's
-    binding is read from [runtimes]. The deployment preflight refuses a
-    runtime.toml with these. *)
+    write. They are the words {!report_exact_output_registry} logs. A slot in
+    [gaps] gets the sentence {!warn_exact_slot_degradation} logs for it. A
+    slot's binding is read from [runtimes]; [runtimes] and [gaps] are the
+    ones the snapshot was built from. The deployment preflight refuses a
+    runtime.toml with these, after it has refused any rule-3 gap with
+    {!exact_slot_degradation}'s own list, so there a rule-3 slot does not
+    reach this function. *)
 
 val warn_exact_slot_degradation : exact_slot_degradation -> unit
 (** One WARN per exact slot rule 3 leaves out and one per lane it empties.

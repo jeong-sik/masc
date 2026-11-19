@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { computed, signal } from '@preact/signals'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -18,6 +18,9 @@ const navigateMock = vi.hoisted(() => vi.fn())
 const callMcpToolMock = vi.hoisted(() => vi.fn<(name: string, args: Record<string, unknown>) => Promise<string>>())
 const assignmentSourceMock = vi.hoisted(() => vi.fn())
 const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
+const refreshExecutionMock = vi.hoisted(() => vi.fn<(opts?: { force?: boolean }) => Promise<void>>())
+const nextExecutionObservationMock = vi.hoisted(() => vi.fn<() => Promise<void>>())
+const showToastMock = vi.hoisted(() => vi.fn<(message: string, type?: string) => void>())
 
 vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
@@ -50,6 +53,13 @@ vi.mock('../store', () => ({
   executionWorkspaceAuthority: signal({ epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }),
   executionWorkspaceRevision: signal(0),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
+  refreshExecution: refreshExecutionMock,
+  nextExecutionObservation: nextExecutionObservationMock,
+}))
+
+vi.mock('./common/toast', async original => ({
+  ...await original<typeof import('./common/toast')>(),
+  showToast: showToastMock,
 }))
 
 vi.mock('./board/board-surface', () => ({
@@ -108,9 +118,12 @@ import { goalStoreUnavailable, goalTreeData, goalTreeError } from '../goal-tree-
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
+import { ObservationPending } from '../lib/observation-refresh'
 import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 import type { GoalStoreUnavailable } from '../types/goal-store-unavailable'
+import { doneWhenMeasure } from '../api/fixtures/goal-criterion'
+import { MEASURE_UNREADABLE } from '../api/goal-measure'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -156,8 +169,8 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
       activity_observation: 'goal_metadata',
     },
     priority: 1,
-    metric: null,
-    target_value: null,
+    measure: doneWhenMeasure,
+    procedure: 'Read the fixture.',
     due_date: null,
     criterion_revision: 'revision-default',
     measurement: { state: 'not_recorded' },
@@ -339,7 +352,7 @@ describe('Work', () => {
     it.each([
       ['idle', { state: 'current', completion: { state: 'idle' } }, '검증 · 원장에 현재 요청 없음'],
       ['stale', { state: 'stale', historical: { state: 'proven',
-        criterion: { revision: 'old', title: 'Old goal', metric: null, target_value: null },
+        criterion: { revision: 'old', title: 'Old goal', measure: doneWhenMeasure, procedure: 'Read the fixture.' },
         requestId: 'old-request', runId: 'old-run', evidence: 'old evidence',
         recordedAt: '2026-09-08', actor: 'verifier_exact' } }, '검증 · 이전 기준의 기록'],
       ['unreadable', { state: 'unreadable', detail: 'primary ledger failed' }, '검증 · 확인 불가'],
@@ -358,7 +371,7 @@ describe('Work', () => {
       goals.value = [{ id: 'G-1', title: 'Old workspace Goal', priority: 1, phase: 'executing',
         created_at: '2026-01-01', updated_at: '2026-01-02',
         verification: { state: 'current', completion: { state: 'proven',
-          criterion: { revision: 'old', title: 'Old workspace Goal', metric: null, target_value: null },
+          criterion: { revision: 'old', title: 'Old workspace Goal', measure: doneWhenMeasure, procedure: 'Read the fixture.' },
           requestId: 'r', runId: 'run', evidence: 'old evidence', recordedAt: 'now', actor: 'verifier' } } }]
       goalIdentityObservation.value = { goals: goals.value, observation: { ids: ['G-1'], complete: true } }
       goalTreeData.value = {
@@ -532,8 +545,9 @@ describe('Work', () => {
         showGoalCreate.value = true
         render(html`<${Work} />`)
         fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'A new goal' } })
-        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'metric' } })
-        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: 'target' } })
+        fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '3' } })
+        fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'merged PRs' } })
+        fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Count merged PRs.' } })
         expect(screen.getByTestId('goal-create-source-unconfirmed')).toBeTruthy()
         expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
       },
@@ -781,6 +795,186 @@ describe('Work', () => {
       expect(screen.getByText('Linked job')).toBeTruthy()
     })
 
+    describe('claiming a backlog task', () => {
+      // The backlog section is not drawn when nothing is claimable.
+      const backlogClaimButtons = () => [...(screen.queryByTestId('work-backlog')?.querySelectorAll('.wk-task-claim') ?? [])]
+      const settle = async () => { for (let turn = 0; turn < 8; turn += 1) await act(async () => { await Promise.resolve() }) }
+      const unclaimed = { id: 'U-1', title: 'Orphan job', status: 'todo' } as const
+      const claimedOnServer = { id: 'U-1', title: 'Orphan job', status: 'claimed', assignee: 'operator-a' } as const
+      const other = { id: 'U-2', title: 'Another orphan', status: 'todo' } as const
+      // What the store does when it accepts an execution observation: the
+      // tasks are replaced, then whoever waited for the next one is told.
+      const observationWaiters: Array<() => void> = []
+      const accept = (first: typeof unclaimed | typeof claimedOnServer) => {
+        tasks.value = [first, other]
+        for (const told of observationWaiters.splice(0)) told()
+      }
+      const acceptAndSettle = async (first: typeof unclaimed | typeof claimedOnServer) => {
+        await act(async () => { accept(first) })
+        await settle()
+      }
+
+      beforeEach(() => {
+        callMcpToolMock.mockReset().mockResolvedValue('ok')
+        refreshExecutionMock.mockReset().mockResolvedValue(undefined)
+        observationWaiters.length = 0
+        nextExecutionObservationMock.mockReset().mockImplementation(
+          () => new Promise<void>(resolve => { observationWaiters.push(resolve) }),
+        )
+        showToastMock.mockReset()
+        tasks.value = [unclaimed, other]
+      })
+
+      it('draws the task released when it is released elsewhere after the claim (#52964)', async () => {
+        // The read after the claim brings the server's row: claimed, with its assignee.
+        refreshExecutionMock.mockImplementation(async () => { accept(claimedOnServer) })
+        render(html`<${Work} />`)
+        expect(backlogClaimButtons()).toHaveLength(2)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        expect(callMcpToolMock).toHaveBeenCalledWith('masc_transition', { task_id: 'U-1', action: 'claim' })
+        expect(refreshExecutionMock).toHaveBeenCalledWith({ force: true })
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // The same assignee releases it from another client; the server says todo, unassigned.
+        await acceptAndSettle(unclaimed)
+
+        expect(backlogClaimButtons()).toHaveLength(2)
+        expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
+        expect(showToastMock).not.toHaveBeenCalled()
+      })
+
+      it('keeps the task drawn as claimed until the read sent after the claim is accepted', async () => {
+        let claimTaken!: (value: string) => void
+        let readDone!: () => void
+        callMcpToolMock.mockReturnValue(new Promise<string>(resolve => { claimTaken = resolve }))
+        refreshExecutionMock.mockReturnValue(new Promise<void>(resolve => { readDone = resolve }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        // The claim is on the wire.
+        expect(backlogClaimButtons()).toHaveLength(1)
+        expect(refreshExecutionMock).not.toHaveBeenCalled()
+
+        claimTaken('ok')
+        await settle()
+        // Taken, and the tasks still on screen are the ones read before it.
+        expect(refreshExecutionMock).toHaveBeenCalledTimes(1)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // A read that began before the claim lands meanwhile and still says
+        // todo. It is not the read sent after the claim, so the flag stays.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        readDone()
+        await settle()
+        // That read is in. It says todo and unassigned too: taken and released
+        // again before this client saw it. The row is drawn as the server has it.
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it.each([
+        ['is dropped for a newer observation', new ObservationPending('Execution response was superseded by a newer observation')],
+        ['fails', new Error('execution read failed')],
+      ])('keeps the flag when the read sent after the claim %s, until an observation is accepted', async (_how, readError) => {
+        refreshExecutionMock.mockRejectedValue(readError)
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        // The server took the claim and the tasks on screen were read before
+        // it. Without the flag the task would be back in the backlog.
+        expect(refreshExecutionMock).toHaveBeenCalledTimes(1)
+        expect(backlogClaimButtons()).toHaveLength(1)
+        expect(screen.getByTestId('kpi-backlog').textContent).toBe('1')
+        expect(showToastMock).not.toHaveBeenCalled()
+
+        await acceptAndSettle(claimedOnServer)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // Released elsewhere later: the flag ended with the observation above.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('ends a flag left by an unaccepted read with the next accepted observation, whatever it says', async () => {
+        refreshExecutionMock.mockRejectedValue(new ObservationPending('Execution projection is initializing'))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        // Taken and released again before any observation reached this client.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('does not count an observation accepted while the read sent after the claim was still out', async () => {
+        let readRefused!: (error: unknown) => void
+        refreshExecutionMock.mockReturnValue(new Promise<void>((_resolve, reject) => { readRefused = reject }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        // It may have been read before the claim, and it says todo.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        readRefused(new ObservationPending('Execution response was superseded by a newer observation'))
+        await settle()
+        // The read is refused only now, so the flag waits for an observation from here on.
+        expect(backlogClaimButtons()).toHaveLength(1)
+
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('holds each claimed task by its own flag', async () => {
+        const reads: Array<{ resolve: () => void; reject: (error: unknown) => void }> = []
+        refreshExecutionMock.mockImplementation(() => new Promise<void>((resolve, reject) => { reads.push({ resolve, reject }) }))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+        expect(callMcpToolMock).toHaveBeenCalledWith('masc_transition', { task_id: 'U-2', action: 'claim' })
+        expect(backlogClaimButtons()).toHaveLength(0)
+
+        // U-1's read is dropped; U-2's is still out.
+        reads[0]!.reject(new ObservationPending('Execution response was superseded by a newer observation'))
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(0)
+
+        // An observation is accepted: U-1's flag ends, U-2 waits for its own read.
+        await acceptAndSettle(unclaimed)
+        expect(backlogClaimButtons().map(button => button.closest('.wk-bl-row')?.querySelector('.wk-task-id')?.textContent)).toEqual(['U-1'])
+
+        reads[1]!.resolve()
+        await settle()
+        expect(backlogClaimButtons()).toHaveLength(2)
+      })
+
+      it('returns a refused claim to the backlog and says why', async () => {
+        callMcpToolMock.mockRejectedValue(new Error('already claimed by keeper-x'))
+        render(html`<${Work} />`)
+
+        fireEvent.click(backlogClaimButtons()[0]!)
+        await settle()
+
+        expect(backlogClaimButtons()).toHaveLength(2)
+        expect(refreshExecutionMock).not.toHaveBeenCalled()
+        expect(nextExecutionObservationMock).not.toHaveBeenCalled()
+        expect(showToastMock).toHaveBeenCalledWith('claim 실패: already claimed by keeper-x', 'error')
+      })
+    })
+
     it('keeps every live backlog task in a scrollable region without a numeric preview policy', () => {
       tasks.value = Array.from({ length: 8 }, (_, index) => ({
         id: `U-${index + 1}`,
@@ -987,8 +1181,9 @@ describe('Work', () => {
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')
         fireEvent.input(titleInput, { target: { value: 'SLO 400ms 회복' } })
-        fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'scheduler p99 over 24 hours' } })
-        fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '400 ms or less' } })
+        fireEvent.input(screen.getByTestId('goal-create-total'), { target: { value: '24' } })
+        fireEvent.input(screen.getByTestId('goal-create-noun'), { target: { value: 'hours with scheduler p99 under 400 ms' } })
+        fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value: 'Read scheduler p99 over 24 hours.' } })
 
         // Submit
         fireEvent.click(screen.getByTestId('goal-create-submit'))
@@ -998,8 +1193,8 @@ describe('Work', () => {
 
         expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
           title: 'SLO 400ms 회복',
-          metric: 'scheduler p99 over 24 hours',
-          target_value: '400 ms or less',
+          measure: { kind: 'count', noun: 'hours with scheduler p99 under 400 ms', total: 24 },
+          procedure: 'Read scheduler p99 over 24 hours.',
           priority: expect.any(Number),
           id: expect.stringMatching(/^goal-/), if_absent: true,
           expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
@@ -1912,8 +2107,8 @@ describe('Work', () => {
             created_at: '2026-01-01',
             updated_at: '2026-01-04',
             last_review_note: 'metric 미충족 — merged PR은 1건뿐',
-            metric: 'merged PR count',
-            target_value: '5 PRs',
+            measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+            procedure: 'Count merged PRs linked to the Goal.',
           },
         ]
         tasks.value = []
@@ -1925,8 +2120,8 @@ describe('Work', () => {
               priority: 5,
               phase: 'executing',
               last_review_note: 'metric 미충족 — merged PR은 1건뿐',
-              metric: 'merged PR count',
-              target_value: '5 PRs',
+              measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+              procedure: 'Count merged PRs linked to the Goal.',
               task_summary: {
                 total: 4,
                 done: 3,
@@ -1940,10 +2135,10 @@ describe('Work', () => {
               },
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
-                kind: 'goal_owner',
+                kind: 'goal_phase',
                 lane: 'goal',
-                title: 'Goal Owner',
-                summary: 'owner: <unassigned> -> dancer by operator',
+                title: 'Goal Phase',
+                summary: 'phase=verifying by operator',
                 severity: 'ok',
               }],
               last_activity_at: '2026-01-04T10:00:00Z',
@@ -1988,17 +2183,17 @@ describe('Work', () => {
 
         // What counts as done is declared once, in the card header, next to the
         // progress bar it qualifies.
-        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
-          .toBe('merged PR count · 5 PRs')
-        expect(text).not.toContain('merged PR count')
+        expect(goalCard.querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe('5 merged PRs')
+        expect(text).not.toContain('5 merged PRs')
       })
 
-      it('declares the metric once in the header and never a second task tally', () => {
+      it('declares the measure once in the header and never a second task tally', () => {
         goals.value = [
           {
             id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked',
             created_at: '2026-01-01', updated_at: '2026-01-04',
-            metric: 'merged PR count', target_value: '5 PRs',
+            measure: { kind: 'count', noun: 'merged PRs', total: 5 }, procedure: 'Count merged PRs linked to the Goal.',
           },
         ]
         // Six done, one cancelled. The header excludes cancelled from the
@@ -2014,8 +2209,8 @@ describe('Work', () => {
             goalTreeNode({
               id: 'G-1',
               phase: 'blocked',
-              metric: 'merged PR count',
-              target_value: '5 PRs',
+              measure: { kind: 'count', noun: 'merged PRs', total: 5 },
+              procedure: 'Count merged PRs linked to the Goal.',
               task_count: 7,
               task_done_count: 6,
               // task_summary keeps cancelled in `total`. The panel used to
@@ -2036,14 +2231,13 @@ describe('Work', () => {
         expandGoalCard(goalCard)
 
         // The declaration sits next to the bar it qualifies, stated once.
-        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
-          .toBe('merged PR count · 5 PRs')
+        expect(goalCard.querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe('5 merged PRs')
         expect(goalCard.querySelector('.wk-prog-lbl')?.textContent).toContain('6/6')
 
         const dossier = screen.getByTestId('goal-dossier')
         const text = dossier.textContent ?? ''
-        expect(text).not.toContain('merged PR count')
-        expect(text).not.toContain('5 PRs')
+        expect(text).not.toContain('5 merged PRs')
         expect(text).not.toContain('전체 7')
         expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
         expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
@@ -2062,27 +2256,21 @@ describe('Work', () => {
         expect(text).not.toContain('달성')
       })
 
-      it('shows no metric chip at all when the goal declares none', () => {
+      it('says the Goal measure is unreadable instead of drawing nothing', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
         tasks.value = []
         goalTreeData.value = {
-          tree: [goalTreeNode({ id: 'G-1' })],
+          tree: [goalTreeNode({ id: 'G-1', measure: null })],
           summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
         }
 
         render(html`<${Work} />`)
-        const goalCard = screen.getByTestId('goal-card')
-        expandGoalCard(goalCard)
-
-        // A goal with nothing declared gets no chip. There is no "정해진 지표가
-        // 없어요" row any more — a placeholder telling the operator a field is
-        // empty costs a line and settles nothing.
-        expect(goalCard.querySelector('[data-goal-metric]')).toBeNull()
-        const dossier = screen.getByTestId('goal-dossier')
-        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
-        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+        // The server writes a measure for every Goal, so a missing one is a
+        // row that did not decode. An empty card would read as "no target".
+        expect(screen.getByTestId('goal-card').querySelector('[data-goal-measure]')?.textContent?.trim())
+          .toBe(MEASURE_UNREADABLE)
       })
 
       it('drops the goal_fsm projection tokens from the goal detail panel', () => {
@@ -2156,10 +2344,10 @@ describe('Work', () => {
               phase: 'executing',
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
-                kind: 'goal_owner',
+                kind: 'goal_phase',
                 lane: 'goal',
-                title: 'Goal Owner',
-                summary: 'owner: <unassigned> -> dancer by operator',
+                title: 'Goal Phase',
+                summary: 'phase=verifying by operator',
                 severity: 'ok',
               }],
             }),
@@ -2184,9 +2372,9 @@ describe('Work', () => {
         expect(toggle).toHaveAttribute('aria-expanded', 'true')
         const rows = dossier.querySelectorAll('[data-goal-dossier-timeline-event]')
         expect(rows).toHaveLength(1)
-        expect(rows[0]!.textContent).toContain('goal_owner')
+        expect(rows[0]!.textContent).toContain('goal_phase')
         expect(rows[0]!.textContent).toContain('2026-01-04T10:00:00Z')
-        expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
+        expect(rows[0]!.textContent).toContain('phase=verifying by operator')
         // The count hook stays put while the list opens.
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
       })

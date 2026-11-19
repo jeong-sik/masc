@@ -743,7 +743,7 @@ let the_preview_follows_a_login () =
       let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
       reply.status, reply.body
     in
-    let account id fact = Printf.sprintf {|{"provider_account_id":"%s",%s}|} id fact in
+    let account id fact = Printf.sprintf {|{"provider_account_id":"%s","kind":"login",%s}|} id fact in
     let runtime account model fact =
       Printf.sprintf {|{"runtime_id":"%s.%s","provider_account_id":"%s",%s}|} account model account fact
     in
@@ -876,7 +876,7 @@ let the_preview_follows_a_login () =
     check_reply
       "the integrations of the workspace"
       ( 200
-      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"}]}|}
+      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","connect":["login","key"],"models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"}]}|}
       )
       (integrations ());
     let refused sentence = 400, Yojson.Safe.to_string (`Assoc [ "error", `String sentence ]) in
@@ -1324,7 +1324,7 @@ let a_person_keeps_keepers_over_mcp () =
       "the Runtimes of the person"
       ( "false"
       , Printf.sprintf
-          {|{"provider_accounts":[{"provider_account_id":"account-1","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
+          {|{"provider_accounts":[{"provider_account_id":"account-1","kind":"login","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","kind":"login","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
           connected
           connected
           connected )
@@ -1531,6 +1531,184 @@ let a_person_keeps_keepers_over_mcp () =
       , {|{"keeper_id":"keeper-1","current_conversation_id":null,"conversations":[],"conversation_id":null,"turns":[]}|}
       )
       (result theirs "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1")))
+;;
+
+(* A PAT of the person of [browser] on every Runtime, with these effects. *)
+let pat_with router browser ~csrf effects =
+  let issued =
+    send
+      browser
+      router
+      ~meth:"POST"
+      ~path:"/api/v1/auth/pats"
+      ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+      ~body:
+        (Printf.sprintf
+           {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":%s},"expires_at_ms":null}|}
+           effects)
+  in
+  match member "token" issued with
+  | Some (`String token) -> token
+  | _ -> Alcotest.failf "no PAT in %S" issued.body
+;;
+
+(* The status of the answer, and its code when it has one. *)
+let told (reply : reply) =
+  ( reply.status
+  , match member "code" reply with
+    | Some (`String code) -> code
+    | Some _ | None -> "" )
+;;
+
+(* The removal of a key account over the route (RFC
+   a-persons-api-key-is-their-own-provider-account 3.6): what a request needs
+   to reach it, and what it is told. What a removal does to the files and the
+   log is tested in test_server_key_account_purge. *)
+let a_person_removes_a_key_account () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    let linked = function
+      | Ok () -> ()
+      | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error)
+    in
+    (* The record of a key account comes before its files, and an account
+       whose files were never made is removed too. *)
+    let on_key = "account-on-a-key" in
+    linked
+      (Authz_provider_account.link_key
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:(get_ok (Provider_account_id.of_string on_key))
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code")));
+    let on_login = "account-on-a-login" in
+    linked
+      (Authz_provider_account.link
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:(get_ok (Provider_account_id.of_string on_login)));
+    let pat = pat_with router admin ~csrf in
+    let remove ?(browser = fresh_browser ()) headers id =
+      send browser router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ id) ~headers
+    in
+    let by_token token id = told (remove [ "Authorization", "Bearer " ^ token ] id) in
+    Alcotest.(check int) "a request with no credential" 401 (remove [] on_key).status;
+    Alcotest.(check int)
+      "the session without its token"
+      403
+      (remove ~browser:admin (changing ()) on_key).status;
+    Alcotest.(check int)
+      "a PAT that manages Keepers and no provider account"
+      403
+      (remove [ "Authorization", "Bearer " ^ pat {|["manage_own_keeper","read_state"]|} ] on_key).status;
+    let owner = pat {|["manage_own_provider"]|} in
+    Alcotest.(check (pair int string))
+      "an account no record links"
+      (404, "unknown_account")
+      (by_token owner "account-of-nobody");
+    Alcotest.(check (pair int string))
+      "an account that holds a login"
+      (400, "not_a_key_account")
+      (by_token owner on_login);
+    let removed = remove ~browser:admin (changing ~csrf ()) on_key in
+    Alcotest.(check int) ("the session with its token: " ^ removed.body) 200 removed.status;
+    Alcotest.(check (pair (option string) (option bool)))
+      "the answer names the account and nothing else of it"
+      (Some on_key, Some true)
+      ( (match member "provider_account_id" removed with
+         | Some (`String id) -> Some id
+         | Some _ | None -> None)
+      , match member "removed" removed with
+        | Some (`Bool removed) -> Some removed
+        | Some _ | None -> None );
+    Alcotest.(check (pair int string))
+      "the removed account, again"
+      (404, "unknown_account")
+      (by_token owner on_key))
+;;
+
+(* The registration of a key over the route (RFC
+   a-persons-api-key-is-their-own-provider-account 3.3): what a request needs
+   to reach it, what it is told, and that the removal route takes the account
+   it made. What a registration leaves on the server is tested in
+   test_server_key_account_registration. The key is made up. *)
+let a_person_registers_a_key () =
+  with_installation (fun t ->
+    declare_providers t;
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    let pat = pat_with router admin ~csrf in
+    let key = "sk-test-a-key-over-the-route" in
+    let register ?(browser = fresh_browser ()) ?(integration = "claude_code") headers =
+      send
+        browser
+        router
+        ~meth:"POST"
+        ~path:Server_key_account.path
+        ~headers:(("Content-Type", "application/json") :: headers)
+        ~body:(Yojson.Safe.to_string (`Assoc [ "integration_id", `String integration; "key", `String key ]))
+    in
+    let accounts () =
+      List.length (Authz_provider_account.owned (Authz_zone.snapshot t.routes.R.zone).Authz_zone.state user_id)
+    in
+    Alcotest.(check int) "a request with no credential" 401 (register []).status;
+    Alcotest.(check int) "the session without its token" 403 (register ~browser:admin (changing ())).status;
+    Alcotest.(check int)
+      "a PAT that manages Keepers and no provider account"
+      403
+      (register [ "Authorization", "Bearer " ^ pat {|["manage_own_keeper","read_state"]|} ]).status;
+    Alcotest.(check int) "the requests that were turned away recorded no account" 0 (accounts ());
+    let refused = register ~browser:admin ~integration:"agy" (changing ~csrf ()) in
+    Alcotest.(check (pair int string))
+      "a provider whose key is not taken"
+      (400, "integration_takes_no_key")
+      (told refused);
+    Alcotest.(check bool) "that answer holds nothing of the key" false (contains ~sub:key refused.body);
+    let registered = register ~browser:admin (changing ~csrf ()) in
+    Alcotest.(check int) ("the session with its token: " ^ registered.body) 200 registered.status;
+    Alcotest.(check bool) "the answer holds nothing of the key" false (contains ~sub:key registered.body);
+    let account =
+      match member "provider_account_id" registered, member "kind" registered with
+      | Some (`String id), Some (`String "key") -> id
+      | (Some _ | None), (Some _ | None) -> Alcotest.failf "no key account in %S" registered.body
+    in
+    Alcotest.(check int) "the log holds the account" 1 (accounts ());
+    (* The list of the accounts of the person (RFC 3.8): the kind, the
+       integration the record names, and whether the key file gives a key. *)
+    let listed () =
+      let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+      reply.status, reply.body
+    in
+    Alcotest.(check (pair int string))
+      "the list of the accounts, after the registration"
+      ( 200
+      , Printf.sprintf
+          {|{"provider_accounts":[{"provider_account_id":"%s","kind":"key","key":"readable","integration_id":"claude_code"}],"runtimes":[]}|}
+          account )
+      (listed ());
+    let by_token = register [ "Authorization", "Bearer " ^ pat {|["manage_own_provider"]|} ] in
+    Alcotest.(check int) ("a PAT that manages provider accounts: " ^ by_token.body) 200 by_token.status;
+    Alcotest.(check int) "the same key again is a second account" 2 (accounts ());
+    let removed =
+      send admin router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ account) ~headers:(changing ~csrf ())
+    in
+    Alcotest.(check int) ("the removal of the account it made: " ^ removed.body) 200 removed.status;
+    let status, after = listed () in
+    Alcotest.(check int) "the list of the accounts, after the removal" 200 status;
+    Alcotest.(check bool) "the removed account is not in it" false (contains ~sub:account after);
+    Alcotest.(check bool) "and nothing of the key is" false (contains ~sub:key after))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved
@@ -1780,6 +1958,8 @@ let () =
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp
+        ; Alcotest.test_case "a person removes a key account" `Quick a_person_removes_a_key_account
+        ; Alcotest.test_case "a person registers a key" `Quick a_person_registers_a_key
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

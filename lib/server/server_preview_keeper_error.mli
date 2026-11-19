@@ -71,6 +71,10 @@ type t =
       (** 409 [runtime_reassigned]: the owner gave the Keeper another Runtime
           after the route read it. *)
   | Not_signed_in  (** 409 [not_signed_in]: the account is not signed in to a subscription. *)
+  | Key_refused
+      (** 409 [key_refused]: the account of the Runtime is a key account,
+          and the provider refused its key (HTTP 401). The client started
+          with the message. *)
   | Key_unusable of
       { reason : Runtime_api_key_file.read_error
       ; sentence : string

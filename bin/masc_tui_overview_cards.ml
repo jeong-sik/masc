@@ -3,25 +3,11 @@ module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
-type titles =
-  { decisions : string
-  ; continuation : string
-  ; capacity : string
-  ; actions : string
-  }
-
-type chromes =
-  { decisions : Masc_tui_card.chrome
-  ; continuation : Masc_tui_card.chrome
-  ; capacity : Masc_tui_card.chrome
-  ; actions : Masc_tui_card.chrome
-  }
-
-let empty_chromes =
-  { decisions = Masc_tui_card.empty_chrome
-  ; continuation = Masc_tui_card.empty_chrome
-  ; capacity = Masc_tui_card.empty_chrome
-  ; actions = Masc_tui_card.empty_chrome
+type edges =
+  { decisions : Masc_tui_card.edge
+  ; continuation : Masc_tui_card.edge
+  ; capacity : Masc_tui_card.edge
+  ; actions : Masc_tui_card.edge
   }
 
 let column_gap = 2
@@ -62,7 +48,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~(chromes : chromes) ~(titles : titles) ~empty_decisions ~inner
+let draw ~ko ~(edges : edges) ~inner
     ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
@@ -73,45 +59,33 @@ let draw ~(chromes : chromes) ~(titles : titles) ~empty_decisions ~inner
     let rows_of entries ~cells =
       List.concat_map (row_body ~is_selected ~cells) entries
     in
+    (* With no decision waiting the edge's count says so, and the body has
+       nothing to list, as the conversations card with none. *)
     let decision_card =
-      { Masc_tui_card.title = titles.decisions
-      ; body =
-          (fun ~cells ->
-             match decisions with
-             (* The cards are drawn only for a whole window, so an empty list
-                means no decision waits. *)
-             | [] -> [ Theme.recede () ^ empty_decisions ^ Ansi.reset ]
-             | _ :: _ -> rows_of decisions ~cells)
-      }
+      { Masc_tui_card.edge = edges.decisions; body = rows_of decisions }
     in
     let continue_card =
-      { Masc_tui_card.title = titles.continuation; body = rows_of continuation }
+      { Masc_tui_card.edge = edges.continuation; body = rows_of continuation }
     in
     let status_card =
-      { Masc_tui_card.title = titles.capacity; body = (fun ~cells -> status ~cells) }
+      { Masc_tui_card.edge = edges.capacity; body = (fun ~cells -> status ~cells) }
     in
     let actions_card =
-      { Masc_tui_card.title = titles.actions
-      ; body = rows_of actions
-      }
+      { Masc_tui_card.edge = edges.actions; body = rows_of actions }
     in
     let style =
-      { Masc_tui_card.edge = Theme.recede ()
+      { Masc_tui_card.border = Theme.recede ()
+      ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold
       ; reset = Ansi.reset
       }
     in
     let grid status_column =
-      Masc_tui_card.grid_with_chrome ~rounded:true ~style ~inner_width:inner
+      Masc_tui_card.grid ~ko ~style ~inner_width:inner
         ~gap:column_gap ~row_gap:card_row_gap ~max_rows:rows
-        [ [ (decision_card, chromes.decisions)
-          ; (continue_card, chromes.continuation)
-          ]
-        ; status_column
-        ]
+        [ [ decision_card; continue_card ]; status_column ]
     in
     match actions with
-    | [] -> grid [ (status_card, chromes.capacity) ]
-    | _ :: _ ->
-      grid [ (status_card, chromes.capacity); (actions_card, chromes.actions) ]
+    | [] -> grid [ status_card ]
+    | _ :: _ -> grid [ status_card; actions_card ]
   end

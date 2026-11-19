@@ -20,7 +20,7 @@ let key_b = "MASC_TEST_CLAUDE_B_KEY"
 let slot_a = "claude_a.haiku"
 let slot_b = "claude_b.haiku"
 
-let account ?(extra = "") ?seats name key =
+let account ?(extra = "") ?seats ?(binding = "") name key =
   Printf.sprintf {|[providers.%s]
 protocol = "messages-http"
 endpoint = "https://api.anthropic.com"
@@ -32,6 +32,7 @@ key = "%s"
 
 [%s.haiku]
 %s
+%s
 |}
     name
     extra
@@ -39,22 +40,38 @@ key = "%s"
     key
     name
     (match seats with None -> "" | Some seats -> Printf.sprintf "max-concurrent = %d" seats)
+    binding
 ;;
 
+let lane_table lane slots =
+  Printf.sprintf
+    "[runtime.exact_output_lanes.%s]\nslots = [%s]\nmax_output_tokens = 4096\n"
+    lane
+    (String.concat ", " (List.map (Printf.sprintf "%S") slots))
+;;
+
+(* Every required lane and [lane_id] are declared with both accounts; [lanes]
+   replaces a declared lane's slots or adds a lane. *)
 let runtime_toml ?(a = account "claude_a" key_a ~extra:"catalog-provider = \"claude\"")
-    ?(b = account "claude_b" key_b ~extra:"catalog-provider = \"claude\"") () =
+    ?(b = account "claude_b" key_b ~extra:"catalog-provider = \"claude\"") ?(extra = "")
+    ?(lanes = []) () =
+  let declared = List.sort_uniq String.compare (lane_id :: Standalone_lane.required_ids) in
   String.concat "\n"
     ([ Printf.sprintf "[runtime]\ndefault = %S\n" slot_b
      ; "[models.haiku]\napi-name = \"claude-haiku-5-5\"\n"
      ; a
      ; b
+     ; extra
      ]
      @ List.map
          (fun lane ->
-            Printf.sprintf
-              "[runtime.exact_output_lanes.%s]\nslots = [%S, %S]\nmax_output_tokens = 4096\n"
-              lane slot_a slot_b)
-         (List.sort_uniq String.compare (lane_id :: Standalone_lane.required_ids)))
+            lane_table lane
+              (Option.value (List.assoc_opt lane lanes) ~default:[ slot_a; slot_b ]))
+         declared
+     @ List.filter_map
+         (fun (lane, slots) ->
+            if List.mem lane declared then None else Some (lane_table lane slots))
+         lanes)
 ;;
 
 let with_fixture f =
@@ -200,7 +217,9 @@ let test_a_catalog_provider_typo_is_refused_at_load () =
   with_fixture @@ fun ~root:_ ~path ->
   let text = runtime_toml ~a:(account "claude_a" key_a ~extra:"catalog-provider = \"claud\"") () in
   match refused_binding ~path text with
-  | [ (id, Runtime_config_error.Catalog_provider_not_declared { provider_id; catalog_provider }) ] ->
+  | [ ( id
+      , Runtime_config_error.Catalog_provider_refused
+          { provider_id; catalog_provider; refusal = Runtime_adapter.Names_no_row } ) ] ->
     check string "the binding" slot_a id;
     check string "the account" "claude_a" provider_id;
     check string "the row it named" "claud" catalog_provider
@@ -218,31 +237,52 @@ let test_a_catalog_row_that_names_another_row_is_refused () =
     ^ "\n" ^ account "claude" key_a ~extra:"catalog-provider = \"deepseek-anthropic\""
   in
   match refused_binding ~path text with
-  | [ ("claude.haiku", Runtime_config_error.Catalog_provider_beside_own_row { provider_id = "claude"; _ }) ] -> ()
+  | [ ( "claude.haiku"
+      , Runtime_config_error.Catalog_provider_refused
+          { provider_id = "claude"; refusal = Runtime_adapter.Beside_own_row; _ } ) ] -> ()
   | dropped ->
     failf "unexpected refusal: %s"
       (String.concat "; "
          (List.map (fun (id, reason) -> id ^ ": " ^ Runtime_config_error.string_of_drop_reason reason) dropped))
 ;;
 
-(* The catalog owns the dialect of the row the account speaks as, exactly as
-   it does for a provider whose id is that row: a stated [kind] drops the
-   binding instead of being read. *)
-let test_kind_beside_catalog_provider_drops_the_binding () =
+let only_refusal ~path text =
+  match refused_binding ~path text with
+  | [ (id, Runtime_config_error.Catalog_provider_refused { refusal; _ }) ] -> id, refusal
+  | dropped ->
+    failf "unexpected refusal: %s"
+      (String.concat "; "
+         (List.map (fun (id, reason) -> id ^ ": " ^ Runtime_config_error.string_of_drop_reason reason) dropped))
+;;
+
+(* The catalog owns the dialect of the row the account speaks as. An operator
+   who adds catalog-provider and leaves the old kind has made the same choice
+   twice; the file is refused and names the key to remove, rather than the
+   account being left out of every lane. *)
+let test_kind_beside_catalog_provider_is_refused_at_load () =
   with_fixture @@ fun ~root:_ ~path ->
   let text =
     runtime_toml
       ~a:(account "claude_a" key_a ~extra:"catalog-provider = \"claude\"\nkind = \"anthropic\"") ()
   in
-  match load ~path text with
-  | Ok (runtimes, _, _, _, _) ->
-    check bool "the account with a stated kind is not a runtime" false
-      (List.exists (fun (runtime : Runtime_instance.t) -> String.equal runtime.id slot_a) runtimes);
-    check bool "the other account is" true
-      (List.exists (fun (runtime : Runtime_instance.t) -> String.equal runtime.id slot_b) runtimes)
-  | Error failure ->
-    failf "a dropped binding is not a load failure: %s"
-      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  match only_refusal ~path text with
+  | id, Runtime_adapter.Beside_kind -> check string "the binding" slot_a id
+  | _, (Runtime_adapter.Names_no_row | Beside_own_row | Names_alias _) ->
+    fail "a stated kind must be named as the cause"
+;;
+
+(* The catalog lookup reads any spelling of a row id, but an exact-output
+   target matches the id as written. Without this refusal the account loads
+   and its slot is left out of the lane at boot. *)
+let test_another_spelling_of_the_row_is_refused_at_load () =
+  with_fixture @@ fun ~root:_ ~path ->
+  let text = runtime_toml ~a:(account "claude_a" key_a ~extra:"catalog-provider = \"Claude\"") () in
+  match only_refusal ~path text with
+  | id, Runtime_adapter.Names_alias row_id ->
+    check string "the binding" slot_a id;
+    check string "the row id to write" "claude" row_id
+  | _, (Runtime_adapter.Names_no_row | Beside_own_row | Beside_kind) ->
+    fail "another spelling of the row must be named as an alias"
 ;;
 
 let test_an_official_client_may_not_name_a_catalog_row () =
@@ -296,6 +336,116 @@ let test_install_check_passes_when_every_slot_is_admitted () =
   Server_runtime_bootstrap.check_exact_output_registry ~config_root:root ()
 ;;
 
+(* #53032 review: the install check names each cause in the words boot logs,
+   one sentence per slot joined by "; ". *)
+let install_refusal ~root ~path text =
+  init ~path text;
+  match Server_runtime_bootstrap.check_exact_output_registry ~config_root:root () with
+  | () -> fail "the install check passed a lane that boot would shorten"
+  | exception Env_config_core.Config_error message -> message
+;;
+
+let names message sentence = check bool ("names " ^ sentence) true (contains message sentence)
+
+let slot_in ?(lane = lane_id) position slot_id =
+  Printf.sprintf "lane %S slot %d (%S)" lane position slot_id
+;;
+
+let unknown_to_both =
+  " ignored because no enabled binding carries that id; the binding is disabled, it was \
+   removed, or the id is mistyped"
+;;
+
+let test_install_check_joins_two_slots_no_binding_carries () =
+  with_fixture @@ fun ~root ~path ->
+  let typo = "claude_a.haiku-typo" and removed = "claude_c.haiku" in
+  let message =
+    install_refusal ~root ~path (runtime_toml ~lanes:[ lane_id, [ slot_a; typo; removed ] ] ())
+  in
+  names message (slot_in 2 typo ^ unknown_to_both ^ "; " ^ slot_in 3 removed ^ unknown_to_both)
+;;
+
+(* A binding switched off with [enabled = false] while a lane still names it
+   refuses the install as a removed one does. *)
+let test_install_check_names_a_disabled_binding () =
+  with_fixture @@ fun ~root ~path ->
+  let a = account "claude_a" key_a ~extra:"catalog-provider = \"claude\"" ~binding:"enabled = false" in
+  let message = install_refusal ~root ~path (runtime_toml ~a ()) in
+  names message (slot_in 1 slot_a ^ unknown_to_both)
+;;
+
+let official = {|[providers.official]
+protocol = "claude-code"
+command = "fixture-not-executed"
+is-non-interactive = true
+
+[official.haiku]
+max-context = 200000
+|}
+
+let test_install_check_names_a_subscription_cli_in_slots () =
+  with_fixture @@ fun ~root ~path ->
+  let cli = "official.haiku" and verifier = Standalone_lane.to_id Standalone_lane.Verifier in
+  let message =
+    install_refusal ~root ~path
+      (runtime_toml ~extra:official ~lanes:[ lane_id, [ slot_a; cli ]; verifier, [ slot_a; cli ] ] ())
+  in
+  let binding =
+    Printf.sprintf
+      " names a binding (provider %S, api-name %S) that is not an exact-output target; "
+      "official"
+      "claude-haiku-5-5"
+  in
+  names message (slot_in 2 cli ^ binding ^ "this lane dispatches by admitted target");
+  names message (slot_in ~lane:verifier 2 cli ^ binding ^ "this lane dispatches by runtime id")
+;;
+
+let test_install_check_names_a_model_the_catalog_has_no_row_for () =
+  with_fixture @@ fun ~root ~path ->
+  let mystery = "claude_a.mystery" in
+  let extra = "[models.mystery]\napi-name = \"claude-mystery-9\"\n\n[claude_a.mystery]\n" in
+  let message =
+    install_refusal ~root ~path (runtime_toml ~extra ~lanes:[ lane_id, [ slot_a; mystery ] ] ())
+  in
+  names
+    message
+    (slot_in 2 mystery
+     ^ Printf.sprintf
+         " ignored because model %S has no AGENT_CORE catalog row under provider %S and \
+          runtime.toml model %S states no "
+         "claude-mystery-9"
+         "claude_a"
+         "mystery")
+;;
+
+(* A slot rule 3 leaves out is named with the sentence the boot WARN logs for
+   it. The deployment preflight refuses rule-3 gaps before this check, so
+   this reaches the check directly. *)
+let test_install_check_names_a_deadline_gap_as_boot_does () =
+  with_fixture @@ fun ~root ~path ->
+  let b =
+    Str.global_replace
+      (Str.regexp_string "exact-body-timeout-s = 1200.0\n")
+      ""
+      (account "claude_b" key_b ~extra:"catalog-provider = \"claude\"")
+  in
+  let message = install_refusal ~root ~path (runtime_toml ~b ()) in
+  let gaps =
+    List.filter
+      (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
+         String.equal (Runtime_schema.exact_lane_key gap.owner) lane_id)
+      (Runtime.exact_slot_body_deadline_gaps ())
+  in
+  check int "one gap in the lane" 1 (List.length gaps);
+  List.iter
+    (fun gap ->
+       names
+         message
+         ("slot left out until its provider declares a whole-request deadline: "
+          ^ Runtime_config_error.exact_slot_body_deadline_gap_to_string gap))
+    gaps
+;;
+
 let () =
   run "account provider catalog row"
     [ ( "exact"
@@ -314,14 +464,25 @@ let () =
       , [ test_case "refuses a slot boot drops" `Quick test_install_check_refuses_a_slot_boot_drops
         ; test_case "passes when every slot is admitted" `Quick
             test_install_check_passes_when_every_slot_is_admitted
+        ; test_case "joins two slots no binding carries" `Quick
+            test_install_check_joins_two_slots_no_binding_carries
+        ; test_case "names a disabled binding" `Quick test_install_check_names_a_disabled_binding
+        ; test_case "names a subscription cli in slots" `Quick
+            test_install_check_names_a_subscription_cli_in_slots
+        ; test_case "names a model the catalog has no row for" `Quick
+            test_install_check_names_a_model_the_catalog_has_no_row_for
+        ; test_case "names a deadline gap as boot does" `Quick
+            test_install_check_names_a_deadline_gap_as_boot_does
         ] )
     ; ( "refusals"
       , [ test_case "a catalog-provider typo is refused at load" `Quick
             test_a_catalog_provider_typo_is_refused_at_load
         ; test_case "a catalog row that names another row is refused" `Quick
             test_a_catalog_row_that_names_another_row_is_refused
-        ; test_case "kind beside catalog-provider drops the binding" `Quick
-            test_kind_beside_catalog_provider_drops_the_binding
+        ; test_case "kind beside catalog-provider is refused at load" `Quick
+            test_kind_beside_catalog_provider_is_refused_at_load
+        ; test_case "another spelling of the row is refused at load" `Quick
+            test_another_spelling_of_the_row_is_refused_at_load
         ; test_case "an official client may not name a catalog row" `Quick
             test_an_official_client_may_not_name_a_catalog_row
         ] )

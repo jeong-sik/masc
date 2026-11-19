@@ -68,7 +68,7 @@ let standalone_lane_last_run ~ko ~now (lane : Tui_decode.standalone_lane) =
     Printf.sprintf
       (if ko then "마지막 실행 %s (%s 전)" else "last run %s (%s ago)")
       (standalone_lane_outcome_word ~ko outcome)
-      (Masc_tui_answering.elapsed_text ~now at)
+      (Masc_tui_value.Ongoing.since ~now at)
 
 let standalone_lane_state_tone (lane : Tui_decode.standalone_lane) =
   match lane.sl_configuration_state, lane.sl_status with
@@ -114,7 +114,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
           (if ko then "%d건 진행 중 (최근 %s 전 시작)"
            else "%d running (latest started %s ago)")
           lane.sl_running_count
-          (Masc_tui_answering.elapsed_text ~now started)
+          (Masc_tui_value.Ongoing.since ~now started)
       | None ->
         Printf.sprintf (if ko then "%d건 진행 중" else "%d running")
           lane.sl_running_count
@@ -446,11 +446,6 @@ let inventory_row_detail_lines ~ko ~width ~selected_output
   @ detail_section_heading (t "1. 설정 · 관측 상세" "1. Configuration & Observation")
   @ Page_reading.rows ~max_cells (Masc_tui_lane_inventory.detail_lines ~ko row)
   @ output_lines
-
-let rec take_rows remaining acc = function
-  | _ when remaining <= 0 -> List.rev acc
-  | [] -> List.rev acc
-  | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
 
 (* Editing takes the pane while it is open. A long CLI tail otherwise sits
    below the lane matrix and can put the acting cursor outside the frame. *)
@@ -851,19 +846,25 @@ let render_lanes_overview (state : state) =
         ~lines:listing
     else listing in
   let detail_height = projection.lop_detail_height in
+  let detail_cells = max 1 (detail_width - panel_padding) in
+  let row_detail row =
+    match Masc_tui_types.standalone_lane_of_inventory_row state row with
+    | Some lane -> standalone_lane_summary_lines state ~width:detail_cells ~standing:(standing row) lane
+    | None ->
+        inventory_row_summary_lines state ~width:detail_cells ~standing:(standing row)
+          ~selected_output:(Masc_tui_types.lanes_exact_output_name state row) row in
   let detail = match selected_inventory_lane state with
     | None -> [Theme.recede (), ui_text state ~ko:"목록에서 기능을 선택하세요." ~en:"Select a capability in the list."]
-    | Some row ->
-        (match selected_standalone_lane state with
-         | Some lane -> standalone_lane_summary_lines state ~width:(max 1 (detail_width - panel_padding))
-             ~standing:(standing row) lane
-         | None -> inventory_row_summary_lines state ~width:(max 1 (detail_width - panel_padding))
-             ~standing:(standing row)
-             ~selected_output:(Masc_tui_types.lanes_exact_output_name state row) row) in
+    | Some row -> row_detail row in
+  (* As tall as the longest feature's detail (RFC tui-one-screen-grammar §8):
+     sized by the selected feature, the card's bottom edge moved with j and
+     k, and so did the notices drawn under a stacked card. *)
   let visible_detail =
-    if List.length detail <= detail_height then detail else
-      take_rows (max 0 (detail_height - 1)) [] detail
-      @ (if detail_height > 0 then [Theme.info (), ui_text state ~ko:"… d: 전체 관측·설정 근거" ~en:"… d: full observation and configuration evidence"] else []) in
+    Masc_tui_detail_height.fit ~budget:detail_height ~rows:inventory ~detail:row_detail
+      ~too_tall:(Masc_tui_detail_height.Cut_with
+                   (Theme.info (), ui_text state ~ko:"… d: 전체 관측·설정 근거"
+                                     ~en:"… d: full observation and configuration evidence"))
+      ~blank:(Ansi.reset, "") detail in
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
   let detail = if projection.lop_boxed then
       studio_panel ~width:detail_width

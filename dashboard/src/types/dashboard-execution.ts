@@ -632,8 +632,9 @@ export interface GoalTreeStatusProjection {
 }
 
 export interface GoalTreeMetricProjection {
-  metric: string | null
-  target_value: string | null
+  /** null when the row's measure is not one of the three server shapes. */
+  measure: import("../api/goal-measure").GoalMeasure | null
+  procedure: string | null
   due_date: string | null
   criterion_revision: string
   measurement: GoalMeasurementProjection

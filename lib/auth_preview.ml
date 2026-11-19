@@ -506,43 +506,93 @@ let fact name code = function
   | Error unread -> [ name, `Null; "unread", `String (code unread) ]
 ;;
 
-let provider_accounts ~base_path ~config state { user_id; namespace = _ } =
-  (* Each receipt is read once, so an account and the Runtimes on it are
-     answered from the same reading. *)
+(* What the list says of the key of a key account: [readable], or the code
+   a use of the account answers with. A place that was not looked at has its
+   reason in the log, where the paths of the server may be named. *)
+let key_code account = function
+  | Runtime_key_account_files.Key_readable -> "readable"
+  | Runtime_key_account_files.Key_not_read error -> Runtime_api_key_file.read_error_code error
+  | Runtime_key_account_files.Key_not_looked_at detail ->
+    Log.Server.warn
+      "The key file of account %s was not looked at for the list of its owner: %s"
+      (Provider_account_id.to_string account)
+      detail;
+    "not_looked_at"
+;;
+
+let removal_code = function
+  | Authz_provider_account.Start_given_up -> "start_given_up"
+  | Authz_provider_account.Stayed Authz_purge_event.Key_not_removed -> "key_not_removed"
+  | Authz_provider_account.Stayed Authz_purge_event.Home_not_removed -> "home_not_removed"
+;;
+
+let provider_accounts ~base_path ~config state { user_id; namespace } =
+  let runtime_root = Runtime_account_home_layout.person_runtime_root ~base_path ~namespace in
+  (* What an account runs on is read once, so an account and the Runtimes
+     on it are answered from the same reading: the receipt of a login
+     account, and the record of a key account. *)
   let accounts =
     List.map
-      (fun account -> account, integration_of ~base_path user_id account)
-      (Authz_provider_account.owned state user_id)
+      (fun ({ provider_account_id = account; kind; removal } : Authz_provider_account.shown) ->
+        let integration, of_kind =
+          match kind with
+          | Authz_provider_account_state.Login ->
+            integration_of ~base_path user_id account, [ "kind", `String "login" ]
+          | Authz_provider_account_state.Key { integration_id; generation } ->
+            ( Ok (Integration_id.to_string integration_id)
+            , [ "kind", `String "key"
+              ; ( "key"
+                , `String
+                    (key_code
+                       account
+                       (Runtime_key_account_files.key_state ~runtime_root ~account_id:account ~generation))
+                )
+              ] )
+        in
+        let of_removal =
+          match removal with
+          | None -> []
+          | Some removal -> [ "removal", `String (removal_code removal) ]
+        in
+        account, integration, Option.is_none removal, of_kind @ of_removal)
+      (Authz_provider_account.shown state user_id)
   in
   (* A Runtime is made only on an account its maker owns (the log refuses
-     [Account_not_theirs]), so its account is in [accounts]; were it not,
-     its receipt is read as the account's would be. *)
-  let integration_on account =
-    match List.find_opt (fun (owned, _) -> Provider_account_id.equal owned account) accounts with
-    | Some (_, integration) -> integration
-    | None -> integration_of ~base_path user_id account
+     [Account_not_theirs]). One whose account is not shown, because its
+     removal is pending or went through, is not shown either, and neither is
+     one on an account a removal was left on: its record stays, and every
+     turn of it is refused. *)
+  let runtimes =
+    List.filter_map
+      (fun (id, (runtime : Authz_runtime_state.runtime)) ->
+        List.find_map
+          (fun (account, integration, in_use, (_ : (string * Yojson.Safe.t) list)) ->
+            if in_use && Provider_account_id.equal account runtime.provider_account_id
+            then Some (id, runtime, integration)
+            else None)
+          accounts)
+      (Authz_runtime.owned state user_id)
   in
   R.json
     R.Ok_200
     [ ( "provider_accounts"
       , `List
           (List.map
-             (fun (account, integration) ->
+             (fun (account, integration, (_ : bool), facts) ->
                `Assoc
-                 (("provider_account_id", `String (Provider_account_id.to_string account))
-                  :: fact "integration_id" integration_unread_code integration))
+                 ((("provider_account_id", `String (Provider_account_id.to_string account)) :: facts)
+                  @ fact "integration_id" integration_unread_code integration))
              accounts) )
     ; ( "runtimes"
       , `List
           (List.map
-             (fun (id, (runtime : Authz_runtime_state.runtime)) ->
-               let integration = integration_on runtime.provider_account_id in
+             (fun (id, (runtime : Authz_runtime_state.runtime), integration) ->
                `Assoc
                  ([ "runtime_id", `String (Runtime_id.to_string id)
                   ; ( "provider_account_id"
                     , `String (Provider_account_id.to_string runtime.provider_account_id) )
                   ]
                   @ fact "model" model_unread_code (model_of ~config ~integration id runtime)))
-             (Authz_runtime.owned state user_id)) )
+             runtimes) )
     ]
 ;;

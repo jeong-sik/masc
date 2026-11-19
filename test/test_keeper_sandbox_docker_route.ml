@@ -2014,6 +2014,162 @@ let test_a_container_missing_after_docker_run_is_removed () =
   Alcotest.(check bool) "the start is not recorded as running" false started
 ;;
 
+(* A guest whose process is not up. [run] and [start] exit 0, as the daemon's
+   do when it accepted the request, and the state probe answers for a
+   container that exists and is not running. What [start] does beyond exiting
+   0 is chosen by a marker file: bring the process up, lose the container, or
+   leave a daemon that no longer answers. *)
+let fake_docker_guest_not_up_script = {|#!/bin/sh
+state_dir="$(dirname "$0")"
+printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+daemon_answers() {
+  if [ -f "$state_dir/daemon-down" ]; then
+    printf 'cannot reach the daemon\n' >&2; exit 1
+  fi
+}
+case "$1" in
+  info) printf '[]\n'; exit 0 ;;
+  image) printf '[]\n'; exit 0 ;;
+  inspect)
+    daemon_answers
+    if [ -f "$state_dir/guest-exists" ]; then
+      case "$*" in
+        *State.Running*)
+          if [ -f "$state_dir/guest-up" ]; then printf 'true\n'; else printf 'false\n'; fi
+          exit 0 ;;
+        *) printf 'fixture-id\n'; exit 0 ;;
+      esac
+    fi
+    printf 'no such container\n' >&2; exit 1 ;;
+  run) touch "$state_dir/guest-exists"; printf 'fixture-id\n'; exit 0 ;;
+  start)
+    if [ -f "$state_dir/start-brings-it-up" ]; then touch "$state_dir/guest-up"; fi
+    if [ -f "$state_dir/start-loses-it" ]; then rm -f "$state_dir/guest-exists"; fi
+    if [ -f "$state_dir/start-stops-the-daemon" ]; then touch "$state_dir/daemon-down"; fi
+    exit 0 ;;
+  ps) daemon_answers; exit 0 ;;
+  rm) exit 0 ;;
+  *) printf 'unexpected fixture command\n' >&2; exit 2 ;;
+esac
+|}
+
+(* What [docker start] leaves behind for a guest that was there, stopped. It
+   exits 0 in every case. *)
+type after_docker_start =
+  | Still_stopped
+  | Up
+  | Gone
+  | Daemon_not_answering
+
+type guest_before_start =
+  | No_guest
+  | Stopped_guest of after_docker_start
+
+let start_with_guest_not_up guest =
+  with_fake_docker fake_docker_guest_not_up_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "guest-not-up.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let mark name =
+    write_file
+      (Filename.concat
+         (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
+         name)
+      ""
+  in
+  (match guest with
+   | No_guest -> ()
+   | Stopped_guest after_start ->
+     mark "guest-exists";
+     (match after_start with
+      | Still_stopped -> ()
+      | Up -> mark "start-brings-it-up"
+      | Gone -> mark "start-loses-it"
+      | Daemon_not_answering -> mark "start-stops-the-daemon"));
+  let runtime =
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "fixture:guest-not-up") ()
+  in
+  let result =
+    Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true runtime
+      ~cwd:playground ~command_argv:[ "printf"; "probe" ]
+  in
+  let started =
+    match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+    | Running _ -> true
+    | Not_started -> false
+  in
+  result, started, String.split_on_char '\n' (read_file log_path)
+;;
+
+let docker_calls lines verb =
+  List.exists (String.starts_with ~prefix:(verb ^ " ")) lines
+;;
+
+(* #52999: [docker run -d] exits 0 for a guest whose process ended at once.
+   The start used to record it as running, and the failure surfaced later as
+   the exit status of the first command. *)
+let test_a_guest_stopped_after_docker_run_fails_the_start () =
+  let result, started, lines = start_with_guest_not_up No_guest in
+  (match result with
+   | Ok _ -> Alcotest.fail "a container whose process had ended was used"
+   | Error detail ->
+     Alcotest.(check bool)
+       "the failure names the stopped guest"
+       true
+       (message_mentions "docker_container_stopped_after_run" detail));
+  Alcotest.(check bool) "the container was created" true (docker_calls lines "run");
+  Alcotest.(check bool) "it is kept for the next start" false (docker_calls lines "rm");
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
+(* The same for a guest that was already there, stopped: [docker start] exits
+   0 and the guest is still not running. Whatever the probe then says, the
+   guest is neither adopted nor recreated, and nothing is removed: a stopped
+   one keeps its filesystem layer, and one whose state could not be read may
+   be up. *)
+let refused_restart after_start ~reason () =
+  let result, started, lines = start_with_guest_not_up (Stopped_guest after_start) in
+  (match result with
+   | Ok _ -> Alcotest.fail "a guest that is not running was adopted"
+   | Error detail ->
+     Alcotest.(check bool) ("the failure says " ^ reason) true
+       (message_mentions reason detail));
+  Alcotest.(check bool) "the guest was started" true (docker_calls lines "start");
+  Alcotest.(check bool) "no second container is made" false (docker_calls lines "run");
+  Alcotest.(check bool) "nothing is removed" false (docker_calls lines "rm");
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
+let test_a_guest_stopped_after_docker_start_fails_the_start =
+  refused_restart Still_stopped ~reason:"docker_container_stopped_after_start"
+;;
+
+let test_a_guest_gone_after_docker_start_fails_the_start =
+  refused_restart Gone ~reason:"docker_container_absent_after_start"
+;;
+
+let test_an_unread_state_after_docker_start_fails_the_start =
+  refused_restart Daemon_not_answering
+    ~reason:"docker_container_state_unknown_after_start"
+;;
+
+(* The path the refusals above leave open: a stopped guest that
+   [docker start] does bring up is adopted. *)
+let test_a_stopped_guest_that_comes_up_is_adopted () =
+  let result, started, lines = start_with_guest_not_up (Stopped_guest Up) in
+  (match result with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "a guest that came up was refused: %s" detail);
+  Alcotest.(check bool) "the guest was started" true (docker_calls lines "start");
+  Alcotest.(check bool) "no second container is made" false (docker_calls lines "run");
+  Alcotest.(check bool) "the start is recorded as running" true started
+;;
+
 (* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
    so what has to hold is that the argv is the container's: an [exec] against
    the running container, as the keeper's uid, with the container cwd. If this
@@ -3325,6 +3481,21 @@ let () =
           Alcotest.test_case
             "a container missing after docker run is removed"
             `Quick test_a_container_missing_after_docker_run_is_removed;
+          Alcotest.test_case
+            "a guest stopped after docker run fails the start"
+            `Quick test_a_guest_stopped_after_docker_run_fails_the_start;
+          Alcotest.test_case
+            "a guest stopped after docker start fails the start"
+            `Quick test_a_guest_stopped_after_docker_start_fails_the_start;
+          Alcotest.test_case
+            "a guest gone after docker start fails the start"
+            `Quick test_a_guest_gone_after_docker_start_fails_the_start;
+          Alcotest.test_case
+            "an unread state after docker start fails the start"
+            `Quick test_an_unread_state_after_docker_start_fails_the_start;
+          Alcotest.test_case
+            "a stopped guest that comes up is adopted"
+            `Quick test_a_stopped_guest_that_comes_up_is_adopted;
           Alcotest.test_case
             "exec_argv is the container argv"
             `Quick

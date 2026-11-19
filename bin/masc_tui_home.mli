@@ -13,6 +13,17 @@ val open_approvals : Masc_tui_types.state -> navigate:(Masc_tui_types.surface ->
 type prepared
 val prepare : Masc_tui_types.state -> prepared
 val home_decision_rows : prepared -> (Masc_tui_types.home_action * string) list
+
+(** How many decisions wait: the request rows among {!home_decision_rows},
+    not the row that opens the whole list or a row that says a source was not
+    read. *)
+type decision_count =
+  | Every_source_read of int
+  | Some_source_unread of int
+      (** A list the requests come from was not read, so this many wait and
+          there may be more. *)
+
+val home_decision_count : prepared -> decision_count
 val clear_ask_answering : Masc_tui_types.state -> unit
 val reconcile_home_request_detail : Masc_tui_types.state -> unit
 val home_continue_rows : prepared -> (Masc_tui_types.home_action * string) list
@@ -35,4 +46,10 @@ type body = private {
 val home_body : prepared -> scroll:int -> budget:int -> body
 (** Renderer and loop share this body allocation. A positive available body
     reserves a selected destination row before optional chrome and notices. *)
-val home_step : Masc_tui_types.state -> backwards:bool -> unit
+val home_move : Masc_tui_types.state -> Masc_tui_scroll.Cursor_move.t -> unit
+(** Select the destination a move key lands on. Every move key of the list
+    goes through here. The order is the plain list's, the one {!home_body}
+    windows: decisions, then the reasons the server needs the operator, then
+    conversations. The two-column cards draw conversations under decisions
+    and the reasons in the right column, so there j and k cross between the
+    columns and Home and End are not the top-left and bottom-right rows. *)

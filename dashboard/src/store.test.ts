@@ -432,6 +432,33 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     expect(store.executionError.value).toBeNull()
   })
 
+  it('ends the wait for the next execution observation with an accepted one, not a refused one', async () => {
+    const store = await import('./store')
+    expect(store.hydrateExecutionSnapshot(execution(2))).toBe(true)
+    let ended = 0
+    const waits = [store.nextExecutionObservation(), store.nextExecutionObservation()]
+    for (const wait of waits) void wait.then(() => { ended += 1 })
+
+    // An older generation of the same publication is refused.
+    expect(store.hydrateExecutionSnapshot(execution(1))).toBe(false)
+    await Promise.resolve()
+    expect(ended).toBe(0)
+
+    expect(store.hydrateExecutionSnapshot(execution(3))).toBe(true)
+    await Promise.all(waits)
+    expect(ended).toBe(2)
+
+    // A wait covers one observation: the next caller waits for the one after.
+    const later = store.nextExecutionObservation()
+    let laterEnded = false
+    void later.then(() => { laterEnded = true })
+    await Promise.resolve()
+    expect(laterEnded).toBe(false)
+    expect(store.hydrateExecutionSnapshot(execution(4))).toBe(true)
+    await later
+    expect(laterEnded).toBe(true)
+  })
+
   it('rejects a superseded held HTTP response without replacing newer accepted authority', async () => {
     const held = pendingResponse()
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(held.promise))
@@ -439,8 +466,11 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     const requested = store.refreshExecution({ force: true })
     store.hydrateExecutionSnapshot(execution(2))
     const current = store.executionWorkspaceAuthority.peek()
+    let observed = false
+    void store.nextExecutionObservation().then(() => { observed = true })
     held.resolve(json(execution(1)))
     await expect(requested).rejects.toThrow('Execution response was superseded by a newer observation')
+    expect(observed).toBe(false)
     expect(store.executionWorkspaceAuthority.peek()).toBe(current)
     expect(store.executionError.value).toBeNull()
     expect(store.executionLoading.value).toBe(false)

@@ -54,25 +54,6 @@ type memory_state = Render_memory.memory_state =
 
 let set_table_frame enabled = table_frame_enabled := enabled
 
-let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
-
-(* The main loop uses the target identity to restart the motion when selection
-   changes. A short name has no animation target and therefore costs no idle
-   repaint. *)
-let keeper_roster_marquee_target (state : state) ~cols =
-  if not (keeper_roster_pane_shown state ~cols)
-     || (state.view = Overview && not state.keeper_navigation_open) then None
-  else
-    match state.view, selected_keeper state with
-    | (Overview | Keepers (Keeper_detail | Keeper_message)), Some keeper ->
-        let name = Terminal_text.single_line keeper.k_name in
-        if Message_layout.display_width name > keeper_roster_name_cells then
-          Some name
-        else None
-    | ((Overview | Keepers (Keeper_detail | Keeper_message)), None)
-    | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick))), _)
-    | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs)))))))))))))))))))), _) -> None
-
 let base_acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open
@@ -181,30 +162,60 @@ let operator_actions_reading (state : state) =
      retained @ sections @ operator_notice_sections state)
 
 (* Requests and capacity have separate observation paths. In particular a
-   working HTTP connection does not make a retained fleet reading current. *)
-let overview_capacity_badge (state : state) =
-  let text ko en = ui_text state ~ko ~en in
+   working HTTP connection does not make a retained fleet reading current.
+
+   The capacity card's status. The mark follows the same reading the colour
+   already followed: a retained reading is stale, a fleet that needs the
+   operator is the operator's turn, a grade that is not ok needs a look.
+   With no reading the mark stands alone, as on every other card: RFC
+   tui-one-screen-grammar section 6.4 keeps "not observed" out of a value's
+   place, and the card's body already says why.
+
+   The word is the grade alone. The running and bootable counts are the
+   body's first meter, which writes its number beside it (RFC section 5.6).
+   A narrow edge gives up its key tag, then shortens its name, then drops the
+   word, and keeps the mark to the end (Masc_tui_card.top_fit): counts inside
+   the word went before the mark did, so they belong to the meter. *)
+let overview_capacity_status (state : state) : Masc_tui_card.status =
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      Some (text "미관측" "unread", Theme.recede ())
+      { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Unread
+      ; word = ""
+      ; tone = Theme.recede () }
   | Unreachable _ | Unavailable _ | Cannot_read _ ->
-      Some (text "관측 불가" "unavailable", Theme.warn ())
+      { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Read_failed
+      ; word = ""
+      ; tone = Theme.warn () }
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained =
         Option.is_some trouble || state.workspace_identity <> Workspace_identity_match
       in
-      let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
-      let grade_style =
-        if retained then Theme.warn ()
-        else if fleet.fs_operator_action_required then Theme.bad ()
-        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status) then Theme.warn ()
-        else Theme.ok ()
+      let mark, tone =
+        if retained then Masc_tui_value.Mark.Caution, Theme.warn ()
+        else if fleet.fs_operator_action_required then Masc_tui_value.Mark.Yours, Theme.bad ()
+        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status) then
+          Masc_tui_value.Mark.Caution, Theme.warn ()
+        else Masc_tui_value.Mark.Settled, Theme.ok ()
       in
-      Some
-        ( Printf.sprintf "%d/%d %s" fleet.fs_running_count fleet.fs_bootable_count grade
-        , grade_style )
+      { Masc_tui_card.symbol = Masc_tui_card.Mark mark
+      ; word = Masc_tui_fleet_line.status_text ~ko fleet.fs_status
+      ; tone }
+
+(* The plain rows drawn when the cards do not fit have no edge, so a status
+   that needs a look leads them. A settled fleet spends no row: the plain rows
+   are drawn in spare room, where a meter or the Tool calls row is worth more
+   than "ok". With no reading the rows under it say why, which the edge's lone
+   mark stands for. *)
+let overview_capacity_status_rows (status : Masc_tui_card.status) =
+  let row mark = [ status.tone ^ Masc_tui_value.Mark.glyph mark ^ " " ^ status.word ^ Ansi.reset ] in
+  match status.symbol with
+  | Masc_tui_card.Mark Masc_tui_value.Mark.Settled -> []
+  | Masc_tui_card.Mark
+      (Masc_tui_value.Mark.(Under_way | Waiting | Paused | Caution | Yours | Failed) as mark) ->
+      row mark
+  | Masc_tui_card.Unknown _ -> []
 
 let overview_capacity_lines ?(cells = 48) (state : state) =
   let text ko en = ui_text state ~ko ~en in
@@ -216,30 +227,26 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       wrap (warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading"))
+  (* With no reading the edge draws the failure mark, and one row says why:
+     the row that names the cause with its age. A general row above it
+     ("not observed · fleet unreachable") said the same thing again. *)
   | Unreachable { since } ->
-      wrap (warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable"))
-      @ wrap (quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
+      wrap (warning (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
   | Unavailable { degradation; disconnected_since } ->
-      wrap (warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable"))
-      @ wrap (quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
+      wrap (warning (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
   | Cannot_read failure ->
-      wrap (warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable"))
-      @ wrap (quiet (Masc_tui_fleet_line.failure_text ~ko failure))
+      wrap (warning (Masc_tui_fleet_line.failure_text ~ko failure))
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
-      let retained = Option.is_some trouble
-        || state.workspace_identity <> Workspace_identity_match in
+      let identity_confirmed = state.workspace_identity = Workspace_identity_match in
+      let retained = Option.is_some trouble || not identity_confirmed in
+      (* The first row says the counts below are an earlier reading and why,
+         before any of them can be read as the fleet's current state. *)
       let scope =
-        if retained then
-          wrap (warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown"))
-        else []
+        List.concat_map
+          (fun row -> wrap (warning (Masc_tui_fleet_line.retained_row_text ~ko ~now row)))
+          (Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed)
       in
-      let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
-      let grade_style =
-        if retained then Theme.warn ()
-        else if fleet.fs_operator_action_required then Theme.bad ()
-        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status)
-        then Theme.warn () else Theme.ok () in
       let avail =
         max 0 (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
       in
@@ -249,8 +256,7 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
               ~max_value:(max 1 fleet.fs_bootable_count)
               ~label:(text "실행" "Run ")
               ~suffix:(Printf.sprintf "%d/%d" fleet.fs_running_count fleet.fs_bootable_count)
-              ~cell_style:(fun ~index ~width ->
-                Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Capacity })
               ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ; Chart.meter ~width:cells ~value:avail
               ~max_value:(max 1 fleet.fs_target_reaction_capacity)
@@ -260,9 +266,13 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
                    Printf.sprintf "%d/%d -%d" avail fleet.fs_target_reaction_capacity
                      fleet.fs_reaction_capacity_shortfall
                  else Printf.sprintf "%d/%d" avail fleet.fs_target_reaction_capacity)
-              ~cell_style:(fun ~index ~width ->
-                if fleet.fs_reaction_capacity_shortfall > 0 then Theme.warn ()
-                else Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              (* Capacity against its target is a share; refusing work is
+                 not what the target means. A shortfall is the anomaly, so
+                 the figure that states it carries the warning colour. *)
+              ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Capacity })
+              ?suffix_style:
+                (if fleet.fs_reaction_capacity_shortfall > 0 then Some (Theme.warn ())
+                 else None)
               ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
           ]
         else
@@ -277,17 +287,19 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
                  (Printf.sprintf "Turn capacity %d/%d · shortfall %d" avail
                     fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall))
       in
+      (* The grade is on the card's edge, so no row repeats it. The blocker
+         takes the warning colour while the reading is current; a count on a
+         row of its own is a figure, drawn quiet. *)
+      let cause_style = function
+        | Masc_tui_fleet_line.Blocker_alone _ | Masc_tui_fleet_line.Blocker_with_owners _ ->
+            if retained then quiet else warning
+        | Masc_tui_fleet_line.Owners_alone _ -> quiet
+      in
       let notes =
-        (if not retained && Masc_tui_fleet_line.status_is_ok fleet.fs_status
-            && not fleet.fs_operator_action_required then []
-         else [grade_style ^ grade ^ Ansi.reset])
-        @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
-        @ (if state.workspace_identity = Workspace_identity_match then [] else
-             [warning (String.capitalize_ascii (workspace_identity_unconfirmed ~ko))])
-        @ Option.to_list (Option.map (fun detail ->
-            (if retained then quiet else warning) (Terminal_text.single_line detail))
-            (Masc_tui_fleet_line.blocker_text ~ko fleet))
-        @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text ~ko fleet))
+        List.map
+          (fun row -> cause_style row (Masc_tui_fleet_line.cause_row_text ~ko row))
+          (Masc_tui_fleet_line.cause_rows ~blocker:fleet.fs_blocker
+             (Masc_tui_fleet_line.owner_count fleet))
       in
       scope @ meters @ List.concat_map wrap notes
 
@@ -363,42 +375,42 @@ let render_overview (state : state) home =
       let card_rows =
         if List.length body.hb_rows <> body.hb_total then None
         else
-          let titles : Masc_tui_overview_cards.titles =
-            { decisions=ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-            ; continuation=ui_text state ~ko:"대화" ~en:"Conversations"
-            ; capacity=ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
-            ; actions=ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed" } in
-          let hk tag =
+          let key tag =
             if state.keeper_navigation_open then None
             else Some (tag, Ansi.bold ^ Theme.accent ())
           in
-          let decision_count = List.length all_decisions in
-          let chromes : Masc_tui_overview_cards.chromes =
+          (* Every card counts what it lists; none of them owns the keyboard
+             yet, so each writes its count. The decisions card counts the
+             requests, not the row that opens the whole list or one that says
+             a source was not read. *)
+          let rows_of rows = Some (Masc_tui_card.Whole (List.length rows)) in
+          let decisions_count =
+            match Masc_tui_home.home_decision_count home with
+            | Masc_tui_home.Every_source_read requests -> Masc_tui_card.Whole requests
+            | Masc_tui_home.Some_source_unread requests -> Masc_tui_card.At_least requests
+          in
+          let edges : Masc_tui_overview_cards.edges =
             { decisions =
-                { Masc_tui_card.hotkey = hk "p "
-                ; badge =
-                    Some
-                      ( (if decision_count = 0 then ui_text state ~ko:"대기 없음" ~en:"clear"
-                         else string_of_int decision_count)
-                      , if decision_count = 0 then Theme.recede () else Theme.warn () )
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
+                ; key = key "p"; status = None; count = Some decisions_count
+                ; focus = Masc_tui_card.Unfocused }
             ; continuation =
-                { Masc_tui_card.hotkey = None
-                ; badge = Some (string_of_int (List.length continuation), Theme.recede ())
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
+                ; key = None; status = None; count = rows_of continuation
+                ; focus = Masc_tui_card.Unfocused }
             ; capacity =
-                { Masc_tui_card.hotkey = hk "m "
-                ; badge = overview_capacity_badge state
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
+                ; key = key "m"; status = Some (overview_capacity_status state); count = None
+                ; focus = Masc_tui_card.Unfocused }
             ; actions =
-                { Masc_tui_card.hotkey = hk "v "
-                ; badge = Some (string_of_int (List.length operator_rows), Theme.bad ())
-                }
+                { Masc_tui_card.name =
+                    ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
+                ; key = key "v"; status = None; count = rows_of operator_rows
+                ; focus = Masc_tui_card.Unfocused }
             }
           in
           let status ~cells = overview_capacity_lines ~cells state in
-          Masc_tui_overview_cards.draw ~chromes ~titles
-            ~empty_decisions:(ui_text state ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you.")
+          Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
             ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
             ~decisions:all_decisions ~decisions_whole:true ~continuation ~status
@@ -413,7 +425,9 @@ let render_overview (state : state) home =
                (ui_text state ~ko:" 바로가기" ~en:" Destinations");
            List.iter draw_row body.hb_rows;
            let spare = max 0 (body.hb_spare - 1) in
-           List.take spare (capacity_lines @ [tool_calls_line ~cells:inner_cols])
+           List.take spare
+             (overview_capacity_status_rows (overview_capacity_status state)
+              @ capacity_lines @ [tool_calls_line ~cells:inner_cols])
            |> List.iter c.push);
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
@@ -872,7 +886,6 @@ let render ~home ~compact_recovery_notice (state : state) =
   Masc_tui_types.keeper_message_rows_begin_frame ();
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
-  Render_schedule.Activity_tick.begin_frame ();
   Masc_tui_emblem_screen.begin_frame ();
   Masc_tui_portrait_view.begin_frame ();
   let frame, clamped, approval, drawn =

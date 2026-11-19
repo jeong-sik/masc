@@ -1245,7 +1245,9 @@ val append_file : string -> string -> unit
     raw bytes were appended), a newline is written before the lines, so
     the unfinished bytes stay a line of their own and every appended line
     is read whole. The file's last byte is read on each call to decide
-    that. Bytes a failed {!append_file} or {!append_lines} did not remove
+    that; when it cannot be read (another process cut the file at that
+    moment), the newline is written as well, which can leave an empty
+    line. Bytes a failed {!append_file} or {!append_lines} did not remove
     are such unfinished bytes. A FIFO or another non-regular file has no
     last byte to read, and the lines are written to it as they are.
     @raise Sys_error when the path cannot be examined, opened, read or
@@ -2450,10 +2452,17 @@ val append_fd_durable_for_testing :
     Each path keeps one cached descriptor reused across appends;
     cross-domain serialization is provided by the same per-path
     mutex registry as [append_file_unix], preserving RFC-0108 §3.2's
-    Record-interleave-0 guarantee. The cache is bounded by
-    [fd_cache_max=32] with LRU eviction; [close_all_cached_writers]
-    is registered at [at_exit]. *)
+    Record-interleave-0 guarantee. The cache holds at most 32
+    descriptors that are not in use, with LRU eviction, and closes
+    them at [at_exit] ([Fd_cache]). *)
 val append_jsonl : string -> Yojson.Safe.t -> unit
+
+(** [append_jsonl_rows path rows] is {!append_jsonl} for rows the caller has
+    rendered already: [rows] is one or more whole rows, each ended by its
+    newline. A caller that also has to know the exact text on disk renders
+    once and passes it here. The directory, the writer, the line start and the
+    commit acknowledgement boundary are {!append_jsonl}'s. *)
+val append_jsonl_rows : string -> string -> unit
 
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
     under one hold of the path lock, as one append. When it fails and its

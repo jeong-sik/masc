@@ -11,6 +11,11 @@ let cached : (string, cached_writer) Hashtbl.t = Hashtbl.create 32
 let mu = Stdlib.Mutex.create ()
 let max_entries = 32
 
+(* Opens in flight, guarded by [mu]. Each made room for its descriptor
+   before it started, so it holds a place in the cache until it ends. *)
+let opening = ref 0
+let held_locked () = Hashtbl.length cached + !opening
+
 (* The descriptor has no user-space buffer, so closing it writes nothing. *)
 let close_silently w =
   try Unix.close (Fd_append_whole.descriptor w.target) with
@@ -22,26 +27,34 @@ let drop_cached_writer_locked path w =
   if w.active = 0 then close_silently w else w.close_on_release <- true
 ;;
 
-(* Evict the inactive writer with the smallest [last_used], closing its fd.
-   Caller must already hold [mu]. Active writers are never closed under a
-   caller still using the lent descriptor. *)
+(* Evict the inactive writer with the smallest [last_used], closing its fd,
+   and say whether there was one. Caller must already hold [mu]. Active
+   writers are never closed under a caller still using the lent descriptor. *)
 let evict_lru_locked () =
-  let oldest = ref None in
-  Hashtbl.iter
-    (fun path w ->
-      if w.active = 0
-      then
-        match !oldest with
-        | None -> oldest := Some (path, w.last_used)
-        | Some (_, ts) when w.last_used < ts -> oldest := Some (path, w.last_used)
-        | _ -> ())
-    cached;
-  match !oldest with
-  | None -> ()
-  | Some (victim_path, _) ->
-    (match Hashtbl.find_opt cached victim_path with
-     | Some w -> drop_cached_writer_locked victim_path w
-     | None -> ())
+  let oldest =
+    Hashtbl.fold
+      (fun path w oldest ->
+        if w.active > 0
+        then oldest
+        else (
+          match oldest with
+          | Some (_, older) when older.last_used <= w.last_used -> oldest
+          | Some _ | None -> Some (path, w)))
+      cached
+      None
+  in
+  match oldest with
+  | None -> false
+  | Some (path, w) ->
+    drop_cached_writer_locked path w;
+    true
+;;
+
+(* Caller must already hold [mu]. Closes inactive writers, least recently
+   used first, until at most [places] are held or every cached writer is
+   lent. *)
+let rec evict_down_to_locked places =
+  if held_locked () > places && evict_lru_locked () then evict_down_to_locked places
 ;;
 
 (* [Sys_error] with the path first is what [Stdlib.open_out_gen] raised for
@@ -95,12 +108,30 @@ let open_writer path =
 let lease path =
   match
     Stdlib.Mutex.protect mu (fun () ->
-      Option.map lease_locked (find_current_locked path))
+      match find_current_locked path with
+      | Some w -> Some (lease_locked w)
+      | None ->
+        (* Room is made before the open, not after it: a process at its
+           descriptor limit with a full cache has no descriptor left for
+           the open until one cached writer is closed. When the open then
+           fails, that writer was closed for nothing and is opened again
+           by its next append. *)
+        evict_down_to_locked (max_entries - 1);
+        incr opening;
+        None)
   with
   | Some w -> w
   | None ->
-    let opened = open_writer path in
+    let opened =
+      match open_writer path with
+      | opened -> opened
+      | exception exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Stdlib.Mutex.protect mu (fun () -> decr opening);
+        Printexc.raise_with_backtrace exception_ backtrace
+    in
     Stdlib.Mutex.protect mu (fun () ->
+      decr opening;
       match find_current_locked path with
       | exception exception_ ->
         let backtrace = Printexc.get_raw_backtrace () in
@@ -111,7 +142,7 @@ let lease path =
         close_silently opened;
         lease_locked w
       | None ->
-        if Hashtbl.length cached >= max_entries then evict_lru_locked ();
+        (* The place this open held becomes the writer's. *)
         Hashtbl.add cached path opened;
         lease_locked opened)
 ;;
@@ -125,7 +156,11 @@ let with_writer path f =
         (* NDT-OK: update LRU recency after use; it only influences future
            inactive fd eviction, never persisted annotation semantics. *)
         w.last_used <- Unix.gettimeofday ();
-        if w.active = 0 && w.close_on_release then close_silently w))
+        if w.active = 0 && w.close_on_release then close_silently w;
+        (* More than [max_entries] places are held only while that many
+           are lent or held by opens in flight at once. The cache comes
+           back to its bound as writers are returned and opens end. *)
+        evict_down_to_locked max_entries))
     (fun () -> f w.target)
 ;;
 

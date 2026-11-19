@@ -38,6 +38,7 @@ import type {
   GoalTreeTask,
   KeeperApprovalQueueState,
 } from '../types'
+import { decodeGoalMeasure } from './goal-measure'
 
 // ── Goal source unavailable envelopes (RFC-0444 §2.3 row 4) ─────────────────
 
@@ -409,8 +410,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   const children = asRecordArray(raw.children)
     .map(decodeGoalTreeNode)
     .filter((node): node is GoalTreeNode => node !== null)
-  const metric = asNullableString(raw.metric)
-  const targetValue = asNullableString(raw.target_value)
   const taskCount = asInt(raw.task_count) ?? tasks.length
   const taskDoneCount = asInt(raw.task_done_count) ?? 0
   return {
@@ -422,8 +421,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, phase),
     verification: decodeGoalProof(raw.verification, id),
     priority: asInt(raw.priority) ?? 0,
-    metric,
-    target_value: targetValue,
+    measure: decodeGoalMeasure(raw.measure),
+    procedure: asNullableString(raw.procedure),
     due_date: asNullableString(raw.due_date),
     last_review_note: asNullableString(raw.last_review_note),
     criterion_revision: criterionRevision,

@@ -435,6 +435,8 @@ let write_all fd content =
   loop 0
 ;;
 
+let keep_store_facts (_ : base_path_lease) = Dated_jsonl.keep_facts_in_this_process ()
+
 let release_base_path_lease lease =
   Mutex.protect base_path_lease_mu (fun () ->
     let owns_table_entry =

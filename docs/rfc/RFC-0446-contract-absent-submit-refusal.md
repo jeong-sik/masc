@@ -7,7 +7,7 @@ updated: 2026-09-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0401", "0387", "0362", "0417"]
+related: ["0401", "0387", "0417"]
 implementation_prs: []
 ---
 
@@ -27,7 +27,6 @@ implementation_prs: []
 
 - **RFC-0401 을 확장한다.** 0401 의 1겹은 "제출 경계는 parse 사실만 거절한다" 이다. 이 RFC 는 parse 사실 하나를 더한다 — 계약이 있는가. 개수 하한은 여전히 두지 않는다. 계약이 좋은지는 판정 레인의 몫이다.
 - **RFC-0387 B1 의 Task 판이다.** 0387 은 Goal 생성 시 성공조건을 요구한다. 이 RFC 는 Task 의 완료 제출 시 계약을 요구한다. 생성 시점이 아니라 제출 시점인 이유는 §5 에 있다.
-- **RFC-0362 와 이어진다.** 0362 는 Goal 이 Task 로 내려오는 intake 계약이다. 이 RFC 는 Task 가 Done 으로 올라가는 exit 쪽 계약이다.
 - **RFC-0417 을 건드리지 않는다.** 취소 심사는 완료 계약이 아니라 진술된 사유를 본다. §2.2 에서 경계를 명시한다.
 
 ## 1. 배경 (실측)
@@ -210,4 +209,4 @@ Task 는 Goal 과 달리 생성 뒤 범위가 정해지는 경우가 많다. 결
 - Codex 검토: 같은 디렉터리 `codex-roadmap.json` `decision_critiques[2]` (critique 와 `rfc_must_pin_down` 5항목 — §2.1, §2.2, §2.3, §2.5 가 각각 답한다), `g1_revisions[2]` ("nonempty, explicit Task acceptance contract bound to its revision at submission and checked again before verdict settlement"), `rfc_order[2]` (세 번째, G1 authoritative 검증 실행 전), `missing[7]` ("contract edits" 는 §2.5 revision 묶기로).
 - 결정 메모: `~/.claude/projects/-Users-dancer-me-workspace-yousleepwhen-masc/memory/masc-runtime-decisions-2026-09-12.md` 3항.
 - 코드(main e763050689): `lib/verification_protocol.ml:submit_request_spec` (`criteria = []`), `:warn_contract_gap`, `:create_submit_request`; `lib/task/anti_rationalization.ml:contract_section`; `lib/completion_authority_agent.ml:verdict_question_of_request`, `:commit_verdict`; `lib/verification.ml:verification_request`, `:request_scan`; `lib/workspace/workspace_task_transitions.ml:transition_task_outcome_r` (notes 검사 자리, `superseded_verification_id`); `lib/types/types_core.ml:task_contract` ("Written once … never rewritten"), `:verification_claim`; `lib/types/masc_error.ml:Task_error`; `lib/workspace/workspace_task_classify.ml:normalize_task_contract`; `lib/task/tool_task_args.ml:parse_task_contract`; `dashboard/src/components/verification-requests-panel.ts:VerificationRow`; `dashboard/src/api/dashboard-misc.ts:VerificationRequest`; `bin/masc_tui_render.ml` task 상세 `done-when`; `config/prompts/verification.md` `### contract`.
-- 관련 RFC: `RFC-0401-typed-probes-verdicts-and-harness-facts.md` §0 1겹, `RFC-0387-goal-verifier-gate.md` B1, `RFC-0362-goal-owner-and-intake-contract.md`, RFC-0417(취소 판정의 주인).
+- 관련 RFC: `RFC-0401-typed-probes-verdicts-and-harness-facts.md` §0 1겹, `RFC-0387-goal-verifier-gate.md` B1, RFC-0417(취소 판정의 주인).

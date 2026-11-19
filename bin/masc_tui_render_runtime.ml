@@ -1184,7 +1184,8 @@ let render_tools (state : state) =
   done;
   if drawable > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
+      (Printf.sprintf (if state.ui_language = Lang_ko then "  [행 %s]" else "  [rows %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -1327,7 +1328,7 @@ let usage_lines ~cols ~rows (state : state) =
   let open Masc.Tui_decode_usage in
   let text = Overview_providers.text_for_viewport ~columns:(framed_inner_width cols) ~rows in
   let scopes () =
-    match Overview_providers.section_cards
+    match Overview_providers.section_cards ~ko:(state.ui_language = Lang_ko)
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_limit_exhausted:state.usage_show_limit_exhausted

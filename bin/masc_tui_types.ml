@@ -3349,14 +3349,40 @@ type chat_schedule_proximity =
   | Schedule_elapsed | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown
   | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled
 
+let chat_schedule_soon_band_s = 3600.
+
+(* The local midnight that starts the day [at] falls on. [Unix.mktime] reads
+   the zone's own day, so a day that gains or loses an hour still starts at
+   its midnight. A breakdown it cannot turn back into an instant has no start
+   to give. *)
+let local_day_start at =
+  let day = Unix.localtime at in
+  match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
+  | start, _ -> Some start
+  | exception Unix.Unix_error _ -> None
+
+(* A row moves to the next band as the clock runs, with no new data: Later
+   becomes Today at the start of the due day, both become Soon an hour before
+   the due moment, and Soon becomes Elapsed at it. Each band notes the instant
+   it ends, so the frame that draws the row is redrawn then (RFC
+   tui-one-screen-grammar §8). *)
 let chat_schedule_proximity ~now = function
   | None -> Schedule_unknown
   | Some due when due <= now -> Schedule_elapsed
-  | Some due when due -. now <= 3600. -> Schedule_soon (* one-hour display band *)
   | Some due ->
-      let today = Unix.localtime now and day = Unix.localtime due in
-      if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
-      else Schedule_later
+      Masc_tui_value.Redraw.note_change_at due;
+      if due -. now <= chat_schedule_soon_band_s then Schedule_soon
+      else begin
+        Masc_tui_value.Redraw.note_change_at (due -. chat_schedule_soon_band_s);
+        let today = Unix.localtime now and day = Unix.localtime due in
+        if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
+        else begin
+          (match local_day_start due with
+           | Some start when start > now -> Masc_tui_value.Redraw.note_change_at start
+           | Some _ | None -> ());
+          Schedule_later
+        end
+      end
 
 (* The Keepers whose event queue a schedule row reads: its target, the
    Keeper its reaction names, the one a transferred occurrence waits with,
@@ -3370,8 +3396,8 @@ let schedule_row_queue_keepers row =
         [ owner ]
     | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
-    | Unknown _ ->
+    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
+    | Cancelled _ | Unknown _ ->
         []
   in
   List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name ] @ holders
@@ -3385,7 +3411,7 @@ let schedule_row_unsettled row =
   match row.sch_occurrence.Tui_schedule_observation.stage with
   | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed
   | Settling _ | Transferring _ | Unknown _ | Dispatching -> true
-  | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false
+  | No_occurrence | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> false
 ;;
 
 let schedule_row_due_time row =
@@ -3424,7 +3450,7 @@ let chat_schedule_entries ~keeper_name snapshot =
              (match Schedule_domain.schedule_status_of_string row.sch_status with
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
-         | Dispatch_failed _ | Completed | Cancelled _ -> true
+         | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> true
          | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Settling _
          | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
@@ -5273,7 +5299,12 @@ end = struct
         | Some query -> board_query_to_yojson query | None -> `Null)]
 end
 
-type full_refresh_intent = Revalidate
+(* Who asks for a full pass, so a pass asked for while [/health] keeps
+   failing waits for the one the failure owes (RFC tui-one-screen-grammar §2). *)
+type full_refresh_intent = Masc_tui_refresh_pace.ask =
+  | Revalidate
+  | Operator_key
+  | Owed_pass
 
 (* Full and scoped bundles share one authority order. A later dispatch
    supersedes an earlier result, including failure and booting results. *)
@@ -5291,7 +5322,7 @@ end
 
 type asks_observation = {
   asks_request: Snapshot_read.request;
-  asks_result: (Masc.Tui_decode_asks.asks_snapshot, string) result;
+  asks_result: (Masc.Tui_decode_asks.asks_snapshot, request_failure) result;
 }
 
 type early_asks_observation = {
@@ -5719,9 +5750,10 @@ type scoped_refresh_followup =
 let note_full_refresh_intent ~intent ~full_refresh_inflight
     ~scoped_refresh_inflight followup =
   match intent with
-  | Revalidate when full_refresh_inflight || scoped_refresh_inflight ->
+  | (Revalidate | Operator_key | Owed_pass)
+    when full_refresh_inflight || scoped_refresh_inflight ->
       Revalidate_after_scoped
-  | Revalidate -> followup
+  | Revalidate | Operator_key | Owed_pass -> followup
 
 let take_scoped_refresh_followup ~full_refresh_inflight
     ~scoped_refresh_inflight = function
@@ -9932,15 +9964,6 @@ type state = {
   mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
-  (* Derived display phase for the selected long name in the narrow roster.
-     The main loop advances it only while that roster is visible. *)
-  mutable roster_marquee_frame: int;
-  (* The frame the running-turn mark is on. The main loop advances it only
-     while some turn is actually running, so a screen with nothing running
-     is a screen that stops repainting -- the animation costs nothing when
-     there is nothing to say. [-1] is "not animating": the mark falls back
-     to its still form rather than freezing on an arbitrary quarter. *)
-  mutable activity_frame: int;
   (* The candle's step. The main loop advances it only while the last frame
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
@@ -10466,6 +10489,13 @@ type state = {
      first: an outcome that stayed would go on claiming a keypress the
      operator has moved past. *)
   mutable last_action: Masc_tui_action_notice.t;
+  (* Background reads that keep failing, apart from [last_action] so a poll
+     cannot replace what the operator's last key did. Zone 4 ranks them
+     below it (RFC tui-one-screen-grammar §2). *)
+  mutable read_failures: Masc_tui_read_failure.t;
+  (* When the next pass may read [/health] after the probe failed
+     (RFC tui-one-screen-grammar §2). *)
+  mutable refresh_pace: Masc_tui_refresh_pace.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -11900,6 +11930,16 @@ let dismiss_latest_preset_save_receipt (state : state) =
 let set_last_action (state : state) action =
   state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
 
+(* A background read's answer, for zone 4 (RFC tui-one-screen-grammar §2): a
+   failure adds to that read's run and an answer ends it. A read the
+   workspace guard kept back never left, so it is neither. The caller passes
+   only the read's own answer, never an error put in place of one. *)
+let note_read_answer (state : state) read ~at = function
+  | Ok _ -> state.read_failures <- Masc_tui_read_failure.succeeded state.read_failures read
+  | Error (Request_failed _) ->
+      state.read_failures <- Masc_tui_read_failure.failed state.read_failures read ~at
+  | Error (Request_withdrawn _) -> ()
+
 let quit_inflight_snapshot (state : state) =
   List.map (fun (entry : inflight) ->
       let phase = match entry.phase with
@@ -12675,7 +12715,16 @@ let board_census_values (state : state) =
    age and the elapsed seconds say how long it has been stuck. *)
 let pending_display_bar_ns = 1_000_000_000L
 
-let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+(* A read inside the bar draws its row when it crosses the bar, with no new
+   data, so the crossing is when time next changes the frame (RFC
+   tui-one-screen-grammar §8). *)
+let past_pending_display_bar age =
+  let past = Int64.compare age pending_display_bar_ns >= 0 in
+  if not past then
+    Masc_tui_value.Redraw.note_change_at
+      (Unix.gettimeofday ()
+       +. Int64.to_float (Int64.sub pending_display_bar_ns age) /. 1e9);
+  past
 
 (* Totals stay borrowable while an ordinary poll is in flight -- the census
    on screen is the last reading until a newer one lands, and dropping the
@@ -13460,8 +13509,10 @@ let resting_keeper_name (state : state) =
   else Option.map (fun (keeper : keeper) -> keeper.k_name)
     (List.nth_opt (keepers_for_selection state) state.keeper_cursor)
 
-(* A row chosen by name or position is that row, not the heading above it,
-   and on the Keepers list a folded group opens so the chosen row is drawn. *)
+(* A row chosen by name -- a search hit, a link, a press -- is that row, not
+   the heading above it, and on the Keepers list a folded group opens so the
+   chosen row is drawn. The move keys place stops instead
+   ([move_keeper_list_stop]) and never open a group. *)
 let choose_keeper_row (state : state) index =
   state.keeper_list_focus <- None;
   state.keeper_cursor <- index;
@@ -13480,11 +13531,14 @@ let place_keeper_list_stop (state : state) stop =
       state.keeper_cursor <- cursor)
     (Masc_tui_keeper_list_model.placement ~view:state.keeper_list_view (keeper_list_reading state).klr_groups stop)
 
-let step_keeper_list_stop (state : state) ~delta =
+(* Every move key on the Keeper list lands here, over the same stops. A
+   stop is placed, never chosen: a folded group stays folded, which only the
+   heading's Enter and Esc change (RFC tui-one-screen-grammar §3.1). *)
+let move_keeper_list_stop (state : state) move =
   Option.iter
     (fun current ->
       Option.iter (place_keeper_list_stop state)
-        (Masc_tui_keeper_list_model.step_stop ~delta (keeper_list_stops state) current))
+        (Masc_tui_keeper_list_model.move_stop move (keeper_list_stops state) current))
     (keeper_list_stop state)
 
 let jump_keeper_list_group (state : state) direction =
@@ -13697,7 +13751,7 @@ let keeper_turns_projection_complete ~current = function
           && List.for_all (fun item ->
             item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error
             && item.kwi_source <> Tui_decode.Waiting_source_observation_unavailable)
-              row.kwr_waiting_on) waiting) rows
+              row.kwr_waiting_heads) waiting) rows
   | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
                              | Tui_decode.Keeper_waiting_unavailable _); _ }
   | Error _ -> false
@@ -18120,39 +18174,43 @@ let selected_acting_entry state =
    tab's status took between five and sixteen seconds (measured 2026-09-12),
    which is long enough to be read as a stall and keyed at. The footer's
    answering badge spends its elapsed seconds for the same reason. *)
-let pending_seconds_floor = 2
+let pending_seconds_floor = 2.
 
-let loading_notice ?elapsed_s what =
-  match elapsed_s with
+(* [elapsed] is the read's own pending time, to the nanosecond: a count
+   already cut to whole seconds would put both the floor's instant and the
+   next change up to a second late. *)
+let loading_notice ?elapsed what =
+  match elapsed with
   | Some seconds when seconds >= pending_seconds_floor ->
-      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
-  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+      Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
+        (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) seconds)
+  | Some seconds ->
+      (* The seconds appear when the read reaches the floor, with no new
+         data, so that is when time next changes this text (RFC
+         tui-one-screen-grammar §8). *)
+      Masc_tui_value.Redraw.note_change_at
+        (Unix.gettimeofday () +. (pending_seconds_floor -. seconds));
+      Printf.sprintf "(%s\xe2\x80\xa6)" what
+  | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
 
-let nanoseconds_per_second = 1_000_000_000L
-
-(* One step of every moving thing on a masc screen: the running-turn mark,
-   the roster marquee and the /about candle. Four steps turn the mark once
-   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
-   and one pace for all three keeps them moving together. *)
+(* The /about candle steps once this often. It is the one thing on a masc
+   screen that moves without new data, and it arrives at a still final frame,
+   so it costs nothing once it has arrived. State marks do not move and time
+   text changes on second boundaries (RFC tui-one-screen-grammar §7.2, §8). *)
 let motion_step_ns = 150_000_000L
 
-(* How far the moving marks have gone after [frame] steps; a negative frame
-   is one that has not started. *)
-let motion_elapsed_seconds frame =
-  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
-  /. Int64.to_float nanoseconds_per_second
+let nanoseconds_per_second = 1e9
 
-(* How long a read has been pending, in whole seconds. [now_ns] is an argument
-   so the answer is the same every time it is asked with the same reading, and
-   the stamp is the read's own rather than the state's: the Sandbox tab's status
-   and its container logs are two reads and can be pending at once.
+(* How long a read has been pending, in seconds. [now_ns] is an argument so
+   the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's
+   status and its container logs are two reads and can be pending at once.
 
    No clamp, because a monotonic reading cannot go backwards. A wall clock can,
    and the clamp that used to be here turned that into a silent zero. *)
-let pending_elapsed_s ~now_ns started_ns =
+let pending_elapsed ~now_ns started_ns =
   Option.map
-    (fun since ->
-      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    (fun since -> Int64.to_float (Int64.sub now_ns since) /. nanoseconds_per_second)
     started_ns
 
 let pending_detail_read (state : state) ~tab ~keeper =
@@ -20900,8 +20958,6 @@ let create_state
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
-  roster_marquee_frame = 0;
-  activity_frame = -1;
   emblem_frame = -1;
   about_reduce_motion = false;
   about_open = false;
@@ -21161,6 +21217,8 @@ let create_state
   voice_floor = None;
   quit_armed = None;
   last_action = Masc_tui_action_notice.empty;
+  read_failures = Masc_tui_read_failure.empty;
+  refresh_pace = Masc_tui_refresh_pace.answering;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
@@ -27357,9 +27415,9 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
               ^ say " · 진행 중" " · in progress"
-          ; motion = Masc_tui_answering.Still; keys = "" } ]
+          ; keys = "" } ]
       | None ->
-        Masc_tui_answering.chat_activity ~frame:state.activity_frame
+        Masc_tui_answering.chat_activity
           ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
@@ -27379,7 +27437,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
     let retained = keeper_input_retained state keeper_name in
-    let plain text = { Masc_tui_answering.lead = text; rest = ""; motion = Masc_tui_answering.Still; keys = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -27403,7 +27461,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = say "다음 대기 줄" "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
-              ; motion = Masc_tui_answering.Still; keys = "" } ] in
+              ; keys = "" } ] in
         let auto_tag =
           match state.user_input_priority_next, ko with
           | true, true -> "자동 다음 순서:켬"
@@ -27416,7 +27474,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         [ { Masc_tui_answering.lead =
               Printf.sprintf (if ko then "내 메시지 %d건 대기" else "Queue (%d pending)") waiting_count
           ; rest = " · " ^ auto_tag
-          ; motion = Masc_tui_answering.Still; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
+          ; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
         @ count_row keeper_queued (say "처리 대기 · /queue" "queued at Keeper · /queue")
         @ count_row awaiting_receipt (say "전송 중" "awaiting receipt")
         @ count_row rechecking (say "전송 확인 중" "rechecking delivery")
@@ -27428,7 +27486,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
          then say " · 중단 뒤" " · after stop" else say " · 보내기 전" " · before sending")
-       ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+       ; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -27448,8 +27506,7 @@ let keeper_message_activity_rows (state : state) =
           let provisional = provisional_requests () in
           let request_id request =
             Masc_tui_keeper_chat_projection.terminal_safe_text request.Masc_tui_keeper_chat_projection.request_id in
-          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest;
-            motion = Masc_tui_answering.Still; keys = "" } in
+          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest; keys = "" } in
           let pending_lead request =
             ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) " ^ request_id request in
           let kept_back refusal = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -27593,12 +27650,12 @@ let keeper_message_activity_rows (state : state) =
           [{ Masc_tui_answering.lead = say "보류" "Held"
            ; rest = (if retained_after_stop then say " · 중단 뒤" " · after stop"
                      else say " · 보내기 전" " · before sending")
-           ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
+           ; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with
         | [] -> []
         | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-            rest = ""; motion = Masc_tui_answering.Still; keys }] in
+            rest = ""; keys }] in
       held_rows @ activity_rows
 ;;
 
@@ -27857,6 +27914,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                 ; "결과 확인 중" ]
               | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
               | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
+              | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
               | Settling _ -> Schedule_pending, ["최근 회차 결과 기록 중"]
               | Transferring _ -> Schedule_pending, ["최근 회차 인계 기록 중"]
@@ -27881,11 +27939,11 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
-                         | Cancelled _ | Settling _ | Transferring _) ->
+                         | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) ->
                   [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
-                      | Cancelled _ | Settling _ | Transferring _) -> [] in
+                      | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) -> [] in
             List.map (fact (Facts.Reading tone)) occurrence
             @ hold
             @ [fact Facts.Plain (plain title); fact (Facts.Reading proximity) clock]

@@ -3,6 +3,7 @@ import { signal } from '@preact/signals'
 import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { confirmationBinding, readGoalConfirmation, sameConfirmationBinding, submitGoalConfirmation } from '../../api/goal-confirmation'
 import type { GoalConfirmationEvidence } from '../../api/goal-confirmation'
+import { goalMeasureText } from '../../api/goal-measure'
 import type { ArtifactWorkspace } from '../../api/published-artifacts'
 import { ApiRequestError, currentStoredTokenRevision, getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { recoverScopedRejectedCredential } from '../../api/dev-token'
@@ -277,7 +278,8 @@ export function GoalConfirmationPanel({ owner, isCurrent, isRecoveryCurrent, wai
     ${view.kind === 'loading' && !authorityReading && !otherPending ? html`<p role="status">현재 증거를 다시 조회해 주세요.</p>` : null}
     ${view.kind === 'unavailable' ? html`<p role="alert">증거를 불러올 수 없습니다. 권한 또는 서버 응답을 확인하세요.${authorityVerified ? ` ${view.detail}` : ''}</p>` : null}
     ${evidence ? html`<dl class="mt-2 text-sm break-words">
-      <dt>현재 성공 기준</dt><dd>${evidence.proof.criterion.title} · ${evidence.proof.criterion.metric} · 목표 ${evidence.proof.criterion.target_value}</dd>
+      <dt>현재 성공 기준</dt><dd>${evidence.proof.criterion.title} · 목표 ${goalMeasureText(evidence.proof.criterion.measure)}</dd>
+      <dt>측정 방법</dt><dd class="whitespace-pre-wrap">${evidence.proof.criterion.procedure}</dd>
       <dt>기준 revision</dt><dd>${evidence.proof.criterion.revision}</dd>
       <dt>Verifier 증거</dt><dd class="whitespace-pre-wrap">${evidence.proof.evidence}</dd>
       <dt>검증자</dt><dd>${evidence.proof.actor} · ${evidence.proof.recordedAt}</dd>

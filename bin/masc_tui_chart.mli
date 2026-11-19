@@ -1,7 +1,8 @@
 (** Visual charting and graphing primitives for the MASC TUI.
 
-    Provides UTF-8 block sparklines, context and resource gauges, tool
-    distribution bars, and the 2x4 Braille cell.
+    Provides UTF-8 block sparklines, context and resource gauges, meters,
+    and tool distribution bars. Braille cells and graphs are
+    {!Masc_tui_braille}.
 
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions.
     Safe across wide/narrow widths, non-ASCII multi-byte text, and empty/negative inputs. *)
@@ -45,26 +46,71 @@ val gauge :
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
 
+(** What a meter's maximum is, which decides the ramp its cells walk (RFC
+    tui-one-screen-grammar section 7.3). *)
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.paint
+      (** A cap set in settings or stated by a provider, where reaching it
+          refuses or holds work: a plan window that blocks model calls when
+          full, a context window's used tokens against its maximum. Each
+          filled cell takes the status colour of its position against the cap. *)
+  | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
+      (** Anything else: a completion ratio, a share of a total, a size
+          against the largest. Each filled cell takes [series]'s hue at its
+          position along the bar, deep at the start and bright at the end. *)
+  | Anomaly of { paint : Masc_tui_theme.paint; alarm : alarm }
+      (** An anomaly the bar reports -- every call failed, a stalled reader
+          -- whose status colour comes before any ramp: every filled cell
+          draws in [alarm]'s status colour through
+          {!Masc_tui_theme.status_readable}. *)
+
+(** The two colours an anomaly takes. A good or neutral status is not an
+    anomaly, so it has no constructor here. *)
+and alarm =
+  | Alarm_warn  (** Waiting too long: a stalled reader. *)
+  | Alarm_bad  (** Failing: every call in a bucket failed. *)
+
+val meter_cell_style :
+  meter_scale -> index:int -> width:int -> value:int -> max_value:int -> string
+(** The SGR drawn before filled cell [index] of a [width]-cell bar drawing
+    [value] against [max_value]. A declared limit draws
+    {!Masc_tui_theme.limit_cell_colour} through
+    {!Masc_tui_theme.meter_cell_readable}; a series draws
+    {!Masc_tui_theme.ramp_style} at the cell's reach, the smaller of its far
+    edge and [value / max_value]; an anomaly draws its status colour. *)
+
+val meter_fill_run :
+  scale:meter_scale ->
+  width:int ->
+  value:int ->
+  max_value:int ->
+  reset:string ->
+  string list ->
+  string
+(** The filled glyphs, cell [0] first, each coloured by {!meter_cell_style}.
+    A colour code goes out only where it differs from the cell before, and
+    [reset] closes the run when any code went out. *)
+
 val meter_bar :
   width:int ->
   value:int ->
   max_value:int ->
-  ?cell_style:(index:int -> width:int -> string) ->
+  scale:meter_scale ->
   ?track_style:string ->
   ?reset:string ->
   unit ->
   string
 (** Bracketless segmented bar of exactly [width] display cells ([""] when
-    [width <= 0]): filled cells draw ["■"] with optional per-cell [cell_style]
-    (for Oklab gradient ramps), and remaining cells draw ["·"] in [track_style]. *)
+    [width <= 0]): filled cells draw ["■"] through {!meter_fill_run}, and
+    remaining cells draw ["·"] in [track_style]. *)
 
 val meter :
   width:int ->
   value:int ->
   max_value:int ->
+  scale:meter_scale ->
   ?label:string ->
   ?suffix:string ->
-  ?cell_style:(index:int -> width:int -> string) ->
   ?track_style:string ->
   ?suffix_style:string ->
   ?reset:string ->
@@ -101,27 +147,3 @@ val distribution_bars :
     use a neutral colour. Shares are rounded down exactly, so displayed
     percentages need not sum to 100; a positive count has at least one filled
     cell when a track is available. Output is bounded within [width] display cells. *)
-
-(** {1 High-Resolution Braille Curve Plots} *)
-
-val braille_cell : mask:int -> string
-(** Encodes a Braille pattern (0x2800 + mask) to UTF-8. *)
-
-val braille_levels : ?min:int -> ?max:int -> int list -> int list
-(** Maps each input onto the 5-step Braille subcolumn scale ([0..4]) without
-    integer overflow. When the lower bound is zero, strictly positive values
-    map to at least [1] so non-zero activity never disappears. *)
-
-val braille_pair : left:int -> right:int -> string
-(** One 2x4 Braille cell pairing two bottom-up dot heights ([0..4]) into the
-    left and right subcolumns (e.g. ["⠀"], ["⢀"], ["⣀"], ["⣠"], ["⣤"], ["⣴"],
-    ["⣶"], ["⣾"], ["⣿"]). *)
-
-val braille_bar_mark : level:int -> string
-(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
-    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. *)
-
-val braille_sparkline : ?min:int -> ?max:int -> int list -> string
-(** High-density single-row Braille sparkline packing two consecutive samples
-    per terminal cell (2x horizontal resolution). An odd sample count left-pads
-    with [0] so the newest sample sits in the rightmost subcolumn. *)

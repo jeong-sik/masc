@@ -8363,11 +8363,10 @@ let launch_verification_load state ~mailbox =
    [None] is a surface with no row cursor, or one whose rows only exist once
    the frame is built. Those keep the keys they already have: Activity has g
    and G, the Keeper log and Tools have their own Home and End. *)
-type row_list = {
-  rl_count : int;  (** rows the list holds *)
-  rl_cursor : int;  (** the row the cursor is on *)
+type row_list = Masc_tui_list_moves.row_list = {
+  rl_count : int;
+  rl_cursor : int;
   rl_place : int -> unit;
-      (** put the cursor on a row and move the window to show it *)
 }
 
 (* The task whose detail is on screen, which is not the same as a detail id
@@ -8466,8 +8465,8 @@ let row_list (state : state) : row_list option =
   else
   match state.view with
   | Keepers Keeper_list ->
-      (* Search, Home/End and the page keys choose a row, which a folded
-         group opens to show. *)
+      (* Search chooses a Keeper row, which a folded group opens to show.
+         The move keys walk the stops instead ([list_moves]). *)
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
         (choose_keeper_row state)
   | Lanes ->
@@ -8886,23 +8885,16 @@ let search_row_cursor state =
 let place_row_cursor state index =
   Option.iter (fun r -> r.rl_place index) (row_list state)
 
-(* Home and End over a surface's list, and the page keys between them. All
-   three name a row rather than stepping to one, so all three go through the
-   one record and the window follows the way it does for a landed search.
-   A surface with no row list is left to the keys it already has. *)
-let move_list_to_edge (state : state) ~(to_bottom : bool) =
-  match row_list state with
-  | None -> ()
-  | Some { rl_count = 0; _ } -> ()
-  | Some r ->
-      r.rl_place (if to_bottom then Masc_tui_scroll.cursor_last ~count:r.rl_count else 0)
+(* The list the six move keys walk (RFC tui-one-screen-grammar §3.1). The
+   choice lives in [Masc_tui_list_moves], which a test links; this only hands
+   it the surface's rows, which need the frame's geometry. *)
+module Cursor_move = Masc_tui_scroll.Cursor_move
 
-let move_list_by_rows (state : state) ~delta =
-  match row_list state with
-  | None | Some { rl_count = 0; _ } -> ()
-  | Some r ->
-      r.rl_place
-        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
+let list_moves (state : state) =
+  Masc_tui_list_moves.moves state ~rows:(fun () -> row_list state)
+
+let move_list (state : state) move =
+  Option.iter (fun moves -> moves move) (list_moves state)
 
 
 (* Standalone rows never scroll, so an action notice only has to be retained
@@ -10253,10 +10245,16 @@ let launch_asks_read state ~mailbox =
      | Some asks_request ->
        let enqueue_async = workspace_enqueue state in
        let host = server_peer_host and port = state.port in
-       launch_workspace_async_read state ~mailbox
+       (* The guard's refusal stays [Request_withdrawn]: that read was not sent
+          and is no failed read (RFC §2). *)
+       launch_workspace_async_read_with state ~mailbox
+         ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun asks_result ->
            enqueue_async mailbox (Ask_msg (Asks_reloaded { asks_request; asks_result })))
-         (fun () -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ());
+         (fun () ->
+           Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+           |> Result.map_error (fun detail -> Request_failed detail));
        true)
 
 (* Runs on every loop iteration. A read already in flight, the refresh's or
@@ -17312,6 +17310,33 @@ let apply_keeper_chat_result state request result =
          true)
   | Some _ | None -> false
 
+(* A background read's own answer, for zone 4 (RFC tui-one-screen-grammar
+   §2). Called where the read's answer arrives, never where an error is put
+   in place of one. The session event list still gets its line from the
+   caller. *)
+let note_read state read result =
+  Masc_tui_types.note_read_answer state read ~at:(Unix.gettimeofday ()) result
+
+(* A probe failed, or a pass raised before it settled: the next pass waits
+   (RFC tui-one-screen-grammar §2). The owed reads' retry constants. The
+   wall clock read here fixes the next try zone 4 says, so a redraw cannot
+   move it. *)
+let fail_refresh_pace state =
+  state.refresh_pace <-
+    Masc_tui_refresh_pace.probe_failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      ~wall_now:(Unix.gettimeofday ()) state.refresh_pace
+
+(* The [/health] probe's reading: its error is the probe's own failure. It
+   also paces the next pass; [answered] says what an answer settles, the
+   owed pass itself or only the wait before it. *)
+let note_server_health state ~answered reading =
+  note_read state Masc_tui_read_failure.Server_health
+    (Result.map_error (fun detail -> Request_failed detail) reading);
+  match reading with
+  | Ok _ -> state.refresh_pace <- answered state.refresh_pace
+  | Error _ -> fail_refresh_pace state
+
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
     match current_error with
@@ -17482,9 +17507,20 @@ let apply_asks_load state = function
 
 (* A read of the questions: what it found, and whether the owed read is
    settled or waits to retry. *)
-let apply_asks_read state result =
+let settle_asks state result =
   settle_asks_read state result;
   apply_asks_load state result
+
+(* The background read of the questions, which zone 4 also hears about. The
+   guard's refusal is said as kept back, never as the read's failure
+   (RFC §2). The reread that follows an answer is that action's outcome and
+   goes to [settle_asks] alone. *)
+let apply_asks_read state result =
+  note_read state Masc_tui_read_failure.Asks result;
+  settle_asks state
+    (Result.map_error
+       (request_failure_text ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Questions_read)
+       result)
 
 let apply_asks_observation state observation =
   Option.iter (apply_asks_read state)
@@ -17510,6 +17546,19 @@ let apply_approvals_read state result =
 let apply_approval_observation state observation =
   Option.iter (fun result ->
     apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result))
+    (take_approval_observation state observation)
+
+(* The confirm queue's own answer, which zone 4 also hears about.
+   [apply_approvals_read] alone also takes an error put in place of a read --
+   a booting server, an account server, a refresh that raised -- and that is
+   no failed read (RFC §2). *)
+let apply_approvals_answer state result =
+  note_read state Masc_tui_read_failure.Confirmations result;
+  apply_approvals_read state result
+
+let apply_approval_answer_observation state observation =
+  Option.iter (fun result ->
+    apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result))
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -17541,7 +17590,7 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
     then
       (* Carried as [request_failure], so a read the guard kept back is drawn
          as kept back and not as a failed read (RFC §2). *)
-      if admit_approval_listing state listing_ticket then apply_approvals_read state result
+      if admit_approval_listing state listing_ticket then apply_approvals_answer state result
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -18161,8 +18210,10 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
          observe_http_reader ~on_progress Http_refresh_progress.Questions
            ~outcome:(fun observation -> Http_refresh_progress.of_result observation.asks_result) (fun () ->
          let asks_result = match expected_workspace with
-           | None -> Error "Server workspace identity is unavailable"
-           | Some expected_workspace -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
+           | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
+           | Some expected_workspace ->
+               Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+               |> Result.map_error (fun detail -> Request_failed detail) in
          let observation = { asks_request; asks_result } in
          (match on_asks with
           | None -> ()
@@ -18493,7 +18544,7 @@ let apply_http_scoped_data state ~datasets results =
       record dataset (if received then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
-  Option.iter (apply_approval_observation state) results.http_approvals;
+  Option.iter (apply_approval_answer_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
   if List.mem Surface_read_order.Board_posts datasets then begin
     (* The terminal reservation already marked missing data unavailable. Only
@@ -19639,6 +19690,8 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
        cannot replace identity observed by a newer collector. *)
     (match admission with
      | Admit_identity_and_data | Admit_identity_only ->
+         note_server_health state ~answered:Masc_tui_refresh_pace.answered_again
+           results.http_scoped_server_identity;
          apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
      | Admit_data_only | Admit_nothing -> ());
     match admission with
@@ -19681,6 +19734,10 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
     let err = request_failure_text ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Surface_read failure in
+    (* The last [/health] reading its probes took, the probe's own answer
+       whatever stopped the refresh after it. *)
+    Option.iter
+      (note_server_health state ~answered:Masc_tui_refresh_pace.answered_again) latest;
     apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
@@ -19690,9 +19747,15 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
     add_event state "error" err
   end
 
+(* A refresh pass settled, and its [/health] probe read [identity]. *)
+let note_refresh_settled state identity =
+  note_read state Masc_tui_read_failure.Refresh_pass (Ok ());
+  note_server_health state ~answered:Masc_tui_refresh_pace.pass_answered identity
+
 let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
+  note_refresh_settled state results.http_server_identity;
   let previous_items = visible_item_revision state in
   let request = results.http_scoped.http_surface_request in
   (* Navigation joins this pass's ticket while it runs, so the ticket alone
@@ -19706,7 +19769,7 @@ let apply_http_surfaces state ~mailbox results =
   let roster_refreshed = match admission with
     | Admit_identity_and_data | Admit_data_only ->
         if state.workspace_identity = Workspace_identity_match then
-          Option.iter (apply_approval_observation state) results.http_approvals;
+          Option.iter (apply_approval_answer_observation state) results.http_approvals;
         apply_http_scoped_data state ~datasets results.http_scoped
     | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
@@ -19731,6 +19794,7 @@ let apply_http_surfaces state ~mailbox results =
 
 let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  note_refresh_settled state identity;
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
@@ -19756,6 +19820,8 @@ let account_server_reason =
 
 let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  (* The probe answered; what answered is the account server. *)
+  note_refresh_settled state (Ok ());
   (* The footer's last notice was said on the screen this one covers, such
      as the settings this server could not answer at start. *)
   (match state.connection_status with
@@ -19776,6 +19842,7 @@ let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticke
   end
 
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
+  note_refresh_settled state latest_identity;
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
@@ -20702,8 +20769,22 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
         | Observer_existing_workspace _ -> report session_id
         | Observer_initial_workspace _ -> () in
       let open_refused = ref false in
+      (* Whether an earlier attempt of this recovery did not open its stream. *)
+      let failed_attempt = ref false in
       let rec follow () =
         open_refused := false;
+        let opened = ref false in
+        (* The open is reported before what it carries, so a [/health] wait
+           it ends is over before the restored identity asks for a pass. *)
+        let note_opened () =
+          if not !opened then begin
+            opened := true;
+            enqueue_async mailbox
+              (Observer_msg (Observer_recovery_opened
+                 (authority, owner,
+                  if !failed_attempt then Masc_tui_refresh_pace.Opened_after_failure
+                  else Masc_tui_refresh_pace.Opened_each_time)))
+          end in
         let outcome =
           try
             match (match !session with
@@ -20720,15 +20801,20 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
                   Masc_tui_http.observe_runtime_events ~clock ~expected_base_path ~expected_masc_root ~host ~port
                     ~session_id ~cursor:None
                     ~on_identity:(fun (handshake, identity) ->
+                      note_opened ();
                       enqueue_async mailbox
                         (Observer_msg (Observer_recovery_identity
                            (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
                             origin, identity))))
-                    ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
+                    ~on_open:(fun _ ->
+                      note_opened ();
+                      refusal_reported := false;
+                      report_existing (Some session_id))
                     ~on_chunk:(fun _ -> ()))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn)) in
+        if not !opened then failed_attempt := true;
         (match outcome with
          | Error (Masc_tui_http.Http_refused {status; detail})
            when Masc_tui_http.observer_workspace_refused ~status ~detail ->
@@ -21194,11 +21280,15 @@ let log_http_surface_read_finished state context =
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  (* While [/health] keeps failing, a pass the TUI asks for by itself waits
+     for the one the failure owes, which revalidates everything this one
+     would, side reads included (RFC tui-one-screen-grammar §2). *)
+  let paced = Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace in
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle. A revalidation owes it a read. Owed, so a pane
      scrolled into older rows or a read in flight takes it when it can; the
      owed read brings the tool details with it. *)
-  begin
+  if paced then begin
     Option.iter
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
@@ -21246,7 +21336,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       ~full_refresh_inflight:!refresh_inflight
       ~scoped_refresh_inflight:!scoped_refresh_inflight
       !scoped_refresh_followup;
-  if not !refresh_inflight then begin
+  if not !refresh_inflight && paced then begin
     refresh_inflight := true;
     scoped_refresh_followup := No_scoped_followup;
     let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in
@@ -21839,7 +21929,8 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
   end
 
-let start_http_scoped_refresh state ~host ~port ~refresh_inflight
+let start_http_scoped_refresh state ~host ~port
+    ~(ask : Masc_tui_refresh_pace.screen_ask) ~refresh_inflight
     ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   (* Entering a surface that draws the roster owes it a whole read rather
@@ -21849,7 +21940,15 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
   let needs = { needs with needs_keeper_roster = false } in
   let authority = state.workspace_authority in
-  if Masc_tui_types.surface_needs_any needs then begin
+  (* This bundle probes [/health] first, so while the probe keeps failing a
+     read the screen owes by itself waits for the pass the failure owes
+     (RFC tui-one-screen-grammar §2). A held read starts nothing and records
+     no start, so its debt stays owed and its launcher asks again on a later
+     loop. Every caller states its [ask]; none is assumed. *)
+  if Masc_tui_types.surface_needs_any needs
+     && Masc_tui_refresh_pace.screen_read_starts ~now:(monotonic_now_s ()) ask
+          state.refresh_pace
+  then begin
     let collection_inflight = !full_refresh_inflight
       || Surface_read_order.navigation_in_flight state.http_surface_reads in
     refresh_inflight := true;
@@ -21989,6 +22088,7 @@ let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
   in
   if due <> [] && server_authority_ready state then
     start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+      ~ask:Masc_tui_refresh_pace.Owed_read_due
       ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
       ~needs:
         (List.fold_left
@@ -22018,6 +22118,7 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
        && not reading
     then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with needs_board = true }
   end
@@ -22055,6 +22156,7 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     if (planning_due || goals_due) && server_authority_ready state
        && state.workspace_identity = Workspace_identity_match then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with
                  needs_planning = planning_due; needs_overview_goals = goals_due }
@@ -22072,6 +22174,19 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
   if launch then
     start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
       ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+
+(* Runs on every loop iteration. A failing [/health] probe owes one pass,
+   which starts once its wait is over, whether or not anything asked
+   (RFC tui-one-screen-grammar §2). Only a full pass in flight holds it: a
+   screen read in flight is the same case for this pass as for any other,
+   and [start_http_refresh] decides it through [note_full_refresh_intent]. *)
+let launch_owed_refresh_pass state ~refresh_inflight ~scoped_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  if not !refresh_inflight
+     && Masc_tui_refresh_pace.due ~now:(monotonic_now_s ()) state.refresh_pace
+  then
+    start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Owed_pass
+      ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
 let open_board_post_id state ~mailbox ~focus post_id =
   state.board_mode <- Board_read post_id;
@@ -22684,7 +22799,7 @@ let apply_ask_answer_completion state submission result asks =
           draft it kept, never an unconfirmed recording (RFC §2). *)
        report_kept_back state ~request:Kept_request.Ask_answer
          (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
-  apply_asks_read state asks
+  settle_asks state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
@@ -24517,6 +24632,19 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
+(* Start a server here, and read it once it answers. The failures in a row
+   were of an address where nothing listened, so that answer ends their wait
+   (RFC tui-one-screen-grammar §2). The start the TUI makes by itself and the
+   Keeper list's [s] both come here. *)
+let start_server_here_then_read state ~base_path ~host ~port ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  start_masc_server_here ~base_path ~host ~port
+    ~note:(fun msg -> add_event state "system" msg)
+    ~on_ready:(fun () ->
+      state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
+      start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
+        ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox)
+
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -24535,13 +24663,10 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
       ~already_attempted:!tui_auto_start_spent
   then begin
     tui_auto_start_spent := true;
-    start_masc_server_here ~base_path ~host ~port
-      ~note:(fun msg -> add_event state "system" msg)
-      ~on_ready:(fun () ->
-        start_http_refresh state ~host ~port ~intent:Revalidate
-          ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight
-          ~scoped_refresh_followup ~mailbox)
+    start_server_here_then_read state ~base_path ~host ~port
+      ~refresh_inflight:http_refresh_inflight
+      ~scoped_refresh_inflight:http_scoped_refresh_inflight
+      ~scoped_refresh_followup ~mailbox
   end;
   (* A server answering here is the workspace appearing. The decision is the
      same guarded one taken at boot -- it still refuses a base path that holds
@@ -24776,7 +24901,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -25437,7 +25562,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result);
+        apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result);
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
@@ -26373,6 +26498,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
               | Workspace_identity_match | Workspace_identity_mismatch _),
               Account_server _ -> ())
+  | Observer_msg (Observer_recovery_opened (authority, owner, opened)) ->
+      (* A stream that would not open opening now is the server answering
+         again: the owed pass starts now. It is not a [/health] answer, so
+         the run of failures goes on (RFC tui-one-screen-grammar §2). *)
+      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then
+        state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
@@ -26440,6 +26571,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       withdraw_currency_authority state;
       state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
+      note_read state Masc_tui_read_failure.Refresh_pass (Error (Request_failed err));
+      fail_refresh_pace state;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -30435,7 +30568,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Some at ->
                say "처리 관측 " "pass observed "
                ^ span_ago ~ko
-                   (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. at))) in
+                   (Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) at) in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
            let admission = Option.map (fun admission ->
@@ -30445,7 +30578,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let reading_age =
              say "상태 조회 " "status loaded "
              ^ span_ago ~ko
-                 (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. mhr_generated_at))) in
+                 (Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) mhr_generated_at) in
            notice ~kind:Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
@@ -32392,10 +32525,9 @@ let main
 
   (* Main loop *)
   let machine_input_timeout_s = 0.3 in
-  let roster_marquee_target = ref None in
-  let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
-  let activity_tick = Render_schedule.Activity_tick.create
-      ~motion_interval_ns:Masc_tui_types.motion_step_ns ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  (* The wall-clock second at which the time text of the last built frame
+     next reads differently, [None] when that frame drew none. *)
+  let time_redraw_due = ref None in
   let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
@@ -36196,6 +36328,9 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_story_turns state ~mailbox:async_messages;
       launch_owed_memory state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
+      launch_owed_refresh_pass state ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+        ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
@@ -36480,7 +36615,7 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
-        start_http_refresh state ~host ~port ~intent:Revalidate
+        start_http_refresh state ~host ~port ~intent:Operator_key
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
@@ -36611,7 +36746,7 @@ Use relative paths for resources already held in the package. -->
            else (match k with
              | "r" ->
                  start_http_refresh state ~host:server_peer_host ~port:state.port
-                   ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                   ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                    ~scoped_refresh_inflight:http_scoped_refresh_inflight
                    ~scoped_refresh_followup ~mailbox:async_messages
              | _ -> ())
@@ -38592,28 +38727,14 @@ Use relative paths for resources already held in the package. -->
                | Some _ ->
                    state.repository_changes_diff_scroll <-
                      Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
-               | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+               | None -> move_list state Cursor_move.Line_down)
 
             | ("k" | "up" | "wheel-up") ->
               (match state.repository_changes_diff_path with
                | Some _ ->
                    state.repository_changes_diff_scroll <-
                      max 0 (state.repository_changes_diff_scroll - 1)
-               | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+               | None -> move_list state Cursor_move.Line_up)
 
             | ("\r" | "\n" | "right") -> (
               match state.repository_changes_diff_path with
@@ -38822,10 +38943,8 @@ Use relative paths for resources already held in the package. -->
                    state.repository_changes_diff_scroll <-
                      if String.equal key "home" then 0 else clamped_scroll_end
                | None ->
-                   (match row_list state with
-                    | Some list when list.rl_count > 0 ->
-                        list.rl_place (if String.equal key "home" then 0 else list.rl_count - 1)
-                    | Some _ | None -> ()))
+                   move_list state
+                     (if String.equal key "home" then Cursor_move.To_top else Cursor_move.To_end))
 
             | ("pageup" | "pagedown") as page_key ->
               (* A surface page at a time, as the shared page arm moved the
@@ -38847,13 +38966,9 @@ Use relative paths for resources already held in the package. -->
                    state.repository_changes_diff_scroll <-
                      Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.repository_changes_diff_scroll
                | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:(direction * page)
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+                   move_list state
+                     (if direction > 0 then Cursor_move.Page_down page
+                      else Cursor_move.Page_up page))
             | "r" | "R" ->
               refresh_shared_sources ();
               refresh_repository_changes state ~mailbox:async_messages;
@@ -39093,7 +39208,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
                      start_http_refresh state ~host:server_peer_host ~port:state.port
-                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_board_post post_id) ->
@@ -39772,7 +39887,7 @@ Use relative paths for resources already held in the package. -->
               authority even when retained rows cannot authorize that read.
               Do not refresh the live browser hidden underneath history. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
@@ -40736,7 +40851,8 @@ Use relative paths for resources already held in the package. -->
            state.keeper_navigation_open <- true;
            state.keeper_message_focus <- Left_pane
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
-           Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
+           move_list state
+             (if key = "k" || key = "up" then Cursor_move.Line_up else Cursor_move.Line_down)
        | Some ("p" | "P") when state.view = Overview ->
            Masc_tui_home.open_approvals state
              ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
@@ -40871,8 +40987,11 @@ Use relative paths for resources already held in the package. -->
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
             let needs = cycle_usage_history_window state in
+            (* The operator's key: the window it picks is read at once, during
+               a [/health] wait too (RFC tui-one-screen-grammar §2). *)
             start_http_scoped_refresh state ~host:server_peer_host
-              ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+              ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+              ~refresh_inflight:http_scoped_refresh_inflight
               ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
               ~mailbox:async_messages ~needs
        (* In chat, printable keys normally belong to the draft. Keep [?] as
@@ -41934,8 +42053,8 @@ Use relative paths for resources already held in the package. -->
           than the first row -- the rest read oldest first and take the plain
           meaning. A surface [surface_list_count] cannot count falls through
           to whatever else claims the key. *)
-       | Some ("home" | "end") when Option.is_some (row_list state) ->
-           move_list_to_edge state ~to_bottom:(key = Some "end")
+       | Some ("home" | "end") when Option.is_some (list_moves state) ->
+           move_list state (if key = Some "end" then Cursor_move.To_end else Cursor_move.To_top)
        | Some ("pageup" | "pagedown") ->
            let page =
              if state.view = Planning && state.planning_mode = Planning_list
@@ -41950,6 +42069,13 @@ Use relative paths for resources already held in the package. -->
                Option.value
                  (Masc_tui_render_keepers.keeper_plain_page_rows state ~terminal_rows ~cols)
                  ~default:(surface_page_rows state)
+             else if state.view = Overview then
+               (* The destinations the frame draws, as the frame sizes them. *)
+               let terminal_rows, _ = get_terminal_size () in
+               let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
+                   ~scroll:state.home_decision_scroll
+                   ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+               Masc_tui_scroll.page_step ~height:(List.length body.hb_rows)
              else if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
@@ -41978,6 +42104,9 @@ Use relative paths for resources already held in the package. -->
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in
+           let page_move page =
+             if direction > 0 then Cursor_move.Page_down page else Cursor_move.Page_up page
+           in
            (match state.view with
             | Planning when state.planning_mode = Planning_list
                             && Masc_tui_overview_tasks.is_focused state.task_focus
@@ -42027,14 +42156,10 @@ Use relative paths for resources already held in the package. -->
                     else Masc_tui_scroll.page_up ~count ~height)
                      (planning_scroll_value state.planning_scroll))
             | Code ->
-                move_list_by_rows state ~delta:(direction * page)
+                move_list state (page_move page)
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     let count = List.length (board_posts state) in
-                     state.board_cursor <-
-                       max 0
-                         (min (count - 1) (state.board_cursor + (direction * page)))
+                 | Board_list -> move_list state (page_move page)
                  | Board_read _ ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -42045,13 +42170,7 @@ Use relative paths for resources already held in the package. -->
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     let count =
-                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
-                     in
-                     state.fusion_cursor <-
-                       max 0
-                         (min (count - 1) (state.fusion_cursor + (direction * page)))
+                 | Fusion_list -> move_list state (page_move page)
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
                        Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.fusion_scroll)
@@ -42061,39 +42180,19 @@ Use relative paths for resources already held in the package. -->
                   state.schedule_scroll <-
                     (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
                      else Masc_tui_scroll.page_up ~count ~height) state.schedule_scroll
-                else
-                  let count =
-                    match state.schedules with
-                    | None -> 0
-                    | Some snapshot -> List.length snapshot.scs_rows
-                  in
-                  state.schedule_cursor <-
-                    max 0
-                      (min (count - 1)
-                         (state.schedule_cursor + (direction * page)))
+                else move_list state (page_move page)
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.verification_detail_scroll
                 else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(direction * page)
-                      ~cursor:state.verification_cursor
-                      ~scroll:state.verification_scroll
-                  in
-                  state.verification_cursor <- cursor;
-                  state.verification_scroll <- scroll
+                  move_list state (page_move page)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.harness_detail_scroll
                 else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(direction * page)
-                      ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                  in
-                  state.harness_cursor <- cursor;
-                  state.harness_scroll <- scroll
+                  move_list state (page_move page)
             (* Presets draw their detail from the same scroll prompts do, and
                the key reached only prompts: a preset longer than its pane
                showed its first screen and nothing past it. *)
@@ -42130,7 +42229,7 @@ Use relative paths for resources already held in the package. -->
             | Keepers Keeper_detail when state.detail_tab = Detail_items ->
                 move_item_browser state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
-                move_list_by_rows state ~delta:(direction * page)
+                move_list state (page_move page)
             (* Identity as well: the drawing keeps the cursor's row in view,
                so a page key that only scrolled was pulled straight back. *)
             | Keepers Keeper_detail when state.detail_tab = Detail_identity ->
@@ -42156,13 +42255,7 @@ Use relative paths for resources already held in the package. -->
                      Metrics_tail.page_up ~entry_count ~content_height
                        state.log_scroll)
              | Clients ->
-                 let cursor, scroll =
-                   move_row_cursor state ~delta:(direction * page)
-                     ~cursor:state.clients_surface_cursor
-                     ~scroll:state.clients_surface_scroll
-                 in
-                 state.clients_surface_cursor <- cursor;
-                 state.clients_surface_scroll <- scroll
+                 move_list state (page_move page)
              | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -42197,8 +42290,7 @@ Use relative paths for resources already held in the package. -->
                             Masc_tui_scroll.ensure_visible
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:(direction * page))
+                 | Lanes_overview -> move_list state (page_move page))
              | Metrics ->
                  let page = Masc_tui_scroll.page_step ~height:state.metrics_content_height in
                  state.metrics_scroll <-
@@ -42211,15 +42303,15 @@ Use relative paths for resources already held in the package. -->
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
-                edge. [move_list_by_rows] finds the list itself and answers
+                edge. [move_list] finds the list itself and answers
                 to nothing when there is none; the arm below is where there
                 is none. *)
              | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
-             | Approvals | Planning | Memory | Repositories
+             | Overview | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
-                 move_list_by_rows state ~delta:(direction * page)
+                 move_list state (page_move page)
              (* Two panes, two meanings: the list moves a cursor like the
-                arm above, the reading scrolls. [move_list_by_rows] finds the
+                arm above, the reading scrolls. [move_list] finds the
                 list only while the list is focused, so the reading's own
                 page is spelled here rather than left silent. *)
              | Resources ->
@@ -42230,7 +42322,7 @@ Use relative paths for resources already held in the package. -->
                   | Left_pane ->
                       let entries = Masc_tui_render_resources.list_page_size state
                           ~rows:(surface_rows state) in
-                      move_list_by_rows state ~delta:(direction * entries))
+                      move_list state (page_move entries))
              | Tools ->
                  let count, height = tools_scroll_viewport state in
                  move_tools_task
@@ -42244,9 +42336,8 @@ Use relative paths for resources already held in the package. -->
                  state.acting_scroll <- Masc_tui_scroll.step_uncounted
                    ~delta:(direction * page) state.acting_scroll;
                  if state.acting_scroll = 0 then state.acting_unseen <- 0
-             (* Overview's two panes are handled earlier; Config's panes
-                carry cursors of their own. *)
-             | Overview | Config -> ())
+             (* Config's panes carry cursors of their own. *)
+             | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore,
           and D, twice, for the delete. Its save key is n, answered inside
@@ -42326,7 +42417,7 @@ Use relative paths for resources already held in the package. -->
               end)
        | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
            let read_candle goal_id =
-             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Operator_key
                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                ~scoped_refresh_followup ~mailbox:async_messages;
              clear_goal_candle_revalidation state ~goal_id;
@@ -42863,30 +42954,11 @@ Use relative paths for resources already held in the package. -->
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
-                  else
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
-                        let cursor =
-                          Masc_tui_scroll.cursor_down
-                            ~count:(Array.length rows)
-                            state.code_file_cursor
-                        in
-                        state.code_file_cursor <- cursor;
-                        state.code_file_scroll <-
-                          Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render_code.code_pane_content_height state)
-                            state.code_file_scroll
-                    (* No rows to move a cursor through. *)
-                    | Some (_, Goal_confirmation_read.Absent) | None
-                    | Some (_, Goal_confirmation_read.Loading)
-                    | Some (_, Goal_confirmation_read.Stale (_, _))
-                    | Some (_, Goal_confirmation_read.Failed _) -> ())
-                else
-                  state.code_cursor <-
-                    Masc_tui_scroll.cursor_down
-                      ~count:(List.length (code_entries state))
-                      state.code_cursor
-            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:1
+                  (* The open file's rows, or nothing while it is read
+                     or failed: the walk's row list says which. *)
+                  else move_list state Cursor_move.Line_down)
+                else move_list state Cursor_move.Line_down
+            | Keepers Keeper_list -> move_list state Cursor_move.Line_down
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -42978,9 +43050,7 @@ Use relative paths for resources already held in the package. -->
                 end
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     if state.board_cursor < List.length (board_posts state) - 1 then
-                       state.board_cursor <- state.board_cursor + 1
+                 | Board_list -> move_list state Cursor_move.Line_down
                  | Board_read post_id ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -43001,61 +43071,28 @@ Use relative paths for resources already held in the package. -->
                        task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Next)
-                 | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p ->
-                           planning_visible_goals ~filter:state.planning_filter
-                             ~sort:state.planning_sort p.pl_goals
-                     in
-                     if state.planning_cursor < List.length goals - 1 then
-                       state.planning_cursor <- state.planning_cursor + 1
+                 | Planning_list -> move_list state Cursor_move.Line_down
                  | Planning_detail _ ->
                      state.planning_scroll <- Planning_scroll_offset
                        (Masc_tui_types.scroll_down_from (planning_scroll_value state.planning_scroll) ~by:1))
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     let count =
-                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
-                     in
-                     if state.fusion_cursor < count - 1 then
-                       state.fusion_cursor <- state.fusion_cursor + 1
+                 | Fusion_list -> move_list state Cursor_move.Line_down
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
-                else
-                  let count =
-                    match state.schedules with
-                    | None -> 0
-                    | Some snapshot -> List.length snapshot.scs_rows
-                  in
-                  if state.schedule_cursor < count - 1 then
-                    state.schedule_cursor <- state.schedule_cursor + 1
+                else move_list state Cursor_move.Line_down
             | Overview -> ()
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_scroll <- scroll)
+                  move_list state Cursor_move.Line_down
             | Clients ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.clients_surface_cursor
-                    ~scroll:state.clients_surface_scroll
-                in
-                state.clients_surface_cursor <- cursor;
-                state.clients_surface_scroll <- scroll
+                move_list state Cursor_move.Line_down
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -43069,45 +43106,17 @@ Use relative paths for resources already held in the package. -->
                       in
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:1)
+                 | Lanes_overview -> move_list state Cursor_move.Line_down)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <- Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                   in
-                   state.harness_cursor <- cursor;
-                   state.harness_scroll <- scroll)
-            | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.memory_facts_cursor
-                      ~scroll:state.memory_facts_scroll
-                  in
-                  state.memory_facts_cursor <- cursor;
-                  state.memory_facts_scroll <- scroll
-                end
-                else begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.memory_health_cursor
-                      ~scroll:state.memory_health_scroll
-                  in
-                  state.memory_health_cursor <- cursor;
-                  state.memory_health_scroll <- scroll
-                end
+                  move_list state Cursor_move.Line_down
+            (* Memory's row list is the facts of the Keeper open in it, or
+               the health rows when none is. *)
+            | Memory -> move_list state Cursor_move.Line_down
             | Repositories ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.repositories_cursor
-                    ~scroll:state.repositories_scroll
-                in
-                state.repositories_cursor <- cursor;
-                state.repositories_scroll <- scroll
+                move_list state Cursor_move.Line_down
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -43116,32 +43125,14 @@ Use relative paths for resources already held in the package. -->
                 | Some _ ->
                     state.changes_diff_scroll <- Masc_tui_types.scroll_down_from state.changes_diff_scroll ~by:1
                 | None ->
-                    let cursor, scroll =
-                      move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
-                        ~scroll:state.changes_scroll
-                    in
-                    state.changes_cursor <- cursor;
-                    state.changes_scroll <- scroll)
+                    move_list state Cursor_move.Line_down)
             | Connectors ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
-                 in
-                 state.connectors_cursor <- cursor;
-                 state.connectors_scroll <- scroll)
+                move_list state Cursor_move.Line_down
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
                   state.runtime_detail_scroll <- Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.runtime_cursor
-                       ~scroll:state.runtime_surface_scroll
-                   in
-                   if cursor <> state.runtime_cursor then
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                   state.runtime_cursor <- cursor;
-                   state.runtime_surface_scroll <- scroll)
+                  move_list state Cursor_move.Line_down
             | Tools ->
                 let count, height = tools_scroll_viewport state in
                 move_tools_task (Masc_tui_scroll.down ~count ~height state.tools_scroll)
@@ -43167,13 +43158,7 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   move_resource_document state (Masc_tui_scroll.Position.By 1)
                 else
-                  let total =
-                    match visible_resources state with
-                    | Some rows -> List.length rows
-                    | None -> 0
-                  in
-                  if state.resources_cursor < total - 1 then
-                    state.resources_cursor <- state.resources_cursor + 1
+                  move_list state Cursor_move.Line_down
             | Acting -> state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1
             | Metrics ->
                 state.metrics_scroll <-
@@ -43183,12 +43168,7 @@ Use relative paths for resources already held in the package. -->
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     Masc_tui_types.scroll_down_from page.lp_detail_scroll ~by:1})
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:(system_logs_page state).lp_cursor
-                       ~scroll:(system_logs_page state).lp_scroll
-                   in
-                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
+                  move_list state Cursor_move.Line_down
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
@@ -43209,30 +43189,11 @@ Use relative paths for resources already held in the package. -->
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
-                  else
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
-                        let cursor =
-                          Masc_tui_scroll.cursor_up
-                            ~count:(Array.length rows)
-                            state.code_file_cursor
-                        in
-                        state.code_file_cursor <- cursor;
-                        state.code_file_scroll <-
-                          Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render_code.code_pane_content_height state)
-                            state.code_file_scroll
-                    (* No rows to move a cursor through. *)
-                    | Some (_, Goal_confirmation_read.Absent) | None
-                    | Some (_, Goal_confirmation_read.Loading)
-                    | Some (_, Goal_confirmation_read.Stale (_, _))
-                    | Some (_, Goal_confirmation_read.Failed _) -> ())
-                else
-                  state.code_cursor <-
-                    Masc_tui_scroll.cursor_up
-                      ~count:(List.length (code_entries state))
-                      state.code_cursor
-            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:(-1)
+                  (* The open file's rows, or nothing while it is read
+                     or failed: the walk's row list says which. *)
+                  else move_list state Cursor_move.Line_up)
+                else move_list state Cursor_move.Line_up
+            | Keepers Keeper_list -> move_list state Cursor_move.Line_up
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -43321,9 +43282,7 @@ Use relative paths for resources already held in the package. -->
                 end
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     if state.board_cursor > 0 then
-                       state.board_cursor <- state.board_cursor - 1
+                 | Board_list -> move_list state Cursor_move.Line_up
                  | Board_read post_id ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -43343,46 +43302,29 @@ Use relative paths for resources already held in the package. -->
                        task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Previous)
-                 | Planning_list ->
-                     if state.planning_cursor > 0 then
-                       state.planning_cursor <- state.planning_cursor - 1
+                 | Planning_list -> move_list state Cursor_move.Line_up
                  | Planning_detail _ ->
                      state.planning_scroll <- Planning_scroll_offset
                        (max 0 (planning_scroll_value state.planning_scroll - 1)))
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     if state.fusion_cursor > 0 then
-                       state.fusion_cursor <- state.fusion_cursor - 1
+                 | Fusion_list -> move_list state Cursor_move.Line_up
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
-                else if state.schedule_cursor > 0 then
-                  state.schedule_cursor <- state.schedule_cursor - 1
+                else move_list state Cursor_move.Line_up
             | Overview -> ()
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     max 0 (state.verification_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_scroll <- scroll)
+                  move_list state Cursor_move.Line_up
             | Clients ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.clients_surface_cursor
-                    ~scroll:state.clients_surface_scroll
-                in
-                state.clients_surface_cursor <- cursor;
-                state.clients_surface_scroll <- scroll
+                move_list state Cursor_move.Line_up
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -43396,80 +43338,33 @@ Use relative paths for resources already held in the package. -->
                       in
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:(-1))
+                 | Lanes_overview -> move_list state Cursor_move.Line_up)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
                     max 0 (state.harness_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                   in
-                   state.harness_cursor <- cursor;
-                   state.harness_scroll <- scroll)
-            | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.memory_facts_cursor
-                      ~scroll:state.memory_facts_scroll
-                  in
-                  state.memory_facts_cursor <- cursor;
-                  state.memory_facts_scroll <- scroll
-                end
-                else begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.memory_health_cursor
-                      ~scroll:state.memory_health_scroll
-                  in
-                  state.memory_health_cursor <- cursor;
-                  state.memory_health_scroll <- scroll
-                end
+                  move_list state Cursor_move.Line_up
+            (* Memory's row list is the facts of the Keeper open in it, or
+               the health rows when none is. *)
+            | Memory -> move_list state Cursor_move.Line_up
             | Repositories ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.repositories_cursor
-                    ~scroll:state.repositories_scroll
-                in
-                state.repositories_cursor <- cursor;
-                state.repositories_scroll <- scroll
+                move_list state Cursor_move.Line_up
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
                     state.changes_diff_scroll <-
                       max 0 (state.changes_diff_scroll - 1)
                 | None ->
-                    let cursor, scroll =
-                      move_row_cursor state ~delta:(-1)
-                        ~cursor:state.changes_cursor
-                        ~scroll:state.changes_scroll
-                    in
-                    state.changes_cursor <- cursor;
-                    state.changes_scroll <- scroll)
+                    move_list state Cursor_move.Line_up)
             | Connectors ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
-                 in
-                 state.connectors_cursor <- cursor;
-                 state.connectors_scroll <- scroll)
+                move_list state Cursor_move.Line_up
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
                   state.runtime_detail_scroll <-
                     max 0 (state.runtime_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.runtime_cursor
-                       ~scroll:state.runtime_surface_scroll
-                   in
-                   if cursor <> state.runtime_cursor then
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                   state.runtime_cursor <- cursor;
-                   state.runtime_surface_scroll <- scroll)
+                  move_list state Cursor_move.Line_up
             | Tools ->
                 if state.tools_scroll > 0 || tools_task_following_end state then begin
                   let count, height = tools_scroll_viewport state in
@@ -43494,8 +43389,7 @@ Use relative paths for resources already held in the package. -->
             | Resources ->
                 if state.resource_focus = Right_pane then
                   move_resource_document state (Masc_tui_scroll.Position.By (-1))
-                else if state.resources_cursor > 0 then
-                  state.resources_cursor <- state.resources_cursor - 1
+                else move_list state Cursor_move.Line_up
             | Metrics ->
                 state.metrics_scroll <- max 0 (state.metrics_scroll - 1)
             | Acting ->
@@ -43508,12 +43402,7 @@ Use relative paths for resources already held in the package. -->
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     max 0 (page.lp_detail_scroll - 1)})
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:(system_logs_page state).lp_cursor
-                       ~scroll:(system_logs_page state).lp_scroll
-                   in
-                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
+                  move_list state Cursor_move.Line_up
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
@@ -43822,7 +43711,7 @@ Use relative paths for resources already held in the package. -->
               | None -> "Board: every hearth"
               | Some hearth -> "Board hearth: " ^ hearth);
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
         | Some "f" | Some "F" when state.view = Planning ->
@@ -44466,15 +44355,10 @@ Use relative paths for resources already held in the package. -->
                  | Disconnected ->
                      (* RFC tui-server-lifecycle: with no server up there is
                         no keeper to shut down, so "s" starts one here. *)
-                     start_masc_server_here ~base_path ~host:server_peer_host
-                       ~port:state.port
-                       ~note:(fun msg -> add_event state "system" msg)
-                       ~on_ready:(fun () ->
-                         start_http_refresh state ~host:server_peer_host
-                           ~port:state.port ~intent:Revalidate
-                           ~refresh_inflight:http_refresh_inflight
-                           ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                           ~scoped_refresh_followup ~mailbox:async_messages)
+                     start_server_here_then_read state ~base_path ~host:server_peer_host
+                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
@@ -44492,7 +44376,7 @@ Use relative paths for resources already held in the package. -->
                        ("Board order: "
                         ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
-                       ~port:state.port ~intent:Revalidate
+                       ~port:state.port ~intent:Operator_key
                        ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup
@@ -44847,9 +44731,14 @@ Use relative paths for resources already held in the package. -->
         in
         drawn_needs := needed;
         Masc_tui_types.note_drawn_surface_needs state needed;
+        (* The operator moved to another screen or view, and it reads what
+           the destination adds at once, during a [/health] wait too (RFC
+           tui-one-screen-grammar §2). [drawn_needs] already holds the
+           destination, so a held read here would be lost; it is not held. *)
         if Masc_tui_types.surface_needs_any delta then
           start_http_scoped_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+            ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+            ~refresh_inflight:http_scoped_refresh_inflight
             ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
             ~mailbox:async_messages ~needs:delta
       end;
@@ -44901,77 +44790,16 @@ Use relative paths for resources already held in the package. -->
       (* Pending HTTP readers keep the last observed contact. Their own
          progress carries elapsed time; a slow reader is not a reconnect. *)
       let now_ns = Mtime_clock.elapsed_ns () in
-      (* Periodic refresh *)
-      let _, terminal_cols = get_terminal_size () in
-      let current_marquee_target =
-        keeper_roster_marquee_target state ~cols:terminal_cols
-      in
-      if current_marquee_target <> !roster_marquee_target then begin
-        roster_marquee_target := current_marquee_target;
-        roster_marquee_last_step_ns := now_ns;
-        state.roster_marquee_frame <- 0
-      end
-      else if
-        Option.is_some current_marquee_target
-        && Int64.compare
-             (Int64.sub now_ns !roster_marquee_last_step_ns)
-             Masc_tui_types.motion_step_ns
-           >= 0
-      then begin
-        roster_marquee_last_step_ns := now_ns;
-        state.roster_marquee_frame <-
-          if state.roster_marquee_frame = max_int then 0
-          else state.roster_marquee_frame + 1;
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
-      (* Only a moving mark emitted by the top frame needs the motion
-         interval. Hidden work still keeps a whole-second clock for visible
-         elapsed/read/age notices, including overlays and the Activity pane.
-         About and roster marquee keep their independent clocks above/below. *)
-      let awaiting_detail_read =
-        state.view = Keepers Keeper_detail
-        && (match Masc_tui_types.selected_keeper state with
-            | None -> false
-            | Some keeper ->
-                Masc_tui_types.detail_read_waiting state
-                  ~tab:state.detail_tab ~keeper:keeper.k_name)
-      in
-      (* Turns are not read while nothing uses them, so the rows kept from the
-         last read may still say running; they drive no motion then. *)
-      let anything_running =
-        Masc_tui_answering.anything_running
-          ~turns:(if keeper_turns_in_use state then state.keeper_turns else [])
-          ~live_transcript:(Option.is_some state.msg_live)
-          ~lanes:state.standalone_lanes ~awaiting_detail_read
-      in
-      (* An in-flight read keeps its age-gated row current without fetching
-         again or advancing a running mark. The existing activity controller
-         supplies its read clock when no moving mark is visible. *)
-      let pending_row_live =
-        Option.is_some (local_source_pending state Local_keepers)
-        || Option.is_some (local_source_pending state Local_work)
-        || Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read)
-      in
-      if not anything_running && state.activity_frame >= 0 then begin
-        state.activity_frame <- -1;
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
-      (match Render_schedule.Activity_tick.take activity_tick ~now_ns
-          ~running:(anything_running || pending_row_live)
-          ~motion_visible:(anything_running
-            && Render_schedule.Activity_tick.motion_visible ()
-            && not state.image_open && not state.msx_open) with
-       | Quiet -> ()
-       | Stop ->
-           state.activity_frame <- -1;
+      (* Without new data only time text changes: the zone-1 clock, moments
+         and lengths (RFC tui-one-screen-grammar §8). The last built frame
+         said when its first such text reads differently; the frame for that
+         is drawn on the following whole second, and a frame with no such
+         text schedules none. About keeps its independent clock below. *)
+      (match !time_redraw_due with
+       | Some due when Unix.gettimeofday () >= due ->
+           time_redraw_due := None;
            Render_schedule.request render_schedule Render_schedule.Background
-       | Advance ->
-           if anything_running then begin
-             state.activity_frame <-
-               (if state.activity_frame < 0 || state.activity_frame = max_int then 0
-                else state.activity_frame + 1)
-           end;
-           Render_schedule.request render_schedule Render_schedule.Background);
+       | Some _ | None -> ());
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew
          motion immediately before the reader left. *)
@@ -45083,11 +44911,13 @@ Use relative paths for resources already held in the package. -->
               last frame comes down rather than float over the picture.
               Closing the picture repaints in full, and the candle steps
               again from that frame. *)
-           Render_schedule.Activity_tick.begin_frame ();
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
            Masc_tui_approval_detail.begin_frame ();
+           (* The picture draws no time text. Closing it repaints in full,
+              and that frame says when time next changes its text. *)
+           time_redraw_due := None;
            Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
@@ -45113,6 +44943,7 @@ Use relative paths for resources already held in the package. -->
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
+                 Masc_tui_value.Redraw.begin_frame ();
                  Masc_tui_message_layout.begin_frame ();
                  Masc_tui_approval_detail.begin_frame ();
                  Masc_tui_approvals_model.reconcile_value_reading state;
@@ -45169,6 +45000,9 @@ Use relative paths for resources already held in the package. -->
                    | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)
            in
+           time_redraw_due :=
+             Render_schedule.Time_redraw.due ~now:(Unix.gettimeofday ())
+               (Masc_tui_value.Redraw.next_change ());
            let terminal_rows, cols = get_terminal_size () in
            let change_authority = Masc_tui_render_repositories.repository_changes_authority state
                ~surface_key:frame.Frame_presenter.surface_key ~terminal_rows ~cols in

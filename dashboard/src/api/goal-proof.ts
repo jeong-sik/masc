@@ -1,16 +1,25 @@
 import { isRecord } from '../components/common/normalize'
 import { isCanonicalGoalId } from '../lib/goal-identity'
+import { decodeGoalMeasure, isServerBlank } from './goal-measure'
 import type { GoalProof, GoalProofCompletion, GoalProofCriterion } from '../types/core'
 
 function nonblank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function serverNonblank(value: unknown): value is string {
+  return typeof value === 'string' && !isServerBlank(value)
+}
+
+// Goal_document.criterion_of_yojson: exactly these four fields, a measure of
+// one of the three shapes, and a revision and procedure that are not blank
+// by OCaml String.trim.
 export function decodeGoalProofCriterion(raw: unknown): GoalProofCriterion | null {
-  if (!isRecord(raw) || !nonblank(raw.revision) || typeof raw.title !== 'string'
-    || !(raw.metric === null || typeof raw.metric === 'string')
-    || !(raw.target_value === null || typeof raw.target_value === 'string')) return null
-  return { revision: raw.revision, title: raw.title, metric: raw.metric, target_value: raw.target_value }
+  if (!isRecord(raw) || Object.keys(raw).length !== 4) return null
+  const measure = decodeGoalMeasure(raw.measure)
+  if (!serverNonblank(raw.revision) || typeof raw.title !== 'string' || measure === null
+    || !serverNonblank(raw.procedure)) return null
+  return { revision: raw.revision, title: raw.title, measure, procedure: raw.procedure }
 }
 
 function completion(raw: unknown): GoalProofCompletion | null {

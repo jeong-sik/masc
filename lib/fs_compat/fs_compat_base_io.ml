@@ -331,7 +331,6 @@ let append_file_unix_with_io ~io ~start (path : string) (content : string) : uni
         Printexc.raise_with_backtrace exception_ backtrace
       | Error
           (( Fd_append_whole.End_unreadable _
-           | Fd_append_whole.Last_byte_missing _
            | Fd_append_whole.Write_failed
                { write_failure =
                    Fd_write_all.No_progress _ | Fd_write_all.Unix_error _

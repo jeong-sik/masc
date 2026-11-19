@@ -25,6 +25,7 @@ import {
   GOAL_STORE_RESET_STEPS,
   GOAL_STORE_UNAVAILABLE_REASONS,
 } from '../types/goal-store-unavailable'
+import { goalCriterion } from './fixtures/goal-criterion'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -206,6 +207,11 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(tree.tree[1]?.measurement).toEqual({
       state: 'unavailable', reason: 'goal_measurement: store read failed',
     })
+    // The criterion in the shape Goal_document.goal_to_yojson writes.
+    expect(measured.measure).toEqual({ kind: 'count', noun: 'passed cases', total: 10 })
+    expect(measured.procedure).toBe('Count the passing cases in the CI summary.')
+    expect(measured.children[0]?.measure).toEqual({ kind: 'done_when', condition: 'the current criterion reads back' })
+    expect(tree.tree[1]?.measure).toEqual({ kind: 'quantity', unit: 'runs', direction: 'at_least', target: 5 })
 
     getMock.mockResolvedValueOnce({
       approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
@@ -213,6 +219,8 @@ describe('fetchDashboardGoalsTree decoding', () => {
     })
     const detail = await fetchDashboardGoalDetail(measured.id)
     expect(detail.goal.measurement).toEqual(measured.measurement)
+    expect(detail.goal.measure).toEqual(measured.measure)
+    expect(detail.goal.procedure).toBe(measured.procedure)
   })
 
   it('refuses a stale or unknown measurement instead of losing it silently', async () => {
@@ -364,10 +372,10 @@ describe('fetchDashboardGoalsTree decoding', () => {
             },
             {
               ts: '2026-08-07T18:42:22Z',
-              kind: 'goal_owner',
+              kind: 'goal_proof_reopened',
               lane: 'goal',
               title: 'Goal Event',
-              summary: 'goal_owner',
+              summary: 'goal_proof_reopened',
               severity: 'ok',
             },
             {
@@ -396,10 +404,10 @@ describe('fetchDashboardGoalsTree decoding', () => {
       },
       {
         ts: '2026-08-07T18:42:22Z',
-        kind: 'goal_owner',
+        kind: 'goal_proof_reopened',
         lane: 'goal',
         title: 'Goal Event',
-        summary: 'goal_owner',
+        summary: 'goal_proof_reopened',
         severity: 'ok',
       },
     ])
@@ -497,7 +505,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
   })
 })
 
-const proofCriterion = { revision: 'criterion-v2', title: 'Measured goal', metric: 'passed cases', target_value: '10' }
+const proofCriterion = goalCriterion({ revision: 'criterion-v2', title: 'Measured goal', measure: { kind: 'count', noun: 'passed cases', total: 10 } })
 const proofVerdict = {
   outcome: 'proven', reason: null, request_id: 'request-v2', criterion: proofCriterion,
   verification_run_id: 'verifier-v2', authority: { kind: 'system_llm_agent', actor: 'verifier_exact' },

@@ -1479,8 +1479,15 @@ type keeper_waiting_row = {
   kwr_waiting_count : int;
   kwr_since : float option;
   kwr_due_at : float option;
-  kwr_waiting_on : waiting_item list;
+  kwr_source_counts : (waiting_source * int) list;
+      (** Rows per source. A source with no rows is absent. *)
+  kwr_waiting_heads : waiting_item list;
+      (** The first row of each (source, wake producer) pair, in inventory
+          order. [kwr_waiting_count] and [kwr_source_counts] count every row. *)
 }
+
+val waiting_source_count : keeper_waiting_row -> waiting_source -> int
+(** How many of the Keeper's rows come from [source]. *)
 
 type keeper_waiting_failure =
   | Keeper_waiting_sources_unavailable of waiting_item list

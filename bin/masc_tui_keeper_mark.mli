@@ -14,10 +14,10 @@ val failing_glyph : string
     its count in the summary, and the sentence of its last failure. *)
 
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
-(** The compact list's activity mark. The renderer adds the activity word and
-    substitutes its existing animated mark for preparing/running turns. [!]
-    belongs to a held call alone; a failed attempt in an open turn has its own
-    mark. *)
+(** The compact list's activity mark. The renderer adds the activity word.
+    Preparing and running turns wear the still under-way mark
+    ({!Masc_tui_value.Mark.Under_way}). [!] belongs to a held call alone; a
+    failed attempt in an open turn has its own mark. *)
 
 val attempt_glyph : string
 (** The mark beside an attempt node in the secondary-row attempt chain. *)

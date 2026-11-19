@@ -9,6 +9,7 @@ vi.mock('../sse-store', () => ({ registerInternalAgentRefresh: vi.fn(() => vi.fn
 
 import { GoalVerificationRunsPanel } from './goal-verification-runs-panel'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
+import { goalCriterion } from '../api/fixtures/goal-criterion'
 
 beforeEach(() => {
   // Reads run only for an accepted workspace that names its Observer instance.
@@ -30,7 +31,7 @@ describe('GoalVerificationRunsPanel', () => {
         runId: 'run-a',
         goalId: 'goal-a',
         requestId: 'request-original',
-        criterion: { revision: 'criterion-original', title: 'Three services', metric: 'verified services', target_value: '3' },
+        criterion: goalCriterion({ revision: 'criterion-original' }),
         evaluatedVerdict: { decision: 'approved', reason: 'original target reached' },
         reviewKind: 'proof',
         authorityActor: 'verifier_exact',

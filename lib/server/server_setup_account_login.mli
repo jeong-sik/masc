@@ -78,9 +78,11 @@ val status : owner:owner -> base_path:string ->
 (** Calls a person's own account once (plan D1-6a): the body is
     [{"provider_account_id":...,"model":...}]. The account must be one the
     person owns in the authorization log; another person's is answered as one
-    that does not exist (404). The runtime is the workspace provider the login
-    receipt names, with the person's account home and that provider's binding
-    of [model] ({!Runtime_account_runtime}), and the call is
+    that does not exist (404), before the call of the account is taken, so
+    whether a call of another person's account runs is not told. The runtime
+    is the workspace provider of the integration of the account
+    ({!person_runtime}), with the person's account home and that provider's
+    binding of [model] ({!Runtime_account_runtime}), and the call is
     {!Runtime_verification.verify_as_command}, the readiness check of the
     [runtime-verify] command: a model answer and a tool round trip, within 120
     seconds.
@@ -96,7 +98,14 @@ val status : owner:owner -> base_path:string ->
     When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
 
     One call of an account runs at a time ({!one_call_of}): a request while a
-    verification or a Keeper turn of the account runs is answered 409. *)
+    verification or a Keeper turn of the account runs is answered 409. A key
+    account whose key file is not there or is not read as a key is a 409 too,
+    with the [code] [key_missing] or [key_unreadable] beside the [error].
+
+    A call the provider answered with HTTP 401 on a key account is a 200
+    whose [verification] failed with the code [key_refused]
+    ({!Runtime_verification.failure}); on a login account the code stays
+    [provider_auth_refused]. *)
 val verify : person:person -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 
@@ -122,10 +131,22 @@ type runtime_error =
     {!Runtime_api_key_file.read_error_code}. *)
 val key_unusable_message : Runtime_api_key_file.read_error -> string
 
-(** The runtime of [binding] on the home of the person's account
-    [provider_account_id]: a provider of the workspace with the home of the
+(** The call of an account that is running. Only {!one_call_of} makes one,
+    and it hands it to the work it runs. The type keeps a caller from making
+    one. It does not keep the work from handing the value on: a value that
+    outlives its call, given back as the result or kept by a fiber the work
+    started, names a call that ended. No caller does either. *)
+type in_call
+
+(** The runtime of [binding] on the home of the account of the call, an
+    account of the person: a provider of the workspace with the home of the
     account ({!Runtime_account_runtime}). {!verify} chooses a model, and a
     turn of a Keeper the Runtime its owner gave it (plan D2-8).
+
+    It takes the call of the account ({!one_call_of}), so the records of the
+    account and its key file are read inside that call. The files of an
+    account change only inside its call, so no runtime is made on a key that
+    a removal or a replacement was taking away.
 
     The record that linked the account says what it runs on. A login account
     is of the provider its login receipt names and runs on the login in its
@@ -137,9 +158,9 @@ val key_unusable_message : Runtime_api_key_file.read_error -> string
     An account the person does not own, or a login account with no login
     receipt of theirs, is a 404 with the same sentence. *)
 val person_runtime
-  :  person
+  :  in_call
+  -> person
   -> base_path:string
-  -> provider_account_id:Authz_types.Provider_account_id.t
   -> binding:Runtime_account_runtime.binding
   -> (prepared, runtime_error) result
 
@@ -147,9 +168,19 @@ val person_runtime
     otherwise. A call starts the official client on the home of the account,
     and no two clients refresh the credential of one home at once, so a
     verification and a Keeper turn of one account take turns (issue #50018).
-    It holds within this process. *)
+    [f] gets the call it runs in, which {!person_runtime} takes. It holds
+    within this process. *)
 val one_call_of
   :  Authz_types.Provider_account_id.t
   -> busy:'e
-  -> (unit -> ('a, 'e) result)
+  -> (in_call -> ('a, 'e) result)
   -> ('a, 'e) result
+
+(** The runtime root of [person] under [base_path], made when it is not
+    there: the folder the homes and the key files of their accounts are
+    under ({!Runtime_account_home_layout.person_runtime_root}). A login and
+    a verification make it the same way. The registration of a key asks for
+    it after the record of its account is written
+    ({!Server_key_account_registration}). The error is a sentence that names
+    no path. *)
+val person_runtime_root : person -> base_path:string -> (string, string) result

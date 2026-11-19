@@ -19,6 +19,7 @@
   failure_observation
   failure_effect
   cross_context_mutex
+  fact_cell
   eio_guard
   pool_lane
   pool_wait

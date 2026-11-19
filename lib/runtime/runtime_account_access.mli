@@ -232,6 +232,17 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Not_the_account_key of Authz_types.Provider_account_id.t
+      (** The account does not carry the key the log gives this account of
+          the person. A key account carries the key of the file of the
+          generation its records say
+          ({!Runtime_account_home_layout.key_file}), read by the capture
+          itself ({!Runtime_official_account.capture_on_key}). A login
+          account, and an account no record links yet, carries no key of a
+          file. The file is spelled under the runtime root of the person
+          the request is for. For an account asked for as one's own it
+          comes after the check of the owner, so it says nothing of an
+          account of another person. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable
@@ -263,6 +274,25 @@ val refusal_to_string : refusal -> string
 
 (** Authorizes [sealed] for [request] by the access the process published. *)
 val authorize : request -> 'client sealed -> ('client authorized, refusal) result
+
+(** What the log says of a turn of a person's Keeper, judged before the
+    account it would run on is read: the part of {!authorize} that looks at
+    no account. A server asks it before it takes the call of the account, so
+    a turn the log refuses here holds no call and is not told whether one
+    runs. A turn it lets through and a record then takes back does take the
+    call: {!authorize} refuses it inside. By then a server has read the key
+    file of a key account to make its runtime; no client is started with
+    the key.
+    It gives nothing a client starts on: {!authorize} judges the request
+    again inside the call, on the state of that time, with the account.
+
+    [Error Not_published] for every request before the process published
+    its access. After that, [Ok ()] for a request that is no [Keeper_turn],
+    and in a single-user process: {!authorize} judges those whole. So
+    [Ok ()] is no promise that {!authorize} lets the request through: in a
+    multi-account process it refuses an operator's call and a turn of an
+    operator's Keeper, which [admit] does not judge. *)
+val admit : request -> (unit, refusal) result
 
 (** Authorizes a Muse account for [request] by the access the process
     published, by the rule of {!authorize}. *)

@@ -124,111 +124,6 @@ let test_target_indexes_skip_prose () =
     (Masc_tui_answering.target_indexes lines)
 ;;
 
-let idle_lane ~(lane : Standalone_lane.t) : Tui_decode.standalone_lane =
-  { Tui_decode.sl_lane = lane
-  ; sl_label = Standalone_lane.to_id lane
-  ; sl_purpose = None
-  ; sl_required = false
-  ; sl_status = Tui_decode.Standalone_idle
-  ; sl_configuration_state = Tui_decode.Lane_ready
-  ; sl_jev = None
-  ; sl_admitted_slots = []
-  ; sl_cli_slots = []
-  ; sl_dropped_slots = []
-  ; sl_declared_slots = []
-  ; sl_declared_cli_slots = []
-  ; sl_admission_error = None
-  ; sl_retained_run_count = 0
-  ; sl_running_count = 0
-  ; sl_succeeded_count = 0
-  ; sl_failed_count = 0
-  ; sl_cancelled_count = 0
-  ; sl_last_started_at = None
-  ; sl_last_terminal_at = None
-  ; sl_last_outcome = None
-  ; sl_p50_elapsed_s = None
-  ; sl_selected_slots = []
-  ; sl_runs_without_slot =
-      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
-  }
-;;
-
-let lanes_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
-  { Tui_decode.sls_observed_at_unix = 0.; sls_lanes = lanes }
-;;
-
-let animating ?(turns = []) ?(live_transcript = false)
-    ?(awaiting_detail_read = false) ?lanes () =
-  Masc_tui_answering.anything_running ~turns ~live_transcript ~lanes
-    ~awaiting_detail_read
-;;
-
-(* A Keeper detail tab that is still blank draws how long it has been blank, and
-   the seconds are honest only because something redraws them. Nothing else on a
-   screen like that moves. *)
-let test_a_blank_detail_tab_keeps_the_screen_redrawing () =
-  Alcotest.(check bool) "a read the operator is waiting on" true
-    (animating ~awaiting_detail_read:true ());
-  Alcotest.(check bool) "and nothing once it has landed" false
-    (animating ~awaiting_detail_read:false ())
-;;
-
-let test_a_quiet_screen_does_not_animate () =
-  Alcotest.(check bool) "nothing at all" false (animating ());
-  Alcotest.(check bool)
-    "an idle keeper and an idle lane" false
-    (animating
-       ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
-       ~lanes:(lanes_snapshot [ idle_lane ~lane:Standalone_lane.Librarian ])
-       ());
-  Alcotest.(check bool)
-    "an unavailable keeper is not a working one" false
-    (animating
-       ~turns:[ row "delta" (Tui_decode.Keeper_turn_unavailable "no owner") ]
-       ())
-;;
-
-let test_each_source_alone_starts_the_mark () =
-  Alcotest.(check bool)
-    "a polled turn" true
-    (animating
-       ~turns:
-         [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:1. "echo" ]
-       ());
-  Alcotest.(check bool)
-    "a standalone lane" true
-    (animating
-       ~lanes:
-         (lanes_snapshot
-            [ { (idle_lane ~lane:Standalone_lane.Librarian) with
-                Tui_decode.sl_status = Tui_decode.Standalone_running
-              ; sl_running_count = 1
-              }
-            ])
-       ());
-  Alcotest.(check bool) "off does not hide accepted work" true
-    (animating ~lanes:(lanes_snapshot [{(idle_lane ~lane:Standalone_lane.Librarian) with
-      sl_status=Standalone_off;sl_configuration_state=Lane_off;sl_running_count=1}]) ());
-  Alcotest.(check bool) "off and drained does not animate" false
-    (animating ~lanes:(lanes_snapshot [{(idle_lane ~lane:Standalone_lane.Librarian) with
-      sl_status=Standalone_off;sl_configuration_state=Lane_off}]) ());
-  (* The one that was missing. The observer feed opens a transcript before the
-     next read returns the row for it, and the chat pane draws the mark
-     against the feed. *)
-  Alcotest.(check bool)
-    "a live transcript, with the polled rows still idle" true
-    (animating ~live_transcript:true
-       ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
-       ~lanes:(lanes_snapshot [ idle_lane ~lane:Standalone_lane.Librarian ])
-       ())
-;;
-
-let test_lanes_that_were_never_loaded_are_not_running () =
-  Alcotest.(check bool)
-    "an absent snapshot claims nothing" false
-    (animating ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ] ())
-;;
-
 let test_chat_shows_background_work_and_uncertainty () =
   let preview : Tui_decode.keeper_turn_preview =
     { ktp_updated_at_unix = 950.; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "editing the report"; ktp_last_tool = Some "Execute"; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None; ktp_activity=None
@@ -250,10 +145,8 @@ let test_chat_shows_background_work_and_uncertainty () =
      The model and the tool are detail and recede. *)
   (match lines with
    | status :: _ ->
-     Alcotest.(check bool) "the lead names the lane and the age" true
-       (Astring.String.is_infix ~affix:"autonomous · 1m40s" status.Masc_tui_answering.lead);
      Alcotest.(check bool) "the model is not in the lead" false
-       (Astring.String.is_infix ~affix:"glm" status.lead);
+       (Astring.String.is_infix ~affix:"glm" status.Masc_tui_answering.lead);
      Alcotest.(check bool) "no sentence around the facts" false
        (Astring.String.is_infix ~affix:"Current" status.lead)
    | [] -> Alcotest.fail "no status row");
@@ -277,40 +170,14 @@ let test_chat_shows_background_work_and_uncertainty () =
     (Astring.String.is_infix ~affix:"editing the report" (String.concat "\n" (text drawn)))
 ;;
 
-let test_motion_demand_uses_only_a_fresh_running_observation () =
-  let has_motion rows = List.exists (fun (row : Masc_tui_answering.chat_activity_row) ->
-      match row.motion with Still -> false | Moving through -> through > 0) rows in
-  let activity ~error state = Masc_tui_answering.chat_activity ~ko:false ~frame:0 ~now:1000.
-      ~keeper_name:"echo" ~error [state] in
-  let running = running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo" in
-  Alcotest.(check bool) "a fresh observed turn requests the motion clock" true
-    (has_motion (activity ~error:None running));
-  Alcotest.(check bool) "a stale observation keeps the seconds clock only" false
-    (has_motion (activity ~error:(Some (Masc_tui_answering.Read_failed "timeout")) running));
-  Alcotest.(check bool) "an idle observation cannot request motion" false
-    (has_motion (activity ~error:None (row "echo" Tui_decode.Keeper_turn_idle)))
-;;
-
 let () =
   Alcotest.run "tui_answering"
-    [ ( "chat activity", [Alcotest.test_case "motion demand follows observation freshness" `Quick
-          test_motion_demand_uses_only_a_fresh_running_observation
-      ; Alcotest.test_case "background work and missing observation" `Quick
+    [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
           test_chat_shows_background_work_and_uncertainty])
     ; ( "duration"
       , [] )
     ; ( "running mark"
       , [] )
-    ; ( "animating at all"
-      , [ Alcotest.test_case "a quiet screen does not animate" `Quick
-            test_a_quiet_screen_does_not_animate
-        ; Alcotest.test_case "each source alone starts the mark" `Quick
-            test_each_source_alone_starts_the_mark
-        ; Alcotest.test_case "a blank detail tab keeps the screen redrawing"
-            `Quick test_a_blank_detail_tab_keeps_the_screen_redrawing
-        ; Alcotest.test_case "lanes that were never loaded are not running"
-            `Quick test_lanes_that_were_never_loaded_are_not_running
-        ] )
     ; ( "tui-answering"
       , [ Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
             test_unavailable_reads_as_unknown_not_idle

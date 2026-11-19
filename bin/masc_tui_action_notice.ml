@@ -51,9 +51,13 @@ type t = {
 
 let empty = { ordinary = None; rejection = None; next_generation = [0]; csi = Csi_inactive }
 let ordinary notice = notice.ordinary
+(* A notice leaves the screen when its window ends, with no input or data,
+   so a frame that draws it notes that instant (RFC tui-one-screen-grammar
+   §8). *)
 let ordinary_visible notice ~now ~window =
   match notice.ordinary with
-  | Some (_, at) as ordinary when now -. at <= window -> ordinary
+  | Some (_, at) as ordinary
+    when Masc_tui_value.Redraw.holds ~now ~until:(at +. window) -> ordinary
   | Some _ | None -> None
 let set_ordinary notice ordinary = { notice with ordinary }
 let csi_active notice = match notice.csi with Csi_inactive -> false | Csi_active _ -> true
@@ -84,7 +88,8 @@ let reject notice kind ~now ~window =
 let rejection notice ~now ~window =
   match notice.rejection with
   | Some (Pending rejection | Draining rejection) -> Some rejection
-  | Some (Presented (rejection, at)) when now -. at <= window -> Some rejection
+  | Some (Presented (rejection, at))
+    when Masc_tui_value.Redraw.holds ~now ~until:(at +. window) -> Some rejection
   | Some (Presented _) | None -> None
 
 let preferred notice ~existing_action ~now ~window =

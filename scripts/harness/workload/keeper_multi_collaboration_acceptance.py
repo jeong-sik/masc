@@ -2189,8 +2189,10 @@ class MissionRun:
             {
                 "id": self.goal_id,
                 "title": f"Multi-Keeper real-world mission {self.marker}",
-                "metric": "correlated product outcomes",
-                "target_value": f"{len(self.catalog['missions'])}/{len(self.catalog['missions'])} missions",
+                "measure": {
+                    "kind": "count", "noun": "missions", "total": len(self.catalog["missions"]),
+                },
+                "procedure": "Count the missions with passing results in the acceptance report.",
                 "priority": 1,
             },
         )
@@ -2761,11 +2763,14 @@ class MissionRun:
             {
                 "id": self.verifier_goal_id,
                 "title": f"Artifact-gated Goal verifier mission {self.marker}",
-                "metric": (
-                    f"producer artifact {self.verifier_artifact} contains the exact "
-                    f"token {self.verifier_success_token}"
+                "measure": {
+                    "kind": "done_when",
+                    "condition": f"The artifact contains the exact token {self.verifier_success_token}",
+                },
+                "procedure": (
+                    f"Use the shared playground layout to read {self.verifier_artifact} "
+                    f"under Keeper {self.roles['coordinator']} and compare its contents with the token."
                 ),
-                "target_value": self.verifier_success_token,
                 "priority": 1,
             },
         )
@@ -2832,7 +2837,7 @@ class MissionRun:
             {"goal_id": self.verifier_goal_id, "action": "request_complete"},
         )
         proven = self.wait_for_goal_state(
-            phase="completed",
+            phase="awaiting_confirmation",
             completion_state="proof_proven",
         )
         proven_verdict = (
@@ -2870,7 +2875,7 @@ class MissionRun:
             tools = run.get("tools")
             if not isinstance(tools, list) or not any(
                 isinstance(tool, dict)
-                and tool.get("tool_name") == "verification_read_file"
+                and tool.get("tool_name") == "tool_read_file"
                 for tool in tools
             ):
                 raise AcceptanceError(
@@ -4158,7 +4163,7 @@ class MissionRun:
             ),
             "goal_verifier_reentry_proven": (
                 isinstance(goal_verifier_proven, dict)
-                and goal_verifier_proven.get("phase") == "completed"
+                and goal_verifier_proven.get("phase") == "awaiting_confirmation"
                 and isinstance(goal_verifier_proven_run, str)
                 and goal_verifier_proven_run != goal_verifier_refuted_run
                 and text_contains(goal_verifier_proven, "proof_proven")
@@ -4197,7 +4202,7 @@ class MissionRun:
                 )
                 == self.goal_verifier_browser_proof["screenshot_sha256"],
                 "real-backend browser expanded the exact proven Goal run and "
-                "rendered verification_read_file evidence",
+                "rendered tool_read_file evidence",
             ),
         }
         malformed = [

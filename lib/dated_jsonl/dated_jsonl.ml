@@ -24,7 +24,6 @@ module Layout = Dated_jsonl_layout
 type t = {
   location : Store.location;
   base_dir : string;
-  cross_context_mutex : Cross_context_mutex.t Atomic.t;
   max_bytes : int option;
 }
 
@@ -76,6 +75,49 @@ type recent_entry =
       ; detail : string
       }
 
+(* A day file of a store, by the names the layout gives it. *)
+type place =
+  { month_dir : string
+  ; day_file : string
+  }
+
+(* The order the strict reads visit day files in, oldest first: months by
+   name, as [list_month_dirs_result] sorts them, and the files of a month as
+   [list_day_entries_result] does. *)
+let compare_places left right =
+  match String.compare left.month_dir right.month_dir with
+  | 0 -> compare_day_files left.day_file right.day_file
+  | order -> order
+;;
+
+(* A row an append put at the end of a day file: the row as the strict reads
+   decode it, and the file. *)
+type written =
+  { row : recent_entry Lazy.t
+  ; place : place
+  }
+
+(* A fact's value, and the newest day file the value saw a row in. A row
+   written to a file older than that one is not the store's newest row. *)
+type 'a held =
+  { value : 'a
+  ; newest : place option
+  }
+
+(* A fact about a store that is kept in memory beside the store's files
+   (RFC "Keeper row facts are kept in memory by their writers"). [read] gives
+   the value from the files and is the only definition of it; [step] gives the
+   value after one more row from the value before it, or [None] when the row
+   alone does not tell. *)
+type 'a fact =
+  { id : 'a Type.Id.t
+  ; name : string (* the [fact] label of the fact's read counter *)
+  ; read : t -> ('a held, read_error) result
+  ; step : 'a -> written -> 'a option
+  }
+
+type kept = Kept : 'a fact * 'a held Fact_cell.t -> kept
+
 let read_operation_to_string = function
   | Inspect -> "inspect"
   | List_directory -> "list directory"
@@ -123,43 +165,127 @@ let read_error_to_string = function
 let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
-let mutex_registry : (string, Cross_context_mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
-let mutex_registry_mu = Stdlib.Mutex.create ()
+(* One entry for each store directory, under the name the file system gives
+   the directory ([Store.directory_name]): the mutex its writers take and the
+   facts kept in memory about it. A handle holds no entry: it asks for its
+   store's each time it writes, prunes or reads a fact. The handles of a
+   Keeper's stores are kept for the life of the process, and an entry chosen
+   when a handle was opened would stay with the spelling even after the
+   directory came to exist under another one.
 
-let strip_trailing_slashes path =
-  let rec loop len =
-    if len > 1 && path.[len - 1] = '/' then loop (len - 1) else len
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
+   [kept] only grows, by a compare-and-set, and only a reader of a fact adds
+   to it ([cell_of_entry]). Whoever writes or removes files goes through the
+   cells that are there and makes none. *)
+type entry =
+  { mutex : Cross_context_mutex.t
+  ; kept : kept list Atomic.t
+  }
 
-let mutex_key base_dir =
-  let path =
-    if Filename.is_relative base_dir then
-      Filename.concat (Config_dir_resolver.current_working_dir ()) base_dir
-    else
-      base_dir
-  in
-  strip_trailing_slashes path
+let registry : (string, entry) Hashtbl.t = Hashtbl.create 16
+let registry_mu = Stdlib.Mutex.create ()
 
-let mutex_for_base_dir ~base_dir =
-  let key = mutex_key base_dir in
-  Stdlib.Mutex.protect mutex_registry_mu (fun () ->
-    match Hashtbl.find_opt mutex_registry key with
-    | Some cell -> cell
+let entry_named name =
+  Stdlib.Mutex.protect registry_mu (fun () ->
+    match Hashtbl.find_opt registry name with
+    | Some entry -> entry
     | None ->
-        let mutex = Cross_context_mutex.create () in
-        let cell = Atomic.make mutex in
-        Hashtbl.add mutex_registry key cell;
-        cell)
+      let entry = { mutex = Cross_context_mutex.create (); kept = Atomic.make [] } in
+      Hashtbl.add registry name entry;
+      entry)
 
-let open_store ?cross_context_mutex ?max_bytes location =
-  let base_dir = Store.dir location in
-  let cross_context_mutex =
-    match cross_context_mutex with
-    | Some mutex -> Atomic.make mutex
-    | None -> mutex_for_base_dir ~base_dir
+module Spellings = Map.Make (String)
+
+(* The entry of each spelling whose directory existed when the file system
+   was asked. A directory that exists keeps its name until it is removed, so
+   each spelling costs the system calls once and a write or a fact read makes
+   none after that. A spelling whose directory does not exist yet is asked
+   again each time: its answer changes when the directory is made.
+
+   [removals] counts the times store directories were removed by code outside
+   this module ([directories_removed]). A removal empties the map, and an
+   answer the file system gave before a removal is not remembered after it. *)
+type remembered =
+  { removals : int
+  ; of_existing : entry Spellings.t
+  }
+
+let remembered : remembered Atomic.t =
+  Atomic.make { removals = 0; of_existing = Spellings.empty }
+
+let rec remember_existing ~removals spelling entry =
+  let now = Atomic.get remembered in
+  if now.removals = removals
+     && not
+          (Atomic.compare_and_set
+             remembered
+             now
+             { now with of_existing = Spellings.add spelling entry now.of_existing })
+  then remember_existing ~removals spelling entry
+
+(* The entry of a location, and what the answer rests on: whether the
+   directory existed when it was given, and the removals counted before it. *)
+type resolved =
+  { entry : entry
+  ; existed : bool
+  ; removals : int
+  }
+
+let resolve location =
+  let spelling = Store.absolute_dir location in
+  let seen = Atomic.get remembered in
+  match Spellings.find_opt spelling seen.of_existing with
+  | Some entry -> { entry; existed = true; removals = seen.removals }
+  | None ->
+    (match Store.directory_name location with
+     | Store.Existing name ->
+       let entry = entry_named name in
+       remember_existing ~removals:seen.removals spelling entry;
+       { entry; existed = true; removals = seen.removals }
+     | Store.Not_yet name ->
+       { entry = entry_named name; existed = false; removals = seen.removals })
+
+let store_mutex t = (resolve t.location).entry.mutex
+
+let forget_kept entry =
+  List.iter (fun (Kept (_, cell)) -> Fact_cell.forget cell) (Atomic.get entry.kept)
+
+(* After a change of the store's files made under [resolved.entry]: the
+   directory may by now be another entry's. A directory that did not exist
+   when the entry was chosen was made by the change, and another spelling can
+   have made it first under another name; a directory removed since and made
+   again can have another name too. The change then went by that entry's
+   cells unseen, so they are forgotten. *)
+let forget_kept_of_the_directory resolved location =
+  if not (resolved.existed && (Atomic.get remembered).removals = resolved.removals)
+  then begin
+    let now = resolve location in
+    if now.entry != resolved.entry
+    then begin
+      forget_kept now.entry;
+      forget_kept resolved.entry
+    end
+  end
+
+(* Store directories were removed by code outside this module. Every
+   remembered name and every kept fact goes: which directories went is not
+   looked at, and neither is whether the removal succeeded. *)
+let directories_removed () =
+  let rec forget_names () =
+    let now = Atomic.get remembered in
+    if not
+         (Atomic.compare_and_set
+            remembered
+            now
+            { removals = now.removals + 1; of_existing = Spellings.empty })
+    then forget_names ()
   in
+  forget_names ();
+  Stdlib.Mutex.protect registry_mu (fun () ->
+    Hashtbl.fold (fun _ entry entries -> entry :: entries) registry [])
+  |> List.iter forget_kept
+
+let open_store ?max_bytes location =
+  let base_dir = Store.dir location in
   let max_bytes =
     match max_bytes with
     | Some bytes when bytes > 0 -> Some bytes
@@ -168,7 +294,6 @@ let open_store ?cross_context_mutex ?max_bytes location =
   {
     location;
     base_dir;
-    cross_context_mutex;
     max_bytes;
   }
 
@@ -261,14 +386,17 @@ let validate_layout_entries ~parent ~expected ~is_valid entries =
   loop [] entries
 ;;
 
-let list_month_dirs_result base_dir =
+(* The store's side files sit among the month directories and belong to
+   the store, so they are passed over by name. They are never opened here. *)
+let list_month_dirs_result t =
   let open Result.Syntax in
-  let* entries = list_directory_result ~missing_is_empty:true base_dir in
+  let* entries = list_directory_result ~missing_is_empty:true t.base_dir in
+  let is_side_file = Store.is_side_file (Store.of_location t.location) in
   validate_layout_entries
-    ~parent:base_dir
+    ~parent:t.base_dir
     ~expected:Month_directory
     ~is_valid:month_directory_name_is_valid
-    entries
+    (List.filter (fun entry -> not (is_side_file entry)) entries)
 ;;
 
 let list_day_entries_result month_path =
@@ -301,7 +429,7 @@ let list_day_files_result month_path =
 ;;
 
 let month_dir_paths_newest_first_result t =
-  list_month_dirs_result t.base_dir
+  list_month_dirs_result t
   |> Result.map (List.map (Filename.concat t.base_dir))
 ;;
 
@@ -686,11 +814,22 @@ let map_tail_rows_result path ~max_lines ~f =
     load_tail_rows_result_inline path ~max_lines |> Result.map (List.map f))
 ;;
 
-let recent_entry_of_line ~path ?line_number line =
+(* A physical line as the strict reads parse it. The result does not depend on
+   the file the line is in, so an append parses its row before it takes the
+   store's mutex. *)
+let parse_line line =
   match Yojson.Safe.from_string line with
-  | json -> Parsed json
-  | exception Yojson.Json_error detail ->
-    Malformed_json { path; line_number; detail }
+  | json -> Ok json
+  | exception Yojson.Json_error detail -> Error detail
+;;
+
+let recent_entry_of_parsed ~path ?line_number = function
+  | Ok json -> Parsed json
+  | Error detail -> Malformed_json { path; line_number; detail }
+;;
+
+let recent_entry_of_line ~path ?line_number line =
+  recent_entry_of_parsed ~path ?line_number (parse_line line)
 ;;
 
 let entry_of_physical_line ~path line =
@@ -864,16 +1003,115 @@ type append_outcome =
    by age is the prune pass's job ([prune_listed_stores_bound]). *)
 let run_post_append_pruning_unlocked t ~(dated : Store.dated_path) =
   match t.max_bytes with
-  | None -> ()
+  | None -> `Kept_every_file
   | Some max_bytes ->
     (* See byte-budget pruning is best-effort cleanup after append. *)
-    ignore (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int)
+    if prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path > 0
+    then `Removed_files
+    else `Kept_every_file
+
+(* ── The facts kept in memory, on the write side ─────────
+
+   An append sees every cell of the store before it changes a file and
+   settles each one after its row is on disk, both under the store's mutex,
+   so two appends never interleave here. A reader that fills a cell and a
+   caller that removes files take no mutex; the cells themselves arbitrate
+   ([Fact_cell]). *)
+
+type seen = Seen : 'a fact * 'a held Fact_cell.t * 'a held Fact_cell.seen -> seen
+
+type seen_before_change =
+  { kept_then : kept list
+  ; cells : seen list
+  }
+
+let see_kept entry =
+  let kept_then = Atomic.get entry.kept in
+  { kept_then
+  ; cells =
+      List.map (fun (Kept (fact, cell)) -> Seen (fact, cell, Fact_cell.see cell)) kept_then
+  }
+
+(* A value after [written]. The row is the store's newest only when no day
+   file after its own holds a row; [held.newest] is the newest file the value
+   saw one in. A clock that went back puts the row in an older file, and what
+   the strict reads then answer is not told by the row. *)
+let after_row fact written held =
+  match held.newest with
+  | Some newest when compare_places written.place newest < 0 -> None
+  | Some _ | None ->
+    (match fact.step held.value written with
+     | Some value -> Some { value; newest = Some written.place }
+     | None -> None
+     | exception ((Out_of_memory | Stack_overflow) as exn) -> raise exn
+     | exception exn ->
+       (* The row is on disk whatever a step does. A step that raises has
+          not told the value, which is [None]'s meaning; raising from here
+          would report a committed row as a failed append. *)
+       Log.Misc.error
+         "dated JSONL fact step raised, the fact is read from the files again: %s"
+         (Printexc.to_string exn);
+       None)
+
+let settle_kept entry before written =
+  List.iter
+    (fun (Seen (fact, cell, seen)) ->
+       Fact_cell.settle cell seen ~step:(after_row fact written))
+    before.cells;
+  (* A cell made while the row was being written was not seen before it. A
+     fill of that cell can have read the files without the row. *)
+  if Atomic.get entry.kept != before.kept_then then forget_kept entry
+
+let written_row ~(dated : Store.dated_path) parsed =
+  { row = lazy (recent_entry_of_parsed ~path:dated.path (Lazy.force parsed))
+  ; place = { month_dir = dated.month_dir; day_file = dated.day_file }
+  }
+
+(* The row's text, rendered once: what goes to disk, and what the facts are
+   told about, read back the way the strict reads read it. It is parsed
+   before the mutex is taken when the store keeps a fact; a fact that appears
+   after that look is parsed under the mutex, once. *)
+type rendered =
+  { rows : string
+  ; parsed : (Yojson.Safe.t, string) result Lazy.t
+  }
+
+let render entry json =
+  let line = Yojson.Safe.to_string json in
+  let parsed = lazy (parse_line line) in
+  (match Atomic.get entry.kept with
+   | [] -> ()
+   | _ :: _ -> ignore (Lazy.force parsed : (Yojson.Safe.t, string) result));
+  { rows = line ^ "\n"; parsed }
+
+(* Run [change], which changes the store's files under the store's mutex and
+   keeps the cells right itself while it returns. When it raises, the files
+   may or may not have changed, so the store's facts are forgotten. Either
+   way the directory may have turned out to be another entry's. *)
+let changing_files t change =
+  let resolved = resolve t.location in
+  match change resolved.entry with
+  | result ->
+    forget_kept_of_the_directory resolved t.location;
+    result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    forget_kept resolved.entry;
+    forget_kept_of_the_directory resolved t.location;
+    Printexc.raise_with_backtrace exn backtrace
+
+(* Run [removal], which removes files of the store, and forget the store's
+   facts on every way out of it: how many files went and whether it
+   succeeded are not looked at. *)
+let removing_files t removal =
+  changing_files t (fun entry ->
+    let result = Cross_context_mutex.with_lock entry.mutex removal in
+    forget_kept entry;
+    result)
 
 let append_unlocked ~on_committed t json =
-  (* [Fs_compat.append_jsonl] (post-RFC-0108 #15936) already provides
-     per-path cross-domain atomicity via its own Stdlib.Mutex registry
-     and fresh-fd-per-call. The PR-5 (#15928) inline [atomic_append_jsonl]
-     was a pre-emptive duplicate of that guarantee — removed here. *)
+  (* [Fs_compat.append_jsonl_rows] provides per-path cross-domain atomicity
+     through its own mutex registry and cached descriptor. *)
   (* [append] reaches here from OS threads too: the audit log is written from
      [Thread.create] workers, where an [Eio.Mutex] waits through an effect the
      thread has no handler for. That raises [Stdlib.Effect.Unhandled] inside
@@ -881,11 +1119,19 @@ let append_unlocked ~on_committed t json =
      only serializes a real fiber and raises for the rest, so the
      cross-context gate is what covers both: a fiber yields cooperatively and
      a raw thread takes the Stdlib mutex. *)
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
-    let dated = Store.dated_path_now t.location in
-    Jsonl_writer.append_jsonl ~path:dated.path json;
-    on_committed ();
-    run_post_append_pruning_unlocked t ~dated)
+  changing_files t (fun entry ->
+    let rendered = render entry json in
+    Cross_context_mutex.with_lock entry.mutex (fun () ->
+      let dated = Store.dated_path_now t.location in
+      let before = see_kept entry in
+      Fs_compat.append_jsonl_rows dated.path rendered.rows;
+      (* The facts first, then the caller's acknowledgement: whoever the
+         acknowledgement wakes reads the facts with the row in them. *)
+      settle_kept entry before (written_row ~dated rendered.parsed);
+      on_committed ();
+      match run_post_append_pruning_unlocked t ~dated with
+      | `Kept_every_file -> ()
+      | `Removed_files -> forget_kept entry))
 
 let append_inner t json = append_unlocked ~on_committed:ignore t json
 
@@ -1293,7 +1539,7 @@ let read_recent_using_result ?(offset=0) t n ~decode =
         let* () = visit_days month_path days in
         visit_months rest
     in
-    let* months = list_month_dirs_result t.base_dir in
+    let* months = list_month_dirs_result t in
     let* () = visit_months months in
     Ok !collected
 ;;
@@ -1331,7 +1577,7 @@ let find_latest_entry_result t f =
        | Some _ -> Ok found
        | None -> visit_months rest)
   in
-  let* months = list_month_dirs_result t.base_dir in
+  let* months = list_month_dirs_result t in
   visit_months months
 ;;
 
@@ -1419,7 +1665,7 @@ let iter_all_entries_result t f =
       let* () = iter_days month_path (List.rev days) in
       iter_months rest
   in
-  let* months = list_month_dirs_result t.base_dir in
+  let* months = list_month_dirs_result t in
   iter_months (List.rev months)
 ;;
 
@@ -1744,10 +1990,16 @@ let load_count_cache ~path =
 ;;
 
 let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
+  changing_files t (fun entry ->
+    let rendered = render entry json in
+    Cross_context_mutex.with_lock entry.mutex (fun () ->
     let dated = Store.dated_path_now t.location in
-    let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
+    let row_bytes = String.length rendered.rows in
     let current_bytes = file_size dated.path in
+    (* Before the rename: rotating the current file out is a change of the
+       store's files too. The rows keep their order across it, so the row
+       appended after it is still the newest. *)
+    let before = see_kept entry in
     let placement =
       if
         max_current_file_bytes <= 0
@@ -1782,12 +2034,16 @@ let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
     in
     match placement with
     | None ->
+      (* Nothing was renamed and nothing was written: the facts stand. *)
       Skipped_rotation_exhausted { sequence_limit = max_int }
     | Some outcome ->
-      Jsonl_writer.append_jsonl ~path:dated.path json;
+      Fs_compat.append_jsonl_rows dated.path rendered.rows;
+      settle_kept entry before (written_row ~dated rendered.parsed);
       on_committed ();
-      run_post_append_pruning_unlocked t ~dated;
-      outcome)
+      (match run_post_append_pruning_unlocked t ~dated with
+       | `Kept_every_file -> ()
+       | `Removed_files -> forget_kept entry);
+      outcome))
 
 let append_rotating ?(on_committed = ignore) t ~max_current_file_bytes json =
   let outcome = ref Skipped_by_append_guard in
@@ -2279,9 +2535,7 @@ let read_range_recent ?offset t ~since ~until n =
 
 (* Keep the existing store mutex on the fiber. Descriptor operations offload
    through Fs_compat, so neither directory reads nor unlinks block the domain. *)
-let prune t ~days =
-  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
-    prune_unlocked t ~days)
+let prune t ~days = removing_files t (fun () -> prune_unlocked t ~days)
 
 let days_to_keep ~operator_window_days store =
   match Store.retention store with
@@ -2302,21 +2556,139 @@ let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
            ~f:(fun location directory ->
              let t = open_store location in
              let removed =
-               Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex)
-                 (fun () -> prune_bound_directory ~location ~days directory)
+               removing_files t (fun () ->
+                 prune_bound_directory ~location ~days directory)
              in
              if removed > 0 then on_pruned location;
              removed))
     0 Store.all
 
+(* ── The facts kept in memory, on the read side ────────── *)
+
+(* The store's cell for [fact]. The first reader makes it, and every later
+   one finds that one: a second cell for the same fact would be settled by no
+   writer that saw the first. *)
+let cell_of_entry : type a. entry -> a fact -> a held Fact_cell.t =
+  fun entry fact ->
+  let rec find : kept list -> a held Fact_cell.t option = function
+    | [] -> None
+    | Kept (other, cell) :: rest ->
+      (match Type.Id.provably_equal fact.id other.id with
+       | Some Type.Equal -> Some cell
+       | None -> find rest)
+  in
+  let rec find_or_add () =
+    let kept = Atomic.get entry.kept in
+    match find kept with
+    | Some cell -> cell
+    | None ->
+      let cell = Fact_cell.make () in
+      if Atomic.compare_and_set entry.kept kept (Kept (fact, cell) :: kept)
+      then cell
+      else find_or_add ()
+  in
+  find_or_add ()
+
+let place_of_day_file_path path =
+  { month_dir = Filename.basename (Filename.dirname path)
+  ; day_file = Filename.basename path
+  }
+
+let last_row : recent_entry option fact =
+  { id = Type.Id.make ()
+  ; name = "last_row"
+  ; read =
+      (fun t ->
+        read_recent_using_result t 1 ~decode:(fun ~path line ->
+          path, recent_entry_of_line ~path line)
+        |> Result.map (function
+          | [] -> { value = None; newest = None }
+          | (path, row) :: _ ->
+            { value = Some row; newest = Some (place_of_day_file_path path) }))
+  ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
+  }
+
+(* Whether this process keeps what [read_fact] reads. A cell is moved by the
+   appends of the process it lives in and by no other, so only the one
+   process that appends to the stores may keep their facts. It says so once
+   and does not take it back. *)
+let keeping_facts = Atomic.make false
+let keep_facts_in_this_process () = Atomic.set keeping_facts true
+
+let fact_read_outcome = function
+  | Fact_cell.Held _ -> "held"
+  | Fact_cell.Read_and_kept _ -> "read_and_kept"
+  | Fact_cell.Read_not_kept _ -> "read_not_kept"
+  | Fact_cell.Read_failed _ -> "read_failed"
+
+let read_fact t fact =
+  let value_of = function
+    | Fact_cell.Held held -> Fact_cell.Held held.value
+    | Fact_cell.Read_and_kept held -> Fact_cell.Read_and_kept held.value
+    | Fact_cell.Read_not_kept held -> Fact_cell.Read_not_kept held.value
+    | Fact_cell.Read_failed _ as failed -> failed
+  in
+  let answer =
+    if not (Atomic.get keeping_facts)
+    then (
+      (* Another process appends to this store. The files are read as they
+         were before there were facts, and no cell is made. *)
+      match fact.read t with
+      | Ok held -> Fact_cell.Read_not_kept held.value
+      | Error error -> Fact_cell.Read_failed error)
+    else (
+      let cell = cell_of_entry (resolve t.location).entry fact in
+      match Fact_cell.held cell with
+      | Some held -> Fact_cell.Held held.value
+      | None ->
+        (* The cell is seen and the files are read in one job. A cell seen
+           before the wait for a worker would lose to every append that
+           lands during the wait. *)
+        off_fiber ~name:(job_name t) (fun () ->
+          Fact_cell.fill cell ~read:(fun () -> fact.read t))
+        |> value_of)
+  in
+  Otel_metric_store_core.inc_counter
+    Otel_builtin_metric_names.metric_dated_jsonl_fact_reads
+    ~labels:
+      [ "store", Store.pool_job_name (Store.of_location t.location)
+      ; "fact", fact.name
+      ; "outcome", fact_read_outcome answer
+      ]
+    ();
+  answer
+
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without
    widening the public API surface. *)
 module For_testing = struct
-  let cross_context_mutex (t : t) = Atomic.get t.cross_context_mutex
+  let cross_context_mutex = store_mutex
 
-  let cross_context_mutex_for_base_dir base_dir =
-    let cell = mutex_for_base_dir ~base_dir in
-    Atomic.get cell
+  let in_registry location =
+    let (Store.Existing name | Store.Not_yet name) = Store.directory_name location in
+    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.mem registry name)
 
+  let after_row fact ~value ~newest ~row ~written =
+    let place (month_dir, day_file) = { month_dir; day_file } in
+    after_row
+      fact
+      { row = Lazy.from_val row; place = place written }
+      { value; newest = Option.map place newest }
+    |> Option.map (fun held ->
+      held.value, Option.map (fun place -> place.month_dir, place.day_file) held.newest)
+
+end
+
+(* A store gets its registry entry when its mutex is first asked for, and
+   only the functions that write or prune ask. None of them is in [Reader]'s
+   signature. *)
+module Reader = struct
+  type nonrec t = t
+
+  let open_store location =
+    { location; base_dir = Store.dir location; max_bytes = None }
+
+  let base_dir = base_dir
+  let read_recent_result = read_recent_result
+  let read_recent_lines_result = read_recent_lines_result
 end

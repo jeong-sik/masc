@@ -162,6 +162,7 @@ val section :
     the header counts still cover every account. *)
 
 val section_cards :
+  ko:bool ->
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
   account_emails:Masc_tui_types.overview_account_emails_reading ->
@@ -176,7 +177,8 @@ val section_cards :
     exhaustion and its email, with the bars sized to the card. Every card in
     one section shares the same label, gauge and percent column measurement,
     computed at the narrowest paired card's content width, so neighbouring
-    accounts read on the same axes. Labels larger
+    accounts read on the same axes. [ko] is the language of what a card's
+    edges say. Labels larger
     than the viewport described by [width] and [rows] retain the ends where
     their boundaries are known and mark omissions instead of expanding an
     unbounded number of rows. Below 20 columns, the label bound uses 20 columns
@@ -206,6 +208,23 @@ val meter : cells:int -> float -> string
     share above zero draws at least one eighth. The share is
     held to [0, 1] for drawing only; a share that is not a number draws an
     empty meter, and the row's value text still prints it as reported. *)
+
+(** How a window's bar fill is coloured (RFC tui-one-screen-grammar section
+    7.3, LAYOUT-LANGUAGE Usage). *)
+type bar_fill =
+  | Limit_fill
+      (** A declared limit: each filled cell takes the colour of its place
+          against the limit, at the percent written beside the bar. *)
+  | Foreground_fill
+      (** A cap no one has confirmed is a limit: the terminal's text colour. *)
+  | Row_tone_fill
+      (** A window that refuses no model call: the fill takes its row's
+          receding tone. *)
+
+val bar_fill : Masc.Tui_decode_usage.provider_usage_window_role -> bar_fill
+(** Only a window that blocks model calls when full is a declared limit. A
+    role the server could not classify draws in the foreground, and a window
+    that counts other use recedes with its row. *)
 
 val bar_cells_min : int
 (** Minimum preferred width of a comparison meter before moving it to another row. *)

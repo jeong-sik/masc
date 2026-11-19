@@ -18,28 +18,18 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
-type titles =
-  { decisions : string
-  ; continuation : string
-  ; capacity : string
-  ; actions : string
+type edges =
+  { decisions : Masc_tui_card.edge
+  ; continuation : Masc_tui_card.edge
+  ; capacity : Masc_tui_card.edge
+  ; actions : Masc_tui_card.edge
   }
-(** The caller owns the language and observation scope of each heading. *)
-
-type chromes =
-  { decisions : Masc_tui_card.chrome
-  ; continuation : Masc_tui_card.chrome
-  ; capacity : Masc_tui_card.chrome
-  ; actions : Masc_tui_card.chrome
-  }
-(** Optional border-embedded hotkey tags and live summary badges per card. *)
-
-val empty_chromes : chromes
+(** What each card's edge says. The caller owns the language and the
+    observation behind each name, status and count. *)
 
 val draw :
-  chromes:chromes ->
-  titles:titles ->
-  empty_decisions:string ->
+  ko:bool ->
+  edges:edges ->
   inner:int ->
   rows:int ->
   is_selected:('action -> bool) ->
@@ -54,7 +44,8 @@ val draw :
     columns, the cards need more than [rows] lines, or [decisions_whole] is
     false. [decisions_whole] says the window holds every decision; a partial
     window uses the plain selectable list instead. The cards are as tall as
-    their rows and the two columns end on the same line.
+    their rows and the two columns end on the same line. A card with no rows
+    has an empty body: its edge's count says there are none.
 
     [actions] are the reasons the server gives for needing the operator, one
     row each, drawn as a card under the status readings. With none, there is

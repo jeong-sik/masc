@@ -218,6 +218,76 @@ export async function interruptKeeperTurn(
   }
 }
 
+/** What the server did with a request to stop the turn of one running chat
+ *  operation. `signalled` is not a finished stop: the signal still has to reach
+ *  the turn, and the operation's own state says when it ended. Every other kind
+ *  stopped nothing. */
+export type KeeperChatOperationInterrupt =
+  | { kind: 'signalled' }
+  /** The Keeper's running turn is not this operation's. */
+  | { kind: 'not_current'; currentOperationId: string | null }
+  /** The operation's execution has returned; only its record is being written. */
+  | { kind: 'settling' }
+  | { kind: 'paused_pending_admission' }
+  /** The operation reads as running, but a maintenance run holds the Keeper. */
+  | { kind: 'maintenance_running' }
+  /** The operation reads as running, but an autonomous turn holds the Keeper. */
+  | { kind: 'slot_held_by_autonomous_turn' }
+  | { kind: 'cancel_failed'; detail: string | null }
+  | { kind: 'owner_unavailable'; detail: string | null }
+
+export function parseKeeperChatOperationInterrupt(
+  value: unknown,
+  operationId: string,
+): KeeperChatOperationInterrupt {
+  if (!isRecord(value) || value.request_id !== operationId || typeof value.signalled !== 'boolean') {
+    throw new Error('Keeper chat operation interrupt response is invalid')
+  }
+  if (value.signalled) return { kind: 'signalled' }
+  const detail = typeof value.detail === 'string' ? value.detail : null
+  switch (value.reason) {
+    case 'operation_not_current':
+      return {
+        kind: 'not_current',
+        currentOperationId: typeof value.current_request_id === 'string' ? value.current_request_id : null,
+      }
+    case 'settling':
+    case 'paused_pending_admission':
+    case 'maintenance_running':
+    case 'slot_held_by_autonomous_turn':
+      return { kind: value.reason }
+    case 'cancel_failed':
+    case 'owner_unavailable':
+      return { kind: value.reason, detail }
+    default:
+      throw new Error('Keeper chat operation interrupt response is invalid')
+  }
+}
+
+/** Ask the server to stop the turn that is running this chat operation. The
+ *  server compares the operation id with the turn it holds before it signals,
+ *  so a late request cannot stop the turn that came after. */
+export async function interruptKeeperChatOperation(
+  keeperName: string,
+  operationId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<KeeperChatOperationInterrupt> {
+  const path = '/api/v1/keepers/turn/interrupt'
+  const resp = await fetchControlPlane(
+    path,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: keeperName.trim(), request_id: operationId }),
+      signal: opts.signal,
+    },
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, resp)
+  }
+  return parseKeeperChatOperationInterrupt(await resp.json(), operationId)
+}
+
 export type {
   KeeperChatCustomEventName,
   KeeperChatStreamEvent,

@@ -3038,6 +3038,8 @@
 (include stanzas/test_tui_usage_calls.inc)
 
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
+(include stanzas/test_dated_jsonl_kept_facts.inc)
+(include stanzas/test_fact_cell.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -3328,6 +3330,8 @@
 
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 
+(include stanzas/test_keeper_stored_meta.inc)
+
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 (include stanzas/test_keeper_request_wire_observation.inc)
@@ -3466,6 +3470,7 @@
 
 (include stanzas/test_workspace_agent_record.inc)
 
+(include stanzas/test_tui_list_moves.inc)
 (include stanzas/test_tui_local_keeper_meta_moved.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
@@ -4683,7 +4688,8 @@
 (test
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
- (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control))
+ (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control
+  masc_tui_scroll))
 
 (include stanzas/test_tui_keeper_axis_row.inc)
 
@@ -4854,7 +4860,13 @@
 (test
  (name test_tui_chart_shares)
  (modules test_tui_chart_shares)
- (libraries alcotest masc_tui_chart))
+ (libraries
+  alcotest
+  masc_tui_braille
+  masc_tui_chart
+  masc_tui_color
+  masc_tui_terminal_palette
+  masc_tui_theme))
 
 (test
  (name test_tui_render_metrics)
@@ -4864,8 +4876,11 @@
   str
   masc_tui_task_flow
   masc
+  ; the scheduler probe's states, which the probe mark decides from
+  masc.masc_core
   masc_test_deps
   masc_types
+  masc_tui_card
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_render_metrics
@@ -5192,12 +5207,13 @@
 (test
  (name test_tui_card)
  (modules test_tui_card)
- (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout
+  masc_tui_value))
 
 (test
  (name test_tui_approval_detail)
@@ -5291,7 +5307,8 @@
   masc_tui_render_prim
   masc_tui_render_schedule
   masc_tui_roster_pane
-  masc_tui_table))
+  masc_tui_table
+  masc_tui_value))
 
 (test
  (name test_tui_terminal_write_repair)
@@ -5456,6 +5473,7 @@
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_value.inc)
+(include stanzas/test_tui_say.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -5476,11 +5494,14 @@
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
+(include stanzas/test_tui_zone4_read_failure.inc)
+(include stanzas/test_tui_refresh_pace.inc)
+(include stanzas/test_tui_refresh_pace_requests.inc)
 
 (test
  (name test_tui_action_notice)
  (modules test_tui_action_notice)
- (libraries masc_tui_action_notice))
+ (libraries masc_tui_action_notice masc_tui_value))
 
 (test
  (name test_tui_rejection_evidence)
@@ -5818,9 +5839,15 @@
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity masc_tui_owed_read))
 
 (test
+ (name test_tui_chat_schedule_proximity)
+ (modules test_tui_chat_schedule_proximity)
+ (libraries alcotest masc_tui_types masc_tui_value unix))
+
+(test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox))
+ (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox
+  masc_tui_value unix))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -7235,7 +7262,8 @@
  (modules test_tui_model_content_activity)
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
   native_tool_outcome_fixture masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_value))
 
 (test
  (name test_tui_child_content)
@@ -7617,6 +7645,9 @@
 (include stanzas/test_runtime_account_access_multi.inc)
 (include stanzas/test_runtime_account_access_off.inc)
 (include stanzas/test_runtime_api_key_file.inc)
+(include stanzas/test_runtime_key_account_files.inc)
+(include stanzas/test_server_key_account_purge.inc)
+(include stanzas/test_server_key_account_registration.inc)
 (include stanzas/test_runtime_claude_key_environment.inc)
 (include stanzas/test_keeper_account_home_reach.inc)
 (include stanzas/test_server_preview_keeper_turn.inc)

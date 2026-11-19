@@ -33,7 +33,6 @@ extends: "0136"
 
 ### 1.1 Single-PR 불가 정량 근거
 
-- 새 file LOC ~1100 > `scripts/lint/godfile-size-regression.sh` *new_file_cap = 600*. `--fail` 게이트로 차단.
 - `retry_loop` 의 nested helpers (`mark_terminal_error` 9 callsites, `do_run` 등) 가 *동시 추출* 필요 — 외부 호출자 없는 *self-contained 추출 단위*.
 - closure deps 15+ 가 *typed context record* 없이는 *huge signature*; record 도입은 *별도 PR-4-a* 로 *baseline* 필요.
 
@@ -220,31 +219,17 @@ PR-4-b (error marker) ─┘
 
 **Mitigation**: PR-4-d impl 시 *exhaustive match* 또는 *RFC-0098 typed envelope* 활용. `_ -> ` catch-all 금지.
 
-### 5.3 PR-4-c 의 새 file LOC 가 600 cap 위반 가능
+### 5.3 PR 의 의존 관계
 
-`retry_loop` 잔여 ~400 LOC + boilerplate ~50 LOC + typed signatures ~50 LOC ≈ ~500 LOC. *600 cap 안전*하나 *추가 helper 추출 시 늘어남*.
-
-**Mitigation**: PR-4-c body 에 *helper extraction 추가 안 함*; 단순 recursive control flow 만 유지.
-
-### 5.4 stack PR force=main yield 7% (memory)
-
-본 5 sub-PR 은 *stack PR 형태* 가 *자연스러움* — PR-4-c 는 PR-4-a + PR-4-b base. memory `feedback_stack_pr_force_base_main_anti_pattern.md` 는 *force=main* 거부.
-
-**Mitigation**: sequential merge (PR-4-a/b merge → PR-4-c rebase main → push). *base=main 직접 force-set 금지*.
+PR-4-c는 PR-4-a와 PR-4-b의 변경을 사용한다. 스택 구성과 병합은
+[기여 가이드](../guides/CONTRIBUTOR-WORKFLOW.ko.md)를 따른다.
 
 ---
 
 ## 6. Validation per Sub-PR
 
-각 sub-PR done criteria:
-- [ ] `dune build --root . @check` clean.
-- [ ] `scripts/lint/godfile-size-regression.sh` clean (cap 3350, new_file_cap 600).
-- [ ] `scripts/lint/no-ocaml-comment-terminator-trap.sh` clean.
-- [ ] `scripts/lint/no-yojson-3-dead-arms.sh` clean.
-- [ ] `scripts/lint/no-inline-json-kind-name.sh` clean.
-- [ ] PR body 에 *self-call site argument table* (PR-4-c only).
-- [ ] PR body 에 *Anti-pattern self-check 7-row* (AGENT-LLM-A.md §워크어라운드 거부).
-- [ ] CI green 후 사용자 ready 결정 대기.
+재시도 단계의 상태 전달과 종료 조건을 검토한다. 실행 검사가 필요한 경우
+변경된 재시도 분기를 직접 다루는 검사를 고른다.
 
 ---
 
@@ -255,5 +240,3 @@ PR-4-b (error marker) ─┘
 - PR-2 #16624 MERGED — Runtime Resolution.
 - PR-3 #16643 MERGED — Pre-Dispatch.
 - `lib/keeper/keeper_unified_turn.ml` post-PR-3 (1742 LOC).
-- `scripts/lint/godfile-size-regression.sh` — new_file_cap 600.
-- memory `feedback_stack_pr_force_base_main_anti_pattern.md` — stack PR sequencing.

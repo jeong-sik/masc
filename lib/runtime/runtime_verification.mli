@@ -41,6 +41,14 @@ type failure =
           Also a Claude Code turn that ended with no HTTP status after the
           client named [authentication_failed], as a login past its time
           limit does. *)
+  | Key_refused of string
+      (** The provider refused the API key of the account: HTTP 401 on a
+          Claude Code account that runs on a key of a file
+          ({!Runtime_claude_code.key_refused}; RFC
+          a-persons-api-key-is-their-own-provider-account 3.5). The status
+          decides, and no sentence of the provider is read. A 403 on such
+          an account, and a 401 on an account of a login, stay
+          [Provider_auth_refused]. *)
   | Provider_unreachable of string
       (** The transport could not reach the provider. *)
   | Model_not_found of string

@@ -61,17 +61,24 @@ val wrap : width:int -> string -> string list
     than [width] takes its own line and overruns. Never returns the empty
     list. *)
 
-val ratio_bar : width:int -> numerator:int -> denominator:int -> string
-(** [ratio_bar ~width ~numerator ~denominator] fills from the left, because the
-    question it answers is how much of a declared ceiling is gone. Exactly
+val ratio_bar :
+  width:int ->
+  numerator:int ->
+  denominator:int ->
+  scale:Masc_tui_chart.meter_scale ->
+  string
+(** [ratio_bar ~width ~numerator ~denominator ~scale] fills from the left,
+    because the question it answers is how much of the denominator is gone.
+    Each filled cell takes {!Masc_tui_chart.meter_cell_style} for [scale]:
+    the status ramp for a declared limit, its series' hue otherwise. Exactly
     [width] cells. *)
 
 val reach_bar :
-  width:int -> transmitted:int -> total:int -> sent_style:string -> string
-(** [reach_bar ~width ~transmitted ~total ~sent_style] fills from the right:
-    the transmitted atoms are the newest ones, and drawing them at the left
-    would put the omitted history in the future. Exactly [width] cells, with
-    [sent_style] applied to the filled run. *)
+  width:int -> transmitted:int -> total:int -> scale:Masc_tui_chart.meter_scale -> string
+(** [reach_bar ~width ~transmitted ~total ~scale] fills from the right: the
+    transmitted atoms are the newest ones, and drawing them at the left would
+    put the omitted history in the future. The filled run takes [scale]'s
+    colours by its reach, as {!ratio_bar} does. Exactly [width] cells. *)
 
 val reach_pointer :
   label:string -> width:int -> transmitted:int -> total:int -> string

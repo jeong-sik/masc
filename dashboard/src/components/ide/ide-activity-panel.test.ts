@@ -834,8 +834,8 @@ describe('IdeActivityPanel', () => {
     goals.value = [{
       id: 'goal-runtime',
       title: 'Runtime goal',
-      metric: 'green CI',
-      target_value: 'merged',
+      measure: { kind: 'done_when', condition: 'the PR is merged with green CI' },
+      procedure: 'Read the PR state and its CI run.',
       priority: 1,
       phase: 'executing',
       created_at: '2026-05-05T09:00:00Z',

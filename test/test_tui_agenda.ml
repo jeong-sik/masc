@@ -708,6 +708,73 @@ let test_unread_questions_take_no_row_and_open_nothing () =
   let lines = lines_of_state state in
   check (list string) "and offers no question to open" [] (ask_targets lines)
 
+(* Every list Home takes requests from, read and empty. *)
+let every_request_source_read state =
+  let open Masc_tui_types in
+  state.approval_snapshot <-
+    Some
+      { aps_items = []
+      ; aps_actor_filter = None
+      ; aps_filter_active = false
+      ; aps_visible_count = 0
+      ; aps_total_count = 0
+      ; aps_hidden_count = 0
+      };
+  state.keeper_tool_approvals_observed <- true;
+  state.keeper_tool_approvals_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- None;
+  set_asks state [];
+  state.asks_error <- None;
+  state.goals_to_confirm <- Agenda.Read []
+
+let pp_decision_count ppf = function
+  | Masc_tui_home.Every_source_read requests -> Format.fprintf ppf "exactly %d" requests
+  | Masc_tui_home.Some_source_unread requests -> Format.fprintf ppf "at least %d" requests
+
+let decision_count = testable pp_decision_count ( = )
+
+let request_rows prepared =
+  List.filter
+    (fun (action, _) ->
+       match action with
+       | Masc_tui_types.Home_request _ -> true
+       | Home_approvals | Home_agenda | Home_resume _ | Home_read_last _
+       | Home_choose_keeper | Home_create_keeper | Home_operator_action _ -> false)
+    (Masc_tui_home.home_decision_rows prepared)
+
+(* The decisions card's edge counted every row it drew, the row that opens
+   the whole list among them, and that row counted the approvals and
+   questions again. The count is the requests: the row that opens the list
+   is not one, and a list nobody read makes the count a lower bound rather
+   than a zero that reads as "nothing waits". *)
+let test_home_counts_the_requests_it_lists () =
+  let state = agenda_state () in
+  every_request_source_read state;
+  check decision_count "nothing waits on a full reading" (Masc_tui_home.Every_source_read 0)
+    (Masc_tui_home.home_decision_count (Masc_tui_home.prepare state));
+  check int "and no row is drawn for it" 0
+    (List.length (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
+  set_asks state [ ask_row "ask-1"; ask_row "ask-2" ];
+  state.goals_to_confirm <- Agenda.Read [ goal ~goal_id:"goal-a" "First proof" ];
+  let prepared = Masc_tui_home.prepare state in
+  check bool "the row that opens the whole list is drawn" true
+    (List.exists (fun (action, _) -> action = Masc_tui_types.Home_approvals)
+       (Masc_tui_home.home_decision_rows prepared));
+  check int "two questions and a Goal are the requests" 3
+    (List.length (request_rows prepared));
+  check decision_count "the count is the requests alone" (Masc_tui_home.Every_source_read 3)
+    (Masc_tui_home.home_decision_count prepared);
+  state.asks_snapshot <- None;
+  check decision_count "unread questions make it a lower bound"
+    (Masc_tui_home.Some_source_unread 1)
+    (Masc_tui_home.home_decision_count (Masc_tui_home.prepare state));
+  set_asks state [];
+  state.goals_to_confirm <- Agenda.Not_read;
+  check decision_count "and so do unread Goals" (Masc_tui_home.Some_source_unread 0)
+    (Masc_tui_home.home_decision_count (Masc_tui_home.prepare state))
+
 let test_home_approval_list_preserves_its_caller () =
   let open Masc_tui_types in
   let state = agenda_state () in
@@ -818,7 +885,9 @@ let () =
             test_unread_questions_take_no_row_and_open_nothing
         ] )
     ; ( "selection across refreshed agenda projections"
-      , [ test_case "Home approval list retains its caller" `Quick
+      , [ test_case "Home counts the requests it lists" `Quick
+            test_home_counts_the_requests_it_lists
+        ; test_case "Home approval list retains its caller" `Quick
             test_home_approval_list_preserves_its_caller
         ; test_case "Task Goal references preserve registry reading truth" `Quick
             test_task_goal_reading_preserves_source_truth

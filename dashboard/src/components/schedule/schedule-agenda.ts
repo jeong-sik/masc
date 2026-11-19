@@ -94,6 +94,16 @@ function startOfDayMs(ms: number): number {
   return date.getTime()
 }
 
+/** Local midnight `days` calendar days after the local day of `ms`. The day is
+ *  stepped on the calendar: where daylight time starts or ends a local day is
+ *  23 or 25 hours long, and adding 24 hours lands on the wrong date. */
+function startOfDayAfterMs(ms: number, days: number): number {
+  const date = new Date(ms)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + days)
+  return date.getTime()
+}
+
 // ── polling strip (interval schedules) ─────────────────────────────
 
 export interface PollingRow {
@@ -130,7 +140,9 @@ export interface AgendaEvent {
 
 export interface AgendaColumn {
   readonly offset: number
+  /** Local midnight that starts this day, and the one that ends it. */
   readonly dateMs: number
+  readonly endMs: number
   readonly events: AgendaEvent[]
 }
 
@@ -148,7 +160,12 @@ export function buildAgenda(
   const todayStart = startOfDayMs(options.nowMs)
   const columns: AgendaColumn[] = []
   for (let index = 0; index < days; index += 1) {
-    columns.push({ offset: index, dateMs: todayStart + index * MS_PER_DAY, events: [] })
+    columns.push({
+      offset: index,
+      dateMs: startOfDayAfterMs(todayStart, index),
+      endMs: startOfDayAfterMs(todayStart, index + 1),
+      events: [],
+    })
   }
   for (const request of requests) {
     if (isTerminalRequest(request)) continue
@@ -168,6 +185,47 @@ export function buildAgenda(
     column.events.sort((a, b) => a.atMs - b.atMs)
   }
   return columns
+}
+
+// ── what the calendar can speak for ────────────────────────────────
+
+/** Whether the rows handed to the calendar are every active schedule.
+ *
+ *  The list endpoint returns at most a page of rows, active schedules first
+ *  and soonest due first (`compare_schedule_order` in
+ *  `server_dashboard_schedule_projection.ml`). More active schedules than rows
+ *  therefore means every row is an active one, and each schedule left out is
+ *  due at or after the last of them (`omittedFromMs`). Before that time the
+ *  page is every active schedule; from it on the calendar cannot tell. With no
+ *  time on any row there is no such point. */
+export type CalendarCoverage =
+  | { readonly kind: 'complete' }
+  | { readonly kind: 'partial'; readonly omittedActive: number; readonly omittedFromMs: number | null }
+
+/** `activeCount` is the server's count of active schedules in the ledger;
+ *  `requests` is the page it returned with that count. */
+export function calendarCoverage(
+  requests: readonly DashboardScheduledAutomationRequest[],
+  activeCount: number,
+): CalendarCoverage {
+  const omittedActive = activeCount - requests.length
+  if (omittedActive <= 0) return { kind: 'complete' }
+  let lastDueMs: number | null = null
+  for (const request of requests) {
+    const atMs = fireTimestampMs(request)
+    if (atMs !== null && (lastDueMs === null || atMs > lastDueMs)) lastDueMs = atMs
+  }
+  return { kind: 'partial', omittedActive, omittedFromMs: lastDueMs }
+}
+
+/** Whether the calendar holds every schedule of a day that ends at `endMs`. */
+export function dayIsComplete(coverage: CalendarCoverage, endMs: number): boolean {
+  switch (coverage.kind) {
+    case 'complete':
+      return true
+    case 'partial':
+      return coverage.omittedFromMs !== null && coverage.omittedFromMs >= endMs
+  }
 }
 
 // ── formatting ─────────────────────────────────────────────────────
@@ -319,9 +377,11 @@ function PollingCard({
 
 export function PollingStrip({
   requests,
+  coverage,
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
+  coverage: CalendarCoverage
   onOpen: (scheduleId: string) => void
 }) {
   const rows = selectPollingSchedules(requests)
@@ -332,7 +392,11 @@ export function PollingStrip({
         <span class="sch-poll-sub">고정 간격 반복 — 특정 시각이 아니라 계속 돎</span>
       </div>
       ${rows.length === 0
-        ? html`<div class="sch-day-empty mono" data-testid="sch-polling-empty">활성 폴링 없음</div>`
+        ? html`<div class="sch-day-empty mono" data-testid="sch-polling-empty">${
+            // A polling loop has no day to be missing from: any schedule left
+            // out of the page may be one.
+            coverage.kind === 'complete' ? '활성 폴링 없음' : '불러온 예약에는 활성 폴링 없음'
+          }</div>`
         : html`
             <div class="sch-poll-list">
               ${rows.map(
@@ -393,13 +457,23 @@ function AgendaEventRow({
   `
 }
 
+function partialCalendarText(coverage: Extract<CalendarCoverage, { kind: 'partial' }>): string {
+  const omitted = `활성 예약 ${coverage.omittedActive.toLocaleString()}건은 불러오지 않았습니다.`
+  // The minute is cut, not rounded, so "at or after" stays true of it.
+  return coverage.omittedFromMs === null
+    ? omitted
+    : `${omitted} 그 예약의 예정 시각은 ${formatDayDate(coverage.omittedFromMs)} ${formatClock(coverage.omittedFromMs)} 이후입니다.`
+}
+
 export function Agenda({
   requests,
+  coverage,
   nowMs,
   days,
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
+  coverage: CalendarCoverage
   nowMs: number
   days?: number
   onOpen: (scheduleId: string) => void
@@ -409,23 +483,31 @@ export function Agenda({
   // days so the agenda does not pad out with blank columns.
   const visible = columns.filter(column => column.events.length > 0 || column.offset <= 1)
   const hasAny = visible.some(column => column.events.length > 0)
+  const complete = (column: AgendaColumn): boolean => dayIsComplete(coverage, column.endMs)
   return html`
     <div class="sch-agenda" data-testid="sch-agenda">
-      ${!hasAny
+      ${!hasAny && columns.every(complete)
         ? html`<div class="sch-empty" data-testid="sch-agenda-empty">다가오는 ${(days ?? AGENDA_DAYS)}일에 예정된 예약이 없습니다.</div>`
         : null}
       ${visible.map(column => {
         const isToday = column.offset === 0
+        // A day the page does not reach to the end of may hold a schedule that
+        // was left out: its count is a floor, and its emptiness is not known.
+        const known = complete(column)
         return html`
           <div key=${column.offset} class=${`sch-day ${isToday ? 'today' : ''}`}>
             <div class="sch-day-h">
               <span class="sch-day-rel">${relativeDayLabel(column.offset)}</span>
               <span class="sch-day-date mono">${formatDayDate(column.dateMs)}</span>
               ${isToday ? html`<span class="sch-day-now mono">지금 ${formatClock(nowMs)}</span>` : null}
-              <span class="sch-day-n mono">${column.events.length > 0 ? `${column.events.length}건` : ''}</span>
+              <span class="sch-day-n mono">${column.events.length > 0
+                ? `${column.events.length}건${known ? '' : ' 이상'}`
+                : ''}</span>
             </div>
             ${column.events.length === 0
-              ? html`<div class="sch-day-empty mono">예정 없음</div>`
+              ? html`<div class="sch-day-empty mono" data-testid="sch-day-empty">${
+                  known ? '예정 없음' : '불러오지 않은 예약이 있을 수 있음'
+                }</div>`
               : html`
                   <div class="sch-day-evs">
                     ${column.events.map(
@@ -450,25 +532,33 @@ export function Agenda({
  * (scheduled + oneshot). Cadence filter narrows both. */
 export function ScheduleCalendar({
   requests,
+  activeCount,
   nowMs,
   cadenceFilter,
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
+  /** Active schedules in the ledger, as the server counted them. */
+  activeCount: number
   nowMs: number
   cadenceFilter: Cadence | null
   onOpen: (scheduleId: string) => void
 }) {
   const showPolling = cadenceFilter === null || cadenceFilter === 'interval'
   const showAgenda = cadenceFilter === null || cadenceFilter !== 'interval'
+  // The page is cut before the cadence filter, so coverage is read from all of it.
+  const coverage = calendarCoverage(requests, activeCount)
   const agendaRequests =
     cadenceFilter === null
       ? requests
       : requests.filter(request => cadenceOfRequest(request) === cadenceFilter)
   return html`
     <div data-testid="sch-calendar">
-      ${showPolling ? html`<${PollingStrip} requests=${requests} onOpen=${onOpen} />` : null}
-      ${showAgenda ? html`<${Agenda} requests=${agendaRequests} nowMs=${nowMs} onOpen=${onOpen} />` : null}
+      ${coverage.kind === 'partial'
+        ? html`<div class="sch-calendar-partial" data-testid="sch-calendar-partial">${partialCalendarText(coverage)}</div>`
+        : null}
+      ${showPolling ? html`<${PollingStrip} requests=${requests} coverage=${coverage} onOpen=${onOpen} />` : null}
+      ${showAgenda ? html`<${Agenda} requests=${agendaRequests} coverage=${coverage} nowMs=${nowMs} onOpen=${onOpen} />` : null}
     </div>
   `
 }

@@ -1,9 +1,5 @@
 (** Board_tool_curation — board-curation handlers (read / submit) and
-    the curation-specific JSON argument coercers.
-
-    Stage 10 split of lib/board_tool_adapter/board_tool.ml — sub-domain split out of
-    [Board_tool_handlers] so both files stay under the godfile new-file
-    cap. *)
+    the curation-specific JSON argument coercers. *)
 
 open Masc_board_handlers
 open Tool_args

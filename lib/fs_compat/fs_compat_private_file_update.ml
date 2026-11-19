@@ -782,6 +782,21 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
     Fs_compat_internal.Systhread_host.run
       ~label:(labelled "fs-compat-append-jsonl" path) write
 
+let append_jsonl_rows (path : string) (rows : string) : unit =
+  test_exec_home_guard ~op:"append_jsonl_rows" path;
+  let write () =
+    Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
+      (Stdlib.Filename.dirname path);
+    append_lines_unix path rows
+  in
+  (* The same boundary as [append_jsonl]: the joined result is the caller's
+     commit acknowledgement, with no cancellation check after the write. *)
+  match execution_context () with
+  | Non_eio -> write ()
+  | Eio_fiber ->
+    Fs_compat_internal.Systhread_host.run
+      ~label:(labelled "fs-compat-append-jsonl" path) write
+
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
   if jsons = [] then ()
   else begin

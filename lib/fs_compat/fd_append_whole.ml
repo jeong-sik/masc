@@ -23,7 +23,11 @@ let regular_file_expected path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
 ;;
 
-let rec open_target path =
+type opened =
+  | Opened of target
+  | Kind_changed
+
+let open_once path =
   let expected = regular_file_expected path in
   let access = if expected then Unix.O_RDWR else Unix.O_WRONLY in
   let fd = Unix.openfile path (append_flags access) 0o644 in
@@ -31,15 +35,24 @@ let rec open_target path =
   | exception (Unix.Unix_error _ as error) ->
     Unix.close fd;
     raise error
-  | true, true -> Regular_file fd
-  | false, false -> Stream fd
+  | true, true -> Opened (Regular_file fd)
+  | false, false -> Opened (Stream fd)
   | true, false | false, true ->
     (* The path came to name another kind of file between the two calls.
        The access mode was chosen for the first kind: a regular file
        opened for writing only cannot be read, and a FIFO opened for
-       reading too did not wait for its reader. Start again. *)
+       reading too did not wait for its reader. *)
     Unix.close fd;
-    open_target path
+    Kind_changed
+;;
+
+(* An open that waits for a FIFO's reader is interrupted by a signal the
+   process handles. It is made again, as the reads and writes are. *)
+let rec open_target path =
+  match open_once path with
+  | Opened target -> target
+  | Kind_changed -> open_target path
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> open_target path
 ;;
 
 type io =
@@ -101,7 +114,6 @@ type failure =
       ; function_name : string
       ; argument : string
       }
-  | Last_byte_missing of { size : int }
   | Write_failed of
       { write_failure : Fd_write_all.failure
       ; rollback : rollback
@@ -127,54 +139,49 @@ let write_all ~io fd bytes =
     ~write:(fun ~offset ~length -> io.write fd bytes offset length)
 ;;
 
-(* What a regular file looked like before the call wrote to it. *)
+(* What a regular file looked like before the call wrote to it.
+   [may_end_mid_line]: the last byte is not a newline, or could not be read. *)
 type before =
   { size : int
-  ; ends_mid_line : bool
+  ; may_end_mid_line : bool
   }
 
-(* What one look at the end of a regular file found. *)
-type look =
-  | Seen of before
-  | No_byte_before of int
-
-let look_once ~io ~start fd =
+(* No byte at [size - 1]: the file became shorter after [size] was read,
+   because another descriptor cut it, or the target has no byte there at
+   all. What the file ends with is then not known, and reading again would
+   only know it until the next cut. The append writes a newline first unless
+   the file is empty now: its row never joins an unfinished line, and at
+   worst an empty line is left. [Fs_compat.load_jsonl] and the [Dated_jsonl]
+   reads pass over an empty line; a reader that splits the file into lines
+   itself has to as well. The length is read again so that a failed write is
+   taken back from the end the file has now. *)
+let observe_once ~io ~start fd =
   let size = io.end_offset fd in
   match start with
-  | Anywhere -> Seen { size; ends_mid_line = false }
+  | Anywhere -> { size; may_end_mid_line = false }
   | At_line_start ->
     if size = 0
-    then Seen { size; ends_mid_line = false }
+    then { size; may_end_mid_line = false }
     else (
       match io.last_byte fd ~size with
-      | Some byte -> Seen { size; ends_mid_line = not (Char.equal byte '\n') }
-      | None -> No_byte_before size)
+      | Some byte -> { size; may_end_mid_line = not (Char.equal byte '\n') }
+      | None ->
+        let size = io.end_offset fd in
+        { size; may_end_mid_line = size > 0 })
 ;;
 
-(* The file can become shorter between the two calls of a look, when
-   another process takes back its own failed append. The length read
-   first is then stale, so the file is looked at again. Every further
-   look has to find a shorter file, which ends the looks: a file that
-   did not shrink and still has no byte before its end is reported. *)
 let observe ~io ~start fd =
-  let rec look ~shorter_than =
-    match retrying_eintr (fun () -> look_once ~io ~start fd) with
-    | Ok (Seen before) -> Ok before
-    | Ok (No_byte_before size) ->
-      (match shorter_than with
-       | Some previous when size >= previous -> Error (Last_byte_missing { size })
-       | Some _ | None -> look ~shorter_than:(Some size))
-    | Error (error, function_name, argument) ->
-      Error (End_unreadable { error; function_name; argument })
-  in
-  look ~shorter_than:None
+  match retrying_eintr (fun () -> observe_once ~io ~start fd) with
+  | Ok before -> Ok before
+  | Error (error, function_name, argument) ->
+    Error (End_unreadable { error; function_name; argument })
 ;;
 
 (* The call's bytes are removed only when the file is exactly [size_before +
-   bytes] long. When every other writer of the file only appends, that
-   length means nothing was added since [size_before] was read except this
-   call's bytes, and they are everything after [size_before]. A shorter
-   file is never grown back to [size_before]. *)
+   bytes] long. While no other descriptor changes the file, that length
+   means the call's bytes are everything after [size_before]. The length
+   is read and the file is cut in two calls; what another descriptor does
+   between them is not seen ([fd_append_whole.mli], Other writers). *)
 let roll_back ~io ~fd ~size_before ~bytes =
   if bytes = 0
   then Nothing_written
@@ -206,7 +213,7 @@ let append_to_regular_file ~io ~start fd content =
   match observe ~io ~start fd with
   | Error failure -> Error failure
   | Ok before ->
-    let bytes = if before.ends_mid_line then "\n" ^ content else content in
+    let bytes = if before.may_end_mid_line then "\n" ^ content else content in
     (match write_all ~io fd bytes with
      | Ok () -> Ok ()
      | Error write_failure ->
@@ -277,10 +284,6 @@ let failure_to_string = function
       "the end of the file could not be read (%s: %s); nothing written"
       function_name
       (Unix.error_message error)
-  | Last_byte_missing { size } ->
-    Printf.sprintf
-      "the file is %d bytes long and has no byte before its end; nothing written"
-      size
   | Write_failed { write_failure; rollback } ->
     write_failure_to_string write_failure ^ "; " ^ rollback_to_string rollback
 ;;

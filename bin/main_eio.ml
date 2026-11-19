@@ -467,6 +467,10 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
     acquire_base_path_lock ~previous_owner
       ~lease_root:(Host_config.host ()).base_path_lease_root canonical_base_path
   in
+  (* This is now the one process that appends to the workspace's stores. A
+     process without the lease (the TUI, a command line tool) cannot say
+     this and reads the files each time. *)
+  Server_startup_takeover.keep_store_facts base_path_lease;
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
      same-process exec before any thread, sampler, or scheduler.
@@ -4663,7 +4667,7 @@ let setup_validate_runtime base_path =
            | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), Some (Runtime_schema.File _ | Runtime_schema.Inline _))
            | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), None)
            | (Some (Runtime_verification.Unavailable (Runtime_verification.Unsupported_runtime | (Runtime_verification.Tools_not_declared | (Runtime_verification.Invalid_credential _ | (Runtime_verification.Invalid_configuration _ | (Runtime_verification.Client_not_authenticated _ | (Runtime_verification.Client_not_started _ | Runtime_verification.Account_not_authorized _))))))), _)
-           | (Some (Runtime_verification.Timed_out | (Runtime_verification.Tool_not_called | (Runtime_verification.Tool_result_not_consumed | (Runtime_verification.Empty_response | (Runtime_verification.Model_unreported | (Runtime_verification.Rate_limited _ | (Runtime_verification.Quota_exhausted _ | (Runtime_verification.Provider_overloaded _ | (Runtime_verification.Provider_auth_refused _ | (Runtime_verification.Provider_unreachable _ | (Runtime_verification.Model_not_found _ | Runtime_verification.Provider_rejected _))))))))))), _)
+           | (Some (Runtime_verification.Timed_out | (Runtime_verification.Tool_not_called | (Runtime_verification.Tool_result_not_consumed | (Runtime_verification.Empty_response | (Runtime_verification.Model_unreported | (Runtime_verification.Rate_limited _ | (Runtime_verification.Quota_exhausted _ | (Runtime_verification.Provider_overloaded _ | (Runtime_verification.Provider_auth_refused _ | (Runtime_verification.Key_refused _ | (Runtime_verification.Provider_unreachable _ | (Runtime_verification.Model_not_found _ | Runtime_verification.Provider_rejected _)))))))))))), _)
            | (None, _) -> ());
           (* Name the cause: a refused key needs a new one, a missing model
              another choice, and the operator cannot tell them apart from the

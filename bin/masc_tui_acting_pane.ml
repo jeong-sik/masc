@@ -236,7 +236,8 @@ type keeper_waiting_summary =
   | Waiting_not_observed
   | Waiting_read_unavailable
   | Waiting_items of {
-      schedules : Reading.waiting_item list;
+      schedules : (Reading.waiting_item * int) option;
+          (** The first waiting schedule and how many wait. *)
       delegate_result_waiting : bool;
       read_error : bool;
     }
@@ -250,19 +251,22 @@ let summarize_keeper_waiting context =
   | Waiting_observed row when not (String.equal row.kwr_keeper_name context.keeper_name) ->
       Waiting_read_unavailable
   | Waiting_observed row ->
-      let schedules = List.filter
-        (fun (item : Reading.waiting_item) ->
-          item.kwi_source = Reading.Waiting_source_schedule_waiting)
-        row.kwr_waiting_on in
+      let schedules =
+        List.find_opt
+          (fun (item : Reading.waiting_item) ->
+            item.kwi_source = Reading.Waiting_source_schedule_waiting)
+          row.kwr_waiting_heads
+        |> Option.map (fun item ->
+          item, Reading.waiting_source_count row Reading.Waiting_source_schedule_waiting) in
       let delegate_result_waiting = List.exists
         (fun (item : Reading.waiting_item) ->
           item.kwi_wake_producer = Reading.Wake_keeper_delegate)
-        row.kwr_waiting_on in
+        row.kwr_waiting_heads in
       let read_error = List.exists
         (fun (item : Reading.waiting_item) ->
           item.kwi_source = Reading.Waiting_source_read_error
           || item.kwi_source = Reading.Waiting_source_observation_unavailable)
-        row.kwr_waiting_on in
+        row.kwr_waiting_heads in
       Waiting_items { schedules; delegate_result_waiting; read_error }
 
 type input = {
@@ -364,15 +368,18 @@ let detail_label_cells = 4
 
 (* An age is read from two clocks. When the call is stamped after the TUI's own
    reading, or a stamp is not a number, there is no age to draw
-   ([Layout.elapsed_text] is [None]) and the cell holds the no-value mark, not
-   a time that never passed. *)
+   ([Layout.age_text] is [None]) and the cell holds the no-value mark, not
+   a time that never passed. An age grows while the reader looks, so it reads
+   in whole seconds and, past a minute, whole minutes (RFC
+   tui-one-screen-grammar §6.2): [last event 16.4s] repainted its row ten
+   times a second. *)
 let age_text ~now at =
-  match Layout.elapsed_text (now -. at) with
+  match Layout.age_text ~now ~since:at with
   | Some text -> text
   | None -> Masc_tui_theme.Glyph.no_value
 
 let ago_text ~ko ~now at =
-  match Layout.elapsed_text (now -. at) with
+  match Layout.age_text ~now ~since:at with
   | Some text -> Masc_tui_words.span_ago ~ko text
   | None -> Masc_tui_theme.Glyph.no_value
 
@@ -1879,23 +1886,24 @@ let keeper_context_lines ~cols input =
             else say " · 마지막 관측" " · last seen" in
           let suffix = qualifier ^ (if read_error then say " · 일부만" " · partial" else "") in
           let schedule, detail = match schedules with
-            | [] -> (one Dim (say "◷ 일정 못 봄" "◷ schedule unseen" ^ suffix), one Dim "  —")
-            | item :: _ ->
+            | None -> (one Dim (say "◷ 일정 못 봄" "◷ schedule unseen" ^ suffix), one Dim "  —")
+            | Some (item, count) ->
                 let clock = match item.kwi_due_at with
                   | None -> say "시각 관측 전" "time unobserved"
                   | Some due ->
-                      (match Layout.elapsed_text (abs_float (due -. input.now)) with
-                       | None -> say "시각 조회 불가" "time unavailable"
-                       | Some span ->
-                           if due >= input.now then say (span ^ " 뒤 예정") ("due in " ^ span)
-                           else say ("예정 시각 " ^ span ^ " 지남") ("due " ^ span ^ " ago")) in
+                      (if not (Float.is_finite due) then say "시각 조회 불가" "time unavailable"
+                       else if due >= input.now then
+                         let span = Masc_tui_value.Ongoing.until ~now:input.now due in
+                         say (span ^ " 뒤 예정") ("due in " ^ span)
+                       else
+                         let span = Masc_tui_value.Ongoing.since ~now:input.now due in
+                         say ("예정 시각 " ^ span ^ " 지남") ("due " ^ span ^ " ago")) in
                 ( one Info
                     (if input.ko then
-                       Printf.sprintf "◷ 대기 중인 일정 %d개%s" (List.length schedules) suffix
+                       Printf.sprintf "◷ 대기 중인 일정 %d개%s" count suffix
                      else
                        Printf.sprintf "◷ %d schedule%s waiting%s"
-                         (List.length schedules)
-                         (if List.length schedules = 1 then "" else "s") suffix)
+                         count (if count = 1 then "" else "s") suffix)
                 , one Plain
                     (say "  첫 항목 · " "  one item · " ^ clock ^ " · "
                      ^ Terminal_text.single_line item.kwi_what) ) in

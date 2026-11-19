@@ -69,7 +69,10 @@ let local_source_pending_note state source =
       let name = match source with
         | Local_keepers -> ui_text state ~ko:"Keeper 메타데이터" ~en:"Keeper metadata"
         | Local_work -> ui_text state ~ko:"작업 목록" ~en:"Work" in
-      let seconds = Printf.sprintf "%.1f" (Int64.to_float age_ns /. 1e9) ^ ui_text state ~ko:"초" ~en:"s" in
+      (* A length still going reads in whole seconds, then whole minutes
+         (RFC tui-one-screen-grammar §6.2). *)
+      let seconds = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
+          (Int64.to_float age_ns /. 1e9) in
       let lead = match phase with
         | Local_read_observation.Read_failed _ | Read_not_started -> name
         | Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
@@ -658,6 +661,49 @@ let recovery_box_bottom state buf ~cols =
   draw_box_bottom_with_recovery buf ~cols selected;
   selected
 
+(* What competes for the footer's notice slot, which stands in for zone 4
+   until the frame draws that row of its own (RFC tui-one-screen-grammar §2,
+   §9 item 6). The confirmations that lead the row and the conflict notices
+   are drawn as before. *)
+type zone4_notice =
+  | Zone4_pending  (* the quit question, which takes the slot *)
+  | Zone4_action  (* what the last key did: the action text or an outcome *)
+  | Zone4_read_failure of Masc_tui_read_failure.failure
+
+let zone4_rank = function
+  | Zone4_pending -> Masc_tui_notice_order.Pending_confirmation
+  | Zone4_action -> Masc_tui_notice_order.Action_result
+  | Zone4_read_failure _ -> Masc_tui_notice_order.Read_failure
+
+let zone4_notice (state : state) ~action_text ~preferred_action =
+  let notices =
+    (match preferred_action with
+     | Some (Masc_tui_footer.Pending_question _) -> [ Zone4_pending ]
+     | Some (Masc_tui_footer.Outcome _ | Masc_tui_footer.Menu_choices _) | None -> [])
+    @ (match action_text, preferred_action with
+       | Some _, (Some _ | None) | None, Some (Masc_tui_footer.Outcome _) -> [ Zone4_action ]
+       | None, (Some (Masc_tui_footer.Pending_question _ | Masc_tui_footer.Menu_choices _) | None) ->
+           [])
+    @ List.map (fun failure -> Zone4_read_failure failure)
+        (Masc_tui_read_failure.failures state.read_failures)
+  in
+  Masc_tui_notice_order.choose ~rank:zone4_rank notices
+
+(* The slot's text once a failing read has its rank: the action result
+   stays, a read failure fills the slot only when nothing outranks it, and
+   whatever waits behind is counted as [외 N]. *)
+let zone4_action_text (state : state) ~action_text ~preferred_action =
+  let ko = state.ui_language = Lang_ko in
+  let with_more more text =
+    if more = 0 then text else text ^ "  " ^ Masc_tui_value.Count.more ~ko more in
+  match zone4_notice state ~action_text ~preferred_action with
+  | None | Some { lead = Zone4_pending; more = _ } -> action_text
+  | Some { lead = Zone4_action; more } -> Option.map (with_more more) action_text
+  | Some { lead = Zone4_read_failure failure; more } ->
+      Some (with_more more
+              (Masc_tui_read_failure.notice_text ~ko ~now:(Unix.gettimeofday ())
+                 ~next_try:(Masc_tui_refresh_pace.next_try state.refresh_pace) failure))
+
 let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room. "?:help" stays only
@@ -771,6 +817,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Rejection notice ->
         Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.rejection_text notice,
               pressable (Press_input_rejection notice)))) in
+  let action_text = zone4_action_text state ~action_text ~preferred_action in
   let identity =
     match state.server_identity with
     | None -> []
@@ -1171,7 +1218,8 @@ let surface_strip (state : state) ~cols =
      how the operator moves. The mark and its word are always drawn, because
      a screen that draws nothing is explained by them. *)
   let connection_style, connection = strip_connection_reading state in
-  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:(Unix.gettimeofday ()) in
+  let clock_now = Unix.gettimeofday () in
+  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:clock_now in
   let ring_cells =
     let cells = ref 0 in
     Array.iteri
@@ -1191,7 +1239,10 @@ let surface_strip (state : state) ~cols =
     if 1 + ring_cells + badge_reserved + strip_reading_gap_cells
        + Message_layout.display_width connection + strip_reading_gap_cells
        + Message_layout.display_width wall_clock <= cols
-    then Some wall_clock
+    then begin
+      Masc_tui_value.Redraw.note_change_at (Masc_tui_value.Instant.next_minute ~now:clock_now);
+      Some wall_clock
+    end
     else None
   in
   let reading_cells =
@@ -2333,7 +2384,7 @@ let here_row ~cols (state : state) ~path ~readings ~position =
       (fun position ->
         Ansi.dim
         ^ Masc_tui_value.Position.text
-            ~whole:(ui_text state ~ko:"전체" ~en:"of") position
+            ~ko:(state.ui_language = Lang_ko) position
         ^ Ansi.reset)
       position
   in
@@ -2613,8 +2664,11 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     match Rows.at window (first + i) with
     | Some (keeper : keeper) ->
         let selected = first + i = state.keeper_cursor in
-        let name = Masc_tui_roster_pane.name_window ~selected
-          ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7))
+        (* A long name keeps its family and its deciding end, the middle
+           folded (docs/design/tui/LAYOUT-LANGUAGE.md). The selected row does
+           not scroll its name: a screen with no new data changes only its
+           time text (RFC tui-one-screen-grammar §8). *)
+        let name = Message_layout.fit_middle (max 0 (cols - 7))
           (Terminal_text.single_line keeper.k_name) in
         let reading = keeper_reading state keeper in
         let glyph = keeper_state_glyph ~paused:reading.paused
@@ -3364,10 +3418,12 @@ let planning_rollup_clauses ~cols (rollup : planning_rollup) =
   if total_goals = 0 then (count, [])
   else
     let bar_width = if cols < 90 then 8 else 12 in
+    (* Goals done out of all goals is a completion ratio, not a limit. *)
     let progress_bar =
       Printf.sprintf "[%s] %2d%% (%d/%d)"
         (Masc_tui_context_bars.ratio_bar ~width:bar_width
-           ~numerator:rollup.pr_done ~denominator:total_goals)
+           ~numerator:rollup.pr_done ~denominator:total_goals
+           ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion }))
         (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
     in
     let counter phase glyph name value =
@@ -3863,7 +3919,7 @@ let fusion_run_clock run =
 
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
-  | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
+  | Fusion_running, _ -> Masc_tui_value.Ongoing.since ~now run.fur_started_at ^ " running"
   | (Fusion_completed | Fusion_failed _), Some finished ->
       Message_layout.span_text (finished -. run.fur_started_at)
   | (Fusion_completed | Fusion_failed _), None -> "not recorded"
@@ -5029,9 +5085,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                  (Inspector.format_tokens maximum)
                  (float tokens /. float maximum *. 100.)
                  (Inspector.format_tokens (max 0 (maximum - tokens))))
+            (* The shaping ceiling is the turn's context window, a declared
+               limit: each cell takes the colour of its place in it. *)
             @ [ "  "
                 ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
                     ~denominator:maximum
+                    ~scale:(Chart.Declared_limit (Theme.paint ()))
               ]
         | Some tokens, (None | Some _) ->
             [ Printf.sprintf "  %s input tokens; window not observed"
@@ -5128,7 +5187,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
-              ~sent_style:(Theme.info ())
+              ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
         ; "  "
           ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
               ~total

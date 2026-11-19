@@ -117,7 +117,9 @@ let partial_cell =
 let meter_open = "\xe2\x96\x95" (* U+2595, right one-eighth block *)
 let meter_close = "\xe2\x96\x8f" (* U+258F, left one-eighth block *)
 
-let meter ~cells share =
+(* The glyphs a meter draws, the filled cells apart from the track, so a
+   caller can colour each filled cell. *)
+let meter_glyphs ~cells share =
   let cells = max 0 cells in
   let valid_share = Float.is_finite share && share >= 0.0 && share <= 1.0 in
   let share =
@@ -134,21 +136,18 @@ let meter ~cells share =
   in
   let whole = filled / eighths_per_cell in
   let part = filled mod eighths_per_cell in
-  let buf = Buffer.create (cells * String.length full_cell) in
-  for _ = 1 to whole do
-    Buffer.add_string buf full_cell
-  done;
-  let drawn =
-    if part > 0 then begin
-      Buffer.add_string buf partial_cell.(part);
-      whole + 1
-    end
-    else whole
+  let fill =
+    List.init whole (fun _ -> full_cell)
+    @ if part > 0 then [ partial_cell.(part) ] else []
   in
-  for _ = drawn + 1 to cells do
-    Buffer.add_string buf (if valid_share then "░" else " ")
-  done;
-  Buffer.contents buf
+  let track =
+    List.init (max 0 (cells - List.length fill)) (fun _ -> if valid_share then "░" else " ")
+  in
+  (fill, track)
+
+let meter ~cells share =
+  let fill, track = meter_glyphs ~cells share in
+  String.concat "" (fill @ track)
 
 (* ---- the provider's own values ---------------------------------------- *)
 
@@ -181,6 +180,49 @@ let percent_of_fraction value =
     float_of_string (Printf.sprintf "%.*g" percent_digits (value *. float_of_int percent_of_full))
   in
   int_of_float (Float.floor hundredths)
+
+(* How a window's bar fill is coloured (RFC tui-one-screen-grammar section
+   7.3, LAYOUT-LANGUAGE Usage). *)
+type bar_fill =
+  | Limit_fill
+      (** The window refuses model calls when full, a declared limit: each
+          filled cell takes the colour of its place against the limit. *)
+  | Foreground_fill
+      (** The server could not classify the window, so no one confirmed it is
+          a limit: the fill draws in the terminal's text colour, whatever tone
+          its row takes. *)
+  | Row_tone_fill
+      (** The window counts use that refuses no model call: the fill recedes
+          with its row. *)
+
+let bar_fill = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls -> Limit_fill
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> Foreground_fill
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Row_tone_fill
+
+(* The meter in its colours. [around] is the colour the row draws in; the
+   track and whatever follows the fill go back to it. A limit's cells are
+   coloured against the whole percent written beside the bar, floored the same
+   way, so the colour and the figure agree at each band's edge. A fill exists
+   only for a finite share above zero, which is the share the percent is taken
+   of. *)
+let coloured_meter ~cells ~fill:bar ~around share =
+  let fill, track = meter_glyphs ~cells share in
+  let width = max 0 cells in
+  let drawn_fill =
+    match bar, fill with
+    | Limit_fill, [] -> ""
+    | Limit_fill, (_ :: _ as fill) ->
+        let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
+        let value = percent_of_fraction share in
+        Masc_tui_chart.meter_fill_run ~scale ~width ~value
+          ~max_value:percent_of_full ~reset:Masc_tui_theme.Sgr.default_fg fill
+        ^ around
+    | Foreground_fill, fill ->
+        Masc_tui_theme.Sgr.default_fg ^ String.concat "" fill ^ around
+    | Row_tone_fill, fill -> String.concat "" fill
+  in
+  drawn_fill ^ String.concat "" track
 
 let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_fraction value when Float.is_finite value ->
@@ -218,9 +260,8 @@ let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =
 
 (* ---- time --------------------------------------------------------------- *)
 
-(* The screen's one ladder, so a countdown here reads like every other span
-   on the Overview. *)
-let span_text = Masc_tui_message_layout.span_text
+(* A countdown changes while the reader looks, so it reads on the ongoing
+   ladder like every other such span (RFC tui-one-screen-grammar §6.2). *)
 
 (* The screen's clock is the terminal's zone, like every other row clock. A
    time on another day carries its date. *)
@@ -254,8 +295,8 @@ let reset_words ~now = function
   | Some at ->
       { reset_tone = None
       ; reset_full =
-          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (span_text (at -. now))
-      ; reset_short = Printf.sprintf "resets in %s" (span_text (at -. now))
+          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at)
+      ; reset_short = Printf.sprintf "resets in %s" (Masc_tui_value.Ongoing.until ~now at)
       }
 
 (* A clock that moved backwards says nothing rather than a negative age. *)
@@ -337,7 +378,7 @@ let exhausted_tag ~now = function
   | Observed_exhausted (Some at) ->
       Some
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
-           (clock_text ~now at) (span_text (at -. now)))
+           (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at))
 
 (* ---- group the reported and observed evidence --------------------------- *)
 
@@ -614,7 +655,8 @@ let role_tag = function
 
 (* A window that counts something a model call does not need never alarms:
    it being full refuses no model call. A limit the server could not classify
-   is drawn like one that gates, since nothing says it does not. *)
+   alarms like one that gates, since nothing says it does not; its bar still
+   draws as an unconfirmed limit ([bar_fill]). *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
   if not (gates_model_calls window.puw_role) then Some (Theme.recede ())
   else if window_at_limit window then Some (Theme.text_status Masc_tui_theme.Bad)
@@ -644,6 +686,7 @@ type window_line = {
           for. A note that does not fit wraps to its own line. *)
   tone : string option;
   detail_tone : string option;
+  fill : bar_fill;
 }
 
 (* Keep the marker separate from provider text, including on wrapped lines.
@@ -703,6 +746,7 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   ; detail_base = detail_with reset.reset_short []
   ; tone
   ; detail_tone = (match reset.reset_tone with Some _ -> reset.reset_tone | None -> tone)
+  ; fill = bar_fill window.puw_role
   }
 
 type entry_body =
@@ -892,8 +936,12 @@ let layout_for ~show_names ~width entries =
   ; continuation_cells = max 1 (budget - name_cells - 1)
   }
 
-(* One entry's rows, at the columns [layout] settled on. *)
-let draw_entry layout tone entry =
+(* How far the text of an entry named on its own row starts under the name. *)
+let under_name_gap = "  "
+
+(* One entry's rows, at the columns [layout] settled on. With [~named:false]
+   the name column stays blank: the name is drawn above the rows. *)
+let draw_entry ?(named = true) layout tone entry =
   let module Text = Masc_tui_message_layout in
   let name_cell tone name =
     Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells (marked ~attention:entry.de_attention name) ^ Ansi.reset
@@ -920,9 +968,10 @@ let draw_entry layout tone entry =
     let gauge =
       match line.share with
       | Some share ->
-          let tone = Option.value ~default:(Theme.info ()) line.tone in
-          tone ^ meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
-          ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
+          let around = match line.tone with Some tone -> tone | None -> "" in
+          around ^ meter_open
+          ^ coloured_meter ~cells:layout.bar_cells ~fill:line.fill ~around share
+          ^ meter_close ^ " " ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
       | None -> String.make gauge_width ' '
     in
     (* A row with no bar has an empty gauge. When the detail does not fit
@@ -966,17 +1015,34 @@ let draw_entry layout tone entry =
          | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
          | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
   in
+  (* An entry named on the row above that reports a state has no bar to line
+     up with the list: its text and notes start just under the name and take
+     the rest of the row, not the room after an empty name column. *)
+  let under_name =
+    (not named)
+    && (match entry.de_body with
+        | State_text _ | Not_reported -> true
+        | Window_lines _ -> false)
+  in
+  let body_prefix = if under_name then indent ^ under_name_gap else layout.continuation in
+  let body_cells =
+    if under_name then max 1 (layout.width - indent_cells - cells_of under_name_gap)
+    else layout.continuation_cells
+  in
   let note_lines ?tone text =
     List.map
-      (fun wrapped -> layout.continuation ^ style tone wrapped)
-      (Text.wrap_words ~max_cells:layout.continuation_cells text)
+      (fun wrapped -> body_prefix ^ style tone wrapped)
+      (Text.wrap_words ~max_cells:body_cells text)
   in
   let state_rows text =
-    match Text.wrap_words ~max_cells:layout.continuation_cells text with
-    | [] -> [ indent ^ name_cell tone entry.de_name ]
-    | first :: rest ->
-        (indent ^ name_cell tone entry.de_name ^ " " ^ first)
-        :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
+    if not named then
+      List.map (fun wrapped -> body_prefix ^ wrapped) (Text.wrap_words ~max_cells:body_cells text)
+    else
+      match Text.wrap_words ~max_cells:layout.continuation_cells text with
+      | [] -> [ indent ^ name_cell tone entry.de_name ]
+      | first :: rest ->
+          (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+          :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
   in
   let rows =
     match entry.de_body with
@@ -984,7 +1050,7 @@ let draw_entry layout tone entry =
         List.concat
           (List.mapi
              (fun index line ->
-               window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
+               window_row tone ~first:(if index = 0 && named then Some entry.de_name else None) line)
              lines)
     | State_text text -> state_rows text
     | Not_reported -> state_rows not_reported_text
@@ -1111,21 +1177,18 @@ let draw_groups ~show_limit_exhausted ~width groups =
         let tone = section_tone section in
         let draw entry =
           if width < minimum_inline_cells then draw_stacked_entry ~width ~tone entry
-          else
-          let label_overflows =
-            match entry.de_body with
-            | State_text _ | Not_reported -> false
-            | Window_lines lines ->
-                List.exists (fun line -> cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells) lines
-          in
-          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells && not label_overflows then
+          else if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells then
             draw_entry layout tone entry
           else
+            (* A name wider than its column goes on a row of its own, and the
+               windows keep the section's columns, so every bar in the list
+               starts at one place. A label wider than its column already
+               moves to a row of its own inside [draw_entry]. *)
             let heading =
               wrap_marked ~width:(width - 2) ~attention:entry.de_attention entry.de_name
               |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
             in
-            heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
+            heading @ draw_entry ~named:false layout tone entry
         in
         let silent, listed = split_silent section entries in
         group_heading ~width section entries
@@ -1158,7 +1221,12 @@ let rec pairs = function
    empty inside the card: the title already says it. The section's shared
    layout keeps every window row on the same axes. *)
 let account_card ~tone ~layout entry =
-  { Masc_tui_card.title = marked ~attention:entry.de_attention entry.de_name
+  { Masc_tui_card.edge =
+      { Masc_tui_card.name = marked ~attention:entry.de_attention entry.de_name
+      ; key = None
+      ; status = None
+      ; count = None
+      ; focus = Masc_tui_card.Unfocused }
   ; body =
       (fun ~cells ->
         let full_name =
@@ -1173,9 +1241,10 @@ let account_card ~tone ~layout entry =
 (* Each pair of accounts is one row of cards that end on the same line; a lone
    last account leaves its neighbour's place empty rather than stretching
    across the screen. *)
-let draw_card_rows ~width ~tone entries =
+let draw_card_rows ~ko ~width ~tone entries =
   let style =
-    { Masc_tui_card.edge = Theme.recede ()
+    { Masc_tui_card.border = Theme.recede ()
+    ; focused_border = Theme.border_focus ()
     ; title_style = Ansi.bold ^ tone
     ; reset = Ansi.reset
     }
@@ -1195,7 +1264,7 @@ let draw_card_rows ~width ~tone entries =
       | _ :: _ :: _ | [] -> List.map (fun card -> [ card ]) cards
     in
     match
-      Masc_tui_card.grid ~rounded:true ~style ~inner_width ~gap:card_gap
+      Masc_tui_card.grid ~ko ~style ~inner_width ~gap:card_gap
         ~row_gap:card_row_gap ~max_rows:max_int columns
     with
     | Some rows -> List.map (fun line -> indent ^ line) rows
@@ -1203,7 +1272,7 @@ let draw_card_rows ~width ~tone entries =
   in
   separated (List.map row (pairs entries))
 
-let draw_cards ~show_limit_exhausted ~width groups =
+let draw_cards ~ko ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
     | At_limit_or_exhausted when not show_limit_exhausted ->
@@ -1212,7 +1281,7 @@ let draw_cards ~show_limit_exhausted ~width groups =
         let tone = section_tone section in
         let silent, listed = split_silent section entries in
         group_heading ~width section entries
-        @ blocks [ draw_card_rows ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
+        @ blocks [ draw_card_rows ~ko ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1391,9 +1460,9 @@ let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~wid
   section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
     ~providers ~runtimes ~account_emails ~now ~width ~rows
 
-let section_cards ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
+let section_cards ~ko ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   let draw =
-    if cards_fit ~width then draw_cards ~show_limit_exhausted ~width
+    if cards_fit ~width then draw_cards ~ko ~show_limit_exhausted ~width
     else draw_groups ~show_limit_exhausted ~width
   in
   section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width ~rows

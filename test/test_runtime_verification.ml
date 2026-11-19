@@ -1155,8 +1155,10 @@ for line in sys.stdin:
 ;;
 
 (* Every case gets its own fixture and its own captured runtime, prepared
-   before any of them runs. *)
-let claude_refusal_verifications steps_per_case =
+   before any of them runs. With [on_key_file] the provider of each case
+   declares a credential file that holds a made-up key, so its account runs
+   on that key. *)
+let claude_refusal_verifications ?(on_key_file = false) steps_per_case =
   let snapshot = Runtime.For_testing.snapshot () in
   let eio_state = Eio_context.snapshot_state () in
   Fun.protect
@@ -1180,6 +1182,17 @@ let claude_refusal_verifications steps_per_case =
         Out_channel.with_open_bin script (fun out ->
           output_string out (claude_refusal_fixture ~steps));
         Unix.chmod script 0o700;
+        let credentials =
+          if on_key_file
+          then (
+            let key_file = Filename.concat case_dir "key" in
+            Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 key_file
+              (fun out -> output_string out "sk-test-the-key-of-the-fixture");
+            (* The mode of the open is narrowed by the umask of the process. *)
+            Unix.chmod key_file 0o600;
+            Printf.sprintf "[providers.fixture.credentials]\ntype = \"file\"\npath = %S\n" key_file)
+          else ""
+        in
         let runtime_path = Filename.concat case_dir "runtime.toml" in
         Out_channel.with_open_bin runtime_path (fun out ->
           Printf.fprintf out {|
@@ -1188,7 +1201,7 @@ protocol = "claude-code"
 command = %S
 account-home = %S
 is-non-interactive = true
-[models.selected]
+%s[models.selected]
 api-name = "claude-sonnet-5-5"
 max-context = 272000
 tools-support = true
@@ -1196,7 +1209,7 @@ turn-timeout-s = 15.0
 [fixture.selected]
 [runtime]
 default = "fixture.selected"
-|} script account_home);
+|} script account_home credentials);
         (match Runtime.init_default ~config_path:runtime_path with
          | Ok () -> ()
          | Error detail -> fail detail);
@@ -1260,6 +1273,50 @@ let test_claude_verification_names_a_refused_credential () =
          fail (label ^ ": " ^ refusal_summary failure))
     cases
     failures
+;;
+
+type key_account_expectation =
+  | The_key
+  | The_account
+  | The_request
+
+(* On an account that runs on a key of a file, a 401 is the refusal of that
+   key (RFC a-persons-api-key-is-their-own-provider-account 3.5 and 5,
+   "401"): the status decides, as a terminal result or as a retry the client
+   reported. A 403, and a sign-in cause with no status, name no key. The
+   same statuses on an account of a login are the cases of
+   [test_claude_verification_names_a_refused_credential]. *)
+let test_claude_verification_names_a_refused_key () =
+  let cases =
+    [ "a terminal 401 result", "terminal:401", The_key
+    ; "a 401 retry before the deadline", "retry:401", The_key
+    ; "a terminal 403 result", "terminal:403", The_account
+    ; ( "a sign-in cause with no status"
+      , "diagnostic:authentication_failed,terminal:none"
+      , The_account )
+    ; "a terminal 500 result", "terminal:500", The_request
+    ] in
+  let failures =
+    claude_refusal_verifications ~on_key_file:true (List.map (fun (_, steps, _) -> steps) cases) in
+  List.iter2
+    (fun (label, _, expected) failure ->
+       match expected, failure with
+       | The_key, Some (Verify.Key_refused _ as failure) ->
+         check string (label ^ ": the code") "key_refused" (Verify.failure_code failure)
+       | The_account, Some (Verify.Provider_auth_refused _) -> ()
+       | The_request, Some (Verify.Provider_rejected _) -> ()
+       | (The_key | The_account | The_request), _ ->
+         fail (label ^ ": " ^ refusal_summary failure))
+    cases
+    failures;
+  (* The code survives the report the server reads back from the command
+     that verifies ([verify_as_command]). *)
+  let result = measure (fun _ ~prompt:_ -> Error (Verify.Key_refused "HTTP 401: refused")) in
+  (match Verify.of_json (Verify.to_json result) with
+   | Ok (Verify.Measured { Verify.failure = Some (Verify.Key_refused detail); _ }) ->
+     check string "the report reads back with its detail" "HTTP 401: refused" detail
+   | Ok _ | Error _ -> fail "the refusal of a key did not read back as one");
+  check int "a refused key is a failed call" 1 (Verify.exit_code result)
 ;;
 
 (* Only a window whose last event is rejected is a spent quota, named with
@@ -1807,6 +1864,8 @@ let () =
             test_official_probes_preserve_selected_effort
         ; test_case "a refused Claude Code credential is named, not timed out" `Quick
             test_claude_verification_names_a_refused_credential
+        ; test_case "a 401 on a Claude Code account that runs on a key file is the key's refusal"
+            `Quick test_claude_verification_names_a_refused_key
         ; test_case "a spent Claude Code window is a quota, a 429 alone a throttle" `Quick
             test_claude_verification_tells_a_spent_window_from_a_throttle
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target

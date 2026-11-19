@@ -166,21 +166,91 @@ let gauge ~width ~value ~max_value ?label () =
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
 ;;
 
-let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
+type meter_scale =
+  | Declared_limit of Masc_tui_theme.paint
+  | Series of { paint : Masc_tui_theme.paint; series : Masc_tui_theme.series }
+  | Anomaly of { paint : Masc_tui_theme.paint; alarm : alarm }
+
+and alarm =
+  | Alarm_warn
+  | Alarm_bad
+
+let alarm_status = function
+  | Alarm_warn -> Masc_tui_theme.Warn
+  | Alarm_bad -> Masc_tui_theme.Bad
+
+(* How far along the bar a filled cell reaches: its far edge, unless the value
+   stops short of it, so the last cell takes the colour of the value it draws
+   and never one past it. *)
+let cell_reach ~index ~width ~value ~max_value =
+  let width = Stdlib.max 1 width in
+  let max_value = Stdlib.max 1 max_value in
+  let value = Stdlib.max 0 (Stdlib.min max_value value) in
+  Float.min
+    (float_of_int (Stdlib.min width (index + 1)) /. float_of_int width)
+    (float_of_int value /. float_of_int max_value)
+;;
+
+let meter_cell_style scale ~index ~width ~value ~max_value =
+  match scale with
+  | Declared_limit paint ->
+    Masc_tui_theme.meter_cell_readable paint
+      (Masc_tui_theme.limit_cell_colour ~depth:paint.Masc_tui_theme.depth ~index
+         ~width ~value ~limit:max_value)
+  | Series { paint; series } ->
+    Masc_tui_theme.ramp_style paint series
+      ~position:(cell_reach ~index ~width ~value ~max_value)
+  | Anomaly { paint; alarm } -> (
+    match paint.Masc_tui_theme.depth with
+    | Masc_tui_theme.No_color -> ""
+    | Masc_tui_theme.Colors_16 | Masc_tui_theme.Colors_256 | Masc_tui_theme.Truecolor ->
+      Masc_tui_theme.status_readable ~surface:paint.Masc_tui_theme.surface
+        paint.Masc_tui_theme.palette (alarm_status alarm))
+;;
+
+(* [meter_cell_style] for every cell of one bar, with a series ramp's table
+   found once for the whole bar. *)
+let meter_cell_styler scale ~width ~value ~max_value =
+  match scale with
+  | Series { paint; series } ->
+    let read = Masc_tui_theme.ramp_reader paint series in
+    fun ~index -> read ~position:(cell_reach ~index ~width ~value ~max_value)
+  | Declared_limit _ | Anomaly _ ->
+    fun ~index -> meter_cell_style scale ~index ~width ~value ~max_value
+;;
+
+(* Neighbouring cells of a ramp often round to the same colour; the code goes
+   out only where it changes, and one reset closes the run. *)
+let styled_run ~reset styled =
+  let buffer = Buffer.create 64 in
+  let last =
+    List.fold_left
+      (fun last (style, glyph) ->
+        if not (String.equal style last) then
+          (* An empty style is the foreground, which only a reset gives back. *)
+          Buffer.add_string buffer (if String.equal style "" then reset else style);
+        Buffer.add_string buffer glyph;
+        style)
+      "" styled
+  in
+  if not (String.equal last "") then Buffer.add_string buffer reset;
+  Buffer.contents buffer
+;;
+
+let meter_fill_run ~scale ~width ~value ~max_value ~reset glyphs =
+  let style = meter_cell_styler scale ~width ~value ~max_value in
+  styled_run ~reset (List.mapi (fun index glyph -> (style ~index, glyph)) glyphs)
+;;
+
+let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
     let filled = bar_filled_cells ~width ~value ~max_value in
     let unfilled = Stdlib.max 0 (width - filled) in
     let filled_part =
-      if filled <= 0 then ""
-      else
-        match cell_style with
-        | None -> repeat meter_fill filled
-        | Some style_at ->
-          String.concat ""
-            (List.init filled (fun index -> style_at ~index ~width ^ meter_fill))
-          ^ reset
+      meter_fill_run ~scale ~width ~value ~max_value ~reset
+        (List.init (Stdlib.max 0 filled) (fun _ -> meter_fill))
     in
     let track_part =
       if unfilled <= 0 then ""
@@ -190,7 +260,7 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
     filled_part ^ track_part
 ;;
 
-let meter ~width ~value ~max_value ?label ?suffix ?cell_style
+let meter ~width ~value ~max_value ~scale ?label ?suffix
     ?(track_style = "") ?(suffix_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -232,7 +302,7 @@ let meter ~width ~value ~max_value ?label ?suffix ?cell_style
     if width >= chrome_cells + 3 then
       let bar_width = width - chrome_cells in
       prefix
-      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ?cell_style
+      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ~scale
           ~track_style ~reset ()
       ^ styled_suffix
     else
@@ -306,80 +376,4 @@ let distribution_bars ~width items =
             count_width count
             pct)
       items shares
-;;
-
-let braille_cell ~mask =
-  let m = mask land 0xff in
-  let b1 = Char.chr 0xe2 in
-  let b2 = Char.chr (0xa0 lor ((m lsr 6) land 0x03)) in
-  let b3 = Char.chr (0x80 lor (m land 0x3f)) in
-  let s = Bytes.create 3 in
-  Bytes.set s 0 b1;
-  Bytes.set s 1 b2;
-  Bytes.set s 2 b3;
-  Bytes.to_string s
-;;
-
-(* Bottom-up 0..4 dot subcolumns in the Unicode Braille block:
-   left column uses dots 7, 3, 2, 1; right column uses dots 8, 6, 5, 4. *)
-let braille_left_dots = [| 0x00; 0x40; 0x44; 0x46; 0x47 |]
-let braille_right_dots = [| 0x00; 0x80; 0xa0; 0xb0; 0xb8 |]
-let braille_top = 4
-
-let braille_levels ?min ?max values =
-  match values with
-  | [] -> []
-  | first :: rest ->
-    let v_min =
-      match min with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.min first rest
-    in
-    let v_max =
-      match max with
-      | Some m -> m
-      | None -> List.fold_left Stdlib.max first rest
-    in
-    let lower = Z.of_int v_min in
-    let range = Z.sub (Z.of_int v_max) lower in
-    List.map
-      (fun v ->
-        if Z.sign range <= 0 then
-          if v_min <= 0 then 0 else braille_top / 2
-        else
-          let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-          let offset = Z.sub (Z.of_int clamped_v) lower in
-          let scaled =
-            Z.to_int (Z.div (Z.mul offset (Z.of_int braille_top)) range)
-          in
-          if v_min = 0 && clamped_v > 0 then Stdlib.max 1 scaled else scaled)
-      values
-;;
-
-let clamp_braille_level level = Stdlib.max 0 (Stdlib.min braille_top level)
-
-let braille_pair ~left ~right =
-  let l = clamp_braille_level left and r = clamp_braille_level right in
-  braille_cell ~mask:(braille_left_dots.(l) lor braille_right_dots.(r))
-;;
-
-let braille_bar_mark ~level = braille_pair ~left:level ~right:level
-
-let braille_sparkline ?min ?max values =
-  match braille_levels ?min ?max values with
-  | [] -> ""
-  | levels ->
-    let aligned =
-      if List.length levels mod 2 = 1 then 0 :: levels else levels
-    in
-    let buf = Buffer.create ((List.length aligned / 2) * 3) in
-    let rec emit = function
-      | left :: right :: rest ->
-        Buffer.add_string buf (braille_pair ~left ~right);
-        emit rest
-      | [ only ] -> Buffer.add_string buf (braille_pair ~left:0 ~right:only)
-      | [] -> ()
-    in
-    emit aligned;
-    Buffer.contents buf
 ;;

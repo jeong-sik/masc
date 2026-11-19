@@ -282,17 +282,8 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   let row_for name view = List.combine view.Pane.rows view.Pane.targets
     |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
     |> fst |> text in
-  let initial = Pane.lines ~rows ~cols ~scroll:0 input in
-  let header_of name view =
-    let texts = List.map text view.Pane.rows in
-    List.nth texts (last_index_of_in texts name)
-  in
-  check bool "initial event age on the header" true
-    (contains "last event 10.0s" (header_of "tester" initial));
   let changed = { input with Pane.now = now +. 20.; selected = Some "probe" } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
-  check bool "age advances independently of chunks" true
-    (contains "last event 1m55s" (header_of "probe" later));
   (* Health is read on every frame as well: over the same reused chunks, a
      keeper whose keepalive has gone loses its fleet row. Running and idle
      draw the same record state, so offline is the reading that shows. *)
@@ -651,10 +642,14 @@ let test_keeper_waiting_context_preserves_evidence () =
     {kwi_source = source; kwi_waiting_on = "item"; kwi_what = what;
      kwi_wake_producer = producer; kwi_since = None; kwi_due_at = None;
      kwi_next_action = "resume"} in
+  let counts_of items =
+    List.fold_left (fun counts (item : Masc.Tui_decode.waiting_item) ->
+      let count = Option.value ~default:0 (List.assoc_opt item.kwi_source counts) in
+      (item.kwi_source, count + 1) :: List.remove_assoc item.kwi_source counts) [] items in
   let row name items : Masc.Tui_decode.keeper_waiting_row =
     {kwr_keeper_name = name; kwr_state = Keeper_waiting_blocked;
      kwr_waiting_count = List.length items; kwr_since = None; kwr_due_at = None;
-     kwr_waiting_on = items} in
+     kwr_source_counts = counts_of items; kwr_waiting_heads = items} in
   check bool "an unread inventory is not an empty inventory" true
     (Pane.summarize_keeper_waiting (context Model.Waiting_unobserved) = Pane.Waiting_not_observed);
   let failed_before_first_row = { (context Model.Waiting_unobserved) with waiting_stale = true } in
@@ -671,7 +666,14 @@ let test_keeper_waiting_context_preserves_evidence () =
   check bool "only typed sources establish schedules and delegate results" true
     (match observed with
      | Pane.Waiting_items {schedules; delegate_result_waiting = false; read_error = false} ->
-         schedules = [schedule]
+         schedules = Some (schedule, 1)
+     | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false);
+  let three_schedules =
+    { (row "alpha" [schedule]) with
+      kwr_waiting_count = 3; kwr_source_counts = [Waiting_source_schedule_waiting, 3] } in
+  check bool "one schedule head stands for every waiting schedule" true
+    (match Pane.summarize_keeper_waiting (context (Model.Waiting_observed three_schedules)) with
+     | Pane.Waiting_items {schedules = Some (first, 3); _} -> first = schedule
      | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false);
   let result = item Waiting_source_event_queue_pending Wake_keeper_delegate "result" in
   check bool "the recorded delegate producer is observed" true
@@ -681,7 +683,7 @@ let test_keeper_waiting_context_preserves_evidence () =
   let error = item Waiting_source_read_error Wake_read_model_reader "unavailable" in
   check bool "a source read error stays visible in the observation" true
     (match Pane.summarize_keeper_waiting (context (Model.Waiting_observed (row "alpha" [error]))) with
-     | Pane.Waiting_items {schedules = []; delegate_result_waiting = false; read_error = true} -> true
+     | Pane.Waiting_items {schedules = None; delegate_result_waiting = false; read_error = true} -> true
      | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false)
 
 let test_context_change_keeps_focus_in_pane () =

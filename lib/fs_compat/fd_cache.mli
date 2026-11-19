@@ -9,9 +9,12 @@
     The cache holds a descriptor and not an [out_channel]: a channel
     keeps the bytes of a failed write in its buffer and writes them
     with the next append or when it is closed. The
-    cache is bounded by [max_entries=32] with last-used eviction so
-    fd count stays bounded regardless of how many paths the process
-    appends to. A [Stdlib.at_exit] hook closes every cached writer
+    cache holds at most [max_entries=32] writers, closing the least
+    recently used one that is not lent, so the fd count stays bounded
+    regardless of how many paths the process appends to. Writers that
+    are lent are never closed, so more than 32 are held while more than
+    32 paths are appended to at once, and the cache comes back to 32 as
+    they are returned. A [Stdlib.at_exit] hook closes every cached writer
     on process exit; production code relies on process-lifetime
     persistence between exits.
 
@@ -26,12 +29,18 @@
     every request. Before reuse, the open descriptor must still identify the
     file at [path]; a removed/replaced path opens a fresh writer. This detects
     changes between leases, not a concurrent external rename during [f].
-    Evicts the least-recently-used inactive writer when
-    the bound is exceeded. Active writers are leased until [f] returns,
+    Active writers are leased until [f] returns,
     so LRU eviction cannot close a descriptor while a caller is
     still writing to it. A path that has no cached writer is opened
     outside the cache's own lock, so an open that waits (a FIFO without
-    a reader) holds up no other path.
+    a reader) holds up no other path. When the cache is full, the least
+    recently used inactive writer is closed before that open, so a
+    process at its descriptor limit can still open the new path; if the
+    open then fails, the closed writer is opened again by its next
+    append. An open in flight counts as one of the 32, so an open that
+    waits takes one place from the cache for as long as it waits. The
+    check that a cached descriptor still identifies the file (two [stat]
+    calls) runs inside the lock.
     @raise Sys_error when the path cannot be examined or opened. The
     message starts with [path] as it was given. *)
 val with_writer : string -> (Fd_append_whole.target -> 'a) -> 'a

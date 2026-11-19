@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>()
@@ -41,10 +41,14 @@ import {
   refreshBoardHearths,
   loadPostDetail,
   submitComment,
-  commentText,
+  detailReadPhase,
+  commentDraft,
+  setCommentText,
+  setReplyingTo,
   loadOlderPostComments,
   detailPost,
   detailPostId,
+  detailFocusedCommentId,
   detailLoading,
   detailComments,
   detailCommentPage,
@@ -81,9 +85,28 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
   }
 }
 
+// Comment drafts outlive a test, so each one written here is emptied after it.
+const draftedPosts = new Set<string>()
+
+function typeOn(postId: string, text: string): void {
+  draftedPosts.add(postId)
+  setCommentText(postId, text)
+}
+
+function replyOn(postId: string, commentId: string): void {
+  draftedPosts.add(postId)
+  setReplyingTo(postId, commentId)
+}
+
+afterEach(() => {
+  for (const postId of draftedPosts) setReplyingTo(postId, null)
+  draftedPosts.clear()
+})
+
 beforeEach(() => {
   detailPostId.value = null
   detailPost.value = null
+  detailFocusedCommentId.value = null
   detailLoading.value = false
   detailComments.value = []
   detailCommentPage.value = { offset: 0, total: 0 }
@@ -573,23 +596,170 @@ describe('loadPostDetail', () => {
     expect(detailComments.value.map(row => row.id)).toEqual(['focused-root', 'middle', 'latest'])
   })
 
-  it('refuses mixed revisions while refreshing a retained range', async () => {
-    detailPostId.value = 'p1'
-    detailPost.value = makePost()
-    detailCommentPage.value = { offset: 0, total: 22, revision: 'old' }
-    vi.mocked(fetchBoardPost)
-      .mockResolvedValueOnce({ ...makePost(), comments: [{ id: 'latest' }],
-        commentPage: { offset: 2, total: 22, revision: 'new' } } as any)
-      .mockResolvedValueOnce({ ...makePost(), comments: [{ id: 'different' }],
-        commentPage: { offset: 0, total: 22, revision: 'changed-again' } } as any)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
+  describe('a refresh of a thread whose older comments are loaded', () => {
+    // #52959: every read succeeds, but an older page answers from a thread
+    // that gained or lost a comment after the newest page was read.
+    const comment = (id: string): BoardComment => ({ id, post_id: 'p1', author: 'keeper',
+      content: id, created_at: '2026-09-30T00:00:00Z' })
+    const answer = (ids: readonly string[], commentPage: { offset: number; total: number; revision: string }) =>
+      ({ ...makePost(), comments: ids.map(comment), commentPage })
+    const threadLoadedFrom = (offset: number, total: number) => {
+      detailPostId.value = 'p1'
+      detailPost.value = makePost()
+      detailCommentPage.value = { offset, total, revision: 'before' }
+    }
+    const shownIds = () => detailComments.value.map(row => row.id)
+
+    it('keeps the newest page when the first older page answers from a changed thread', async () => {
+      threadLoadedFrom(0, 22)
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['latest'], { offset: 2, total: 22, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['read-under-second'], { offset: 0, total: 23, revision: 'second' }))
+
       await loadPostDetail('p1')
-      expect(detailPost.value).toBeNull()
-      expect(detailComments.value).toEqual([])
-      expect(showToast).toHaveBeenCalled()
-      expect(fetchBoardPost).toHaveBeenCalledTimes(2)
-    } finally { warn.mockRestore() }
+
+      // One refresh reads each page of the range once, however the thread moves.
+      expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([['p1'], ['p1', 0, 2]])
+      expect(detailPost.value).not.toBeNull()
+      expect(detailReadPhase.value).toBe('loaded')
+      expect(detailLoading.value).toBe(false)
+      expect(shownIds()).toEqual(['latest'])
+      expect(detailCommentPage.value).toEqual({ offset: 2, total: 22, revision: 'first' })
+      expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'error')
+    })
+
+    it('keeps the pages it joined before the thread changed', async () => {
+      threadLoadedFrom(0, 42)
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['latest'], { offset: 22, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['middle'], { offset: 2, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['read-under-second'], { offset: 0, total: 43, revision: 'second' }))
+
+      await loadPostDetail('p1')
+
+      expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([['p1'], ['p1', 2, 20], ['p1', 0, 2]])
+      expect(shownIds()).toEqual(['middle', 'latest'])
+      expect(detailCommentPage.value).toEqual({ offset: 2, total: 42, revision: 'first' })
+      expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'error')
+    })
+
+    it('keeps the newest page when an older page cannot be read', async () => {
+      threadLoadedFrom(0, 22)
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['latest'], { offset: 2, total: 22, revision: 'first' }))
+        .mockRejectedValueOnce(new Error('fixture older page unavailable'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await loadPostDetail('p1')
+
+        expect(detailPost.value).not.toBeNull()
+        expect(detailReadPhase.value).toBe('loaded')
+        expect(shownIds()).toEqual(['latest'])
+        expect(detailCommentPage.value).toEqual({ offset: 2, total: 22, revision: 'first' })
+        expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'error')
+      } finally { warn.mockRestore() }
+    })
+
+    it('restores the whole range when no page answers from another snapshot', async () => {
+      threadLoadedFrom(0, 42)
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['latest'], { offset: 22, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['middle'], { offset: 2, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['oldest'], { offset: 0, total: 42, revision: 'first' }))
+
+      await loadPostDetail('p1')
+
+      expect(shownIds()).toEqual(['oldest', 'middle', 'latest'])
+      expect(detailCommentPage.value).toEqual({ offset: 0, total: 42, revision: 'first' })
+      expect(showToast).not.toHaveBeenCalled()
+    })
+
+    it('says nothing about an older page that fails after the operator opened another post', async () => {
+      threadLoadedFrom(0, 22)
+      let failOlderRead = (): void => {}
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['latest'], { offset: 2, total: 22, revision: 'first' }))
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => {
+          failOlderRead = () => reject(new Error('fixture older page unavailable'))
+        }))
+        .mockResolvedValueOnce({ ...makePost({ id: 'p2' }), comments: [{ ...comment('of-p2'), post_id: 'p2' }],
+          commentPage: { offset: 0, total: 1, revision: 'p2' } })
+
+      const refresh = loadPostDetail('p1')
+      await vi.waitFor(() => expect(fetchBoardPost).toHaveBeenCalledTimes(2))
+      await loadPostDetail('p2', null)
+      failOlderRead()
+      await refresh
+
+      expect(detailPost.value?.id).toBe('p2')
+      expect(shownIds()).toEqual(['of-p2'])
+      expect(detailLoading.value).toBe(false)
+      expect(showToast).not.toHaveBeenCalled()
+    })
+
+    it('does not read a page again for a focused reply once the restore has stopped', async () => {
+      // The focused reply's parent is on the page the restore could not join.
+      threadLoadedFrom(0, 22)
+      detailFocusedCommentId.value = 'reply'
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce({ ...makePost(), comments: [{ ...comment('reply'), parent_id: 'root' }],
+          commentPage: { offset: 2, total: 22, revision: 'first' } })
+        .mockResolvedValue(answer(['read-under-second'], { offset: 0, total: 23, revision: 'second' }))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        await loadPostDetail('p1')
+
+        expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([
+          ['p1', undefined, undefined, 'reply'],
+          ['p1', 0, 2],
+        ])
+        expect(shownIds()).toEqual(['reply'])
+        expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'error')
+      } finally { warn.mockRestore() }
+    })
+
+    it('restores the same range when a second refresh starts before the first one ends', async () => {
+      // A comment is submitted and, before its refresh answers, the post is voted on.
+      threadLoadedFrom(0, 42)
+      let answerFirstRefresh = (): void => {}
+      vi.mocked(fetchBoardPost)
+        .mockImplementationOnce(() => new Promise(resolve => {
+          answerFirstRefresh = () => resolve(answer(['latest'], { offset: 22, total: 42, revision: 'first' }))
+        }))
+        .mockResolvedValueOnce(answer(['latest'], { offset: 22, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['middle'], { offset: 2, total: 42, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['oldest'], { offset: 0, total: 42, revision: 'first' }))
+
+      const first = loadPostDetail('p1')
+      await vi.waitFor(() => expect(fetchBoardPost).toHaveBeenCalledTimes(1))
+      await loadPostDetail('p1')
+      answerFirstRefresh()
+      await first
+
+      expect(shownIds()).toEqual(['oldest', 'middle', 'latest'])
+      expect(detailCommentPage.value).toEqual({ offset: 0, total: 42, revision: 'first' })
+      expect(detailLoading.value).toBe(false)
+      expect(showToast).not.toHaveBeenCalled()
+    })
+
+    it('rebuilds a "load older" range once and stops when the thread changes again', async () => {
+      detailPostId.value = 'p1'
+      detailPost.value = makePost()
+      detailComments.value = [comment('retained')]
+      detailCommentPage.value = { offset: 20, total: 21, revision: 'before' }
+      vi.mocked(fetchBoardPost)
+        .mockResolvedValueOnce(answer(['earlier'], { offset: 0, total: 22, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['retained', 'appended'], { offset: 2, total: 22, revision: 'first' }))
+        .mockResolvedValueOnce(answer(['read-under-second'], { offset: 0, total: 23, revision: 'second' }))
+
+      await loadOlderPostComments('p1')
+
+      expect(fetchBoardPost).toHaveBeenCalledTimes(3)
+      expect(detailPost.value).not.toBeNull()
+      expect(shownIds()).toEqual(['retained', 'appended'])
+      expect(detailCommentPage.value).toEqual({ offset: 2, total: 22, revision: 'first' })
+      expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'error')
+    })
   })
 
   it('loads a focused reply ancestor chain across two older pages', async () => {
@@ -766,13 +936,77 @@ describe('loadPostDetail', () => {
       comments: [comment('root', null), comment('older-parent', 'root'), comment('new-reply', 'older-parent')],
       commentPage: { offset: 40, total: 45, revision: 'after-reply' },
     })
-    commentText.value = 'Reply to the older page'
+    detailPostId.value = 'p1'
+    typeOn('p1', 'Reply to the older page')
     await submitComment('p1', 'older-parent')
     expect(commentPost).toHaveBeenCalledWith('p1', expect.any(String), 'Reply to the older page', 'older-parent')
     expect(fetchBoardPost).toHaveBeenCalledExactlyOnceWith('p1', undefined, undefined, 'older-parent')
     expect(detailComments.value.map(comment => [comment.id, comment.parent_id])).toEqual([
       ['root', null], ['older-parent', 'root'], ['new-reply', 'older-parent'],
     ])
+  })
+
+  it('keeps the open thread when a comment on another post finishes late', async () => {
+    // #52951: the operator submits on A, opens B, and only then A's request ends.
+    const threadOf = (id: string): BoardComment => ({ id: `comment-of-${id}`, post_id: id,
+      author: 'keeper', content: id, created_at: '2026-09-30T00:00:00Z' })
+    vi.mocked(fetchBoardPost).mockImplementation(async id => ({
+      ...makePost({ id }), comments: [threadOf(id)], commentPage: { offset: 0, total: 1 },
+    }))
+    let finishSubmit = (): void => {}
+    vi.mocked(commentPost).mockImplementation(() => new Promise(resolve => {
+      finishSubmit = () => resolve({})
+    }))
+    await loadPostDetail('post-a', null)
+    typeOn('post-a', 'written on A')
+    const submitted = submitComment('post-a')
+    await loadPostDetail('post-b', null)
+    finishSubmit()
+    await submitted
+    expect(commentPost).toHaveBeenCalledWith('post-a', expect.any(String), 'written on A', undefined)
+    expect(detailPostId.value).toBe('post-b')
+    expect(detailPost.value?.id).toBe('post-b')
+    expect(detailComments.value.map(row => row.id)).toEqual(['comment-of-post-b'])
+  })
+
+  it('keeps a draft with the post it was typed on', async () => {
+    // #52955: text typed on A was what B's form showed and sent.
+    vi.mocked(commentPost).mockResolvedValue({})
+    typeOn('draft-a', 'draft composed for A')
+    replyOn('reply-a', 'comment-of-a')
+    expect(commentDraft('draft-b')).toEqual({ text: '', replyingTo: null, submitting: false })
+    await submitComment('draft-b')
+    expect(commentPost).not.toHaveBeenCalled()
+    expect(commentDraft('draft-a').text).toBe('draft composed for A')
+    expect(commentDraft('reply-a').replyingTo).toBe('comment-of-a')
+  })
+
+  it('a submit in flight on one post leaves another post free to type', async () => {
+    let finishSubmit = (): void => {}
+    vi.mocked(commentPost).mockImplementation(() => new Promise(resolve => {
+      finishSubmit = () => resolve({})
+    }))
+    typeOn('flight-a', 'sent on A')
+    const submitted = submitComment('flight-a')
+    expect(commentDraft('flight-a').submitting).toBe(true)
+    expect(commentDraft('flight-b').submitting).toBe(false)
+    typeOn('flight-b', 'typed on B while A is in flight')
+    finishSubmit()
+    await submitted
+    expect(commentDraft('flight-a')).toEqual({ text: '', replyingTo: null, submitting: false })
+    expect(commentDraft('flight-b').text).toBe('typed on B while A is in flight')
+  })
+
+  it('keeps the text when the submit fails', async () => {
+    vi.mocked(commentPost).mockRejectedValue(new Error('fixture comment refused'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      typeOn('failed-a', 'not stored yet')
+      await submitComment('failed-a')
+      expect(commentDraft('failed-a')).toEqual({ text: 'not stored yet', replyingTo: null, submitting: false })
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('leaves detailPost.closed undefined for an open post', async () => {

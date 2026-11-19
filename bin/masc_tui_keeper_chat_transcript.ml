@@ -909,7 +909,12 @@ let model_phase_text ~ko ~show_timing ~now t =
   let answering = say "답변 중" "STREAMING · answering" in
   let reasoning = say "생각 중" "THINKING · reasoning" in
   let observed ~since word =
-    if not show_timing || now -. since < quiet_after_s then Some word
+    (* The clause appears once the model has been quiet for [quiet_after_s],
+       with no new data, so a frame drawn before then notes that instant
+       (RFC tui-one-screen-grammar §8). *)
+    if not show_timing
+       || Masc_tui_value.Redraw.holds ~now ~until:(since +. quiet_after_s)
+    then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word

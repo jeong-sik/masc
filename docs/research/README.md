@@ -15,6 +15,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | — | [표와 차트를 편집하는 문서 왕복](artifact-office-roundtrip.md) |
 | — | [표 너비와 편집 반복 비용 조사](artifact-office-fidelity.md) |
 | — | [기존 HWP의 표와 차트 데이터를 가져온다](artifact-hwp-import.md) |
+| 2026-11-19 | [btop 계열 TUI 여섯의 화면 문법과 MASC 경사 색 제안](2026-11-19-tui-genre-visual-grammar.md) |
 | 2026-11-18 | [btop 의 화면 문법과 쉬는 TUI 가 쓰는 비용](2026-11-18-tui-btop-visual-grammar-and-idle-cost.md) |
 | 2026-11-18 | [Keeper 가 돌고 있는 설치에 사람을 들이려면 — 두 서버의 차이와 설계가 비워 둔 곳](2026-11-18-people-into-a-running-installation.md) |
 | 2026-11-17 | [서버가 읽는 파일 전수 검사 — 무엇을, 누가 부를 때, 어느 domain 에서 읽나](2026-11-17-read-path-inventory.md) |

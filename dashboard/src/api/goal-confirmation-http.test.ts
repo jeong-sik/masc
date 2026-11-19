@@ -3,11 +3,12 @@ import { confirmationBinding, readGoalConfirmation, submitGoalConfirmation } fro
 import { clearStoredToken, get, setRejectedCredentialListener, setStoredToken } from './core'
 import { captureArtifactWorkspace } from './published-artifacts'
 import { fetchDashboardGoalsTree } from './dashboard-goals'
+import { goalCriterion } from './fixtures/goal-criterion'
 
 const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
 const epoch = 'epoch-a'
 const instance = '018f83d7-93a4-7f5d-9a72-123456789abc'
-const criterion = { revision: 'revision-1', title: 'Goal', metric: 'cases', target_value: '10' }
+const criterion = goalCriterion({ revision: 'revision-1', title: 'Goal', measure: { kind: 'count', noun: 'cases', total: 10 } })
 const proof = { inspection_operator_id: 'operator-a',
   goal: { id: 'goal-1', phase: 'awaiting_confirmation', criterion_revision: criterion.revision, ...criterion },
   verification: { goal_id: 'goal-1', updated_at: '2026-11-01T00:00:00Z', completion: { state: 'proof_proven',

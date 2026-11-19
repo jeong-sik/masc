@@ -137,6 +137,7 @@ type refusal =
   | Home_unresolved of string
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
+  | Not_the_account_key of Authz_types.Provider_account_id.t
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable
@@ -174,6 +175,10 @@ let refusal_to_string = function
   | Not_the_account_home provider_account_id ->
     Printf.sprintf
       "the account was captured from another home than the one of %s"
+      (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Not_the_account_key provider_account_id ->
+    Printf.sprintf
+      "the account was not captured on the key the log gives %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
   | Account_unavailable { provider_account_id; reason } ->
     Printf.sprintf
@@ -224,78 +229,132 @@ let layout_client (type client) (client : client Runtime_official_account.client
 ;;
 
 (* What a start claims, whichever client it is for: the client whose login
-   keeps the home, and the home when a declaration chose it. [None] is a home
-   the environment of the process chose. *)
+   keeps the home, the home when a declaration chose it, and the file its API
+   key was read from. [None] of the home is a home the environment of the
+   process chose. [None] of the file is an account that carries no key of a
+   file. *)
 type claim =
   { client : Layout.client
   ; declared_home : string option
+  ; key_file : string option
   }
 
-(* The home of [provider_account_id] under the namespace of [user_id] is the
-   one home a CLI for that person starts on. *)
-let own_home ~base_path (state : Authz_state.t) user_id provider_account_id claim =
+(* The runtime root of the namespace the admission of [user_id] fixed. *)
+let person_root ~base_path (state : Authz_state.t) user_id =
   match Ps.find_membership state.Authz_state.principals user_id with
   | None -> Error (No_membership user_id)
   | Some membership ->
-    let runtime_root =
-      Layout.person_runtime_root ~base_path ~namespace:membership.Ps.account_home_namespace
-    in
-    (match
-       Layout.home
-         ~runtime_root
-         claim.client
-         ~account_id:(Authz_types.Provider_account_id.to_string provider_account_id)
-     with
-     | Error detail -> Error (Home_unresolved detail)
-     | Ok expected ->
-       (match claim.declared_home with
-        | None -> Error Not_a_declared_home
-        | Some home ->
-          if String.equal expected home
-          then Ok ()
-          else Error (Not_the_account_home provider_account_id)))
+    Ok (Layout.person_runtime_root ~base_path ~namespace:membership.Ps.account_home_namespace)
+;;
+
+(* The home of [provider_account_id] under the runtime root of the person is
+   the one home a CLI for that person starts on. *)
+let own_home ~runtime_root provider_account_id claim =
+  match
+    Layout.home
+      ~runtime_root
+      claim.client
+      ~account_id:(Authz_types.Provider_account_id.to_string provider_account_id)
+  with
+  | Error detail -> Error (Home_unresolved detail)
+  | Ok expected ->
+    (match claim.declared_home with
+     | None -> Error Not_a_declared_home
+     | Some home ->
+       if String.equal expected home
+       then Ok ()
+       else Error (Not_the_account_home provider_account_id))
+;;
+
+(* HIGH-RISK-UNREVIEWED: the key a child is handed is the one the log gives
+   the account, and no other. A key account carries the key of the file of
+   the generation its records say, spelled under the runtime root of the
+   person the request is for, so no request reaches a file of another
+   person. An account that is not a key account, a login account or one no
+   record links yet, carries no key of a file. The runtime root is the one
+   [own_home] spelled the home from. The layout resolves it once more for
+   the file, so a root that changed between the two is refused as a home
+   that could not be spelled. The file is compared by its spelling: what the
+   name leads to is read by [Runtime_api_key_file.read], which takes a
+   private regular file of this user and refuses a link in its place. A link
+   in the place of one of its folders is followed: only a writer with the
+   uid of the server makes one. *)
+let own_key ~runtime_root (state : Authz_state.t) provider_account_id claim =
+  let expected =
+    match Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id with
+    | None | Some { Authz_provider_account_state.kind = Authz_provider_account_state.Login; owner = _ }
+      -> Ok None
+    | Some
+        { Authz_provider_account_state.kind =
+            Authz_provider_account_state.Key { integration_id = _; generation }
+        ; owner = _
+        } ->
+      Layout.key_file ~runtime_root ~account_id:provider_account_id ~generation
+      |> Result.map Option.some
+  in
+  match expected with
+  | Error detail -> Error (Home_unresolved detail)
+  | Ok expected ->
+    if Option.equal String.equal expected claim.key_file
+    then Ok ()
+    else Error (Not_the_account_key provider_account_id)
 ;;
 
 (* One request is judged on one snapshot, and only on one the zone could be
-   trusted for: the person, the turn and the home are read in the same state. *)
+   trusted for. *)
+let on_trusted zone judge =
+  match Authz_zone.read zone with
+  | Error uncertain -> Error (Zone_uncertain uncertain)
+  | Ok trusted -> judge trusted (trusted :> Authz_zone.snapshot).Authz_zone.state
+;;
+
+(* The turn the log gives a request of a person's Keeper. It reads nothing
+   of the account the request was captured on. *)
+let decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now =
+  match Authz_keeper_turn.decide trusted ~owner ~keeper_id ~channel ~pat ~now:(now ()) with
+  | Error refusal -> Error (Turn_refused refusal)
+  | Ok turn ->
+    if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
+    then Ok turn
+    else
+      Error
+        (Not_the_assigned_runtime
+           { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })
+;;
+
+(* The person, the turn and the home are read in the same state. *)
 let multi_account ~zone ~base_path ~now request claim =
-  let on_trusted judge =
-    match Authz_zone.read zone with
-    | Error uncertain -> Error (Zone_uncertain uncertain)
-    | Ok trusted -> judge trusted (trusted :> Authz_zone.snapshot).Authz_zone.state
-  in
+  let on_trusted judge = on_trusted zone judge in
   match request with
   | Operator_call -> Error No_operator
   | Own_account { user_id; provider_account_id } ->
     on_trusted (fun (_ : Authz_zone.trusted) state ->
       match Ps.find state.Authz_state.principals user_id with
       | Some { Ps.status = Ps.Active; _ } ->
-        Result.bind (own_home ~base_path state user_id provider_account_id claim) (fun () ->
-          (* What the log says of the account, as a turn reads it. The home
-             is checked first, so the answer says nothing of an account
-             captured from another home. *)
+        let ( let* ) = Result.bind in
+        let* runtime_root = person_root ~base_path state user_id in
+        let* () = own_home ~runtime_root provider_account_id claim in
+        (* What the log says of the account, as a turn reads it. The home
+           is checked first, so the answer says nothing of an account
+           captured from another home. *)
+        let* () =
           Result.map_error
             (fun reason -> Account_unavailable { provider_account_id; reason })
-            (Authz_provider_account.availability state ~user_id provider_account_id))
+            (Authz_provider_account.availability state ~user_id provider_account_id)
+        in
+        (* The key is checked once the account is known to be theirs. *)
+        own_key ~runtime_root state provider_account_id claim
       | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
   | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
     on_trusted (fun trusted state ->
-      match Authz_keeper_turn.decide trusted ~owner ~keeper_id ~channel ~pat ~now:(now ()) with
-      | Error refusal -> Error (Turn_refused refusal)
-      | Ok turn ->
-        if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
-        then
-          own_home
-            ~base_path
-            state
-            turn.Authz_keeper_turn.owner
-            turn.Authz_keeper_turn.provider_account_id
-            claim
-        else
-          Error
-            (Not_the_assigned_runtime
-               { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id }))
+      let ( let* ) = Result.bind in
+      let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+      let owner = turn.Authz_keeper_turn.owner in
+      let provider_account_id = turn.Authz_keeper_turn.provider_account_id in
+      let* runtime_root = person_root ~base_path state owner in
+      let* () = own_home ~runtime_root provider_account_id claim in
+      own_key ~runtime_root state provider_account_id claim)
 ;;
 
 (* The Runtime of the log that [name] spells, if the log made one. A name
@@ -352,6 +411,24 @@ let judge request claim =
     multi_account ~zone ~base_path ~now request claim
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the judgment of a turn that reads no account, for a
+   server to refuse on before it takes the call of the account. It gives
+   nothing: a client starts only on what [authorize] gives. *)
+let admit request =
+  match Atomic.get state, request with
+  | Unpublished, (Keeper_turn _ | Operator_keeper_turn _ | Own_account _ | Operator_call) ->
+    Error Not_published
+  | ( Published (Multi_account { zone; base_path = _; now })
+    , Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ) ->
+    on_trusted zone (fun trusted (_ : Authz_state.t) ->
+      decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now
+      |> Result.map (fun (_ : Authz_keeper_turn.turn) -> ()))
+  | ( Published (Multi_account { zone = _; base_path = _; now = _ })
+    , (Operator_keeper_turn _ | Own_account _ | Operator_call) )
+  | ( Published (Single_user (_ : Authz_boot_mode_read.single_user))
+    , (Keeper_turn _ | Operator_keeper_turn _ | Own_account _ | Operator_call) ) -> Ok ()
+;;
+
 let official_claim sealed =
   { client = layout_client (Runtime_official_account.client sealed)
   ; declared_home =
@@ -359,6 +436,7 @@ let official_claim sealed =
        | Runtime_official_account.Declared_directory -> Some (Runtime_official_account.home sealed)
        | Runtime_official_account.Inherited_directory
        | Runtime_official_account.Inherited_user_home -> None)
+  ; key_file = Runtime_official_account.key_file sealed
   }
 ;;
 
@@ -367,7 +445,9 @@ let authorize request sealed =
 ;;
 
 let authorize_muse request account =
-  judge request { client = Layout.Muse_home; declared_home = muse_account_home account }
+  judge
+    request
+    { client = Layout.Muse_home; declared_home = muse_account_home account; key_file = None }
   |> Result.map (fun () -> account)
 ;;
 

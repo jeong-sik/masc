@@ -58,31 +58,64 @@ let runtime_overall_badge ~ko status =
   in
   style ^ runtime_overall_label ~ko status ^ Ansi.reset
 
-let runtime_usage_badge state runtime =
-  let ko = state.ui_language = Lang_ko in
+(* A value the row could not read is one mark (RFC tui-one-screen-grammar
+   6.4): not read yet, the read failed, or read and not reported. Why is the
+   selected row's detail and the page's own status. *)
+let unknown_cell unknown = Ansi.dim ^ Masc_tui_value.Unknown.glyph unknown ^ Ansi.reset
+
+(* The account usage of the runtime: spent windows, none, or why it is not
+   known. A failed usage read and an account the read did not report are
+   different marks. *)
+let runtime_usage_reading state runtime =
   match state.runtime_surface with
-  | None -> Some (Ansi.dim ^ (if ko then "사용량 미확인" else "usage unknown") ^ Ansi.reset)
+  | None -> Error Masc_tui_value.Unknown.Unread
   | Some snapshot ->
       match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Error _ -> Some (Ansi.dim ^ (if ko then "사용량 미확인" else "usage unknown") ^ Ansi.reset)
-      | Ok [] -> None
-      | Ok (_ :: _) -> Some (Theme.warn () ^ (if ko then "계정 한도 소진" else "account limit spent") ^ Ansi.reset)
+      | Ok windows -> Ok windows
+      | Error _ ->
+          Error (match snapshot.rss_resolved.rrs_usage with
+            | Error _ -> Masc_tui_value.Unknown.Read_failed
+            | Ok _ -> Masc_tui_value.Unknown.Unreported)
 
+(* The call side of the row: each refusal in warn, else [—] when none is
+   recorded and the account usage reads none spent, else the mark of the
+   usage that could not be read. A row that reads as it should recedes, so a
+   refusal stands out (RFC tui-one-screen-grammar 7.3). *)
 let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   let ko = state.ui_language = Lang_ko in
   let warn label = Option.map (fun text -> Theme.warn () ^ text ^ Ansi.reset) label in
+  let usage = runtime_usage_reading state runtime in
+  let spent = match usage with
+    | Ok (_ :: _) -> Some (Theme.warn () ^ (if ko then "계정 한도 소진" else "account limit spent") ^ Ansi.reset)
+    | Ok [] | Error _ -> None in
   match
     List.filter_map Fun.id
       [ warn (runtime_credential_refused_label ~ko runtime)
       ; warn (runtime_quota_label ~ko runtime); warn (runtime_rate_limit_label ~ko runtime)
-      ; runtime_usage_badge state runtime ]
+      ; spent ]
   with
-  | [] -> (Theme.info ()) ^ (if ko then "거절 없음" else "no refusal") ^ Ansi.reset
-  | badges -> String.concat " " badges
+  | _ :: _ as badges -> String.concat " " badges
+  | [] ->
+      (match usage with
+       | Ok _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
+       | Error unknown -> unknown_cell unknown)
 
-let runtime_probe_badge ~ko = function
-  | None -> Ansi.dim ^ (if ko then "미관측" else "unobserved") ^ Ansi.reset
+(* The connection side of the row, for a runtime the probe has no entry for:
+   the probe not read yet, its read failed, or it read and left this runtime
+   out. *)
+let runtime_probe_missing state =
+  match state.runtime_surface with
+  | None -> Masc_tui_value.Unknown.Unread
+  | Some snapshot ->
+      (match snapshot.rss_probe_error, snapshot.rss_probe with
+       | Some _, _ -> Masc_tui_value.Unknown.Read_failed
+       | None, None -> Masc_tui_value.Unknown.Unread
+       | None, Some _ -> Masc_tui_value.Unknown.Unreported)
+
+let runtime_probe_badge state = function
+  | None -> unknown_cell (runtime_probe_missing state)
   | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
+      let ko = state.ui_language = Lang_ko in
       let open Masc.Tui_decode_runtime_probe in
       let style =
         match probe.rpp_status with
@@ -104,8 +137,7 @@ let runtime_probe_badge ~ko = function
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge state runtime probe =
-  runtime_route_badge state runtime ^ " / "
-  ^ runtime_probe_badge ~ko:(state.ui_language = Lang_ko) probe
+  runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge state probe
 
 let runtime_probe_detail = function
   | None -> []

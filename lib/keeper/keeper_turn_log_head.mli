@@ -10,8 +10,7 @@ module Marks := Keeper_turn_log_marks
 type t =
   { closed_messages : int
   ; open_messages : int
-  (** Messages of the open turn. A line written outside a turn closes them
-      first, so this is zero when such a line takes its mark. *)
+  (** Messages of the open turn. A mark does not count them. *)
   ; covered : Marks.covered
   }
 

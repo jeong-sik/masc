@@ -360,7 +360,18 @@ let test_a_keeper_directory_that_was_removed =
   check (float 0.0) "the admission is written" at_admission (failures "admission");
   check string "the log starts again in a new directory"
     "started at 0\nopened 2 at 0\nclosed completed at 0, before [], own []"
-    (log_text place)
+    (log_text place);
+  (* The directory goes away while a turn runs: the turn's end finds a log
+     that does not show it open. Nothing is written, and it is counted. *)
+  let at_end = failures "end" in
+  let (_ : (unit, string) result) =
+    turn place 3 (fun (_ : Turn.t) ->
+      remove place.keepers_dir;
+      Ok ())
+  in
+  check (float 0.0) "an end with no open turn to close is counted" (at_end +. 1.0)
+    (failures "end");
+  check bool "and no log is made for it" false (Sys.file_exists place.keepers_dir)
 ;;
 
 let () =

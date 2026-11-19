@@ -259,15 +259,16 @@ type turn_line =
   - 멈춘 턴을 잇는 저장(`keeper_direct_gate_continuation.ml:297`, `keeper_direct_checkpoint_continuation.ml:75`, `keeper_direct_runtime_continuation.ml:148`).
   - 입력을 기다린 답의 저장(`keeper_input_wait_response.ml:191`).
 - 그 메시지는 받아들인 턴의 것이다. 그 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 받아들임이 닫으면 `baseline` 앞이 되어 Task 없이 실린다.
-- 턴이 남긴 열린 메시지도 같은 길로 간다. 다음 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 그 메시지는 다음 턴의 Task 와 함께 보인다. 그런 때는 셋이다.
+- 턴이 남긴 열린 메시지도 같은 길로 간다. 다음 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 그 메시지는 다음 턴의 Task 와 함께 보인다. 그런 때는 넷이다.
   - 턴의 닫는 저장이 실패했다. 그 턴의 줄이 `Save_failed` 라서 읽는 쪽은 그 사정을 안다.
   - 이력 지우기가 남길 메시지를 열린 채로 넣었다(§5.6).
   - `Opened` 를 못 쓴 턴이 도중에 저장하고 죽었다. 닫지 못한 `Opened` 가 없어서 프로세스 시작 단계가 닫지 않는다.
+  - 프로세스 시작 단계의 닫는 저장이 실패했다. 카운터 `turn_log_open_close_failed` 가 오른다.
 - 닫지 못한 `Opened` 가 있었으면 `Closed {Close_missing}` 의 `own` 은 그 턴의 닫는 저장이 닫은 것이다. 닫는 저장도 없었으면 비어 있다.
-- 프로세스 시작 단계와 head 를 줄이는 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 없으면 저장하지 않는다.
-- 프로세스 시작 단계는 마지막 `Opened` 가 닫히지 않았을 때만 닫는다. 닫는 것은 죽은 턴이 저장한 메시지다. `Closed {Process_exited}` 의 `own` 에 든다.
+- 줄 앞에서 head 의 열린 메시지를 닫는 쪽은 둘이다. 마지막 `Opened` 가 닫히지 않았을 때의 프로세스 시작 단계와, head 를 줄이는 함수다. 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 없으면 저장하지 않는다.
+- 프로세스 시작 단계가 닫는 것은 죽은 턴이 저장한 메시지다. `Closed {Process_exited}` 의 `own` 에 든다.
 - head 를 줄이는 함수가 닫은 것은 `Reset` 줄의 `closed_before` 에 든다. 지우기와 recovering purge 가 버리는 메시지는 열려 있던 것까지 그 줄에 이름이 있다.
-- 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 카운터 `turn_log_open_close_failed` 가 오른다. 남은 것은 다음 턴의 닫는 저장이 닫는다.
+- 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 줄은 쓰고, 남은 것은 다음 턴의 닫는 저장이 닫는다.
 - head 를 줄이는 함수는 이 저장이 실패하면 줄을 쓰지 않고 거절한다. head 변경도 같은 저장소에 쓰는 일이라 어차피 실패한다.
 - 값은 저장 한 번이다. 이력을 한 번 읽고 bundle 하나와 head 를 쓴다.
 - 지금 boot 의 꼬리 복구는 마지막 tool 요청이 결과를 기다릴 때만 죽은 턴의 메시지를 닫는다(`keeper_transcript_tail_recovery.mli:14-15`). 그 밖에는 열린 채 남아 다음 턴의 `own` 에 든다. 지우기와 recovering purge 는 그것을 이름 없이 버린다.
@@ -504,8 +505,8 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 | 값 | 어디서 오나 | 종류 |
 |---|---|---|
-| slot s 의 창 W(s) | `Runtime_instance.resolve_max_context_of_runtime` (binding, provider, model 순) | 운영자 선언 |
-| 출력 몫 R | lane 의 `max_output_tokens`. 선언이 없으면 요청에 `max_tokens` 를 싣지 않는다. provider 기본값이 적용되고, 그 칸이 꼭 있어야 하는 wire 에서만 catalog 최대값이 들어간다(`runtime_schema.mli:425-431`). catalog 의 출력 한도는 검증에만 쓰는 상한이다 | 운영자 선언, 없으면 provider 기본값 |
+| slot s 의 창 W(s) | `Runtime_instance.resolve_max_context_of_runtime` (binding, provider, model, capability catalog 순) | 운영자 선언 |
+| 출력 몫 R | lane 의 `max_output_tokens`. 켠 lane 은 반드시 적는다(§6.4). HTTP slot 의 요청에 `max_tokens` 로 실린다. CLI slot 은 `max_tokens` 를 받지 않는다. catalog 의 출력 한도는 검증에만 쓰는 상한이다 | 운영자 선언 |
 | 질문 q 의 입력 token 수 | 미리 세는 slot(Anthropic, Kimi)은 Agent-Core 가 보내기 전에 센다. 그 밖은 provider 가 받은 뒤 거절하거나, 답과 함께 `usage.input_tokens` 로 알려 준다 | provider 사실 |
 | 폭 | 단위 몇 개, 그다음은 한 단위의 항목 몇 개 | 입력의 구조 |
 
@@ -523,7 +524,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 ### 6.4 출력 몫과 본문 시간
 
-- R 은 운영자의 선언이다. 지금 운영 lane 은 `max_output_tokens` 를 선언하지 않았고, 이 RFC 도 요구하지 않는다. 로드 때는 `R ≤` 각 slot 의 catalog 출력 한도만 본다.
+- R 은 운영자의 선언이다. 켠 Librarian lane 은 `max_output_tokens` 를 적어야 로드된다. 적지 않으면 요청에 provider 기본값이나 catalog 최대값이 실린다. 그 값은 lane 값에 없어서, 값이 바뀌어도 크기 사실이 남는다. 로드 때는 그 밖에 `R ≤` 각 slot 의 catalog 출력 한도를 본다.
 - R 을 정할 때 두 힘이 있다. 둘 다 설치 안내에 적고, 로드에서 검사하지 않는다.
   - 너무 작으면 답이 R 에서 잘린다. reasoning token 을 `max_tokens` 안에서 세는 slot 에서 그렇다. GLM 은 thinking 을 강제하는데, 그 token 을 안에서 세는지는 문서에 없다.
   - slot 이 본문 시간 안에 만들 수 있는 양보다 크면 긴 답이 시간 초과로 끝난다. 시간 초과는 「말 없음」이라 폭을 줄이지 않는다.
@@ -672,12 +673,17 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 쓰는 쪽은 맨 앞 항목의 두 질문에 대해 slot 마다 받은 크기 사실을 메모리에 둔다.
 
 ```ocaml
-type slot_key = { id : string; target : string; window : int; reserve : int option }
-  (* lane 값이 푼 slot. reserve 는 보내기 전 세기가 쓴 출력 몫이고, 세지 않는 slot 은 None 이다. 하나라도 바뀌면 다른 key 다 *)
+type target =
+  | Http of { provider_id : string option; model_id : string; provider_kind : Provider_kind.t
+            ; endpoint : string; reserve : int }   (* reserve: lane 의 출력 몫 R *)
+  | Cli of { runtime_id : string; api_name : string }
+type slot_key = { id : string; target : target; window : int }
+  (* lane 값이 푼 slot. 하나라도 바뀌면 다른 key 다 *)
 type judged = { question : Question_id.t; facts : (slot_key * size_fact) list }
 type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞 항목의 두 질문 *)
 ```
 
+- HTTP slot 의 `reserve` 는 lane 의 R 이고 slot 마다 다르지 않다. 보내기 전에 세는 slot 은 R 로 세고, 세지 않는 provider 도 입력과 `max_tokens` 의 합으로 창을 잰다. 그래서 R 이 바뀌면 HTTP slot 의 key 가 모두 바뀌고 그 크기 사실을 다시 묻는다. CLI slot 은 `max_tokens` 를 받지 않아서 `reserve` 가 없다.
 - 기억하는 것은 한 항목짜리 질문에 대한 `Refused (Sized _)` 뿐이다.
   - 한 항목보다 넓은 질문의 거절은 기억하지 않는다. 바로 폭을 줄이므로 그 질문을 다시 묻지 않는다.
   - `Unsized` 는 기억하지 않는다. 400 은 크기를 말하지 않고, provider 는 지나가는 일(다 쓴 quota)도 400 으로 알린다. 그 slot 에는 pulse 마다 다시 묻는다. 400 이면 요청 하나가 들고 생성은 없다. 모델이 내용을 거절한 stop reason 이면 생성도 하나 든다.
@@ -1058,8 +1064,11 @@ and ended = Read_ended of read_result | Room_ended of room_result
 - `Stopped` 로 가면 가던 묻기를 취소한다. 멈췄다는 줄은 쓰지 않는다. boot 가 디스크에서 다시 계산한다.
 
 **선언 변경.** lane 값은 질문 쪽(프롬프트, 답 schema, 출력 몫, thinking)과 slot 목록이다. slot 은 풀린 창까지 값에 든다.
+HTTP slot 의 창은 registry 가 게시할 때 target 옆에 고정한 값이다. CLI slot 의 창은 물을 때의 runtime 표에서 읽는다. CLI 호출도 그 표를 읽는다.
+lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slot 이 없다, R 을 적지 않았다, 창을 모르는 slot 이 있다(`Window_unknown {slot}`). 모두 선언이 없는 것과 같이 다룬다(W1).
+`slots` 의 id 가 runtime 을 가리키지 않으면 로드가 거절한다. 그 뒤에 창을 모르는 slot 은 둘뿐이다. registry 가 창 없이 고정한 HTTP target 과, 지금 runtime 표에 없는 CLI id 다.
 
-- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 파일이 다시 게시될 때마다 이 사건이 온다.
+- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다.
 - 질문 쪽이 바뀌거나 lane 이 켜지고 꺼지면 가던 묻기를 취소한다. 옛 질문으로 만든 것은 반영되지 않는다.
 - slot 목록만 바뀌면 묻기는 끝까지 간다. 답은 반영한다. 선언에서 빠진 slot 의 결과는 읽지 않는다.
 - 어느 쪽이든 새 값을 저장하고 폭 기억을 비운다. 바닥의 크기 사실은 건드리지 않는다. 바뀐 slot 은 key 가 다르고 바뀐 질문은 id 가 다르다(§7.4).
@@ -1223,11 +1232,15 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 | `Pulse` | 서버 maintenance tick(60초). 등록된 Keeper 를 돌며 `ensure` 를 부르고 그 쓰는 쪽에 보낸다(§8.6) |
 | `Write` | Keeper 의 Memory 도구와 운영자 route. 답은 promise 로 받는다 |
 | `Ask_ended` | 묻는 fiber. 예외로 끝나도 `Ask_failed` 를 보낸다 |
-| `Declaration_changed` | fiber 하나가 `Runtime.await_catalogue_change` 를 기다렸다가 모든 쓰는 쪽에 lane 값을 보낸다 |
+| `Declaration_changed` | fiber 하나가 신호 둘을 기다린다. runtime 표의 게시(`Runtime.await_catalogue_change`)와 이 lane 의 registry 변경(`Runtime_exact_output_registry.subscribe_lane_changes`)이다. 어느 쪽이 와도 lane 값을 다시 풀어 모든 쓰는 쪽에 보낸다 |
 | `Operator _` | 운영자 route(§12.4) |
 | `Retire` | 등록부에 없는 Keeper 의 쓰는 쪽을 본 pulse. Keeper 를 지우는 경로는 등록부에서 뺀 뒤 파일을 지우기 전에 보내고 `Retired` 를 기다린다. 꺼낼 때 그 Keeper 가 등록부에 있으면 사건이 아니다 |
 | `Boot_finished` | 쓰는 쪽의 boot |
 
+- **선언의 신호는 둘이다.** 한 신호는 다른 쪽이 바꾼 것을 보지 못한다.
+  - runtime 표의 게시는 CLI slot 의 창과 모델 이름을 바꾼다. registry 의 구독은 그것을 보지 못한다.
+  - registry 의 변경은 HTTP slot 의 target 과 창을 바꾼다. `runtime.toml` 을 바꾸는 commit 에서 runtime 표의 신호가 새 registry 보다 먼저 온다. 그사이 registry 는 `Publication_busy` 를 답한다.
+  - `Publication_busy` 면 lane 값을 보내지 않는다. registry 가 다 바뀌면 lane 의 신호가 온다(`runtime_exact_output_registry.mli:125-129`).
 - **`Turn_closed` 는 귀띔이다.** 쓰는 쪽은 사건이 실은 값을 믿지 않고 디스크에서 할 일을 계산한다. 귀띔이 오지 않아도 `Idle` 의 pulse 가 턴 기록의 길이를 보고 찾는다. 그래서 줄을 쓰는 경로가 귀띔을 빠뜨려도 읽기가 서지 않는다. 늦어질 뿐이다.
 - **Keeper 의 턴은 쓰는 쪽을 기다리지 않고 시작한다**(§8.6). Keeper 가 답을 기다리며 보내는 것은 `Write` 하나다. 그 답은 반영 하나(줄 fsync 와 스냅샷 쓰기)를 기다린다. 쓰는 쪽이 `Booting` 이면 boot 가 끝날 때까지 더 기다린다. 모델 호출은 기다리지 않는다. 읽기는 메모리의 view 와 스냅샷 파일을 본다(§11).
 - **사건은 하나씩 다룬다.** 묻는 fiber 는 따로 돌고 결과만 mailbox 로 보낸다. 반영의 덧붙이기와 스냅샷 쓰기는 취소되지 않는 구간이다(§8.2).
@@ -1283,6 +1296,7 @@ val view : Keeper_name.t -> (view, [ `Booting | `Stopped of store_stop | `No_wri
 ### 11.2 요청의 시작점
 
 runtime 다섯이 함수 하나를 쓴다. 날것 이력의 창은 아래 둘 가운데 뒤쪽에서 시작한다.
+RFC #53307(§3.3)이 이 규칙을 고친다. 운영자가 2026-11-19 에 그 RFC 의 D2 를 정했다. 읽은 곳의 끝이 앞으로 가도 창은 seed 에 두고, 그 RFC 의 신호가 올 때 읽은 곳의 끝으로 옮긴다. L8 은 그 RFC 가 정한 규칙으로 짓는다.
 
 - **읽은 곳의 끝.** `covered.trace` 에서 닫힌 메시지 `covered.closed_messages` 개 다음이다. 그 앞은 Memory 에 있다. official-client lane 에서는 `covered` 의 fragment offset 이다. `covers_through = Before_first` 면 없다.
 - **seed.** 이 이력에서 provider 가 마지막으로 받아 준 범위의 시작이다. 지금의 `Keeper_carried_front` seed 이고, Keeper 쪽 코드라 그대로 둔다.
@@ -1314,7 +1328,7 @@ builder 는 요청을 만들 때 자기 시작점을 메모리에 적어 둔다.
 
 ### 11.4 하던 일
 
-- 턴마다 `view.working_state` 를 싣는다. continuity 스냅샷의 「하던 일」을 대신한다.
+- 턴마다 `view.working_state` 를 싣는다. continuity 스냅샷의 「하던 일」을 대신한다. 요청의 어디에 싣고 언제 바꾸는지는 RFC #53307(§3.3)이 정한다. 창 맨 앞에 두고 창을 옮길 때만 바꾼다.
 - 컷부터 그 Keeper 의 첫 반영까지는 비어 있다. 그 사이는 날것 창이 덮는다.
 - Memory 변화와 하던 일은 답 하나에서 나와 줄 하나에 같이 들어간다. 지금은 두 파일로 따로 써서 한쪽만 쓰인 적이 있다.
 
@@ -1495,7 +1509,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I9 | 죽은 뒤 상태는 durable 기록에서 다시 만든다. 깨움과 신호는 귀띔이고, 할 일은 디스크에서 계산한다 | 상태는 반영 기록의 꼬리 줄과 턴 기록에서 나온다. 귀띔을 놓쳐도 `Idle` 의 pulse 가 턴 기록의 길이를 보고 찾는다(§9.5) | 두 번 복구 시험(L5). `LibrarianWriter` 의 boot 행 |
 | I10 | durable 기록은 들어온 일만큼 자란다. 패스 수나 장애 시간만큼 자라지 않는다 | §10 | F10 시험(L6) |
 | I11 | 보내는 것의 크기는 만들 때 묶인다 | §6.3 에 적은 뜻으로 지킨다. 미리 세는 slot 은 보내기 전에, 그 밖은 provider 자신의 창이 묶는다 | F6 시험(L7) |
-| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다(§5.2) | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. 항목마다 보낸 이가 있다. `baseline` 앞에서 닫힌 내용에는 Task 가 없다. 죽은 턴이 저장한 메시지는 프로세스 시작 단계가 그 턴의 단위로 닫는다(§5.2). 받아들일 때 열려 있던 메시지는 받아들인 턴의 것이다 | `LibrarianTurnLog`: `OwnNotClosedBefore` |
+| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다(§5.2) | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. 항목마다 보낸 이가 있다. `baseline` 앞에서 닫힌 내용에는 Task 가 없다. `Opened` 를 쓰고 죽은 턴이 저장한 메시지는 프로세스 시작 단계가 그 턴의 단위로 닫는다(§5.2). 받아들일 때 열려 있던 메시지는 받아들인 턴의 것이다 | `LibrarianTurnLog`: `OwnNotClosedBefore` |
 | I13 | 날것 턴은 덧붙이기만 한다. purge 가 독자가 무엇을 읽었는지를 정하지 않는다 | 줄이 내용을 sha 로 이름 붙은 bundle 로 가리킨다. purge 는 Librarian 의 읽은 자리를 읽지 않는다. 고쳐 쓰기만 하는 purge 는 단위 줄이 아직 없는 메시지(닫혔든 열렸든)를 건드리지 않는다. 끊긴 곳 뒤를 버리는 purge 는 버리는 것을 줄에 먼저 적는다(§5.6) | `LibrarianTurnLog`: `UnreadReadable`. 단위 줄 위의 메시지를 고쳐 쓰는 buggy 설정이 깨진다(§21) |
 | I14 | metric 이 무엇도 막지 않는다. 갈래는 타입으로 나눈다. 모양은 하드컷으로 바꾼다 | 경보와 카운터는 아무것도 막지 않는다. 갈래는 닫힌 생성자 위에 있다 | 타입 검사. L9 의 해석 시험 |
 | I15 | 지식 하나에 맞는 fact 하나. 낡았는지는 Librarian 이 판단한다. 시간이나 TTL 이 아니다 | Librarian 이 `Drop`, `Merge`, `Revise` 로 판단한다. TTL 도 크기 예산도 fact 를 지우지 않는다. 자리 내기는 Librarian 에게 하는 질문이다 | L1 채점기(merge 뒤 보존, 변화율) |
@@ -1638,6 +1652,7 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
 - 「Exact 요청은 자리만 기다린다」 RFC(#52986)의 자리 걷기 층과 그 아래 로드 요구 층이 운영에 들어가 있다.
 - 그 RFC 가 운영자에게 맡긴 일이 끝나 있다. CLI binding 둘에 `max-concurrent` 선언, `max_exact_in_flight` 키 삭제다.
 - tinker binding 에 `max-context` 를 선언한다. 지금은 없다.
+- Librarian lane 의 출력 몫 R 을 정한다(§6.4). 적지 않은 lane 은 로드되지 않는다.
 - Librarian lane 에 모든 호출이 실패하는 slot 이 없다(§15.2 의 넷째 결론). 그런 slot 하나가 11-18 20:13 의 runtime 파일에 남아 있다. 설치 전에 뺀다.
 - Keeper 턴과 나눠 쓰는 계정의 run limit 을 정한다(§15.3).
 - 남길 스냅샷(`<k>.memory-current.json`)을 새 빌드의 codec 으로 읽어 본다. 읽기 전용 확인이다. 해석되지 않는 스냅샷이 있으면 그 Keeper 의 Memory 는 컷 뒤에 `Stopped Memory_unreadable` 로 선다. Keeper 는 돌고, 그사이의 턴은 스냅샷을 고친 뒤에 읽힌다(§8.6).
@@ -1651,7 +1666,7 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
    - `[runtime.exact_output_lanes.librarian_exact]` 는 건드리지 않는다. working-context pass 의 표다.
    - `[typesafeai]` 아래 `absorb_gate` 와 `librarian_preflight` 를 지운다. `context_review` 는 남긴다.
    - 서버 환경에서 `facts_max_bytes` 와 admission 바이트 상한 키를 지운다.
-   - `max_output_tokens` 는 넣어도 되고 안 넣어도 된다. 넣는다면 §6.4 의 두 한도를 보고 정한다.
+   - 새 lane 표에 `max_output_tokens` 를 넣는다. §6.4 의 두 한도를 보고 정한 값이다.
 3. **지운다.** 목록은 §19.1 에 파일마다 있다. 디스크의 모든 Librarian 파일은 그 목록에서 「지운다」나 「남긴다」 가운데 하나다.
 4. **새 빌드의 `validate-stores` 를 돌린다.** 읽기 전용이다. 모든 저장소가 통과하고 분류 안 된 파일이 0개여야 한다. blob sweep 의 dry run 도 0개여야 한다. 배포 preflight 는 `keeper-librarian` add-on 이 남아 있으면 거절한다.
 5. **설치하고 서버를 띄운다.** 프로세스가 시작할 때 턴 경로가 Keeper 마다 `Log_started` 를 쓴다. 쓰는 쪽은 첫 pulse 안에 생겨 `Started` 를 쓴다.
@@ -1831,7 +1846,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b3 | 기록하기 한 번: 꼬리 읽기, head 읽기, 끝자리 잡기, `plan`, 앞 segment 읽기, 덧붙임을 잇는다. 끝이 달라졌으면 꼬리부터 다시 한다 | 실제 파일과 저장소의 저장 함수로 시험한다. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). head 가 가진 턴보다 긴 범위는 segment 를 읽어 가리킨다. 줄어든 head 는 reset 뒤에 처음부터 실린다. 수로 보이지 않는 head 교체는 옛 수까지의 메시지를 싣지 않는다(§22.4). 끊긴 덧붙임이 남긴 조각 뒤에도 다음 줄이 써진다. 읽지 못한 head 로는 줄을 쓰지 않는다 |
 | L3a3b4a | 턴이 자기 줄을 쓴다. 받아들일 때 `Opened`, 끝날 때 `Closed` 다. 두 줄을 쓰는 곳은 하나다(`Keeper_turn_log_turn.around`). 옛 경계 파일 옆에 쓴다. 닫는 저장이 한 일을 턴이 끝까지 들고 간다. 카운터 `turn_log_append_failed` | 끝나는 길마다 `Closed` 가 정확히 하나다. 길은 돌려줌, 예외, 취소다. 줄을 못 써도 턴의 답과 예외가 그대로다. 실패한 저장은 `Save_failed`, 쓰지 않은 저장은 `Stale_save` 로 실린다 |
 | L3a3b4b | 받아들임은 head 의 열린 메시지를 닫지 않는다. §5.2 와 모델(`LibrarianTurnLog`)을 그렇게 고친다. 코드는 L3a3b4a 그대로다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다. Keeper 만들기의 첫 저장, 멈춘 턴을 잇는 저장(gate, checkpoint, runtime), 입력을 기다린 답의 저장이다. 받아들임이 닫으면 이어 가는 턴의 메시지가 Task 없이 실린다 | 모델의 정상 설정이 모두 통과한다. 받아들임이 닫는다는 규칙에 기대던 설정과 속성이 없어진다. 열린 메시지는 그것을 닫은 저장의 단위에 든다 |
-| L3a3b4c | 프로세스 시작 단계. checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 돈다. 열린 메시지를 닫고 `Closed {Process_exited}` 나 `Log_started` 를 쓴다 | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 줄을 못 써도 프로세스 시작이 그대로 간다 |
+| L3a3b4c | 프로세스 시작 단계(`Keeper_turn_log_process_start`). checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 저장된 Keeper 마다 돈다. 마지막 `Opened` 가 열려 있으면 head 의 열린 메시지를 닫고 `Closed {Process_exited}` 를 쓴다. 턴 기록이 없으면 `Log_started` 를 쓴다. 카운터 `turn_log_open_close_failed` | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 열린 턴이 없으면 head 의 열린 메시지를 그대로 둔다. 읽지 못한 턴 기록에는 닫지도 쓰지도 않는다. 닫는 저장이 실패해도 줄을 쓰고, 줄을 못 써도 프로세스 시작이 그대로 간다 |
 | L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다 | payload 갈래마다 줄 타입이 하나다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
@@ -2058,7 +2073,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 |---|---|
 | Librarian lane 의 slot 목록 | Keeper 턴과 계정을 나누지 않는 slot 이 있느냐가 Keeper 턴의 대기를 가른다(§15.2) |
 | Keeper 턴과 나눠 쓰는 계정의 run limit | Librarian 호출은 GLM 자리를 약 14배 오래 잡는다. 그보다 작은 값은 선언이 없는 것보다 Keeper 턴에 나쁘다(§15.3) |
-| 출력 몫 R | 넣지 않아도 된다. 넣을 때 볼 한도 둘(§6.4) |
+| 출력 몫 R | 켠 lane 은 적어야 로드된다. 정할 때 볼 한도 둘(§6.4) |
 | slot 별 창 | tinker binding 에는 `max-context` 선언이 없다. 컷 전에 넣는다(§18.1) |
 
 ### 22.4 판단으로 정한 것
@@ -2074,6 +2089,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 반영 기록이 없으면 턴 기록에 무엇이 있든 첫 boot 다 | 「턴 줄이 있으면 잃은 기록」으로 가르면 손으로 지운 기록이 `Stopped` 로 보인다. 그러려면 Keeper 의 첫 턴을 `Started` 뒤로 묶어야 하고, Keeper 를 띄우는 길마다 같은 검사를 넣어야 한다 |
 | 알린 head 변경이 일어났는지를 가리지 않는다. 다음 단위는 언제나 그 줄의 `after` 에서 시작한다 | head 가 적어 둔 chain 을 줄에 싣고 견주면, 일어나지 않은 변경 뒤의 「한 번 더 읽기」 하나를 아낀다. 그 값은 Agent-Core 부분만 말하고, 턴 64개가 segment 로 묶이면 없어지고, official-client 만 쓰는 Keeper 에는 없다. 필드 하나, 생성자 하나, purge 의 순서 규칙 하나가 든다. 수로 가리면 일어난 지우기를 거둔 것으로 읽고 턴을 건너뛸 수 있다 |
 | 열린 메시지는 닫힌 뒤의 첫 단위에 든다. 받아들임은 닫지 않는다. 프로세스 시작 단계와 head 를 줄이는 함수만 줄 앞에서 닫는다 | 받아들임도 닫게 하면 닫는 저장이 실패한 턴의 메시지가 Task 없이 실린다. 그 대신 멈췄다가 잇는 턴과 Keeper 의 첫 턴의 메시지도 Task 없이 실린다. 둘을 가르려면 열린 메시지를 누가 남겼는지를 head 에 적어야 한다. 값: 닫는 저장이 실패한 턴의 메시지가 다음 턴의 Task 와 함께 보인다 |
+| 켠 Librarian lane 은 출력 몫 R 을 적어야 로드된다 | 적지 않고 provider 기본값에 맡길 수도 있다. 그러면 들어가는 조건의 R 이 lane 값 밖에 있어서, 기본값이나 catalog 가 바뀌어도 크기 사실이 남는다. 값: 운영자가 컷 전에 수 하나를 정한다 |
 | session 을 지우는 정지가 지우기 전에 줄을 쓴다 | 쓰지 않으면 다음에 줄 쓰는 쪽이 수를 보고 알아내야 한다. 마지막 끝자리가 0 이거나 head 가 같은 수까지 다시 자라면 구멍이 기록 없이 지나간다. 값: 턴 기록에 쓰지 못하면 그 정지는 session 을 지우지 못한다 |
 | 읽은 자리를 모르면 처음부터 읽는다. 꼬리를 읽지 못한 반영 기록을 맡길 때도 같다 | 끝에서 이어 읽으면 값이 들지 않는다. 그 대신 안 읽은 줄이 기록 없이 지나간다 |
 | 쓰는 쪽은 처음 쓰일 때 만든다. Keeper 를 띄우는 길은 쓰는 쪽을 모른다 | 띄우는 길마다 만들면 pulse 한 번을 기다리지 않는다. 길 하나가 빠지면 그 Keeper 의 쓰기가 모두 거절되고 경보가 없다 |

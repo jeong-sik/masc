@@ -43,6 +43,7 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Verifier
   | Candle_appraiser
+  | Librarian_memory
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
@@ -3515,7 +3516,7 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | Verifier, Ok () -> slots, cli_slots
       | Verifier, Error _ ->
         judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-      | (Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser), _ ->
+      | (Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser | Librarian_memory), _ ->
         slots, cli_slots
     in
     let next =
@@ -3531,11 +3532,13 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
             in
             Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
         next
-        (* Candle appraisal is explicitly configured, not enabled by
-           provisioning a general-purpose runtime. *)
+        (* Candle appraisal and the Librarian's Memory lane are explicitly
+           configured, not enabled by provisioning a general-purpose runtime:
+           the operator declares the Librarian's slots and their windows
+           before the cut. *)
         (List.filter
            (function
-             | Candle_appraiser -> false
+             | Candle_appraiser | Librarian_memory -> false
              | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
            Standalone_lane.all)
     in
@@ -3974,7 +3977,8 @@ let requirement_of_exact_lane
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Candle_appraiser ->
+  | Candle_appraiser
+  | Librarian_memory ->
     { window = Unbounded_or_unknown
     ; overflow = Truncation_acceptable
     ; verdict = Json_syntax { schema }

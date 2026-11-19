@@ -64,8 +64,33 @@ type normalized_output =
   ; validation : json_validation_provenance
   }
 
+(** The provider's typed stop reason for an answer that ended without one
+    structured output. [Types.MaxTokens] and [Types.ContextWindowExceeded] are
+    not here: they are {!Output_limit_stopped} and {!Window_stopped}. *)
+type incomplete_stop =
+  | End_turn
+  | Tool_use
+  | Stop_sequence
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Pause_turn
+  | Compaction
+  | Unmatched_tool_calls
+  | Unknown_stop of string
+
+(** What an answer stopped at the context window carried. *)
+type window_output =
+  | No_output  (** No content block: the empty answer. *)
+  | Partial_output  (** At least one content block. *)
+
+val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason
+
 type output_normalization_error =
-  | Incomplete_structured_response of Types.stop_reason
+  | Output_limit_stopped  (** The provider typed a stop at max tokens. *)
+  | Window_stopped of window_output
+      (** The provider typed a stop at the context window. *)
+  | Incomplete_structured_response of incomplete_stop
   | Missing_structured_text
   | Ambiguous_structured_text of int
   | Unexpected_structured_content

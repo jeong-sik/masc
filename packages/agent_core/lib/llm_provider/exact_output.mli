@@ -297,7 +297,7 @@ type generation_dispatch_fact =
 (** The provider's typed stop reason for an answer that ended without one
     structured output. [Types.MaxTokens] and [Types.ContextWindowExceeded] are
     not here: they are {!Output_limit_reached} and {!Window_reached}. *)
-type incomplete_stop =
+type incomplete_stop = Exact_output_plan.incomplete_stop =
   | End_turn
   | Tool_use
   | Stop_sequence
@@ -313,11 +313,13 @@ type incomplete_stop =
 val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason
 
 (** What a response that stopped at the model's window had produced. *)
-type window_output =
+type window_output = Exact_output_plan.window_output =
   | No_output
-      (** The completion was empty. *)
+      (** The answer carried no content block, whether the provider parser
+          reported it as an empty completion or it reached normalization. *)
   | Partial_output
-      (** Text came, and it was not one structured output. *)
+      (** The answer carried at least one content block, and it was not one
+          structured output. *)
 
 (** Why one dispatched or dispatching attempt failed. Every cause belongs to
     the binding or to its answer, never to masc's wiring: the plan parsed its

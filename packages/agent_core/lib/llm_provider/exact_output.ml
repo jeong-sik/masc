@@ -134,7 +134,7 @@ type generation_dispatch_fact =
   | No_generation_dispatch
   | Generation_dispatch_started
 
-type incomplete_stop =
+type incomplete_stop = Exact_output_plan.incomplete_stop =
   | End_turn
   | Tool_use
   | Stop_sequence
@@ -146,20 +146,9 @@ type incomplete_stop =
   | Unmatched_tool_calls
   | Unknown_stop of string
 
-let stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason = function
-  | End_turn -> Types.EndTurn
-  | Tool_use -> Types.StopToolUse
-  | Stop_sequence -> Types.StopSequence
-  | Refusal -> Types.Refusal
-  | Content_filter -> Types.ContentFilter
-  | Repetition_truncation -> Types.RepetitionTruncation
-  | Pause_turn -> Types.PauseTurn
-  | Compaction -> Types.Compaction
-  | Unmatched_tool_calls -> Types.UnmatchedToolCalls
-  | Unknown_stop token -> Types.Unknown token
-;;
+let stop_reason_of_incomplete_stop = Exact_output_plan.stop_reason_of_incomplete_stop
 
-type window_output =
+type window_output = Exact_output_plan.window_output =
   | No_output
   | Partial_output
 
@@ -987,20 +976,10 @@ let execution_error_cause ~http_status ~dispatch = function
                | Http_client.Unknown_provider_failure _ )
            ; _
            } ) as error) -> Completion_failed { error; dispatch }
-  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response stop_reason) ->
-    (match stop_reason with
-     | Types.MaxTokens -> Output_limit_reached
-     | Types.ContextWindowExceeded -> Window_reached { output = Partial_output }
-     | Types.EndTurn -> Incomplete_output { stop = End_turn }
-     | Types.StopToolUse -> Incomplete_output { stop = Tool_use }
-     | Types.StopSequence -> Incomplete_output { stop = Stop_sequence }
-     | Types.Refusal -> Incomplete_output { stop = Refusal }
-     | Types.ContentFilter -> Incomplete_output { stop = Content_filter }
-     | Types.RepetitionTruncation -> Incomplete_output { stop = Repetition_truncation }
-     | Types.PauseTurn -> Incomplete_output { stop = Pause_turn }
-     | Types.Compaction -> Incomplete_output { stop = Compaction }
-     | Types.UnmatchedToolCalls -> Incomplete_output { stop = Unmatched_tool_calls }
-     | Types.Unknown token -> Incomplete_output { stop = Unknown_stop token })
+  | Exec.Output_normalization_failed Exec.Output_limit_stopped -> Output_limit_reached
+  | Exec.Output_normalization_failed (Exec.Window_stopped output) -> Window_reached { output }
+  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response stop) ->
+    Incomplete_output { stop }
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
   | Exec.Output_normalization_failed (Exec.Ambiguous_structured_text count) ->
     Ambiguous_output count

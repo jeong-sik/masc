@@ -4977,6 +4977,30 @@ let test_window_stopped_answer_advances_once_to_successor ~content () =
     ()
 ;;
 
+(* The Anthropic codec keeps an empty answer and lets normalization read it.
+   An answer stopped at the window with no content block is the empty answer
+   there too, so it is [No_output] as on the OpenAI-compatible path. *)
+let test_anthropic_window_stopped_answer_reads_its_content ~content () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"anthropic"
+    ~label:("anthropic-window-stopped-" ^ if String.equal content "[]" then "empty" else "text")
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , Printf.sprintf
+          {|{"id":"msg-window","type":"message","role":"assistant","model":"flow","content":%s,"stop_reason":"model_context_window_exceeded","usage":{"input_tokens":1,"output_tokens":1}}|}
+          content )
+    ~assert_cause:(fun cause ->
+      match String.equal content "[]", cause with
+      | true, EO.Window_reached { output = EO.No_output }
+      | false, EO.Window_reached { output = EO.Partial_output } -> ()
+      | _, _ ->
+        fail
+          (Printf.sprintf
+             "an Anthropic answer stopped at the window read as %s"
+             (EO.execution_error_cause_to_string cause)))
+    ()
+;;
+
 (* An answer the provider cut at its output limit (finish_reason "length")
    advances once to the declared successor with its own typed cause, whether
    the cut answer carries JSON text or is empty. *)
@@ -6653,6 +6677,15 @@ let () =
             (test_window_stopped_answer_advances_once_to_successor ~content:"")
         ; test_case "a text answer stopped at the window advances once" `Quick
             (test_window_stopped_answer_advances_once_to_successor ~content:"{")
+        ; test_case
+            "an empty Anthropic answer stopped at the window has no output"
+            `Quick
+            (test_anthropic_window_stopped_answer_reads_its_content ~content:"[]")
+        ; test_case
+            "an Anthropic answer with text stopped at the window has partial output"
+            `Quick
+            (test_anthropic_window_stopped_answer_reads_its_content
+               ~content:{|[{"type":"text","text":"{"}]|})
         ; test_case "an output-limited text answer advances once" `Quick
             (test_output_limit_advances_once_to_successor ~content:"{}")
         ; test_case "an output-limited empty answer advances once" `Quick

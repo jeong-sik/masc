@@ -49,6 +49,16 @@ val order_at :
   ordered
 (** {!order} read at [now] instead of the wall clock. *)
 
+val held_until :
+  ordered ->
+  cli:string Runtime_candidate_standing.exact_order ->
+  float option
+(** The earliest stated time when no declared slot of either kind may be
+    called: [Some t] only when [ordered] leaves no HTTP slot and [cli] no CLI
+    slot to walk, and at least one slot is held. A lane with nothing to walk
+    and nothing held is not resting. [cli] is the order of
+    [ordered.lane.cli_slots] read at the same time as [ordered]. *)
+
 val observe :
   resolved:Runtime_exact_output_registry.resolved_lane ->
   ( ('accepted, 'rejection) Agent_core.Exact_output.validated_flow_success

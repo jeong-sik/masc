@@ -6934,7 +6934,7 @@ let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_
   let text korean english = if ko then korean else english in
   let pass () = match keeper.mkh_librarian.mlh_state with
     | Some ending -> memory_pass_text ~ko ending
-    | None -> text "처리 결과 미관측" "pass not observed" in
+    | None -> text "처리 결과 보고 안 됨" "pass not reported" in
   match memory_state keeper with
   | Memory_ordinary -> text "기억 관측됨" "memory observed"
   | Memory_warning -> text "보고된 주의" "warning reported"
@@ -22355,7 +22355,7 @@ let surface_reads_pending (state : state) =
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
 let page_failed_note ~ko =
-  if ko then "  (조회 실패 · 현재 값 미확인)" else "  (nothing here is a reading)"
+  if ko then "  (조회 실패)" else "  (nothing here is a reading)"
 
 (* The row the Browser Lane picker draws when it has no connection to offer,
    and [None] when it has one. A discovery that failed used to leave an empty
@@ -25100,11 +25100,11 @@ let runtime_quota_scope_label ~ko (runtime : Tui_decode.runtime_option) =
   | Some scope_id -> scope_id
   | None -> (match runtime.ro_quota_scope with
       | Some scope ->
-          (if ko then "미확인; 이 응답에서만 쓰는 범위 "
-           else "unavailable; response-local scope ") ^ scope
+          (if ko then "구독 ID 보고 안 됨 · 이 응답에서만 쓰는 범위 "
+           else "subscription id not reported; response-local scope ") ^ scope
       | None ->
-          if ko then "미확인 (응답에 쿼터 범위 없음)"
-          else "unavailable (no quota scope reported)")
+          if ko then "보고 안 됨 (응답에 쿼터 범위 없음)"
+          else "not reported (no quota scope in the response)")
 
 type runtime_picker_projection = {
   rlp_lane : string;
@@ -26090,7 +26090,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
         let rows =
           if count = 0 then
             [Parent_focus (match state.runtime_surface with
-              | None -> text "슬롯 미관측 · v 전체 읽기" "Slots unobserved · v reads all"
+              | None -> text "슬롯 미조회 · v 전체 읽기" "Slots not read · v reads all"
               | Some _ -> text "빈 순서 · a 추가" "Empty order · a adds a runtime")]
           else if Option.is_none selected then
             [Parent_focus (text "선택 없음 · j/k로 선택" "No selection · j/k selects")]
@@ -26833,8 +26833,8 @@ let runtime_cost_summary ~ko cost =
           cost.known_cost_usd cost.priced_readings cost.unpriced_readings
     | Cost.Unresolved ->
         let history = match cost.history with
-          | Cost.Complete -> "" | Cost.Unobserved -> "이력 미관측 · " in
-        Printf.sprintf "%s$%.4f 확인 · 가격 보고 %d / 미보고 %d / 미해결 %d건 · 시도 미관측 %d건"
+          | Cost.Complete -> "" | Cost.Unobserved -> "이전 이력 보고 안 됨 · " in
+        Printf.sprintf "%s$%.4f 확인 · 가격 보고 %d / 미보고 %d / 미해결 %d건 · 비용 보고 안 된 시도 %d건"
           history cost.known_cost_usd cost.priced_readings cost.unpriced_readings
           cost.unresolved_readings cost.unobserved_attempts
 
@@ -26844,7 +26844,7 @@ let runtime_fleet_summary state =
   | [] -> None
   | keepers ->
       let summary = match aggregate_keeper_stats keepers with
-        | None -> if ko then "활동 미관측" else "activity not observed"
+        | None -> if ko then "활동 합계 보고 안 됨" else "activity total not reported"
         | Some (turns, tokens, cost) ->
             Printf.sprintf (if ko then "턴 %d · 토큰 %s · %s" else "%d turns · %s tok · %s")
               turns (format_context_tokens tokens) (runtime_cost_summary ~ko cost)
@@ -26876,7 +26876,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
     | Some snapshot ->
         let summary_text =
           match snapshot.Tui_decode.rss_probe with
-          | None -> if ko then "프로브 미확인" else "probe unavailable"
+          | None -> if ko then "프로브 보고 안 됨" else "probe not reported"
           | Some probe ->
               let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
               Printf.sprintf
@@ -26917,7 +26917,7 @@ let runtime_default_route_lines ~cols state =
   let ko = state.ui_language = Lang_ko in
   let text =
     match state.runtime_surface with
-    | None -> if ko then "[runtime].default  미관측" else "[runtime].default  not observed"
+    | None -> if ko then "[runtime].default  미조회" else "[runtime].default  not read"
     | Some snapshot ->
         let resolved = snapshot.Tui_decode.rss_resolved in
         (match resolved.rrs_default_route, resolved.rrs_default_runtime_id with
@@ -28328,7 +28328,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
-              | None -> "시각 미확인"
+              | None -> "예정 시각 보고 안 됨"
               | Some due -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due ^ " 예정" in
             let reason label = function
               | None -> [label]
@@ -28342,21 +28342,21 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                    | Ok Failed -> Schedule_failed, ["예약 전달 실패"]
                    | Ok (Scheduled | Due) ->
                        (match proximity with
-                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "실행 상태 미확인"]
+                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "최근 회차 기록 없음"]
                         | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, ["예약 대기"]
                         | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, ["예약 대기"])
-                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["실행 상태 미확인"])
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["최근 회차 기록 없음"])
               | Dispatching -> Schedule_pending, ["예약 전달 중"]
               | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
               | Queued -> Schedule_pending, ["예약 도착"; "처리 대기"]
               | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
-              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 미확인"]
+              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 기록 없음"]
               | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
               | Turn_ended disposition ->
                 Schedule_pending,
                 [ "최근 회차 턴 종료: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
                 ; "결과 확인 중" ]
-              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
+              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 보고 안 됨"]
               | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
               | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why

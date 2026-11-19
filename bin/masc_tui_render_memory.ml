@@ -1640,7 +1640,7 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> if ko then "  (조회 실패)" else page_failed_note ~ko:false
+      | Page_failed -> page_failed_note ~ko
       | Page_unread -> if ko then
           (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
@@ -1889,7 +1889,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패)" (page_failed_note ~ko:false)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note ~ko
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
            text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")

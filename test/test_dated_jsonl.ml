@@ -586,6 +586,32 @@ let test_read_recent_result_missing_store_is_empty () =
   check int "missing store is empty" 0 (List.length entries)
 ;;
 
+(* The store's directory removed with plain [unlink] and [rmdir], and no
+   [prepare_for_directory_removal] before it: the next append makes the month
+   directory again (#53279). *)
+let test_append_after_the_directory_was_removed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_removed_dir" in
+  let store = Dated_jsonl.open_store location in
+  Dated_jsonl.append store (make_json 1);
+  let rec remove_with_plain_calls path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter
+        (fun name -> remove_with_plain_calls (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Unix.unlink path
+  in
+  remove_with_plain_calls (Dated_jsonl.Store.dir location);
+  Dated_jsonl.directories_removed ();
+  Dated_jsonl.append store (make_json 2);
+  check (list int) "the row written after the removal" [ 2 ]
+    (List.map json_i (Dated_jsonl.read_recent store 5))
+;;
+
 let test_read_recent_result_rejects_base_file () =
   let dir = tmpdir "dated_jsonl_base_file" in
   let location = store_under dir in
@@ -2256,6 +2282,8 @@ let () =
           test_case "large UTF-8 row preserves captured extent" `Quick
             test_strict_incremental_large_utf8_row_and_captured_extent;
           test_case "creates dated file" `Quick test_append_creates_dated_file;
+          test_case "appends after its directory was removed" `Quick
+            test_append_after_the_directory_was_removed;
           test_case "append reports its commit point" `Quick
             test_notifying_commit_reports_durable_row;
         ] );

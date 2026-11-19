@@ -1719,7 +1719,6 @@ let close t =
 let prepare_for_directory_removal t =
   let dated = Store.dated_path_now t.location in
   close t;
-  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     Hashtbl.remove file_count_cache dated.path)
 ;;

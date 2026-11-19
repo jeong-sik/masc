@@ -99,10 +99,11 @@ val close : t -> unit
     directory remains on disk. *)
 
 val prepare_for_directory_removal : t -> unit
-(** Close the current append writer and forget its memoized month directory
-    and row count before application-owned code removes [base_dir t]. A later
-    append can then recreate the directory and observe the new file identity.
-    The removal is followed by {!directories_removed}. *)
+(** Close the current append writer and forget the row count of its day file
+    before application-owned code removes [base_dir t]. A later append makes
+    the directory again whether or not this was called; what it adds is the
+    descriptor closed before the removal and a row count that is not the
+    removed file's. The removal is followed by {!directories_removed}. *)
 
 val directories_removed : unit -> unit
 (** Tell this module that store directories, or files inside them, were

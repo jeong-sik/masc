@@ -5,7 +5,6 @@
  (package masc)
  (wrapped true)
  (modules
-  mkdir_memo
   fd_cache
   owned_directory_chain
   owned_tree_cleanup

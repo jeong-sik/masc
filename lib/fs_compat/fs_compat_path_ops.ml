@@ -172,8 +172,7 @@ let remove_tree_unix (path : string) : unit =
     | stat when stat.Unix.st_kind = Unix.S_DIR ->
       Sys.readdir path
       |> Array.iter (fun name -> remove (Filename.concat path name));
-      Unix.rmdir path;
-      Mkdir_memo.invalidate path
+      Unix.rmdir path
     | _stat -> Sys.remove path
   in
   remove path
@@ -264,21 +263,3 @@ let mkdir_p (path : string) : unit =
        let eio_path = Eio.Path.(fs / path) in
        Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
 ;;
-
-(* RFC-0162 §3.1: once-per-path mkdir memoize. Hot append paths
-   ([append_jsonl] in particular) call [mkdir_p] on every record so
-   that the day-rollover dir gets created on first append. After the
-   dir exists, every subsequent call only burns a [Sys.file_exists]
-   or [Eio.Path.mkdirs ~exists_ok:true] stat syscall — yet on the
-   tool_call_io path this adds up to ~22k stats over a few hours and
-   contributes to the EMFILE/ENFILE pressure documented in the RFC.
-
-   The cache stores only the *fact* that the dir exists; it does not
-   keep an fd open. RFC-0108 §2.5's cached [out_channel] corruption
-   does not apply. RFC-0108 §3.3 (cross-domain fd cache) is unrelated.
-
-   Race: two domains may both miss-and-mkdir; the second [mkdir] is a
-   harmless EEXIST. The mutex covers the [Hashtbl] op only. *)
-let mkdir_p_memoized path = Mkdir_memo.mkdir_p_memoized ~mkdir_p path
-let invalidate_mkdir_memo path = Mkdir_memo.invalidate path
-let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()

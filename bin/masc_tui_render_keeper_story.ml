@@ -135,8 +135,10 @@ let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
     match attention_word row with
     | Some word -> Theme.warn (), word
     | None ->
-        ( Masc_tui_render_work.schedule_status_color row.sch_status
-        , Terminal_text.single_line row.sch_status )
+        (* The story speaks English for now; the words still take their
+           colour from the status, not from the word. *)
+        let status = Masc_tui_render_work.schedule_status_reading ~ko:false row.sch_status in
+        status.tone, status.word
   in
   let what =
     Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
@@ -256,10 +258,10 @@ let note_line = function
    wake happened. *)
 let wake_item_text wake =
   let row = Masc_tui_keeper_wakes.row wake in
-  let outcome = Terminal_text.single_line (Masc_tui_render_work.schedule_outcome_word row) in
   let outcome_text =
-    if String.equal outcome Masc_tui_theme.Glyph.no_value then ""
-    else " " ^ Masc_tui_render_prim.semantic_status_color outcome ^ outcome ^ Ansi.reset
+    match Masc_tui_render_work.schedule_outcome ~ko:false row with
+    | None -> ""
+    | Some (word, tone) -> " " ^ tone ^ Terminal_text.single_line word ^ Ansi.reset
   in
   let error_text =
     match row.sch_last_wake_status with

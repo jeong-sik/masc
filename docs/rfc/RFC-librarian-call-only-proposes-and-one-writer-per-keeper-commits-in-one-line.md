@@ -1405,6 +1405,16 @@ RFC #53307(§3.3)이 이 규칙을 고친다. 운영자가 2026-11-19 에 그 RF
 
 메시지 수를 atom 번호로 바꾸는 일은 지금 있는 `first_atom_at_or_after` 가 한다. 읽은 곳의 끝과 아래 세 단계는 digest 를 견주지 않는다. purge 가 읽은 곳의 메시지를 고쳐 써도 번호는 그대로다(§5.6). seed 는 지금처럼 digest 를 견준다. purge 가 seed 의 atom 을 여는 메시지를 고쳐 쓰면 seed 가 버려지고 요청은 읽은 곳의 끝에서 열린다. 지금도 그렇다.
 
+seed 의 세대 경계도 턴 기록에서 읽는다. 지금은 `turn-boundaries.jsonl` 에서 읽는다.
+
+- 이 trace 에서 센 마지막 `Reset` 을 찾는다. `Reset` 의 trace 는 `after.trace` 다.
+- 그 줄 앞에서 닫힌 이 trace 의 마지막 턴이 경계다. 턴 번호는 그 턴 `Opened` 줄의 `turn_ref` 에서 읽는다.
+- 그 번호 이하의 턴 기록(turn record)은 seed 가 되지 않는다.
+- `Reset` 뒤에 닫힌 턴은 경계 밖이다. 도구로 이력을 지운 턴 자신이 그렇다. 지금의 경계도 그 턴을 포함하지 않는다.
+- 세는 `Reset` 은 cause 가 `Announced Cleared` 이거나 `Unannounced` 인 것이다.
+- `Announced Recovered` 는 세지 않는다. purge 는 번호를 바꾸지 않는다. purge 가 고쳐 쓴 atom 의 seed 는 위의 digest 가 버린다.
+- 센 `Reset` 이 없거나 그 앞에 닫힌 턴이 없으면 경계가 없다.
+
 head 가 그 trace 에 없거나 닫힌 메시지가 `covered.closed_messages` 보다 적으면 시작점은 `Front_unresolved` 다. 이력을 지운 뒤 Librarian 이 그 `Reset` 단위를 읽기 전까지가 그렇다.
 
 provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당긴다. 코드에 있는 세 단계이고 그대로 둔다.

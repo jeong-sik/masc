@@ -291,7 +291,7 @@ let detail_rows ~ko ~(selected : D.preset_manifest option)
     match fetched with
     | Masc_tui_fetched.Ready d ->
       ([ plain "" ] @ comparison_rows ~ko d, saved_contents_rows ~ko d)
-    | Masc_tui_fetched.Loading -> [ plain ""; detail (text ~ko "내용을 읽는 중…" "Loading contents…") ], []
+    | Masc_tui_fetched.Loading -> [ plain ""; detail (text ~ko "내용을 읽는 중" "Loading contents") ], []
     (* A failed refresh keeps the contents it read last, under a line that
        says they are the last read. *)
     | Masc_tui_fetched.Stale (d, Detail_read_failed reason) ->

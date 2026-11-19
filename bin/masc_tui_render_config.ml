@@ -176,7 +176,7 @@ let render_runtime_params (state : state) =
    | None ->
      if state.runtime_params_loading && rows = []
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터를 읽는 중…" ~en:"  Loading parameters…" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터를 읽는 중" ~en:"  Loading parameters" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if Option.is_none state.runtime_params
@@ -381,7 +381,7 @@ let render_runtime_params (state : state) =
 let prompt_catalog_status_row state prompts =
   match prompts with
   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
-  | Masc_tui_fetched.Loading -> Some (Theme.recede (), ui_text state ~ko:"프롬프트 목록을 읽는 중…" ~en:"Loading prompt catalog…")
+  | Masc_tui_fetched.Loading -> Some (Theme.recede (), ui_text state ~ko:"프롬프트 목록을 읽는 중" ~en:"Loading prompt catalog")
   | Masc_tui_fetched.Stale (_, detail) ->
     Some
       ( Theme.bad ()
@@ -482,7 +482,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                        && not (Option.exists
                             (fun (key, _) -> String.equal key row.pr_key)
                             state.prompts_librarian_input) then
-                 [ui_text state ~ko:"관리자 실행 상세를 읽는 중…" ~en:"Loading admin execution details…"]
+                 [ui_text state ~ko:"관리자 실행 상세를 읽는 중" ~en:"Loading admin execution details"]
                else match state.prompts_librarian_input_error with
                  | Some detail -> [ui_text state ~ko:"읽기 실패: " ~en:"Read failed: " ^ Terminal_text.single_line detail]
                  | None ->
@@ -1155,7 +1155,7 @@ let render_presets (state : state) =
    | None, None ->
        incr drawn;
        box_line_styled buf cols ~style:(Theme.recede ())
-         (ui_text state ~ko:"  프리셋을 읽는 중…" ~en:"  Loading presets…")
+         (ui_text state ~ko:"  프리셋을 읽는 중" ~en:"  Loading presets")
    | Some snapshot, (Some _ | None) ->
        Option.iter
          (fun line ->
@@ -1613,7 +1613,7 @@ let render_config_models (state : state) =
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
-       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings… Esc cancels" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings · Esc cancels" ^ Ansi.reset);
        for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
@@ -2279,7 +2279,7 @@ let render_voice (state : state) =
        voice_body_line_styled buf cols ~style:(Theme.warn ()) (ui_text state ~ko:"  음성 설정을 읽지 못했습니다" ~en:"  Voice settings did not load");
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
-       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (ui_text state ~ko:"읽는 중…" ~en:"Reading…") Ansi.reset)
+       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (ui_text state ~ko:"읽는 중" ~en:"Reading") Ansi.reset)
    | Some json, None ->
        field (ui_text state ~ko:"상태" ~en:"status")
          (Option.value (string_of [ "status" ] json)

@@ -60,8 +60,16 @@ val assemble_request_context :
   dynamic_context_partition:Keeper_context_layers.rendered option ->
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
-(** Split uniquely renderer-attributed Active Goals and admitted request source
-    into System suffixes, in that order.
+(** Split uniquely renderer-attributed Active Goals into a System suffix. An
+    official client also reads the admitted request source as a System suffix
+    right behind them, including one that takes the turn over after an Agent
+    Core round. Agent Core leaves the source in the end context of the
+    turn's first request, so a turn that serves an admitted request and one
+    that does not send the same System
+    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A
+    later request adds no tail for it; an Anthropic lane that keeps the first
+    context in its history sends it again in place
+    ({!Prompt_block_id.injected_on_post_tool_round}).
     Agent Core carries Goals Awaiting Proof in that same issued System;
     official clients keep it in their turn-scoped context carrier. Completion
     Authority remains a context block. Missing, stale or duplicate renderer
@@ -74,9 +82,9 @@ val assemble_request_context :
     observations, for Agent Core, and as that block for an official client.
     They are read from [system] on each round and follow [checkpoint_owner],
     so a fallback moves them to the carrier of the request's owner. Later tool rounds
-    retain the exact issued observations and Completion Authority the previous
-    round of this turn carried. Proof state follows [checkpoint_owner], even
-    when a fallback changes the execution owner. They also retain
+    retain the Goal snapshot and the Completion Authority the previous round
+    of this turn carried. The admitted source and proof state follow
+    [checkpoint_owner], even when a fallback changes the execution owner. They also retain
     permitted extra blocks.
     Other world state stays first-round only. No store read or
     conversation-history write. *)

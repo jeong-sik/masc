@@ -635,7 +635,9 @@ let test_no_growth_before_a_turn_opened_under_the_window () =
     (Ledger.next_turn_peak ledger)
 ;;
 
-let test_a_moved_front_starts_the_growth_over () =
+(* A front that moves opens another window: its counts start over, and how
+   much one turn grew stays. *)
+let test_a_moved_front_keeps_how_much_a_turn_grew () =
   let grown =
     [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_500
     ; true, 0, 14, Some 1_600; false, 0, 16, Some 2_400 ]
@@ -644,7 +646,10 @@ let test_a_moved_front_starts_the_growth_over () =
   check (option int) "grown under the first window" (Some 3_300) (Ledger.next_turn_peak ledger);
   let moved, ledger = observe_all (grown @ [ true, 10, 18, Some 900 ]) in
   check string "the front moved" "front_moved_unmeasured" (Ledger.event_to_string moved.event);
-  check (option int) "the new window has measured no turn" None (Ledger.next_turn_peak ledger)
+  check (option int) "the new window's count plus the 900 the ended turn grew"
+    (Some (900 + 900)) (Ledger.next_turn_peak ledger);
+  let _, ledger = observe_all (grown @ [ false, 10, 18, Some 900 ]) in
+  check (option int) "a move inside a turn ends no turn" None (Ledger.next_turn_peak ledger)
 ;;
 
 let test_an_uncounted_request_leaves_its_turn_out () =
@@ -714,7 +719,8 @@ let () =
             test_a_turn_that_calls_no_tool_counts_its_first_request
         ; test_case "none before a turn opened under the window" `Quick
             test_no_growth_before_a_turn_opened_under_the_window
-        ; test_case "a moved front starts over" `Quick test_a_moved_front_starts_the_growth_over
+        ; test_case "a moved front keeps the growth" `Quick
+            test_a_moved_front_keeps_how_much_a_turn_grew
         ; test_case "an uncounted request leaves its turn out" `Quick
             test_an_uncounted_request_leaves_its_turn_out
         ] )

@@ -131,6 +131,18 @@ let grow (growth : turn_growth) ~turn_context (counted : usage option) =
     }
 ;;
 
+(* A front that moved opens another window. Its counts start over with the
+   request in hand: the last count before it was taken under the old window.
+   How much one turn grows does not depend on where the window opens, so the
+   largest growth stays. A move at a turn's first request adds the turn that
+   ended under the old window to it. *)
+let moved_growth (growth : turn_growth) ~turn_context (counted : usage option) =
+  let largest =
+    if turn_context then larger growth.largest (finished_growth growth) else growth.largest
+  in
+  { (growth_from counted) with largest }
+;;
+
 let next_turn_peak t =
   match t.growth.last_input, larger t.growth.largest (finished_growth t.growth) with
   | Some input, Some growth -> Some (input + growth)
@@ -317,10 +329,8 @@ let observe_trimmed
       ; last = request
       ; last_usage = (match usage with Some _ -> usage | None -> t.last_usage)
       ; growth =
-          (* A front that moved opens another window; the growth measured
-             under the old one does not describe it. *)
           (if evicted_atoms > 0
-           then growth_from counted
+           then moved_growth t.growth ~turn_context:request.turn_context counted
            else grow t.growth ~turn_context:request.turn_context counted)
       }
     in

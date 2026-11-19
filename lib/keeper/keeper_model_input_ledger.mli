@@ -121,8 +121,9 @@ type block =
     is the provider's [input_tokens] for a request, a sample or not: the
     turn's first request carries the turn context and is still the largest
     request of a turn that calls no tool. A request with the turn context
-    opens a turn. A front that moves, or a restart, opens another window, and
-    the growth starts over with it. *)
+    opens a turn. A front that moves opens another window: the counts start
+    over with it, and [largest] stays, since how much one turn grows does not
+    depend on where the window opens. A restart starts all of it over. *)
 type turn_growth =
   { ended_at : int option
         (** The count of the last request before the current turn, under
@@ -131,8 +132,8 @@ type turn_growth =
         (** The largest count among the current turn's requests; [None] once
             one of them went uncounted. *)
   ; largest : int option
-        (** The largest [peak - ended_at] of a turn that finished under this
-            window. *)
+        (** The largest [peak - ended_at] of a turn that finished since the
+            ledger started, under any of its windows. *)
   ; last_input : int option  (** The count of the last request. *)
   }
 
@@ -215,11 +216,11 @@ val holds : digest_at:(int -> string option) -> t -> bool
 val next_turn_peak : t -> int option
 (** The input the next turn is expected to reach while the window stays: the
     last request's count plus the largest growth of a turn that finished
-    under this window, the current turn included as if it had just finished
-    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §4). [None]
-    while either is unknown. The turn a window opened in has no count before
-    it, so the first growth is the next turn's, read once that turn has
-    opened. *)
+    since the ledger started, the current turn included as if it had just
+    finished (RFC a-sent-request-prefix-changes-only-when-the-window-moves
+    §4). [None] while either is unknown. The turn a window opened in has no
+    count before it under that window, so it adds no growth. A ledger's first
+    window has none until its second turn has opened. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)

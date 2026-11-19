@@ -40710,7 +40710,9 @@ Use relative paths for resources already held in the package. -->
             | Some (index, _) ->
                 state.tools_skill_cursor <- index;
                 Masc_tui_list_moves.show_tools_pane state Tools_surface;
-                tools_task_user_scroll state 0;
+                (* The chosen Composition comes into view where it is in
+                   the list, as a move key would bring it. *)
+                follow_tools_list state Masc_tui_list_moves.Tools_skills;
                 handle_skill_evidence ())
        | Some k
          when String.equal k Masc_tui_volume_gc.key

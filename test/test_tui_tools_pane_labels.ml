@@ -26,12 +26,14 @@ let ledger_json revision =
     [ "status", `String "available"; "keeper_name", `String "imp"
     ; "ledger", `Assoc [ "schema", `String "masc.skill-activations/v8"; "workspace_key", `String hex64; "session_id", `String trace_id; "revision", `String revision; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List [] ] ]
 
-let async_json =
+let async_json_submitted_at submitted_at =
   `Assoc
     [ "schema", `String "masc.async-request-observation/v1"; "status", `String "ready"
     ; "summary", `Assoc [ "active", `Int 1; "runtime_owned", `Int 1; "ownership_unknown", `Int 0; "record_errors", `Int 0 ]
-    ; "requests", `List [ `Assoc [ "request_id", `String "req-capture-0001"; "submitted_by", `String "capture-owner"; "keeper_name", `String "imp"; "status", `String "running"; "worker_ownership", `String "runtime_owned"; "submitted_at", `Float 1000.0; "elapsed_sec", `Float 12.5 ] ]
+    ; "requests", `List [ `Assoc [ "request_id", `String "req-capture-0001"; "submitted_by", `String "capture-owner"; "keeper_name", `String "imp"; "status", `String "running"; "worker_ownership", `String "runtime_owned"; "submitted_at", `Float submitted_at; "elapsed_sec", `Float 12.5 ] ]
     ; "startup_recovery", `Null ]
+
+let async_json = async_json_submitted_at 1000.0
 
 let ledger_of_json revision =
   match Masc.Keeper_skill_activation_ledger.of_projection_yojson (List.assoc "ledger" (match ledger_json revision with `Assoc fields -> fields | _ -> failwith "obj")) with
@@ -42,8 +44,8 @@ let revision_solved =
   let canonical = `Assoc [ "workspace_key", `String hex64; "session_id", `String trace_id; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List [] ] in
   Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string canonical)))
 
-let async_of_json () =
-  match Masc.Tui_decode.decode_async_request_observation async_json with
+let async_of_json ?(json = async_json) () =
+  match Masc.Tui_decode.decode_async_request_observation json with
   | Ok observation -> observation
   | Error detail -> failwith ("async: " ^ detail)
 
@@ -222,6 +224,53 @@ let test_readings_and_failures_belong_to_their_keeper () =
   Alcotest.(check (option string)) "an error read with no Keeper selected" error
     (held_tools_error ~selected:None ~held_keeper:None error)
 
+(* The Async pane lists every request with its age and scrolls. Building
+   the rows notes no redraw; each request row carries the instant its age
+   reads differently, and only a window that draws the row asks for it. *)
+let async_display ~cols =
+  let state = tools_state () in
+  let submitted_at = Unix.gettimeofday () -. 20. in
+  state.tools_async_observation <-
+    Some (async_of_json ~json:(async_json_submitted_at submitted_at) ());
+  state.tools_pane <- Tools_async;
+  Masc_tui_value.Redraw.begin_frame ();
+  let display = Masc_tui_render_tools.tools_display ~cols state in
+  Alcotest.(check bool) "building every row notes nothing" true
+    (Option.is_none (Masc_tui_value.Redraw.next_change ()));
+  (submitted_at, display)
+
+let drawn (display : Masc_tui_render_tools.display) ~first ~height =
+  Masc_tui_render_tools.drawn_change display
+    (Masc_tui_rows.of_list ~first ~height display.lines)
+
+let test_a_request_age_asks_for_a_redraw_only_when_drawn () =
+  let submitted_at, display = async_display ~cols:160 in
+  match display.row_changes with
+  | [ (index, at) ] ->
+    Alcotest.(check bool) "its age changes after it was submitted" true (at > submitted_at);
+    Alcotest.(check (option (float 0.))) "a window that draws the row asks for it" (Some at)
+      (drawn display ~first:index ~height:1);
+    Alcotest.(check (option (float 0.))) "a window above the row asks nothing" None
+      (drawn display ~first:0 ~height:index);
+    Alcotest.(check (option (float 0.))) "a window below the row asks nothing" None
+      (drawn display ~first:(index + 1) ~height:(List.length display.lines))
+  | ([] | _ :: _ :: _) as changes ->
+    Alcotest.failf "only the request row carries a change, not %d rows" (List.length changes)
+
+(* A request row too wide for the frame wraps, and its age may land on any
+   of the rows: a window that draws only the last of them still asks. *)
+let test_a_wrapped_request_asks_from_each_of_its_rows () =
+  let _, display = async_display ~cols:40 in
+  match display.row_changes, List.rev display.row_changes with
+  | (_, at) :: _ :: _, (last, _) :: _ ->
+    Alcotest.(check bool) "every row of the request carries one instant" true
+      (List.for_all (fun (_, other) -> Float.equal other at) display.row_changes);
+    Alcotest.(check (option (float 0.))) "a window over its last row asks for it" (Some at)
+      (drawn display ~first:last ~height:1)
+  | ([] | [ _ ]), _ | _, [] ->
+    Alcotest.failf "the request row wraps into more than one row, not %d"
+      (List.length display.row_changes)
+
 let () =
   let open Alcotest in
   run "TUI tools pane labels"
@@ -236,5 +285,9 @@ let () =
             test_only_a_whole_roster_drops_readings
         ; test_case "readings and failures belong to their Keeper" `Quick
             test_readings_and_failures_belong_to_their_keeper
+        ; test_case "a request age asks for a redraw only when drawn" `Quick
+            test_a_request_age_asks_for_a_redraw_only_when_drawn
+        ; test_case "a wrapped request asks from each of its rows" `Quick
+            test_a_wrapped_request_asks_from_each_of_its_rows
         ] )
     ]

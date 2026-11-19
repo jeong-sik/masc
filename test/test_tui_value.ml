@@ -474,6 +474,25 @@ let test_a_set_interval_reads_its_exact_seconds () =
     [ 45, "45s"; 90, "1m30s"; 300, "5m"; 3600, "1h"; 5400, "1h30m"; 21600, "6h"
     ; 86400, "1d"; 93600, "1d02h"; 0, "0s" ]
 
+(* Text built for a row that may be scrolled out of the window hands back
+   when it reads differently instead of noting it, so only the caller that
+   draws the row asks for a redraw. *)
+let test_a_deferred_build_hands_its_change_back () =
+  Redraw.begin_frame ();
+  let text, change = Redraw.deferred (fun () -> Ongoing.since ~now:1000.25 995.5) in
+  Alcotest.(check string) "the build returns its text"
+    (Redraw.measuring (fun () -> Ongoing.since ~now:1000.25 995.5)) text;
+  Alcotest.(check (option (float 1e-9))) "the frame notes nothing for it" None
+    (Redraw.next_change ());
+  Alcotest.(check (option (float 1e-9))) "the change is handed back" (Some 1000.5) change;
+  ignore (Ongoing.since ~now:1000.25 900.);
+  let _, change = Redraw.deferred (fun () -> Ongoing.since ~now:1000.25 995.5) in
+  Alcotest.(check (option (float 1e-9))) "a later instant than the frame's own" (Some 1000.5) change;
+  Alcotest.(check (option (float 1e-9))) "what the frame noted before stays" (Some 1020.)
+    (Redraw.next_change ());
+  let _, change = Redraw.deferred (fun () -> "no time text") in
+  Alcotest.(check (option (float 1e-9))) "text without time hands back none" None change
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -544,5 +563,7 @@ let () =
             test_a_reading_that_holds_notes_when_it_ends
         ; Alcotest.test_case "a measurement notes nothing" `Quick
             test_a_measurement_notes_nothing
+        ; Alcotest.test_case "a deferred build hands its change back" `Quick
+            test_a_deferred_build_hands_its_change_back
         ] )
     ]

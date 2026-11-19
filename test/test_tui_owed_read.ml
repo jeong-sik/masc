@@ -53,6 +53,40 @@ let test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff () =
   check bool "the next failure waits the doubled time" false (O.due ~now:4.9 t);
   check bool "after the doubled time" true (O.due ~now:5.0 t)
 
+(* A placeholder answer waits like a failure, unless a change was announced
+   while it was read: that change is read now, and the placeholders in a row
+   still count toward the next wait. *)
+let placeholder ~now t = O.placeholder ~retry_s ~max_retry_s ~now t
+
+let test_a_placeholder_waits_unless_a_change_came_during_it () =
+  let t = placeholder ~now:10.0 (O.started (O.changed O.settled)) in
+  check bool "not before the first wait" false (O.due ~now:11.9 t);
+  check bool "after the first wait" true (O.due ~now:12.0 t);
+  let t = placeholder ~now:12.0 (O.changed (O.started t)) in
+  check bool "a change during the read is read now" true (O.due ~now:12.0 t);
+  let t = placeholder ~now:12.0 (O.started t) in
+  check bool "the third placeholder waits the third wait" false (O.due ~now:19.9 t);
+  check bool "after the third wait" true (O.due ~now:20.0 t)
+
+(* The record as the read that just answered left it. A read in flight keeps
+   the change announced during it; an answer with no read in flight is a
+   read begun just now with no change since, so a placeholder from it waits
+   instead of reading again at once. *)
+let test_answering_keeps_the_change_of_the_read_in_flight () =
+  let changed_since = function
+    | O.Reading { changed_since; _ } -> Some changed_since
+    | O.(Settled | Owed _ | Waiting _) -> None
+  in
+  check (option bool) "a change during the read stays" (Some true)
+    (changed_since (O.answering (O.changed (O.started O.settled))));
+  check (option bool) "an unheard read counts as begun" (Some false)
+    (changed_since (O.answering O.settled));
+  check bool "an unheard read that failed is retried" true
+    (O.due ~now:2.0 (failed ~now:0.0 (O.answering O.settled)));
+  check bool "an unheard placeholder waits" false
+    (O.due ~now:0.0
+       (O.placeholder ~retry_s:2.0 ~max_retry_s:30.0 ~now:0.0 (O.answering (O.changed O.settled))))
+
 (* An answer arriving when no read is in flight belongs to a read that did
    not carry the owed change (an audit still owed, for one), so it settles
    nothing. *)
@@ -107,6 +141,10 @@ let () =
             test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff
         ; test_case "an answer without a read in flight keeps what is owed" `Quick
             test_an_answer_without_a_read_in_flight_keeps_what_is_owed
+        ; test_case "a placeholder waits unless a change came during it" `Quick
+            test_a_placeholder_waits_unless_a_change_came_during_it
+        ; test_case "answering keeps the change of the read in flight" `Quick
+            test_answering_keeps_the_change_of_the_read_in_flight
         ; test_case "a read that never ran is owed again" `Quick
             test_a_read_that_never_ran_is_owed_again
         ; test_case "a replacing read covers the changes before it" `Quick

@@ -9249,12 +9249,20 @@ let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
    yields to it, so it is defined before the first launch that checks it. *)
 let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
-(* A failed read leaves its record owed and waiting whoever started it, so a
-   read on entering a surface retries like an announced one. *)
+(* A failed read leaves its record waiting, whoever started it: a read on
+   entering a surface, which the record never saw start, retries on the same
+   clock as one it started. *)
 let failed_read owed =
   Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
     ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
-    (Masc_tui_owed_read.started (Masc_tui_owed_read.changed owed))
+    (Masc_tui_owed_read.answering owed)
+
+(* A placeholder answer, whoever started the read, is read again on the
+   failed read's clock; a change announced during it is read now. *)
+let placeholder_read owed =
+  Masc_tui_owed_read.placeholder ~retry_s:stream_reconnect_s
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+    (Masc_tui_owed_read.answering owed)
 
 (* runtime.toml reads when the server says it committed a text of it, on
    arrival and on a revalidation, and again after a failed read (RFC-0482
@@ -30297,11 +30305,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          Keeper now selected is still owed its read. *)
       if current then
         state.tools_inventory_owed <-
-          (if not (Option.equal String.equal keeper_name selected_name)
-           then Masc_tui_owed_read.changed (Masc_tui_owed_read.succeeded state.tools_inventory_owed)
-           else match result with
-             | Ok _ -> Masc_tui_owed_read.succeeded state.tools_inventory_owed
-             | Error _ -> failed_read state.tools_inventory_owed);
+          tools_inventory_owed ~failed:failed_read ~warming:placeholder_read
+            (tools_inventory_answer ~selected:selected_name ~answered_for:keeper_name result)
+            state.tools_inventory_owed;
       if generation = state.tools_request_generation
          && Option.equal String.equal keeper_name selected_name then (
       match result with
@@ -30311,13 +30317,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_inventory <- Some snapshot;
           state.tools_inventory_keeper <- keeper_name;
           state.tools_error <- None;
-          (* No push says when the server's warming placeholder becomes the
-             built inventory, so a warming answer is read again like a failed
-             one. *)
-          state.tools_inventory_owed <-
-            (match snapshot.Masc.Tui_decode_tools.ts_freshness with
-             | Masc.Tui_decode_tools.Settled -> Masc_tui_owed_read.succeeded state.tools_inventory_owed
-             | Masc.Tui_decode_tools.Warming -> failed_read state.tools_inventory_owed);
           let kept =
             match selected with
             | None -> false
@@ -30349,10 +30348,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  follow_tools_list state Masc_tui_list_moves.Tools_skills
              | Some Masc_tui_list_moves.Tools_async_requests | None -> ())
       | Error detail ->
-          (* The failure and its wait are this Keeper's, like a reading. *)
+          (* The failure is this Keeper's, like a reading. *)
           state.tools_inventory_keeper <- keeper_name;
-          state.tools_error <- Some detail;
-          state.tools_inventory_owed <- failed_read state.tools_inventory_owed)
+          state.tools_error <- Some detail)
   | Skill_evidence_loaded (request, key, result) ->
       if Option.exists (fun held -> held == request) state.tools_evidence_request then (
         state.tools_evidence_request <- None;

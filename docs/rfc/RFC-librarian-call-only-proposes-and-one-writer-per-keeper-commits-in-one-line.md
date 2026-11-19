@@ -204,7 +204,7 @@ type turn_line =
              ; closed_before : slice list }
 ```
 
-- `closed_messages` 는 닫힌 메시지 수다. 마지막 segment 의 `segment_messages` 에 head 가 가진 턴들의 `messages` 를 더한다. 열린 메시지는 세지 않는다. 턴 밖에서 줄을 쓰는 쪽은 열린 메시지를 먼저 닫는다(§5.2). 그래서 턴 밖에서 잡은 끝자리는 head 가 가진 메시지를 모두 센다.
+- `closed_messages` 는 닫힌 메시지 수다. 마지막 segment 의 `segment_messages` 에 head 가 가진 턴들의 `messages` 를 더한다. 열린 메시지는 세지 않는다. 열린 메시지는 닫힌 뒤의 첫 단위에 든다(§5.2).
 - 닫힌 턴 수는 쓰지 않는다. purge 가 메시지 하나를 다시 쓰면 그 뒤의 닫힌 턴이 모두 bundle 하나로 합쳐진다(`checkpoint_objects.ml:478-499, 590-615`). 턴 수는 바뀌고 메시지 수와 순서는 남는다.
 - official-client 의 끝자리는 파일 길이가 아니라 마지막 줄바꿈의 offset 이다. 줄이 반만 쓰인 순간에 끝자리를 잡아도 그 줄이 둘로 갈리지 않는다.
 - `Turn_id.t` 는 그 턴의 `Opened` 줄이 시작하는 바이트 offset 이다. 줄 번호를 쓰면 boot 때마다 파일 전체를 세어야 한다.
@@ -252,24 +252,31 @@ type turn_line =
 | 제품 경로가 head 를 줄이거나 바꾸려 한다 | 먼저 `Reset {Announced _; before; after; closed_before}` 를 쓴다. 덧붙임이 성공한 뒤에만 head 를 바꾼다 |
 | 줄을 쓰려는데 head 가 다른 trace 에 있거나, 마지막 끝자리보다 아래이거나, 해석되지 않는다 | 같은 덧붙임 안에서 자기 줄 앞에 `Reset {Unannounced; before = 그 끝자리; after = 지금 head 의 빈 끝자리}`. 까닭은 표 아래에 적었다 |
 
-**턴 밖에서 줄을 쓰는 쪽은 head 의 열린 메시지를 먼저 닫는다.** 받아들임, 프로세스 시작 단계, head 를 줄이는 함수가 그렇다.
-head 에 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 열린 메시지가 없으면 저장하지 않는다.
+**열린 메시지는 닫힌 뒤의 첫 단위에 든다.** 끝자리는 닫힌 메시지만 센다. 열린 메시지는 닫힐 때까지 어느 줄에도 없다.
 
-- 턴 밖에서 head 에 열린 메시지가 남는 때는 셋이다. 턴이 도중에 저장하고 죽었다. 턴의 닫는 저장이 실패했다. 이력 지우기가 남길 메시지를 열린 채로 넣었다.
-- 그래서 받아들임, 프로세스 시작 단계, head 를 줄이는 함수가 잡는 끝자리는 head 의 메시지를 모두 센다. 줄이 이름 붙이지 못하는 메시지가 없다.
-- 받아들임이 닫은 것은 `baseline` 앞이다. `unattributed` 에 들고 Task 없이 보인다. 죽은 턴이 남긴 것이 새 턴의 Task 를 빌리지 않는다.
-- 닫지 못한 `Opened` 가 있었으면 그 메시지는 `Closed {Close_missing}` 의 `own` 에 든다. 프로세스 시작 단계가 닫은 것은 `Closed {Process_exited}` 의 `own` 에 든다.
+- 받아들임은 head 의 열린 메시지를 닫지 않는다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다.
+  - Keeper 를 만들 때의 첫 저장(`keeper_turn_up_create.ml:288`).
+  - 멈춘 턴을 잇는 저장(`keeper_direct_gate_continuation.ml:297`, `keeper_direct_checkpoint_continuation.ml:75`, `keeper_direct_runtime_continuation.ml:148`).
+  - 입력을 기다린 답의 저장(`keeper_input_wait_response.ml:191`).
+- 그 메시지는 받아들인 턴의 것이다. 그 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 받아들임이 닫으면 `baseline` 앞이 되어 Task 없이 실린다.
+- 턴이 남긴 열린 메시지도 같은 길로 간다. 다음 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 그 메시지는 다음 턴의 Task 와 함께 보인다. 그런 때는 셋이다.
+  - 턴의 닫는 저장이 실패했다. 그 턴의 줄이 `Save_failed` 라서 읽는 쪽은 그 사정을 안다.
+  - 이력 지우기가 남길 메시지를 열린 채로 넣었다(§5.6).
+  - `Opened` 를 못 쓴 턴이 도중에 저장하고 죽었다. 닫지 못한 `Opened` 가 없어서 프로세스 시작 단계가 닫지 않는다.
+- 닫지 못한 `Opened` 가 있었으면 `Closed {Close_missing}` 의 `own` 은 그 턴의 닫는 저장이 닫은 것이다. 닫는 저장도 없었으면 비어 있다.
+- 프로세스 시작 단계와 head 를 줄이는 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 없으면 저장하지 않는다.
+- 프로세스 시작 단계는 마지막 `Opened` 가 닫히지 않았을 때만 닫는다. 닫는 것은 죽은 턴이 저장한 메시지다. `Closed {Process_exited}` 의 `own` 에 든다.
 - head 를 줄이는 함수가 닫은 것은 `Reset` 줄의 `closed_before` 에 든다. 지우기와 recovering purge 가 버리는 메시지는 열려 있던 것까지 그 줄에 이름이 있다.
-- 받아들임과 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 카운터 `turn_log_open_close_failed` 가 오른다. 남은 것은 다음에 줄 쓰는 쪽이 다시 닫는다. 그 전에 턴의 닫는 저장이 먼저 닫으면 그 턴의 `own` 에 든다.
+- 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 카운터 `turn_log_open_close_failed` 가 오른다. 남은 것은 다음 턴의 닫는 저장이 닫는다.
 - head 를 줄이는 함수는 이 저장이 실패하면 줄을 쓰지 않고 거절한다. head 변경도 같은 저장소에 쓰는 일이라 어차피 실패한다.
-- 값은 저장 한 번이다. 이력을 한 번 읽고 bundle 하나와 head 를 쓴다. 위 세 경우가 있었던 Keeper 에서만 든다.
+- 값은 저장 한 번이다. 이력을 한 번 읽고 bundle 하나와 head 를 쓴다.
 - 지금 boot 의 꼬리 복구는 마지막 tool 요청이 결과를 기다릴 때만 죽은 턴의 메시지를 닫는다(`keeper_transcript_tail_recovery.mli:14-15`). 그 밖에는 열린 채 남아 다음 턴의 `own` 에 든다. 지우기와 recovering purge 는 그것을 이름 없이 버린다.
 
 reset 줄의 `after` 는 앞 줄의 `after` 에서, 그 경로가 바꾼 저장소의 값만 지금 값으로 바꾼 것이다.
 
 **줄 쓰는 쪽이 본 `Unannounced` reset 의 `after` 는 지금 head 의 빈 끝자리다.** 그 trace 에 닫힌 메시지가 0 인 끝자리다. 다른 저장소의 값은 `before` 그대로다.
 
-- 다음 단위는 지금 head 가 가진 닫힌 메시지를 처음부터 싣는다. `Opened` 를 못 쓴 턴이 새 head 에서 닫은 것도, 받아들임이 닫은 것도 빠지지 않는다.
+- 다음 단위는 지금 head 가 가진 닫힌 메시지를 처음부터 싣는다. `Opened` 를 못 쓴 턴이 새 head 에서 닫은 것도 빠지지 않는다.
 - `after` 를 지금 끝자리로 두면 그 메시지들이 줄 없이 지나간다. 지우기 표의 「넣은 것은 다음 줄이 싣는다」와도 어긋난다.
 - 대가가 하나 있다. head 가 앞부분을 그대로 둔 채 줄어든 것이었으면 그 앞부분이 한 번 더 든다. 알리지 않은 변경은 어느 쪽인지 가릴 수 없어서 빠뜨리지 않는 쪽을 고른다.
 - 해석되지 않는 head 는 그 trace 의 빈 head 로 센다. checkpoint 버전이 바뀌어 옛 head 를 읽지 못하는 턴(`Saved_history_superseded`)이 여기 든다. 받아들일 때 이 줄이 쓰이고, 그 턴의 첫 저장이 head 를 새 이력으로 바꾼다. 그 턴이 닫은 것은 `own` 에 든다.
@@ -337,7 +344,7 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 - `Opened` 는 이 점을 옮기지 않는다.
 - 규칙은 저장소 넷에 똑같다. Agent-Core 메시지, official-client 의 두 파일, chat 바이트, 외부 행이다. 그래서 `Closed` 와 다음 `Opened` 사이에 쓰인 것은 다음 단위에 든다.
 - `Closed` 는 Agent-Core 범위를 `baseline` 에서 둘로 나눈다. 앞쪽이 `unattributed`, 뒤쪽이 `own` 이다. 그 턴의 `Opened` 뒤에 `Reset` 이 있으면 나누지 않고 전부 `unattributed` 다. 그 범위는 그 턴이 쓴 것이 아니다. 일어나지 않은 head 변경을 한 번 더 읽는 것이거나 지우기가 남긴 것이다.
-- `baseline` 앞의 것은 Task 없이 보여 준다. `Reset` 단위도 Task 없이 보여 준다. 옛 턴이 다른 턴의 Task 를 빌리지 않는다.
+- `baseline` 앞의 것은 Task 없이 보여 준다. `Reset` 단위도 Task 없이 보여 준다. 옛 턴이 다른 턴의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다. 어느 단위에 들고 Task 가 붙는지는 §5.2 가 정한다.
 - `Close_missing` 이나 `Process_exited` 로 닫힌 턴의 `own` 은 「이 턴이 닫았다」가 아니라 「이 턴을 받아들인 뒤에 닫혔다」는 뜻이다. 질문에 그렇게 적는다.
 
 이 규칙이면 어느 head 가 닫은 메시지든 빠지지 않고 단위에 든다. 줄을 못 쓴 턴이 닫은 것, 늦게 들어온 저장, 꼬리 복구가 닫은 것도 같다.
@@ -428,7 +435,7 @@ type purge_refused = Turn_log_unwritable of io_error
 - sweep 은 턴 기록이 있는 Keeper 디렉터리를 모두 읽는다. Keeper 가 켜져 있든 꺼져 있든 같다.
 - Keeper 를 멈추면서 session 을 지우면(`remove_session`) head 와 그 trace 의 bundle 이 함께 없어지고 턴 기록은 남는다. 정지가 지우기 전에 `Unannounced` 줄을 쓴다(§5.2). 그 앞의 안 읽은 단위는 `Content_missing` 으로 적힌다.
 - 이력 지우기는 그 trace 의 옛 object 와 `covered` 뒤의 fragment 바이트를 그대로 둔다.
-- 지우기가 남기는 System 메시지는 열린 채로 들어간다. 다음 받아들임이 닫고, 그 메시지는 한 번 더 읽힌다.
+- 지우기가 남기는 System 메시지는 열린 채로 들어간다. 다음 턴의 닫는 저장이 닫고, 그 메시지는 한 번 더 읽힌다.
 
 이 규칙의 값은 디스크다. 안 읽은 줄이 가리키는 bundle 은 읽힌 뒤 첫 프로세스 시작까지 남는다. Librarian 이 많이 밀린 Keeper 는 purge 를 해도 그만큼의 옛 bundle 을 그대로 갖고 있다. purge 가 바꿔 놓은 object 는 지금처럼 다음 시작 때 지워진다.
 
@@ -1488,7 +1495,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I9 | 죽은 뒤 상태는 durable 기록에서 다시 만든다. 깨움과 신호는 귀띔이고, 할 일은 디스크에서 계산한다 | 상태는 반영 기록의 꼬리 줄과 턴 기록에서 나온다. 귀띔을 놓쳐도 `Idle` 의 pulse 가 턴 기록의 길이를 보고 찾는다(§9.5) | 두 번 복구 시험(L5). `LibrarianWriter` 의 boot 행 |
 | I10 | durable 기록은 들어온 일만큼 자란다. 패스 수나 장애 시간만큼 자라지 않는다 | §10 | F10 시험(L6) |
 | I11 | 보내는 것의 크기는 만들 때 묶인다 | §6.3 에 적은 뜻으로 지킨다. 미리 세는 slot 은 보내기 전에, 그 밖은 provider 자신의 창이 묶는다 | F6 시험(L7) |
-| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다 | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. 항목마다 보낸 이가 있다. `baseline` 앞의 내용에는 Task 가 없다. 죽은 턴이 남긴 열린 메시지는 다음 받아들임이 `baseline` 앞에서 닫는다(§5.2) | `LibrarianTurnLog`: `LeftoverNotBorrowed` |
+| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다(§5.2) | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. 항목마다 보낸 이가 있다. `baseline` 앞에서 닫힌 내용에는 Task 가 없다. 죽은 턴이 저장한 메시지는 프로세스 시작 단계가 그 턴의 단위로 닫는다(§5.2). 받아들일 때 열려 있던 메시지는 받아들인 턴의 것이다 | `LibrarianTurnLog`: `OwnNotClosedBefore` |
 | I13 | 날것 턴은 덧붙이기만 한다. purge 가 독자가 무엇을 읽었는지를 정하지 않는다 | 줄이 내용을 sha 로 이름 붙은 bundle 로 가리킨다. purge 는 Librarian 의 읽은 자리를 읽지 않는다. 고쳐 쓰기만 하는 purge 는 단위 줄이 아직 없는 메시지(닫혔든 열렸든)를 건드리지 않는다. 끊긴 곳 뒤를 버리는 purge 는 버리는 것을 줄에 먼저 적는다(§5.6) | `LibrarianTurnLog`: `UnreadReadable`. 단위 줄 위의 메시지를 고쳐 쓰는 buggy 설정이 깨진다(§21) |
 | I14 | metric 이 무엇도 막지 않는다. 갈래는 타입으로 나눈다. 모양은 하드컷으로 바꾼다 | 경보와 카운터는 아무것도 막지 않는다. 갈래는 닫힌 생성자 위에 있다 | 타입 검사. L9 의 해석 시험 |
 | I15 | 지식 하나에 맞는 fact 하나. 낡았는지는 Librarian 이 판단한다. 시간이나 TTL 이 아니다 | Librarian 이 `Drop`, `Merge`, `Revise` 로 판단한다. TTL 도 크기 예산도 fact 를 지우지 않는다. 자리 내기는 Librarian 에게 하는 질문이다 | L1 채점기(merge 뒤 보존, 변화율) |
@@ -1607,7 +1614,7 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
 | lane 선언 | Librarian 은 자기 lane 표를 읽는다. working-context pass 의 표와 나눈다 | lane 종류가 하나 는다. 설치 때 운영자가 slot 목록을 옮겨 적는다 |
 | 읽기 시작점 | Keeper 가 provider 에게 마지막으로 받아들여진 요청의 시작. 풀리지 않으면 지금 | 컷 때 Keeper 의 창 밖에 있던 안 읽은 턴은 읽지 않는다 |
 | reset | head 를 바꾸기 전에 줄을 먼저 쓴다. 줄 뒤에 변경이 일어났는지는 가리지 않는다. 다음 단위는 언제나 그 줄의 `after` 에서 시작한다 | 변경이 일어나지 않았으면 `after` 와 `before` 사이를 한 번 더 읽는다. 지우기에서는 Keeper 가 들고 있던 이력 전체다 |
-| 턴 밖의 열린 메시지 | 턴 밖에서 줄을 쓰는 쪽이 먼저 닫는다. 그래서 그때의 끝자리가 head 의 메시지를 모두 센다 | 도중에 죽은 턴이나 실패한 닫는 저장 뒤에 저장이 한 번 더 든다 |
+| 턴 밖의 열린 메시지 | 프로세스 시작 단계와 head 를 줄이는 함수가 줄 앞에서 닫는다. 받아들임은 닫지 않는다 | 도중에 죽은 턴 뒤의 프로세스 시작과 head 를 줄일 때에 저장이 한 번 더 든다 |
 | purge | Librarian 의 읽은 자리를 보지 않는다. 마지막 단위 줄 아래의 닫힌 메시지만 고쳐 쓴다 | 안 읽은 줄이 가리키는 bundle 은 읽힐 때까지 디스크에 남는다. 단위 줄이 아직 없는 메시지는 다음 purge 까지 그대로다 |
 | 반영 기록이 없는 boot | 언제나 첫 boot 다. `Log_started` 부터 읽는다. Keeper 는 쓰는 쪽을 기다리지 않는다 | 없어진 반영 기록은 `Stopped` 로 보이지 않는다. 턴 기록을 처음부터 한 번 더 읽고, 철회한 claim 이 다시 들어올 수 있다. 꼬리를 읽지 못한 반영 기록을 맡길 때도 같다 |
 | `Refused_at_bottom` | 상태로 둔다. 모든 slot 이 크기를 말한 질문은 사건이 있을 때만 다시 묻는다 | 상태가 하나 많다. 없으면 서 있는 Keeper 마다 pulse 마다 질문을 다시 짓고 아무것도 알아내지 못한다 |
@@ -1965,7 +1972,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | `NoSilentSkip`, `NoSkipOfHeadMessage` | 닫힌 메시지는 모두 줄에 이름이 있거나, 기록된 모르는 구간에 있거나, 없어진 파일과 함께 갔거나, 다음 단위 줄이 싣는다 |
 | `NoOpenLost` | 열린 채로 head 를 떠나는 메시지는 없다. 줄에 구간을 적은 정지만 다르다 |
 | `EveryClosedInOneUnit` | 닫힌 메시지는 단위 하나에 든다. 둘에 드는 것은 지우기가 남긴 메시지와 일어나지 않은 head 변경뿐이다 |
-| `LeftoverNotBorrowed` | 죽은 턴이나 실패한 닫는 저장이 열어 둔 메시지는 뒤에 받아들인 턴의 `own` 에 들지 않는다. 그 받아들임의 닫는 저장이 실패한 때만 다르다 |
+| `OwnNotClosedBefore` | 턴의 `own` 은 그 턴을 받아들일 때 이미 닫혀 있던 메시지를 싣지 않는다. 그때 열려 있던 메시지는 그 턴이 닫을 것이라 실을 수 있다 |
 | `UnreadReadable`, `UndeliveredReadable` | 아직 읽지 않은 것은 줄이 이름 붙인 내용 그대로 저장소에 있다. 파일이 잘리거나 바뀐 뒤에도 같다 |
 | `PurgeOnlyRewritesNamed` | purge 는 줄이 이름 붙인 것만 고쳐 쓴다 |
 | `OnlyWrittenOrder` | 줄의 순서는 `Log_started ( Reset \| Opened Reset* Closed )*` 다 |
@@ -1976,17 +1983,16 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 
 | 설정 | 모양 | 상태 수 |
 |---|---|---|
-| `LibrarianTurnLog` | 턴 경로, 프로세스 시작 단계, 일어나지 않을 수 있는 알린 reset 하나. 메시지 셋, 줄 여섯 | 33,153 |
-| `-purge` | 고쳐 쓰기만 하는 purge 와 프로세스 시작 때의 sweep | 35,587 |
-| `-stop-removes-session` | session 을 지우는 정지 둘과 그 사이의 `Opened` 없는 턴 | 34,295 |
+| `LibrarianTurnLog` | 턴 경로, 프로세스 시작 단계, 일어나지 않을 수 있는 알린 reset 하나. 메시지 셋, 줄 여섯 | 22,097 |
+| `-purge` | 고쳐 쓰기만 하는 purge 와 프로세스 시작 때의 sweep | 23,587 |
+| `-stop-removes-session` | session 을 지우는 정지 둘과 그 사이의 `Opened` 없는 턴 | 25,856 |
 | `-file-replaced` | 읽는 쪽이 반영한 뒤 턴 기록을 지우고 새 파일이 자란다 | 1,729 |
-| `-named-once` | 두 번 드는 원인 둘을 끈 모양. 어느 메시지도 두 번 이름 붙지 않는다 | 95,359 |
+| `-named-once` | 두 번 드는 원인 둘을 끈 모양. 어느 메시지도 두 번 이름 붙지 않는다 | 65,630 |
 
 | 옛 규칙 | 어긴 속성 |
 |---|---|
-| 받아들임이 열린 메시지를 먼저 닫지 않는다 | `LeftoverNotBorrowed` |
 | head 를 줄이는 함수가 열린 메시지를 먼저 닫지 않는다 | `NoOpenLost` |
-| `Opened` 뒤에 `Reset` 이 있는 `Closed` 의 범위가 전부 `own` 이다 | `LeftoverNotBorrowed` |
+| `Opened` 뒤에 `Reset` 이 있는 `Closed` 의 범위가 전부 `own` 이다 | `OwnNotClosedBefore` |
 | 정지가 줄 없이 session 을 지운다 | `NoSilentSkip` |
 | 정지가 같은 `after` 의 줄이 있으면 줄을 쓰지 않는다 | `NoSilentSkip` |
 | 일어나지 않은 reset 을 수로 가려 거둔다 | `NoSilentSkip` |
@@ -1995,7 +2001,9 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | sweep 이 head 만 뿌리로 잡는다 | `UnreadReadable` |
 | sweep 이 offset 을 확인 없이 쓴다 | `UndeliveredReadable` |
 
-닿는다는 것을 보인 가지는 아홉이다. 설정 이름이 `-reachable-buggy` 로 끝난다.
+닿는다는 것을 보인 가지는 여덟이다. 설정 이름이 `-reachable-buggy` 로 끝난다.
+
+턴 밖에서 열린 메시지를 두는 저장은 걸음으로 따로 두지 않았다. 닫는 저장이 실패한 턴이 같은 상태를 만든다. 받아들일 때 열려 있던 메시지가 그 턴의 `own` 에 드는 가지는 `-held-owned-reachable-buggy` 가 보인다.
 
 다루지 않는 것: 메시지의 바이트, official-client 의 fragment, Keeper 여럿, 제품 밖에서 손으로 한 수정.
 
@@ -2065,7 +2073,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | Memory 없이 읽는 동안은 warn 이다. Memory 가 어느 slot 에도 안 들어가면 error 다 | 앞의 것도 error 로 올릴 수 있다. 그동안 합치기와 고치기가 멈춰 있다 |
 | 반영 기록이 없으면 턴 기록에 무엇이 있든 첫 boot 다 | 「턴 줄이 있으면 잃은 기록」으로 가르면 손으로 지운 기록이 `Stopped` 로 보인다. 그러려면 Keeper 의 첫 턴을 `Started` 뒤로 묶어야 하고, Keeper 를 띄우는 길마다 같은 검사를 넣어야 한다 |
 | 알린 head 변경이 일어났는지를 가리지 않는다. 다음 단위는 언제나 그 줄의 `after` 에서 시작한다 | head 가 적어 둔 chain 을 줄에 싣고 견주면, 일어나지 않은 변경 뒤의 「한 번 더 읽기」 하나를 아낀다. 그 값은 Agent-Core 부분만 말하고, 턴 64개가 segment 로 묶이면 없어지고, official-client 만 쓰는 Keeper 에는 없다. 필드 하나, 생성자 하나, purge 의 순서 규칙 하나가 든다. 수로 가리면 일어난 지우기를 거둔 것으로 읽고 턴을 건너뛸 수 있다 |
-| 턴 밖에서 줄을 쓰는 쪽이 head 의 열린 메시지를 먼저 닫는다 | 열린 메시지의 digest 를 줄에 따로 실을 수도 있다. 필드 하나와 sweep 뿌리 하나가 든다. 죽은 턴이 남긴 것이 다음 턴의 Task 를 빌리는 일은 그대로 남는다 |
+| 열린 메시지는 닫힌 뒤의 첫 단위에 든다. 받아들임은 닫지 않는다. 프로세스 시작 단계와 head 를 줄이는 함수만 줄 앞에서 닫는다 | 받아들임도 닫게 하면 닫는 저장이 실패한 턴의 메시지가 Task 없이 실린다. 그 대신 멈췄다가 잇는 턴과 Keeper 의 첫 턴의 메시지도 Task 없이 실린다. 둘을 가르려면 열린 메시지를 누가 남겼는지를 head 에 적어야 한다. 값: 닫는 저장이 실패한 턴의 메시지가 다음 턴의 Task 와 함께 보인다 |
 | session 을 지우는 정지가 지우기 전에 줄을 쓴다 | 쓰지 않으면 다음에 줄 쓰는 쪽이 수를 보고 알아내야 한다. 마지막 끝자리가 0 이거나 head 가 같은 수까지 다시 자라면 구멍이 기록 없이 지나간다. 값: 턴 기록에 쓰지 못하면 그 정지는 session 을 지우지 못한다 |
 | 읽은 자리를 모르면 처음부터 읽는다. 꼬리를 읽지 못한 반영 기록을 맡길 때도 같다 | 끝에서 이어 읽으면 값이 들지 않는다. 그 대신 안 읽은 줄이 기록 없이 지나간다 |
 | 쓰는 쪽은 처음 쓰일 때 만든다. Keeper 를 띄우는 길은 쓰는 쪽을 모른다 | 띄우는 길마다 만들면 pulse 한 번을 기다리지 않는다. 길 하나가 빠지면 그 Keeper 의 쓰기가 모두 거절되고 경보가 없다 |
@@ -2099,7 +2107,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | session 을 지우는 정지의 마무리 단계가 그 Keeper 의 턴이 모두 끝난 뒤에 도는지 | 아니면 정지가 쓴 줄 뒤에 그 턴의 `Closed` 가 온다. 그 줄의 끝자리는 없어진 head 의 것이다 | reset 층(L3c) |
 | head 를 줄이는 함수가 `Reset` 줄부터 head 설치가 돌아올 때까지 턴의 줄을 쓰는 쪽과 같은 잠금을 쥐는지. 지우기와 dashboard purge 가 쥐는 잠금 이름만 읽었다(§5.2) | 아니면 줄과 head 변경 사이에 턴이 받아들여지고, 그 턴의 `baseline` 이 없어질 head 의 것이다 | reset 층(L3c) |
 | 같은 이름의 runtime 파일이 남아 있을 때 Keeper 만들기가 거절하는지 | 거절하면 「meta 를 치우고 다시 만든 Keeper」 경로(§5.2)가 없다 | reset 층(L3c) |
-| 끝이 결과를 기다리는 tool 요청인 열린 메시지를 닫은 뒤에, 다음 턴이 그 이력을 지금처럼 읽는지. 지금은 턴이 시작할 때 메모리에서 닫는 메시지를 덧붙인다(`keeper_agent_run.ml:229-230`). 닫는 저장은 메시지 목록을 바꾸지 않고 닫힘의 경계만 옮긴다 | 다르게 읽으면 받아들임이 닫는 저장을 하기 전에 그 꼬리를 먼저 고쳐야 한다 | 턴 기록 층(L3a) |
+| 끝이 결과를 기다리는 tool 요청인 열린 메시지를 닫은 뒤에, 다음 턴이 그 이력을 지금처럼 읽는지. 지금은 턴이 시작할 때 메모리에서 닫는 메시지를 덧붙인다(`keeper_agent_run.ml:229-230`). 닫는 저장은 메시지 목록을 바꾸지 않고 닫힘의 경계만 옮긴다 | 다르게 읽으면 프로세스 시작 단계가 닫는 저장을 하기 전에 그 꼬리를 먼저 고쳐야 한다 | 프로세스 시작 단계의 층(L3a3b4c) |
 | 메시지 codec 이 옛 빌드가 쓴 object 를 같은 바이트로 되돌려 주는지 | 아니면 purge 가 건드리지 않은 메시지의 digest 가 바뀐다. 시험은 풀어낸 값이 아니라 저장된 digest 를 견준다 | purge 층(L8) |
 | bundle 이 다른 object 를 가리키는지 | 가리키면 sweep 이 줄의 bundle 에서 그 object 까지 따라가야 한다 | purge 층(L8) |
 | Librarian 의 프롬프트를 파일에서 읽는 경우, 그 파일이 바뀐 것을 알리는 신호가 있는지 | 없으면 손으로 고친 프롬프트는 재시작 때 보인다. 설계는 그렇게 적었다 | 묻기 층(L6) |

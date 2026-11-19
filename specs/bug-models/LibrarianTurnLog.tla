@@ -41,10 +41,9 @@
 (*                         twice only for the two stated causes (a message *)
 (*                         a clear keeps; a head change that was not       *)
 (*                         made).                                          *)
-(*   LeftoverNotBorrowed   a message left open by a dead turn or a failed  *)
-(*                         closing save is never in the own slice of a     *)
-(*                         turn admitted later, unless that admission's    *)
-(*                         closing save failed (closeFailedAt).            *)
+(*   OwnNotClosedBefore    the own slice of a turn names no message that   *)
+(*                         was closed, and not open again, when the turn   *)
+(*                         was admitted.                                   *)
 (*   UnreadReadable        what no commit passed is in the store as the    *)
 (*                         line named it, and the first line that names a  *)
 (*                         message names it as first written.              *)
@@ -96,7 +95,7 @@ CONSTANTS
     Unseen,         \* BOOLEAN: a by-hand shrink may regrow to the last mark before a line writer looks (stated limit)
     RegrowAligned,  \* BOOLEAN: a cut file that regrows past the saved offset has a line start there (stated limit)
     OwnAfterReset,  \* a Closed whose Opened is followed by a Reset: "unattributed" (its range has no task) | "own" (the whole range is own)
-    Bug             \* "none" | "no_close_before_reset" | "no_close_at_admission" | "remove_session_no_line"
+    Bug             \* "none" | "no_close_before_reset" | "remove_session_no_line"
                     \* | "stop_line_deduped" | "sweep_offset_unchecked" | "sweep_head_only" | "purge_above_mark"
                     \* | "purge_open" | "withdrawn_by_count"
 
@@ -138,8 +137,6 @@ VARIABLES
     notHap,      \* ghost: announced Reset lines whose head change was not made
     rereadKept,  \* ghost: ids a clear kept (installed open, closed again): second-reading cause 1
     rereadNotMade, \* ghost: ids at positions after+1 .. before of an announced change that was not made: cause 2
-    leftover,    \* ghost: ids a turn left open when it ended or died
-    closeFailedAt, \* Opened lines whose admission could not close the head's open messages first (the excuse of LeftoverNotBorrowed)
     stopLines,   \* ghost: Unannounced lines a stop that removes the session wrote
     wit,         \* ghost: witness flags (reachability)
     budget
@@ -148,7 +145,7 @@ hv == << head, objects, nextMsg, closedIds, openLost >>
 lv == << log, logId, lostIds, seenShrink, unseen >>
 tv == << turn, turnLine, saved >>
 gv == << happened, notHap, rereadKept, rereadNotMade >>
-av == << leftover, closeFailedAt, stopLines >>
+av == << stopLines >>
 rvars == << offset, covered, readerLogId, misaligned, passedTo, staleCov, delivered, missingRec,
             unknownRec, lineSkipRec, skipped, acct, excused, dupIds, badSkip >>
 vars == << hv, lv, tv, gv, av, rvars, bad, up, pend, badPurge, droppedUnread, wit, budget >>
@@ -213,11 +210,13 @@ NamedBundles(idxs) ==
 \* cause (Reset): cleared | recovered | unann | withdrawn (planted bug only).
 \* mark: Opened.baseline, Closed.after, Reset.after. before: Reset.before.
 \* turn: a Closed's Opened. own: the ids of a Closed's own slice.
-\* left (ghost, Opened): the ids that were leftovers when the turn was admitted.
+\* adm (ghost, Opened): what the head held when the turn was admitted. was: the
+\* ids closed before and not open then. held: the ids open then.
 
-Line(k, cause, t, outcome, before, mark, pieces, span, own, left) ==
+Line(k, cause, t, outcome, before, mark, pieces, span, own, adm) ==
     [k |-> k, cause |-> cause, turn |-> t, outcome |-> outcome,
-     before |-> before, mark |-> mark, pieces |-> pieces, span |-> span, own |-> own, left |-> left]
+     before |-> before, mark |-> mark, pieces |-> pieces, span |-> span, own |-> own, adm |-> adm]
+NoAdm == [was |-> {}, held |-> {}]
 
 Good(lg) == { i \in 1..Len(lg) : i \notin bad }           \* line 1 is never bad
 UnitIdx(lg) == { i \in Good(lg) : lg[i].k \in {"LS", "C", "R"} }
@@ -256,13 +255,15 @@ CountNow(lg, h) ==
 Pre(lg, h, cl) ==
     IF WillUnann(lg, h)
     THEN << Line("R", "unann", 0, "none", LastMark(lg), MkW(lg, h), << >>,
-                 cl \ (NamedIn(lg) \cup SpansIn(lg) \cup lostIds), {}, {}) >>
+                 cl \ (NamedIn(lg) \cup SpansIn(lg) \cup lostIds), {}, NoAdm) >>
     ELSE IF ~NeedUnann(lg, h) /\ CountNow(lg, h)
     THEN << Line("R", "withdrawn", MaxOf(Good(lg)), "none", LastLine(lg).mark, LastLine(lg).before,
-                 << >>, {}, {}, {}) >>
+                 << >>, {}, {}, NoAdm) >>
     ELSE << >>
 
-OLine(lg, h, left) == Line("O", "none", 0, "none", MkW(lg, h), MkW(lg, h), << >>, {}, {}, left)
+OLine(lg, h, cl) ==
+    Line("O", "none", 0, "none", MkW(lg, h), MkW(lg, h), << >>, {}, {},
+         [was |-> cl \ IdsOfSeq(h.open), held |-> IdsOfSeq(h.open)])
 
 \* A Closed is a unit: its content is what closed between the last unit line's
 \* mark and now. Its own slice starts at its Opened's baseline. When a Reset
@@ -275,11 +276,11 @@ CLine(lg, h, t, outcome) ==
                    ELSE Max2(q.n, lg[t].mark.n)
     IN Line("C", "none", t, outcome, MkW(lg, h), MkW(lg, h),
             IF inRange THEN RangeP(h.bundles, q.n, N(h)) ELSE << >>, {},
-            IF inRange THEN IdsFrom(h, ownFrom) ELSE {}, {})
+            IF inRange THEN IdsFrom(h, ownFrom) ELSE {}, NoAdm)
 
 \* Log_started is written when the file is absent or holds no complete line,
 \* before an append.
-LSLine(h) == Line("LS", "none", 0, "none", Mk(h), Mk(h), << >>, {}, {}, {})
+LSLine(h) == Line("LS", "none", 0, "none", Mk(h), Mk(h), << >>, {}, {}, NoAdm)
 Base0(h) == IF log = << >> THEN << LSLine(h) >> ELSE log
 
 \* h: the head the lines were written from; cl: the ids closed by then.
@@ -325,45 +326,32 @@ SweepKeep == IF SweepStops THEN objects ELSE BundleSet(head.bundles) \cup NamedB
 
 \* ------------------------------------------------- the turn path
 
-\* Admission closes the head's open messages first (one save), then reads the
-\* mark. When the save fails it goes on and the Opened is remembered in
-\* closeFailedAt. The save is made before the append, so it stands also when
-\* the append fails and the turn runs with no line.
+\* Admission reads the mark and appends. It does not close the head's open
+\* messages: product paths leave them there on purpose (a Keeper's first save,
+\* a paused turn that is continued), and the save that closes them names them.
 Admit ==
     /\ up
     /\ turn = "none"
     /\ head.ok
     /\ Free
-    /\ \E cs \in {"none", "saved", "failed"} :
-         /\ (cs = "none") = (head.open = << >> \/ Bug = "no_close_at_admission")
-         /\ cs = "failed" => budget.closefails > 0
-         /\ LET h1 == IF cs = "saved" THEN CloseOpen(head) ELSE head
-                cl1 == IF cs = "saved" THEN closedIds \cup IdsOfSeq(head.open) ELSE closedIds
-                b1 == IF cs = "failed" THEN [budget EXCEPT !.closefails = @ - 1] ELSE budget
-            IN /\ (cs = "saved" /\ unseen /\ ~Unseen /\ log # << >>) => Shrunk(log, h1)
-               /\ head' = h1
-               /\ objects' = IF cs = "saved" THEN objects \cup {head.open} ELSE objects
-               /\ closedIds' = cl1
-               /\ \/ LET lg0 == Base0(h1)
-                         pre == Pre(lg0, h1, cl1)
-                         lg1 == lg0 \o pre
-                         cl == IF Dangling(lg1)
-                               THEN << CLine(lg1, h1, DTurn(lg1), "close_missing") >>
-                               ELSE << >>
-                         at == Len(lg1) + Len(cl) + 1
-                     IN /\ AppendCore(pre \o cl \o << OLine(lg1, h1, leftover) >>, h1, cl1)
-                        /\ turn' = "line"
-                        /\ turnLine' = at
-                        /\ closeFailedAt' = IF cs = "failed" THEN closeFailedAt \cup {at} ELSE closeFailedAt
-                        /\ budget' = b1
-                  \/ /\ b1.fails > 0
-                     /\ budget' = [b1 EXCEPT !.fails = @ - 1]
-                     /\ turn' = "noline"
-                     /\ turnLine' = 0
-                     /\ UNCHANGED << lv, closeFailedAt >>
+    /\ \/ LET lg0 == Base0(head)
+              pre == Pre(lg0, head, closedIds)
+              lg1 == lg0 \o pre
+              cl == IF Dangling(lg1)
+                    THEN << CLine(lg1, head, DTurn(lg1), "close_missing") >>
+                    ELSE << >>
+              at == Len(lg1) + Len(cl) + 1
+          IN /\ AppendCore(pre \o cl \o << OLine(lg1, head, closedIds) >>, head, closedIds)
+             /\ turn' = "line"
+             /\ turnLine' = at
+             /\ UNCHANGED budget
+       \/ /\ budget.fails > 0
+          /\ budget' = [budget EXCEPT !.fails = @ - 1]
+          /\ turn' = "noline"
+          /\ turnLine' = 0
+          /\ UNCHANGED lv
     /\ saved' = FALSE
-    /\ UNCHANGED << nextMsg, openLost, gv, leftover, stopLines, bad, up, pend, droppedUnread, rvars,
-                    badPurge, wit >>
+    /\ UNCHANGED << hv, gv, stopLines, bad, up, pend, droppedUnread, rvars, badPurge, wit >>
 
 \* An in-turn save: one more message is durable and open.
 InTurnSave ==
@@ -414,9 +402,6 @@ LateSave ==
     /\ budget' = [budget EXCEPT !.late = @ - 1]
     /\ UNCHANGED << lv, tv, gv, av, rvars, bad, up, pend, badPurge, droppedUnread, wit >>
 
-\* What a turn leaves open when it ends or dies is a leftover.
-LeftNow == leftover \cup IdsOfSeq(head.open)
-
 \* The turn ends and its Closed is appended. With no closing save before it
 \* (the save failed) the open messages stay open.
 ExitOk ==
@@ -429,8 +414,7 @@ ExitOk ==
        IN AppendCore(pre \o << CLine(lg1, head, turnLine, "completed") >>, head, closedIds)
     /\ turn' = "none"
     /\ turnLine' = 0
-    /\ leftover' = LeftNow
-    /\ UNCHANGED << hv, saved, bad, up, pend, gv, closeFailedAt, stopLines, droppedUnread, rvars,
+    /\ UNCHANGED << hv, saved, bad, up, pend, gv, stopLines, droppedUnread, rvars,
                     badPurge, wit, budget >>
 
 \* The exit append fails, or the turn had no Opened: nothing is written.
@@ -441,8 +425,7 @@ ExitSilent ==
     /\ Free
     /\ turn' = "none"
     /\ turnLine' = 0
-    /\ leftover' = LeftNow
-    /\ UNCHANGED << hv, lv, saved, gv, closeFailedAt, stopLines, bad, up, pend, droppedUnread, rvars,
+    /\ UNCHANGED << hv, lv, saved, gv, stopLines, bad, up, pend, droppedUnread, rvars,
                     badPurge, wit >>
 
 \* The process exits while a turn runs. What the turn saved in-turn stays open.
@@ -454,8 +437,7 @@ Die ==
     /\ budget' = [budget EXCEPT !.fails = @ - 1]
     /\ turn' = IF turn = "line" THEN "deadline" ELSE "deadnoline"
     /\ up' = FALSE
-    /\ leftover' = LeftNow
-    /\ UNCHANGED << hv, lv, turnLine, saved, gv, closeFailedAt, stopLines, bad, pend, droppedUnread,
+    /\ UNCHANGED << hv, lv, turnLine, saved, gv, stopLines, bad, pend, droppedUnread,
                     rvars, badPurge, wit >>
 
 \* The process stops with no turn running.
@@ -556,7 +538,7 @@ ResetAnnounce(kind, j) ==
                  \* the clear of an undecodable head appends Unannounced itself; not a second one with the same after
                  THEN (IF ll.k = "R" /\ ll.cause = "unann" /\ ll.mark = Mk(new) THEN << >>
                        ELSE << Line("R", "unann", 0, "none", LastMark(lg1), Mk(new), << >>,
-                                    cl1 \ (NamedIn(lg1) \cup SpansIn(lg1) \cup lostIds), {}, {}) >>)
+                                    cl1 \ (NamedIn(lg1) \cup SpansIn(lg1) \cup lostIds), {}, NoAdm) >>)
                  ELSE << Line("R", IF kind = "clear" THEN "cleared" ELSE "recovered", 0, "none",
                               Mk(h1), Mk(new),
                               IF Q(lg1).trace = h1.trace
@@ -618,8 +600,7 @@ CrashBetween ==
     /\ pend' = NoPend
     /\ up' = FALSE
     /\ turn' = CASE turn = "line" -> "deadline" [] turn = "noline" -> "deadnoline" [] OTHER -> turn
-    /\ leftover' = IF turn \in {"line", "noline"} THEN LeftNow ELSE leftover
-    /\ UNCHANGED << hv, lv, turnLine, saved, happened, rereadKept, closeFailedAt, stopLines, bad,
+    /\ UNCHANGED << hv, lv, turnLine, saved, happened, rereadKept, stopLines, bad,
                     droppedUnread, rvars, badPurge, wit >>
 
 \* ------------------------------------------------- outside the product, and Keeper creation
@@ -676,7 +657,7 @@ RemoveSession ==
            ll == LastLine(lg0)
            same == Bug = "stop_line_deduped" /\ ll.k = "R" /\ ll.cause = "unann" /\ ll.mark = empty
            line == Line("R", "unann", 0, "none", LastMark(lg0), empty, << >>,
-                        closedIds \ (NamedIn(lg0) \cup SpansIn(lg0) \cup lostIds), {}, {})
+                        closedIds \ (NamedIn(lg0) \cup SpansIn(lg0) \cup lostIds), {}, NoAdm)
        IN IF Bug = "remove_session_no_line"
           THEN /\ openLost' = openLost \cup IdsOfSeq(head.open)
                /\ UNCHANGED << lv, stopLines >>
@@ -686,7 +667,7 @@ RemoveSession ==
     /\ head' = [trace |-> head.trace, bundles |-> << >>, open |-> << >>, ok |-> TRUE]
     /\ objects' = {}
     /\ budget' = [budget EXCEPT !.removes = @ - 1]
-    /\ UNCHANGED << nextMsg, closedIds, tv, gv, leftover, closeFailedAt, bad, up, pend, droppedUnread,
+    /\ UNCHANGED << nextMsg, closedIds, tv, gv, bad, up, pend, droppedUnread,
                     rvars, badPurge, wit >>
 
 BreakHead ==
@@ -725,10 +706,9 @@ DeleteLog ==
     /\ lineSkipRec' = {}
     /\ happened' = {}
     /\ notHap' = {}
-    /\ closeFailedAt' = {}
     /\ stopLines' = {}
     /\ budget' = [budget EXCEPT !.replaces = @ - 1]
-    /\ UNCHANGED << hv, logId, saved, rereadKept, rereadNotMade, leftover, up, pend, droppedUnread,
+    /\ UNCHANGED << hv, logId, saved, rereadKept, rereadNotMade, up, pend, droppedUnread,
                     offset, covered, readerLogId, misaligned, staleCov, delivered, missingRec, skipped,
                     acct, excused, dupIds, badSkip, badPurge, wit >>
 
@@ -743,7 +723,6 @@ CutLog(c) ==
     /\ seenShrink' = seenShrink \cap 1..c
     /\ happened' = happened \cap 1..c
     /\ notHap' = notHap \cap 1..c
-    /\ closeFailedAt' = closeFailedAt \cap 1..c
     /\ stopLines' = stopLines \cap 1..c
     /\ IF turnLine > c
        THEN /\ turn' = CASE turn = "line" -> "noline" [] turn = "deadline" -> "deadnoline" [] OTHER -> turn
@@ -754,7 +733,7 @@ CutLog(c) ==
     /\ unknownRec' = unknownRec \cap 1..c
     /\ lineSkipRec' = lineSkipRec \cap 1..c
     /\ budget' = [budget EXCEPT !.cuts = @ - 1]
-    /\ UNCHANGED << hv, logId, lostIds, unseen, saved, rereadKept, rereadNotMade, leftover, up, pend,
+    /\ UNCHANGED << hv, logId, lostIds, unseen, saved, rereadKept, rereadNotMade, up, pend,
                     droppedUnread, offset, covered, readerLogId, staleCov, delivered, missingRec,
                     skipped, acct, excused, dupIds, badSkip, badPurge, wit >>
 
@@ -928,7 +907,7 @@ Mark0 == [trace |-> 1, n |-> 0]
 Init ==
     /\ head = [trace |-> 1, bundles |-> << >>, open |-> << >>, ok |-> TRUE]
     /\ objects = {}
-    /\ log = << Line("LS", "none", 0, "none", Mark0, Mark0, << >>, {}, {}, {}) >>
+    /\ log = << Line("LS", "none", 0, "none", Mark0, Mark0, << >>, {}, {}, NoAdm) >>
     /\ logId = 1
     /\ bad = {}
     /\ up = TRUE
@@ -963,8 +942,6 @@ Init ==
     /\ notHap = {}
     /\ rereadKept = {}
     /\ rereadNotMade = {}
-    /\ leftover = {}
-    /\ closeFailedAt = {}
     /\ stopLines = {}
     /\ budget = [purges |-> MaxPurges, resets |-> MaxResets, fails |-> MaxFails,
                  closefails |-> MaxCloseFails, late |-> MaxLate,
@@ -1042,13 +1019,11 @@ EveryClosedInOneUnit ==
 NoDoubleName ==
     \A t1, t2 \in Occ(log, AllIdx) : t1 # t2 => IdOf(t1) # IdOf(t2)
 
-\* A message that was a leftover when a turn was admitted is not in that
-\* turn's own slice, unless the admission could not close it first.
-LeftoverNotBorrowed ==
+\* A turn's own slice names no message that was closed, and not open again,
+\* when the turn was admitted. What was open then is the turn's to close.
+OwnNotClosedBefore ==
     \A i \in AllIdx :
-        log[i].k = "C" =>
-            \/ log[i].own \cap log[log[i].turn].left = {}
-            \/ log[i].turn \in closeFailedAt
+        log[i].k = "C" => log[i].own \cap log[log[i].turn].adm.was = {}
 
 \* Log_started ( Reset | Opened Reset* Closed )* [ Opened Reset* ]
 RECURSIVE Gram(_, _, _)
@@ -1123,16 +1098,10 @@ SkipLineOnlyUndecodable == ~badSkip
 \* an announced head change that was not made, the messages named a second time, and both readings passed
 W_NoSecondReading ==
     ~(ReaderOK /\ ~Unread /\ \E id \in rereadNotMade : NamedCount(id) >= 2 /\ id \in delivered)
-\* a leftover named by the Closed of a later turn outside its own slice (no task), the admission's save having succeeded
-W_NoLeftoverUnattributed ==
+\* a message that was open when a turn was admitted is in that turn's own slice
+W_NoHeldOwned ==
     ~(\E i \in AllIdx : /\ log[i].k = "C"
-                        /\ log[i].turn \notin closeFailedAt
-                        /\ ((LineIds(i) \ log[i].own) \cap log[log[i].turn].left) # {})
-\* the excuse is used: the admission's save failed and the turn's own slice holds the leftover
-W_NoBorrowExcused ==
-    ~(\E i \in AllIdx : /\ log[i].k = "C"
-                        /\ log[i].turn \in closeFailedAt
-                        /\ (log[i].own \cap log[log[i].turn].left) # {})
+                        /\ (log[i].own \cap log[log[i].turn].adm.held) # {})
 \* a stop's line, and the reader's Skip of an unknown span for it
 W_NoStopLineSkip == stopLines \cap unknownRec = {}
 \* the covered mark rests at the after of a Reset whose head change was not made while a whole turn runs

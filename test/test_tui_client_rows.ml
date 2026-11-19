@@ -1,6 +1,10 @@
 open Alcotest
 module Types = Masc_tui_types
 
+(* Instants on the main loop's clock, [seconds] after this test began. *)
+let start = Masc_tui_wake.Mono.now ()
+let at seconds = Masc_tui_wake.Mono.after start seconds
+
 (* A Keeper's own session is filed under the Keeper's name, so the column
    repeated the name beside it -- twelve of fourteen rows on a live
    workspace -- while the row's type already said it was a Keeper. *)
@@ -112,24 +116,24 @@ let test_an_owed_read_that_answers_settles () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   Masc_tui_types.owe_clients_read state;
   Masc_tui_types.begin_clients_read state;
-  Masc_tui_types.settle_clients_read state ~now:0. (Ok (snapshot ()));
+  Masc_tui_types.settle_clients_read state ~now:(at 0.) (Ok (snapshot ()));
   (* Not due is what keeps launch_owed_clients from reading again. *)
   check bool "the settled read is not due again"
     false
-    (Masc_tui_owed_read.due ~now:0. state.Masc_tui_types.clients_owed)
+    (Masc_tui_owed_read.due ~now:(at 0.) state.Masc_tui_types.clients_owed)
 
 let test_an_answer_with_unread_rows_backs_off () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   Masc_tui_types.owe_clients_read state;
   Masc_tui_types.begin_clients_read state;
-  Masc_tui_types.settle_clients_read state ~now:0.
+  Masc_tui_types.settle_clients_read state ~now:(at 0.)
     (Ok (snapshot ~failures:[ "runtime agent roster: read failed" ] ()));
   check bool "a partial roster is not due at once"
     false
-    (Masc_tui_owed_read.due ~now:0. state.Masc_tui_types.clients_owed);
+    (Masc_tui_owed_read.due ~now:(at 0.) state.Masc_tui_types.clients_owed);
   check bool "the retry is due after the backoff"
     true
-    (Masc_tui_owed_read.due ~now:2. state.Masc_tui_types.clients_owed)
+    (Masc_tui_owed_read.due ~now:(at 2.) state.Masc_tui_types.clients_owed)
 
 let () =
   run "tui client rows"

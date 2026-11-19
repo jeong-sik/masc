@@ -1,9 +1,9 @@
 module Owed = Masc_tui_owed_read
 module Names = Map.Make (String)
 
-(* [scheduled] holds the rows to read at a time on the caller's clock, for a
+(* [scheduled] holds the rows to read at a time on the loop's clock, for a
    value that changes with time rather than with a write. *)
-type t = { roster : Owed.t; rows : Owed.t Names.t; scheduled : float Names.t }
+type t = { roster : Owed.t; rows : Owed.t Names.t; scheduled : Masc_tui_wake.Mono.t Names.t }
 
 type read =
   | Read_row of string
@@ -37,7 +37,7 @@ let reading t = is_reading t.roster || Names.exists (fun _ owed -> is_reading ow
    read that follows its wait reads every owed row. *)
 let waiting_out_a_failure ~now = function
   | Owed.Waiting { retry_at; _ } ->
-      not (Masc_tui_wake.reached Masc_tui_wake.Owed_read_retry ~now ~at:retry_at)
+      not (Masc_tui_wake.reached_mono Masc_tui_wake.Owed_read_retry ~now ~at:retry_at)
   | Owed.Settled | Owed.Owed _ | Owed.Reading _ -> false
 
 let next_read ~now t =
@@ -80,5 +80,5 @@ let schedule_rows due t =
 
 let release_scheduled ~now t =
   let due, later = Names.partition (fun _ at ->
-      Masc_tui_wake.reached Masc_tui_wake.Roster_row_scheduled ~now ~at) t.scheduled in
+      Masc_tui_wake.reached_mono Masc_tui_wake.Roster_row_scheduled ~now ~at) t.scheduled in
   Names.fold (fun keeper_name _ t -> row_changed ~keeper_name t) due { t with scheduled = later }

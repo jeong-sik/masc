@@ -254,19 +254,29 @@ let test_until () =
 
 (* The decisions that note their moment *)
 
+(* A decision on the loop's clock notes its own instant, not one moved
+   through seconds. *)
+let noted () =
+  Option.map (fun (d : Wake.deadline) -> (reason_number d.reason, d.at_ns)) (Wake.Pass.noted ())
+
 let test_owed_read_retry_is_noted () =
   let module Owed = Masc_tui_owed_read in
-  let waiting = Owed.failed ~retry_s:6. ~max_retry_s:60. ~now:4.
+  let now = Wake.Mono.now () in
+  let waiting = Owed.failed ~retry_s:6. ~max_retry_s:60. ~now
       (Owed.started (Owed.changed Owed.settled)) in
   let retry_at = match waiting with
     | Owed.Waiting { retry_at; _ } -> retry_at
     | Owed.Settled | Owed.Owed _ | Owed.Reading _ -> fail "a failed read is not waiting" in
-  check_noted_in "owed read" Wake.Owed_read_retry ~remaining_s:(retry_at -. 5.)
-    (fun () -> Owed.due ~now:5. waiting);
+  check int64 "the retry is the wait after the failure"
+    (Int64.add (now :> int64) (seconds 6)) (retry_at :> int64);
+  Wake.Pass.begin_pass ();
+  check bool "owed read: not yet" false (Owed.due ~now:(Wake.Mono.after now 1.) waiting);
+  check (option (pair int int64)) "owed read: its retry is noted"
+    (Some (reason_number Owed_read_retry, (retry_at :> int64))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "due at its retry" true (Owed.due ~now:retry_at waiting);
-  check bool "owed is due" true (Owed.due ~now:5. (Owed.changed Owed.settled));
-  check bool "settled is not" false (Owed.due ~now:5. Owed.settled);
+  check bool "owed is due" true (Owed.due ~now (Owed.changed Owed.settled));
+  check bool "settled is not" false (Owed.due ~now Owed.settled);
   check_nothing_noted "owed read without a wait"
 
 let test_refresh_retry_is_noted () =
@@ -283,21 +293,16 @@ let test_refresh_retry_is_noted () =
 
 let test_roster_row_is_noted () =
   let module Roster = Masc_tui_roster_owed in
-  let scheduled = Roster.schedule_rows [ ("keeper-a", 10.) ] Roster.settled in
+  let now = Wake.Mono.now () in
+  let at = Wake.Mono.after now 6. in
+  let scheduled = Roster.schedule_rows [ ("keeper-a", at) ] Roster.settled in
   Wake.Pass.begin_pass ();
-  let before = Mtime_clock.elapsed_ns () in
-  let still = Roster.release_scheduled ~now:4. scheduled in
-  let after = Mtime_clock.elapsed_ns () in
-  (match Wake.Pass.noted () with
-   | Some noted ->
-     check int "roster reason" (reason_number Roster_row_scheduled) (reason_number noted.reason);
-     check bool "six seconds on" true
-       (Int64.compare noted.at_ns (Int64.add before (seconds 6)) >= 0
-        && Int64.compare noted.at_ns (Int64.add after (seconds 6)) <= 0)
-   | None -> fail "a scheduled row noted nothing");
-  check bool "nothing to read before its time" true (Option.is_none (Roster.next_read ~now:4. still));
+  let still = Roster.release_scheduled ~now scheduled in
+  check (option (pair int int64)) "the scheduled row is noted"
+    (Some (reason_number Roster_row_scheduled, (at :> int64))) (noted ());
+  check bool "nothing to read before its time" true (Option.is_none (Roster.next_read ~now still));
   check bool "read at its time" true
-    (Option.is_some (Roster.next_read ~now:10. (Roster.release_scheduled ~now:10. scheduled)))
+    (Option.is_some (Roster.next_read ~now:at (Roster.release_scheduled ~now:at scheduled)))
 
 let test_engine_sample_is_noted () =
   let module Samples = Masc_tui_engine_samples in

@@ -959,20 +959,25 @@ let fit_middle column label =
     let used = display_width truncated in
     truncated ^ String.make (Int.max 0 (column - used)) ' '
 
-(* One glyph per speaker, from the vocabulary the Keepers roster and Acting
-   already use. Colour carries this distinction better, and NO_COLOR takes
-   colour away, so the mark is what still answers "who said this" on a pane
-   with no colour at all. *)
+(* One glyph per speaker. Colour carries this distinction better, and
+   NO_COLOR takes colour away, so the mark is what still answers "who said
+   this" on a pane with no colour at all.
+
+   Who is speaking is not a state, so no speaker wears a status mark of RFC
+   tui-one-screen-grammar 7.2: the Keeper's filled dot read as 정상·끝남 and
+   its hollow note as 기다림, beside call rows that will wear those marks
+   for exactly that. The Keeper is a filled star and its note an unfilled
+   one, keeping the filled/unfilled pair. *)
 let speaker_mark : style -> string = function
   | User -> "\xe2\x96\xb6"      (* the operator sends *)
   | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
-  | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
+  | Keeper -> "\xe2\x9c\xa6"    (* ✦ a keeper speaks *)
   (* The Keeper's own mark, unfilled: this row is the pane's note about a
      turn rather than the Keeper speaking in it. It used to be a question
      mark, which is the one thing in this alphabet that is not a shape -- and
      it stayed a question on a row that had already settled, so a gate that
      finished still read as one nobody had answered. *)
-  | Status -> "\xe2\x97\x8b"
+  | Status -> "\xe2\x9c\xa7"    (* ✧ *)
   (* The same mark the composer prompt draws, because that is where this row
      came from: the pane answering what was typed at it. *)
   | Local -> "\xe2\x80\xba"

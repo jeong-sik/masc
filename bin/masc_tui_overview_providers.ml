@@ -1217,7 +1217,8 @@ let account_card ~tone ~layout entry =
       ; key = None
       ; status = None
       ; count = None
-      ; focus = Masc_tui_card.Unfocused }
+      ; focus = Masc_tui_card.Unfocused
+      ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage) }
   ; body =
       (fun ~cells ->
         let full_name =

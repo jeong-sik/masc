@@ -28,6 +28,7 @@ type edge =
   ; status : status option
   ; count : count option
   ; focus : focus
+  ; border_accent : string option
   }
 
 type t =
@@ -249,9 +250,10 @@ let top_fit ~ko ~width edge =
         | Some name -> kept ~key:false ~name ~word:false ()
         | None -> tail ())
 
-let border_style ~style = function
+let border_style ~style edge =
+  match edge.focus with
   | Focused_list | Focused_other -> style.focused_border
-  | Unfocused -> style.border
+  | Unfocused -> Option.value ~default:style.border edge.border_accent
 
 (* The ends of a squashed card are half rules, after lazygit's squashed frame:
    a row with corners would read as a box that never closes, and the half
@@ -270,7 +272,7 @@ let top_edge ~ko ~style ~width ~shape edge =
   let glyphs = glyphs_of_focus edge.focus in
   let start, finish = edge_ends ~glyphs shape in
   let fit = top_fit ~ko ~width edge in
-  let border = border_style ~style edge.focus in
+  let border = border_style ~style edge in
   let paint code text = code ^ text ^ style.reset in
   let key =
     match edge.key with
@@ -397,7 +399,7 @@ let render_body ?scrollbar ~ko ~style ~width ~height edge body =
     let rows = height - 2 in
     let shown, hidden = window ~rows body in
     let glyphs = glyphs_of_focus edge.focus in
-    let border = border_style ~style edge.focus in
+    let border = border_style ~style edge in
     let thumb_style =
       if String.equal style.title_style "" then border else style.title_style
     in

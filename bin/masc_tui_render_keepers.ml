@@ -407,10 +407,42 @@ let keeper_detail_text ~ko ?now (row : Keeper_list_model.row) =
    The text is fitted as plain text, so a cut mark takes the colour of the text
    it cuts. A sentence that fills the cell is fitted together with the rest, so
    the rest it pushes out is still marked by the cut. *)
-let keeper_detail_cell ~ko ?now ~width ~failure_context row =
+(* Compact inline live context mini-meter for a Keeper list row (btop proc
+   style), shown only when live context is already measured for this Keeper. *)
+let keeper_row_context_chip (state : state) (row : Keeper_list_model.row) =
+  match row.keeper.k_identity with
+  | Error _ -> None
+  | Ok _ ->
+      (match live_context_view state row.keeper with
+       | Masc_tui_fetched.Ready obs | Masc_tui_fetched.Stale (obs, _) ->
+           (match Observation_layout.context_summary obs with
+            | Observation_layout.Context_measured { ratio; _ } ->
+                let value = Observation_layout.percentage_tenths ratio in
+                let max_value = Observation_layout.percentage_tenths_full in
+                let pct = (value + 5) / 10 in
+                let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
+                let bar =
+                  Masc_tui_chart.meter_bar ~width:5 ~value ~max_value ~scale
+                    ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+                in
+                Some (Printf.sprintf "%s %3d%%" bar pct)
+            | Observation_layout.Context_partial _
+            | Observation_layout.Context_unavailable _ -> None)
+       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+       | Masc_tui_fetched.Failed _ -> None)
+
+let keeper_detail_cell ~ko ?now ?context_chip ~width ~failure_context row =
   let rest = keeper_detail_text ~ko ?now row in
   match failure_context with
-  | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
+  | None ->
+      (match context_chip with
+       | Some chip when width >= 14 ->
+           let chip_cells = Message_layout.display_width chip in
+           let tail = if String.equal rest "" then "" else detail_separator ^ rest in
+           if chip_cells >= width then fit_width chip width
+           else
+             chip ^ Theme.recede () ^ fit_width tail (width - chip_cells) ^ Ansi.reset
+       | Some _ | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset)
   | Some sentence ->
       let sentence_cells = Message_layout.display_width sentence in
       let tail = if String.equal rest "" then "" else detail_separator ^ rest in
@@ -499,7 +531,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
   ^ Ansi.reset
 
-let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
+let keeper_row_content ~ko ?context_chip ~(columns : Render_schedule.keeper_columns)
     ~now ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
@@ -528,7 +560,7 @@ let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
        else "")
     ; (if columns.kcol_show_detail then
          " "
-         ^ keeper_detail_cell ~ko ~now ~width:columns.kcol_task
+         ^ keeper_detail_cell ~ko ~now ?context_chip ~width:columns.kcol_task
              ~failure_context:
                (Render_schedule.keeper_failure_context_for_detail
                   ~show_runtime:columns.kcol_show_runtime failure_context)
@@ -3229,7 +3261,8 @@ let render_keeper_axes (state : state) =
                   ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
             | None, Axis_row.List_columns ->
-                keeper_row_content ~ko:(state.ui_language = Lang_ko) ~columns ~now:now_unix ~yolo
+                keeper_row_content ~ko:(state.ui_language = Lang_ko)
+                  ?context_chip:(keeper_row_context_chip state row) ~columns ~now:now_unix ~yolo
                   ~selected row
             | None, Axis_row.Grid grid_columns ->
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag

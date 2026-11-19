@@ -71,6 +71,10 @@ type edge =
         (** A focused list card writes no count: zone 2's position already
             says it (RFC section 2). *)
   ; focus : focus
+  ; border_accent : string option
+        (** Optional btop-style semantic border SGR used when unfocused
+            ({!Masc_tui_theme.panel_border}). [None] uses [style.border]; a
+            focused card always takes [style.focused_border]. *)
   }
 
 type t =

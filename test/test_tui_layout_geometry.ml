@@ -313,7 +313,7 @@ let style =
   }
 
 let edge ?key ?status ?count ?(focus = Card.Unfocused) name =
-  { Card.name; key; status; count; focus }
+  { Card.name; key; status; count; focus; border_accent = None }
 
 let failed = { Card.symbol = Card.Mark Masc_tui_value.Mark.Failed; word = "실패"; tone = "\027[31m" }
 let unreported =

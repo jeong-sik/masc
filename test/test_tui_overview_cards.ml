@@ -18,7 +18,7 @@ module Layout = Masc_tui_message_layout
 (* Wide enough for the two columns, each holding a short row on one line. *)
 let inner = 94
 
-let edge name = { Card.name; key = None; status = None; count = None; focus = Card.Unfocused }
+let edge name = { Card.name; key = None; status = None; count = None; focus = Card.Unfocused; border_accent = None }
 
 let edges =
   { Cards.decisions = edge "decisions"

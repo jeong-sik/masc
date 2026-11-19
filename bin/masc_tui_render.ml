@@ -435,20 +435,24 @@ let render_overview (state : state) home =
             { decisions =
                 { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
                 ; key = key "p"; status = None; count = Some decisions_count
-                ; focus = Masc_tui_card.Unfocused }
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_attention) }
             ; continuation =
                 { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
                 ; key = None; status = None; count = rows_of continuation
-                ; focus = Masc_tui_card.Unfocused }
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage) }
             ; capacity =
                 { Masc_tui_card.name = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
                 ; key = key "m"; status = Some (overview_capacity_status state); count = None
-                ; focus = Masc_tui_card.Unfocused }
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_fleet) }
             ; actions =
                 { Masc_tui_card.name =
                     ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
                 ; key = key "v"; status = None; count = rows_of operator_rows
-                ; focus = Masc_tui_card.Unfocused }
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_memory) }
             }
           in
           let status ~cells = overview_capacity_lines ~cells ~mark:Mark_on_card_edge state in

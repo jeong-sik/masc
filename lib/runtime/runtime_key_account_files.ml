@@ -98,15 +98,24 @@ let home_of ~runtime_root ~account_id =
   Layout.home ~runtime_root client ~account_id:(Authz_types.Provider_account_id.to_string account_id)
 ;;
 
+(* The folder of the keys of the account with everything in it, under a
+   runtime root that is there. *)
+let keys_removed ~runtime_root ~account_id =
+  let* keys = Layout.key_dir ~runtime_root ~account_id in
+  removed keys
+;;
+
+let remove_keys ~runtime_root ~account_id =
+  let* there = root_there ~runtime_root in
+  if there then keys_removed ~runtime_root ~account_id else Ok ()
+;;
+
 let remove ~runtime_root ~account_id =
   match root_there ~runtime_root with
   | Error detail -> Error (Key_not_removed detail)
   | Ok false -> Ok ()
   | Ok true ->
-    (match
-       let* keys = Layout.key_dir ~runtime_root ~account_id in
-       removed keys
-     with
+    (match keys_removed ~runtime_root ~account_id with
      | Error detail -> Error (Key_not_removed detail)
      | Ok () ->
        (match

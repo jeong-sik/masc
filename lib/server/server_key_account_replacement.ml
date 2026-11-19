@@ -59,9 +59,19 @@ let recorded (person : Login.person) id ~held:before =
        Error (Not_recorded error))
 ;;
 
-(* The third and the fourth step. From the record on, the key of the
-   generation before is not read, so an error here leaves the account with
-   no key until the person sends one again. *)
+(* The third and the fourth step.
+
+   A store that failed: from the record on the key of the generation before
+   is not read, and the account is to read no key until the person sends
+   one again (RFC 3.7). The folder is not known to hold none. A file of the
+   new generation can have been there before the call, and is then what
+   the account reads; the key that was sent can be in place with its folder
+   not synced. So the folder of the keys goes, as it does first in a
+   removal of the account, and the key before goes with it. The next
+   replacement makes the folder again.
+
+   A runtime root that was not made holds no file this process reaches, so
+   nothing is removed after it. *)
 let stored (person : Login.person) ~base_path id ~generation key =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) ->
@@ -75,6 +85,9 @@ let stored (person : Login.person) ~base_path id ~generation key =
        Ok { old_keys_removed = false }
      | Error error ->
        logged id "its record went in, and its key was not stored" (Files.make_error_detail error);
+       (match Files.remove_keys ~runtime_root ~account_id:id with
+        | Ok () -> ()
+        | Error detail -> logged id "its key was not stored, and the folder of its keys stays" detail);
        Error Key_not_stored)
 ;;
 

@@ -288,7 +288,6 @@ let render_system_logs (state : state) =
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
              @ filter_pieces)
   in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -880,8 +879,8 @@ let acting_notices (state : state) ~trace_unavailable =
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
-  (* Top/title/divider, column heading, then bottom/footer. *)
-  max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
+  (* Title/divider, column heading, then bottom/footer. *)
+  max 1 (rows - (3 + List.length notices + listing_rows_below_the_body))
 
 let acting_list_height state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1026,7 +1025,6 @@ let render_acting (state : state) =
       | Actions | Everything ->
           Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   in
-  box_top buf cols;
   box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   List.iter

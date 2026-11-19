@@ -925,7 +925,6 @@ let render_approvals (state : state) =
                (Masc_tui_value.Position.row ~selected:(Some state.approval_cursor)
                   ~total:(List.length approvals)))
   in
-  box_top buf cols;
   box_line buf cols header;
   let policy_buf = Buffer.create 512 in
   (* Both Gate lanes are always on screen here. The durable rows obey the

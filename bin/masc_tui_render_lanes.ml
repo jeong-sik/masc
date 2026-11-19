@@ -773,7 +773,6 @@ let render_lanes_overview (state : state) =
              (Masc_tui_value.Position.row
                 ~selected:(lane_inventory_visual_cursor state) ~total:entries))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   projection.lop_links
@@ -1148,7 +1147,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       ~readings:(if state.lane_runs_loading then [ text "읽는 중" "loading" ] else [])
       ~position
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   let subject_kind, subject_heading =
@@ -2296,7 +2294,6 @@ let render_clients (state : state) =
              (Masc_tui_value.Position.row
                 ~selected:(Some state.clients_surface_cursor) ~total:shown))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   (* Measured from the rows like the verification submitter column: a fixed

@@ -181,7 +181,6 @@ let render_verification_list (state : state) =
           Some (Masc_tui_value.Position.partial ~selected ~loaded:(offset + shown) ~total)
         else Some (Masc_tui_value.Position.row ~selected ~total:(offset + shown))
   in
-  box_top buf cols;
   box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   let col_hdr, request_row =
@@ -750,7 +749,6 @@ let render_harness_list (state : state) =
              ~after:("  " ^ connection_badge state))
           (connection_badge state)
   in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -809,7 +807,7 @@ let render_harness_list (state : state) =
        ~keys:(Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
          ~has_rows:(shown > 0) state.view));
   (* Drawing and cursor/page movement consume the same state-owned bound.
-     The timestamp makes six head rows and two tail rows; aggregate ledger
+     The timestamp makes five head rows and two tail rows; aggregate ledger
      rows are part of the selected detail document instead. *)
   let content_height =
     match scrolled_surface state ~cols Harness with

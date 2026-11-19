@@ -1158,7 +1158,6 @@ let render_tools (state : state) =
     {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
      ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
      ttf_cols=cols}) (tools_task_display_owner state);
-  box_top buf cols;
   box_line buf cols
     (header
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));

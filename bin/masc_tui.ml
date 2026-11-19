@@ -32696,6 +32696,11 @@ let main
   (* A frame went out this pass. Launchers that read what it drew run after
      the next wait, so that wait ends at once (RFC tui-idle-wait §3.4). *)
   let frame_drawn = ref false in
+  (* One drain deadline for the work between two waits: the post-input drain
+     after one wait and the pre-input drain before the next share it, so the
+     two apply at most one budget of queued work and the wait itself is never
+     counted against it. A key is handled before either drain runs. *)
+  let drain_deadline_ns = ref (Int64.add !pass_started_ns async_drain_budget_ns) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind (!presented).approval approval_row_reference
@@ -35014,12 +35019,6 @@ Use relative paths for resources already held in the package. -->
                 end)
        | Masc_tui_exit_signals.Continue -> None
       in
-      (* One drain deadline for the whole pass: the pre-input drain below and
-         the post-input drain share it, so a key never waits through two
-         separately budgeted drains. *)
-      let drain_deadline_ns =
-        Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
-      in
       (* Input may cancel a pending MIDI handoff even when it will later be
          rejected; this lets the existing editor owner yield without replay. *)
       if not (input_unsettled ()) && Option.is_none interrupted_paste then
@@ -35055,7 +35054,7 @@ Use relative paths for resources already held in the package. -->
       in
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:!drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader
               || Masc_tui_exit_signals.pending_signal exit_signals
               || Option.is_some state.quit_armed
@@ -35182,6 +35181,7 @@ Use relative paths for resources already held in the package. -->
       Masc_tui_wake.Pass.begin_pass ();
       frame_drawn := false;
       pass_started_ns := Mtime_clock.elapsed_ns ();
+      drain_deadline_ns := Int64.add !pass_started_ns async_drain_budget_ns;
       Masc_tui_nav_trace_log.note_input nav_trace
         (match input with
          | Some (Key name) -> Masc_tui_nav_trace_log.Key name
@@ -45314,12 +45314,12 @@ Use relative paths for resources already held in the package. -->
       end;
 
       Eio.Fiber.yield ();
-      (* Shares the pass deadline computed before the pre-input drain: when the
+      (* Shares the deadline set when the wait ended: when the
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:!drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader
               || Masc_tui_exit_signals.pending_signal exit_signals
               || Option.is_some state.quit_armed

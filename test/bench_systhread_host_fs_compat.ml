@@ -62,7 +62,7 @@ let () =
   let dir = Sys.argv.(6) in
   (match mode with
    | "own" -> ()
-   | "host" -> Systhread_host.start ()
+   | "host" -> Systhread_host.start ~minor_heap:Minor_heap.Tuned ()
    | other -> failwith ("mode is own or host, not " ^ other));
   for _ = 1 to blocked_domains do
     ignore (Domain.spawn block_forever : unit Domain.t)

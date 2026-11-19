@@ -52,7 +52,7 @@ let refusal ir =
 ;;
 
 let test_allowed_command_runs () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   with_eio (fun () ->
     match Adapter.dispatch ~workdir:"/tmp" ~sandbox:(host ()) (echo "admitted") with
     | Ok result ->
@@ -73,7 +73,7 @@ let refused_cases () =
 ;;
 
 let test_refusals_match_outside_eio () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   let outside = List.map (fun (name, ir) -> name, refusal ir) (refused_cases ()) in
   List.iter
     (fun (name, answer) ->
@@ -108,7 +108,7 @@ let inputs () =
 ;;
 
 let test_lowering_matches_outside_eio () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   let answer input = lowered input, findings input in
   let outside = List.map answer (inputs ()) in
   let inside =

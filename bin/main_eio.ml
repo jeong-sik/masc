@@ -4973,7 +4973,7 @@ let setup_cmd =
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
     Term.(ret (const run $ run_base_path $ port_argument $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
 
-let setup_gc () = Minor_heap.tune ()
+let setup_gc () = Minor_heap.apply Minor_heap.Tuned
 
 (* Internal elevation endpoint: no workspace, login, or model initialization. *)
 let sandbox_install_apple_verified_cmd =

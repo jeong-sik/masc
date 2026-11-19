@@ -294,12 +294,17 @@ module For_testing = struct
   let install_domain_pool_references = install_domain_pool_references
 end
 
+(* The minor heap of every domain the server starts for its own work: the
+   pools, the snapshot codec, the systhread host and the serving domain.
+   [main_eio.ml] gives the main domain the same. Agent Core's codec pool
+   starts from the plain manager and keeps the runtime's size. *)
+let minor_heap = Minor_heap.Tuned
+
 (* Server GC parameters. They apply only when OCAMLRUNPARAM is unset, so an
    operator can override them at launch without code changes.
 
-   minor_heap_size is per domain in OCaml 5, so it is not set here.
-   [Minor_heap.tune] sets it on the main domain and on the masc pool
-   domains; Agent Core's codec pool is not covered. *)
+   minor_heap_size is per domain in OCaml 5, so it is not set here but on
+   each domain as it starts ([minor_heap] above). *)
 let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
@@ -890,7 +895,7 @@ let initialize_owner_state_blocking
     loop ());
   (* Initial owner preparation can checkpoint durable queue state, before
      the shared runtime pool or Keeper lanes are activated. *)
-  Keeper_event_queue_snapshot_codec.install ~sw domain_mgr;
+  Keeper_event_queue_snapshot_codec.install ~sw (Minor_heap.domain_mgr minor_heap domain_mgr);
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
   Log.Server.info
@@ -1138,15 +1143,16 @@ let initialize_owner_state_blocking
     | Ok budget -> budget
     | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
   in
+  let pool_domain_mgr = Minor_heap.domain_mgr minor_heap domain_mgr in
   let domain_pool =
-    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool pool_domain_mgr
   in
   let read_pool =
-    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool pool_domain_mgr
   in
   install_domain_pool_references ~read:read_pool domain_pool;
   Server_pending_confirm_expiry.start ~sw ~clock ~mono_clock ~state;
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap ();
   (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
       ~domain_count:budget.Domain_budget.execution_codec with
    | Ok () -> ()
@@ -2217,13 +2223,11 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   then (
     Log.Server.info
       "HTTP serving domain isolation enabled (RFC-0204 Phase 3): accept loop isolated on dedicated domain";
-    Eio.Domain_manager.run domain_mgr (fun () ->
-      (* This domain starts after [main_eio.ml] tuned the main one, and
-         [Gc.set]'s minor_heap_size is per-domain, so it would otherwise
-         serve every request on the 2 MB default -- the isolation this block
-         exists for would be undone by the domain collecting eight times as
-         often, and a minor collection stops every other domain with it. *)
-      Minor_heap.tune ();
+    (* A new domain starts on the runtime's 2 MB minor heap whatever the main
+       one set, and serving every request on it would undo the isolation
+       this block exists for: the domain would collect eight times as often,
+       and a minor collection stops every other domain with it. *)
+    Eio.Domain_manager.run (Minor_heap.domain_mgr minor_heap domain_mgr) (fun () ->
       Eio.Switch.run (fun serving_sw ->
         (* How late a ready fiber of a connection runs on this domain
            ([scheduler.serving_lag] in /health). A daemon: the probe never

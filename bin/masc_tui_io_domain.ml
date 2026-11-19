@@ -7,13 +7,10 @@ type t = { jobs : (unit -> unit) Eio.Stream.t }
    own. *)
 let unbounded = max_int
 
-let start ~sw ~env =
+let start ~sw ~env ~minor_heap =
   let jobs = Eio.Stream.create unbounded in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
-      (* A minor collection stops every domain, so this one collects on the
-         heap size the rest of the process collects on ([Minor_heap]). *)
-      Minor_heap.tune ();
+    Eio.Domain_manager.run (Minor_heap.domain_mgr minor_heap (Eio.Stdenv.domain_mgr env)) (fun () ->
       Eio.Switch.run (fun io_sw ->
         Masc_http_client.with_scoped_pool ~sw:io_sw ~env (fun () ->
           (* The jobs' switch ends inside the pool's scope, so every request

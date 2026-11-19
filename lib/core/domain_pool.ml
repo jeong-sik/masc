@@ -29,8 +29,9 @@ let domain_count t = t.domain_count
    run inline when the caller is already pool work. Without the mark a job
    that called one of them queued a second job and waited for it: on a
    one-domain pool, or whenever every worker held such a job, nothing was
-   left to run the second job, and the workers waited forever. Entering
-   the mark also gives the domain the tuned minor heap ([Minor_heap]). *)
+   left to run the second job, and the workers waited forever. The
+   domains collect on the heap of the manager the pool was created with
+   ([Minor_heap.domain_mgr]); a job does not change it. *)
 let submit ~weight ~name t f =
   Executor_pool_submission.submit t.pool ~weight ~name (fun () ->
     Executor_pool_ref.with_worker_context f)

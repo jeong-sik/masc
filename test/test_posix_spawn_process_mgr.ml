@@ -183,7 +183,7 @@ let test_switch_that_finishes_during_the_spawn_leaves_no_child () =
 (* [Systhread_host.start] is once per process, so every case of the last
    group starts it and the groups before it run without one. *)
 let with_the_host test () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   test ()
 ;;
 

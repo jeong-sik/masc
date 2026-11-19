@@ -1,20 +1,32 @@
 open Alcotest
 
-let sample () =
-  let before = (Gc.get ()).Gc.minor_heap_size in
-  Minor_heap.tune ();
-  let after = (Gc.get ()).Gc.minor_heap_size in
-  Minor_heap.tune ();
-  before, after, (Gc.get ()).Gc.minor_heap_size
+let words () = (Gc.get ()).Gc.minor_heap_size
+
+(* Run in a child process so each case chooses its own OCAMLRUNPARAM. The
+   main domain applies [Tuned] first, so every domain after it would show an
+   inherited size if the runtime or [Minor_heap] passed one on. *)
+let probe () =
+  let main_before = words () in
+  Minor_heap.apply Minor_heap.Tuned;
+  let main_after = words () in
+  Minor_heap.apply Minor_heap.Tuned;
+  let main_again = words () in
+  let started policy =
+    Eio_main.run (fun env ->
+      Eio.Domain_manager.run (Minor_heap.domain_mgr policy (Eio.Stdenv.domain_mgr env)) words)
+  in
+  let default_domain = started Minor_heap.Runtime_default in
+  let tuned_domain = started Minor_heap.Tuned in
+  Printf.printf "%d %d %d %d %d\n%!" main_before main_after main_again default_domain tuned_domain
 ;;
 
-let probe () =
-  let before, after, again = sample () in
-  let worker = Domain.spawn sample |> Domain.join in
-  let worker_before, worker_after, worker_again = worker in
-  Printf.printf "%d %d %d %d %d %d\n%!"
-    before after again worker_before worker_after worker_again
-;;
+type sample =
+  { main_before : int
+  ; main_after : int
+  ; main_again : int
+  ; default_domain : int
+  ; tuned_domain : int
+  }
 
 let run_probe setting =
   let inherited = Unix.environment () |> Array.to_list
@@ -35,42 +47,38 @@ let run_probe setting =
    | Unix.WEXITED 0 -> ()
    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
      fail "minor heap probe failed");
-  Scanf.sscanf text "%d %d %d %d %d %d"
-    (fun before after again worker_before worker_after worker_again ->
-      (before, after, again), (worker_before, worker_after, worker_again))
+  Scanf.sscanf text "%d %d %d %d %d"
+    (fun main_before main_after main_again default_domain tuned_domain ->
+      { main_before; main_after; main_again; default_domain; tuned_domain })
 ;;
 
 let test_operator_configuration setting () =
-  let main, worker = run_probe (Some setting) in
-  List.iter (fun (label, (before, after, again)) ->
-    check int (label ^ " preserves the runtime heap") before after;
-    check int (label ^ " remains unchanged on another job") after again)
-    ["main", main; "worker domain", worker]
+  let s = run_probe (Some setting) in
+  check int "Tuned leaves the main domain on the runtime heap" s.main_before s.main_after;
+  check int "a second apply changes nothing" s.main_after s.main_again;
+  check int "a Runtime_default domain keeps the runtime heap" s.main_before s.default_domain;
+  check int "a Tuned domain keeps the runtime heap" s.main_before s.tuned_domain
 ;;
 
-let test_default_policy () =
-  let main, worker = run_probe None in
-  List.iter (fun (label, (before, after, again)) ->
-    check bool (label ^ " does not shrink its heap") true (after >= before);
-    check int (label ^ " is idempotent") after again)
-    ["main", main; "worker domain", worker];
-  let _, main_after, _ = main and _, worker_after, _ = worker in
-  check int "both domains use the shared default" main_after worker_after;
-  (* Equality alone would also hold if a no-op tune left both domains at the
-     2M-word runtime default. Pin the tuned size itself. *)
-  check int "the shared default is the tuned minor heap"
-    (4 * 1024 * 1024) main_after
+let test_without_operator_configuration () =
+  let s = run_probe None in
+  check int "Tuned gives the main domain 4M words" (4 * 1024 * 1024) s.main_after;
+  check int "a second apply changes nothing" s.main_after s.main_again;
+  (* The main domain was tuned before this domain started. *)
+  check int "a Runtime_default domain starts on the runtime heap, not the caller's"
+    s.main_before s.default_domain;
+  check int "a Tuned domain applies 4M words when it starts" (4 * 1024 * 1024) s.tuned_domain
 ;;
 
 let () =
   if Array.length Sys.argv = 2 && Sys.argv.(1) = "--minor-heap-probe"
   then probe ()
-  else run "minor heap operator policy" ["domains", [
+  else run "minor heap chosen where a domain starts" ["domains", [
     test_case "runtime size instruction is authoritative" `Quick
       (test_operator_configuration "s=128k");
     test_case "other runtime instructions remain authoritative" `Quick
       (test_operator_configuration "b=1");
     test_case "explicit empty runtime configuration remains authoritative" `Quick
       (test_operator_configuration "");
-    test_case "absent runtime configuration uses the shared default" `Quick
-      test_default_policy]]
+    test_case "each domain collects on the heap its starter named" `Quick
+      test_without_operator_configuration]]

@@ -384,8 +384,8 @@ let request_clock () = Eio_context.get_clock_opt ()
    [Masc_tui.run_with_eio_context] starts it before the TUI sends anything. *)
 let io_domain : Masc_tui_io_domain.t option Atomic.t = Atomic.make None
 
-let start_io_domain ~sw ~env =
-  Atomic.set io_domain (Some (Masc_tui_io_domain.start ~sw ~env))
+let start_io_domain ~sw ~env ~minor_heap =
+  Atomic.set io_domain (Some (Masc_tui_io_domain.start ~sw ~env ~minor_heap))
 
 let on_io_domain ~not_started send =
   match Atomic.get io_domain with

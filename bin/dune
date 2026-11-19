@@ -3551,6 +3551,7 @@
  (libraries
   masc.http_client
   masc.masc_eio_context
+  masc.masc_core
   masc_tui_io_domain
   cstruct
   eio

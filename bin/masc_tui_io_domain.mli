@@ -26,10 +26,11 @@
 
 type t
 
-val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> t
-(** [start ~sw ~env] spawns the domain, with its own Eio scheduler and its own
-    connection pool. It lives as long as [sw]: finishing [sw] cancels the work
-    still running there. A domain that fails fails [sw]. *)
+val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> minor_heap:Minor_heap.t -> t
+(** [start ~sw ~env ~minor_heap] spawns the domain, with its own Eio
+    scheduler, its own connection pool and the minor heap [minor_heap]. It
+    lives as long as [sw]: finishing [sw] cancels the work still running
+    there. A domain that fails fails [sw]. *)
 
 val run : t -> (unit -> 'a) -> 'a
 (** [run t work] runs [work] on [t]'s domain and returns its result on the

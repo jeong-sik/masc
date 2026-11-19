@@ -52,7 +52,7 @@ let test_without_the_host_a_guard_call_is_the_callers () =
 ;;
 
 let test_a_guard_call_runs_on_the_host () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let caller = domain () in
     let thread = bounded env 10.0 "the guard call" guard_thread in
@@ -64,7 +64,7 @@ let test_a_guard_call_runs_on_the_host () =
 (* A host thread has no Eio handler either, and the guard still names the
    misuse instead of letting [Effect.Unhandled] out. *)
 let test_a_guard_call_on_the_host_names_an_eio_operation () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let named =
       bounded env 10.0 "the guard call" (fun () ->
@@ -103,7 +103,7 @@ let test_without_the_host_a_fs_compat_call_is_the_callers () =
 ;;
 
 let test_a_fs_compat_call_runs_on_the_host () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let caller = domain () in
     let thread = bounded env 10.0 "the rewrite" fs_compat_thread in
@@ -113,7 +113,7 @@ let test_a_fs_compat_call_runs_on_the_host () =
 ;;
 
 let test_a_fs_compat_call_from_pool_work_keeps_its_domain () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
@@ -128,7 +128,7 @@ let test_a_fs_compat_call_from_pool_work_keeps_its_domain () =
 ;;
 
 let test_work_runs_on_the_host_outside_eio () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let caller = domain () in
     let thread, context =
@@ -142,7 +142,7 @@ let test_work_runs_on_the_host_outside_eio () =
 (* Pool work keeps its own domain: the host would serialize what pool domains
    now run in parallel. *)
 let test_pool_work_keeps_its_own_domain () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
@@ -159,7 +159,7 @@ let test_pool_work_keeps_its_own_domain () =
 (* A cancelled caller does not start the work; inside [Cancel.protect] it does,
    which is what a durable step run during shutdown relies on. *)
 let test_a_cancelled_caller_starts_work_only_when_protected () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let ran = Atomic.make false in
     let refused =
@@ -184,7 +184,7 @@ let test_a_cancelled_caller_starts_work_only_when_protected () =
    only after the work has finished, with its value, as under
    [Eio_unix.run_in_systhread]. *)
 let test_cancelled_caller_waits_for_started_work () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let started = Atomic.make false in
@@ -215,7 +215,7 @@ let test_cancelled_caller_waits_for_started_work () =
 ;;
 
 let test_outside_eio_the_work_runs_directly () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   let caller = Thread.id (Thread.self ()) in
   let thread = Systhread_host.run (fun () -> Thread.id (Thread.self ())) in
   check int "a non-Eio caller runs the work in its own thread" caller thread
@@ -224,7 +224,7 @@ let test_outside_eio_the_work_runs_directly () =
 (* Each job gets its own thread on the host: a short job finishes while a
    long one is still running. *)
 let test_a_long_job_does_not_delay_a_short_one () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let release = Atomic.make false in
     let long_started = Atomic.make false in
@@ -246,7 +246,7 @@ let test_a_long_job_does_not_delay_a_short_one () =
 ;;
 
 let test_failure_reraises_once () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_main.run (fun env ->
     let calls = Atomic.make 0 in
     let raised =
@@ -265,7 +265,7 @@ let test_failure_reraises_once () =
    around the call fails when it ends. The backend is posix, the one masc
    pins (D6). *)
 let test_a_call_through_the_host_marks_an_os_mutex_section () =
-  Systhread_host.start ();
+  Systhread_host.start ~minor_heap:Minor_heap.Runtime_default ();
   Eio_posix.run (fun env ->
     let mutex = Os_mutex.create ~name:"host-call" () in
     match

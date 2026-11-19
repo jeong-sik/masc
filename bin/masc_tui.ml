@@ -45049,7 +45049,7 @@ let run_with_eio_context f =
      collection every few frames. Measured on a live chat with PageUp/PageDown
      held, the median key-to-output time fell about a quarter. A larger
      OCAMLRUNPARAM setting is left alone. *)
-  Minor_heap.tune ();
+  Minor_heap.apply Minor_heap.Tuned;
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -45074,14 +45074,16 @@ let run_with_eio_context f =
                stop-the-world collection while the chat allocates scroll rows;
                the client has no Keeper actors to distribute over that pool. *)
             let cpu_pool=Domain_pool.create ~sw ~domain_count:1
-                (Eio.Stdenv.domain_mgr env) in
+                (Minor_heap.domain_mgr Minor_heap.Tuned (Eio.Stdenv.domain_mgr env)) in
             Domain_pool_ref.set cpu_pool;
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-            Masc_tui_http.start_io_domain ~sw ~env;
+            (* A minor collection stops every domain, so the other domains
+               collect on the UI domain's heap size. *)
+            Masc_tui_http.start_io_domain ~sw ~env ~minor_heap:Minor_heap.Tuned;
             f ()))
   with
   | Break -> ()

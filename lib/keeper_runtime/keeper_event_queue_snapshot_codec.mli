@@ -13,7 +13,9 @@ val install : sw:Eio.Switch.t -> _ Eio.Domain_manager.t -> unit
     One worker is sufficient to break the shared-pool dependency; no Keeper
     admission or turn limit is imposed. Owner-switch cancellation interrupts
     submissions even when the writer masks its caller's cancellation. Switch
-    release clears this installation without clearing a later installation. *)
+    release clears this installation without clearing a later installation.
+    The worker collects on the minor heap the manager starts it with
+    ({!Minor_heap.domain_mgr}). *)
 
 val encode_state : Keeper_event_queue_state.t -> string
 (** Construct and sanitize a snapshot once on the encoding worker. Return

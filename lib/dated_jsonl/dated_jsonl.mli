@@ -343,18 +343,25 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     other way is told with {!directories_removed}.
 
     That holds for the appends of one process. A row another process appends
-    moves nothing here, so a fact is kept only by the process that has said
-    it is the one that writes the stores ({!keep_facts_in_this_process}). *)
+    moves nothing here, so a fact is kept only where two things hold: the
+    process has said it holds the workspace's writer lease
+    ({!keep_facts_in_this_process}), and the store is one whose files only
+    the lease holder changes ({!Store.facts}). Anywhere else {!read_fact}
+    reads the files each time. *)
 
 type 'a fact
 
 val keep_facts_in_this_process : unit -> unit
-(** From now on {!read_fact} keeps what it reads. Said once by the one
-    process that appends to the stores whose facts it reads: the server, when
-    it holds the BasePath writer lease. It is not taken back.
+(** From now on {!read_fact} keeps what it reads from a store whose
+    {!Store.facts} is [Kept_by_the_lease_holder]. Said once by the process
+    that holds the workspace's writer lease: the server, through
+    [Server_startup_takeover.keep_store_facts], and a test executable that
+    stands for it. It is not taken back.
 
     A process that has not said it (the TUI, a command line tool) reads the
-    files on every {!read_fact}, as it did before there were facts. *)
+    files on every {!read_fact}, as it did before there were facts. So does
+    the lease holder for every other store: the cost log, for one, is also
+    appended to by [masc-cost], which takes no lease. *)
 
 val last_row : recent_entry option fact
 (** The store's newest physical row, as [read_recent_result t 1] reads it:

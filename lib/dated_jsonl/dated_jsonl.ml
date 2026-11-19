@@ -2608,12 +2608,22 @@ let last_row : recent_entry option fact =
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
   }
 
-(* Whether this process keeps what [read_fact] reads. A cell is moved by the
-   appends of the process it lives in and by no other, so only the one
-   process that appends to the stores may keep their facts. It says so once
-   and does not take it back. *)
+(* Whether this process holds the workspace's writer lease. A cell is moved
+   by the appends of the process it lives in and by no other, so only that
+   process may keep facts. It says so once and does not take it back. *)
 let keeping_facts = Atomic.make false
 let keep_facts_in_this_process () = Atomic.set keeping_facts true
+
+(* The lease holder is the one writer of some stores and not of others
+   ([Store.facts]): being the lease holder is a fact about the process, and
+   who writes a store is a fact about the store. A fact is kept where both
+   hold. *)
+let keeps_facts_of t =
+  Atomic.get keeping_facts
+  &&
+  match Store.facts (Store.of_location t.location) with
+  | Store.Kept_by_the_lease_holder -> true
+  | Store.Read_from_the_files -> false
 
 let fact_read_outcome = function
   | Fact_cell.Held _ -> "held"
@@ -2629,10 +2639,10 @@ let read_fact t fact =
     | Fact_cell.Read_failed _ as failed -> failed
   in
   let answer =
-    if not (Atomic.get keeping_facts)
+    if not (keeps_facts_of t)
     then (
-      (* Another process appends to this store. The files are read as they
-         were before there were facts, and no cell is made. *)
+      (* Another process appends to this store, or may. The files are read
+         as they were before there were facts, and no cell is made. *)
       match fact.read t with
       | Ok held -> Fact_cell.Read_not_kept held.value
       | Error error -> Fact_cell.Read_failed error)

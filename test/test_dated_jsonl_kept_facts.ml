@@ -45,7 +45,9 @@ let tmpdir prefix =
   dir
 ;;
 
-let location_under root = D.Store.(at (root_of_masc_dir root) Root.Telemetry)
+(* A store whose facts the lease holder keeps ([Store.facts]). *)
+let kept_store root = D.Store.(keeper root ~keeper:"kept" Keeper.Turn_records)
+let location_under root = kept_store (D.Store.root_of_masc_dir root)
 let temp_location prefix = location_under (tmpdir prefix)
 let row number = `Assoc [ "row", `Int number ]
 
@@ -299,7 +301,7 @@ let test_the_pass_over_the_listed_stores_forgets () =
   @@ fun () ->
   let base_path = tmpdir "djkf_pass" in
   let root = D.Store.root_of_base_path ~base_path in
-  let location = D.Store.at root D.Store.Root.Telemetry in
+  let location = kept_store root in
   let store = D.open_store location in
   ignore (write_behind_the_store location ~ts:(now () -. (60. *. day)) "{\"row\":1}\n" : string);
   check answer "the old row is the newest" (Read_and_kept (Some (D.Parsed (row 1)))) (last_row store);
@@ -441,6 +443,58 @@ let test_which_file_holds_the_newest_row () =
       , ("2026-11", "30.jsonl")
       , None )
     ]
+;;
+
+(* --- a store another process writes ------------------------------------- *)
+
+(* This executable has said it holds the writer lease. The cost log is also
+   appended to by [masc-cost], which takes no lease, so its facts are not
+   kept here either: a row that reached the file without this process's
+   [append] is the next answer, and an append of this process starts no
+   keeping. *)
+let test_a_store_another_process_writes_is_read_every_time () =
+  let root = D.Store.root_of_masc_dir (tmpdir "djkf_costs") in
+  let location = D.Store.at root D.Store.Root.Costs in
+  let store = D.open_store location in
+  D.append store (row 1);
+  check answer "the files are read" (Read_not_kept (Some (D.Parsed (row 1)))) (last_row store);
+  check answer "and read again" (Read_not_kept (Some (D.Parsed (row 1)))) (last_row store);
+  ignore (write_behind_the_store location ~ts:(now ()) "{\"row\":2}\n" : string);
+  check
+    answer
+    "another process's row is the next answer"
+    (Read_not_kept (Some (D.Parsed (row 2))))
+    (last_row store);
+  D.append store (row 3);
+  check
+    answer
+    "after an append of this process"
+    (Read_not_kept (Some (D.Parsed (row 3))))
+    (last_row store)
+;;
+
+(* Every store says whether its facts are kept, and the ones kept are the
+   ones whose writers have been gone through. A store added to the kept ones
+   changes this list, and with it comes the account of who writes it. *)
+let test_which_stores_keep_their_facts () =
+  let kept =
+    List.filter
+      (fun store ->
+         match D.Store.facts store with
+         | D.Store.Kept_by_the_lease_holder -> true
+         | D.Store.Read_from_the_files -> false)
+      D.Store.all
+  in
+  let store =
+    testable
+      (fun formatter store -> Format.pp_print_string formatter (D.Store.pool_job_name store))
+      (fun (left : D.Store.t) right -> left = right)
+  in
+  check
+    (list store)
+    "the stores whose facts are kept"
+    [ D.Store.Keeper D.Store.Keeper.Turn_records ]
+    kept
 ;;
 
 (* --- 5. one directory, one fact ---------------------------------------- *)
@@ -756,6 +810,14 @@ let () =
             `Quick
             test_reads_are_counted_by_how_they_were_come_by
         ] )
+    ; ( "a store another process writes"
+      , [ test_case
+            "is read every time"
+            `Quick
+            test_a_store_another_process_writes_is_read_every_time
+        ; test_case "which stores keep their facts" `Quick test_which_stores_keep_their_facts
+        ]
+      )
     ; ( "every path"
       , [ test_case
             "the fact is the files after every operation"

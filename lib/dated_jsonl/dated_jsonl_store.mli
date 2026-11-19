@@ -133,6 +133,22 @@ type retention =
 
 val retention : t -> retention
 
+(** Whether the process that holds the workspace's writer lease may keep a
+    fact of the store's files in memory ([Dated_jsonl.read_fact]). A kept
+    fact is moved by the appends of the process it is kept in and by no
+    other. *)
+type facts =
+  | Kept_by_the_lease_holder
+      (** Every change of the store's files is made through [Dated_jsonl] by
+          the process that holds the lease. This is said of a store once its
+          writers have been gone through. *)
+  | Read_from_the_files
+      (** The files are read each time: another process changes them too, or
+          the store's writers have not been gone through. *)
+
+val facts : t -> facts
+(** Each store answers for itself, so a new store has to. *)
+
 val is_side_file : t -> string -> bool
 (** Whether the store's owner keeps the entry named [name] in the store's
     own directory, beside the month directories. A side file is made from the

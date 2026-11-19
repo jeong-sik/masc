@@ -193,6 +193,52 @@ let retention = function
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
 
+type facts =
+  | Kept_by_the_lease_holder
+  | Read_from_the_files
+
+(* Who changes a store's files. [Kept_by_the_lease_holder] says that every
+   change is made by the process that holds the workspace's writer lease, and
+   is written here once the store's writers have been gone through. A store
+   nobody has gone through is read from the files, and so is one that
+   another process is known to write. *)
+let root_facts = function
+  (* [masc-cost --log] appends to the cost log and takes no lease
+     ([bin/masc_cost.ml]). *)
+  | Root.Costs -> Read_from_the_files
+  | Root.Transition_audit
+  | Root.Audit_approvals
+  | Root.Tool_events
+  | Root.Verdicts
+  | Root.Audit
+  | Root.Telemetry
+  | Root.Events
+  | Root.Activity_events
+  | Root.Tool_calls
+  | Root.Tool_usage
+  | Root.Agent_core_events
+  | Root.Provider_usage_history
+  | Root.Wire_capture
+  | Root.Schedule_signals
+  | Root.Telemetry_coverage_gaps -> Read_from_the_files
+
+let keeper_facts = function
+  (* One writer, [Keeper_turn_record_writer], called from the Keeper's turn.
+     A turn runs only in a process that holds the lease. Day files go by the
+     prune pass and by the Keeper's purge, both in that process. *)
+  | Keeper.Turn_records -> Kept_by_the_lease_holder
+  | Keeper.Metrics
+  | Keeper.Execution_receipts
+  | Keeper.Provider_inputs
+  | Keeper.Memory_recall_artifacts
+  | Keeper.Crash_events
+  | Keeper.Continuity_requests -> Read_from_the_files
+
+let facts = function
+  | Root store -> root_facts store
+  | Keeper store -> keeper_facts store
+  | Reaction_ledger | Decision_audit -> Read_from_the_files
+
 (* What a store's owner keeps in the store's own directory, beside the month
    directories: a file made from the day files, which no reader of the day
    files reads. Each store answers for itself, so a new store has to.

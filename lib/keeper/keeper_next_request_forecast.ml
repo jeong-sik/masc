@@ -142,10 +142,11 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start
-      ~counted_tokens ~atom_count ~digest_at messages =
+let carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_start
+      ~history_at_start ~counted_tokens ~atom_count ~digest_at messages =
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
+      ~past_max_context
       ~continuity
       ~front
       ~accepted
@@ -154,10 +155,22 @@ let carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_
       ~history_at_start
   in
   (* The ledger's count describes the range its front opened; any other
-     start carries a range nothing has counted. *)
+     start carries a range nothing has counted, the turn boundary the size
+     signal moved to among them. *)
   let counted_tokens =
     match start with
-    | Keeper_turn_driver_try_provider.From_seed _ -> counted_tokens
+    | Keeper_turn_driver_try_provider.From_seed { source = Keeper_carried_front.Ledger; _ } ->
+      counted_tokens
+    | Keeper_turn_driver_try_provider.From_seed
+        { source =
+            ( Keeper_carried_front.Turn_record _
+            | Keeper_carried_front.Turn_start_after_seed_refusal
+            | Keeper_carried_front.Turn_start_after_librarian_refusal
+            | Keeper_carried_front.This_turn_start_after_seed_refusal
+            | Keeper_carried_front.This_turn_start_after_librarian_refusal
+            | Keeper_carried_front.Turn_start_at_max_context )
+        ; _
+        }
     | Keeper_turn_driver_try_provider.From_snapshot _
     | Keeper_turn_driver_try_provider.From_read_position _
     | Keeper_turn_driver_try_provider.Past_librarian_point _
@@ -194,11 +207,11 @@ let carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_
   }
 ;;
 
-let carry ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start ~counted_tokens
-      messages =
+let carry ?past_max_context ~measure ~continuity ~front ~accepted ~turn_start
+      ~history_at_start ~counted_tokens messages =
   let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
-  carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start
-    ~counted_tokens ~atom_count ~digest_at messages
+  carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_start
+    ~history_at_start ~counted_tokens ~atom_count ~digest_at messages
 ;;
 
 (* The request in travel order. The system prompt and the tool array are
@@ -474,14 +487,21 @@ type first_request =
    A Librarian point weighs the seed alone, never the ledger: the driver reads
    the accepted start from the turn record, and only for a Librarian point. *)
 let first_request ~keeper_name ~trace_id ~runtime_id reads =
-  let ledger_front, front, counted_tokens =
+  let ledger_front, front, counted_tokens, past_max_context =
     match
       Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
     with
     | Some ledger when Keeper_model_input_ledger.holds ~digest_at:reads.digest_at ledger ->
       let front = Keeper_carried_front.of_ledger ledger in
-      front, front, ledger.Keeper_model_input_ledger.total_tokens
-    | Some _ | None -> None, Lazy.force reads.seed, None
+      ( front
+      , front
+      , ledger.Keeper_model_input_ledger.total_tokens
+        (* The next request is a turn's first, where the driver reads the
+           size signal from the same ledger and the same declaration. *)
+      , Keeper_turn_driver_try_provider.past_max_context
+          ~max_context:(Option.map fst (Runtime.resolve_max_context_of_runtime_id runtime_id))
+          ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger) )
+    | Some _ | None -> None, Lazy.force reads.seed, None, None
   in
   let accepted =
     match Keeper_turn_driver_try_provider.continuity_choice reads.continuity with
@@ -491,6 +511,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
   { carried =
       carry_indexed
         ~measure:(Keeper_context_core.message_measurer ())
+        ~past_max_context
         ~continuity:(Some reads.continuity)
         ~front
         ~accepted

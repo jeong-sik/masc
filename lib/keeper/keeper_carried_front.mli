@@ -25,8 +25,9 @@
     [total_atoms - transmitted_atoms]. A front a refusal moved in this turn
     ({!Turn_start_after_seed_refusal}, {!Turn_start_after_librarian_refusal},
     {!This_turn_start_after_seed_refusal},
-    {!This_turn_start_after_librarian_refusal}) belongs to the turn and takes
-    precedence over an older front in a later candidate's ledger.
+    {!This_turn_start_after_librarian_refusal}), or the size signal moved
+    ({!Turn_start_at_max_context}), belongs to the turn and takes precedence
+    over an older front in a later candidate's ledger.
 
     A front is a position witnessed by an opening-message digest
     ({!Runtime_model_input_tail_window.atom_opening_digest}): the front atom
@@ -60,6 +61,14 @@ type source =
           refused as too large too: the front moved to where this turn began
           for the rest of the turn (rule 8). Rule 7 bounds it by where this
           turn began, not by the turn boundary. *)
+  | Turn_start_at_max_context
+      (** No provider refused anything: at the turn's first request the
+          window stayed where the last request opened it, and that request's
+          count plus the largest growth one turn made since the ledger
+          started passed the binding's max-context. The front moved to the
+          turn boundary for the rest of the turn (RFC
+          a-sent-request-prefix-changes-only-when-the-window-moves §4), with
+          a Librarian point or without one. *)
 
 type seed =
   { first_atom : int
@@ -313,7 +322,7 @@ val origin_to_json : origin -> Yojson.Safe.t
     [turn_record] with [turn]; [turn_start_after_seed_refusal];
     [turn_start_after_librarian_refusal];
     [this_turn_start_after_seed_refusal];
-    [this_turn_start_after_librarian_refusal];
+    [this_turn_start_after_librarian_refusal]; [turn_start_at_max_context];
     [librarian_snapshot] with [end_atom] and [boundary_line];
     [librarian_progress] with [end_atom]; [past_librarian_point] with
     [librarian_end_atom] and [front], the {!Carried} object of its source;

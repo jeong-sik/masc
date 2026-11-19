@@ -137,6 +137,81 @@ let test_a_start_past_the_librarian_point_decodes () =
        (decode
           {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"librarian_progress","end_atom":2}}|}))
 
+(* Every origin the server writes decodes as the origin it names. The
+   expected value is a match over the server's types, so a new source or
+   origin fails to compile here until the TUI has a constructor for it and it
+   is listed below. *)
+module Front = Masc.Keeper_carried_front
+
+let expected_source : Front.source -> Inspector.forecast_carried_origin = function
+  | Front.Ledger -> Inspector.Carried_from_ledger
+  | Front.Turn_record { turn } -> Inspector.Carried_from_turn_record { turn }
+  | Front.Turn_start_after_seed_refusal -> Inspector.Carried_turn_start_after_seed_refusal
+  | Front.Turn_start_after_librarian_refusal ->
+    Inspector.Carried_turn_start_after_librarian_refusal
+  | Front.This_turn_start_after_seed_refusal ->
+    Inspector.Carried_this_turn_start_after_seed_refusal
+  | Front.This_turn_start_after_librarian_refusal ->
+    Inspector.Carried_this_turn_start_after_librarian_refusal
+  | Front.Turn_start_at_max_context -> Inspector.Carried_turn_start_at_max_context
+;;
+
+let expected_origin : Front.origin -> Inspector.forecast_carried_origin = function
+  | Front.Carried source -> expected_source source
+  | Front.Past_librarian_point { librarian_end_atom; source } ->
+    Inspector.Carried_past_librarian_point { librarian_end_atom; front = expected_source source }
+  | Front.Librarian_snapshot { end_atom; boundary_line } ->
+    Inspector.Carried_librarian_snapshot { end_atom; boundary_line }
+  | Front.Librarian_progress { end_atom } -> Inspector.Carried_librarian_progress { end_atom }
+  | Front.Turn_start { end_atom } -> Inspector.Carried_turn_start { end_atom }
+  | Front.Turn_start_unknown { reason } -> Inspector.Carried_turn_start_unknown { reason }
+;;
+
+let test_every_server_origin_decodes () =
+  let sources =
+    [ Front.Ledger
+    ; Front.Turn_record { turn = 7 }
+    ; Front.Turn_start_after_seed_refusal
+    ; Front.Turn_start_after_librarian_refusal
+    ; Front.This_turn_start_after_seed_refusal
+    ; Front.This_turn_start_after_librarian_refusal
+    ; Front.Turn_start_at_max_context
+    ]
+  in
+  let origins =
+    List.concat_map
+      (fun source ->
+         [ Front.Carried source; Front.Past_librarian_point { librarian_end_atom = 2; source } ])
+      sources
+    @ [ Front.Librarian_snapshot { end_atom = 2; boundary_line = 1 }
+      ; Front.Librarian_progress { end_atom = 2 }
+      ; Front.Turn_start { end_atom = 8 }
+      ; Front.Turn_start_unknown { reason = "the boundary log is unreadable" }
+      ]
+  in
+  List.iter
+    (fun origin ->
+       let written = Yojson.Safe.to_string (Front.origin_to_json origin) in
+       let json =
+         Yojson.Safe.from_string
+           (Printf.sprintf
+              {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
+                 "walk":{"lane_id":"r","declared":["r"]},
+                 "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
+                   "parts":{"error":"not measured"},"history_atoms":12,
+                   "carried":{"first_atom":8,"kept_atoms":4,"transmitted_bytes":300,"preamble_bytes":null,
+                              "origin":%s,"counted_tokens":null},
+                   "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+              written)
+       in
+       match Inspector.decode_forecast json with
+       | Ok { candidates = [ { carried = Some { origin = decoded; _ }; _ } ]; _ } ->
+         Alcotest.(check bool) written true (decoded = expected_origin origin)
+       | Ok _ -> Alcotest.fail (written ^ " decoded without its carried range")
+       | Error detail -> Alcotest.fail (written ^ " does not decode: " ^ detail))
+    origins
+;;
+
 let test_a_turn_start_origin_decodes () =
   let json =
     Yojson.Safe.from_string
@@ -577,6 +652,8 @@ let () =
             test_a_front_at_this_turns_start_decodes
         ; Alcotest.test_case "a start past the Librarian point decodes" `Quick
             test_a_start_past_the_librarian_point_decodes
+        ; Alcotest.test_case "every origin the server writes decodes" `Quick
+            test_every_server_origin_decodes
         ; Alcotest.test_case "a not-applicable lane decodes as such" `Quick
             test_a_not_applicable_lane_decodes_as_such
         ; Alcotest.test_case "a malformed forecast fails the reading" `Quick

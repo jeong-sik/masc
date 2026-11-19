@@ -294,7 +294,37 @@ type start_choice =
         (** A seed this history does not hold, dropped with the reason. *)
   }
 
+(** The size signal (RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §4, D1): at a
+    turn's first request, the window the pair's ledger last carried passes
+    the binding's max-context once the next turn grows as much as the largest
+    turn grew since the ledger started
+    ({!Keeper_model_input_ledger.next_turn_peak}). *)
+type past_max_context =
+  { window_first_atom : int
+        (** Where the ledger's last request opened its range. *)
+  ; turn_boundary : Keeper_carried_front.seed
+        (** The turn boundary, past [window_first_atom], as a seed with source
+            {!Keeper_carried_front.Turn_start_at_max_context}. *)
+  ; next_turn_peak : int
+  ; max_context : int
+  }
+
+val past_max_context :
+  max_context:int option ->
+  history_digest_at:(int -> string option) ->
+  turn_boundary:Keeper_carried_front.turn_start ->
+  Keeper_model_input_ledger.t option ->
+  past_max_context option
+(** [Some] when the ledger's next-turn peak passes [max_context], the ledger
+    still holds its positions in this history, and a known [turn_boundary]
+    lies past the window's first atom at an atom this history has. [None]
+    for no ledger, an unknown count, no [max_context], an unknown boundary,
+    or a boundary at or before the window: the signal moves a window early,
+    and never moves it back or by a guess. Pure. *)
+
 val choose_range_start :
+  past_max_context:past_max_context option ->
   continuity:continuity option ->
   front:Keeper_carried_front.seed option ->
   accepted:Keeper_carried_front.seed option ->
@@ -319,6 +349,13 @@ val choose_range_start :
     [turn_boundary] when that start is not known.
     [accepted] is not read
     without a Librarian point, and [front] is not read with one.
+    [past_max_context] moves only a window that stays: when the start these
+    rules choose opens at its [window_first_atom], the rules run again with
+    its [turn_boundary] as both [front] and [accepted]. Without a Librarian
+    point the range then opens there ({!From_seed}); with one, past the
+    point ({!Past_librarian_point}), so a snapshot's working state still
+    rides. A start that opens anywhere else has moved the window already:
+    to a Librarian point past it, or to a front a refusal held.
     [continuity] is [None] for a request with no trace or one composed from
     a recovery view, and is then read as {!without_snapshot}. Pure: the
     caller reads the files. The turn's composition and
@@ -996,11 +1033,14 @@ module For_testing : sig
       [ToolUse] block, says whether that tool's repeated results leave as a
       pointer to the turn's first one ({!Keeper_same_turn_result_stub},
       RFC-0510). Omitted, no tool does. The pointer is placed before the
-      demotion plan, on the range the checkpoint history chose. *)
+      demotion plan, on the range the checkpoint history chose.
+      [past_max_context] goes to {!choose_range_start}; omitted, no window
+      moves for size. The turn driver passes it at a turn's first request. *)
 
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
+    ?past_max_context:past_max_context ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->
@@ -1018,6 +1058,7 @@ module For_testing : sig
   val request_view :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
+    ?past_max_context:past_max_context ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->

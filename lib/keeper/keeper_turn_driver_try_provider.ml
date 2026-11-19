@@ -1245,7 +1245,8 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
           (this_turn_start ~history_digest_at history_at_start)
       | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
       | Keeper_carried_front.Turn_start_after_seed_refusal
-      | Keeper_carried_front.Turn_start_after_librarian_refusal -> end_atom
+      | Keeper_carried_front.Turn_start_after_librarian_refusal
+      | Keeper_carried_front.Turn_start_at_max_context -> end_atom
     in
     if seed.first_atom > bound
     then
@@ -1278,26 +1279,111 @@ let from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at
   | Some (_ : Keeper_carried_front.seed) | None -> at_point
 ;;
 
-let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
-      ~history_at_start =
-  let without_point () =
-    match front with
-    | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
-    | Some seed ->
-      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
-       | Ok seed -> { start = From_seed seed; outlived_seed = None }
-       | Error dropped ->
-         { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
+(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1). The
+   window the pair's ledger last carried passes the binding's max-context
+   once the next turn grows as much as the largest turn grew since the ledger
+   started, so it moves to the turn boundary before a provider refuses it: a
+   refusal that is not typed fails the turn instead of moving the window.
+   Every value is one the provider counted or the operator declared, and an
+   unknown one gives no signal. *)
+type past_max_context =
+  { window_first_atom : int
+  ; turn_boundary : Keeper_carried_front.seed
+  ; next_turn_peak : int
+  ; max_context : int
+  }
+
+let past_max_context ~max_context ~history_digest_at ~turn_boundary
+      (ledger : Keeper_model_input_ledger.t option) =
+  let ( let* ) = Option.bind in
+  let* ledger = ledger in
+  let* max_context = max_context in
+  let* next_turn_peak = Keeper_model_input_ledger.next_turn_peak ledger in
+  let* end_atom =
+    match turn_boundary with
+    | Keeper_carried_front.Turn_boundary { end_atom } -> Some end_atom
+    | Keeper_carried_front.Turn_boundary_unknown _ -> None
   in
-  let at_point point =
-    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point
-    ; outlived_seed = None
-    }
+  let window_first_atom = ledger.last.first_atom in
+  if next_turn_peak > max_context
+     && end_atom > window_first_atom
+     && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
+  then
+    Option.map
+      (fun front_digest ->
+         { window_first_atom
+         ; turn_boundary =
+             { Keeper_carried_front.first_atom = end_atom
+             ; front = Model_input_front.At_atom front_digest
+             ; source = Keeper_carried_front.Turn_start_at_max_context
+             }
+         ; next_turn_peak
+         ; max_context
+         })
+      (history_digest_at end_atom)
+  else None
+;;
+
+(* Whether a request's range opened at the front the size signal moved,
+   with a Librarian point or without one. *)
+let opened_at_max_context : Keeper_carried_front.origin -> bool = function
+  | Keeper_carried_front.Carried source
+  | Keeper_carried_front.Past_librarian_point { source; _ } ->
+    (match source with
+     | Keeper_carried_front.Turn_start_at_max_context -> true
+     | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
+     | Keeper_carried_front.Turn_start_after_seed_refusal
+     | Keeper_carried_front.Turn_start_after_librarian_refusal
+     | Keeper_carried_front.This_turn_start_after_seed_refusal
+     | Keeper_carried_front.This_turn_start_after_librarian_refusal -> false)
+  | Keeper_carried_front.Librarian_snapshot _ | Keeper_carried_front.Librarian_progress _
+  | Keeper_carried_front.Turn_start _ | Keeper_carried_front.Turn_start_unknown _ -> false
+;;
+
+(* The atom a start opens the carried range at, before the projection clamps
+   it to the newest atom; [None] for an unknown boundary, which names none. *)
+let range_opening_atom = function
+  | From_snapshot snapshot -> Some snapshot.Librarian_continuity_snapshot.end_atom
+  | From_read_position { end_atom } -> Some end_atom
+  | Past_librarian_point { accepted; _ } -> Some accepted.Keeper_carried_front.first_atom
+  | From_seed seed -> Some seed.Keeper_carried_front.first_atom
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) -> Some end_atom
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) -> None
+;;
+
+let choose_range_start ~past_max_context ~continuity ~front ~accepted ~history_digest_at
+      ~turn_boundary ~history_at_start =
+  let choose ~front ~accepted =
+    let without_point () =
+      match front with
+      | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
+      | Some seed ->
+        (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+         | Ok seed -> { start = From_seed seed; outlived_seed = None }
+         | Error dropped ->
+           { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
+    in
+    let at_point point =
+      { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point
+      ; outlived_seed = None
+      }
+    in
+    match Option.map (fun (value : continuity) -> value.point) continuity with
+    | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
+    | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
+    | Some Without_snapshot | None -> without_point ()
   in
-  match Option.map (fun (value : continuity) -> value.point) continuity with
-  | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
-  | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
-  | Some Without_snapshot | None -> without_point ()
+  let choice = choose ~front ~accepted in
+  (* The signal moves only a window that stays: a start that opens anywhere
+     but where the ledger's window opened has moved it already, to a
+     Librarian point past it or to a front a refusal held. The moved front
+     replaces the seed on both paths, so a Librarian snapshot's working state
+     still rides ahead of it. *)
+  match past_max_context with
+  | Some { window_first_atom; turn_boundary = moved; _ }
+    when Option.equal Int.equal (range_opening_atom choice.start) (Some window_first_atom) ->
+    choose ~front:(Some moved) ~accepted:(Some moved)
+  | Some _ | None -> choice
 ;;
 
 let range_start_origin = function
@@ -1382,6 +1468,7 @@ let project_range_start ~unread ~measure_message_bytes ~atom_count start message
 let compose_carried_model_input
       ?continuity
       ?completed_arguments
+      ?past_max_context
       ?(finished_turn_results = Finished_turns_verbatim)
       ?(history_at_start = Keeper_turn_boundaries.Continued_history)
       ?(same_turn_result_as_pointer = fun (_ : string) -> false)
@@ -1403,8 +1490,8 @@ let compose_carried_model_input
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
   let { start; outlived_seed } =
-    choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
-      ~history_at_start
+    choose_range_start ~past_max_context ~continuity ~front ~accepted ~history_digest_at
+      ~turn_boundary ~history_at_start
   in
   (* A result whose text repeats an earlier result of its own turn leaves as
      a pointer to that turn's first one, for the tools that declare it
@@ -1529,6 +1616,7 @@ let resolve_carried ~to_wire carried =
 let materialize_request_history
       ?continuity
       ?completed_arguments
+      ?past_max_context
       ?finished_turn_results
       ?history_at_start
       ?same_turn_result_as_pointer
@@ -1546,8 +1634,8 @@ let materialize_request_history
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
-        ?same_turn_result_as_pointer
+        ?continuity ?completed_arguments ?past_max_context ?finished_turn_results
+        ?history_at_start ?same_turn_result_as_pointer
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1619,15 +1707,15 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
-      ?same_turn_result_as_pointer
+      ?continuity ?completed_arguments ?past_max_context ?finished_turn_results
+      ?history_at_start ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
   let materialized ?(materialize = materialize) completed_arguments =
-    materialize_request_history ?continuity ?completed_arguments ?finished_turn_results
-      ?history_at_start ?same_turn_result_as_pointer
+    materialize_request_history ?continuity ?completed_arguments ?past_max_context
+      ?finished_turn_results ?history_at_start ?same_turn_result_as_pointer
       ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -1958,6 +2046,13 @@ let bounded_model_input_projection
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
+  (* The binding's max-context, which the size signal compares the ledger's
+     counts against; read once per attempt. *)
+  let max_context =
+    lazy
+      (Option.bind ctx.input_runtime (fun runtime ->
+         Option.map fst (Runtime_instance.resolve_max_context_of_runtime runtime)))
+  in
   let to_wire = memoize_wire_message media_store in
   fun messages ->
     state.request_range := None;
@@ -2039,10 +2134,22 @@ let bounded_model_input_projection
          | None -> (Lazy.force cold_seed).Keeper_carried_front.seed)
       | None | Some Without_snapshot -> None
     in
+    (* Read at the turn's first request only, the one that carries the turn
+       context. The ledger's count at a later request already holds part of
+       this turn's growth, and the turn keeps the front the signal moved,
+       held below. *)
+    let past_max_context =
+      if List.exists Runtime_model_input_tail_window.is_extra_context messages
+      then
+        past_max_context ~max_context:(Lazy.force max_context) ~history_digest_at
+          ~turn_boundary:ctx.turn_boundary !(state.ledger)
+      else None
+    in
     let current_turn_results = !(state.current_turn_results) in
     let* view =
       request_view
         ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+        ?past_max_context
         ~finished_turn_results
         ~history_at_start:ctx.history_at_start
         ~same_turn_result_as_pointer
@@ -2097,6 +2204,20 @@ let bounded_model_input_projection
     let composed = view.composed in
     Keeper_carried_front.warn_if_origin_is_unknown_start
       ~keeper_name:ctx.keeper_name composed.origin;
+    (* The rest of the turn opens at the front the signal moved: a Librarian
+       point reads the accepted start from the held front, and a candidate
+       whose ledger has not seen this request reads it too. *)
+    (match past_max_context with
+     | Some signal when opened_at_max_context composed.origin ->
+       ctx.hold_carried_front signal.turn_boundary;
+       Log.Keeper.info
+         ~keeper_name:ctx.keeper_name
+         "model input window moved to the turn boundary before the provider counted \
+          past max-context runtime=%s next_turn_peak=%d max_context=%d \
+          window_first_atom=%d front=%s"
+         ctx.runtime_id signal.next_turn_peak signal.max_context signal.window_first_atom
+         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json signal.turn_boundary))
+     | Some _ | None -> ());
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -2106,6 +2227,7 @@ let bounded_model_input_projection
              let demoted =
                compose_carried_model_input
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ?past_max_context
                  ~history_at_start:ctx.history_at_start
                  ~same_turn_result_as_pointer
                  ~measure_message_bytes

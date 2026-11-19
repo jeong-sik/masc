@@ -36,3 +36,47 @@ let content_cols ~hidden ~cols =
    moved nothing at all, which reads as a dead key. *)
 let arrows_go_left ~hidden ~cols ~preferring_left =
   preferring_left && shown ~hidden ~cols
+
+type zoom =
+  | Normal
+  | Half
+  | Full
+
+let zoom_in = function
+  | Normal -> Half
+  | Half | Full -> Full
+
+let zoom_out = function
+  | Full -> Half
+  | Half | Normal -> Normal
+
+let step_zoom ~zoom ~direction ~activity_available ~roster_available =
+  match direction with
+  | `In -> (
+      if not activity_available && not roster_available then None
+      else
+        match zoom with
+        | Normal ->
+            if activity_available then Some Half
+            else Some Full
+        | Half ->
+            if roster_available then Some Full
+            else Some Half
+        | Full -> Some Full)
+  | `Out -> (
+      match zoom with
+      | Full -> if activity_available then Some Half else Some Normal
+      | Half | Normal -> Some Normal)
+
+let hides_activity = function
+  | Normal -> false
+  | Half | Full -> true
+
+let hides_roster = function
+  | Normal | Half -> false
+  | Full -> true
+
+let zoom_label ~ko = function
+  | Normal -> if ko then "화면 분할: 기본 (Normal)" else "Pane zoom: normal"
+  | Half -> if ko then "화면 분할: 넓게 (Half — 우측 패널 접음)" else "Pane zoom: half (Activity hidden)"
+  | Full -> if ko then "화면 분할: 전체 (Full — 좌우 패널 접음)" else "Pane zoom: full (side panes hidden)"

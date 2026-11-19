@@ -28,7 +28,7 @@
 val to_json : Librarian_log.line -> Yojson.Safe.t
 
 (** Every object has exactly its fields. Counts and offsets are not negative,
-    and a Memory id has the shape of one. Text a write carried (a claim, a
+    a line's [at] is finite, and a Memory id has the shape of one. Text a write carried (a claim, a
     reason, a name) is read as it was written: the reader does not refuse a
     line the writer could have written. *)
 val of_json

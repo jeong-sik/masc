@@ -329,6 +329,13 @@ let test_rejections () =
     ~reason:(Unknown_token "abc")
     (replace_once ~old:(Printf.sprintf {|"snapshot":"%s"|} (String.make 64 'a'))
        ~by:{|"snapshot":"abc"|} started_text);
+  (* The JSON reader takes these two words as numbers. *)
+  expect_rejected "a started line whose time is not a number" ~path:[ Wire_field "at" ]
+    ~reason:Not_finite
+    (replace_once ~old:{|"at":100.0|} ~by:{|"at":NaN|} started_text);
+  expect_rejected "a commit whose time is not finite" ~path:[ Wire_field "at" ]
+    ~reason:Not_finite
+    (replace_once ~old:{|"at":200.0|} ~by:{|"at":Infinity|} committed_text);
   expect_rejected "a negative sequence number" ~path:[ Wire_field "seq" ] ~reason:Negative
     (replace_once ~old:{|"seq":2|} ~by:{|"seq":-1|} committed_text);
   expect_rejected "a negative offset" ~path:[ Wire_field "turn_log_offset" ] ~reason:Negative

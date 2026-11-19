@@ -91,6 +91,7 @@ val new_fact_of_json : Yojson.Safe.t -> (new_fact, wire_error) result
     ({!Schema_violation}). *)
 val of_json : asked:Librarian_question_id.t -> Yojson.Safe.t -> (t, rejection) result
 
-(** {!of_json} on text that is exactly one JSON document. Text around the
-    document, a code fence included, is {!Not_json}. *)
+(** {!of_json} on text that is one JSON document. The JSON reader skips
+    whitespace and JSON comments ([// …], [/* … */]) around the document.
+    Any other text around it, a code fence included, is {!Not_json}. *)
 val of_string : asked:Librarian_question_id.t -> string -> (t, rejection) result

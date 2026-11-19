@@ -567,6 +567,13 @@ let working_state_field fields =
     wire_fail [ Wire_field f_working_state ] Expected_string
 ;;
 
+(* A line's time becomes the [updated_at] of the snapshot written from it,
+   and the snapshot codec reads only a finite one. *)
+let time_field field fields =
+  let* at = wire_number_field field fields in
+  if Float.is_finite at then Ok at else wire_fail [ Wire_field field ] Not_finite
+;;
+
 let of_json json =
   let* fields = object_fields json in
   let* line = of_token ~token_of:line_kind_token line_kinds f_line fields in
@@ -577,7 +584,7 @@ let of_json json =
         [ f_line; f_at; f_turn_log; f_snapshot; f_revision; f_turn_log_offset; f_covered ]
         fields
     in
-    let* at = wire_number_field f_at fields in
+    let* at = time_field f_at fields in
     let* turn_log = log_id_field f_turn_log fields in
     let* snapshot = digest_field f_snapshot fields in
     let* revision = count_field f_revision fields in
@@ -604,7 +611,7 @@ let of_json json =
         fields
     in
     let* seq = count_field f_seq fields in
-    let* at = wire_number_field f_at fields in
+    let* at = time_field f_at fields in
     let* basis = digest_field f_basis fields in
     let* after = digest_field f_after fields in
     let* revision = count_field f_revision fields in

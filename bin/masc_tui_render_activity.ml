@@ -583,13 +583,23 @@ let render_keeper_calls (state : state) =
     entries
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
+         (* The status marks of RFC tui-one-screen-grammar 7.2 in their 7.3
+            tones. A deferred call handed its continuation to the async path
+            and the work goes on, so it is under way, as on the lane run
+            detail; it wore [◌], the mark of a value not read yet (6.4). A
+            record that names no outcome yet is unreported [?], and one whose
+            fields the reader refuses (the decoder drops those rows) read
+            failed. *)
          let glyph, style =
+           let status mark = (Masc_tui_value.Mark.glyph mark, Theme.status_tone mark) in
            match call.kc_outcome with
-           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
-           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
-           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
-           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
-             ("?", Ansi.reset)
+           | Tool_result.Recorded_succeeded -> status Masc_tui_value.Mark.Settled
+           | Tool_result.Recorded_failed -> status Masc_tui_value.Mark.Failed
+           | Tool_result.Recorded_deferred -> status Masc_tui_value.Mark.Under_way
+           | Tool_result.Recorded_unsettled ->
+             (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported, Ansi.reset)
+           | Tool_result.Recorded_malformed ->
+             (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed, Theme.bad ())
          in
          let duration =
            match Option.bind call.kc_duration_ms Masc_tui_acting.elapsed_text with

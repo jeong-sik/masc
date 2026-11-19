@@ -1601,13 +1601,23 @@ val fold_private_jsonl_locked_result
     propagates; descriptor settlement uses the existing transaction outcome. *)
 
 module Private_jsonl_window : sig
+  (** Which row before [from] a window read looks for. *)
+  type previous_row_wanted =
+    | No_previous_row  (** Nothing before [from] is read. *)
+    | Nearest_accepted of (string -> bool)
+        (** The nearest row before [from] the predicate accepts. The read
+            walks back from [from] a row at a time until one is accepted, to
+            the first row when none is, so it costs the rows it walks. The
+            predicate runs in the blocking worker under the lock: it must not
+            raise or use Eio effects. *)
+
   type t =
     | Window_missing  (** No file at the path. *)
     | Window_present of
         { previous_row : (int * string) option
-              (** When [from] starts a row after the first: the nearest row
-                  before [from] that [previous_row_wanted] accepts, as its
-                  start offset and its bytes without the ['\n']. *)
+              (** When [from] starts a row after the first and a row was asked
+                  for: the nearest row before [from] the predicate accepts, as
+                  its start offset and its bytes without the ['\n']. *)
         ; from_starts_row : bool
               (** [from] is [0], or lies at or before [rows_end] right after a
                   ['\n']. *)
@@ -1623,18 +1633,16 @@ end
 
 (** Part of a private JSONL store under the lock and framing of
     {!read_private_jsonl_rows_locked_result}: where the complete rows end,
-    the row before [from], and at most [max_rows] complete rows from [from].
-    It reads the rows it returns, the rows before [from] back to the one
-    [previous_row_wanted] accepts, and the bytes from the end of the store
-    back to its last ['\n'], not the whole store. [previous_row_wanted] runs
-    in the blocking worker under the lock: it must not raise or use Eio
-    effects.
+    the row before [from] when one is asked for, and at most [max_rows]
+    complete rows from [from]. It reads the rows it returns, the rows
+    [previous_row_wanted] walks, and the bytes from the end of the store back
+    to its last ['\n'], not the whole store.
     Raises [Invalid_argument] for a negative [from] or a [max_rows] below one. *)
 val read_private_jsonl_window_locked_result :
   string ->
   from:int ->
   max_rows:int ->
-  previous_row_wanted:(string -> bool) ->
+  previous_row_wanted:Private_jsonl_window.previous_row_wanted ->
   ( Private_jsonl_window.t
   , Private_jsonl_rows.error )
   private_file_transaction_outcome

@@ -167,8 +167,8 @@ let draws_zone_two_text head = String.starts_with ~prefix:"let position_text " h
 
 let draws_title_row body =
   List.exists (contains body)
-    [ "surface_chrome "; "here_row "; "titled_row "; "pane_surface_header "
-    ; "config_pane_title " ]
+    [ "surface_chrome "; "here_row "; "titled_row "; "zone_two_title "
+    ; "pane_surface_header "; "config_pane_title " ]
 
 let windows_rows body =
   List.exists (contains body) [ "Rows.of_list"; "Paged_by_cursor"; "Self_scrolled" ]

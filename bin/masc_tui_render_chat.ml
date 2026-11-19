@@ -4782,10 +4782,11 @@ let render_keeper_message (state : state) =
                ~total:(List.length menu.Masc_tui_command.items))
       | Some _ | None -> None
     in
-    let inner_cells = titled_room ~cols:chat_cols state ~position in
     let title_row =
-      titled_row ~cols:chat_cols state ~position
-        ~title:(Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix)
+      zone_two_title ~cols:chat_cols state ~position
+        ~title:(fun ~cols ->
+          Message_layout.chat_title_row ~inner_cells:(framed_inner_width cols)
+            ~title ~mode_suffix)
     in
     let status_cells = keeper_status_cells ~cols in
     let status_block =

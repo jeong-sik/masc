@@ -130,7 +130,7 @@ let render_verification_list (state : state) =
     match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
   in
   let shown = List.length requests in
-  let header =
+  let header ~cols =
     match state.verification with
     | None ->
         let reading_note =
@@ -182,7 +182,7 @@ let render_verification_list (state : state) =
         else Some (Masc_tui_value.Position.row ~selected ~total:(offset + shown))
   in
   box_top buf cols;
-  box_line buf cols (titled_row ~cols state ~title:header ~position);
+  box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   let col_hdr, request_row =
     judgement_list_columns state ~cols
@@ -524,18 +524,18 @@ let verification_detail_pane (state : state) ~rows ~cols
   let pane_start = Buffer.length buf in
   box_top buf cols;
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
             ~total:(List.length lines))
-       ~title:
-    (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 details  %s"
-               (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
-        ^ " \xe2\x96\xb8 details")
-       (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id)));
+       ~title:(fun ~cols ->
+         Printf.sprintf "%s  %s"
+           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
+              ~after:
+                (Printf.sprintf " \xe2\x96\xb8 details  %s"
+                   (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
+            ^ " \xe2\x96\xb8 details")
+           (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id)));
   box_divider buf cols;
   (* The frame cell of the first content row, counted from what was drawn
      above it, for the pictures placed over the rows under it. *)
@@ -713,7 +713,7 @@ let render_harness_list (state : state) =
            Option.is_some v.Masc.Tui_decode.hv_fallback_reason)
          verdicts)
   in
-  let header =
+  let header ~cols =
     match state.harness with
     | None ->
         let reading_note =
@@ -751,7 +751,7 @@ let render_harness_list (state : state) =
   in
   box_top buf cols;
   box_line buf cols
-    (titled_row ~cols state ~title:header
+    (zone_two_title ~cols state ~title:header
        ~position:
          (if shown = 0 then None
           else
@@ -1000,9 +1000,9 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   box_top buf cols;
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~title:
-         (harness_detail_heading state ~cols
+         (harness_detail_heading state
             ~task_id:verdict.Masc.Tui_decode.hv_task_id
             ~tail:(connection_badge state))
        ~position:

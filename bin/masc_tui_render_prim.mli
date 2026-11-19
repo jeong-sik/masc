@@ -374,8 +374,31 @@ val here_row :
     end, and the position is never cut. A step ahead of the last that the row
     cannot hold whole is folded in the middle, the longest first, so the last
     step stays on the row. The product name is not drawn. This,
-    {!titled_row} and the title row of {!surface_chrome} are the only places a
-    position becomes text. *)
+    {!zone_two_title} and the title row of {!surface_chrome} are the only
+    places a position becomes text. *)
+
+val zone_two_title :
+  cols:int ->
+  Masc_tui_types.state ->
+  position:Masc_tui_value.Position.t option ->
+  title:(cols:int -> string) ->
+  string
+(** A title row a surface lays out itself rather than through {!here_row},
+    with [position] at its right-hand end. [title] is asked for the row at
+    the frame width its text has: [cols] less the cells the position and its
+    gap take. A strip, heading or badge it sizes to that width keeps its end;
+    only a title wider than that loses its end, so the position keeps its
+    column. *)
+
+val zone_two_title_head :
+  cols:int ->
+  Masc_tui_types.state ->
+  position:Masc_tui_value.Position.t option ->
+  title:(cols:int -> string) ->
+  Masc_tui_message_layout.head
+(** What {!zone_two_title} decides for [title]: [Whole] when the title fits
+    the cells the position leaves, [Cut] when the row has to cut its end.
+    Nothing is drawn. A test reads the decision here. *)
 
 val titled_row :
   cols:int ->
@@ -383,15 +406,11 @@ val titled_row :
   title:string ->
   position:Masc_tui_value.Position.t option ->
   string
-(** A title row a surface lays out itself rather than through {!here_row},
-    with [position] at its right-hand end: [title] keeps the
-    {!titled_room} cells the position leaves and is cut to them. *)
-
-val titled_room :
-  cols:int -> Masc_tui_types.state -> position:Masc_tui_value.Position.t option -> int
-(** The cells {!titled_row} leaves its [title]. A title that lays out its own
-    parts sizes them to this, so the cut does not take the end it meant to
-    keep. *)
+(** {!zone_two_title} for a title handed as text. Text laid out for the
+    whole row loses its end to the position, so a title that lays out its
+    parts goes through {!zone_two_title}. Kept for {!surface_chrome}, whose
+    surfaces hand their title as text, and for two rows in
+    masc_tui_render_work.ml; it goes once those take [cols:int -> string]. *)
 
 val reading_separator : string
 (** The mark between two readings of one row. *)
@@ -406,6 +425,15 @@ val here_steps_room :
     also keep [after] cells for what follows the path: what the screen name
     and one separator a step leave. A row that lays out the path itself
     ({!here_path}) folds a long step to this. *)
+
+val keeper_detail_title :
+  Masc_tui_types.state -> keeper_name:string -> cols:int -> string
+(** A Keeper detail's title on a row [cols] wide: the path to the Keeper,
+    its name folded in the middle when the row is short, and the strip of
+    detail tabs with the open one marked. The strip drops whole tabs and
+    counts them, so its end is a whole tab or the count of those it hides.
+    Handed to {!zone_two_title}, which asks for it at the width the
+    position leaves. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -813,7 +841,9 @@ val config_pane_title :
     nine of them spelled it identically, which is also why none could tell the
     strip to leave room for the badge. When those optional names and shortcuts
     cannot leave room for the active pane, the path names that pane in the
-    strip's place, ahead of the connection observation. *)
+    strip's place, ahead of the connection observation. Applied to all but
+    [cols] it is the [title] a pane hands {!zone_two_title}, so the strip
+    and the badge are laid out in the cells the position leaves. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

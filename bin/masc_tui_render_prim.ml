@@ -2020,16 +2020,49 @@ let zone_two_row ~cols ~left = function
           ' '
       ^ text
 
-(* A title row a surface lays out itself, with the position at its right:
-   the title keeps the cells the position leaves. *)
+(* A title row a surface lays out itself, with the position at its right.
+
+   The title is asked for at the frame width its text really has: the row's
+   own, less the cells the position and its gap take. A title that lays out
+   its parts against a frame width -- a tab strip that drops whole entries,
+   a heading that keeps its badge -- then lays them out in those cells, and
+   the row cuts nothing it laid out. Handed text built for the whole row, the
+   row had to cut its end to keep the position, and the end was what those
+   rows exist to keep: the last tab or the mark counting the hidden ones,
+   and the connection badge (#53217 review). *)
 let titled_room ~cols (state : state) ~position =
   max 0 (framed_inner_width cols - zone_two_position_cells (zone_two_position state position))
 
+(* The title is asked for at the frame width whose inner width is [room]. *)
+let zone_two_title_text ~cols (state : state) ~position ~title =
+  let room = titled_room ~cols state ~position in
+  (room, title ~cols:(cols - (framed_inner_width cols - room)))
+
+let zone_two_title_head ~cols (state : state) ~position ~title =
+  let room, text = zone_two_title_text ~cols state ~position ~title in
+  Message_layout.take_cells text room
+
+let zone_two_title ~cols (state : state) ~position ~title =
+  let room, text = zone_two_title_text ~cols state ~position ~title in
+  (* A title laid out in [room] fits it. One that does not was laid out for
+     more cells than it has, and its end goes so the position keeps its
+     column. *)
+  let left =
+    match Message_layout.take_cells text room with
+    | Message_layout.Whole text -> text
+    | Message_layout.Cut _ -> Message_layout.truncate_end room text
+  in
+  zone_two_row ~cols ~left (zone_two_position state position)
+
+(* WORKAROUND: a title handed as text was laid out before the row knew the
+   position's cells, so when it filled the row its end is cut.
+   [surface_chrome] takes every surface's title as text, and two rows in
+   masc_tui_render_work.ml call this while another change owns that file.
+   Root fix: [surface_chrome] takes [title : cols:int -> string] the way
+   [zone_two_title] does, those two rows call [zone_two_title], and this
+   goes. *)
 let titled_row ~cols (state : state) ~title ~position =
-  let left_cells = titled_room ~cols state ~position in
-  match zone_two_position state position with
-  | None -> title
-  | Some _ as position -> zone_two_row ~cols ~left:(fit_width title left_cells) position
+  zone_two_title ~cols state ~position ~title:(fun ~cols:_ -> title)
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
    itself. Everything else is the body's budget. The framed panels count the
@@ -2542,6 +2575,49 @@ let here_row ~cols (state : state) ~path ~readings ~position =
       ~tail
   in
   zone_two_row ~cols ~left position
+
+(* A Keeper detail's title ahead of its position: where the reader is, the
+   Keeper's name, and the walk of tabs on the same row, so the chrome height
+   the scroll math counts does not move.
+
+   The tab you are on carries the mark the surface strip puts on the
+   surface you are on. Bold and underline said it alone before, so the
+   answer was gone from a monochrome terminal, from one that drops
+   underline, and from every text capture -- a frame dump, a screenshot
+   pasted into an issue, the keyboard-input fixtures.
+
+   Drawn through [tab_strip] with the row's width: ten tabs are wider than
+   the row beside the roster pane, and cut from the right the mark on Runs
+   was the part that went. *)
+let keeper_detail_title (state : state) ~keeper_name ~cols =
+  let entries =
+    List.map
+      (fun tab ->
+        ( keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
+        , tab = state.detail_tab
+        , tab ))
+      keeper_detail_tabs
+  in
+  (* The strip keeps the cells its current tab needs; a name longer than
+     what is left folds in the middle. Drawn whole, a long name took the
+     row and the strip drew nothing, so the row no longer said which tab
+     the body below it is. *)
+  let name =
+    Message_layout.truncate_middle
+      (max heading_id_floor
+         (here_steps_room ~cols state ~steps:1
+            ~after:
+              (Message_layout.display_width tab_strip_gap
+               + tab_strip_min_width entries)))
+      (Terminal_text.single_line keeper_name)
+  in
+  let before =
+    here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
+  in
+  before
+  ^ tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
+      ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
+      entries
 
 (* The step the Runtime screens take from System, and a keeper's runtime
    takes from that keeper. *)

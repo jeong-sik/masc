@@ -190,9 +190,9 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
      scrolls, and an operator who reads the first screen as the whole ask
      could press y on it: the title row's position says there is more. *)
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
-       ~title:(screen_title
+       ~title:(fun ~cols:_ -> screen_title
          (if input_unreadable then "!WIDEN Approval"
           else match value_hint, key_has_bytes with
             | Masc_tui_keys.No_value_reading, false -> " MASC Approval"
@@ -1239,11 +1239,11 @@ let render_question_reader (state : state) =
   in
   box_top buf cols;
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:room
             ~total:(List.length lines))
-       ~title:(screen_title
+       ~title:(fun ~cols:_ -> screen_title
          (" MASC Approvals / Questions"
           ^ Masc_tui_approvals_model.approval_list_note ~name:"questions"
               (Masc_tui_approvals_model.approvals_questions_reading state))));

@@ -38,7 +38,7 @@ let render_runtime_params (state : state) =
   box_top buf cols;
   (* The list has the cursor, so its selected row is the position. *)
   box_line buf cols
-    (titled_row ~cols state ~title:(config_pane_title ~cols state)
+    (zone_two_title ~cols state ~title:(config_pane_title state)
        ~position:
          (match state.runtime_params with
           | None | Some [] -> None
@@ -680,7 +680,7 @@ let render_prompt_registry (state : state) =
       Ansi.reset
   in
   box_line buf cols
-    (titled_row ~cols state ~title:(config_pane_title ~cols ~reading state)
+    (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
        ~position:
          (if total = 0 then None
           else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)));
@@ -770,9 +770,9 @@ let render_runtime_prompt_assets (state : state) =
       (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
   in
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~title:
-         (config_pane_title ~cols
+         (config_pane_title
             ~path:
               [ ui_text state ~ko:"프롬프트" ~en:"prompts"
               ; ui_text state ~ko:"런타임 자산" ~en:"runtime assets" ]
@@ -1108,7 +1108,7 @@ let render_presets (state : state) =
   box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (titled_row ~cols state ~title:(config_pane_title ~cols ~reading state)
+    (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
        ~position:
          (if total = 0 then None
           else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)));
@@ -1560,9 +1560,9 @@ let render_config_models (state : state) =
     | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
   in
   box_line buf cols
-    (titled_row ~cols state
+    (zone_two_title ~cols state
        ~title:
-         (config_pane_title ~cols
+         (config_pane_title
             ~reading:(if Option.is_none state.runtime_model_form
                          && Option.is_none state.runtime_model_jump
                          && Option.is_none (config_models_read_error state)

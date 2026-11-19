@@ -261,7 +261,7 @@ let render_system_logs (state : state) =
     | None, None -> []
     | _ -> filter_pieces
   in
-  let header =
+  let header ~cols =
     match (system_logs_page state).lp_snapshot with
     | None ->
         let reading_note =
@@ -291,7 +291,7 @@ let render_system_logs (state : state) =
   in
   box_top buf cols;
   box_line buf cols
-    (titled_row ~cols state ~title:header
+    (zone_two_title ~cols state ~title:header
        ~position:
          (if total_entries = 0 then None
           else
@@ -971,7 +971,7 @@ let render_acting (state : state) =
     | Some rows -> List.nth_opt rows idx
     | None -> Option.map row_of (List.nth_opt visible idx)
   in
-  let header =
+  let header ~cols =
     activity_heading state ~cols ~on_logs:false
       ~reading:
         (("  " ^ Acting.filter_label ~ko:(state.ui_language = Lang_ko) state.acting_filter)
@@ -1012,7 +1012,7 @@ let render_acting (state : state) =
           Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   in
   box_top buf cols;
-  box_line buf cols (titled_row ~cols state ~title:header ~position);
+  box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   List.iter
     (fun (style, notice) -> box_line_styled buf cols ~style ("  " ^ notice))

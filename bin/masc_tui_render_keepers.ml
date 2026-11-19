@@ -4980,51 +4980,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     (* Top border *)
     box_top buf cols;
 
-    (* Title, with the tab walk on the same row so the chrome height the
-       scroll math counts does not move. *)
-    (* The tab you are on carries the mark the surface strip puts on the
-       surface you are on. Bold and underline said it alone before, so the
-       answer was gone from a monochrome terminal, from one that drops
-       underline, and from every text capture -- a frame dump, a screenshot
-       pasted into an issue, the keyboard-input fixtures.
-
-       Drawn through [tab_strip] with the row's width: ten tabs are wider
-       than the row beside the roster pane, and cut from the right the mark
-       on Runs was the part that went. *)
-    let entries =
-      List.map
-        (fun tab ->
-          ( Masc_tui_types.keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
-          , tab = state.detail_tab
-          , tab ))
-        Masc_tui_types.keeper_detail_tabs
-    in
-    (* The strip keeps the cells its current tab needs; a name longer than
-       what is left folds in the middle. Drawn whole, a long name took the
-       row and the strip drew nothing, so the row no longer said which tab
-       the body below it is. *)
-    let name =
-      Message_layout.truncate_middle
-        (max heading_id_floor
-           (here_steps_room ~cols state ~steps:1
-              ~after:
-                (Message_layout.display_width tab_strip_gap
-                 + tab_strip_min_width entries)))
-        (Terminal_text.single_line k.k_name)
-    in
-    let before =
-      here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
-    in
-    let tabs =
-      tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
-        ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
-        entries
-    in
-    let title = before ^ tabs in
     (* The Terminal tab's own row says what its view is doing; every other
        tab names its window on the title row. *)
     box_line buf cols
-      (titled_row ~cols state ~title
+      (zone_two_title ~cols state
+         ~title:(keeper_detail_title state ~keeper_name:k.k_name)
          ~position:
            (if terminal_tab then None
             else

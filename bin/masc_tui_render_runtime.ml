@@ -1044,21 +1044,25 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     let lead = Printf.sprintf (if ko then "안내 %d · %s · " else "%d notices · %s · ")
         projection.rpp_notices door in
     (* The parts share what the position leaves, so the cut never reaches
-       the connection notice at the end. *)
-    let width = titled_room ~cols state ~position:projection.rpp_position in
-    let available = max 0 (width - Message_layout.display_width lead) in
-    let connection = match reading_connection_notice state with
-      | None -> ""
-      | Some _ -> reading_connection_summary
-          ~width:(max 0 (available - Message_layout.display_width " ")) state |> String.trim in
-    let connection = if Message_layout.display_width connection = 0 then "" else connection in
-    let separator = if String.equal connection "" then "" else " " in
-    let label_width = max 0 (available - Message_layout.display_width (separator ^ connection)) in
-    (* Own notice count/reader key survive a one-row body even when a global
-       connection warning also needs the title. Identity uses what is left. *)
-    titled_row ~cols state ~position:projection.rpp_position
-      ~title:(screen_title lead ^ Message_layout.fit_middle label_width title
-              ^ separator ^ connection) in
+       the connection notice at the end. Own notice count/reader key survive
+       a one-row body even when a global connection warning also needs the
+       title. Identity uses what is left. *)
+    zone_two_title ~cols state ~position:projection.rpp_position
+      ~title:(fun ~cols ->
+        let available =
+          max 0 (framed_inner_width cols - Message_layout.display_width lead) in
+        let connection = match reading_connection_notice state with
+          | None -> ""
+          | Some _ -> reading_connection_summary
+              ~width:(max 0 (available - Message_layout.display_width " ")) state
+              |> String.trim in
+        let connection =
+          if Message_layout.display_width connection = 0 then "" else connection in
+        let separator = if String.equal connection "" then "" else " " in
+        let label_width =
+          max 0 (available - Message_layout.display_width (separator ^ connection)) in
+        screen_title lead ^ Message_layout.fit_middle label_width title
+        ^ separator ^ connection) in
   let hints = Masc_tui_keys.footer_hints_runtime_parent
       ~lang:state.ui_language ~parent:projection.rpp_parent in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols

@@ -166,8 +166,11 @@ let append ~path ~at_end (first, rest) =
   let suffix = String.concat "" rows in
   let last_row_length = List.fold_left (fun (_ : int) row -> String.length row) 0 rows in
   let dir = Filename.dirname path in
-  (* The offset-checked append does not create its directory. *)
-  match Fs_compat.mkdir_p_memoized dir with
+  (* The offset-checked append does not create its directory. Not the
+     memoized call: a Keeper's directory is removed when the Keeper is
+     deleted, and a Keeper made again under the same name in the same
+     process would then append into a directory that is not there. *)
+  match Fs_compat.mkdir_p dir with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Directory_unavailable { path = dir; detail = Printexc.to_string exn })
   | () ->

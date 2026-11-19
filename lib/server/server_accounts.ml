@@ -345,15 +345,15 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      stopped server left end beside the routes. The access is published, and
      each takes the call of its account, as its owner's request does. That
      call does not wait, so the two run one after the other in one fiber:
-     side by side, one would skip an account the other holds. The
-     conversations go first: the deletion of a conversation of a key account
-     reads the key of the account, and after the removal of the account it
-     is recorded as one whose copy may remain at the vendor (issue #53044).
-     A removal that waits for them leaves its key on disk for that long, in
-     an account every use of which is refused. *)
+     side by side, one would skip an account the other holds. The removals
+     go first: they remove files and call no vendor, and a key waits on disk
+     for as long as they wait. Each deletion of a conversation can wait for
+     its vendor client. The order takes nothing from the deletions: one of
+     an account whose removal began is refused the account either way, and
+     is recorded as one whose copy may remain at the vendor (issue #53044). *)
   Eio.Fiber.fork ~sw (fun () ->
-    Server_keeper_conversation_purge.resume ~env ~zone ~base_path;
-    Server_key_account_purge.resume ~zone ~base_path);
+    Server_key_account_purge.resume ~zone ~base_path;
+    Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
   Log.Server.info
     "the account server of the multi-account installation listens on %s:%d (https port %s); it \
      serves the %d route(s) of its own table, and no route that reads the credentials of a \

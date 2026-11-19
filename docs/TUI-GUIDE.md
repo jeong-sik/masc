@@ -1304,70 +1304,78 @@ answered says so. Seats are spelled as the tool ledger spells its actors:
 
 ### Memory
 
-저장된 메모리 크기는 기본적으로 추정 토큰(≈)으로 표시한다. `u`로
-토큰과 바이트 단위(B/KiB/MiB)를 전환한다. Keeper를 선택하면 저장량 아래에
-전체 요청 입력의 `avg / max / min / last`도 표시한다. 범위는 최근 50개
-기록된 Keeper 턴이며, 각 턴의 마지막 요청 관측값을 사용한다.
-마지막 턴이 미보고이면 `last unreported`를 표시한다. `/context`에서
-같은 턴의 세부 구성을 확인할 수 있다.
+Stored memory sizes show as estimated tokens (≈) by default; `u` switches
+between tokens and bytes (B/KiB/MiB). With a Keeper selected, the stored size
+is followed by `avg / max / min / last` of its whole request input over its 50
+most recent recorded turns, using each turn's last request observation. When
+the last turn reported nothing, `last` reads `unreported`. `/context` shows the
+same turn's composition.
 
-Keeper별 Memory OS 건강 상태를 한 표로 보여준다. ordinary current
-snapshot과 source-bound snapshot을 별도 열로 표시하며, 각 행은 두 저장소의
-revision, facts, 크기와 source invalidation 수, 최근 ordinary 변화
-(+추가/-제거), 상태를 담는다. `STARVING`은 Librarian 실행이 실패했고 두
-스냅샷 모두 없는 Keeper다. ordinary snapshot은 없지만 source-bound snapshot이
-남아 있으면 `source-only`로 표시한다.
-`no-current`는 아직 ordinary snapshot이 없는 조용한 상태, `degraded`는
-ordinary snapshot은 있지만 Librarian 갱신이 실패 중인 상태다. 두 저장소 중
-하나라도 읽지 못하면 `read-error`로 표시한다.
+The table shows each Keeper's Memory OS health. The ordinary current snapshot
+and the source-bound snapshot have separate columns; each row carries both
+stores' revision, facts, size and source invalidation count, the latest
+ordinary change (+added/-removed) and the state. `STARVING` is a Keeper whose
+Librarian runs failed and that has neither snapshot. `source-only` has a
+source-bound snapshot but no ordinary one. `no-current` is the quiet state
+before the first ordinary snapshot, and `degraded` has an ordinary snapshot
+while Librarian updates are failing. `read-error` means either store could not
+be read.
 
-Vision ingest 오류가 있으면 상세에 구조화된 reason별 횟수를 표시하고, 해당
-행을 warning으로 그린다.
+When vision ingest has errors, the detail counts them by structured reason and
+the row draws as a warning.
 
-커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
-아래에 함께 나온다. `r`로 다시 불러온다.
+Below the table come the full state of the row under the cursor and the alerts
+the server attached to it. `r` reloads.
 
-행에서 `Enter`를 누르면 그 Keeper의 **사실(fact) 브라우저**가 열린다.
-목록은 사실의 내용을 경로보다 먼저 보여준다. 일반 사실의 분류, 파일에
-묶인 사실, 무효화 기록을 구별하며, 한국어 설정에서는 내장 분류명과
-`원본`·`무효화` 표지만 번역한다. 사용자 정의 분류명, 내용, origin과
-무효화 사유는 원문을 유지한다. 선택한 행의 출처와 시각은 목록 아래에
-나오고, `Enter`로 전체 내용을 읽는다.
+`Enter` on a row opens that Keeper's **fact browser**. The list shows a fact's
+content before its path. It separates ordinary facts by category, facts bound
+to a file, and invalidation records. The Korean setting translates only the
+built-in category names and the `source` and `dropped` marks (`원본`, `무효화`);
+custom category names, content, origin and invalidation reasons keep their
+original text. The selected row's source and time show under the list, and
+`Enter` reads the whole content.
 
-`c`/`C`는 전체·일반 분류·원본·무효화 필터를 순환한다. 일반 분류를
-고르면 그 분류의 일반 사실만 남고, 원본과 무효화는 각각의 필터로
-읽는다. `/`는 내용·분류·출처를 검색하며 전체 Keeper 보기에서는 이름도
-검색한다. 일반 분류는 정규명과 한국어 표시명으로 모두 찾을 수 있다.
-건강 표의 검색도 Keeper 이름과 정규 상태명·한국어/영어 표시 상태를
-받는다. `Esc`는 열린 상세를 닫거나 검색을 해제하고 이전 보기로 돌아간다.
+`c`/`C` cycle the filters: all, each ordinary category, source and dropped.
+Choosing an ordinary category keeps only that category's ordinary facts;
+source and dropped records have their own filters. `/` searches content,
+category and source, and Keeper names too in the all-Keepers view. Ordinary
+categories match by canonical name or Korean display name. Search on the
+health table takes Keeper names and state names, canonical or displayed in
+Korean or English. `Esc` closes an open detail or clears the search and returns
+to the previous view.
 
-제목과 `목록`의 수량은 현재 필터에 남은 행 수다. 분류 옆 수량은 저장소
-전체를 읽은 범위의 값이며, 읽기 실패나 Keeper 누락이 있으면 `?`로
-표시한다.
+The counts in the title and on the list (`N listed rows`) are the rows left
+under the current filter. The count beside a category covers the whole store
+as read; a read failure or a missing Keeper shows it as `?`.
 
 ### Workspace
 
-등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
-정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
-`Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
-`Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
-`Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
+Registered repositories and the checkout path the server actually resolved for
+each. Workspace is a Tab ring stop, and Code hangs off it. The `Path` column
+shortens the middle when it is too narrow, but `Path:` under the selected row
+wraps the full path. A path stored as relative also shows `Stored as:`, and
+`Keepers:` names the Keepers assigned to the repository.
 
-Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
-`d`를 누르면 선택한 저장소(또는 Keepers 목록/상세 화면에서 누를 경우 프로젝트)의 현재 Git 변경 파일을 연다. 각 행은 staged,
-worktree, untracked, conflict 상태를 구분한다. 제목에는 체크아웃된 브랜치와 upstream 대비
-`↑ahead ↓behind`가 함께 나온다. upstream이 없으면 `(no upstream)`, upstream ref가 사라졌으면
-`(upstream … gone)`, 브랜치가 아니면 `detached HEAD`로 표시하고 숫자를 0으로 채우지 않는다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
-해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
-`v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
+Right or `Enter` opens Code scoped to the selected repository. `d` opens the
+current Git changes of the selected repository (or of the project, when pressed
+on the Keepers list or detail). Each row is staged, worktree, untracked or
+conflict. The title carries the checked-out branch and `↑ahead ↓behind` against
+its upstream; with no upstream it says `(no upstream)`, with a vanished
+upstream ref `(upstream … gone)`, and off a branch `detached HEAD`, without
+filling the numbers with 0. In that list, `Right`, `d` or `Enter` opens the
+file's Git diff inline with syntax highlighting and line numbers; `j`/`k`
+scroll it and `Esc`/`Left` return to the file list. `v` opens the file on Code.
+Left or `Esc` returns to the previous screen (repository list, Keeper detail or
+chat).
 
-Workspace에서 `H`는 서버의 공유 도구 호출 기록에서 지난 24시간 동안의 파일
-변경을 읽고, 선택한 저장소의 정확한 ID에 해당하는 변경만 보여준다. Keeper
-명부로 거르지 않으므로, 저장소 담당이 아닌 Keeper와 그사이 삭제됐거나 지금
-로드되지 않은 Keeper가 남긴 변경도 24시간 안이면 함께 나온다.
+On Workspace, `H` reads the last 24 hours of file changes from the server's
+shared tool-call record and shows only those for the selected repository's
+exact ID. It does not filter by the Keeper roster, so changes by Keepers not
+assigned to the repository, or since deleted or not loaded now, appear too
+while they are within the 24 hours.
 
-저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보다.
-아래 Changes 화면은 선택한 Keeper가 지난 24시간 동안 남긴 기록을 보여준다.
+A repository's Git changes and a Keeper's work record are different facts.
+Changes, below, shows what the selected Keeper recorded in the last 24 hours.
 
 ### Changes
 
@@ -1404,12 +1412,11 @@ or a registered repository after `Enter` on a Workspace row
 (`masc ▸ /`). `Esc` at a scoped root returns to the project tree, and at the project
 root it lands on Workspace, the ring parent.
 
-프로젝트 tree에 초점이 있을 때 `d`를 누르면 현재 프로젝트의 Git 변경
-파일을 모두 보여준다. 이 프로젝트는 Workspace에 등록되어 있지 않아도
-된다. 목록은 staged, worktree, untracked, conflict를 구분하고, `Enter`로
-선택한 파일을 연다. Left 또는 `Esc`를 누르면 같은 프로젝트 tree로
-돌아간다. 파일 pane에 초점이 있을 때의 `d`는 아래처럼 그 파일 하나의
-diff를 연다.
+With the project tree focused, `d` lists every Git-changed file in the current
+project; the project does not need to be registered in Workspace. The list
+separates staged, worktree, untracked and conflict, and `Enter` opens the
+selected file. Left or `Esc` returns to the same project tree. With the file
+pane focused, `d` opens that one file's diff, as below.
 
 An open file arrives whole and is lexed once — OCaml (nested comments
 included), bash, JSON, the curly-brace family (TypeScript/JavaScript,
@@ -1552,8 +1559,8 @@ From request detail, `t` opens the original source Task and its event history;
 `r` refreshes both and `Esc` returns to the original request.
 
 The Skill Usage pane opens with a summary box: observed catalog entries,
-distinct Keepers, and separate Triggered, Delivered, and Actions totals (호출,
-전달, 동작 on the Korean screen; table headers follow the screen language).
+distinct Keepers, and separate Triggered, Delivered, and Actions totals (`호출`,
+`전달`, `동작` on the Korean screen; table headers follow the screen language).
 Missing ledgers make the totals partial and are called out beside the summary.
 
 Skill cards follow in descending invocation order. Each card shows its own

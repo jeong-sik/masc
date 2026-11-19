@@ -170,16 +170,6 @@ val with_admission_and_work_until
   -> (unit -> 'a)
   -> ('a, deadline_expiry) result
 
-(** Opens the shared permit-wait and work deadline [timeout_s] seconds from
-    now on the explicitly supplied [clock]. *)
-val with_admission_and_work_for
-  :  ?wait:permit_wait Atomic.t
-  -> clock:_ Eio.Time.clock
-  -> timeout_s:float
-  -> config:Provider_config.t
-  -> (unit -> 'a)
-  -> ('a, deadline_expiry) result
-
 (** {2 A seat taken before the work}
 
     A caller with several endpoints to choose from takes a seat first and

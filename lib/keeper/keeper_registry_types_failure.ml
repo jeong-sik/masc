@@ -43,10 +43,8 @@ type failure_reason =
           (** Typed runtime-exhaustion reason, [Some] only on the
               runtime-exhausted construction path
               ([keeper_unified_turn_types.registry_failure_reason_of_raw_error]).
-              Lets the supervisor decide retryability via
-              [Keeper_internal_error.runtime_exhaustion_reason_retryable]
-              instead of reparsing [code]. [None] for non-exhaustion
-              provider/runtime errors. *)
+              Lets consumers read the typed reason instead of reparsing
+              [code]. [None] for non-exhaustion provider/runtime errors. *)
       ; fenced_empty_turn_runtime : string option
           (** Runtime id of a fenced provider attempt whose cause is the
               typed empty assistant turn

@@ -38,11 +38,6 @@ let record_persist_error ~where msg =
   Log.BoardLog.error "persist error (%s): %s" where msg
 ;;
 
-let persist_io_error ~where msg =
-  record_persist_error ~where msg;
-  Error (Io_error (Printf.sprintf "%s: %s" where msg))
-;;
-
 let create_store_on_binding workspace_binding posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
   { posts_source = Posts_unobserved
   ; posts_source_io

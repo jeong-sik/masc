@@ -3,7 +3,7 @@
 
 open Masc
 
-module P = Board_core
+module P = Masc_board_handlers.Board_core
 module D = Keeper_durable_store
 module Rows = Masc_board_handlers.Board_votes_json
 module Paths = Masc_board_handlers.Board_paths

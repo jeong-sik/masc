@@ -150,14 +150,11 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 
 (** {1 SSE response headers} *)
 
-val keeper_chat_stream_headers : string -> Httpun.Headers.t
-(** Headers of a per-turn SSE response to a request from [origin]. The
-    connection closes with the writer: Httpun adds no Content-Length to a
-    streaming body, so the writer close is the only end of the response. *)
-
 val keeper_chat_stream_request_headers : Httpun.Request.t -> Httpun.Headers.t
-(** Same as {!keeper_chat_stream_headers}, emitting CORS headers only for an
-    authority-admitted [Origin]. *)
+(** Headers of a per-turn SSE response, with CORS headers only for an
+    authority-admitted [Origin]. The connection closes with the writer: Httpun
+    adds no Content-Length to a streaming body, so the writer close is the
+    only end of the response. *)
 
 (** {1 SSE handler} *)
 

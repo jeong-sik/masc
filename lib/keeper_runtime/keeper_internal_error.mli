@@ -66,8 +66,6 @@ type runtime_exhaustion_reason =
   | Session_conflict
   | Other_detail of string
 
-val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
-
 val runtime_exhaustion_reason_to_label : runtime_exhaustion_reason -> string
 (** Human-readable label carrying the [detail]/[message] payload inline,
     for {!summary_of_masc_internal_error} and log lines. Distinct from

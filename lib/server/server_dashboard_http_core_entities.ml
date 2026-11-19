@@ -49,23 +49,6 @@ let dashboard_client_json ((agent : Masc_domain.agent), (source : Workspace.agen
     agent_json ~session_bound_at:`Null ~last_seen:`Null agent
 ;;
 
-let dashboard_message_json (message : Masc_domain.message) =
-  `Assoc
-    [ "request_id", `String message.request_id
-    ; ( "mention_delivery"
-      , `String
-          (Masc_domain.message_mention_delivery_to_string message.mention_delivery) )
-    ; "from", `String message.from_agent
-    ; "type", `String message.msg_type
-    ; "content", `String message.content
-    ; "mention", Json_util.string_opt_to_json message.mention
-    ; "timestamp", `String message.timestamp
-    ; "trace_context", Json_util.string_opt_to_json message.trace_context
-    ; "expires_at", Json_util.float_opt_to_json message.expires_at
-    ; "seq", `Int message.seq
-    ]
-;;
-
 let dashboard_tasks_safe config = Workspace.get_tasks_safe config
 let dashboard_agents_safe config = Workspace.get_active_agents config
 

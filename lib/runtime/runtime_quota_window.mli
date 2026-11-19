@@ -85,11 +85,6 @@ val note_observed_exhausted_at : now:float -> scope:scope -> source:refusal -> u
     {!note_observed_exhausted}; this entry point exists so a fixture can be
     dated deterministically. *)
 
-val note_read_without_reset_at : now:float -> scope:scope -> unit
-(** {!note_read_without_reset} with the moment of observation given as [now].
-    Same relation to its wall-clock sibling as
-    {!note_observed_exhausted_at}. *)
-
 val note_succeeded : scope:scope -> unit
 (** A call on [scope] got through, so an observation recorded by
     {!note_observed_exhausted} no longer holds and is dropped.  A stated

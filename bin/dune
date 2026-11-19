@@ -18,16 +18,6 @@
  (libraries masc_test_deps masc.server masc.build_commit mcp_protocol eio_main cohttp-eio unix))
 
 (executable
- (name masc_reliable_change_g1_check)
- (modules masc_reliable_change_g1_check)
- (public_name masc-reliable-change-g1-check)
- (package masc)
- (libraries
-  masc.masc_goal
-  unix
-  yojson))
-
-(executable
  (name main_eio)
  (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_browser_lane_setup masc_cli_exact_addon_setup masc_cli_inspect_file masc_cli_checkpoint_inspect masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_account_login masc_cli_owner_upgrade masc_cli_restart masc_cli_runtime_setup masc_cli_client_path masc_cli_web_search_setup masc_cli_config_set masc_cli_runtime_config_remote masc_cli_auth)
  (public_name masc)
@@ -3627,24 +3617,6 @@
   masc_tui_image_mosaic
   masc_tui_frame_timing
   yojson))
-
-;; RFC-0429 §3.0: the same HTTP client the TUI uses, with no TUI around it.
-;; A request the server answers in milliseconds is logged by the live TUI as
-;; taking seconds; this separates the transport from the loop it runs in.
-(executable
- (name masc_http_probe)
- (modules masc_http_probe)
- (public_name masc-http-probe)
- (package masc)
- (libraries
-  masc.http_client
-  masc.masc_eio_context
-  masc_tui_io_domain
-  cstruct
-  eio
-  eio_main
-  unix
-  mtime.clock.os))
 
 (library
  (name masc_tui_queue_layout)

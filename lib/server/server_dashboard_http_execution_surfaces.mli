@@ -333,8 +333,6 @@ val pipeline_stage_of_lifecycle_event :
 val paused_of_lifecycle_event :
   Keeper_lifecycle_events.lifecycle_event -> bool option
 
-val seed_execution_cache_for_test : state:Mcp_server.server_state -> unit -> unit
-
 val patch_surface_json_for_running_keepers :
   Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 

@@ -647,6 +647,7 @@
   test_librarian_unit_content
   test_librarian_question
   test_librarian_slot_visit
+  test_librarian_ask
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -1016,6 +1017,7 @@
   test_librarian_unit_content
   test_librarian_question
   test_librarian_slot_visit
+  test_librarian_ask
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -1286,6 +1288,9 @@
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries goal_measure_fixture masc.goal_measure
  masc.prompt_registry
+  ;; test_librarian_ask asks a fake provider on loopback through the
+  ;; published exact-output registry.
+  exact_output_fixture
  masc_test_deps masc_schedule bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
   masc.auth

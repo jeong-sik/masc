@@ -604,13 +604,13 @@ type ask_result =                        (* 코드는 Librarian_read_result.t *)
   | Input_fault of input_fault
   | Ask_failed of failed
 and reach = { line : int; within : within; covered : mark; turn_log_offset : int }   (* 반영 줄이 그대로 적는 값 *)
-and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록이나 단위의 파일을 읽지 못했다 *)
+and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 스냅샷, 턴 기록, 단위의 파일을 읽지 못했다 *)
 ```
 
 - `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3). 폭이 드는 `offered` 와 `lane_result` 의 나머지 칸(`question`, `basis`, `head`)은 L7 이 더한다.
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
-- 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
+- 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)과 쓰는 쪽이 더는 열려 있지 않은 것은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
 - 예외의 글은 구조화 로그로 간다. 행에는 오지 않는다.
 - 기다린 시간, 호출 시간, 버린 본문은 결과에 없다. metric 과 span 으로 간다.
 

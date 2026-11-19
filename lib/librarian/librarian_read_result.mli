@@ -43,10 +43,12 @@ type question =
 type failed =
   | Raised (** The ask raised. *)
   | Flow_stopped
-  (** A measurement or an attempt could not start, or a callback failed. *)
+  (** A measurement or an attempt could not start, a callback failed, or the
+      writer was no longer open. *)
   | Read_failed
-  (** The turn log or a byte file of a unit could not be read: an IO
-      error, or the file changed while it was read. *)
+  (** The snapshot the tail names, the turn log or a byte file of a unit
+      could not be read: an IO error, the file changed while it was read, or
+      the snapshot is not there or does not decode. *)
 
 type t =
   | Answered of

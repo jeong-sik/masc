@@ -334,7 +334,7 @@ let render_resources (state : state) =
       | Some (_, (Absent | Loading | Failed _)) | None ->
           if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
-      ^ (if ko then " · 오늘 미확인: " else " · today unchecked: ")
+      ^ (if ko then " · 오늘 확인 안 함: " else " · today unchecked: ")
       ^ unchecked ^ Ansi.reset
       ^ Theme.recede () ^ query ^ Ansi.reset);
     let budget = list_rows state ~rows in

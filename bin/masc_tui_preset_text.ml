@@ -14,6 +14,12 @@ let counts (m : D.preset_manifest) =
     m.D.pm_lane_count
 ;;
 
+(* Status marks of RFC tui-one-screen-grammar 7.2: an unreadable preset
+   directory failed, a restore that left something to check is a caution.
+   [!] is not a status mark. *)
+let failed_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+let caution_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+
 let unreadable_only_line = "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다"
 
 let listing_lines (snapshot : D.presets_snapshot) =
@@ -37,26 +43,10 @@ let listing_lines (snapshot : D.presets_snapshot) =
   in
   let unreadable =
     List.map
-      (fun (name, reason) -> Printf.sprintf "  ! %s — %s" name reason)
+      (fun (name, reason) -> Printf.sprintf "  %s %s — %s" failed_mark name reason)
       snapshot.D.pss_unreadable
   in
   presets @ unreadable
-;;
-
-(* A reason names what to do at its end, so cutting the row at the pane
-   width hides the part the operator needs. Each reason is folded at spaces
-   instead; continuation rows are indented under the name. *)
-let unreadable_rows ~max_cells unreadable =
-  let budget = max 1 (max_cells - 2) in
-  List.concat_map
-    (fun (name, reason) ->
-      match
-        Masc_tui_message_layout.wrap_words ~max_cells:budget
-          (Printf.sprintf "! %s — %s" name reason)
-      with
-      | [] -> []
-      | first :: rest -> first :: List.map (fun row -> "  " ^ row) rest)
-    unreadable
 ;;
 
 let saved_line (m : D.preset_manifest) =
@@ -98,13 +88,13 @@ let runtime_rows ~ko = function
     @ (match commit.D.prc_durability with
        | Runtime.Durable -> []
        | Runtime.Durability_unconfirmed { detail } ->
-         [ caution (text ~ko "  ! 적용됐지만 디스크 저장 내구성은 미확인 — " "  ! Applied; disk durability unconfirmed — " ^ detail)
+         [ caution ("  " ^ caution_mark ^ text ~ko " 적용됨 · 디스크 저장 완료 보고 안 됨 — " " Applied; disk durability not reported — " ^ detail)
          ; caution (text ~ko "    다시 복원하기 전 저장소를 확인하세요. 재복원은 이전 백업을 덮어씁니다."
              "    Check storage before restoring again; another restore replaces the backup.")
          ])
     @ List.map
         (function Runtime.Config_lock_release_unconfirmed detail ->
-          caution (text ~ko "  ! 런타임 잠금 해제 미확인 — " "  ! Runtime lock release unconfirmed — " ^ detail))
+          caution ("  " ^ caution_mark ^ text ~ko " 런타임 잠금 해제 보고 안 됨 — " " Runtime lock release not reported — " ^ detail))
         commit.D.prc_lock_warnings
     @ (match commit.D.prc_registry with
        | D.Preset_registry_applied D.Preset_registry_runtime_bindings ->
@@ -112,10 +102,10 @@ let runtime_rows ~ko = function
        | D.Preset_registry_applied D.Preset_registry_replacement_catalog ->
          [ plain (text ~ko "정확 출력 레인 · 교체 목록 적용" "Exact lanes · replacement catalog applied") ]
        | D.Preset_registry_unpublished ->
-         [ caution (text ~ko "  ! 정확 출력 레인 · 게시되지 않음, 재시작 필요" "  ! Exact lanes · unpublished; restart required") ]
+         [ caution ("  " ^ caution_mark ^ text ~ko " 정확 출력 레인 · 게시되지 않음, 재시작 필요" " Exact lanes · unpublished; restart required") ]
        | D.Preset_registry_kept reason ->
-         [ caution (text ~ko "  ! 정확 출력 레인 · 이전 목록 유지, 다음 시작에 파일을 게시할 수 없음 — "
-             "  ! Exact lanes · previous registry retained; committed file cannot publish at next start — " ^ reason) ])
+         [ caution ("  " ^ caution_mark ^ text ~ko " 정확 출력 레인 · 이전 목록 유지, 다음 시작에 파일을 게시할 수 없음 — "
+             " Exact lanes · previous registry retained; committed file cannot publish at next start — " ^ reason) ])
   | D.Preset_runtime_failed reason -> [ failure (text ~ko "런타임 · 실패 — " "Runtime · failed — " ^ reason) ]
 ;;
 
@@ -212,7 +202,7 @@ let comparison_rows ~ko (d : D.preset_detail) =
   @ (match d.D.pd_skipped_lanes with
      | [] -> []
      | lanes ->
-       [caution (Printf.sprintf (if ko then "! 복원 제외 레인 %d개" else "! Lanes not restored: %d")
+       [caution (caution_mark ^ Printf.sprintf (if ko then " 복원 제외 레인 %d개" else " Lanes not restored: %d")
           (List.length lanes))])
   @ (match d.D.pd_preserved_lane_settings with
      | [] -> []
@@ -222,7 +212,7 @@ let comparison_rows ~ko (d : D.preset_detail) =
            else "Unsaved lane request settings: %d · current values retained")
           (List.length settings))])
   @ List.map (fun (lane, reason) ->
-      caution (text ~ko "! 레인 복원 제외 · " "! Lane not restored · " ^ lane ^ ": " ^ reason))
+      caution (caution_mark ^ text ~ko " 레인 복원 제외 · " " Lane not restored · " ^ lane ^ ": " ^ reason))
       d.D.pd_skipped_lanes
 ;;
 

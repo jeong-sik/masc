@@ -1001,32 +1001,53 @@ let test_interrupted_fifo_open_is_made_again () =
 
 let kind_swap_seconds = 0.3
 
-(* The path changes between a regular file and a device while it is opened
+(* The path changes between a regular file and a FIFO while it is opened
    again and again. Whatever [open_target] returns was opened the way its
-   kind needs: a regular file can be read, anything else is write-only. *)
+   kind needs: a regular file can be read, anything else is write-only.
+
+   The path is a hard link that another hard link is renamed over, so an
+   open finds one inode or the other. A symbolic link renamed over would
+   bring a failure of its own: on ext4 an open with O_CREAT through such a
+   link fails now and then with EISDIR (34 of 2.3 million opens when the
+   same system calls were run on Linux 7.0; none on tmpfs, none with hard
+   links). *)
 let test_open_matches_the_kind_under_a_changing_path () =
   let dir = tmpdir "fd_cache_kind_swap" in
   let regular = Filename.concat dir "regular" in
   Out_channel.with_open_bin regular (fun channel -> output_string channel "r\n");
+  let fifo = Filename.concat dir "fifo" in
+  Unix.mkfifo fifo 0o600;
+  (* An open of a FIFO for writing waits for a reader. This one is there for
+     the whole test. *)
+  let fifo_reader =
+    Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
+  in
   let path = Filename.concat dir "swapped" in
   let staged = Filename.concat dir "swapped.next" in
-  Unix.symlink regular path;
+  Unix.link regular path;
   let stop = Atomic.make false in
   let swapper =
     Thread.create
       (fun () ->
+        (* The two links always name different files: a rename of one hard
+           link over another of the same file does nothing. *)
         let to_regular = ref false in
         while not (Atomic.get stop) do
-          Unix.symlink (if !to_regular then regular else "/dev/null") staged;
+          Unix.link (if !to_regular then regular else fifo) staged;
           Unix.rename staged path;
           to_regular := not !to_regular
         done)
       ()
   in
   let byte = Bytes.create 1 in
+  (* A descriptor that can be read answers a read, with a byte or with "none
+     yet". One opened for writing only refuses it. The read does not wait: a
+     FIFO opened for reading too would wait for a byte from itself. *)
   let readable fd =
+    Unix.set_nonblock fd;
     match Unix.read fd byte 0 1 with
     | (_ : int) -> true
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> true
     | exception Unix.Unix_error (Unix.EBADF, _, _) -> false
   in
   let wrong = ref 0 in
@@ -1034,7 +1055,8 @@ let test_open_matches_the_kind_under_a_changing_path () =
   Fun.protect
     ~finally:(fun () ->
       Atomic.set stop true;
-      Thread.join swapper)
+      Thread.join swapper;
+      Unix.close fifo_reader)
     (fun () ->
       while Unix.gettimeofday () < deadline do
         let target = Whole.open_target path in

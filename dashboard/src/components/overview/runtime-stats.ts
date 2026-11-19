@@ -32,16 +32,24 @@ function usageWindowLabel(window: ProviderUsageWindow): string {
   }
 }
 
+function usageWindowKey(window: ProviderUsageWindow): string {
+  const label = window.window.kind === 'provider_label' ? window.window.label : ''
+  return `${window.window.kind}-${label}-${window.limit_id ?? ''}`
+}
+
 function usageWindowText(window: ProviderUsageWindow): string {
   const utilization = window.utilization
-  const percent = utilization.unit === 'fraction'
-    ? Math.trunc(window.utilization.value * 100)
-    : window.utilization.value
-  const value = utilization.unit === 'usd'
-    ? `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
-      ? ' · 키 한도 없음'
-      : ` / $${utilization.limit.toFixed(4)} 한도 · $${(utilization.limit - utilization.value).toFixed(4)} 남음`}`
-    : `${number(percent, '%')} 사용`
+  const value = utilization.unit === 'credit_unlimited'
+    ? 'Credit unlimited'
+    : utilization.unit === 'credit_balance'
+      ? `Credit ${utilization.currency} ${utilization.remaining.toFixed(2)} 남음${utilization.total == null
+      ? ''
+      : ` · ${utilization.currency} ${(utilization.total - utilization.remaining).toFixed(2)}/${utilization.currency} ${utilization.total.toFixed(2)} 사용`}`
+    : utilization.unit === 'usd'
+      ? `$${utilization.value.toFixed(4)} 사용${utilization.limit == null
+        ? ' · 키 한도 없음'
+        : ` / $${utilization.limit.toFixed(4)} 한도 · $${(utilization.limit - utilization.value).toFixed(4)} 남음`}`
+      : `${number(utilization.unit === 'fraction' ? Math.trunc(utilization.value * 100) : utilization.value, '%')} 사용`
   const reset = window.resets_at == null ? ''
     : window.resets_at * 1000 <= Date.now()
       ? ' · 리셋 시각 경과, 새 보고 없음'
@@ -116,7 +124,7 @@ function ProviderAccount({ client, usage, authority }: {
               : !scope ? '이 계정의 제공자 사용량 행 없음'
                 : scope.state === 'not_reported_since_start' ? '제공자 사용량: 서버 시작 이후 미보고'
                   : scope.windows.length === 0 ? '제공자 사용량: 보고된 창 없음'
-                    : scope.windows.map(window => html`<div key=${`${window.window.kind}-${window.limit_id ?? ''}`}>${usageWindowText(window)}</div>`)}
+                    : scope.windows.map(window => html`<div key=${usageWindowKey(window)}>${usageWindowText(window)}</div>`)}
       </div>
     </div>
   `

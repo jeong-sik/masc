@@ -118,11 +118,15 @@ val register
       theirs that was started is not ended.
     - 500 [internal_error]: the log refused the record for a reason no
       request of a person leads to.
+    - 503 [files_not_reached]: the runtime root of the person or the home
+      of the account was not reached, or a folder on the way is no folder
+      this server takes. No record was tried, the zone was not asked, and
+      the key of the account was not changed. While the folder stays as it
+      is, the same request gets the same answer.
     - 503 [replacement_not_recorded]: the record was not written, the key
       of the account was not changed, and the zone did not stop. The person
-      sends the key again. It is the answer too when the folder of the
-      files of the person was not reached: no record was tried then. A commit that wrote its intent and
-      not its record blocks the account until then (the same RFC, 3.7).
+      sends the key again. A commit that wrote its intent and not its
+      record blocks the account until then (the same RFC, 3.7).
     - 503 [key_not_stored]: the record was written and the new key was not
       put in place. The key before is not read, and the server removes the
       folder of the keys of the account, so the account has no key until

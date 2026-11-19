@@ -45,6 +45,7 @@ let request
   ; tail_bytes
   ; turn_context
   ; demote_before
+  ; working_state = None
   }
 ;;
 
@@ -590,6 +591,80 @@ let test_a_provider_observed_front_is_checked_at_its_own_position () =
 
 (* The pair table sits behind an Eio mutex, so the table tests need a
    running scheduler. *)
+(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4. [steps]
+   are (turn context, first atom, atom count, input tokens) per request; a
+   [None] count is a request the provider did not count. *)
+let observe_all steps =
+  List.fold_left
+    (fun (_, ledger) (turn_context, first_atom, atom_count, input) ->
+       let o =
+         step ledger (request ~turn_context ~first_atom ~atom_count ())
+           (Option.map (fun n -> usage n) input)
+       in
+       Some o, Some o.ledger)
+    (None, None) steps
+  |> function
+  | Some o, Some ledger -> o, ledger
+  | None, (Some _ | None) | Some _, None -> Alcotest.fail "no request was observed"
+;;
+
+let test_a_turn_grows_from_the_last_request_before_it_to_its_largest () =
+  let _, ledger =
+    observe_all
+      [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_500
+      ; true, 0, 14, Some 1_600; false, 0, 16, Some 2_400; false, 0, 18, Some 2_200 ]
+  in
+  check (option int) "the last count plus the second turn's 2,400 - 1,500"
+    (Some (2_200 + 900)) (Ledger.next_turn_peak ledger);
+  let json = Ledger.to_json ledger in
+  check int "the JSON says the same" 3_100
+    Yojson.Safe.Util.(json |> member "next_turn_peak" |> to_int)
+;;
+
+let test_a_turn_that_calls_no_tool_counts_its_first_request () =
+  let _, ledger =
+    observe_all [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_200; true, 0, 14, Some 2_000 ]
+  in
+  check (option int) "the turn context's request is the turn's largest"
+    (Some (2_000 + 800)) (Ledger.next_turn_peak ledger);
+  check (option int) "it is still not a sample" (Some 1_200) ledger.total_tokens
+;;
+
+let test_no_growth_before_a_turn_opened_under_the_window () =
+  let _, ledger = observe_all [ true, 0, 10, Some 1_000; false, 0, 12, Some 2_900 ] in
+  check (option int) "the turn the window opened in has no count before it" None
+    (Ledger.next_turn_peak ledger)
+;;
+
+(* A front that moves opens another window: its counts start over, and how
+   much one turn grew stays. *)
+let test_a_moved_front_keeps_how_much_a_turn_grew () =
+  let grown =
+    [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_500
+    ; true, 0, 14, Some 1_600; false, 0, 16, Some 2_400 ]
+  in
+  let _, ledger = observe_all grown in
+  check (option int) "grown under the first window" (Some 3_300) (Ledger.next_turn_peak ledger);
+  let moved, ledger = observe_all (grown @ [ true, 10, 18, Some 900 ]) in
+  check string "the front moved" "front_moved_unmeasured" (Ledger.event_to_string moved.event);
+  check (option int) "the new window's count plus the 900 the ended turn grew"
+    (Some (900 + 900)) (Ledger.next_turn_peak ledger);
+  let _, ledger = observe_all (grown @ [ false, 10, 18, Some 900 ]) in
+  check (option int) "a move inside a turn ends no turn" None (Ledger.next_turn_peak ledger)
+;;
+
+let test_an_uncounted_request_leaves_its_turn_out () =
+  let _, ledger =
+    observe_all
+      [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_400
+      ; true, 0, 14, Some 1_500; false, 0, 16, Some 2_000
+      ; true, 0, 18, Some 2_100; false, 0, 20, None
+      ; true, 0, 22, Some 2_600 ]
+  in
+  check (option int) "the uncounted turn adds nothing; the 600 before it stands"
+    (Some (2_600 + 600)) (Ledger.next_turn_peak ledger)
+;;
+
 let () =
   Eio_main.run @@ fun _ ->
   run
@@ -637,6 +712,18 @@ let () =
         ; test_case "both positions hold" `Quick test_both_positions_holding_keeps_appending
         ; test_case "provider-observed front checked at its position" `Quick
             test_a_provider_observed_front_is_checked_at_its_own_position
+        ] )
+    ; ( "turn growth"
+      , [ test_case "from the last request before it to its largest" `Quick
+            test_a_turn_grows_from_the_last_request_before_it_to_its_largest
+        ; test_case "a turn with no tool counts its first request" `Quick
+            test_a_turn_that_calls_no_tool_counts_its_first_request
+        ; test_case "none before a turn opened under the window" `Quick
+            test_no_growth_before_a_turn_opened_under_the_window
+        ; test_case "a moved front keeps the growth" `Quick
+            test_a_moved_front_keeps_how_much_a_turn_grew
+        ; test_case "an uncounted request leaves its turn out" `Quick
+            test_an_uncounted_request_leaves_its_turn_out
         ] )
     ; "json", [ test_case "counts only" `Quick test_json_reports_counts_not_the_block_list ]
     ; ( "inputs"

@@ -33,11 +33,13 @@ followAllowlist(model.view, allowlist)
 followMembers(model.view, members)
 // A token or a link made is shown until the page goes away, as its box
 // says: a page the browser keeps to come back to does not keep it. Nor does
-// it keep a key in the field of an open form: the form of a key closes.
+// it keep a key in the field of an open form: the form of a key closes,
+// and so does the field of a key in the card of an account.
 window.addEventListener('pagehide', () => {
   tokens.forget()
   invites.forget()
   subscriptions.adding.reset()
+  subscriptions.replacing.reset()
 })
 render(html`<${ConsoleFrame} model=${model} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} invites=${invites} allowlist=${allowlist} members=${members} />`, root)
 void model.load()

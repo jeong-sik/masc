@@ -7,12 +7,6 @@ module Reading = Masc.Tui_decode
    Colour belongs to the caller. A mark says which state a goal is in; which
    theme paints it is the surface's business. *)
 
-let waiting_glyph = "\xe2\x80\xa6" (* … the judge has been asked, not answered *)
-let proven_glyph = "\xe2\x9c\x93" (* ✓ approved *)
-let refused_glyph = "\xe2\x9c\x97" (* ✗ refused *)
-let superseded_glyph = "~" (* the criterion moved under a proof that stands *)
-let unreadable_glyph = "!" (* the ledger did not decode *)
-
 (* Idle draws a blank. Nothing has been asked of the judge, and a glyph for
    that would mark every goal that has never been reviewed. *)
 let idle_glyph = " "
@@ -24,6 +18,19 @@ type kind =
   | Superseded
   | Unreadable
 
+(* Each verdict is a status mark of RFC tui-one-screen-grammar 7.2: asked and
+   not answered waits (○), approved is settled (●), refused is 반려 (✕), a
+   criterion that moved under a standing proof is 오래됨 (▲). A ledger that did
+   not decode is a value read and failed, whose mark is the failed one (6.4). *)
+let status = function
+  | Waiting -> Masc_tui_value.Mark.Waiting
+  | Proven -> Masc_tui_value.Mark.Settled
+  | Refused -> Masc_tui_value.Mark.Failed
+  | Superseded -> Masc_tui_value.Mark.Caution
+  | Unreadable -> Masc_tui_value.Mark.Failed
+
+let mark kind = Masc_tui_value.Mark.glyph (status kind)
+
 (* [None] is the blank: a state with no mark needs no word. *)
 let kind_of_proof : Reading.goal_proof -> kind option = function
   | Reading.Proof_idle -> None
@@ -34,19 +41,23 @@ let kind_of_proof : Reading.goal_proof -> kind option = function
   | Reading.Proof_unreadable _ -> Some Unreadable
 
 (* The word is what to do about the mark, not a restatement of it. *)
-let entry = function
-  | Waiting -> (waiting_glyph, "waiting")
-  | Proven -> (proven_glyph, "proven")
-  | Refused -> (refused_glyph, "refused, back in executing")
-  | Superseded -> (superseded_glyph, "criterion changed")
-  | Unreadable -> (unreadable_glyph, "unreadable")
+let entry kind =
+  ( mark kind
+  , match kind with
+    | Waiting -> "waiting"
+    | Proven -> "proven"
+    | Refused -> "refused, back in executing"
+    | Superseded -> "criterion changed"
+    | Unreadable -> "unreadable" )
 
-let entry_korean = function
-  | Waiting -> (waiting_glyph, "판정 대기")
-  | Proven -> (proven_glyph, "검증 통과")
-  | Refused -> (refused_glyph, "거절 · 진행으로 복귀")
-  | Superseded -> (superseded_glyph, "기준 변경")
-  | Unreadable -> (unreadable_glyph, "판정 기록 읽기 실패")
+let entry_korean kind =
+  ( mark kind
+  , match kind with
+    | Waiting -> "판정 대기"
+    | Proven -> "검증 통과"
+    | Refused -> "거절 · 진행으로 복귀"
+    | Superseded -> "기준 변경"
+    | Unreadable -> "판정 기록 읽기 실패" )
 
 (* The order a goal travels, so the legend reads the same whichever subset of
    it a screen needs. *)
@@ -55,7 +66,9 @@ let kinds = [ Waiting; Proven; Refused; Superseded; Unreadable ]
 let glyph proof =
   match kind_of_proof proof with
   | None -> idle_glyph
-  | Some kind -> fst (entry kind)
+  | Some kind -> mark kind
+
+let tone proof = Option.map status (kind_of_proof proof)
 
 let legend = List.map entry kinds
 

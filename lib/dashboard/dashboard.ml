@@ -376,6 +376,8 @@ let tool_failure_total () =
       ThinkingPersistFailures;
       CheckpointFailures;
       TurnBoundaryFailures;
+      TurnLogAppendFailures;
+      TurnLogOpenCloseFailures;
       HistoryFragmentFailures;
       WriteMetaCycleFailures;
       MetricsSseFailures;

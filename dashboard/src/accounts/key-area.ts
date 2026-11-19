@@ -9,19 +9,14 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { AddFailure, AddRefusal, AddView, KeyAddModel } from './key-add'
-import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, idTail, keyGivenWords, keyStaysValidWords, notAKeyWords, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { Integration } from './wire'
 
 // ---- words ----
 
-/** What a person reads before they give a key (RFC, 3.8). */
-const notes = [
-  'key 는 이 서버에 암호화하지 않은 파일로 저장돼요. 서버를 운영하는 사람은 그 파일을 읽을 수 있어요.',
-  '저장한 뒤에는 이 화면에서 다시 보여 주지 않아요.',
-  '이 key 로 쓴 만큼 key 를 발급한 조직에 요금이 나가요.',
-  keyStaysValidWords,
-] as const
+/** What a person reads before they give a key for a new account (RFC, 3.8). */
+const notes = [...keyGivenWords, keyStaysValidWords] as const
 
 /** Why the server did not store a key, and what the person does next.
     `accountId` is the account the server left behind, if it left one. A
@@ -29,7 +24,7 @@ const notes = [
     console shares (notes.ts, `ProblemNote`). */
 function refusedWords(code: Exclude<AddRefusal, 'unrecognised'>, accountId: string | null): string {
   switch (code) {
-    case 'not_a_key': return 'key 로 읽을 수 없는 값이에요. key 하나만 넣어 주세요. 비어 있거나, 줄바꿈 같은 제어 문자가 있거나, JSON 문서면 받지 않아요.'
+    case 'not_a_key': return notAKeyWords
     case 'invalid_request': return '서버가 이 요청을 읽지 못했어요. 저장된 것은 없어요.'
     case 'unknown_integration': return '서버에 이 구독이 없어요. 저장된 것은 없어요. 구독 목록을 다시 읽었어요.'
     case 'integration_takes_no_key': return '이 구독은 API key 를 받지 않아요. 저장된 것은 없어요. 구독 목록을 다시 읽었어요.'

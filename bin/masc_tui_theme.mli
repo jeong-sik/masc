@@ -39,6 +39,14 @@ val sidebar_selection : Masc_tui_terminal_palette.t option -> string
     to reverse video without a usable colour palette. Indexed colours use
     xterm defaults for projection, not observed slot values. *)
 
+val selection_style : Masc_tui_terminal_palette.t option -> string
+(** A Truecolor accent-tinted selection band derived from the active palette
+    with a foreground verified to clear WCAG 4.5:1 over the tinted band, and
+    the band itself separated from the page ground. Falls back to a neutral
+    Truecolor step when the accent sits too close to the page, and to
+    {!selection} (reverse video) when colour is disabled, the palette is
+    absent, or stdout cannot emit direct 24-bit RGB. *)
+
 val recede : surface:surface -> Masc_tui_terminal_palette.t option -> string
 (** Secondary text is blended toward the palette background while the projected
     colour is estimated to retain 4.5:1 contrast against [surface]'s ground. For ANSI-256 the estimate
@@ -48,6 +56,13 @@ val recede : surface:surface -> Masc_tui_terminal_palette.t option -> string
     SGR dim and an assumed grey cannot establish contrast. This changes only
     foreground, so callers must close an enclosing dim span before using it.
     Disabled colours produce [""] rather than a colour override. *)
+
+val border_muted : surface:surface -> Masc_tui_terminal_palette.t option -> string
+(** Non-text hairline colour for unfocused panel borders, card frames, and
+    horizontal rules. On Truecolor terminals, steps the foreground further
+    toward [surface]'s ground down to a 2.2:1 hairline floor so structural
+    chrome sits behind secondary text instead of competing with it. Falls back
+    to {!recede} on non-Truecolor capabilities and to [""] under NO_COLOR. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is
@@ -473,6 +488,44 @@ module For_testing : sig
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for {!val:recede}. *)
+
+  val selection_style
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:selection_style}. *)
+
+  val border_muted_rgb
+    :  foreground:Masc_tui_terminal_palette.rgb
+    -> background:Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb option
+  (** Pure hairline blend: foreground stepped further toward background down
+      to the 2.2:1 non-text border floor. *)
+
+  val border_muted
+    :  colors_enabled:bool
+    -> default_foreground:string
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:border_muted}. *)
+
+  val diff_row_styles
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> kind:[ `Added | `Removed ]
+    -> Masc_tui_terminal_palette.t option
+    -> string * string
+  (** Pure capability/environment fixture returning [(bg, fg)] SGR escapes for
+      a diff row. *)
 end
 
 val selection : string
@@ -509,6 +562,17 @@ module Syntax : sig
   (** Fixed light text paired with both fixed dark diff backgrounds. Unlike
       the terminal default foreground, this pair keeps its contrast when a
       light terminal theme uses dark default text. *)
+
+  val diff_row_styles
+    :  kind:[ `Added | `Removed ]
+    -> Masc_tui_terminal_palette.t option
+    -> string * string
+  (** Palette-adaptive Truecolor [(bg, fg)] escapes for diff rows. Blends the
+      active page ground toward green (added) or red (removed) on Truecolor
+      terminals and lifts the foreground to clear WCAG 4.5:1 over the tinted
+      background. Falls back to [(diff_added_bg/diff_removed_bg,
+      diff_row_foreground)] on non-Truecolor capabilities and [("", "")] under
+      NO_COLOR. *)
 end
 
 val strip_sgr : string -> string
@@ -558,6 +622,17 @@ val set_lift_enabled : bool -> unit
 val lift_is_enabled : unit -> bool
 (** What {!set_lift_enabled} was last given; used to invalidate cached
     colours when the setting changes. *)
+
+val set_direct_truecolor : bool -> unit
+(** When enabled on a Truecolor stdout with an active palette, semantic
+    colours emit their 24-bit RGB escape sequences ([38;2;r;g;b]) directly
+    instead of falling back to plain 16-colour ANSI SGR codes when an entry
+    clears the readability floor. Enabled when an explicit TUI theme is active
+    and disabled when following the terminal's own ANSI slots. *)
+
+val direct_truecolor_is_enabled : unit -> bool
+(** What {!set_direct_truecolor} was last given; used to invalidate cached
+    colours when switching between an explicit theme and terminal-follow mode. *)
 
 val strip_sgr_with_positions : string -> string * int array
 (** The same SGR stripping grammar as {!strip_sgr}, retaining each copied

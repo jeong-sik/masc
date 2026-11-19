@@ -34,12 +34,23 @@ val read_file_tail_lines_with_completion :
     the read: whether the final line was terminated, and whether the read
     reached the file's start.
 
+    The read goes back from the file's end {!tail_chunk_bytes} at a time. It
+    stops at the file's start, at [max_bytes] bytes, or once it has passed
+    more than [max_lines] newlines, whichever comes first. A [max_bytes] of
+    zero or less is no byte limit. A blank line's newline is counted like
+    any other.
+
     A read that did not reach the file's start drops the first piece of what
-    it read, up to the first newline: the window may have cut it. The read
-    does not look at the byte before its window, so a window that starts at a
-    line's first byte drops that whole line. Blank lines are passed over
-    after the drop, so a line is in [lines] whenever the newline before it is
-    in the window (and [max_lines] reaches it). *)
+    it read, up to the first newline: where the read stopped may have cut
+    it. The read does not look at the byte before the first one it read, so
+    when that first byte is a line's first, the whole line goes. Blank lines
+    are passed over after the drop, so a line is in [lines] whenever the
+    newline before it is among the bytes read and the line is one of the
+    last [max_lines] that are not blank. *)
+
+val tail_chunk_bytes : int
+(** How many bytes a tail read goes back at a time. A read that stops before
+    its byte limit stops at a multiple of this from the file's end. *)
 
 type tail_of_file =
   | No_file

@@ -71,6 +71,16 @@ let recede_rgb ~foreground ~background =
     ~max_ratio:recede_max_ratio foreground
 ;;
 
+(* Non-text structural hairlines (unfocused card borders, overlay frames,
+   horizontal rules) sit behind secondary text so content leads the eye. *)
+let border_muted_max_ratio = 0.72
+let border_muted_contrast_floor = 2.2
+
+let border_muted_rgb ~foreground ~background =
+  Color.recede_toward ~background ~floor:border_muted_contrast_floor
+    ~max_ratio:border_muted_max_ratio foreground
+;;
+
 (* How far the reader's own row is set apart from the page behind it. A light
    page darkens by a little and a dark page lightens by more, because the same
    step reads as less against a dark ground. *)
@@ -123,6 +133,35 @@ let recede_for ~colors_enabled ~default_foreground ~project ~surface palette =
              >= recede_contrast_floor
           then projected_foreground ~colors_enabled (Some projected)
           else default_foreground
+;;
+
+let border_muted_for ~colors_enabled ~default_foreground ~project ~surface
+    palette =
+  if not colors_enabled then ""
+  else
+    match palette with
+    | None -> default_foreground
+    | Some pal ->
+      let background = surface_background surface pal in
+      let fallback () =
+        recede_for ~colors_enabled ~default_foreground ~project ~surface
+          palette
+      in
+      (match
+         border_muted_rgb ~foreground:(Terminal_palette.foreground pal)
+           ~background
+       with
+       | None -> fallback ()
+       | Some blended ->
+         (match project blended with
+          | Some projected ->
+            (match Terminal_palette.direct_rgb projected with
+             | Some rgb
+               when Color.contrast_ratio rgb background
+                    >= border_muted_contrast_floor ->
+               projected_foreground ~colors_enabled (Some projected)
+             | Some _ | None -> fallback ())
+          | None -> fallback ()))
 ;;
 
 let user_message_background_for ~colors_enabled ~project palette =
@@ -229,6 +268,11 @@ let side_pane_background palette =
 
 let recede ~surface palette =
   recede_for ~colors_enabled ~default_foreground:Sgr.default_fg
+    ~project:Terminal_palette.best_color ~surface palette
+;;
+
+let border_muted ~surface palette =
+  border_muted_for ~colors_enabled ~default_foreground:Sgr.default_fg
     ~project:Terminal_palette.best_color ~surface palette
 ;;
 
@@ -353,6 +397,11 @@ let lift_enabled = ref true
 let set_lift_enabled value = lift_enabled := value
 let lift_is_enabled () = !lift_enabled
 
+let direct_truecolor_enabled = ref false
+
+let set_direct_truecolor value = direct_truecolor_enabled := value
+let direct_truecolor_is_enabled () = !direct_truecolor_enabled
+
 type contrast_fallback = Keep_ansi | Default_foreground
 
 let ansi_readable_with_fallback ~fallback ~colors_enabled ~project ~surface
@@ -379,30 +428,65 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project ~surface
   in
   (* Off means the scheme's own colour goes out untouched -- what every other
      terminal UI does, and what a reader on a high-contrast scheme asked for
-     by picking one. *)
+     by picking one. When an explicit theme is active in direct Truecolor mode,
+     the scheme's 24-bit RGB goes out directly on Truecolor terminals instead
+     of relying on the terminal's 16-colour ANSI slot mapping. *)
   if not colors_enabled then ""
-  else if not !lift_enabled then code
   else
-    match palette with
-    | None -> fallback_code ()
-    | Some palette -> (
-      match Terminal_palette.ansi palette (ansi_color_index color) with
-      | None -> fallback_code ()
-      | Some entry ->
-        let background = surface_background surface palette in
-        let lifted =
-          Color.lift_for_contrast ~background ~floor:status_contrast_floor
-            entry
-        in
-        if lifted = entry then
-          if acceptable entry background then code else fallback_code ()
-        else
-          (match project lifted with
-           | None -> fallback_code ()
-           | Some projected ->
-             if acceptable_projection projected background
-             then projected_foreground ~colors_enabled (Some projected)
-             else fallback_code ()))
+    match !direct_truecolor_enabled, palette with
+    | true, Some pal ->
+      (match Terminal_palette.ansi pal (ansi_color_index color) with
+       | None -> if not !lift_enabled then code else fallback_code ()
+       | Some entry ->
+         let background = surface_background surface pal in
+         let target =
+           if !lift_enabled then
+             Color.lift_for_contrast ~background ~floor:status_contrast_floor
+               entry
+           else entry
+         in
+         (match project target with
+          | Some projected ->
+            (match Terminal_palette.direct_rgb projected with
+             | Some rgb ->
+               if not !lift_enabled || acceptable rgb background then
+                 projected_foreground ~colors_enabled (Some projected)
+               else fallback_code ()
+             | None ->
+               if not !lift_enabled then code
+               else if target = entry then
+                 if acceptable entry background then code else fallback_code ()
+               else if acceptable_projection projected background then
+                 projected_foreground ~colors_enabled (Some projected)
+               else fallback_code ())
+          | None ->
+            if not !lift_enabled then code
+            else if target = entry then
+              if acceptable entry background then code else fallback_code ()
+            else fallback_code ()))
+    | false, _ | true, None ->
+      if not !lift_enabled then code
+      else
+        match palette with
+        | None -> fallback_code ()
+        | Some palette -> (
+          match Terminal_palette.ansi palette (ansi_color_index color) with
+          | None -> fallback_code ()
+          | Some entry ->
+            let background = surface_background surface palette in
+            let lifted =
+              Color.lift_for_contrast ~background ~floor:status_contrast_floor
+                entry
+            in
+            if lifted = entry then
+              if acceptable entry background then code else fallback_code ()
+            else
+              (match project lifted with
+               | None -> fallback_code ()
+               | Some projected ->
+                 if acceptable_projection projected background
+                 then projected_foreground ~colors_enabled (Some projected)
+                 else fallback_code ()))
 ;;
 
 let ansi_readable_for ~colors_enabled ~project ~surface palette color =
@@ -757,6 +841,161 @@ let panel_border paint role =
   | (Colors_256 | Truecolor), Panel_attention -> border_for Latency
 ;;
 
+let selection = Sgr.reverse
+
+(* Accent-tinted Truecolor selection band (lazygit style). Blending the page
+   ground toward the scheme's blue/cyan accent produces a calm highlight bar
+   instead of a stark reverse-video block, while holding a verified 4.5:1
+   foreground over the tinted ground and >= 1.15 separation from the page. *)
+let selection_bg_dark_ratio = 0.28
+let selection_bg_light_ratio = 0.22
+let selection_bg_min_contrast = 1.15
+let selection_neutral_max_ratio = 0.24
+
+let blend_rgb ~ratio base target =
+  let mix select =
+    blend_component ~toward:(select target) ~ratio (select base)
+  in
+  Terminal_palette.make_rgb
+    ~red:(mix Terminal_palette.red)
+    ~green:(mix Terminal_palette.green)
+    ~blue:(mix Terminal_palette.blue)
+;;
+
+let selection_accent_candidates palette =
+  List.filter_map
+    (fun slot -> Terminal_palette.ansi palette (ansi_color_index slot))
+    [ Bright_blue; Bright_cyan ]
+;;
+
+let try_selection_pair ~colors_enabled ~project ~foreground bg =
+  match project bg with
+  | Some bg_proj ->
+    (match Terminal_palette.direct_rgb bg_proj with
+     | Some bg_rgb ->
+       let fg_lifted =
+         Color.lift_for_contrast ~background:bg_rgb
+           ~floor:status_contrast_floor foreground
+       in
+       if Color.contrast_ratio fg_lifted bg_rgb >= status_contrast_floor then
+         (match project fg_lifted with
+          | Some fg_proj ->
+            (match Terminal_palette.direct_rgb fg_proj with
+             | Some fg_rgb
+               when Color.contrast_ratio fg_rgb bg_rgb >= status_contrast_floor ->
+               Some
+                 (projected_foreground ~colors_enabled (Some fg_proj)
+                  ^ projected_background ~colors_enabled (Some bg_proj))
+             | Some _ | None -> None)
+          | None -> None)
+       else None
+     | None -> None)
+  | None -> None
+;;
+
+let selection_style_for ~colors_enabled ~project palette =
+  if not colors_enabled then selection
+  else
+    match palette with
+    | None -> selection
+    | Some palette ->
+      let page = Terminal_palette.background palette in
+      let foreground = Terminal_palette.foreground palette in
+      let ratio =
+        if Color.is_light page then selection_bg_light_ratio
+        else selection_bg_dark_ratio
+      in
+      let try_bg bg =
+        if Color.contrast_ratio bg page >= selection_bg_min_contrast then
+          try_selection_pair ~colors_enabled ~project ~foreground bg
+        else None
+      in
+      let neutral () =
+        match
+          Color.recede_toward ~background:foreground
+            ~floor:status_contrast_floor ~max_ratio:selection_neutral_max_ratio
+            page
+        with
+        | Some bg -> try_bg bg
+        | None -> None
+      in
+      let accent_attempt =
+        List.find_map
+          (fun accent -> try_bg (blend_rgb ~ratio page accent))
+          (selection_accent_candidates palette)
+      in
+      (match accent_attempt with
+       | Some style -> style
+       | None ->
+         (match neutral () with
+          | Some style -> style
+          | None -> selection))
+;;
+
+(* Palette-adaptive Truecolor diff row tints. Blends the page ground gently
+   toward the scheme's green (added) or red (removed) slot and pairs it with
+   a foreground verified at WCAG 4.5:1 over the tinted band, replacing the
+   hardcoded xterm-256 swamp-green/brown backgrounds on Truecolor terminals. *)
+let diff_tint_dark_ratio = 0.22
+let diff_tint_light_ratio = 0.18
+let diff_row_fallback_fg = "\027[38;5;255m"
+
+let diff_row_styles_for ~colors_enabled ~project ~kind palette =
+  if not colors_enabled then "", ""
+  else
+    let fallback () =
+      let bg =
+        match kind with
+        | `Added -> style_for ~colors_enabled "\027[48;5;22m"
+        | `Removed -> style_for ~colors_enabled "\027[48;5;52m"
+      in
+      bg, style_for ~colors_enabled diff_row_fallback_fg
+    in
+    match palette with
+    | None -> fallback ()
+    | Some pal ->
+      let slot =
+        match kind with
+        | `Added -> Bright_green
+        | `Removed -> Bright_red
+      in
+      (match Terminal_palette.ansi pal (ansi_color_index slot) with
+       | None -> fallback ()
+       | Some hue ->
+         let page = Terminal_palette.background pal in
+         let foreground = Terminal_palette.foreground pal in
+         let ratio =
+           if Color.is_light page then diff_tint_light_ratio
+           else diff_tint_dark_ratio
+         in
+         let tinted_bg = blend_rgb ~ratio page hue in
+         if tinted_bg = page then fallback ()
+         else
+           (match project tinted_bg with
+            | Some bg_proj ->
+              (match Terminal_palette.direct_rgb bg_proj with
+               | Some bg_rgb ->
+                 let fg_lifted =
+                   Color.lift_for_contrast ~background:bg_rgb
+                     ~floor:status_contrast_floor foreground
+                 in
+                 if Color.contrast_ratio fg_lifted bg_rgb >= status_contrast_floor
+                 then
+                   (match project fg_lifted with
+                    | Some fg_proj ->
+                      (match Terminal_palette.direct_rgb fg_proj with
+                       | Some fg_rgb
+                         when Color.contrast_ratio fg_rgb bg_rgb
+                              >= status_contrast_floor ->
+                         ( projected_background ~colors_enabled (Some bg_proj)
+                         , projected_foreground ~colors_enabled (Some fg_proj) )
+                       | Some _ | None -> fallback ())
+                    | None -> fallback ())
+                 else fallback ()
+               | None -> fallback ())
+            | None -> fallback ()))
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
@@ -770,6 +1009,10 @@ module For_testing = struct
   let status_text_readable = status_text_readable_for
   let meter_cell_readable = meter_cell_readable_for
   let ramp_style = ramp_style_for
+  let selection_style = selection_style_for
+  let border_muted_rgb = border_muted_rgb
+  let border_muted = border_muted_for
+  let diff_row_styles = diff_row_styles_for
 end
 
 let ansi_readable ~surface palette color =
@@ -792,7 +1035,10 @@ let meter_cell_readable paint cell =
     paint cell
 ;;
 
-let selection = Sgr.reverse
+let selection_style palette =
+  selection_style_for ~colors_enabled ~project:Terminal_palette.best_color
+    palette
+;;
 
 let sidebar_selection palette =
   if not colors_enabled then selection
@@ -812,8 +1058,9 @@ module Syntax = struct
   (* What does not take a hue from the palette. The words a reader scans for
      (keyword, string, number, type, link, a JSON key) are hues, and draw
      through [Masc_tui_ansi.Theme.Syntax], which lifts them. Punctuation
-     recedes by weight instead, and a diff row pairs a fixed background with
-     fixed text. *)
+     recedes by weight instead; diff rows adapt to the palette on Truecolor
+     terminals via [diff_row_styles] and fall back to the fixed 256-colour
+     pair below when Truecolor or a palette is unavailable. *)
   let json_punctuation = Sgr.dim
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
@@ -832,6 +1079,11 @@ module Syntax = struct
      backgrounds above. *)
   let diff_added = Sgr.green
   let diff_removed = Sgr.red
+
+  let diff_row_styles ~kind palette =
+    diff_row_styles_for ~colors_enabled ~project:Terminal_palette.best_color
+      ~kind palette
+  ;;
 end
 
 let strip_sgr_internal ?on_span text =

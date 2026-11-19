@@ -30,8 +30,13 @@ type system_observation =
     session already holds again only when the bytes change
     ({!Prompt_block_id.resent_when_held}).
     The other three come from the renderer.
-    The admitted operation source follows the Goal snapshot and is held across
-    tool rounds independently of the remaining dynamic context. Agent Core
+    An official client reads the admitted operation source right behind the
+    Goal snapshot on every request of its turn, from [admitted_source]. Agent
+    Core does not issue it: the source rides the end context of the turn's
+    first request, so the System does not change with the turn kind
+    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2;
+    {!Prompt_block_id.injected_on_post_tool_round} says what a later request
+    of each lane carries). Agent Core
     keeps the current turn's proof state here so tool feedback remains the
     newest message. Official clients receive proof state as turn-scoped input
     instead. Completion Authority remains a context block. *)
@@ -42,6 +47,16 @@ type proof_state = private { proof_text : string }
     named block is not evidence that the renderer issued that state. *)
 
 val issue_proof_state : Keeper_context_layers.rendered -> proof_state option
+
+type admitted_source = private { source_text : string }
+(** The source of the admitted operation the turn serves, issued from the
+    renderer's unique [Direct_input_source] section. A raw named block is not
+    evidence that the renderer issued it. *)
+
+val issue_admitted_source : Keeper_context_layers.rendered -> admitted_source option
+(** [Some] when the layer split off by
+    {!Keeper_context_layers.partition_layer} holds exactly one
+    [Direct_input_source] section with text. *)
 
 type system_prompt = private
   { base_text : string
@@ -67,9 +82,15 @@ type t = private
     (** The renderer-issued state this turn can carry across execution owners.
         It is independent of whether the current request puts it in System
         or in the official client's turn-scoped carrier. *)
+  ; admitted_source : admitted_source option
+    (** The renderer-issued source this turn carries across tool rounds and
+        execution owners. An official client reads it in System on every
+        request, also one that takes the turn over after an Agent Core round;
+        Agent Core never puts it in System. *)
   }
 
 val with_proof_state : proof_state option -> t -> t
+val with_admitted_source : admitted_source option -> t -> t
 
 val assemble :
   dynamic_context_partition:Keeper_context_layers.rendered option ->

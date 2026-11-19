@@ -991,11 +991,13 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    (RFC-0363 §3.4.1), with one exception: a tool result of
    [aged_result_min_bytes] or more that belongs to a turn that ended leaves
    as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
-   Each such result changes once, on the first request after its turn ended,
-   and goes as the same marker on every later request. Verified arguments of
-   closed calls in ended turns also go as stored references, unless signed
-   reasoning requires their original prefix. Each payload changes once after
-   its turn ends; this can invalidate the provider cache from that point.
+   Each such result changes once, on the first request whose window moved
+   after its turn ended, and goes as the same marker on every later request
+   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1).
+   Verified arguments of closed calls in ended turns also go as stored
+   references below the same boundary, unless signed reasoning requires
+   their original prefix. A window that stays keeps both where it last sent
+   them, so its prefix holds across turns.
    Other bodies stay as the range first sent them. The range shrinks
    only where its front moves, or as the answer to a size refusal.
 
@@ -1071,6 +1073,11 @@ type composed =
            demoted, the end of the last turn that ended (never the newest
            atom) when its results go as markers, the refused request's atom
            count after a size refusal. *)
+  ; working_state : string option
+        (* The working state the range carried ahead of its atoms. *)
+  ; moved_at_max_context : Keeper_carried_front.seed option
+        (* The front the size signal moved this range to, which the rest of
+           the turn holds. *)
   }
 
 (* A request as the ledger reads it, with the history it was composed from:
@@ -1191,11 +1198,20 @@ type range_start =
 type start_choice =
   { start : range_start
   ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  ; moved_at_max_context : Keeper_carried_front.seed option
   }
 
 let librarian_point_end_atom = function
   | At_snapshot snapshot -> snapshot.Librarian_continuity_snapshot.end_atom
   | At_read_position { end_atom } -> end_atom
+;;
+
+(* The Librarian point a request's continuity stands on, if any. *)
+let librarian_point_of (continuity : continuity option) =
+  match Option.map (fun (value : continuity) -> value.point) continuity with
+  | Some (Summarized { snapshot; _ }) -> Some (At_snapshot snapshot)
+  | Some (Absorbed { end_atom; _ }) -> Some (At_read_position { end_atom })
+  | Some Without_snapshot | None -> None
 ;;
 
 (* Where this turn began on the history in hand (RFC librarian-lifecycle
@@ -1245,7 +1261,9 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
           (this_turn_start ~history_digest_at history_at_start)
       | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
       | Keeper_carried_front.Turn_start_after_seed_refusal
-      | Keeper_carried_front.Turn_start_after_librarian_refusal -> end_atom
+      | Keeper_carried_front.Turn_start_after_librarian_refusal
+      | Keeper_carried_front.Turn_start_at_max_context
+      | Keeper_carried_front.Librarian_point_at_max_context -> end_atom
     in
     if seed.first_atom > bound
     then
@@ -1260,7 +1278,14 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
     Some seed
 ;;
 
-let from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point =
+(* RFC librarian-lifecycle §4.10, rules 1 and 2: a Librarian point yields to
+   a start the provider accepted past it. A window that stays holds its
+   accepted start behind the point too (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.3): the point
+   moves the window only when the window moves, so the prefix the provider
+   cached stays. [window_held_at] is where the held window opened. *)
+let from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boundary
+      ~history_at_start point =
   let at_point =
     match point with
     | At_snapshot snapshot -> From_snapshot snapshot
@@ -1273,31 +1298,152 @@ let from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at
       | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start seed)
   in
   match past_point with
-  | Some seed when seed.Keeper_carried_front.first_atom > librarian_point_end_atom point ->
+  | Some seed
+    when seed.Keeper_carried_front.first_atom > librarian_point_end_atom point
+         || Option.equal Int.equal window_held_at (Some seed.Keeper_carried_front.first_atom) ->
     Past_librarian_point { point; accepted = seed }
   | Some (_ : Keeper_carried_front.seed) | None -> at_point
 ;;
 
-let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
-      ~history_at_start =
-  let without_point () =
-    match front with
-    | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
-    | Some seed ->
-      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
-       | Ok seed -> { start = From_seed seed; outlived_seed = None }
-       | Error dropped ->
-         { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
+(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1). The
+   window the pair's ledger last carried passes the binding's max-context
+   once the next turn grows as much as the largest turn grew since the ledger
+   started, so it moves before a provider refuses it: to the end of what the
+   Librarian read when that lies past the window, else to the turn boundary.
+   A refusal that is not typed fails the turn instead of moving the window.
+   Every value is one the provider counted or the operator declared, and an
+   unknown one gives no signal. *)
+type past_max_context =
+  { window_first_atom : int
+  ; moved_to : Keeper_carried_front.seed
+  ; next_turn_peak : int
+  ; max_context : int
+  }
+
+let past_max_context ~max_context ~continuity ~history_digest_at ~turn_boundary
+      (ledger : Keeper_model_input_ledger.t option) =
+  let ( let* ) = Option.bind in
+  let* ledger = ledger in
+  let* max_context = max_context in
+  let* next_turn_peak = Keeper_model_input_ledger.next_turn_peak ledger in
+  let* end_atom =
+    match turn_boundary with
+    | Keeper_carried_front.Turn_boundary { end_atom } -> Some end_atom
+    | Keeper_carried_front.Turn_boundary_unknown _ -> None
   in
-  let at_point point =
-    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point
-    ; outlived_seed = None
+  let window_first_atom = ledger.last.first_atom in
+  (* The end of what the Librarian read, when it lies past the window: the
+     atoms the move drops are then in memory. Else the turn boundary. *)
+  let moved_to_atom, source =
+    match Option.map librarian_point_end_atom (librarian_point_of continuity) with
+    | Some point_end when point_end > window_first_atom ->
+      point_end, Keeper_carried_front.Librarian_point_at_max_context
+    | Some (_ : int) | None -> end_atom, Keeper_carried_front.Turn_start_at_max_context
+  in
+  if next_turn_peak > max_context
+     && end_atom > window_first_atom
+     && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
+  then
+    Option.map
+      (fun front_digest ->
+         { window_first_atom
+         ; moved_to =
+             { Keeper_carried_front.first_atom = moved_to_atom
+             ; front = Model_input_front.At_atom front_digest
+             ; source
+             }
+         ; next_turn_peak
+         ; max_context
+         })
+      (history_digest_at moved_to_atom)
+  else None
+;;
+
+(* What a window that stays keeps where it last sent it (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.1, §3.3). *)
+type held_window =
+  { window_opened_at : int
+  ; markers_before : int
+  ; working_state : string option
+  }
+
+(* At a turn's first request a window holds only while the size signal
+   watches it. Without the signal, a window that keeps its results whole
+   grows until the provider refuses it. Later in the turn it holds where the
+   turn's first request opened it, which the ledger's last request
+   records. *)
+let held_window ~opens_turn ~max_context ~history_digest_at
+      (ledger : Keeper_model_input_ledger.t option) =
+  match ledger with
+  | None -> None
+  | Some ledger ->
+    let watched =
+      (not opens_turn)
+      || (Option.is_some max_context
+          && Option.is_some (Keeper_model_input_ledger.next_turn_peak ledger))
+    in
+    if watched && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
+    then
+      Some
+        { window_opened_at = ledger.last.first_atom
+        ; markers_before = ledger.last.demote_before
+        ; working_state = ledger.last.working_state
+        }
+    else None
+;;
+
+(* The atom a start opens the carried range at, before the projection clamps
+   it to the newest atom; [None] for an unknown boundary, which names none. *)
+let range_opening_atom = function
+  | From_snapshot snapshot -> Some snapshot.Librarian_continuity_snapshot.end_atom
+  | From_read_position { end_atom } -> Some end_atom
+  | Past_librarian_point { accepted; _ } -> Some accepted.Keeper_carried_front.first_atom
+  | From_seed seed -> Some seed.Keeper_carried_front.first_atom
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) -> Some end_atom
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) -> None
+;;
+
+(* Whether [start] opens the range where the ledger's last request opened
+   it: the window stays. *)
+let stays_at ~opened_at start =
+  Option.equal Int.equal (range_opening_atom start) (Some opened_at)
+;;
+
+let choose_range_start ~past_max_context ~held_window ~continuity ~front ~accepted
+      ~history_digest_at ~turn_boundary ~history_at_start =
+  let window_held_at =
+    Option.map (fun (held : held_window) -> held.window_opened_at) held_window
+  in
+  let choose ~front ~accepted =
+    let chosen ?outlived_seed start = { start; outlived_seed; moved_at_max_context = None } in
+    match librarian_point_of continuity with
+    | Some point ->
+      chosen
+        (from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boundary
+           ~history_at_start point)
+    | None ->
+      (match front with
+       | None -> chosen (From_turn_boundary turn_boundary)
+       | Some seed ->
+         (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+          | Ok seed -> chosen (From_seed seed)
+          | Error dropped ->
+            chosen ~outlived_seed:(seed, dropped) (From_turn_boundary turn_boundary)))
+  in
+  let choice = choose ~front ~accepted in
+  (* The signal moves only a window that stays: a start that opens anywhere
+     but where the ledger's window opened has moved it already, to a
+     Librarian point past it or to a front a refusal held. The moved front
+     replaces the seed on both paths, so a Librarian snapshot's working state
+     still rides ahead of it, and the caller holds it for the rest of the
+     turn. *)
+  match past_max_context with
+  | Some { window_first_atom; moved_to; _ }
+    when stays_at ~opened_at:window_first_atom choice.start ->
+    { (choose ~front:(Some moved_to) ~accepted:(Some moved_to)) with
+      moved_at_max_context = Some moved_to
     }
-  in
-  match Option.map (fun (value : continuity) -> value.point) continuity with
-  | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
-  | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
-  | Some Without_snapshot | None -> without_point ()
+  | Some _ | None -> choice
 ;;
 
 let range_start_origin = function
@@ -1319,69 +1465,92 @@ let range_start_origin = function
     Keeper_carried_front.Turn_start_unknown { reason }
 ;;
 
-(* The range [start] opens, over [messages] of [atom_count] atoms. A
-   snapshot's working state rides ahead of the atoms it does not cover, and
-   a Librarian point may leave no history atom at all: a Librarian that has
-   read everything, which is the only state a purge leaves it in. A seed or
-   a turn boundary always carries the newest atom ({!Keeper_carried_front.clamp});
-   an unknown boundary carries that atom alone. *)
-let working_state_message snapshot : Agent_core.Types.message =
+(* The working state that rides ahead of the atoms a start does not cover:
+   the text of the snapshot the start reads, and none for any other start.
+   The one place a request reads the Librarian's working state. *)
+let current_working_state = function
+  | From_snapshot snapshot | Past_librarian_point { point = At_snapshot snapshot; _ } ->
+    Some (working_state_text snapshot)
+  | From_read_position _
+  | Past_librarian_point { point = At_read_position _; _ }
+  | From_seed _ | From_turn_boundary _ -> None
+;;
+
+(* A window that stays carries the working state it carried when it opened,
+   or none when it opened with none, so the front of the request changes
+   only when the window moves (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.3). A window
+   that moved carries the one its start reads. *)
+let carried_working_state ~held_window start =
+  match held_window with
+  | Some { window_opened_at; working_state; _ } when stays_at ~opened_at:window_opened_at start ->
+    working_state
+  | Some _ | None -> current_working_state start
+;;
+
+let working_state_message text : Agent_core.Types.message =
   { origin = Llm_provider.Types.Agent_instruction;  role = Agent_core.Types.User
-  ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
+  ; content = [ Agent_core.Types.Text text ]
   ; name = None; tool_call_id = None
   ; metadata = Runtime_model_input_tail_window.working_state_metadata
   }
 ;;
 
-let project_range_start ~unread ~measure_message_bytes ~atom_count start messages =
+(* The range [start] opens over [messages] of [atom_count] atoms, with
+   [working_state] ahead of it when there is one, standing in for the atoms
+   before it. Without one, the omission preamble says older turns are left
+   out. A Librarian point may leave no history atom at all: a Librarian that
+   has read everything, which is the only state a purge leaves it in. A seed
+   or a turn boundary always carries the newest atom
+   ({!Keeper_carried_front.clamp}); an unknown boundary carries that atom
+   alone. *)
+let project_range_start ~unread ~working_state ~measure_message_bytes ~atom_count start
+      messages =
   let messages=Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User unread messages in
-  match start with
-  | From_snapshot snapshot ->
+  let first_atom, allow_empty_history =
+    match start with
+    | From_snapshot snapshot -> snapshot.Librarian_continuity_snapshot.end_atom, true
+    | From_read_position { end_atom } -> end_atom, true
+    | Past_librarian_point { accepted = seed; _ } | From_seed seed ->
+      ( Keeper_carried_front.clamp_seed ~atom_count seed
+      , Model_input_front.permits_empty seed.Keeper_carried_front.front )
+    | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+      Keeper_carried_front.clamp ~atom_count end_atom, false
+    | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
+      Keeper_carried_front.newest_atom ~atom_count, false
+  in
+  match working_state with
+  | Some text ->
     Runtime_model_input_tail_window.project_from_atom
-      ~allow_empty_history:true
-      ~history_already_announced:true ~measure_message_bytes
-      ~first_atom:snapshot.Librarian_continuity_snapshot.end_atom
-      (working_state_message snapshot :: messages)
-  | From_read_position { end_atom } ->
-    (* No summary stands in for the absorbed atoms; the omission preamble
-       says older turns are left out. *)
+      ~allow_empty_history ~history_already_announced:true ~measure_message_bytes ~first_atom
+      (working_state_message text :: messages)
+  | None ->
     Runtime_model_input_tail_window.project_from_atom
-      ~allow_empty_history:true ~measure_message_bytes ~first_atom:end_atom messages
-  | Past_librarian_point { point = At_snapshot snapshot; accepted } ->
-    (* The working state still rides: it summarizes the atoms before the
-       point, and the range opens at the accepted start after it. *)
-    Runtime_model_input_tail_window.project_from_atom
-      ~history_already_announced:true ~measure_message_bytes
-      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
-      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
-      (working_state_message snapshot :: messages)
-  | Past_librarian_point { point = At_read_position _; accepted } ->
-    Runtime_model_input_tail_window.project_from_atom
-      ~measure_message_bytes
-      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
-      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
-      messages
-  | From_seed (seed : Keeper_carried_front.seed) ->
-    Runtime_model_input_tail_window.project_from_atom
-      ~measure_message_bytes
-      ~allow_empty_history:(Model_input_front.permits_empty seed.front)
-      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count seed)
-      messages
-  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
-    Runtime_model_input_tail_window.project_from_atom
-      ~measure_message_bytes
-      ~first_atom:(Keeper_carried_front.clamp ~atom_count end_atom)
-      messages
-  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
-    Runtime_model_input_tail_window.project_from_atom
-      ~measure_message_bytes
-      ~first_atom:(Keeper_carried_front.newest_atom ~atom_count)
-      messages
+      ~allow_empty_history ~measure_message_bytes ~first_atom messages
+;;
+
+(* Where the results and arguments of turns that ended go as markers (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.1). A window
+   that stays keeps them below the boundary it last sent, and the arguments
+   the attempt bound at the turn boundary narrow to it. A window that moved
+   demotes every turn that ended. *)
+let finished_boundary ~held_window ~start ~atom_count ~turn_boundary completed_arguments
+      messages =
+  match held_window with
+  | Some { window_opened_at; markers_before; _ } when stays_at ~opened_at:window_opened_at start ->
+    let before = Keeper_carried_front.clamp ~atom_count markers_before in
+    ( before
+    , Option.map
+        (Keeper_model_input_demotion.arguments_before ~atom:before messages)
+        completed_arguments )
+  | Some _ | None -> finished_turn_atoms ~atom_count turn_boundary, completed_arguments
 ;;
 
 let compose_carried_model_input
       ?continuity
       ?completed_arguments
+      ?past_max_context
+      ?held_window
       ?(finished_turn_results = Finished_turns_verbatim)
       ?(history_at_start = Keeper_turn_boundaries.Continued_history)
       ?(same_turn_result_as_pointer = fun (_ : string) -> false)
@@ -1402,9 +1571,9 @@ let compose_carried_model_input
      rather than carrying the newest atom alone from a position that would
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
-  let { start; outlived_seed } =
-    choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
-      ~history_at_start
+  let { start; outlived_seed; moved_at_max_context } =
+    choose_range_start ~past_max_context ~held_window ~continuity ~front ~accepted
+      ~history_digest_at ~turn_boundary ~history_at_start
   in
   (* A result whose text repeats an earlier result of its own turn leaves as
      a pointer to that turn's first one, for the tools that declare it
@@ -1426,17 +1595,19 @@ let compose_carried_model_input
      request with the completed arguments the attempt bound: the resend is the
      smallest this range can carry, and the attempt's later requests keep the
      same markers. Any other request carries what the range already sent,
-     unchanged (RFC-0363 §3.4.1), but for the results of turns that ended when
-     the caller asks for them as markers: those are the same markers on every
-     request after the first one that follows their turn, and no argument is
-     touched. *)
+     unchanged (RFC-0363 §3.4.1), but for the results and arguments of turns
+     that ended when the caller asks for them as markers: they change only
+     when the window moves ([finished_boundary]). *)
   let planned, demote_before =
     match current_turn_results with
     | Current_turn_verbatim ->
       (match finished_turn_results with
        | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
        | Finished_turns_as_markers ->
-         let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
+         let finished, completed_arguments =
+           finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
+             completed_arguments messages
+         in
          ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
              ~measure_wire_bytes
              ~base_path ~demote_before:finished messages
@@ -1452,9 +1623,11 @@ let compose_carried_model_input
      after the attempt: with no continuity by the in-turn ladder, which owns
      any further move toward the newest atom; otherwise by one resend from
      the turn boundary ([turn_boundary_resend_sequence]). *)
+  let working_state = carried_working_state ~held_window start in
   let projection, transmitted_bytes =
     project_range_start
       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread continuity)
+      ~working_state
       ~measure_message_bytes
       ~atom_count:history_atom_count
       start
@@ -1467,6 +1640,8 @@ let compose_carried_model_input
   ; origin = range_start_origin start
   ; outlived_seed
   ; demote_before
+  ; working_state
+  ; moved_at_max_context
   }
 ;;
 
@@ -1529,6 +1704,8 @@ let resolve_carried ~to_wire carried =
 let materialize_request_history
       ?continuity
       ?completed_arguments
+      ?past_max_context
+      ?held_window
       ?finished_turn_results
       ?history_at_start
       ?same_turn_result_as_pointer
@@ -1546,8 +1723,8 @@ let materialize_request_history
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
-        ?same_turn_result_as_pointer
+        ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
+        ?history_at_start ?same_turn_result_as_pointer
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1619,15 +1796,15 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
-      ?same_turn_result_as_pointer
+      ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
+      ?history_at_start ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
   let materialized ?(materialize = materialize) completed_arguments =
-    materialize_request_history ?continuity ?completed_arguments ?finished_turn_results
-      ?history_at_start ?same_turn_result_as_pointer
+    materialize_request_history ?continuity ?completed_arguments ?past_max_context
+      ?held_window ?finished_turn_results ?history_at_start ?same_turn_result_as_pointer
       ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -1958,6 +2135,13 @@ let bounded_model_input_projection
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
+  (* The binding's max-context, which the size signal compares the ledger's
+     counts against; read once per attempt. *)
+  let max_context =
+    lazy
+      (Option.bind ctx.input_runtime (fun runtime ->
+         Option.map fst (Runtime_instance.resolve_max_context_of_runtime runtime)))
+  in
   let to_wire = memoize_wire_message media_store in
   fun messages ->
     state.request_range := None;
@@ -2027,10 +2211,12 @@ let bounded_model_input_projection
       dropped_ledger;
     (* A turn with a Librarian point starts past it only where the provider
        accepted a later start on this history (RFC librarian-lifecycle
-       §4.10, rules 1 and 2): the turn boundary a size refusal moved this
-       turn to, else the newest response-observed turn record. Both are read
-       from the turn and from the file, never from the process's ledger, so
-       a restart and a lane's next candidate choose the same start. *)
+       §4.10, rules 1 and 2): the turn boundary a size refusal or the size
+       signal moved this turn to, else the newest response-observed turn
+       record. Both are read from the turn and from the file, never from the
+       process's ledger, so a restart and a lane's next candidate choose the
+       same start. The ledger says only whether a window that stays holds it
+       behind the point ([held_window]). *)
     let accepted =
       match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
       | Some (Summarized _ | Absorbed _) ->
@@ -2039,10 +2225,31 @@ let bounded_model_input_projection
          | None -> (Lazy.force cold_seed).Keeper_carried_front.seed)
       | None | Some Without_snapshot -> None
     in
+    (* Read at the turn's first request only, the one that carries the turn
+       context. The ledger's count at a later request already holds part of
+       this turn's growth, and the turn keeps the front the signal moved,
+       held below. *)
+    let opens_turn = List.exists Runtime_model_input_tail_window.is_extra_context messages in
+    let past_max_context =
+      if opens_turn
+      then
+        past_max_context ~max_context:(Lazy.force max_context)
+          ~continuity:(input_continuity ctx.request_input) ~history_digest_at
+          ~turn_boundary:ctx.turn_boundary !(state.ledger)
+      else None
+    in
+    (* Read before this request moves the ledger: where a window that stays
+       last sent its markers and what working state it carried. *)
+    let held_window =
+      held_window ~opens_turn ~max_context:(Lazy.force max_context) ~history_digest_at
+        !(state.ledger)
+    in
     let current_turn_results = !(state.current_turn_results) in
     let* view =
       request_view
         ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+        ?past_max_context
+        ?held_window
         ~finished_turn_results
         ~history_at_start:ctx.history_at_start
         ~same_turn_result_as_pointer
@@ -2097,6 +2304,19 @@ let bounded_model_input_projection
     let composed = view.composed in
     Keeper_carried_front.warn_if_origin_is_unknown_start
       ~keeper_name:ctx.keeper_name composed.origin;
+    (* The rest of the turn opens at the front the signal moved: a Librarian
+       point reads the accepted start from the held front, and a candidate
+       whose ledger has not seen this request reads it too. *)
+    (match past_max_context, composed.moved_at_max_context with
+     | Some signal, Some moved ->
+       ctx.hold_carried_front moved;
+       Log.Keeper.info
+         ~keeper_name:ctx.keeper_name
+         "model input window moved before the provider counted past max-context \
+          runtime=%s next_turn_peak=%d max_context=%d window_first_atom=%d front=%s"
+         ctx.runtime_id signal.next_turn_peak signal.max_context signal.window_first_atom
+         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json moved))
+     | Some _, None | None, (Some _ | None) -> ());
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -2106,6 +2326,8 @@ let bounded_model_input_projection
              let demoted =
                compose_carried_model_input
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ?past_max_context
+                 ?held_window
                  ~history_at_start:ctx.history_at_start
                  ~same_turn_result_as_pointer
                  ~measure_message_bytes
@@ -2299,6 +2521,7 @@ let bounded_model_input_projection
               ; tail_bytes
               ; turn_context
               ; demote_before = view.composed.demote_before
+              ; working_state = view.composed.working_state
               }
           ; digest_at = history_digest_at
           ; origin = view.composed.origin

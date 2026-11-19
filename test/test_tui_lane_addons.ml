@@ -335,7 +335,7 @@ let action_identity_and_uncertainty () =
   let received = UI.action_receipt request (Action.to_json receipt) |> ok in
   let lines = UI.lines ~width:100 {UI.initial with presentation=UI.Technical;last_action=Some request;action_receipt=Some received} in
   check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
-  check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
+  check bool "missing executor stays unreported" true (List.mem "  requester operator · executor ?" lines);
   check bool "different request cannot satisfy status read" true
     (Result.is_error (UI.action_receipt {request with request_id="request-2"} (Action.to_json receipt)));
   check bool "duplicate identity in command is rejected" true

@@ -97,7 +97,7 @@ let system_log_detail_lines (state : state) ~seq ~width =
              (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet (t "없음" "none") ] ])
        | json ->
            detail_page ~width blocks
-           @ system_log_detail_section details_title
+           @ system_log_detail_section ~width details_title
            @ (document_json ~width (Yojson.Safe.pretty_to_string json)
               |> List.map (fun line -> Ansi.reset, "  " ^ line)))
 
@@ -288,7 +288,6 @@ let render_system_logs (state : state) =
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
              @ filter_pieces)
   in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -330,6 +329,7 @@ let render_system_logs (state : state) =
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
+  report_drawn_list System_log_rows ~height:content_height;
   if total_entries = 0 then begin
     let empty =
       match
@@ -488,8 +488,8 @@ let render_keeper_calls (state : state) =
             ; freshness ]
   in
   let col_hdr =
-    ui_text state ~ko:"  j/k 줄 단위 · 원문 필드: tool | input | output"
-      ~en:"  j/k rows · exact fields: tool | input | output"
+    ui_text state ~ko:"  j/k:줄 단위  원문 필드: tool | input | output"
+      ~en:"  j/k:rows  exact fields: tool | input | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -583,13 +583,23 @@ let render_keeper_calls (state : state) =
     entries
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
+         (* The status marks of RFC tui-one-screen-grammar 7.2 in their 7.3
+            tones. A deferred call handed its continuation to the async path
+            and the work goes on, so it is under way, as on the lane run
+            detail; it wore [◌], the mark of a value not read yet (6.4). A
+            record that names no outcome yet is unreported [?], and one whose
+            fields the reader refuses (the decoder drops those rows) read
+            failed. *)
          let glyph, style =
+           let status mark = (Masc_tui_value.Mark.glyph mark, Theme.status_tone mark) in
            match call.kc_outcome with
-           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
-           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
-           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
-           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
-             ("?", Ansi.reset)
+           | Tool_result.Recorded_succeeded -> status Masc_tui_value.Mark.Settled
+           | Tool_result.Recorded_failed -> status Masc_tui_value.Mark.Failed
+           | Tool_result.Recorded_deferred -> status Masc_tui_value.Mark.Under_way
+           | Tool_result.Recorded_unsettled ->
+             (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported, Ansi.reset)
+           | Tool_result.Recorded_malformed ->
+             (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed, Theme.bad ())
          in
          let duration =
            match Option.bind call.kc_duration_ms Masc_tui_acting.elapsed_text with
@@ -628,7 +638,8 @@ let render_keeper_calls (state : state) =
                     Ansi.dim)
                ~label:"output" output
          in
-         (call_index, style, summary) :: exact_rows @ output_rows)
+         let call_rows = (call_index, style, summary) :: exact_rows @ output_rows in
+         if call_index = 0 then call_rows else (call_index, Ansi.dim, "") :: call_rows)
     |> List.concat
   in
   let total_rows = List.length rows in
@@ -718,7 +729,7 @@ let render_acting_evidence (state : state) entry =
   (* A field the event did not carry, as opposed to one it carried empty. *)
   let not_carried = ui_text state ~ko:"실려 오지 않음" ~en:"not carried" in
   let lines =
-    detail_section_lines ~first:true
+    detail_section_lines ~first:true ~width:(framed_inner_width cols)
       (ui_text state ~ko:"1. 이벤트 식별 · 실행 컨텍스트"
          ~en:"1. Event Identity & Execution Context")
     @ ((ui_text state ~ko:"TUI 수신 시각" ~en:"TUI received at",
@@ -755,13 +766,13 @@ let render_acting_evidence (state : state) entry =
               :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
-        detail_section_lines
+        detail_section_lines ~width:(framed_inner_width cols)
           (ui_text state ~ko:"2. 입출력 관측 기록" ~en:"2. Input / Output Observations")
         @ json (ui_text state ~ko:"입력" ~en:"Input") call.kt_tool_args
-        @ preview (ui_text state ~ko:"입력 미리보기" ~en:"Input preview") call.kt_tool_args_preview
-        @ json (ui_text state ~ko:"출력" ~en:"Output") call.kt_tool_result
-        @ preview (ui_text state ~ko:"출력 미리보기" ~en:"Output preview")
-            call.kt_tool_output_preview
+        @ ("" :: preview (ui_text state ~ko:"입력 미리보기" ~en:"Input preview") call.kt_tool_args_preview)
+        @ ("" :: json (ui_text state ~ko:"출력" ~en:"Output") call.kt_tool_result)
+        @ ("" :: preview (ui_text state ~ko:"출력 미리보기" ~en:"Output preview")
+             call.kt_tool_output_preview)
     | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
     (* A skill node's frame carries no input or output; its call log row does. *)
     | Masc_tui_observer.Keeper_tool_call_evidence_committed _
@@ -868,14 +879,17 @@ let acting_notices (state : state) ~trace_unavailable =
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
-  (* Top/title/divider, column heading, then bottom/footer. *)
-  max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
+  (* Title/divider, column heading, then bottom/footer. *)
+  max 1 (rows - (3 + List.length notices + listing_rows_below_the_body))
 
-let acting_page_rows state ~terminal_rows =
+let acting_list_height state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
   let notices = acting_notices state ~trace_unavailable:trace_reading.unavailable in
-  Masc_tui_scroll.page_step ~height:(acting_content_height ~rows ~notices)
+  acting_content_height ~rows ~notices
+
+let acting_page_rows state ~terminal_rows =
+  Masc_tui_scroll.page_step ~height:(acting_list_height state ~terminal_rows)
 
 let render_acting (state : state) =
   match state.acting_detail with
@@ -988,6 +1002,7 @@ let render_acting (state : state) =
                 ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
   let content_height = acting_content_height ~rows ~notices in
+  report_drawn_list Activity_events ~height:content_height;
   let max_scroll = max 0 (shown - content_height) in
   let cursor = max 0 (min state.acting_cursor (shown - 1)) in
   let scroll =
@@ -1010,7 +1025,6 @@ let render_acting (state : state) =
       | Actions | Everything ->
           Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   in
-  box_top buf cols;
   box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   List.iter
@@ -1114,8 +1128,10 @@ let render_acting (state : state) =
               ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
-          let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
-          box_line_styled buf cols ~style:(if selected then Theme.selection else style) line
+          if selected then
+            let marked = "> " ^ String.sub line 2 (String.length line - 2) in
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr marked)
+          else box_line_styled buf cols ~style line
     done;
   box_bottom buf cols;
   (* A Turns row is a fold with no cursor on it: "/" and n have no row to

@@ -158,6 +158,8 @@ type t =
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
+  | TurnLogAppendFailures
+  | TurnLogOpenCloseFailures
   | HistoryFragmentFailures
   | WorkingStateNotCarried
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)

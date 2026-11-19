@@ -1827,7 +1827,8 @@ let recorded_usage_windows scope =
           | Usage.Provider_label label -> label in
         let percent = match recorded.window.utilization with
           | Usage.Percent percent -> percent
-          | Usage.Fraction _ | Usage.Usd _ -> -1 in
+          | Usage.Fraction _ | Usage.Usd _ | Usage.Credit_unlimited
+          | Usage.Credit_retracted | Usage.Credit_balance _ -> -1 in
         Printf.sprintf "%s %s %d%% resets=%d" (Usage.source_to_string recorded.source) kind
           percent (Option.value recorded.window.resets_at ~default:0))
       (first :: rest)

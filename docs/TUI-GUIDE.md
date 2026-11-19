@@ -433,10 +433,10 @@ tool calls and their returns, turn boundaries and turn done rows, chat rows
 landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
-Marks: `▶` a call
-started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
-(a provider call's start or end, an internal agent run's start), `■` done
-(the keeper's turn, or an internal agent run), `?` something needing
+Marks: `◐` a call
+started, `●` a call returned, `✕` a failure, `✧` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `●` done
+(the keeper's turn, or an internal agent run), `▲` something needing
 attention. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.
@@ -538,7 +538,7 @@ named on its title row: `story`, `s schedules` and `m memory`.
   wake, the error the schedule recorded.
   A source the window has not read, cannot read, has cut, is reading again or
   whose read failed does not vanish from the feed: a line of its own after the
-  events says so, one line per source, for example `turns reading…`,
+  events says so, one line per source, for example `turns reading`,
   `wakes from the first page only` or `wakes (schedule read failed)`.
 - `s schedules` is the first page of the Keeper's own schedules, the page the
   Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
@@ -678,7 +678,7 @@ Right from the Keeper list.
 
 The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
-`id (name unknown)` when it does not.
+`id (name not reported)` when it does not.
 
 A browser consent started on the Services tab keeps checking its Keeper even
 on another surface. A callback the server admitted just before `expires_at`
@@ -723,7 +723,7 @@ command, not a quoted shell line to paste.
 
 While the tab is open the TUI holds a connection to the Keeper's Execute output
 stream and keeps the newest 500 rows. The row under the output says `following`, how many commands are
-active (`closed` when none is and the last one ended, `state unknown` when none
+active (`closed` when none is and the last one ended, `state not reported` when none
 is active and the server has not recorded an end), and when the server last
 said anything on the connection. When commands
 overlap their rows interleave, and each row then starts with its stream number
@@ -803,8 +803,9 @@ turn is starting or running, `Ctrl-G` selects the next readable Keeper and
 wraps at the end of the roster. Each Keeper keeps its own draft. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-Chat opens in a conversation layout: a small `›` marks your message, `●`
-marks the Keeper, and `◀` marks another sender. Other senders keep their name
+Chat opens in a conversation layout: a small `›` marks your message, `✦`
+marks the Keeper, `✧` marks the pane's note about a turn, and `◀` marks
+another sender. Other senders keep their name
 and origin above their message. Tool calls keep
 their own name and result mark without a second TOOLS label.
 
@@ -911,7 +912,7 @@ counts (prompt overrides, Keepers with instructions, runtime assignments,
 exact-output lanes). The detail below shows its save time and description, a
 comparison with current settings, this session's last restore report, then the
 saved contents and the Keepers it holds. A directory whose manifest does not
-read is listed with `!` under Read errors.
+read is listed with `✕` under Read errors.
 
 The chat does the same. `/preset` lists the prompt presets the server holds
 under `.masc/presets`.
@@ -931,7 +932,7 @@ is already applied, not that the restore should be repeated. Inspect current
 settings and `_autosave` first: repeating restore replaces the undo snapshot.
 An unreadable response also does not prove that nothing changed.
 `/preset delete <name>` removes that
-preset, including one listed with `!` because it does not load; typing the
+preset, including one listed with `✕` because it does not load; typing the
 name is the confirmation. A directory whose name is not a valid preset name
 is refused.
 The answers land in the chat pane of the keeper selected when the command was

@@ -859,6 +859,7 @@ let run_keeper_invocation_turn_admitted_inner
                                         Keeper_input_speaker.Host_prompt
                                           Keeper_input_speaker.Official_client_resume
                                       | None -> input_speaker)
+		                                ~woken_by:[]
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot

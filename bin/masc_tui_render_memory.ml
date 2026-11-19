@@ -16,7 +16,7 @@ let librarian_failure_words ~ko kind =
   let text korean english = if ko then korean else english in
   match kind with
   | Masc.Tui_decode_memory_health.Failure_prompt_render -> text "프롬프트 구성 실패" "prompt could not be built"
-  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> text "실행 시계 미확인" "no clock to run on"
+  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> text "실행 시계 없음" "no clock to run on"
   | Masc.Tui_decode_memory_health.Failure_exact_setup -> text "모델 호출 준비 실패" "model call could not be set up"
   | Masc.Tui_decode_memory_health.Failure_exact_execution -> text "모델 호출 실패" "model call failed"
   | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> text "모델 응답 사용 불가" "model answer was not usable"
@@ -133,7 +133,7 @@ let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
               | Memory_store_absent | Memory_store_present _ -> [])
            @ (match snapshot.mfs_events_read_error with
               | None -> []
-              | Some detail -> [text "조회·수정 기록 미확인: " "Retrieval/change history unreadable: " ^ Terminal_text.single_line detail])) in
+              | Some detail -> [text "조회·수정 기록 조회 실패: " "Retrieval/change history unreadable: " ^ Terminal_text.single_line detail])) in
   let width = max 1 (framed_inner_width cols - 2) in
   List.concat_map (fun line ->
     (if full then Message_layout.wrap_words ~max_cells:width line
@@ -295,7 +295,7 @@ let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
       | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> text "턴 기록 읽기 실패" "turn records unreadable"
       | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> text "턴 경계 읽기 실패" "turn boundaries unreadable"
       | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> text "연속성 스냅샷 읽기 실패" "continuity snapshot unreadable"
-      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> text "읽은 위치 미확인" "read position unreadable"
+      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> text "읽은 위치 읽기 실패" "read position unreadable"
     in
     [ Printf.sprintf (if ko then "  Librarian 처리 지연 · 미측정, %s · %s" else "  Librarian stalled · not measured, %s · %s") cause
         (Terminal_text.preview_line mls_detail) ]
@@ -310,7 +310,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       clause_rows ~full ~cols
         [ text "저장 " "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
         ; (match unit with Memory_usage.Tokens -> text "저장 지식 추정량" "estimated knowledge size" | Memory_usage.Bytes -> text "저장된 지식" "rendered knowledge") ]
-    | Some _, _ | _, Some _ -> clause_rows ~full ~cols [text "저장량 미확인" "Stored: unreadable"]
+    | Some _, _ | _, Some _ -> clause_rows ~full ~cols [text "저장량 읽기 실패" "Stored: unreadable"]
   in
   let current_line =
     Printf.sprintf (if ko then "  %s · %s · 저장 r%d · 저장량 %s · 갱신 %s" else "  %s · %s · snapshot r%d · stored %s · updated %s")
@@ -1077,7 +1077,7 @@ let memory_refused_keeper_lines (state : state) =
         Printf.sprintf (if ko then "  행 읽기 실패 · %s: %s" else "  row not read · %s: %s")
           (match refusal.mkr_keeper_id with
            | Some keeper_id -> Terminal_text.single_line keeper_id
-           | None -> if ko then "키퍼 ID 미확인" else "keeper id not read")
+           | None -> if ko then "키퍼 ID 보고 안 됨" else "keeper id not reported")
           (Terminal_text.single_line refusal.mkr_reason))
       refused
 
@@ -1089,8 +1089,8 @@ let memory_world_axis (state : state) ~room =
   let provenance = match reading with
     | Masc_tui_memory_world.Not_read -> [ui_text state ~ko:"미조회" ~en:"not read"]
     | Masc_tui_memory_world.Reading -> [ui_text state ~ko:"조회 중" ~en:"reading"]
-    | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미확인" ~en:"current value unknown"]
-    | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패 · 현재 값 미확인" ~en:"read failed; current value unknown"]
+    | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미조회" ~en:"current value not read"]
+    | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패" ~en:"read failed"]
     | Masc_tui_memory_world.Loaded { refresh_failure = Some (Kept_back _); _ } ->
         [ui_text state ~ko:"마지막 관측" ~en:"last observation"]
     | Masc_tui_memory_world.Loaded { refresh_failure = Some (Suspended | Request_failed _); _ } ->
@@ -1110,7 +1110,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     | None, true -> Masc_tui_keeper_age_ladder.keeper_clauses ~ko keeper.mkh_age_bins
   in
   let saved = match keeper.mkh_read_error, keeper.mkh_snapshot_present with
-    | Some _, _ -> [text ~ko:"저장 시각 미확인" ~en:"save time unavailable"]
+    | Some _, _ -> [text ~ko:"저장 시각 읽기 실패" ~en:"save time unreadable"]
     | None, false -> [text ~ko:"일반 기억 스냅샷 없음" ~en:"no ordinary memory snapshot"]
     | None, true ->
         [memory_updated_text keeper.mkh_updated_at;
@@ -1134,7 +1134,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     | Some atoms -> Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind %d atoms") atoms
   in
   let pass = match librarian.mlh_state with
-    | None -> text ~ko:"처리 결과 미관측" ~en:"pass not observed"
+    | None -> text ~ko:"처리 결과 보고 안 됨" ~en:"pass not reported"
     | Some ending -> text ~ko:"처리 " ~en:"pass " ^ memory_pass_text ~ko ending
   in
   let axes =
@@ -1237,7 +1237,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
   in
   let target_notice = match original, keeper with
     | Some {Masc.Operator_action_reason.cause=Memory_attention {keeper;_};_}, None ->
-        [section (if ko then "대상 기억 미관측" else "Target memory unobserved")
+        [section (if ko then "대상 기억 미조회" else "Target memory not read")
           [Terminal_text.single_line keeper;
            (if ko then "이 Keeper의 기억 상태는 이 조회에서 확인하지 못했습니다."
             else "This reading did not establish this Keeper's memory state.")]]
@@ -1319,7 +1319,7 @@ let memory_compact_fleet_row ~cols (state : state) =
           @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
                [Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
           @ (match snapshot.mhs_total_librarian_unread_turns with
-             | None -> [if ko then "미읽은 턴 미관측" else "unread turns unobserved"]
+             | None -> [if ko then "미읽은 턴 보고 안 됨" else "unread turns not reported"]
              | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns]
              | Some _ -> [])
         in
@@ -1347,20 +1347,83 @@ type memory_overview_projection =
 let refused_rows projection =
   List.length projection.refused + if projection.refused_divider then 1 else 0
 
-let memory_overview_rows ~cols ~budget ?cursor (state : state) =
+(* How tall one Keeper's reading is, full and compact, and whether it keeps a
+   stalled-gap row: all the detail under the list needs from the Keepers that
+   are not selected, to be as tall as the tallest of them (RFC
+   tui-one-screen-grammar §8). *)
+type memory_reading_measure = { full_rows : int; compact_rows : int; stalled : bool }
+
+(* Measuring wraps every loaded Keeper's reading, and the overview is built
+   several times a frame (its layout, its body, the position count). The
+   measures are kept for the readings they were taken from: the same health
+   snapshot and World reading, the same Keepers in the same order, at the
+   same width and in the same reading. A value that changes is a new value,
+   so any change measures again. The input reading is part of it only under
+   [v]: the axis reading does not draw it, and the input is read again for
+   every Keeper j or k selects, so keeping it there measured every Keeper on
+   every move. *)
+let memory_reading_measures :
+    ((memory_health_snapshot option * Masc_tui_memory_world.t
+      * (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source option
+      * memory_keeper_health list * int * bool * bool * Masc_tui_memory_usage.display_unit)
+     * memory_reading_measure list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let measured_readings (state : state) ~cols ~readings keepers =
+  let input = if state.memory_overview_detail then Some state.memory_input else None in
+  let key =
+    ( state.memory_health, state.memory_world, input, keepers, cols
+    , state.ui_language = Lang_ko, state.memory_overview_detail, state.memory_unit )
+  in
+  let same (health, world, input, seen, seen_cols, seen_ko, seen_detail, seen_unit)
+      (health', world', input', keepers', cols', ko', detail', unit') =
+    health == health' && world == world' && Option.equal ( == ) input input'
+    && List.equal ( == ) seen keepers' && seen_cols = cols' && Bool.equal seen_ko ko'
+    && Bool.equal seen_detail detail' && seen_unit = unit'
+  in
+  match Domain.DLS.get memory_reading_measures with
+  | Some (seen, measures) when same seen key -> measures
+  | Some _ | None ->
+      let measures =
+        List.map
+          (fun keeper ->
+            let full, compact = readings keeper in
+            { full_rows = List.length full.rows
+            ; compact_rows = List.length compact.rows
+            ; stalled = Option.is_some full.stalled_row })
+          keepers
+      in
+      Domain.DLS.set memory_reading_measures (Some (key, measures));
+      measures
+
+let memory_overview_rows ~cols ~budget (state : state) =
   let keepers = visible_memory_keepers state in
-  let cursor = Option.value cursor ~default:state.memory_health_cursor in
-  let selected = List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) in
-  let context =
-    match selected with
-    | None -> { rows = []; primary_rows = 0; stalled_row = None }
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:false keeper
-    | Some keeper ->
-      memory_context_lines ~ko:(state.ui_language = Lang_ko) ~cols ~detail:state.memory_overview_detail
-        ~unit:state.memory_unit
-        ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:keeper.mkh_keeper_id)
-        keeper
+  let ko = state.ui_language = Lang_ko in
+  (* A Keeper's reading and the compact one that stands in for it on a short
+     frame. [v] keeps the full input and coverage, so it has no compact one. *)
+  let readings keeper =
+    if state.memory_overview_detail then
+      let full =
+        memory_context_lines ~ko ~cols ~detail:state.memory_overview_detail
+          ~unit:state.memory_unit
+          ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
+                    ~key:keeper.mkh_keeper_id)
+          keeper
+      in
+      full, full
+    else
+      memory_axis_context state ~cols ~compact:false keeper,
+      memory_axis_context state ~cols ~compact:true keeper
+  in
+  (* Every loaded Keeper's is measured, because the detail under the list is
+     as tall as the tallest of them (RFC tui-one-screen-grammar §8). Sized by
+     the selected Keeper alone, it moved the list's last row and the divider
+     under it on every j and k (QA N02). Only the selected one is drawn. *)
+  let measures = measured_readings state ~cols ~readings keepers in
+  let no_reading = { rows = []; primary_rows = 0; stalled_row = None } in
+  let context, compact_context =
+    Option.fold ~none:(no_reading, no_reading) ~some:readings
+      (List.nth_opt keepers (max 0 (min state.memory_health_cursor (List.length keepers - 1))))
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
@@ -1373,18 +1436,17 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
-  (* A compact selected reading keeps its state, an omission marker and an
-     actionable stalled-gap row. [v] retains the full input and coverage. *)
-  let compact_context = match selected with
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:true keeper
-    | Some _ | None -> context
+  (* A compact reading keeps its state, an omission marker and an actionable
+     stalled-gap row. The rows kept for the detail are the most any loaded
+     Keeper's would keep, so the header and the rejected rows above the list
+     do not change with the selection either. *)
+  let reserve measure =
+    if measure.full_rows = 0 then 0
+    else if state.memory_overview_detail then 3 + (if measure.stalled then 1 else 0)
+    else measure.compact_rows + 1
   in
   let context_reserve =
-    if context.rows = [] then 0
-    else if state.memory_overview_detail then
-      3 + (if Option.is_some context.stalled_row then 1 else 0)
-    else List.length compact_context.rows + 1
+    List.fold_left (fun most measure -> max most (reserve measure)) 0 measures
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
   (* On a very short frame the full list and selected detail must yield before
@@ -1395,9 +1457,9 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     if state.memory_overview_detail then memory_fleet_header_rows ~cols state
     else
       [memory_compact_fleet_row ~cols state]
-      @ (match selected with
-         | Some _ -> []
-         | None ->
+      @ (match keepers with
+         | _ :: _ -> []
+         | [] ->
              let heading, clauses = memory_world_axis state ~room:(max 1 (framed_inner_width cols - 2)) in
              clause_rows ~cols (heading :: clauses))
   in
@@ -1424,14 +1486,31 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     in
     if context.rows = [] || available <= 1 then []
     else
-      let context =
-        if List.length context.rows <= available - 1 then context else compact_context in
-      fold_memory_context_rows ~ko:(state.ui_language = Lang_ko) ~max_rows:(available - 1) context
+      let room = available - 1 in
+      let fold (context, compact) =
+        fold_memory_context_rows ~ko ~max_rows:room
+          (if List.length context.rows <= room then context else compact)
+      in
+      (* The rows [fold] leaves a reading: it keeps a reading that fits and
+         folds a longer one, or its compact one, into the room. *)
+      let folded measure =
+        if measure.full_rows <= room then measure.full_rows else min measure.compact_rows room
+      in
+      let tallest = List.fold_left (fun tallest measure -> max tallest (folded measure)) 0 measures in
+      (* Each reading is folded into the room before it is measured, so
+         none is cut here: [fit_tallest] only pads the selected one to the
+         tallest. The room is the cap as well: a reading too tall for it is
+         already drawn in its compact form, so the default cap would only cut
+         a reading that fits. *)
+      Masc_tui_detail_height.fit_tallest ~cap:room ~budget:room ~tallest
+        ~too_tall:(Masc_tui_detail_height.Cut_with
+                     (if ko then "  … v:전체" else "  … v:full reading"))
+        ~blank:"" (fold (context, compact_context))
   in
   { header; refused; refused_divider; context }
 
-let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
-  let projection = memory_overview_rows ~cols ~budget ?cursor state in
+let memory_overview_scrolled ~cols ~budget (state : state) =
+  let projection = memory_overview_rows ~cols ~budget state in
   memory_overview_scrolled
     ~header_rows:(List.length projection.header)
     ~refused_rows:(refused_rows projection)
@@ -1456,6 +1535,7 @@ let memory_selector_line ~cols (state : state) keeper =
   ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1509,10 +1589,10 @@ let render_memory_body ~cols ~budget (state : state)
        rows up already counts through the helper that declines the plural. *)
     if query <> "" then
       if ko then
-        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %s[Esc:해제]%s"
+        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %sEsc:해제%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query) shown (Theme.recede ()) Ansi.reset
       else
-        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query)
           (Masc_tui_message_layout.count_noun shown "matching keeper")
           (Theme.recede ()) Ansi.reset
@@ -1560,7 +1640,7 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note ~ko:false
+      | Page_failed -> page_failed_note ~ko
       | Page_unread -> if ko then
           (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
@@ -1576,6 +1656,7 @@ let render_memory_body ~cols ~budget (state : state)
     let keepers_window =
       Rows.of_list ~first:scroll ~height:content_height keepers
     in
+    report_drawn_list Memory_keepers ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at keepers_window idx with
@@ -1603,11 +1684,35 @@ let render_memory_body ~cols ~budget (state : state)
    edge. Under this the browser stops being one. *)
 let memory_fact_list_floor_rows = 5
 
+(* The tallest detail among the loaded facts, in lines. Counting it wraps
+   every fact's claim, so it is kept for the rows it was counted from: the
+   rows are the projection [memory_fact_rows] keeps until the snapshot, the
+   filter or the sort changes, and a frame that draws the same rows reads
+   the count back. *)
+let memory_fact_tallest_detail :
+    (memory_fact_row list * int * bool * int) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let tallest_fact_detail_lines ~ko ~cols rows =
+  match Domain.DLS.get memory_fact_tallest_detail with
+  | Some (seen, seen_cols, seen_ko, tallest)
+    when seen == rows && seen_cols = cols && Bool.equal seen_ko ko -> tallest
+  | Some _ | None ->
+      let tallest =
+        List.fold_left
+          (fun tallest row ->
+            Int.max tallest (fact_detail_line_count (memory_fact_detail_parts ~ko ~cols row)))
+          0 rows
+      in
+      Domain.DLS.set memory_fact_tallest_detail (Some (rows, cols, ko, tallest));
+      tallest
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
+  let ko = state.ui_language = Lang_ko in
   let detail =
-    Option.map (memory_fact_detail_parts ~state ~ko:(state.ui_language = Lang_ko) ~cols) (List.nth_opt rows cursor)
+    Option.map (memory_fact_detail_parts ~state ~ko ~cols) (List.nth_opt rows cursor)
   in
   let total_detail_lines =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
@@ -1615,9 +1720,8 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let scope_rows = List.length (memory_facts_scope_lines ~cols state) in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
-     divider. Input asks for the target cursor because wrapped details can
-     change the height on every movement. The search row is counted from
-     [memory_search_query], the same value the renderer draws it from. *)
+     divider. The search row is counted from [memory_search_query], the same
+     value the renderer draws it from. *)
   let chrome_rows =
     4
     + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
@@ -1625,37 +1729,35 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     + scope_rows
     + (if scope_rows > 0 then 1 else 0)
   in
-  (* The detail is as tall as the fact under the cursor, and a fact can be
-     any length. On the live store at thirty rows one fact filled fifteen of
-     them and the list fell to its floor of one: a browser of 254 facts
-     showing one row, whose height then moved on every [j] as the next fact
-     wrapped to a different depth. The list keeps this many rows before the
-     detail takes any, and what the detail then loses is one keypress away --
-     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  (* The detail is as tall as the tallest loaded fact's (RFC
+     tui-one-screen-grammar §8), so the list above it keeps one height while
+     [j] walks facts of different lengths; a shorter fact's detail ends in
+     blank rows. A fact can be any length: on the live store at thirty rows
+     one fact filled fifteen of them and the list fell to one row of 254
+     facts. The list keeps this many rows before the detail takes any, and
+     what the detail then loses is one keypress away -- [Enter] opens the
+     whole fact in an overlay that owns the terminal. *)
   let room_below_chrome = max 1 (budget - chrome_rows) in
-  let detail_row_budget =
-    min (if total_detail_lines = 0 then 0 else 1 + total_detail_lines)
-      (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  let detail_budget =
+    (* Less the detail's divider. *)
+    max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
+  let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
   let detail_lines =
     match detail with
     | None -> []
     | Some parts ->
-      let kept = max 0 (detail_row_budget - 1) in
-      (* The detail also needs its divider. With no line left after that,
-         even the folded marker would exceed the rows reserved for it. *)
-      if kept = 0 then []
-      else if kept >= total_detail_lines then
-        fact_detail_prefix parts total_detail_lines
-      else
+        let height = min detail_budget (max tallest total_detail_lines) in
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
-        fact_detail_prefix parts (kept - 1)
-        @ [ "      "
-            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
-                (total_detail_lines - (kept - 1))
-            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
-               else " · Enter for the whole fact") ]
+        let overflow =
+          "      "
+          ^ Masc_tui_value.Count.more ~ko (total_detail_lines - (height - 1))
+          ^ (if ko then " · Enter:전체 사실" else " · Enter for the whole fact")
+        in
+        Masc_tui_detail_height.fit_tallest ~budget:detail_budget ~tallest
+          ~too_tall:(Masc_tui_detail_height.Cut_with overflow) ~blank:""
+          (fact_detail_prefix parts total_detail_lines)
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)
@@ -1681,6 +1783,7 @@ let memory_facts_content_height ~cols ~budget ~cursor state =
   height
 
 let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1731,7 +1834,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           else text "  d:분류 펼치기" "  d:show categories"
         in
         let pills =
-          if not show_category_strip then text "  c/C:분류 · Enter:사실 상세" "  c/C:category · Enter:fact detail"
+          if not show_category_strip then text "  c/C:분류  Enter:사실 상세" "  c/C:category  Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
@@ -1758,7 +1861,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        applied one drew the old word above rows the new one had left. *)
     let filter = memory_search_query state in
     if String.trim filter <> "" then
-      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %s[Esc:해제]%s" else "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s")
+      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %sEsc:해제%s" else "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s")
         Ansi.bold Ansi.reset (Terminal_text.single_line filter)
         (if ko then Printf.sprintf "일치 %d개" total else Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
@@ -1786,7 +1889,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패 · 현재 사실 미확인)" (page_failed_note ~ko:false)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note ~ko
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
            text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
@@ -1802,16 +1905,17 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                (Terminal_text.single_line filter)
            else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
              memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
-             text "  (읽힌 사실 없음 · 일부 저장소 미확인)" "  (no facts read; a store is unavailable)"
+             text "  (읽힌 사실 없음 · 일부 관측)" "  (no facts read; partial reading)"
            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
            else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
        | Page_empty, filt ->
-           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s — c/C cycles)")
+           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s · c/C cycles)")
              (memory_category_filter_text ~ko filt)
      in
      push_styled ~style:(Theme.recede ()) empty)
   else begin
     let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
+    report_drawn_list Memory_fact_rows ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at rows_window idx with
@@ -1830,10 +1934,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
-    ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+    ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
   if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
-      ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
+      ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
@@ -1841,21 +1945,21 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
-      ~hand_position
+      ~report_drawn_list ~hand_position
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->
-        collect (Theme.selection ^ fit_width text fact_inner_cols ^ Ansi.reset))
+        collect (Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
       ~push_divider:(fun () ->
-        collect (Theme.recede () ^ draw_hline fact_inner_cols ^ Ansi.reset))
+        collect (Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect "");
     let ko = state.ui_language = Lang_ko in
     let count category = Option.bind (memory_facts_snapshot state)
         (fun snapshot -> category_count state snapshot category) in
     let header =
       [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
-      ; Theme.recede () ^ (if ko then "c/C:이동 · 클릭:선택" else "c/C:move · click:select") ^ Ansi.reset
-      ; Theme.recede () ^ draw_hline width ^ Ansi.reset
+      ; Theme.recede () ^ (if ko then "c/C:이동  클릭:선택" else "c/C:move  click:select") ^ Ansi.reset
+      ; Theme.border_muted () ^ draw_hline width ^ Ansi.reset
       ]
     in
     let height = max 0 (budget - List.length header) in
@@ -1902,7 +2006,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
       (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
        |> List.map (fun (category, text) ->
            let text = fit_width ("  " ^ text) width in
-           let style = if category = state.memory_facts_category then Theme.selection else Theme.recede () in
+           let style = if category = state.memory_facts_category then Theme.selection_style () else Theme.recede () in
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in
@@ -1913,7 +2017,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts_window = Rows.of_list ~first:0 ~height facts in
     for index = 0 to height - 1 do
       let cell window = Option.value (Rows.at window index) ~default:"" in
-      push (fit_width (cell rail_window) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+      push (fit_width (cell rail_window) width ^ Theme.border_muted () ^ " │ " ^ Ansi.reset
         ^ fit_width (cell facts_window) fact_inner_cols)
     done
   end

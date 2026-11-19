@@ -90,7 +90,7 @@ let application_summary ~ko : Masc.Lane_addon_application.t -> string = function
   | Applied id -> say ko "워커 실행 중: " "worker running: " ^ id
   | Inactive -> say ko "워커 정리 확인" "worker cleanup confirmed"
   | Failed messages -> say ko "적용 실패: " "application failed: " ^ String.concat "; " messages
-  | Unknown messages -> say ko "적용 미확인: " "application unknown: " ^ String.concat "; " messages
+  | Unknown messages -> say ko "적용 일부 관측: " "application partly read: " ^ String.concat "; " messages
 let declaration_summary ~ko = function
   | Valid value ->
       (if value.enabled then say ko "켜짐으로 설정" "configured on"
@@ -98,7 +98,7 @@ let declaration_summary ~ko = function
       ^ clause_gap ko ^ application_summary ~ko value.application
   | Invalid _ -> say ko "선언 오류" "declaration invalid"
   | Absent -> say ko "선언 파일 없음" "declaration absent"
-  | Unobserved -> say ko "선언 미관측" "declaration not observed"
+  | Unobserved -> say ko "선언 일부 관측" "declaration partly read"
 let browser_switch_line ~ko =
   say ko "브라우저 소스는 browser-<source> 패키지 행에서 켜고 끕니다: Enter, Space, s 순서."
     "A source is switched on or off from its browser-<source> package row: Enter, then Space, then s."
@@ -113,7 +113,7 @@ let browser_reading_label ~ko observed = function
 let machine_activity_label ~ko = function
   | Machine_enabled -> say ko "켜짐" "on"
   | Machine_disabled -> say ko "꺼짐 · 머신 상태 보존" "off; machine state retained"
-  | Machine_unobserved -> say ko "활동 미관측" "activity unavailable"
+  | Machine_unobserved -> say ko "활동 보고 안 됨" "activity not reported"
 let machine_publication_label ~ko = function
   | No_screen -> say ko "게시된 화면 없음" "no screen published"
   | Stable -> say ko "화면 안정" "screen stable"

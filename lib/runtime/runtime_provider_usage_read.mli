@@ -18,13 +18,15 @@
     A provider that declares [usage-read] in runtime.toml is
     asked with one HTTP GET to that URL, authenticated with the key its HTTP
     runtime was built with, and the answer is decoded by the declared shape.
-    A provider that also declares [usage-read.refresh-s] is asked again that
-    many seconds after each read ends. runtime.toml refuses [usage-read] on an
-    official-client protocol. *)
+    OpenRouter's optional [usage-read.credit.url] is also read and recorded as
+    an observation-only account Credit report; primary and Credit failures do
+    not suppress each other's successful report. A provider that also declares
+    [usage-read.refresh-s] is asked again that many seconds after each read
+    ends. runtime.toml refuses [usage-read] on an official-client protocol. *)
 
 val read_timeout_s : float
-(** The bound on one read: a Codex account admission and one request, one
-    whole HTTP GET, or a Muse [usage/read]. *)
+(** The bound on one client admission/request or each HTTP GET, including an
+    auxiliary OpenRouter Credit read. *)
 
 val read_codex :
   mgr:_ Eio.Process.mgr ->
@@ -86,7 +88,7 @@ val read_scopes :
   readable list ->
   unit
 (** Read each scope in order with [codex], [antigravity] or [fetch] (one GET
-    of the declared URL), decode, and record.  A failed or raising read is logged
+    of each declared URL), decode, and record.  A failed or raising read is logged
     with its scope (and shape) and does not stop the scopes after it; only
     {!Eio.Cancel.Cancelled} is re-raised.  A read that states no windows logs
     one info line.  An HTTP read with an empty key fails without a request. *)
@@ -197,10 +199,10 @@ type account_refusal_read =
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read
-(** A window is spent when its utilization is a [Fraction] of at least 1.0
-    or a [Percent] of at least 100. Windows that count other use (Z.AI's
-    TIME_LIMIT, OpenRouter's free-model requests) and unclassified ones are
-    ignored. *)
+(** A window is spent when its utilization is a [Fraction] of at least 1.0,
+    a [Percent] of at least 100, USD at its key limit, or zero remaining
+    Credit. Windows that count other use (Z.AI's TIME_LIMIT, OpenRouter's
+    free-model requests) and unclassified ones are ignored. *)
 
 val read_after_account_refusal :
   fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->

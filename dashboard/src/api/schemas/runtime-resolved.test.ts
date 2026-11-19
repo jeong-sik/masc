@@ -130,4 +130,27 @@ describe('runtime-resolved schema', () => {
     })
     expect(parsed.provider_usage_windows?.[0]?.windows[0]?.utilization).toEqual(utilization)
   })
+
+  it.each([
+    { unit: 'credit_balance', currency: 'USD', total: 100.5, remaining: 74.75 },
+    { unit: 'credit_balance', currency: 'CNY', total: null, remaining: 0 },
+    { unit: 'credit_unlimited' },
+  ])('retains a reported Credit balance without inventing usage: %j', (utilization) => {
+    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime),
+      provider_usage_windows: [{ scope: 'account:credit', providers: [{ id: 'provider', display_name: 'Provider' }],
+        state: 'reported', windows: [{ limit_id: null, window: { kind: 'provider_label', label: 'credit balance' },
+          utilization, resets_at: null, observed_at: 1_100, source: 'provider.credit', role: 'counts_other_use' }] }],
+    })
+    expect(parsed.provider_usage_windows?.[0]?.windows[0]?.utilization).toEqual(utilization)
+  })
+
+  it('rejects an unknown utilization unit instead of treating it as zero Credit', () => {
+    expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime),
+      provider_usage_windows: [{ scope: 'account:credit', providers: [], state: 'reported', windows: [{
+        limit_id: null, window: { kind: 'provider_label', label: 'credit balance' },
+        utilization: { unit: 'credits', total: null, remaining: 0 }, resets_at: null, observed_at: 1_100,
+        source: 'provider.credit', role: 'counts_other_use',
+      }] }],
+    })).toThrow(RuntimeResolvedSchemaDriftError)
+  })
 })

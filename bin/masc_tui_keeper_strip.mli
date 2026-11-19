@@ -6,8 +6,8 @@ val header :
   age:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_list_model.memory_age) ->
   Masc_tui_keeper_list_model.row list -> string
 (** Four fixed known groups; unknown readings keep an explicit [?] count.
-    Every non-empty group's count is reserved before marks; remaining width
-    shows individual marks (with the selected Keeper bold) or [+n] overflow. *)
+    Each non-empty group draws its status mark and count once without
+    per-member glyph repetition. *)
 
 type wake_style =
   | Keeper_wakes
@@ -51,7 +51,7 @@ val fleet_cells :
     grid has no band: the two maxima would scale cells that are not drawn. *)
 
 val selected_summary :
-  now:float -> activity_cell:string ->
+  ko:bool -> now:float -> activity_cell:string ->
   next_run:Masc_tui_keeper_next_run.t -> recurrence:Schedule_domain.recurrence option ->
   memory:Masc_tui_keeper_memory_reading.t -> Masc_tui_keeper_list_model.row -> string
 (** Activity age/since, next scheduled run with a decoded recurrence, lag and,

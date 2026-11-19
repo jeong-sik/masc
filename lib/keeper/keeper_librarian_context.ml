@@ -38,9 +38,16 @@ let fresh_id ?previous_version sources =
   "context-" ^ digest (Yojson.Safe.to_string (`Assoc
     ["previous_version", previous;
      "sources", strings (List.sort String.compare sources)]))
+let event_reference_prefix = "event:"
 let source_of_event (selection : Keeper_event_queue_state.pending_selection) =
-  { reference = Printf.sprintf "event:%s:%Ld" (Keeper_event_queue_state.source_snapshot_ref selection.source) selection.admitted_revision
+  { reference = Printf.sprintf "%s%s:%Ld" event_reference_prefix (Keeper_event_queue_state.source_snapshot_ref selection.source) selection.admitted_revision
   ; content = Keeper_event_queue.stimulus_to_yojson selection.source }
+(* The reading half of [source_of_event]. The reference says which kind of
+   source this is, and an event source holds the stimulus it was made from. *)
+let stimulus_of_source (source : source) =
+  if String.starts_with ~prefix:event_reference_prefix source.reference
+  then Some (Keeper_event_queue.stimulus_of_yojson source.content)
+  else None
 let source_of_chat (operation : Keeper_chat_operation.t) =
   { reference = Printf.sprintf "chat:%s:%s" (Keeper_chat_operation.Operation_id.to_string operation.operation_id) operation.execution_digest
   ; content = Keeper_chat_operation.to_json operation }

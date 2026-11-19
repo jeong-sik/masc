@@ -49,7 +49,12 @@ val snapshot_with_additional_secret_files :
 val redact_text : t -> string -> string
 (** Replace exact projected secret values and generic sensitive patterns
     with [\[REDACTED\]], preserving message length semantics except for
-    the replacements themselves. *)
+    the replacements themselves. An exact value is matched as written and as
+    one JSON string spells it, so it is replaced in printed JSON (the
+    arguments of a tool call) as well as in plain text. The stream forms
+    below match the same two spellings. A JSON spelling longer than the
+    largest secret file a snapshot reads (64 KiB) is not matched; the value
+    as written still is. *)
 
 val redact_text_mapped : t -> string -> Secret_patterns.source_piece list
 (** Same policy as {!redact_text}, with half-open original input byte spans.

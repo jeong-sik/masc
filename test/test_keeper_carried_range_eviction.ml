@@ -60,6 +60,7 @@ let request ~digest_at ~first_atom ~atom_count : Ledger.request =
   ; tail_bytes = 0
   ; turn_context = false
   ; demote_before = 0
+  ; working_state = None
   }
 ;;
 
@@ -466,7 +467,8 @@ let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
   let history = exchanges ~from:0 10 in
   let continuity = absorbed_at ~point:2 history in
   let start ?source ~history_at_start accepted =
-    (Try_provider.choose_range_start ~continuity:(Some continuity) ~front:None
+    (Try_provider.choose_range_start ~past_max_context:None ~held_window:None
+       ~continuity:(Some continuity) ~front:None
        ~accepted:(Some (accepted_at ?source history accepted))
        ~history_digest_at:(Window.atom_opening_digest history)
        ~turn_boundary:(Front.Turn_boundary { end_atom = 8 }) ~history_at_start)
@@ -661,6 +663,219 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
     [overflow; body_refused_by_provider]
 ;;
 
+(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1), as
+   rules from what a turn's first request reads to where its range opens.
+   The pair's ledger last carried a window that opened at atom 4; the last
+   completed turn ended at atom 8. Under that window the second turn grew
+   from 1,500 to 2,400, so the next turn is expected at 2,400 + 900. *)
+let window_ledger ?(demote_before = 0) ~history ~first_atom counts =
+  let atom_count, digest_at = Window.atom_opening_index history in
+  List.fold_left
+    (fun ledger (turn_context, input_tokens) ->
+       let request =
+         { (request ~digest_at ~first_atom ~atom_count) with turn_context; demote_before }
+       in
+       Some
+         (Ledger.observe ~digest_at ledger request
+            (Ledger.usage_of_counts ~input_tokens ~cache_read_input_tokens:0))
+           .ledger)
+    None counts
+;;
+
+let grown_turns = [ true, 1_000; false, 1_500; true, 1_600; false, 2_400 ]
+let boundary_8 = Front.Turn_boundary { end_atom = 8 }
+
+let signal_over ?(max_context = Some 3_000) ?(turn_boundary = boundary_8) ?continuity ~history
+      ledger =
+  Try_provider.past_max_context ~max_context ~continuity
+    ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary ledger
+;;
+
+let test_the_size_signal_reads_the_ledger_and_the_declaration () =
+  let history = exchanges ~from:0 10 in
+  let ledger = window_ledger ~history ~first_atom:4 grown_turns in
+  (match signal_over ~history ledger with
+   | Some signal ->
+     check int "it moves the window that opened at 4" 4 signal.window_first_atom;
+     check int "to the turn boundary" 8 signal.moved_to.Front.first_atom;
+     check int "the next turn's expected count" 3_300 signal.next_turn_peak;
+     check string "named for the signal" "turn_start_at_max_context"
+       (Front.source_to_string signal.moved_to.Front.source)
+   | None -> fail "a next turn past max-context moves the window");
+  let none label signal = check bool label true (Option.is_none signal) in
+  none "a next turn at max-context stays" (signal_over ~max_context:(Some 3_300) ~history ledger);
+  none "no declared max-context, no signal" (signal_over ~max_context:None ~history ledger);
+  none "no ledger, no signal" (signal_over ~history None);
+  none "an unknown boundary names nowhere to move"
+    (signal_over ~turn_boundary:(Front.Turn_boundary_unknown { reason = "test" }) ~history ledger);
+  none "a boundary at the window's start is not past it"
+    (signal_over ~turn_boundary:(Front.Turn_boundary { end_atom = 4 }) ~history ledger);
+  none "a window no turn has opened under yet has no growth"
+    (signal_over ~history (window_ledger ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]));
+  none "a ledger this history does not hold moves nothing"
+    (signal_over ~history:(exchanges ~from:100 10) ledger)
+;;
+
+let opens = function
+  | Try_provider.From_seed seed -> seed.Front.first_atom
+  | Try_provider.Past_librarian_point { accepted; _ } -> accepted.Front.first_atom
+  | Try_provider.From_read_position { end_atom } -> end_atom
+  | Try_provider.From_snapshot snapshot -> snapshot.Masc.Librarian_continuity_snapshot.end_atom
+  | Try_provider.From_turn_boundary (Front.Turn_boundary { end_atom }) -> end_atom
+  | Try_provider.From_turn_boundary (Front.Turn_boundary_unknown _) -> -1
+;;
+
+let test_the_size_signal_moves_only_a_window_that_stays () =
+  let history = exchanges ~from:0 10 in
+  let digest_at = Window.atom_opening_digest history in
+  let signal = signal_over ~history (window_ledger ~history ~first_atom:4 grown_turns) in
+  check bool "the signal is on" true (Option.is_some signal);
+  let start ?continuity ?front ?accepted past_max_context =
+    let { Try_provider.start; _ } =
+      Try_provider.choose_range_start ~past_max_context ~held_window:None
+        ~continuity:(Option.map (fun point -> absorbed_at ~point history) continuity)
+        ~front ~accepted ~history_digest_at:digest_at ~turn_boundary:boundary_8
+        ~history_at_start:Boundary.Continued_history
+    in
+    opens start, Front.origin_to_string (Try_provider.range_start_origin start)
+  in
+  let at = pair int string in
+  let ledger_4 = accepted_at ~source:Front.Ledger history 4 in
+  let record_4 = accepted_at history 4 in
+  check at "no point: the window at the ledger's front moves to the boundary"
+    (8, "turn_start_at_max_context") (start ~front:ledger_4 signal);
+  check at "no point, no signal: it stays" (4, "ledger") (start ~front:ledger_4 None);
+  check at "a point behind the window: the accepted start moves to the boundary"
+    (8, "past_librarian_point:turn_start_at_max_context")
+    (start ~continuity:2 ~accepted:record_4 signal);
+  check at "a point behind the window, no signal: it stays"
+    (4, "past_librarian_point:turn_record#1") (start ~continuity:2 ~accepted:record_4 None);
+  check at "a window that opened at the point moves past it"
+    (8, "past_librarian_point:turn_start_at_max_context") (start ~continuity:4 signal);
+  check at "a point past the window moved it already" (6, "librarian_progress")
+    (start ~continuity:6 ~accepted:record_4 signal);
+  check at "a front a refusal held past the window moved it already"
+    (10, "this_turn_start_after_seed_refusal")
+    (start ~front:(accepted_at ~source:Front.This_turn_start_after_seed_refusal history 10) signal);
+  (* A later request of the same turn reads no signal; the front the first
+     request moved is held, and the point yields to it. *)
+  let held = Option.map (fun (s : Try_provider.past_max_context) -> s.moved_to) signal in
+  check at "the rest of the turn opens at the held front"
+    (8, "past_librarian_point:turn_start_at_max_context")
+    (start ~continuity:2 ?accepted:held None);
+  (* The forecast asks the same rule and counts nothing for the moved range. *)
+  let forecast =
+    Masc.Keeper_next_request_forecast.carry ?past_max_context:signal
+      ~measure:(Masc.Keeper_context_core.message_measurer ())
+      ~continuity:(Some Try_provider.without_snapshot) ~front:(Some ledger_4) ~accepted:None
+      ~turn_start:boundary_8 ~history_at_start:Boundary.Continued_history
+      ~counted_tokens:(Some 2_400) history
+  in
+  check int "the forecast opens where the request will" 8 forecast.first_atom;
+  check (option int) "and the window's count does not ride along" None forecast.counted_tokens
+;;
+
+(* With a Librarian point, a window that stays holds at the start the
+   provider last accepted, even after the Librarian read past it (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.3, D2): the
+   point moves the window only when the window moves. A window not held
+   there follows the point. *)
+let test_a_window_that_stays_holds_behind_the_librarian_point () =
+  let history = exchanges ~from:0 10 in
+  let held at =
+    Some { Try_provider.window_opened_at = at; markers_before = 0; working_state = None }
+  in
+  let start ~held_window ~point accepted =
+    let { Try_provider.start; _ } =
+      Try_provider.choose_range_start ~past_max_context:None ~held_window
+        ~continuity:(Some (absorbed_at ~point history)) ~front:None
+        ~accepted:(Some (accepted_at history accepted))
+        ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
+        ~history_at_start:Boundary.Continued_history
+    in
+    opens start, Front.origin_to_string (Try_provider.range_start_origin start)
+  in
+  let at = pair int string in
+  check at "a window held at the accepted start stays behind the point"
+    (4, "past_librarian_point:turn_record#1") (start ~held_window:(held 4) ~point:6 4);
+  check at "a window not held follows the point" (6, "librarian_progress")
+    (start ~held_window:None ~point:6 4);
+  check at "a window held elsewhere follows the point" (6, "librarian_progress")
+    (start ~held_window:(held 2) ~point:6 4);
+  check at "a start past the point opens there, held or not"
+    (7, "past_librarian_point:turn_record#1") (start ~held_window:None ~point:6 7)
+;;
+
+(* The signal moves a window that stays to the end of what the Librarian
+   read when that lies past the window, so the atoms it drops are in memory;
+   a point at or behind the window leaves the turn boundary (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §4). The rest of
+   the turn holds the moved front, even when the Librarian reads on. *)
+let test_the_size_signal_moves_to_the_librarian_point () =
+  let history = exchanges ~from:0 10 in
+  let ledger = window_ledger ~history ~first_atom:4 grown_turns in
+  let target ~point =
+    Option.map
+      (fun (signal : Try_provider.past_max_context) ->
+         signal.moved_to.Front.first_atom, Front.source_to_string signal.moved_to.Front.source)
+      (signal_over ~continuity:(absorbed_at ~point history) ~history ledger)
+  in
+  let to_ = option (pair int string) in
+  check to_ "a point past the window" (Some (6, "librarian_point_at_max_context"))
+    (target ~point:6);
+  check to_ "a point at the window" (Some (8, "turn_start_at_max_context")) (target ~point:4);
+  check to_ "a point behind the window" (Some (8, "turn_start_at_max_context"))
+    (target ~point:2);
+  let choose ?past_max_context ~held_at ~point accepted =
+    let choice =
+      Try_provider.choose_range_start ~past_max_context
+        ~held_window:
+          (Some
+             { Try_provider.window_opened_at = held_at; markers_before = 0; working_state = None })
+        ~continuity:(Some (absorbed_at ~point history)) ~front:None ~accepted:(Some accepted)
+        ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
+        ~history_at_start:Boundary.Continued_history
+    in
+    ( opens choice.Try_provider.start
+    , Option.map (fun (seed : Front.seed) -> seed.first_atom) choice.moved_at_max_context )
+  in
+  let moved = pair int (option int) in
+  let signal = signal_over ~continuity:(absorbed_at ~point:6 history) ~history ledger in
+  check moved "the turn's first request opens at the point and names it to hold" (6, Some 6)
+    (choose ?past_max_context:signal ~held_at:4 ~point:6 (accepted_at history 4));
+  let held_front = (Option.get signal).Try_provider.moved_to in
+  check moved "the rest of the turn opens there while the Librarian reads on" (6, None)
+    (choose ~held_at:6 ~point:7 held_front)
+;;
+
+(* Markers wait for the window to move only while the size signal watches
+   it (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
+let test_markers_wait_only_while_the_size_signal_watches () =
+  let history = exchanges ~from:0 10 in
+  let held ?(opens_turn = true) ?(max_context = Some 400_000) ledger =
+    Option.map
+      (fun (held : Try_provider.held_window) -> held.window_opened_at, held.markers_before)
+      (Try_provider.held_window ~opens_turn ~max_context
+         ~history_digest_at:(Window.atom_opening_digest history) ledger)
+  in
+  let at = option (pair int int) in
+  let grown = window_ledger ~demote_before:6 ~history ~first_atom:4 grown_turns in
+  check at "the signal watches: the markers stay where the window sent them" (Some (4, 6))
+    (held grown);
+  check at "no declared max-context: a turn's first request demotes the ended turns" None
+    (held ~max_context:None grown);
+  let unmeasured =
+    window_ledger ~demote_before:6 ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]
+  in
+  check at "no turn has grown under the ledger yet: the same" None (held unmeasured);
+  check at "later in the turn they stay where its first request put them" (Some (4, 6))
+    (held ~opens_turn:false ~max_context:None unmeasured);
+  check at "no ledger holds nothing" None (held ~opens_turn:false None);
+  check at "a ledger this history does not hold holds nothing" None
+    (held ~opens_turn:false
+       (window_ledger ~history:(exchanges ~from:100 10) ~first_atom:4 grown_turns))
+;;
+
 let () =
   Eio_main.run
   @@ fun _ ->
@@ -702,6 +917,22 @@ let () =
             test_no_resend_after_a_refusal_not_about_size
         ; test_case "a refused resend gives the front back only when not about size" `Quick
             test_a_refused_resend_gives_the_front_back_only_when_not_about_size
+        ] )
+    ; ( "size signal"
+      , [ test_case "it reads the ledger and the declaration" `Quick
+            test_the_size_signal_reads_the_ledger_and_the_declaration
+        ; test_case "it moves only a window that stays" `Quick
+            test_the_size_signal_moves_only_a_window_that_stays
+        ] )
+    ; ( "held markers"
+      , [ test_case "they wait only while the size signal watches" `Quick
+            test_markers_wait_only_while_the_size_signal_watches
+        ] )
+    ; ( "held window"
+      , [ test_case "it stays behind the Librarian point" `Quick
+            test_a_window_that_stays_holds_behind_the_librarian_point
+        ; test_case "the signal moves it to the Librarian point" `Quick
+            test_the_size_signal_moves_to_the_librarian_point
         ] )
     ]
 ;;

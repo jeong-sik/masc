@@ -178,11 +178,11 @@ Current 는 10초 trust 캐시(`operator_control_snapshot_trust.ml:5`)를 일부
 
 ### 3.1 meta 는 Owner 를 읽는다
 
-`keepers_json`, board address, `masc_keeper_list` 는 meta 파일을 열기 전에 `Keeper_owner_projection.lookup` 을 본다. 이 함수는 잠금 없이 `Atomic` map 을 읽는다(`keeper_owner_projection.ml:31-36`). 그래서 system thread 에서 도는 board address 에서도 부를 수 있다. Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:936-957`). 새로 저장하는 상태는 없다.
+`keepers_json`, board address, `masc_keeper_list`, 그리고 snapshot 이 계속 떠 있어야 하는 Keeper 를 고르는 훑기는 meta 파일을 열기 전에 `Keeper_owner_projection.lookup` 을 본다. 이 함수는 잠금 없이 `Atomic` map 을 읽는다(`keeper_owner_projection.ml:31-36`). 그래서 system thread 에서 도는 board address 에서도 부를 수 있다. Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:936-957`). 새로 저장하는 상태는 없다.
 
-세 소비자는 Owner 값을 그대로 쓰지 않는다. Owner 값의 설정 필드에는 TOML 값이 있고, 파일을 읽은 값에는 자리 채움 값이 있다(§1.1). 그대로 쓰면 `keepers_json` 의 `activation_mode` 와 trust 의 sandbox 값이 지금과 달라진다. profile 을 덮는 두 소비자도 달라진다. TOML 에서 key 를 뺀 뒤에는 덮기가 받은 값을 남긴다(§1.1). 그 값이 자리 채움 값이 아니라 Owner 가 든 옛 TOML 값이 된다.
+네 소비자는 Owner 값을 그대로 쓰지 않는다. Owner 값의 설정 필드에는 TOML 값이 있고, 파일을 읽은 값에는 자리 채움 값이 있다(§1.1). 그대로 쓰면 `keepers_json` 의 `activation_mode` 와 trust 의 sandbox 값이 지금과 달라진다. profile 을 덮는 두 소비자도 달라진다. TOML 에서 key 를 뺀 뒤에는 덮기가 받은 값을 남긴다(§1.1). 그 값이 자리 채움 값이 아니라 Owner 가 든 옛 TOML 값이 된다.
 
-세 소비자는 파일 읽기 한 걸음만 바꾼다. Owner 값을 파일과 같은 길로 한 번 돌린 값을 그 자리에 넣는다. 파일에 쓰는 encoder(`meta_to_json`, `keeper_meta_store.ml:34-35`)로 바꾸고, 파일을 읽는 함수의 '글자 → meta' 부분(`:192-250`)으로 되읽는다. 둘 다 메모리에서 한다. `Keeper_meta_store` 가 이 왕복을 함수 하나로 내놓는다. 그 뒤의 일은 그대로 둔다. profile 덮기도 지금 자리에서 지금처럼 돈다.
+네 소비자는 파일 읽기 한 걸음만 바꾼다. Owner 값을 파일과 같은 길로 한 번 돌린 값을 그 자리에 넣는다. 파일에 쓰는 encoder(`meta_to_json`, `keeper_meta_store.ml:34-35`)로 바꾸고, 파일을 읽는 함수의 '글자 → meta' 부분(`:192-250`)으로 되읽는다. 둘 다 메모리에서 한다. `Keeper_meta_store` 가 이 왕복을 함수 하나로 내놓는다. 그 뒤의 일은 그대로 둔다. profile 덮기도 지금 자리에서 지금처럼 돈다.
 
 왕복한 값이 파일을 읽은 값과 같은 까닭은 때에 따라 다르다.
 
@@ -209,7 +209,14 @@ Owner 의 meta 가 파일과 어긋난 채 남는 때가 둘 있다.
 
 서버가 도는 동안 밖에서 meta 파일을 고치면 보이는 값이 지금과 달라진다(`scripts/migrate-keeper-meta-sandbox.sh`, §1.4). 지금 행은 Owner 의 다음 커밋 전까지 고친 파일 값을 보인다. L1 뒤에는 처음부터 Owner 값을 보인다. 고친 파일 값은 어느 쪽이든 Owner 의 다음 커밋이 덮는다.
 
-snapshot 은 Keeper 행과 따로 Keeper 마다 meta 파일을 한 번 더 연다(#53113). L1 은 그 읽기를 옮기지 않았다.
+snapshot 은 Keeper 행과 따로, 계속 떠 있어야 하는 Keeper 를 고르려고 설정된 Keeper 마다 저장된 meta 를 읽는다(`Keeper_meta_store.persistent_agent_names_with_unread`, #53113). 이 훑기도 행과 같은 읽기(`Keeper_stored_meta.read`)를 쓴다. `Keeper_meta_store` 는 `Keeper_stored_meta` 아래 모듈이라, 훑는 함수가 읽는 함수를 인자로 받는다(`~read_meta`). snapshot 의 행과 훑기는 같은 함수 하나(`stored_meta`)로 읽는다.
+
+그래서 Owner 가 대신하는 Keeper 의 meta 파일을 서버 밖에서 읽을 수 없게 만들어도 snapshot 은 partial 이 되지 않는다. 전에는 이 훑기가 그 파일을 읽다 실패했고, snapshot 이 partial 이 되면서 그 Keeper 가 `persistent_agents` 에서 빠졌다. 행은 L1 부터 이미 Owner 값이었다. supervisor sweep 은 지금도 파일을 읽는다. 그 상태를 카운터(`masc_keeper_meta_read_failures_total`, `site="keepalive_read"`)와 WARN 으로 남기고, 그 Keeper 를 keepalive 에서 뺀다. snapshot 은 Owner 값대로 그 Keeper 를 계속 떠 있어야 하는 Keeper 로 보인다. 두 답이 갈라지는 것은 #53426 에 적었다.
+
+옮기지 않은 읽기가 둘 있다.
+
+- supervisor 의 keepalive reconcile(`keepalive_keeper_names`)은 지금처럼 meta 파일을 읽는다. supervisor sweep 이 끝날 때마다 돈다(`keeper_supervisor.ml` 의 `sweep_and_recover`). sweep 간격은 설정값이고 기본 30초다(`env_config_keeper_supervisor.ml`).
+- 이 훑기는 Keeper TOML 을 읽는다. 설정된 이름을 찾을 때 Keeper 마다 한 번 읽는다. meta 가 있고 멈추지 않은 Keeper 는 autoboot 를 정할 때 한 번 더 읽는다. 풀이는 내용이 같으면 다시 하지 않는다(`keeper_types_profile_toml_io.ml` 의 `parsed_toml_cache`). TOML 은 서버 밖에서 고치는 파일이라 '쓰는 곳이 메모리에도 고친다'에 들지 않는다.
 
 ### 3.2 칸과 사실
 
@@ -327,8 +334,8 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 - append 뒤 바이트 prune(metrics 에 `max_bytes` 를 켠 때)은 `on_committed` 다음에 파일을 지운다. `prune_to_max_bytes_unlocked` 는 지운 파일 수를 돌려준다(`dated_jsonl.ml:831-850`). 지금 부르는 쪽은 그 수를 버린다(`:865-870`). 하나라도 지웠거나 prune 이 예외로 끝나면 그 저장소의 칸을 모두 비운다.
 - 쓰기는 지금 시각의 날짜 파일로 간다(`dated_jsonl.ml:885`, `:1748`). 읽는 쪽은 날짜 파일을 새것부터 읽는다. 시계가 뒤로 가서 지난 날짜 파일에 쓰면 그 행은 읽는 쪽에게 가장 새 행이 아니다. 그래서 쓴 날짜 파일이 값이 본 가장 새 날짜 파일(`newest`)보다 앞이면 칸을 비운다. 아니면 새 값의 `newest` 를 쓴 날짜 파일로 둔다. 같은 날 크기 회전으로 닫힌 파일(`18.2.jsonl`)은 지금 쓰는 파일(`18.jsonl`)보다 앞이다.
 - 결정 기록: 돌리기에는 잠금이 없고, 쓰기의 잠금은 system thread 안의 OS mutex 다(§1.4). 이 RFC 는 잠금을 더하지 않는다. 쓰는 쪽은 돌리기 전에 칸을 읽고, 쓰기가 끝난 뒤 칸을 맞춘다. 같은 Keeper 의 결정 기록을 두 곳이 같이 쓰면 늦게 온 compare-and-set 이 실패해 칸이 비워진다. 그래도 불변식은 지켜진다.
-- 결정 기록의 새 값은 디스크에 쓴 줄(`utf8_repair_string` 을 거친 줄)로 만든다. 줄바꿈까지 쳐서 읽는 쪽 창의 절반(20,000바이트) 이하이고 JSON object 인 줄만 `Row` 로 넣는다. 아니면 칸을 비운다.
-  - 읽는 쪽은 마지막 40,000바이트를 한 번에 읽는다. 창이 파일 처음보다 뒤에서 시작하면 첫 줄바꿈까지의 조각을 버린다(`keeper_memory_recall.ml` 의 `tail_lines_of_fd`). 창이 그 조각을 잘랐을 수 있어서다. 빈 줄은 그 뒤에 걸러낸다. 그래서 마지막 줄 앞의 줄바꿈이 창에 들어오면 마지막 줄은 버려지지 않는다. 줄이 창의 절반 이하면 그 줄바꿈이 늘 창에 들어온다.
+- 결정 기록의 새 값은 디스크에 쓴 줄(`utf8_repair_string` 을 거친 줄)로 만든다. 줄바꿈까지 쳐서 읽는 쪽 창보다 한 바이트 이상 짧고(39,999바이트 이하) JSON object 인 줄만 `Row` 로 넣는다. 아니면 칸을 비운다.
+  - 읽는 쪽은 마지막 40,000바이트를 한 번에 읽는다. 창이 파일 처음보다 뒤에서 시작하면 첫 줄바꿈까지의 조각을 버린다(`keeper_memory_recall.ml` 의 `tail_lines_of_fd`). 창이 그 조각을 잘랐을 수 있어서다. 빈 줄은 그 뒤에 걸러낸다. 그래서 마지막 줄 앞의 줄바꿈이 창에 들어오면 마지막 줄은 버려지지 않는다. 그 줄바꿈은 마지막 줄 바로 앞 바이트다. 줄이 줄바꿈까지 쳐서 창보다 한 바이트 짧으면 그 줄바꿈이 창의 첫 바이트다. 줄이 창과 같은 길이면 창이 그 줄의 첫 바이트에서 시작하고, 읽는 쪽은 그 줄을 잘린 조각으로 보고 버린다. 그 줄이 파일의 하나뿐인 줄이면 창이 파일 처음에서 시작해서 버리지 않는다. 쓰는 쪽은 파일에 무엇이 있었는지 보지 않고 길이만 본다.
   - 로그를 돌린 직후에는 새 파일에 쓴 줄 하나만 있다. 창이 파일 처음에서 시작하므로 첫 줄을 버리지 않고, 쓴 줄이 그대로 값이다. 읽는 쪽은 `.1` 로 옮긴 파일을 지금도 읽지 않는다.
   - object 가 아닌 줄은 건너뛰고 앞 줄을 찾는다(`keeper_runtime_trust_snapshot.ml:336-366`). 그 결과는 쓴 줄 하나로 알 수 없다.
 - metrics 쓰기는 칸 둘을 맞춘다. `metrics_recent` 에는 쓴 줄을 더하고, 120줄을 넘는 앞 줄을 뺀다(L3b). `turn_audit` 은 쓴 행이 Turn tool audit 행이면 그 행으로 바꾸고, 아니면 같은 값으로 세대만 올린다(L3a). 행이 Turn tool audit 인지는 읽는 쪽과 같은 함수로 본다(`Keeper_status_metrics.tool_audit_of_metrics_row`). `Dated_jsonl.newest_selected` 가 그 함수 하나를 받아 읽기와 `step` 을 같이 만든다. heartbeat 가 이어져도 `Filled` 인 `turn_audit` 은 비워지지 않는다.
@@ -394,7 +401,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 
 | 층 | 무엇 | 확인 |
 |---|---|---|
-| L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
+| L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). snapshot 의 훑기는 그 뒤에 같은 읽기로 옮겼다(#53113). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
 | W | 줄 쓰기 함수가 규칙 11 을 지킨다. 병합됐다(#52991). 그 리뷰의 후속은 #53017 이다 | `test_fs_compat_fd_cache`, `test_fs_compat_append_jsonl_atomicity` |
 | L2 | 먼저 깔 것이 셋이다. 저장소 선언의 곁 파일 이름(§3.4), file system 이 부르는 이름으로 만든 등록부 key(§3.2), 따로 만든 잠금 handle 의 읽기 전용 타입(§3.2). 그 위에 칸(`Fact_cell`)과 `Dated_jsonl` 의 사실, 값 넷(최근 TurnRecord, 가장 새 온전한 receipt, 도구 호출 16줄, 결정 기록 마지막 행)을 둔다. `Dated_jsonl` 의 쓰는 함수 둘이 등록부 항목의 칸을 맞춘다. 결정 기록 칸의 표(`Keeper_row_facts`). 결정 기록 tail 의 결과 읽기(§3.4). 지우는 쪽이 끝나는 모든 경로의 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 칸 정체 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, 취소 시험, 지우다 실패하는 시험, `step` 단위 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다. 채우기 시도 수와 들어간 수를 칸마다 적는다. 어느 칸의 들어간 수가 늘 0 이면 그 칸은 채워지지 않는 것이다 |
 | L3a | 가장 최근 Turn tool audit 행 칸(`Dated_jsonl.newest_selected`). metrics 저장소를 쓰는 곳을 따라가 보고 kept 로 적는다. 읽는 쪽은 Keeper 행·briefing·Keeper 상세의 tool audit 다. `Tool_audit_cache` 를 지운다 | 차분 시험(회전, 날짜 prune, 쓰기 뒤의 바이트 prune 포함), heartbeat 시험, purge 뒤 heartbeat 만 쓴 후계 시험 |
@@ -417,7 +424,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 
 **차분 시험.** 실제 쓰기 함수(`append_decision_record`, `log_call`, receipt `append`, TurnRecord `write`, `append_keeper_metrics`)와 돌리기, prune, purge, runtime 디렉터리 지우기, 채우기를 무작위 순서로 부른다. 한 걸음마다 두 가지를 본다. 첫째, `Filled` 값이 그 칸의 읽기(§3.4 의 표)로 파일에서 다시 계산한 값과 같다. 둘째, 칸으로 만든 행 값이 지금의 reader 가 파일에서 만든 값과 같다. reader 는 `latest_decision_json`, `read_latest ~keeper_name`, receipt 의 두 reader, TurnRecord 최근 읽기, tool audit 읽기, 최근 활동이다. tool audit 는 캐시를 비운 채 읽는다(§3.4). 도구 호출 원장은 색인 reader 를 한 번 부른 디렉터리로 돌린다. 색인 파일이 있어야 운영과 같다. 칸의 읽기가 `Error` 인 걸음에서는 칸이 채워지지 않았는지만 본다. 시험마다 base path 를 새로 만들어서 `reset_for_tests` 를 쓰지 않는다. 넣는 입력은 이렇다.
 
-- 결정 기록 줄 길이: 창의 절반 근처와 창 크기 근처.
+- 결정 기록 줄 길이: 창 크기 근처.
 - object 가 아닌 줄, 목록 창 가운데의 깨진 줄, 끝이 줄 중간에서 끊긴 파일.
 - 크기 회전: metrics 는 `max_bytes` 를 켠다. 도구 호출 원장은 16 MB 에서 돈다(`keeper_tool_call_log.ml:630`). 그 크기를 채우는 대신 `append_rotating` 을 작은 크기로 부른다.
 - 실패하는 쓰기(W 의 시험과 같은 방법)와, 몇 개를 지운 뒤 실패하는 prune·purge.
@@ -426,7 +433,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - 점으로 시작하는 `.jsonl` 이 있는 달 디렉터리. 칸으로 만든 값이 엄격한 읽기와 같아야 한다. 지금의 너그러운 reader 와는 다르다(§3.4).
 - 읽기 색인 파일이 있는 도구 호출 원장 디렉터리. `tool_calls` 칸이 채워져야 한다. 선언에 없는 낯선 이름을 넣으면 채워지지 않아야 한다.
 
-결정 기록의 차분 시험은 `test_keeper_decision_row_kept` 에 있다(L2d-4). 300걸음이다. 짧은 행, object 가 아닌 행, 창의 절반인 행과 한 바이트 더 긴 행, 창보다 긴 행, 돌리기, 손으로 쓴 깨진 줄과 끊긴 줄, 손으로 지운 파일이 섞인다. 손으로 바꾼 뒤에는 `decision_records_removed` 를 부른다. 같은 파일의 시험 열셋이 따로 고정한다. 든 행은 파일 없이 읽힌다. 쓴 행이 든 행을 바꾼다. 돌린 뒤의 행도 든다. object 가 아닌 행과 절반을 넘는 행은 들지 않는다. 실패한 쓰기와 못 읽은 파일은 아무것도 남기지 않는다. 두 표기가 한 칸에 닿는다. 표기 다섯(`.` 조각, 겹친 `/`, 상대 경로, 디렉터리 symlink, 대소문자)은 같은 파일일 때만 그 칸에 닿는다. 없는 파일로 가는 링크로 만든 기록은 두 칸을 비운다. 돌린 뒤와 실패한 쓰기 뒤에는 기억한 이름을 다시 묻는다. 다른 writer 에게 추월당한 writer 는 칸을 비운다. purge 가 든 행을 비우는 것은 `test_keeper_shutdown_official_client_purge` 가, 말하지 않은 process 가 매번 파일을 읽는 것은 `test_keeper_runtime_trust_snapshot` 이 본다.
+결정 기록의 차분 시험은 `test_keeper_decision_row_kept` 에 있다(L2d-4). 300걸음이다. 짧은 행, object 가 아닌 행, 창보다 한 바이트 짧은 행과 창과 같은 길이인 행, 창보다 긴 행, 돌리기, 손으로 쓴 깨진 줄과 끊긴 줄, 손으로 지운 파일이 섞인다. 손으로 바꾼 뒤에는 `decision_records_removed` 를 부른다. 같은 파일의 시험 열다섯이 따로 고정한다. 든 행은 파일 없이 읽힌다. 쓴 행이 든 행을 바꾼다. 돌린 뒤의 행도 든다. object 가 아닌 행과 창 길이 이상인 행은 들지 않는다. 실패한 쓰기와 못 읽은 파일은 아무것도 남기지 않는다. 두 표기가 한 칸에 닿는다. 표기 다섯(`.` 조각, 겹친 `/`, 상대 경로, 디렉터리 symlink, 대소문자)은 같은 파일일 때만 그 칸에 닿는다. 없는 파일로 가는 링크로 만든 기록은 두 칸을 비운다. 돌린 뒤와 실패한 쓰기 뒤에는 기억한 이름을 다시 묻는다. 다른 writer 에게 추월당한 writer 는 칸을 비운다. purge 가 든 행을 비우는 것은 `test_keeper_shutdown_official_client_purge` 가, 말하지 않은 process 가 매번 파일을 읽는 것은 `test_keeper_runtime_trust_snapshot` 이 본다.
 
 - 로컬에서는 진짜 칸 모듈과 진짜 tail 읽기에 대역 writer 를 붙여 무작위 2000걸음을 씨앗 넷으로 돌렸다. 두 표기를 섞어 쓰고 읽었다. 든 행을 파일과 견준 것이 씨앗마다 2100번쯤이다. 변이 다섯(길이를 보지 않는다, 쓴 줄로 옮기지 않는다, 표기마다 칸을 둔다, 지움이 칸을 남긴다, 알 수 없는 줄에 '행 없음'을 든다)이 모두 14걸음 안에 걸렸다.
 - 돌린 뒤 기억한 이름을 지우는 일은 기록 경로를 symlink 로 만들어 고정한다. 돌리기가 링크를 옮기고 다음 쓰기가 일반 파일을 만들므로, 어느 file system 에서나 경로의 이름이 바뀐다.
@@ -452,7 +459,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 
 **heartbeat 시험.** `turn_audit` 이 `Filled` 인 동안 heartbeat 행을 계속 쓴다. 칸이 비워지지 않고 값이 그대로다. 그 사이 Turn 행을 쓰면 값이 그 행으로 바뀐다. 저장소 층에서는 `test_dated_jsonl_kept_facts` 의 「the newest row a selection selects」 다섯이 본다. 고른 행은 값이 되고, 지나친 행은 든 값을 그대로 둔다. 날짜 파일을 몰래 지워도 답이 같으니 파일을 열지 않은 것이다. 크기 회전 뒤에도 든다. 400걸음 무작위 시험도 이 사실을 걸음마다 엄격한 찾기와 견준다. Keeper 층에서는 `test_keeper_turn_tool_audit_kept` 가 실제 쓰는 함수(`append_keeper_metrics`)로 같은 것을 본다.
 
-**`step` 단위 시험.** `step` 은 읽어 둔 값, 쓴 줄, 쓴 날짜 파일만 받는 순수 함수다. 표로 넣어 결과를 본다. 지난 날짜 파일에 쓴 줄, 창의 절반을 넘는 결정 기록 줄, Turn 이 아닌 metrics 행, 깨진 줄이 든 목록이 들어간다.
+**`step` 단위 시험.** `step` 은 읽어 둔 값, 쓴 줄, 쓴 날짜 파일만 받는 순수 함수다. 표로 넣어 결과를 본다. 지난 날짜 파일에 쓴 줄, Turn 이 아닌 metrics 행, 깨진 줄이 든 목록이 들어간다.
 
 **TLA+.** `KeeperRowFacts.tla` 에 쓰는 쪽 둘, 채우는 쪽 하나, 지우는 쪽(prune·purge) 하나를 둔다. 저장소는 파일의 열이다(지금 쓰는 파일과 회전으로 닫힌 파일). 파일은 줄의 열이고, 줄에는 종류가 있다(Turn, 그 밖, 깨진 줄). 가장 새 파일의 마지막 줄은 줄바꿈 없이 끝날 수 있다. 그 줄은 온전한 행일 수도, 깨진 조각일 수도 있다. 칸은 `{ generation, slot }` 이고, 사실은 끝 K 줄(K = 2)과 가장 최근 Turn 행 둘이다.
 
@@ -541,7 +548,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - tool audit 의 read drop 보고(`surface=keeper_status_runtime_keeper_metrics`)는 metrics 저장소를 훑을 때 난다. 서버에서는 칸을 채울 때다.
 - 있는 디렉터리의 이름은 적은 글자마다 처음 한 번만 묻는다(§3.2). 서버가 도는 동안 그 경로의 조각을 다른 곳을 가리키는 symlink 로 바꾸거나, 디렉터리를 지우고 대소문자만 다른 이름으로 다시 만들면, 기억한 이름이 옛 자리를 가리킨다. 손으로 파일을 지우는 경우와 같은 부류다. 서버가 Keeper 를 지울 때는 칸을 비우면서 그 기억도 지운다(§3.4).
 - 도구 호출 원장 디렉터리에 선언하지 않은 곁 파일이 새로 생기면 `tool_calls` 칸이 채워지지 않는다. 행은 지금처럼 파일을 읽는다. 칸마다 세는 채우기 수가 그 상태를 보여 준다(§5).
-- 결정 기록 행은 줄바꿈까지 20,000바이트 이하일 때만 든다(§3.3). 더 긴 행을 쓴 뒤에는 다음 읽기가 파일을 읽는다.
+- 결정 기록 행은 줄바꿈까지 39,999바이트 이하일 때만 든다(§3.3). 더 긴 행을 쓴 뒤에는 다음 읽기가 파일을 읽는다.
 - metrics 줄 칸에는 바이트 상한이 없다. Keeper 마다 가장 새 120줄을 process 가 끝날 때까지 든다. metrics 행 하나의 크기에도 상한이 없다. 큰 행 하나는 그 뒤로 120줄이 쓰이면 칸에서 나간다. 운영 행의 크기는 재지 않았다.
 - 결정 기록의 read drop counter(`surface=keeper_runtime_trust_decision_log`)는 서버에서 채울 때만 오른다. 지금은 행을 만들 때마다 같은 줄을 다시 센다. 저장소 안에 이 surface 를 읽는 화면이나 알림은 없다.
 - 결정 기록의 경로를 볼 수조차 없을 때(지나는 디렉터리의 `EACCES`, `ENOTDIR`, `ELOOP`, `ENAMETOOLONG`) 읽는 쪽이 오류를 보고한다. 전에는 파일이 없는 것으로 보고 조용히 '행 없음'을 냈다. 파일은 있는데 열지 못하는 경우(권한 없는 파일)는 전에도 보고됐다. 행이 보이는 값은 모두 '행 없음'이다.

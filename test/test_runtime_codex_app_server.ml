@@ -2497,7 +2497,9 @@ let test_rate_limits_read_without_turn () =
               , (match w.kind with
                  | Five_hour -> "5h" | Seven_day -> "7d"
                  | Duration_minutes m -> string_of_int m | Provider_label l -> l)
-              , (match w.utilization with Percent p -> p | Fraction _ | Usd _ -> -1) ))
+              , (match w.utilization with
+                 | Percent p -> p
+                 | Fraction _ | Usd _ | Credit_balance _ | Credit_unlimited | Credit_retracted -> -1) ))
             report.windows
         in
         check (list (triple string string int)) "every bucket, keyed"
@@ -4709,6 +4711,18 @@ let projection_http_fixture requests =
       `OK,
       {|{"id":"projection-a","model":"projection-http-fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}|}) }
 
+(* What every fixture turn is admitted with, so a test can read it back from
+   the turn log's [Opened]. *)
+let production_fixture_woken_by : Keeper_event_queue.stimulus list =
+  [ { post_id = "workspace-message:fixture-request"
+    ; urgency = Normal
+    ; arrived_at = 0.0
+    ; payload =
+        Workspace_message { wmsg_request_id = "fixture-request"; wmsg_from = "fixture-sender" }
+    }
+  ]
+;;
+
 let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
     ~http_fixture ~base_path ~trace_id
@@ -4851,6 +4865,7 @@ candidates = [%s]
                                     })
                                 ~user_message
                                 ~input_speaker
+                                ~woken_by:production_fixture_woken_by
                                 ~turn_kind
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
@@ -8611,12 +8626,42 @@ let assert_production_keeper_result result =
     (Option.is_none result.checkpoint)
 ;;
 
+(* The same turn in the turn log, written beside the boundary line: the log's
+   start, the turn's admission, and an end that says how the turn ended. *)
+let assert_turn_log ~keepers_dir ~trace_id ~ended =
+  let path =
+    Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:"codex-production-fixture"
+  in
+  let lines =
+    String.split_on_char '\n' (Fs_compat.load_file path)
+    |> List.filter (fun row -> not (String.equal row ""))
+    |> List.map (fun row ->
+      match Keeper_turn_log_codec.of_json (Yojson.Safe.from_string row) with
+      | Ok line -> line
+      | Error error -> fail (Keeper_memory_os_types.wire_error_to_string error))
+  in
+  match lines with
+  | [ Keeper_turn_log.Log_started _; Opened { turn_ref; stimuli; _ }; Closed { outcome; _ } ] ->
+    check string "turn log turn" (trace_id ^ "#1") (Ids.Turn_ref.to_string turn_ref);
+    check bool "the admission names what the turn was woken by" true
+      (stimuli
+       = [ Keeper_turn_log.Workspace_message
+             { request = "fixture-request"; from = "fixture-sender" }
+         ]);
+    check bool "the turn's end says how it ended" true (outcome = ended)
+  | lines ->
+    fail
+      (Printf.sprintf
+         "expected the log's start, an admission and an end, read %d lines"
+         (List.length lines))
+;;
+
 (* A turn of a new workspace starts from a history with no atom, and says so
    before it runs: that is the first line, and it is there whether or not the
    turn reaches its end. An official-client turn saves no AGENT_CORE checkpoint,
    so the line it leaves at its end names the turn, repeats that the history
    was fresh, and states that there is no atom history. *)
-let assert_official_client_turn_boundary ~base_path ~trace_id =
+let assert_official_client_turn_boundary ~base_path ~trace_id ~ended =
   let keepers_dir =
     Filename.concat (Workspace.backend_config_for base_path).base_path
       Common.keepers_runtime_dirname
@@ -8644,7 +8689,8 @@ let assert_official_client_turn_boundary ~base_path ~trace_id =
     check bool "the first turn of a new workspace began from a fresh history" true
       (history_at_start = Keeper_turn_boundaries.Fresh_history);
     check bool "an official client turn has no atom history" true
-      (position = Keeper_turn_boundaries.No_atom_history)
+      (position = Keeper_turn_boundaries.No_atom_history);
+    assert_turn_log ~keepers_dir ~trace_id ~ended
   | Ok lines ->
     fail
       (Printf.sprintf
@@ -8697,7 +8743,8 @@ let test_production_keeper_dispatches_codex_runtime () =
               assert_production_keeper_result result;
               assert_official_client_turn_boundary
                 ~base_path
-                ~trace_id:"codex-production-trace-1"))
+                ~trace_id:"codex-production-trace-1"
+                ~ended:Keeper_turn_log.Completed))
 ;;
 
 (* An official-client turn that fails never reaches finalize. Its input is
@@ -8724,7 +8771,8 @@ let test_production_keeper_failed_turn_leaves_its_end_line () =
             | Error _ ->
               assert_official_client_turn_boundary
                 ~base_path
-                ~trace_id:"codex-production-failed-1"))
+                ~trace_id:"codex-production-failed-1"
+                ~ended:Keeper_turn_log.Errored))
 ;;
 
 (* The host resolves a Codex turn's spend from the thread's running count

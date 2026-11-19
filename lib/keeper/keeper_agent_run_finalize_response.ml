@@ -154,6 +154,7 @@ let finalize
     ~last_persisted_checkpoint
     ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
+    ~turn_log
     ~post_turn_t0
     ~runtime_id_string
     ~max_context
@@ -394,7 +395,14 @@ let finalize
   let saved_checkpoint_result =
     match checkpoint_owner, result.checkpoint with
     | Runtime_execution.Masc_agent_core, Some result_checkpoint ->
-      save_agent_core_checkpoint result_checkpoint
+      let saved = save_agent_core_checkpoint result_checkpoint in
+      Keeper_turn_log_turn.note_closing_save
+        turn_log
+        (match saved with
+         | Ok (Some (_ : Agent_core.Checkpoint.t)) -> Keeper_turn_log_turn.Saved
+         | Ok None -> Keeper_turn_log_turn.Stale
+         | Error (_ : Agent_core.Error.t) -> Keeper_turn_log_turn.Failed);
+      saved
     | Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
     | Runtime_execution.Official_client, Some _ ->
       unexpected_agent_core_checkpoint ()

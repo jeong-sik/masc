@@ -81,6 +81,10 @@ type purge_error =
   | Purge_backup_failed of string
   | Purge_source_changed
   | Purge_install_failed of string
+  | Purge_turn_log_not_written of string
+      (** A purge that drops what follows a break writes the Keeper's turn
+          log line first. The open messages were not closed or the line was
+          not appended, so nothing was replaced. *)
 
 val purge_error_to_string : purge_error -> string
 

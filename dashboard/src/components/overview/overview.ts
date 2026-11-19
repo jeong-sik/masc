@@ -18,7 +18,7 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
 import { OverviewRuntimeStats } from './runtime-stats'
 import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
-import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
+import { tasks, keepers, boardPosts, boardTotal, boardListNarrowed, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
 import type { Task, Keeper, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
   DashboardScheduledAutomationProjection,
@@ -1262,11 +1262,13 @@ function OverviewDomainSection({
            "never loaded" from "loaded and empty". boardTotal is null whenever
            the server pages the result (server_dashboard_http.ml emits total
            only when the whole result fits the fetched window), so the
-           loaded-rows count is labelled as such instead of as a total. -->
+           loaded-rows count is labelled as such instead of as a total. The
+           list is also the Board surface's own: under a sub-board or a search
+           boardTotal counts that list, so it is not shown as the Board's. -->
       <${DomainCard} title="보드" linkLabel="보드" nav=${{ tab: 'board' }} testId="domain-board">
         ${lastBoardRefreshAt.value === null
           ? html`<div class="ov-mini-list"><div class="ov-mini-empty ov-empty">보드 데이터 미연결</div></div>`
-          : boardTotal.value !== null
+          : boardTotal.value !== null && !boardListNarrowed.value
             ? html`<div class="ov-stat-row"><span class="k">전체 포스트</span><span class="v mono">${boardTotal.value}</span></div>`
             : html`<div class="ov-stat-row"><span class="k">불러온 포스트</span><span class="v mono">${boardPosts.value.length}</span></div>`}
       <//>

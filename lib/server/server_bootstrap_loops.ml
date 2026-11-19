@@ -844,6 +844,23 @@ let prepare_keeper_persistence_owned
       transcript_tail.tool_results_appended
       transcript_tail.unparseable
       transcript_tail.failed;
+  (* After the tails are closed and before any Keeper turn: a turn the last
+     process left open gets its end line, and a Keeper with no turn log gets
+     its first line. A failure is counted and the start goes on. *)
+  let turn_log_started = preparation_stage_started () in
+  let turn_log = Keeper_turn_log_process_start.run config in
+  observe_preparation_stage
+    ~stage:"turn_log"
+    ~started:turn_log_started
+    ~examined:turn_log.examined
+    ~failures:turn_log.failed;
+  if turn_log.closed_open > 0 || turn_log.failed > 0
+  then
+    Log.Keeper.warn
+      "turn_log_process_start: examined=%d closed_open=%d failed=%d"
+      turn_log.examined
+      turn_log.closed_open
+      turn_log.failed;
   let fusion_delivery_recovery =
     Fusion_delivery_projector.recover_startup ~base_path ()
   in

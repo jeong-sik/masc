@@ -158,7 +158,7 @@ let test_a_refusal_keeps_the_form_on_its_field () =
   let form =
     refusal (declare (opened ()) ([ "\r"; "\r" ] @ typed "/home/op/.codex-account1" @ [ "\r" ]))
   in
-  Alcotest.(check bool) "the reason is on the form" true (row_with "  ! " form);
+  Alcotest.(check bool) "the reason is on the form" true (row_with "  \xe2\x9c\x95 " form);
   Alcotest.(check bool) "the cursor waits on the home" true (F.field form = F.Location);
   let keys =
     [ "up" ] @ List.init 20 (fun _ -> "\127") @ typed "codex_acct1" @ [ "\r" ]

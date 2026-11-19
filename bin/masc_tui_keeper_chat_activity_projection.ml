@@ -127,17 +127,24 @@ let native_report_says_failed (completion : Runtime_native_tools.completion opti
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
 
-let finished_marker = "✓"
+(* The status marks of RFC tui-one-screen-grammar 7.2 (5.4 asks them of the
+   chat). Arguments still arriving and a native step running are under way;
+   a call sent and waiting on its result waits, the 도구 대기 7.2 names; a
+   result back or a native step ended is settled; a failure failed. A result
+   never seen before the attempt ended is a caution -- it does not establish
+   a failure. An outcome the record does not carry stays the unreported [?]
+   of 6.4. [◌] belongs to a value not read yet and no longer marks a call. *)
+let finished_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 let marker_of_outcome = function
-  | Started -> "◌"
-  | Awaiting_result -> "▶"
+  | Started -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Awaiting_result -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
   | Returned -> finished_marker
-  | Native_running -> "◌"
-  | Native_ended -> "■"
-  | Native_failed | Failed -> "\xe2\x9c\x97"
-  | Never_returned -> "○"
-  | Outcome_unrecorded -> "?"
+  | Native_running -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Native_ended -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Native_failed | Failed -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+  | Never_returned -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+  | Outcome_unrecorded -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let pad_to width text =
   let length = String.length text in
@@ -529,7 +536,9 @@ let outcome_label = function
   | Never_returned -> "result not seen"
   | Outcome_unrecorded -> "outcome unrecorded"
 
-let received_marker = "↩"
+(* A durable output came back: settled, like a returned call. [↩] is not a
+   status mark (7.2). *)
+let received_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 (* Every outcome, in the order the rollup lists them: what is still moving
    first, then what finished, then what nothing can be said about. *)

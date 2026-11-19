@@ -144,13 +144,20 @@ type glyph =
   | Attention
   | Quiet
 
+(* The states wear the status marks of RFC tui-one-screen-grammar 7.2, which
+   5.4 asks of this pane too: a call under way, a call that returned and a
+   turn that is done settled, a failure failed, and anything that asks for a
+   look -- input required, an approval answered, events lost, an event kind
+   this build does not name -- a caution. The words beside say which. *)
 let glyph_text = function
-  | Call_started -> "\xe2\x96\xb6"
-  | Call_returned -> "\xe2\x9c\x93"
-  | Turn_boundary -> "\xe2\x97\x8f"
-  | Turn_done -> "\xe2\x96\xa0"
-  | Failure -> "\xe2\x9c\x97"
-  | Attention -> "?"
+  | Call_started -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Call_returned -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  (* ✧, the chat pane's note about a turn: a boundary is not the settled
+     state the filled dot names (RFC tui-one-screen-grammar 7.2). *)
+  | Turn_boundary -> "\xe2\x9c\xa7"
+  | Turn_done -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Failure -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+  | Attention -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
   (* A quiet row claims no state, so it draws no mark: a blank first cell.
      [\xc2\xb6] here read as the roster's idle glyph -- the same character
      saying two things in one line (#33691). The label beside the cell

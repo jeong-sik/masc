@@ -12,6 +12,7 @@ import { axe } from 'jest-axe'
 import { AccountList } from './account-rows'
 import { createChecks } from './check'
 import { createRemovals, removeAccount, removePath } from './key-remove'
+import { createReplacements } from './key-replace'
 import type { RemovalsModel, Removing } from './key-remove'
 import { csrfHeader } from './wire'
 import type { Integration, Owned, ProviderAccount, Removal, Send } from './wire'
@@ -253,13 +254,19 @@ describe('the removal of an account', () => {
 
 const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
 const keyAccount = (removal: Removal | null = null): ProviderAccount =>
-  ({ id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal })
-const loginAccount: ProviderAccount = { id: 'acct_login', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }
+  ({ id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: removal === null ? null : { kind: 'removal', stage: removal } })
+const loginAccount: ProviderAccount = { id: 'acct_login', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }
 const owning = (...accounts: ProviderAccount[]): Owned => ({ accounts, runtimes: [] })
 
 /** Checks no test here drives: a card only needs them to be there. */
 const idleChecks = () =>
   createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
+
+/** Replacements no test here drives: a card only needs them to be there. */
+const idleReplacements = () => createReplacements({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
+
+/** The buttons of the removal in a card: the one that removes, and the one that takes the question back. */
+const removeButtons = 'button[id^="remove-"]'
 
 /** A model of removals that shows `removing` for the key account and counts what it is asked. */
 const showing = (removing: Removing | undefined) => ({
@@ -269,7 +276,7 @@ const showing = (removing: Removing | undefined) => ({
 }) satisfies RemovalsModel
 
 const list = (removals: RemovalsModel, owned: Owned) => html`
-  <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[claude]} owned=${owned} checks=${idleChecks()} removals=${removals} /></section>
+  <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[claude]} owned=${owned} checks=${idleChecks()} removals=${removals} replacements=${idleReplacements()} /></section>
 `
 const card = (removals: RemovalsModel, owned: Owned = owning(keyAccount())) => render(list(removals, owned)).container
 
@@ -319,7 +326,7 @@ describe('the remove button of an account', () => {
   it('is on a key account, with or without a removal left on it, and not on a login account', () => {
     const container = card(showing(undefined), owning(keyAccount(), loginAccount))
     const left = card(showing(undefined), owning(keyAccount('start_given_up')))
-    expect([[...container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('.actions button').length), left.querySelectorAll('.actions button').length])
+    expect([[...container.querySelectorAll('li.row')].map((row) => row.querySelectorAll(removeButtons).length), left.querySelectorAll(removeButtons).length])
       .toEqual([[1, 0], 1])
   })
 
@@ -327,9 +334,9 @@ describe('the remove button of an account', () => {
     const removals = showing(undefined)
     const container = card(removals)
     fireEvent.click(removeButton(container))
-    const asked = [removals.remove.mock.calls.length, container.querySelectorAll('.actions button').length]
+    const asked = [removals.remove.mock.calls.length, container.querySelectorAll(removeButtons).length]
     fireEvent.click(removeButton(container))
-    expect([asked, removals.remove.mock.calls, container.querySelectorAll('.actions button').length]).toEqual([[0, 2], [['acct_key']], 1])
+    expect([asked, removals.remove.mock.calls, container.querySelectorAll(removeButtons).length]).toEqual([[0, 2], [['acct_key']], 1])
   })
 
   it('takes the question back and removes nothing, with the focus back on the button', () => {
@@ -339,7 +346,7 @@ describe('the remove button of an account', () => {
     const back = buttonOf(container, 'remove-back-acct_key')
     back.focus()
     fireEvent.click(back)
-    expect([removals.remove.mock.calls.length, container.querySelectorAll('.actions button').length, document.activeElement === removeButton(container)])
+    expect([removals.remove.mock.calls.length, container.querySelectorAll(removeButtons).length, document.activeElement === removeButton(container)])
       .toEqual([0, 1, true])
   })
 
@@ -351,7 +358,7 @@ describe('the remove button of an account', () => {
     const container = card(removals)
     fireEvent.click(removeButton(container))
     fireEvent.click(removeButton(container))
-    expect([removals.remove.mock.calls.length, container.querySelectorAll('.actions button').length, removeButton(container).getAttribute('aria-disabled')])
+    expect([removals.remove.mock.calls.length, container.querySelectorAll(removeButtons).length, removeButton(container).getAttribute('aria-disabled')])
       .toEqual([0, 1, 'true'])
   })
 

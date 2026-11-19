@@ -163,7 +163,10 @@ Resolution (`lib/runtime/runtime_adapter.ml` and `lib/runtime/runtime_toml.ml`):
   request — authentication uses the credentials table only.
 - `usage-read` reads usage windows without a model call: `shape` is one of
   `openrouter-key`, `zai-quota-limit`, `kimi-coding-usages`, `ollama-balance`;
-  plus `url` and `refresh-s`.
+  plus `url` and `refresh-s`. With `shape = "openrouter-key"`, an optional
+  `[providers.<id>.usage-read.credit]` table adds `url` for the account Credit
+  endpoint. It uses the same credential and refresh period; its URL follows
+  the same HTTPS and provider-host checks as the primary `url`.
 - `capabilities` (RFC-0058 §2.4): `supports-inline-tools`,
   `argv-prompt-preflight`, `uses-messages-caching`.
 

@@ -18,6 +18,7 @@ type view =
 type drawn =
   { rows : string list
   ; cursor_row : int option
+  ; separator_rows : int
   }
 
 (* The Identity tab's body. Numbering comes from
@@ -291,6 +292,7 @@ let draw ~cols (view : view) =
         preamble ()
         @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
     ; cursor_row = None
+    ; separator_rows = 0
     }
   else if numbered = [] && rejected = [] && narrowed_by_view
   then
@@ -298,11 +300,13 @@ let draw ~cols (view : view) =
         preamble ()
         @ [ Ansi.dim ^ "  Nothing in this view. v to see the others." ^ Ansi.reset ]
     ; cursor_row = None
+    ; separator_rows = 0
     }
   else if numbered = [] && rejected = []
   then
     { rows = [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
     ; cursor_row = None
+    ; separator_rows = 0
     }
   else
     let preamble = preamble () in
@@ -316,5 +320,8 @@ let draw ~cols (view : view) =
       in
       position 0 listed
     in
-    { rows = preamble @ numbered @ rejected @ attached_tool_lines; cursor_row }
+    let separator_rows =
+      List.length (List.filter (fun (index, _) -> Option.is_none index) listed)
+    in
+    { rows = preamble @ numbered @ rejected @ attached_tool_lines; cursor_row; separator_rows }
 ;;

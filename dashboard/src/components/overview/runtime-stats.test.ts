@@ -6,6 +6,7 @@ import { get, post } from '../../api/core'
 import { publishDashboardObservationChange } from '../../lib/observation-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
+import type { ProviderUsageWindow } from '../../api/schemas/runtime-resolved'
 import { reloadRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 vi.mock('../../api/core', async original => ({
   ...await original<typeof import('../../api/core')>(), get: vi.fn(), post: vi.fn(),
@@ -63,6 +64,38 @@ it.each([false, true])('reads and renders HTTP dollar usage with official client
   await waitFor(() => expect(view.getByTestId('overview-client-usage-openrouter').textContent).toContain('$21.5000 사용 · 키 한도 없음'))
   expect(view.getByTestId('overview-client-usage-openrouter').textContent).not.toContain('$20.0000 한도')
   expect(post).not.toHaveBeenCalled()
+})
+it('renders remaining Credit before optional usage context', async () => {
+  const http = { provider: 'credit.one', runtime_id: 'credit.one', provider_id: 'credit',
+    provider_display_name: 'Credit provider', protocol: 'openai-compatible-http', usage_read_configured: true, models: [] }
+  catalogMock.value = { status: 'loaded', data: [http] }
+  const windows: ProviderUsageWindow[] = [
+    { label: 'account credit balance', currency: 'USD', total: 100.5, remaining: 74.75 },
+    { label: 'purchased credit balance', currency: 'CNY', total: null, remaining: 25 },
+    { label: 'booster credit balance', currency: 'CNY', total: 175, remaining: 0 },
+  ].map(row => ({
+    limit_id: null, window: { kind: 'provider_label', label: row.label },
+    utilization: { unit: 'credit_balance', currency: row.currency, total: row.total, remaining: row.remaining },
+    resets_at: null, observed_at: 1_100, source: 'provider.credit', role: 'counts_other_use',
+  }))
+  windows.push({
+    limit_id: 'codex', window: { kind: 'provider_label', label: 'credit balance' },
+    utilization: { unit: 'credit_unlimited' }, resets_at: null, observed_at: 1_100,
+    source: 'codex.account_rate_limits_read', role: 'counts_other_use',
+  })
+  vi.mocked(get).mockImplementation(async path => path === '/api/v1/runtime/resolved' ? {
+    config_path: null, default_route: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
+    provider_usage_windows: [{ scope: 'account:credit', providers: [{ id: 'credit', display_name: 'Credit provider' }],
+      state: 'reported', windows }],
+  } : response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => {
+    const text = view.getByTestId('overview-client-usage-credit').textContent
+    expect(text).toContain('Credit USD 74.75 남음 · USD 25.75/USD 100.50 사용')
+    expect(text).toContain('Credit CNY 25.00 남음')
+    expect(text).toContain('Credit CNY 0.00 남음 · CNY 175.00/CNY 175.00 사용')
+    expect(text).toContain('Credit unlimited')
+  })
 })
 it('shows each official client account once with its provider-reported usage', async () => {
   catalogMock.value = { status: 'loaded', data: [

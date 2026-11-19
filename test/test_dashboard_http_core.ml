@@ -1815,6 +1815,46 @@ let test_scheduled_automation_reads_its_cache_key () =
         (cache_sentinel cache_key)
         (Server_dashboard_http.dashboard_scheduled_automation_http_json ~config))
 
+(* The Dashboard calendar reads [active_only=true] (#52961). That list has its
+   own cache key: it is not answered from the fleet list's entry, and the
+   invalidation the schedule store and the runner loop call drops both. *)
+let test_active_only_scheduled_automation_reads_its_own_cache_key () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let key ~active_only =
+        Server_dashboard_http_core_cache.scheduled_automation_cache_key
+          ~base_path:config.base_path
+          ~active_only
+      in
+      let fleet_key = key ~active_only:false in
+      let active_key = key ~active_only:true in
+      check bool "the two lists have different keys" false
+        (String.equal fleet_key active_key);
+      List.iter seed_cache [ fleet_key; active_key ];
+      let read target =
+        Server_dashboard_http.dashboard_scheduled_automation_query_http_json
+          ~config
+          (request target)
+      in
+      check
+        (of_pp Yojson.Safe.pp)
+        "active_only=true is served from the active-only key"
+        (cache_sentinel active_key)
+        (read "/api/v1/dashboard/scheduled-automation?active_only=true");
+      check
+        (of_pp Yojson.Safe.pp)
+        "no selector is served from the fleet key"
+        (cache_sentinel fleet_key)
+        (read "/api/v1/dashboard/scheduled-automation");
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation
+        ~base_path:config.base_path;
+      check bool "one invalidation drops both lists" true
+        (Option.is_none (Dashboard_cache.peek fleet_key)
+         && Option.is_none (Dashboard_cache.peek active_key)))
+
 (* The exact lookup answers with a closed status, so a blank id is a named
    outcome rather than a not_found that reads like "no such schedule". Pin the
    two the caller can reach without a store: an empty id is invalid_id, and the
@@ -2065,7 +2105,7 @@ let test_schedule_page_can_be_scoped_to_one_target () =
     (Some "keeper:alpha")
     (scoped |> member "payload_target_selector" |> to_option to_string);
   check int "the scoped limit is its own number"
-    Server_dashboard_schedule_projection.schedule_projection_target_request_limit
+    Server_dashboard_schedule_projection.schedule_projection_selected_request_limit
     (scoped |> member "request_limit" |> to_int);
   (* #38411: the runner's status rides the scoped page too, but only the word.
      The rest of /health's runner object is every target's holds and every
@@ -6469,6 +6509,54 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
         "no_successor")
 ;;
 
+(* The Board search box asks this payload for the whole Board (#52957). [q]
+   narrows the posts, and it is part of the cache key: a payload kept for one
+   query never answers another. A blank [q] is no query. *)
+let test_dashboard_board_payload_narrows_to_the_query () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  Lib.Board.reset_global_for_test ();
+  Lib.Board_dispatch.reset_for_test ();
+  Result.get_ok (Lib.Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Lib.Board.reset_global_for_test ();
+      Lib.Board_dispatch.reset_for_test ())
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let create content =
+        match Lib.Board_dispatch.create_post
+                ~author:"board-search-test" ~content
+                ~post_kind:Lib.Board.Human_post () with
+        | Ok _ -> ()
+        | Error error -> fail (Lib.Board.Post_publication_failure.to_string error)
+      in
+      create "alpha search fixture";
+      create "beta search fixture";
+      let titles target =
+        let payload =
+          Server_dashboard_http.dashboard_memory_http_payload ~config
+            ~reader:Masc_board_handlers.Board_access.Operator ~actor:None
+            (request target)
+        in
+        Yojson.Safe.Util.(payload.Dashboard_cache.json |> member "posts" |> to_list)
+        |> List.map (fun post -> Yojson.Safe.Util.(post |> member "title" |> to_string))
+        |> List.sort String.compare
+      in
+      let path = "/api/v1/dashboard/board?sort_by=recent" in
+      let both = [ "alpha search fixture"; "beta search fixture" ] in
+      check (list string) "no query lists every post" both (titles path);
+      check (list string) "a query narrows the posts"
+        [ "alpha search fixture" ] (titles (path ^ "&q=ALPHA"));
+      check (list string) "another query has its own payload"
+        [ "beta search fixture" ] (titles (path ^ "&q=beta"));
+      check (list string) "a blank query is no query" both
+        (titles (path ^ "&q=%20%20")))
+;;
+
 (* The PAT route's hostname picks the login lane the token is written to.
    One that is written but unreadable is refused before any Keeper is read;
    falling back to the query or github.com would store the token under a host
@@ -8417,6 +8505,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "board close route rejects wrong typed decisions" `Quick
             test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "dashboard board payload narrows to the query" `Quick
+            test_dashboard_board_payload_narrows_to_the_query;
           test_case "Keeper metrics reads only the selected strict window" `Quick
             test_keeper_metrics_reads_selected_strict_window;
           test_case "Skill evidence joins activation and composition" `Quick
@@ -8437,6 +8527,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
+          test_case "active-only scheduled-automation reads its own cache key" `Quick
+            test_active_only_scheduled_automation_reads_its_own_cache_key;
           test_case "schedule exact lookup carries the wake history" `Quick
             test_schedule_exact_lookup_carries_the_wake_history;
           test_case "schedule exact lookup found matches the Dashboard fixture" `Quick

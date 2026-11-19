@@ -221,34 +221,79 @@ let api_key_of_credential : Llm_provider.Provider_config.credential_source * _ -
       (refresh ())
 ;;
 
-let usage_report ?(api_key_of = api_key_of_credential) ~fetch { credential; usage_read } =
+let report_of_url ?(api_key_of = api_key_of_credential) ~fetch credential ~url decode =
   let open Result.Syntax in
   let* api_key = api_key_of credential in
   let* () =
     if Llm_provider.Secret.is_empty api_key then Error Credential_unavailable else Ok ()
   in
-  let* body = fetch ~api_key usage_read.url in
+  let* body = fetch ~api_key url in
   let* json = parse_json body in
-  decoder_of_shape usage_read.shape json
-  |> Result.map_error (fun error -> Decode_failed error)
+  decode json |> Result.map_error (fun error -> Decode_failed error)
+;;
+
+let usage_report ?api_key_of ~fetch { credential; usage_read } =
+  report_of_url
+    ?api_key_of
+    ~fetch
+    credential
+    ~url:usage_read.url
+    (decoder_of_shape usage_read.shape)
+;;
+
+let openrouter_credit_report ~fetch { credential; usage_read } =
+  match usage_read.credit_url with
+  | None -> Ok None
+  | Some url ->
+    Result.map Option.some
+      (report_of_url
+         ~fetch
+         credential
+         ~url
+         Runtime_provider_usage_window.decode_openrouter_credits)
 ;;
 
 let shape_label (http : http_read) =
   Runtime_schema.usage_read_shape_to_string http.usage_read.shape
 ;;
 
-let read_http ~fetch ~scope http =
-  let open Result.Syntax in
-  let* (report : Runtime_provider_usage_window.report) = usage_report ~fetch http in
+let record_http_report ~scope ~shape (report : Runtime_provider_usage_window.report) =
   (match report.windows with
    | [] ->
      Log.Runtime_agent.info
        "provider usage read for %s (shape %s) stated no windows"
        (Runtime_quota_window.scope_to_string scope)
-       (shape_label http)
+       shape
    | _ :: _ -> ());
-  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
-  Ok ()
+  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
+;;
+
+let read_http ~fetch ~scope http =
+  let open Result.Syntax in
+  let attempt read =
+    match read () with
+    | outcome -> `Returned outcome
+    | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+    | exception exn -> `Raised exn
+  in
+  let primary =
+    attempt (fun () ->
+      let* report = usage_report ~fetch http in
+      record_http_report ~scope ~shape:(shape_label http) report;
+      Ok ())
+  in
+  let credit =
+    attempt (fun () ->
+      let* report = openrouter_credit_report ~fetch http in
+      Option.iter (record_http_report ~scope ~shape:"openrouter-credits") report;
+      Ok ())
+  in
+  match primary, credit with
+  | `Raised exn, _ | _, `Raised exn -> raise exn
+  | `Returned primary, `Returned credit ->
+    (match primary, credit with
+     | Ok (), Ok () -> Ok ()
+     | Error error, _ | _, Error error -> Error error)
 ;;
 
 (* One HTTP read, with its failure logged.  A read that raises logs only the

@@ -54,13 +54,13 @@ afterEach(() => {
 })
 
 describe('sending a key', () => {
-  it('posts the subscription and the key, with the token of the session and no other credential', async () => {
+  it('posts the subscription and the key, with the token of the session and no other credential, and follows no redirect', async () => {
     const { send, sent } = answering([stored()])
     expect(await addKey(send, 'token-1', 'claude_code', key)).toEqual({ kind: 'stored', accountId: 'acct_new' })
     const init: RequestInit = sent[0]?.init ?? {}
     const headers = new Headers(init.headers)
-    expect([sent.map(({ path }) => path), init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type')])
-      .toEqual([[addPath], 'POST', 'same-origin', 'token-1', false, 'application/json'])
+    expect([sent.map(({ path }) => path), init.method, init.credentials, init.redirect, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type')])
+      .toEqual([[addPath], 'POST', 'same-origin', 'error', 'token-1', false, 'application/json'])
     expect(JSON.parse(String(init.body))).toEqual({ integration_id: 'claude_code', key })
   })
 

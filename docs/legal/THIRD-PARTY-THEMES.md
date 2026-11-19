@@ -1,12 +1,12 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 53개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
+masc TUI 는 색 스킴 54개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
 바이너리에 함께 구워져 나간다. 읽는 사람이 `<base>/.masc/config/themes/` 나
 `<base>/config/themes/` 에 같은 형식으로 자기 것을 두면 같은 이름을 덮어쓴다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
 `pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `ultraviolet`, `glacier`,
 `bloodmoon`, `arcade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
 `msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,
-**나머지 35개는 다른 사람이 만든 것**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
+**나머지 36개는 다른 사람이 만든 것(또는 그 파생)**이다. 이 문서가 누가 만들었고 어떤 조건으로 쓰는지를 적는다.
 
 ### masc 자체 레트로 프리셋 4개 (2026-09-05)
 
@@ -111,6 +111,7 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 | `ayu-mirage` | `ayu-mirage` | Tinted Theming (https://github.com/tinted-theming), Ayu Theme (https://github.com/ayu-theme) | MIT (tinted-theming) |
 | `zenburn` | `zenburn` | elnawe | MIT (tinted-theming) |
 | `tokyo-night-storm` | `tokyo-night-storm` | Michaël Ball | MIT (tinted-theming) |
+| `tokyo-night-storm-truecolor` | `tokyonight.nvim` (storm) ← | Folke Lemaitre (https://github.com/folke/tokyonight.nvim), base03 adjusted by masc for WCAG AA | Apache-2.0 (upstream folke/tokyonight.nvim) |
 | `catppuccin-frappe` | `catppuccin-frappe` | https://github.com/catppuccin/catppuccin | MIT (tinted-theming) |
 | `rose-pine-moon` | `rose-pine-moon` | Emilia Dunfelt <edun@dunfelt.se> | MIT (tinted-theming) |
 | `tomorrow-night` | `tomorrow-night` | Chris Kempson (http://chriskempson.com) | MIT (tinted-theming) |

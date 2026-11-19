@@ -122,7 +122,7 @@ let render_workspace_activity (state : state) repo_id =
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
-          ~surface_rows:(surface_body_rows state ~terminal_rows) in
+          ~budget:(surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows) in
         let scroll = max 0 (min requested (max 0 (count - height))) in
         here_row ~cols state
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
@@ -147,8 +147,8 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ())
-            (if ko then "  모든 Keeper 가 clone 에 쓴 기록 · Enter 로 파일 열기 · 코드 화면에서 H 이력, m 노트"
-             else "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code");
+            (if ko then "  전체 Keeper clone 쓰기 기록  Enter:파일 열기 (코드 화면: H:이력  m:노트)"
+             else "  Recorded clone writes from all Keepers  Enter:open file (in Code: H:history  m:notes)");
           let cells = workspace_activity_cells ~ko ~cols in
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
@@ -404,6 +404,7 @@ let render_repository_list (state : state) =
           (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
              ~height:content_height state.repositories_scroll)) in
       let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
+      report_drawn_list Repository_rows ~height:content_height;
       let lines =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
@@ -418,7 +419,7 @@ let render_repository_list (state : state) =
           | Some r ->
               let line = row r in
               if idx = state.repositories_cursor then
-                Theme.selection ^ fit_width line row_width ^ Ansi.reset
+                Theme.selection_style () ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
       if shown > 0 then
@@ -654,6 +655,7 @@ let render_repository_changes (state : state) =
               | Some _ -> Masc_tui_scroll.ensure_visible
                   ~cursor:state.repository_changes_cursor ~height:room scroll in
             let changes_window = Rows.of_list ~first:scroll ~height:room changes in
+            report_drawn_list Repository_change_rows ~height:room;
             for i = 0 to room - 1 do
               let idx = scroll + i in
               match Rows.at changes_window idx with
@@ -690,7 +692,7 @@ let render_repository_changes (state : state) =
                   let line =
                     Printf.sprintf "%s%-18s %s%s"
                       (if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
-                       then "! " else "  ")
+                       then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " else "  ")
                       (repository_change_status row)
                       (Message_layout.truncate_middle
                          (max 1 (available - Message_layout.display_width attr)) path)
@@ -747,8 +749,12 @@ let change_result_badge ~ko (change : Masc.Tui_decode.file_change) =
 let diff_row_span ?(hscroll = 0) ~width (row : Diff.row) =
   let background, marker, text =
     match row with
-    | Diff.Removed line -> (Span.bg Theme.Syntax.diff_removed_bg, "-", line)
-    | Diff.Added line -> (Span.bg Theme.Syntax.diff_added_bg, "+", line)
+    | Diff.Removed line ->
+        (Span.combine (Span.bg (Theme.Syntax.diff_removed_bg ()))
+           (Span.fg (Theme.Syntax.diff_removed_fg ())), "-", line)
+    | Diff.Added line ->
+        (Span.combine (Span.bg (Theme.Syntax.diff_added_bg ()))
+           (Span.fg (Theme.Syntax.diff_added_fg ())), "+", line)
     | Diff.Context line -> (Span.plain, " ", line)
   in
   (* Context is dim so the changed lines are what an eye lands on. The marker
@@ -894,8 +900,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d · Esc 로 닫기"
-        else "  col %d · esc closes")
+       (if state.ui_language = Lang_ko then "  열 %d  Esc:닫기"
+        else "  col %d  Esc:close")
        (state.changes_diff_hscroll + 1));
   box_bottom buf cols;
   let framed = Buffer.create (Buffer.length buf + 512) in
@@ -954,7 +960,6 @@ let render_changes_list (state : state) =
                  (Masc_tui_message_layout.count_noun
                     s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   (* What the turn did takes the cells the drawn columns leave. *)
@@ -1031,6 +1036,7 @@ let render_changes_list (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
   let changes_window = Rows.of_list ~first:scroll ~height:content_height changes in
+  report_drawn_list Change_rows ~height:content_height;
   (* The marked row, not the window's top row. They were the same field, so
      the mark never left the first drawn row: every row below it was visible
      and unselectable, and Enter always opened whichever change the window
@@ -1097,8 +1103,8 @@ let render_changes_list (state : state) =
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  (Enter 로 열어 스크롤)"
-             else "  preview %s  -%d +%d  (Enter opens, scrolls)")
+            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  Enter:열기·스크롤"
+             else "  preview %s  -%d +%d  Enter:open/scroll")
             (Terminal_text.single_line (change_row_address change))
             removed added);
        let body_height = preview_height - 2 in

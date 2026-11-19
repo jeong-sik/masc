@@ -32,15 +32,7 @@ let bucket ~now ~age view row =
        | Grid.Failing _ -> Failures | Grid.Recovered -> Recoveries
        | Grid.Sound -> Sound | Grid.Paused -> Paused | Grid.Other -> Unknown)
 
-let odd_dormant row =
-  match runtime row with
-  | Some row -> not row.Decode.kr_paused &&
-      (match row.kr_activation_mode with
-       | Decode.Activation_autonomous -> true
-       | Decode.Activation_manual | Decode.Activation_on_demand -> false)
-  | None -> false
-
-let header ~ko ~now ~cells ~view ~selected ~age rows =
+let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
   let say korean english = if ko then korean else english in
   (* A group of Keepers wears the status mark of its verdict, in that mark's
      colour (RFC tui-one-screen-grammar §7.2); the groups the verdict cannot
@@ -55,7 +47,7 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
          Today, "▆", say "하루 안" "today", Ansi.reset;
          Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
          Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
-         Unknown, unreported, say "나이 모름" "age unknown", Theme.recede ()]
+         Unknown, unreported, say "나이 보고 안 됨" "age not reported", Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
         let failed, failed_tone = status Masc_tui_value.Mark.Failed in
         let caution, caution_tone = status Masc_tui_value.Mark.Caution in
@@ -74,96 +66,22 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
   let groups = List.filter_map (fun (key, mark, word, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in
-    match members with [] -> None | _ :: _ -> Some (key, mark, word, style, members)) groups in
-  let label long (_, mark, word, _, members) =
-    if not long then mark ^ string_of_int (List.length members)
-    else if ko then Printf.sprintf "%s %s %d" mark word (List.length members)
-    else Printf.sprintf "%s %d %s" mark (List.length members) word in
+    match members with [] -> None | _ :: _ -> Some (mark, word, style, List.length members)) groups in
+  let label long (mark, word, _, count) =
+    if not long then mark ^ string_of_int count
+    else if ko then Printf.sprintf "%s %s %d" mark word count
+    else Printf.sprintf "%s %d %s" mark count word in
   let sep_w = 2 * max 0 (List.length groups - 1) in
   let base_w long =
     sep_w + List.fold_left (fun n g -> n + Layout.display_width (label long g)) 0 groups in
-  let full_marks_w =
-    List.fold_left (fun n (_, _, _, _, members) -> n + 1 + List.length members) 0 groups in
-  let long = base_w true + full_marks_w <= cells in
-  let group_count = List.length groups in
-  let mark_budgets =
-    let avail = max 0 (cells - base_w long) in
-    if full_marks_w <= avail then
-      List.map (fun (_, _, _, _, members) -> 1 + List.length members) groups
-    else
-      let caps =
-        Array.of_list (List.map (fun (_, _, _, _, members) -> 1 + List.length members) groups)
-      in
-      let alloc = Array.make group_count 0 in
-      let rem = ref avail in
-      let progress = ref true in
-      while !rem > 0 && !progress do
-        progress := false;
-        for i = 0 to group_count - 1 do
-          if !rem > 0 && alloc.(i) < caps.(i) then (
-            alloc.(i) <- alloc.(i) + 1;
-            decr rem;
-            progress := true)
-        done
-      done;
-      Array.to_list alloc
-  in
-  let draw_mark key style row =
-    let mark, tone = match key with
-      | Paused -> "·", Theme.recede ()
-      | Failures ->
-          (match Grid.verdict ~now (runtime row) with
-           | Grid.Failing { resting = true } -> "▫", Theme.recede ()
-           | Grid.Failing { resting = false } | Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other -> "▪", style)
-      | Dormant -> if odd_dormant row then "▪", Theme.warn () else "▫", style
-      | Unknown -> "?", Theme.recede ()
-      | Recoveries | Sound | Fresh | Today | Cooling -> "▪", style in
-    tone ^ (if selected = Some (name row) then Ansi.bold else "") ^ mark ^ Ansi.reset
-  in
-  let take_with_selected count members =
-    let rec take n acc = function
-      | [] -> List.rev acc
-      | _ when n <= 0 -> List.rev acc
-      | x :: xs -> take (n - 1) (x :: acc) xs
-    in
-    let prefix = take count [] members in
-    match selected with
-    | None -> prefix
-    | Some sel ->
-      if List.exists (fun r -> String.equal (name r) sel) prefix then prefix
-      else
-        (match List.find_opt (fun r -> String.equal (name r) sel) members with
-         | None -> prefix
-         | Some sel_row ->
-           (match List.rev prefix with
-            | [] -> [sel_row]
-            | _ :: rev_init -> List.rev (sel_row :: rev_init)))
-  in
-  let draw budget ((key, _, _, style, members) as group) =
-    let count = List.length members in
-    let lbl = style ^ label long group ^ Ansi.reset in
-    if budget >= 1 + count then
-      lbl ^ " " ^ String.concat "" (List.map (draw_mark key style) members)
-    else
-      let mark_cols = budget - 1 in
-      let max_suffix_w = 1 + String.length (string_of_int count) in
-      if mark_cols >= 1 + max_suffix_w then
-        let shown0 = mark_cols - max_suffix_w in
-        let shown =
-          if shown0 + 1 < count
-             && shown0 + 1 + 1 + String.length (string_of_int (count - shown0 - 1)) <= mark_cols
-          then shown0 + 1
-          else shown0
-        in
-        let omitted = count - shown in
-        let visible_members = take_with_selected shown members in
-        let marks_str = String.concat "" (List.map (draw_mark key style) visible_members) in
-        let suffix = Theme.recede () ^ "+" ^ string_of_int omitted ^ Ansi.reset in
-        lbl ^ " " ^ marks_str ^ suffix
-      else
-        lbl
-  in
-  String.concat "  " (List.map2 draw mark_budgets groups)
+  let long = base_w true <= max 0 (cells - 2) in
+  match groups with
+  | [] -> ""
+  | _ :: _ ->
+      "  "
+      ^ String.concat "  "
+          (List.map (fun ((_, _, style, _) as group) ->
+             style ^ label long group ^ Ansi.reset) groups)
 
 type wake_style = Keeper_wakes | Wake_counts
 
@@ -290,7 +208,8 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   ; due = let label = (if ko then "최대" else "max ") ^ wake_max in
       if Layout.display_width label <= Grid.due_cells then label else Layout.compact_count wake_peak }
 
-let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
+let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
+  let say korean english = if ko then korean else english in
   let observed = runtime row in
   let verdict = Grid.verdict ~now observed in
   let age = Option.bind row.Model.last_activity_at (fun since -> Layout.age_text ~now ~since) in
@@ -298,9 +217,9 @@ let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
     | Grid.Failing _, Some runtime ->
         Some (match runtime.Decode.kr_failing_since with
           | Some at when Float.is_finite at && at <= now ->
-              "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
-          | Some _ | None -> "since ?")
-    | Grid.Failing _, None -> Some "since ?"
+              say "시작 " "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
+          | Some _ | None -> say "시작 ?" "since ?")
+    | Grid.Failing _, None -> Some (say "시작 ?" "since ?")
     | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None) -> None in
   let next = match next_run with
     | Next.Scheduled_at at ->
@@ -310,23 +229,26 @@ let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
     | Next.No_schedule | Next.Late_since _ | Next.Held_current _ | Next.Held_as_of _
     | Next.Not_before _ | Next.Unknown ->
         Option.map (fun (cell : Masc_tui_keeper_axis_cell.t) -> cell.text)
-          (Next.cell ~now next_run) in
+          (Next.cell ~ko ~now next_run) in
   let next = Option.map (fun text -> text ^ (match recurrence with
-    | Some (Schedule_domain.Interval { interval_sec }) -> " every " ^ Grid.short_span (float_of_int interval_sec)
+    | Some (Schedule_domain.Interval { interval_sec }) ->
+        say " 주기 " " every " ^ Grid.short_span (float_of_int interval_sec)
     | Some (Schedule_domain.One_shot as recurrence)
     | Some (Schedule_domain.Daily _ as recurrence)
     | Some (Schedule_domain.Cron _ as recurrence) -> " " ^ clean (Schedule_domain.recurrence_summary recurrence)
     | None -> "")) next in
   let lag = match memory with
-    | Memory.Row { lag = Memory.Lag n; _ } -> if n > 0 then Some ("lag " ^ string_of_int n) else None
-    | Memory.Row { lag = Memory.Lag_unmeasured; _ } | Memory.Unknown -> Some "lag ?"
-    | Memory.Refused _ -> Some "lag !"
+    | Memory.Row { lag = Memory.Lag n; _ } ->
+        if n > 0 then Some (say "지연 " "lag " ^ string_of_int n) else None
+    | Memory.Row { lag = Memory.Lag_unmeasured; _ } | Memory.Unknown -> Some (say "지연 ?" "lag ?")
+    | Memory.Refused _ -> Some (say "지연 !" "lag !")
     | Memory.No_row -> None in
   let head = match verdict, observed with
     | Grid.Failing _, Some row ->
         (match row.Decode.kr_runtime_path_rest with
          | Ok (Some (Decode.Path_rest_serving path)) -> Some ("▹ " ^ clean path.runtime_id)
-         | Ok (Some (Decode.Path_rest_resting path)) -> Some ("◌ wait " ^ clean path.runtime_id)
+         | Ok (Some (Decode.Path_rest_resting path)) ->
+             Some (say "◌ 대기 " "◌ wait " ^ clean path.runtime_id)
          | Error _ | Ok None -> Some "▹ ?")
     | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None)
     | Grid.Failing _, None -> None in

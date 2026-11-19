@@ -18,6 +18,7 @@ const boardExcludeSystem = signal(true)
 const boardExcludeAutomation = signal(false)
 const boardAuthorFilter = signal('')
 const boardHearthFilter = signal('')
+const boardSearchText = signal('')
 const boardOffset = signal(0)
 const namespaceTruth = signal<unknown>(null)
 const namespaceTruthError = signal<unknown>(null)
@@ -86,6 +87,7 @@ async function loadSseStore() {
     boardExcludeAutomation,
     boardAuthorFilter,
     boardHearthFilter,
+    boardSearchText,
     boardOffset,
     removeBoardPost,
   }))
@@ -171,6 +173,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     boardExcludeAutomation.value = false
     boardAuthorFilter.value = ''
     boardHearthFilter.value = ''
+    boardSearchText.value = ''
     boardOffset.value = 0
     serverStatus.value = null
     compositeTick.value = { name: '', ts_unix: 0 }
@@ -942,6 +945,28 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(boardPosts.value).toEqual([])
     expect(refreshBoard).toHaveBeenCalledTimes(1)
     expect(refreshHearths).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a searched list again instead of putting a new post on top of it', async () => {
+    // The server decides what matches the search; a new post that does not
+    // match would otherwise sit at the top of the matches.
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardSearchText.value = 'needle'
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Unrelated note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value).toEqual([])
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 
   it('refreshes hearth chips when an optimistic board post carries a hearth', async () => {

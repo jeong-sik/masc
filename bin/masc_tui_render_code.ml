@@ -97,7 +97,7 @@ let code_pane_content_height (state : state) =
   pane_surface_content_height ~rows
 
 let draft_rows_cache :
-    (Masc_tui_code_draft.t * int * ui_language * string list) option Domain.DLS.key =
+    (Masc_tui_code_draft.t * int * ui_language * int * string list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
 let prepare_code_draft_rows ~ko ~cols draft =
@@ -139,8 +139,8 @@ let prepare_code_draft_rows ~ko ~cols draft =
   let rows = Diff.rows ~before ~after:(Draft.text draft) |> List.concat_map (fun row ->
     let marker, style, text = match row with
       | Diff.Context text -> "  ", Ansi.dim, text
-      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
-      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text in
+      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
+      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text in
     Terminal_text.single_line
       (fst (Message_layout.expand_tabs ~column:0 text))
     |> Message_layout.split_cells
@@ -148,8 +148,8 @@ let prepare_code_draft_rows ~ko ~cols draft =
     |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
   List.concat_map wrap
     [ status; comparing; bytes;
-      say "e 편집 · S 저장 · r 다시 읽기 · A 서버 판 받기 · X 버리기 · Esc 닫기"
-        "e edit · S save · r reread · A adopt compared revision · X discard · Esc close" ]
+      say "e:편집  S:저장  r:다시 읽기  A:서버 판 적용  X:버리기  Esc:닫기"
+        "e:edit  S:save  r:reread  A:adopt compared revision  X:discard  Esc:close" ]
   @ rows
 
 (* [same_draft] follows the editing session, including later edits. Only the
@@ -158,12 +158,16 @@ let code_draft_rows state ~cols =
   match current_code_draft state with
   | None -> Domain.DLS.set draft_rows_cache None; []
   | Some draft ->
+      let palette_gen =
+        Masc_tui_terminal_palette.(snapshot_generation (snapshot ()))
+      in
       match Domain.DLS.get draft_rows_cache with
-      | Some (seen, width, language, rows)
-        when seen == draft && width = cols && language = state.ui_language -> rows
+      | Some (seen, width, language, seen_gen, rows)
+        when seen == draft && width = cols && language = state.ui_language
+             && seen_gen = palette_gen -> rows
       | Some _ | None ->
           let rows = prepare_code_draft_rows ~ko:(state.ui_language = Lang_ko) ~cols draft in
-          Domain.DLS.set draft_rows_cache (Some (draft, cols, state.ui_language, rows));
+          Domain.DLS.set draft_rows_cache (Some (draft, cols, state.ui_language, palette_gen, rows));
           rows
 
 let code_hover_rows state ~cols =
@@ -255,8 +259,8 @@ let history_change_rows ~ko ~cols (change : Masc.Tui_decode.file_change) =
   let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
     let marker, style, text = match row with
       | Diff.Context text -> "  ", Ansi.dim, text
-      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
-      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text
+      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
+      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text
     in
     (* Code whitespace is evidence: word wrapping would erase indentation
        and collapse internal spaces. Cell splitting also retains empty rows. *)
@@ -345,7 +349,7 @@ let prepare_code_history_rows (state : state) ~cols =
 
 let history_rows_cache :
     (((code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t
-      * int option * code_note option * int * ui_language)
+      * int option * code_note option * int * ui_language * int)
      * ((int * code_history_entry) option * string) list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
@@ -353,14 +357,17 @@ let code_history_rows (state : state) ~cols =
   let source = state.code_history in
   let expanded = state.code_history_expanded in
   let note = state.code_lsp_note in
+  let palette_gen =
+    Masc_tui_terminal_palette.(snapshot_generation (snapshot ()))
+  in
   match Domain.DLS.get history_rows_cache with
-  | Some ((seen, seen_expanded, seen_note, width, language), rows)
+  | Some ((seen, seen_expanded, seen_note, width, language, seen_gen), rows)
       when seen == source && seen_expanded = expanded && seen_note = note && width = cols
-           && language = state.ui_language -> rows
+           && language = state.ui_language && seen_gen = palette_gen -> rows
   | Some _ | None ->
       let rows = prepare_code_history_rows state ~cols in
       Domain.DLS.set history_rows_cache
-        (Some ((source, expanded, note, cols, state.ui_language), rows));
+        (Some ((source, expanded, note, cols, state.ui_language, palette_gen), rows));
       rows
 
 let code_history_pane_cols () =
@@ -410,6 +417,41 @@ let toggle_history_change state =
       true
   | Some (_, Hist_commit _) | None -> false
 
+(* A directory read with no entries: the status line above the tree and the
+   file pane beside it say it in the same words. *)
+let empty_directory_text (state : state) =
+  ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)"
+
+(* The line above the file tree's rows. Each state of the listing says which
+   it is. "(loading…)" stood for all three empty ones: a request in flight, a
+   listing never asked for, and a directory that answered with no entries. *)
+let code_tree_status (state : state) =
+  match code_listing_view state with
+  | Masc_tui_fetched.Stale (_, detail) ->
+      Some
+        ((Theme.bad ())
+         ^ ui_text state ~ko:" 새로 고침 실패 · 마지막으로 읽은 목록: "
+             ~en:" Refresh failed, showing the last read: "
+         ^ Terminal_text.single_line detail ^ Ansi.reset)
+  | Masc_tui_fetched.Failed detail ->
+      Some ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
+  | Masc_tui_fetched.Loading ->
+      Some
+        (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
+         ^ Ansi.reset)
+  | Masc_tui_fetched.Absent ->
+      Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
+  | Masc_tui_fetched.Ready [] ->
+      Some (Ansi.dim ^ " " ^ empty_directory_text state ^ Ansi.reset)
+  | Masc_tui_fetched.Ready (_ :: _) -> None
+
+(* The file tree's rows are the pane less its status line. The drawing cuts
+   the window here and the page key reads the same. *)
+let code_tree_list_height (state : state) =
+  max 0
+    (code_pane_content_height state
+     - match code_tree_status state with Some _ -> 1 | None -> 0)
+
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
@@ -417,14 +459,13 @@ let render_code (state : state) =
   (* The focused pane says where its reader is; the title row above both
      panes draws it, so the panes are drawn first. *)
   let position = ref None in
-  let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
   (* What the file pane says with no file open: the listing's own reading, so
      it offers Enter only beside rows to choose and says a failure whole. *)
   let listing_idle = Masc_tui_list_idle.of_listing (code_listing_view state) in
-  let empty_directory = ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)" in
+  let empty_directory = empty_directory_text state in
   let span = lexed_span in
   let list_pane ~framed pane_buf pane_cols =
     (* Beside the file pane the box is the pane separator; alone on a narrow
@@ -455,35 +496,9 @@ let render_code (state : state) =
        ^ workspace_entries_count_label total
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
-    (* Each state of the listing says which it is. "(loading…)" stood for all
-       three empty ones: a request in flight, a listing never asked for, and a
-       directory that answered with no entries. *)
-    let status_line text =
-      framed_line pane_buf pane_cols text;
-      1
-    in
-    let status_rows =
-      match code_listing_view state with
-      | Masc_tui_fetched.Stale (_, detail) ->
-          status_line
-            ((Theme.bad ())
-             ^ ui_text state ~ko:" 새로 고침 실패 · 마지막으로 읽은 목록: "
-                 ~en:" Refresh failed, showing the last read: "
-             ^ Terminal_text.single_line detail ^ Ansi.reset)
-      | Masc_tui_fetched.Failed detail ->
-          status_line
-            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
-      | Masc_tui_fetched.Loading ->
-          status_line
-            (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
-             ^ Ansi.reset)
-      | Masc_tui_fetched.Absent ->
-          status_line (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
-      | Masc_tui_fetched.Ready [] ->
-          status_line (Ansi.dim ^ " " ^ empty_directory ^ Ansi.reset)
-      | Masc_tui_fetched.Ready (_ :: _) -> 0
-    in
-    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
+    Option.iter (framed_line pane_buf pane_cols) (code_tree_status state);
+    let list_rows_budget = code_tree_list_height state in
+    report_drawn_list Code_tree_entries ~height:list_rows_budget;
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in
@@ -568,11 +583,12 @@ let render_code (state : state) =
           in
           let line =
             if selected then
-              Theme.selection ^ " " ^ marker ^ name
+              let plain_marker = Masc_tui_theme.strip_sgr marker in
+              Theme.selection_style () ^ " " ^ plain_marker ^ name
               ^ String.make
                   (max 0
                      (framed_inner_width pane_cols - 3
-                      - Message_layout.display_width (marker ^ name)))
+                      - Message_layout.display_width (plain_marker ^ name)))
                   ' '
               ^ Ansi.reset
             else " " ^ marker ^ name
@@ -718,7 +734,7 @@ let render_code (state : state) =
                ^ Terminal_text.single_line detail ^ Ansi.reset
            | Some (_, Masc_tui_fetched.Loading) ->
                with_note ^ "  " ^ Theme.recede ()
-               ^ ui_text state ~ko:"blame 읽는 중…" ~en:"reading blame…" ^ Ansi.reset
+               ^ ui_text state ~ko:"blame 읽는 중" ~en:"reading blame" ^ Ansi.reset
            | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
       | None ->
@@ -753,7 +769,7 @@ let render_code (state : state) =
        hand ~first:scroll ~shown:height ~total;
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           (ui_text state ~ko:"  Esc: 코드로 돌아가기" ~en:"  Esc returns to code");
+           (ui_text state ~ko:"  Esc:코드로 돌아가기" ~en:"  Esc:back to code");
        let window = Rows.of_list ~first:scroll ~height rendered in
        for index = 0 to height - 1 do
          match Rows.at window (scroll + index) with
@@ -861,9 +877,9 @@ let render_code (state : state) =
                      let body =
                        match row.gdr_kind with
                        | Gd_removed ->
-                           Theme.Syntax.diff_removed_bg ^ text ^ Ansi.reset
+                           Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg () ^ text ^ Ansi.reset
                        | Gd_added ->
-                           Theme.Syntax.diff_added_bg ^ text ^ Ansi.reset
+                           Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg () ^ text ^ Ansi.reset
                        | Gd_context -> Ansi.dim ^ text ^ Ansi.reset
                      in
                      box_line pane_buf pane_cols
@@ -900,7 +916,7 @@ let render_code (state : state) =
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) -> say (Theme.bad ()) detail
        | Some (path, Masc_tui_fetched.Loading) ->
            say (Theme.recede ())
-             (ui_text state ~ko:(path ^ " 읽는 중…") ~en:("reading " ^ path ^ "…"))
+             (ui_text state ~ko:(path ^ " 읽는 중") ~en:("reading " ^ path))
        | Some (_, Masc_tui_fetched.Absent) | None ->
            draw_list_idle pane_buf pane_cols ~ko:(state.ui_language = Lang_ko)
              ~empty:empty_directory ~height:content_height listing_idle
@@ -915,6 +931,7 @@ let render_code (state : state) =
        | Some (open_path, Masc_tui_fetched.Ready { cfd_body = Code_text _; cfd_rows = file_rows; _ }) ->
            let scroll = file_scroll (Array.length file_rows) in
            hand ~first:scroll ~shown:content_height ~total:(Array.length file_rows);
+           report_drawn_list Code_file_lines ~height:content_height;
            let hscroll =
              max 0
                (min state.code_file_hscroll

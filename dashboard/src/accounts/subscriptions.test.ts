@@ -16,6 +16,8 @@ import { addPath, createKeyAdds } from './key-add'
 import type { KeyAddModel } from './key-add'
 import { createRemovals, removePath } from './key-remove'
 import type { RemovalsModel } from './key-remove'
+import { createReplacements, replacePath } from './key-replace'
+import type { ReplacementsModel } from './key-replace'
 import type { View } from './console'
 import { loginPath } from './login'
 import { slowAfterMs } from './notes'
@@ -71,6 +73,8 @@ const idleChecks = (): ChecksModel =>
 /** A giving of a key no test here drives: the panel only needs one to be there. */
 const idleAdds = (): KeyAddModel =>
   createKeyAdds({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
+/** Replacements no test here drives: the panel only needs them to be there. */
+const idleReplacements = (): ReplacementsModel => createReplacements({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 /** Removals no test here drives: the panel only needs them to be there. */
 const idleRemovals = (): RemovalsModel =>
   createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
@@ -134,7 +138,7 @@ describe('reading the subscriptions', () => {
         { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: {
-        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }],
+        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }],
         runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
       },
     })
@@ -160,6 +164,8 @@ describe('reading the subscriptions', () => {
     await forOther
     first.give(offered())
     await forPerson
+    // No one waits for a reading that was replaced: its answer is taken in by now.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     const view = panel.view.value
     expect([kind(panel), view.kind === 'read' ? view.owned.accounts.length : null]).toEqual([`read for ${other}`, 0])
   })
@@ -210,7 +216,17 @@ describe('reading the subscriptions', () => {
     await panel.load(sessionOf(person))
     first.give(notReady())
     await older
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(kind(panel)).toBe(`read for ${person}`)
+  })
+
+  it('lets go of whoever waits for a reading once it is stopped, though no answer came', async () => {
+    const { panel } = start({ [paths.integrations]: [offered()], [paths.owned]: [later().answer] })
+    let ended = false
+    void panel.load(sessionOf(person)).then(() => { ended = true })
+    panel.stop()
+    await vi.waitFor(() => { expect(ended).toBe(true) })
+    expect(kind(panel)).toBe('waiting')
   })
 
   it('keeps the page of a failed reading while it leaves after a retry finds no session', async () => {
@@ -276,7 +292,7 @@ describe('following the console', () => {
       view: signal<PanelView>({ kind: 'waiting' }),
       load: vi.fn((_session: Session) => Promise.resolve()),
       retry: vi.fn(() => Promise.resolve()),
-      connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(),
+      connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), replacing: idleReplacements(),
       stop: vi.fn(),
     } satisfies SubscriptionsModel
     const stop = follow(frame, panel)
@@ -447,12 +463,94 @@ describe('giving a key in the panel', () => {
   })
 })
 
+describe('giving another key for an account in the panel', () => {
+  const keyReplaced = (): Response => json(200, { provider_account_id: 'acct_key', old_keys_removed: true })
+  const replaceTokens = (sent: readonly Sent[]): Array<string | null> =>
+    sent.filter((one) => one.path === replacePath('acct_key')).map((one) => new Headers(one.init.headers).get(csrfHeader))
+  const ownedReadings = (sent: readonly Sent[]): number => sent.filter((one) => one.path === paths.owned).length
+
+  it('sends the key with the token of the newest session, and reads the subscriptions again', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+    })
+    await panel.load(sessionOf(person, 'first'))
+    await panel.load(sessionOf(person, 'second'))
+    panel.replacing.open('acct_key')
+    const kept = await panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([kept, replaceTokens(sent), ownedReadings(sent), kind(panel)]).toEqual(['dropped', ['second'], 2, `read for ${person}`])
+  })
+
+  it('says the key was replaced only once the list of the newest reading is on the page', async () => {
+    const second = later()
+    const third = later()
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), second.answer, third.answer],
+      [paths.owned]: [ownedKey(), ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+      [addPath]: [json(200, { provider_account_id: 'acct_other', kind: 'key' })],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    const replaced = panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(2) })
+    // Another card asks for the list while the reading of the replacement is on its way.
+    panel.adding.open()
+    const added = panel.adding.add('claude_code', 'another-made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(3) })
+    second.give(offeredWithKey())
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('sending')
+    third.give(offeredWithKey())
+    await Promise.all([replaced, added])
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+  })
+
+  it('says the key was replaced once the newest list is on the page, though the readings before it have no answer', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey(), offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedKey(), later().answer, later().answer, ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+      [addPath]: ['no answer', 'no answer'],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    await panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(2) })
+    // A key whose answer did not come asks for the list again, twice. Only
+    // the last of the three readings gets an answer.
+    panel.adding.open()
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    const held = panel.replacing.replacing.value.get('acct_key')?.kind
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([held, ownedReadings(sent), kind(panel)]).toEqual(['sending', 4, `read for ${person}`])
+  })
+
+  it('forgets the replacements of one person once it shows another', async () => {
+    const call = later()
+    const { panel } = start({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [replacePath('acct_key')]: [call.answer],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    const run = panel.replacing.replace('acct_key', 'made-up-key')
+    await panel.load(sessionOf(other))
+    call.give(keyReplaced())
+    expect([await run, panel.replacing.replacing.value.size, kind(panel)]).toEqual(['dropped', 0, `read for ${other}`])
+  })
+})
+
 describe('removing a key account in the panel', () => {
   const removeTokens = (sent: readonly Sent[]): Array<string | null> =>
     sent.filter((one) => one.path === removePath('acct_key')).map((one) => new Headers(one.init.headers).get(csrfHeader))
   const accountsOf = (panel: SubscriptionsModel): readonly unknown[] => {
     const view = panel.view.value
-    return view.kind === 'read' ? view.owned.accounts.map((account) => [account.id, account.removal]) : [view.kind]
+    return view.kind === 'read' ? view.owned.accounts.map((account) => [account.id, account.left]) : [view.kind]
   }
 
   it('removes with the token of the newest session, and reads the subscriptions again once the server removed the account', async () => {
@@ -475,7 +573,7 @@ describe('removing a key account in the panel', () => {
     })
     await panel.load(sessionOf(person))
     await panel.removing.remove('acct_key')
-    expect([accountsOf(panel), panel.removing.removing.value.get('acct_key')?.kind]).toEqual([[['acct_key', 'key_not_removed']], 'refused'])
+    expect([accountsOf(panel), panel.removing.removing.value.get('acct_key')?.kind]).toEqual([[['acct_key', { kind: 'removal', stage: 'key_not_removed' }]], 'refused'])
   })
 
   it('forgets the removals of one person once it shows another', async () => {
@@ -502,11 +600,11 @@ describe('what the panel knows of each account', () => {
   ]
   const facts = accountFacts(integrations, {
     accounts: [
-      { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
-      { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
-      { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
-      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
-      { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, left: null },
+      { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
+      { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, left: null },
+      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, left: null },
+      { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
     ],
     runtimes: [
       { id: 'acct_codex.gpt-5.5', accountId: 'acct_codex', model: { read: true, value: 'gpt-5.5' } },
@@ -558,8 +656,8 @@ describe('what the panel knows of each account', () => {
   it('tells an account that has a model to check from one whose subscription offers none', () => {
     const owned = {
       accounts: [
-        { id: 'acct_checked', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
-        { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_checked', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
       ],
       runtimes: [{ id: 'acct_checked.claude-sonnet-5', accountId: 'acct_checked', model: { read: true, value: 'claude-sonnet-5' } }],
     } as const
@@ -568,22 +666,26 @@ describe('what the panel knows of each account', () => {
     expect(kinds(integrations.map((one) => ({ ...one, models: [] })))).toEqual([['acct_checked', 'can_run'], ['acct_new', 'no_model']])
   })
 
-  it('says a removal that was left on an account before anything else of it', () => {
+  it('says a removal or a key replacement that was left on an account before anything else of it', () => {
     const kinds = accountFacts(integrations, {
       accounts: [
-        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
-        { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, removal: 'start_given_up' },
-        { id: 'acct_left_refused', integration: { read: true, value: 'codex' }, held: { kind: 'key', key: 'readable' }, removal: 'home_not_removed' },
-        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
+        { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, left: { kind: 'removal', stage: 'start_given_up' } },
+        { id: 'acct_left_refused', integration: { read: true, value: 'codex' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'home_not_removed' } },
+        { id: 'acct_blocked', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'replacement', stage: 'start_given_up' } },
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, left: null },
       ],
       runtimes: [],
     }).map((one) => [one.account.id, one.keeper.kind])
-    expect(kinds).toEqual([['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_left_refused', 'removal_left'], ['acct_key', 'needs_model']])
+    expect(kinds).toEqual([
+      ['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_left_refused', 'removal_left'],
+      ['acct_blocked', 'replacement_left'], ['acct_key', 'needs_model'],
+    ])
   })
 
   it('says a Keeper can run on a key account with a checked model only while the server read its key', () => {
     const states = ['readable', 'key_missing', 'key_unreadable', 'not_looked_at', 'unrecognised'] as const
-    const accounts = states.map((key) => ({ id: `acct_${key}`, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, removal: null }) as const)
+    const accounts = states.map((key) => ({ id: `acct_${key}`, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, left: null }) as const)
     const runtimes = accounts.map((account) => ({ id: `${account.id}.claude-sonnet-5`, accountId: account.id, model: { read: true, value: 'claude-sonnet-5' } }) as const)
     expect(accountFacts(integrations, { accounts, runtimes }).map((one) => one.keeper.kind))
       .toEqual(['can_run', 'key_not_readable', 'key_not_readable', 'key_not_readable', 'key_not_readable'])
@@ -619,11 +721,11 @@ describe('the panel', () => {
     ['nothing connected', read({ accounts: [], runtimes: [] })],
     ['accounts of each kind', read({
       accounts: [
-        { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
-        { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
-        { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
-        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
-        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' }, held: { kind: 'login' }, left: null },
       ],
       runtimes: [
         { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
@@ -637,8 +739,8 @@ describe('the panel', () => {
     // Their subscription takes a key.
     ['key accounts', read({
       accounts: [
-        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
-        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, left: null },
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
       ],
       runtimes: [],
     }, true)],
@@ -650,7 +752,7 @@ describe('the panel', () => {
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
     const model = {
-      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), stop: vi.fn(),
+      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), replacing: idleReplacements(), stop: vi.fn(),
     } satisfies SubscriptionsModel
     return { container: render(html`<${SubscriptionsPanel} model=${model} />`).container, model }
   }
@@ -702,9 +804,18 @@ describe('the panel', () => {
     const removeButtons = (name: string): number[] => {
       const view = views.find(([one]) => one === name)?.[1]
       if (view === undefined) throw new Error(`no view ${name}`)
-      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('.actions button').length)
+      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('button[id^="remove-"]').length)
     }
     expect([removeButtons('key accounts'), removeButtons('accounts of each kind').every((buttons) => buttons === 0)]).toEqual([[1, 1], true])
+  })
+
+  it('offers another key on a key account, and none on an account a removal was left on', () => {
+    const replaceButtons = (name: string): number[] => {
+      const view = views.find(([one]) => one === name)?.[1]
+      if (view === undefined) throw new Error(`no view ${name}`)
+      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('button[id^="replace-"]').length)
+    }
+    expect([replaceButtons('key accounts'), replaceButtons('accounts of each kind').every((buttons) => buttons === 0)]).toEqual([[1, 0], true])
   })
 
   it('names, before anything is connected, only the subscriptions with a model to check', () => {
@@ -874,6 +985,34 @@ describe('the panel', () => {
       .toEqual(['', false, 0, true])
   })
 
+  it('says that an account it sent a key for was not there, once its card is off the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [replacePath('acct_key')]: [json(404, { error: 'No such account.', code: 'unknown_account' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    const before = lineOf(container)
+    panel.replacing.open('acct_key')
+    await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
+    // The page is drawn again when `act` ends, so the wait is for what the panel holds.
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
+    expect([before, lineOf(container) === '', container.querySelectorAll('li.row').length]).toEqual(['', false, 0])
+  })
+
+  it('does not say that account went while a list that has it is on the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [json(404, { error: 'No such account.', code: 'unknown_account' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    panel.replacing.open('acct_key')
+    await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
+    expect([lineOf(container), container.querySelectorAll('li.row').length]).toEqual(['', 1])
+  })
+
   it('says an account went only once its card is off the page, however the readings overlap', async () => {
     const asked = later()
     const newer = later()
@@ -892,15 +1031,28 @@ describe('the panel', () => {
     await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
     await act(async () => {
       asked.give(ownedNothing())
-      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
     })
-    const replaced = [container.querySelectorAll('li.row').length, lineOf(container)]
+    // The card stays held: the list on the page is not the one of the newest reading.
+    const replaced = [panel.removing.removing.value.get('acct_key')?.kind, container.querySelectorAll('li.row').length, lineOf(container)]
     await act(async () => {
       newer.give(ownedNothing())
-      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
+      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
     })
-    expect([replaced, container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
-      .toEqual([[1, ''], 0, false, true])
+    expect([replaced, listed(panel), container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
+      .toEqual([['sending', 1, ''], 0, 0, false, true])
+  })
+
+  it('does not say an account it removed went while a list that has it is on the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [removePath('acct_key')]: [keyRemoved()],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await pressRemove(container)
+    await act(async () => { await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') }) })
+    expect([lineOf(container), container.querySelectorAll('li.row').length]).toEqual(['', 1])
   })
 
   it.each([

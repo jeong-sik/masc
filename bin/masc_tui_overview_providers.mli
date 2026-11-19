@@ -3,10 +3,12 @@
     and accounts without windows to show.
     A row names the account and window, draws a bar and the percent used, and
     says when the window resets. A window priced in USD also shows its amounts.
-    A window heard at a different time than its account's newest report says so.
+    A Credit balance shows its remaining amount first, with used/total context
+    only when the provider stated a positive total. A window heard at a different time
+    than its account's newest report says so.
 
-    USD amounts describe the named window and its cap, not an inferred account
-    balance.
+    USD amounts describe the named window and its cap. Credit balances are
+    shown as reported, without inferring a total or account availability.
 
     A summary separates full last-reported limits from catalogue-observed
     exhaustion. Shaded meter cells show the unused part of the reported limit.
@@ -190,13 +192,30 @@ val cards_fit : width:int -> bool
 (** Whether {!section_cards} draws cards at [width]. *)
 
 
+type reset_state =
+  | Reset_not_reported
+  | Reset_passed
+  | Reset_pending of float
+
+val reset_state : now:float -> float option -> reset_state
+(** Classify the provider's reset timestamp without inferring a replacement. *)
+
+val shows_reset : Masc.Tui_decode_usage.provider_usage_utilization -> bool
+(** Unlimited and retracted Credit omit reset details; other reports retain
+    the stated, missing, or passed reset state. *)
+
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
-(** The value as a whole percent or a USD credit amount. A percent is
-    shown as reported; a fraction is multiplied by 100 and floored, so
-    [0.9999] reads [99%] and never [100%]. *)
+(** The value as a whole percent, a USD credit amount, or remaining Credit.
+    A percent is shown as reported; a fraction is multiplied by 100 and
+    floored, so [0.9999] reads [99%] and never [100%]. *)
 
 val share_of_full : Masc.Tui_decode_usage.provider_usage_utilization -> float option
-(** [None] for uncapped USD use: an amount with no denominator has no meter. *)
+(** [None] for uncapped USD use and Credit without a positive stated total:
+    an amount with no denominator has no meter. *)
+
+val credit_used_total : float option -> float -> (float * float) option
+(** The used and total amounts for a positive stated total, in that order.
+    Missing and zero totals produce no used/total context. *)
 
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with

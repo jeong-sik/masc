@@ -121,9 +121,11 @@ val cursor_apply : count:int -> Cursor_move.t -> int -> int
 
 val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 (** Like {!ensure_visible} for a cursor that names a run of lines [start] to
-    [stop] (inclusive). A window that already shows some line of the run is
-    left where the reader scrolled it, so the body of a tall item can be
-    walked; the window moves only when the whole run has left it. *)
+    [stop] (inclusive). A run no taller than the window is shown whole, by
+    the smallest move: a run below the window ends it, a run above starts
+    it. A taller run is read inside: a window that shows some line of it is
+    left where the reader scrolled it, so its body can be walked, and the
+    window moves only when the whole run has left it. *)
 
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
@@ -147,6 +149,15 @@ val window_of_heights : heights:int list -> cursor:int -> rows:int -> int -> int
     starts at that item and draws no item: the count is 0, and the items
     around it are not drawn in its place. [(0, 0)] for an empty list or a
     window of no lines. *)
+
+val items_always_shown : heights:int list -> rows:int -> int
+(** The fewest items in a row that a window of [rows] lines holds whole,
+    wherever the run starts, at least one: item [i] takes the [i]th of
+    [heights]. It is the height a list of such items reports for a page key,
+    so from any window a page down lands on an item that fits with every item
+    the window showed after the cursor, and nothing is passed unseen when the
+    windows ahead hold fewer items than this one. An item taller than the
+    window holds no run, so a list with one pages by one item. *)
 
 (** A surface that draws a preview under its list splits the rows it has. The
     split belongs here for the same reason the bound does: the keypress and

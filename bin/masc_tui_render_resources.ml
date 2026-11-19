@@ -28,7 +28,8 @@ let check_style status =
       (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
   | Known None
   | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
-  | Unknown _ | Kept_back _ -> Theme.muted ()
+  | Unknown (Masc_tui_value.Unknown.Read_failed, _) -> Theme.bad ()
+  | Unknown (Masc_tui_value.Unknown.(Unread | Unreported), _) | Kept_back _ -> Theme.muted ()
 
 (* A report's display name already spells its format, title and revision, and
    the type column says the format and revision, so the row names it by title. *)
@@ -75,12 +76,10 @@ let meta_cap_cells = 44
    to read across, so a wider pane leaves the rest of its width empty. *)
 let table_cap_cells = 120
 
-(* The widest check reading, the one that says nothing is known. Held as a
-   constant of the column rather than measured over the visible rows, so the
-   columns after it do not move when the window scrolls past a different one. *)
-let check_cells =
-  Masc_tui_message_layout.display_width
-    (Masc_tui_artifact_checks.label (Masc_tui_artifact_checks.Unknown ""))
+(* The widest check reading. Held as a constant of the column rather than
+   measured over the visible rows, so the columns after it do not move when
+   the window scrolls past a different one. *)
+let check_cells = Masc_tui_artifact_checks.widest_label_cells
 
 let day_marker ~ko = if ko then "오늘" else "today"
 
@@ -202,8 +201,6 @@ let list_rows state ~rows =
     | List_unread | List_loading | List_failed _ | List_empty _ | Rows_ready (Some _) -> true in
   max 0 (pane_surface_content_height ~rows - save_prompt_height state - 2
     - (if status then 1 else 0))
-
-let list_page_size state ~rows = max 1 (list_rows state ~rows)
 
 let document_viewport state ~rows ~cols =
   let pane_cols = if resource_split state ~cols then cols - keeper_roster_pane_cols else cols in
@@ -336,7 +333,7 @@ let render_resources (state : state) =
       | Some (_, (Absent | Loading | Failed _)) | None ->
           if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
-      ^ (if ko then " · 오늘 미확인: " else " · today unchecked: ")
+      ^ (if ko then " · 오늘 확인 안 함: " else " · today unchecked: ")
       ^ unchecked ^ Ansi.reset
       ^ Theme.recede () ^ query ^ Ansi.reset);
     let budget = list_rows state ~rows in
@@ -355,6 +352,7 @@ let render_resources (state : state) =
              (list_cells ~ko table None)
          ^ Ansi.reset);
     let visible = Rows.of_list ~first ~height:budget rows_list in
+    report_drawn_list Resource_entries ~height:budget;
     for i = 0 to budget - 1 do
       match Rows.at visible (first + i) with
       | Some resource ->

@@ -448,16 +448,16 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
            false
            (held.activation_mode = stored.activation_mode)
        | None -> Alcotest.fail "the Owner holds no meta");
-      let row () =
+      let snapshot () =
         Operator_control.invalidate_snapshot_cache ();
         Dashboard_cache.invalidate_all ();
-        let json =
-          Operator_control.snapshot_json ~view:"summary"
-            ~include_keepers:true ~include_messages:false
-            (operator_ctx env sw config "owner")
-        in
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          (operator_ctx env sw config "owner")
+      in
+      let row () =
         match
-          Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+          Yojson.Safe.Util.(snapshot () |> member "keepers" |> member "items" |> to_list)
           |> List.find_opt (fun row ->
                  Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
         with
@@ -466,6 +466,17 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
             (`Assoc (List.filter (fun (key, _) -> not (List.mem key row_ages)) fields))
         | Some _ | None -> Alcotest.fail "expected the keeper's row in the snapshot"
       in
+      (* The Keepers the snapshot names as meant to keep running. The snapshot
+         reads every configured Keeper's stored meta to name them (#53113). *)
+      let persistent () =
+        Yojson.Safe.Util.(
+          snapshot () |> member "persistent_agents" |> member "items" |> to_list)
+        |> List.map (fun item -> Yojson.Safe.Util.(item |> member "name" |> to_string))
+      in
+      Alcotest.(check (list string))
+        "the Keeper is one the snapshot names as meant to keep running"
+        [ keeper_name ]
+        (persistent ());
       let from_owner = row () in
       Keeper_owner_projection.remove ~base_path ~keeper_name owner;
       let from_file =
@@ -490,7 +501,11 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
       Alcotest.(check string)
         "the row of an owned Keeper needs no meta file"
         from_owner
-        (row ()))
+        (row ());
+      Alcotest.(check (list string))
+        "naming the Keepers meant to keep running needs no meta file"
+        [ keeper_name ]
+        (persistent ()))
 
 let health_projection_meta ~total_turns =
   match

@@ -13,6 +13,7 @@ import { AccountList } from './account-rows'
 import { checkDeadlineMs, checkModel, checkPath, createChecks, readChecked } from './check'
 import type { Check, ChecksModel } from './check'
 import { createRemovals } from './key-remove'
+import { createReplacements } from './key-replace'
 import { csrfHeader } from './wire'
 import type { Integration, Owned, Send } from './wire'
 
@@ -52,6 +53,8 @@ const passedBody = (record = 'made') =>
 const failedBody = (code = 'rate_limited', status = 'failed', message: unknown = 'The provider is rate limiting this account.') =>
   ({ verification: verification(status, { code, message, detail: null }), runtime: null })
 
+/** Replacements no test here drives: a card only needs them to be there. */
+const idleReplacements = () => createReplacements({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 /** Removals no test here drives: a card only needs them to be there. */
 const idleRemovals = () =>
   createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
@@ -286,11 +289,11 @@ const bare: Integration = {
   withheld: [{ model: 'bare-ghost', reason: 'model_undeclared' }, { model: 'bare-notools', reason: 'tools_not_declared' }],
 }
 const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
-const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId }, held: { kind: 'login' }, removal: null }], runtimes: [] })
+const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId }, held: { kind: 'login' }, left: null }], runtimes: [] })
 
 const card = (checks: ChecksModel, owned: Owned = one('claude_code')) =>
   render(html`
-    <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[claude, bare, codex]} owned=${owned} checks=${checks} removals=${idleRemovals()} /></section>
+    <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[claude, bare, codex]} owned=${owned} checks=${checks} removals=${idleRemovals()} replacements=${idleReplacements()} /></section>
   `).container
 
 /** A model of checks that shows `check` for the account and counts what it is asked. */
@@ -387,7 +390,7 @@ describe('the card of an account', () => {
 
   it('names the field and the button of each card with the card', () => {
     const two: Owned = {
-      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }) as const),
+      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }) as const),
       runtimes: [],
     }
     const container = card(showing(undefined), two)
@@ -403,7 +406,7 @@ describe('the card of an account', () => {
   ])('moves the focus to the title of the card when a reading takes the check away: %s', (_name, after) => {
     const checks = showing(undefined)
     const drawn = (integration: Integration) => html`
-      <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[integration]} owned=${one('claude_code')} checks=${checks} removals=${idleRemovals()} /></section>
+      <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[integration]} owned=${one('claude_code')} checks=${checks} removals=${idleRemovals()} replacements=${idleReplacements()} /></section>
     `
     const { container, rerender } = render(drawn(claude))
     container.querySelector<HTMLButtonElement>('.check button')?.focus()
@@ -417,7 +420,7 @@ describe('the card of an account', () => {
     const checks = showing(undefined)
     const drawn = (integration: Integration) => html`
       <section aria-labelledby="h"><h2 id="h">구독</h2><button type="button">다른 곳</button>
-        <${AccountList} integrations=${[integration]} owned=${one('claude_code')} checks=${checks} removals=${idleRemovals()} /></section>
+        <${AccountList} integrations=${[integration]} owned=${one('claude_code')} checks=${checks} removals=${idleRemovals()} replacements=${idleReplacements()} /></section>
     `
     const { container, rerender } = render(drawn(claude))
     const elsewhere = container.querySelector<HTMLButtonElement>('section > button')

@@ -63,11 +63,17 @@ end
    not read as something running. Every detail page draws its headings with
    these two. *)
 module Section = struct
-  let rule_text title =
-    "\xe2\x94\x80\xe2\x94\x80 " ^ title
-    ^ " \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+  let rule_lead = "\xe2\x94\x80\xe2\x94\x80 "
+  let rule_tail = " \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+  let rule_text title = rule_lead ^ title ^ rule_tail
 
   let style = Ansi.bold
+
+  let styled_heading ~rule_style title =
+    rule_style ^ rule_lead ^ Ansi.reset
+    ^ style ^ title ^ Ansi.reset
+    ^ rule_style ^ rule_tail ^ Ansi.reset
 end
 
 (** Semantic styles for state and content syntax.
@@ -87,6 +93,7 @@ module Theme = struct
   type resolved =
     { generation : int
     ; lift_enabled : bool
+    ; direct_truecolor : bool
     ; ok : string
     ; warn : string
     ; bad : string
@@ -142,6 +149,13 @@ module Theme = struct
        whole row is the quiet thing. Measured against the same ground as the
        hues above, because a quiet row on a side pane sits on that pane. *)
     ; recede : string
+    ; border_muted : string
+    ; diff_added_bg : string
+    ; diff_removed_bg : string
+    ; diff_added_fg : string
+    ; diff_removed_fg : string
+    ; diff_added : string
+    ; diff_removed : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -186,17 +200,28 @@ module Theme = struct
     let probed = Masc_tui_terminal_palette.snapshot () in
     let generation = Masc_tui_terminal_palette.snapshot_generation probed in
     let lift_enabled = Masc_tui_theme.lift_is_enabled () in
+    let direct_truecolor = Masc_tui_theme.direct_truecolor_is_enabled () in
     let previous = Atomic.get cache in
     match previous with
-    | Some cached when cached.generation = generation && cached.lift_enabled = lift_enabled -> cached
+    | Some cached
+      when cached.generation = generation
+           && cached.lift_enabled = lift_enabled
+           && cached.direct_truecolor = direct_truecolor -> cached
     | Some _ | None ->
       let palette = Masc_tui_terminal_palette.snapshot_palette probed in
       let of_state = Masc_tui_theme.status_readable ~surface palette in
       let of_text = Masc_tui_theme.status_text_readable ~surface palette in
       let of_colour = Masc_tui_theme.ansi_readable ~surface palette in
+      let diff_added_bg, diff_added_fg =
+        Masc_tui_theme.Syntax.diff_row_styles ~kind:`Added palette
+      in
+      let diff_removed_bg, diff_removed_fg =
+        Masc_tui_theme.Syntax.diff_row_styles ~kind:`Removed palette
+      in
       let next =
         { generation
         ; lift_enabled
+        ; direct_truecolor
         ; ok = of_state Masc_tui_theme.Ok
         ; warn = of_state Masc_tui_theme.Warn
         ; bad = of_state Masc_tui_theme.Bad
@@ -226,6 +251,13 @@ module Theme = struct
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
         ; recede = Masc_tui_theme.recede ~surface palette
+        ; border_muted = Masc_tui_theme.border_muted ~surface palette
+        ; diff_added_bg
+        ; diff_removed_bg
+        ; diff_added_fg
+        ; diff_removed_fg
+        ; diff_added = of_colour Masc_tui_theme.Bright_green
+        ; diff_removed = of_colour Masc_tui_theme.Bright_red
         }
       in
       if Atomic.compare_and_set cache previous (Some next) then next
@@ -269,11 +301,31 @@ module Theme = struct
 
   (* The frame's one accent: a key letter in a hint row, a label, a column the
      reader scans for. Bright cyan reads under 4.5:1 against the page in 11 of
-     the 53 bundled themes, so it goes through the same lift as every other
+     the 54 bundled themes, so it goes through the same lift as every other
      colour here. It is the same cyan as [info] and [hue_cyan]: a screen that
      drew two cyans would not say which one is the accent. *)
   let accent () = (resolved ()).hue_cyan
   let selection = Masc_tui_theme.selection
+  let selection_style_cache : (int * string) option Atomic.t = Atomic.make None
+
+  let rec selection_style () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get selection_style_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.selection_style
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set selection_style_cache previous
+           (Some (generation, style))
+      then style
+      else selection_style ()
+  ;;
+
   let sidebar_selection () =
     Masc_tui_terminal_palette.snapshot ()
     |> Masc_tui_terminal_palette.snapshot_palette
@@ -281,8 +333,9 @@ module Theme = struct
   (* A focused card's border, the border.focused token. RFC
      tui-one-screen-grammar section 7.3 gives status.info to "under way" and
      to focus, so it is [info] and goes through the same lift: a raw bright
-     cyan reads under 4.5:1 in 11 of the 53 bundled themes. *)
+     cyan reads under 4.5:1 in 11 of the 54 bundled themes. *)
   let border_focus () = (resolved ()).info
+  let border_muted () = (resolved ()).border_muted
 
   let recede () = (resolved ()).recede
 
@@ -350,6 +403,7 @@ module Theme = struct
     let bad () = (resolved ()).bad
     let info () = (resolved ()).info
     let recede () = (resolved ()).recede
+    let border_muted () = (resolved ()).border_muted
 
     (* The two next-action colours that are not a health reading. A keeper
        about to be probed is not unwell, and one a person just spoke to is not
@@ -383,7 +437,7 @@ module Theme = struct
     (* The rule between sections and the border of a fence divide a document
        the way a panel border divides a screen, so they take the panel
        border's colour. *)
-    let rule () = recede ()
+    let rule () = border_muted ()
 
     (* A served JSON payload has one role per thing a reader distinguishes,
        because a payload drawn in one colour is the wall of text the tool tree
@@ -394,10 +448,12 @@ module Theme = struct
     let json_number () = (resolved ()).hue_yellow
     let json_literal () = (resolved ()).hue_magenta
     let json_punctuation = Masc_tui_theme.Syntax.json_punctuation
-    let diff_added = Masc_tui_theme.Syntax.diff_added
-    let diff_removed = Masc_tui_theme.Syntax.diff_removed
-    let diff_added_bg = Masc_tui_theme.Syntax.diff_added_bg
-    let diff_removed_bg = Masc_tui_theme.Syntax.diff_removed_bg
+    let diff_added () = (resolved ()).diff_added
+    let diff_removed () = (resolved ()).diff_removed
+    let diff_added_bg () = (resolved ()).diff_added_bg
+    let diff_removed_bg () = (resolved ()).diff_removed_bg
+    let diff_added_fg () = (resolved ()).diff_added_fg
+    let diff_removed_fg () = (resolved ()).diff_removed_fg
     let diff_row_foreground = Masc_tui_theme.Syntax.diff_row_foreground
   end
 end
@@ -943,12 +999,11 @@ let ctx_color ratio =
    side-by-side panes still need it: a border is what separates an overlay
    from the surface under it, and two panes from each other.
 
-   The border is drawn in [Theme.recede], the colour the pane borders and
-   rules beside it already use, and not in the flat grey SGR 90. On a terminal
-   that reports its palette that grey is the terminal's own bright black, which
-   is 1.69:1 against Nord's background; [recede] is projected onto the reported
-   palette and held at 4.5:1. On a terminal that reports none, [recede] is the
-   default foreground, as it is for every pane border. *)
+   The border is drawn in [Theme.border_muted], a Truecolor non-text hairline
+   held at a 2.2:1 contrast floor so structural chrome sits calmly behind
+   secondary text instead of competing with it. On non-Truecolor capabilities
+   it falls back to [Theme.recede] (4.5:1), and on a terminal that reports no
+   palette it falls back to the default foreground. *)
 
 (* The box's measurements live in [Masc_tui_frame] so the helpers that draw
    it and the callers that measure against it read one set. *)
@@ -959,15 +1014,15 @@ let framed_content_height ~rows = Masc_tui_frame.content_height ~rows
 
 let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_tl_round (draw_hline (framed_rule_width cols)) Ansi.box_tr_round Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_tl_round (draw_hline (framed_rule_width cols)) Ansi.box_tr_round Ansi.reset)
 
 let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_bl_round (draw_hline (framed_rule_width cols)) Ansi.box_br_round Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_bl_round (draw_hline (framed_rule_width cols)) Ansi.box_br_round Ansi.reset)
 
 let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
 
 (* What an overlay draws between its border glyph and the content, and what
    a borderless row draws in the border's place. Both come from the frame's
@@ -985,7 +1040,7 @@ let add_row buf pieces =
 
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; fit_width content inner
@@ -994,14 +1049,14 @@ let framed_line buf cols content =
 let framed_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
     ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; String.make inner ' '
@@ -1016,14 +1071,12 @@ let framed_empty buf cols =
 let box_top buf _cols = Buffer.add_char buf '\n'
 let box_bottom buf _cols = Buffer.add_char buf '\n'
 
-(* The receded colour, not a flat grey. [Theme.recede] projects onto the
-   probed palette and holds a 4.5:1 contrast floor. So on a terminal that
-   reports one, this rule used to sit at whatever grey the SGR table happened
-   to give -- which can be the background -- while the rules the surfaces
-   draw beside it were receded. *)
+(* The muted hairline colour, not a flat grey. [Theme.border_muted] projects
+   onto the active palette and holds a 2.2:1 non-text contrast floor on
+   Truecolor, falling back to [Theme.recede] otherwise. *)
 let box_divider buf cols =
   Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.recede ())
+    (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.border_muted ())
        (draw_hline (framed_inner_width cols)) Ansi.reset frame_margin)
 
 (* Rows keep the framed geometry -- the frame's margin each side, content
@@ -1208,16 +1261,17 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   in
   lead ^ id ^ after ^ tail
 
-(* The selected row of a borderless list: one reverse-video band across the
-   full row, box_line's geometry (the frame's margin each side, content width
-   {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the
-   selection signal a colourless terminal keeps. Content must carry no SGR
-   of its own -- an inner reset would cut the band short; callers fold a
-   styled row with [Masc_tui_theme.strip_sgr] first. *)
+(* The selected row of a borderless list: one full-width selection band
+   (Truecolor accent-tinted on Truecolor terminals, reverse video otherwise),
+   matching box_line's geometry (the frame's margin each side, content width
+   {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is
+   also the selection signal a colourless terminal keeps. Content must carry
+   no SGR of its own -- an inner reset would cut the band short; callers fold
+   a styled row with [Masc_tui_theme.strip_sgr] first. *)
 let box_line_selected buf cols content =
   let inner = framed_inner_width cols in
   add_row buf
-    [ Masc_tui_theme.selection; frame_margin; fit_width content inner; frame_margin
+    [ Theme.selection_style (); frame_margin; fit_width content inner; frame_margin
     ; Ansi.reset ]
 
 let box_empty buf cols =

@@ -179,6 +179,10 @@ let render_context_inspector state =
           match selected with
           | None -> stored_scroll
           | Some cursor ->
+              (* The item rows are one-line rows in a row, and the window
+                 follows the selected one as it follows any row, so the
+                 item list is paged by this window. *)
+              report_drawn_list Context_inspector_items ~height;
               Masc_tui_scroll.ensure_visible ~cursor ~height
                 (Masc_tui_scroll.normalize ~count:(List.length lines) ~height
                    stored_scroll)
@@ -220,6 +224,7 @@ let render_context_inspector state =
               ~left:[ List.hd left ] ~right:[ List.hd right ]
             |> List.iter c.push;
             let body_height = split_height - 1 in
+            report_drawn_list Context_inspector_items ~height:body_height;
             let items = List.length left - 1 in
             let cursor =
               min (max 0 (items - 1)) (max 0 state.context_inspector_cursor)
@@ -471,7 +476,7 @@ let render_palette (state : state) =
         List.map Terminal_text.single_line
           (match code_worktrees_view state with
            | Masc_tui_fetched.Absent -> [ "Worktrees are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading worktrees…" ]
+           | Masc_tui_fetched.Loading -> [ "Reading worktrees" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
@@ -484,7 +489,7 @@ let render_palette (state : state) =
         List.map Terminal_text.single_line
           (match code_branches_view state with
            | Masc_tui_fetched.Absent -> [ "Branches are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading branches…" ]
+           | Masc_tui_fetched.Loading -> [ "Reading branches" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
@@ -503,7 +508,7 @@ let render_palette (state : state) =
                     | None -> "the checkout"
                     | Some dir -> "under " ^ dir) ]
            | Some (key, Masc_tui_fetched.Loading) ->
-               [ "Searching for " ^ key.css_query ^ "…" ]
+               [ "Searching for " ^ key.css_query ]
            | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
                [ detail ]
            | Some (_, Masc_tui_fetched.Ready search) ->
@@ -521,7 +526,7 @@ let render_palette (state : state) =
     | Palette_files _ ->
         let catalog_note = match code_finder_catalog state with
           | Masc_tui_fetched.Absent -> "File finder is no longer active; Esc returns to Code"
-          | Masc_tui_fetched.Loading -> "Reading checkout files…"
+          | Masc_tui_fetched.Loading -> "Reading checkout files"
           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
           | Masc_tui_fetched.Ready catalog ->
               Printf.sprintf "%s · %s"
@@ -530,7 +535,7 @@ let render_palette (state : state) =
                 (if String.equal catalog.wfc_root "" then "workspace checkout"
                  else catalog.wfc_root) in
         let file_notes = match Masc_tui_fetched.current state.code_finder_file with
-          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file…"]
+          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file"]
           | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) -> [detail]
           | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _)) -> [] in
         List.map Terminal_text.single_line (catalog_note :: file_notes)
@@ -569,8 +574,8 @@ let render_palette (state : state) =
           let context = match state.palette_mode with
             | Palette_jump when String.trim state.palette_query = "" ->
                 [ui_text state
-                   ~ko:"화면·키퍼·Task·게시글·설정을 검색하세요"
-                   ~en:"Search screens, Keepers, Tasks, posts or settings"]
+                   ~ko:"화면·키퍼·Task·게시글·설정 검색"
+                   ~en:"Search screens, Keepers, Tasks, posts, or settings"]
             | Palette_search search_origin ->
                 (match search_place search_origin with
                  | None -> []
@@ -584,8 +589,8 @@ let render_palette (state : state) =
             match state.palette_mode, Masc_tui_palette.search_enter state with
             | Palette_search _, Masc_tui_palette.Enter_searches ->
                 Some
-                  (if ko then "Enter를 눌러 입력한 검색어로 워크스페이스를 검색합니다"
-                   else "Press Enter to search the workspace for the typed query")
+                  (if ko then "Enter:입력한 검색어로 워크스페이스 검색"
+                   else "Enter:search workspace for typed query")
             | (Palette_search _, Masc_tui_palette.Enter_opens _)
             | ((Palette_jump | Palette_choice _ | Palette_files _
                 | Palette_locations _ | Palette_branches _ | Palette_worktrees _),
@@ -671,12 +676,10 @@ let link_modal_card (state : state) =
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
       let total_links = List.length state.link_modal_links in
-      (* Which link of several, and the divider under it. *)
-      let nav_rows = if total_links > 1 then 2 else 0 in
+      (* Link index/total moved to zone 2 ([c.position]); body uses the full
+         overlay budget without subtracting deleted in-body nav rows. *)
       let content_height =
-        max 1
-          (Masc_tui_types.surface_body_rows state ~terminal_rows
-           - surface_chrome_rows - nav_rows)
+        surface_chrome_budget ~frame:Chrome_overlay state ~terminal_rows
       in
       let content_lines =
         Masc_tui_link_preview.render_modal_card
@@ -1083,7 +1086,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
   let status = if not (server_authority_ready state) then
     "Workspace unconfirmed; any receipt is from the previous observation"
   else match panel.qp_reading, panel.qp_notice with
-    | Queue_loading, _ -> "Reading or sending…"
+    | Queue_loading, _ -> "Reading or sending"
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with
@@ -1504,13 +1507,13 @@ let render_account_server state ~version =
     (* The server's own string: one printable row, whatever it carries. *)
     ; say "버전" "Version", Masc.Tui_terminal_text.sanitize_terminal_text version
     ; say "사람" "People",
-      say "브라우저로 주소를 열고 로그인해 자기 구독과 키퍼를 써요."
+      say "브라우저에서 로그인 후 개인 구독·키퍼 사용"
         "Open the address in a browser, sign in, and use your own subscriptions and Keepers."
     ; "Admin",
-      say "같은 곳에서 로그인한 뒤 초대 링크와 허용 계정을 관리해요."
+      say "같은 주소에서 로그인 후 초대 링크·허용 계정 관리"
         "Sign in there too, then manage invitation links and allowed accounts."
     ; say "운영 화면" "Operator screens",
-      say "이 주소에서는 열 수 없어요. 단일 사용자 masc 서버라면 그 포트로 masc-tui 를 다시 열어요(--port)."
+      say "이 주소에서 미지원 · 단일 사용자 masc 서버는 --port로 masc-tui 재실행"
         "Not served at this address. For a single-user masc server, open masc-tui again on its port (--port)."
     ]
   in
@@ -1529,7 +1532,7 @@ let render_account_server state ~version =
       in
       List.iter (fun line -> c.push (fit_width (" " ^ line) width))
         (wrapped ~indent:1
-           (say "이 주소는 다계정 설치의 계정 서버예요. 운영 화면(키퍼·작업·저장소)은 여기에 없어요."
+           (say "다계정 설치의 계정 서버 주소 · 운영 화면(키퍼·작업·저장소)은 여기 없음"
               "This address is the account server of a multi-account installation. The operator screens (Keepers, Tasks, Repositories) are not served here."));
       c.push_empty ();
       let value_indent = 1 + label_cells + 2 in

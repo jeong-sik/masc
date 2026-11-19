@@ -181,6 +181,9 @@ val one_call_of
     under ({!Runtime_account_home_layout.person_runtime_root}). A login and
     a verification make it the same way. The registration of a key asks for
     it after the record of its account is written
-    ({!Server_key_account_registration}). The error is a sentence that names
-    no path. *)
+    ({!Server_key_account_registration}), and the replacement of a key
+    before its record ({!Server_key_account_replacement}). A name that is
+    there is taken as the folder: whether it is one, and whether it is
+    reached, is for whoever makes a file under it. The error is a sentence
+    that names no path. *)
 val person_runtime_root : person -> base_path:string -> (string, string) result

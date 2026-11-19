@@ -197,6 +197,16 @@ type forecast_carried_origin =
       (** A Librarian point, and the range opened at the turn boundary was
           refused as too large too: the turn's front moved to where this turn
           began, past atoms a failed turn saved without an end line. *)
+  | Carried_turn_start_at_max_context
+      (** Nothing was refused: the last request's count plus the largest
+          growth of one turn passed the binding's max-context, so the turn's
+          front moved to the turn boundary before the provider counted past
+          it. With no Librarian point, or one at or before where the window
+          opened. *)
+  | Carried_librarian_point_at_max_context
+      (** As {!Carried_turn_start_at_max_context}, with a Librarian point
+          past where the window opened: the turn's front moved to the end of
+          what the Librarian read. *)
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)
@@ -216,7 +226,8 @@ type forecast_carried_origin =
                 provider accepted came from. *)
       }
       (** The Librarian point is [librarian_end_atom] and the range opens at
-          a later start the provider accepted. *)
+          a start the provider accepted: past the point, or behind it while
+          the window stays. *)
 
 type forecast_carried =
   { first_atom : int

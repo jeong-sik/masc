@@ -13,6 +13,7 @@ type action = Payload of { source : Keeper_checkpoint_ref.t option; bytes : stri
                           allow_turn_reset : bool }
             | No_payload of canonical
 type plan = { authority : authority; session_dir : string; action : action }
+type head_change = Empties_head | Removes_undecodable_head | No_head
 type history =
   | Emptied of { cleared_message_count : int; checkpoint_found : bool }
   | Removed of { checkpoint_path : string; undecodable : Store.checkpoint_load_error }
@@ -174,6 +175,18 @@ let prepare ~(authority:authority) ~session_dir ~preserve_system =
       bytes;remove_undecodable;
       cleared_message_count=List.length original.messages - List.length messages;
       allow_turn_reset}}
+
+(* What the planned change does to the head. *)
+let head_change (plan : plan) =
+  match plan.action with
+  (* The head is there and decodes; its kept messages go in open. *)
+  | Payload { source = Some (_ : Keeper_checkpoint_ref.t); _ } -> Empties_head
+  (* An undecodable head is removed, and the retained input put in or not. *)
+  | Payload { source = None; remove_undecodable = true; _ } | No_payload Undecodable ->
+    Removes_undecodable_head
+  (* No head: the retained input goes in, or nothing changes. *)
+  | Payload { source = None; remove_undecodable = false; _ }
+  | No_payload (Absent | Superseded | Present (_ : Store.exact_checkpoint_snapshot)) -> No_head
 
 let remove_undecodable ~session_dir ~session_id =
   match Store.remove_undecodable_canonical ~session_dir ~session_id with

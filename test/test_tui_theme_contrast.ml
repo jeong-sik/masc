@@ -1020,14 +1020,328 @@ let test_contracts_cover_the_bundled_retro_presets () =
     retro_preset_names
 ;;
 
+let test_truecolor_selection_bar_clears_contrast_on_every_scheme () =
+  let parse_fg_bg drawn =
+    match String.index_opt drawn 'm' with
+    | None -> None
+    | Some split ->
+      let fg_part = String.sub drawn 0 (split + 1) in
+      let bg_part =
+        String.sub drawn (split + 1) (String.length drawn - split - 1)
+      in
+      (match
+         ( truecolor_rgb ~prefix:truecolor_prefix fg_part
+         , truecolor_rgb ~prefix:"\027[48;2;" bg_part )
+       with
+       | Some fg, Some bg -> Some (fg, bg)
+       | _ -> None)
+  in
+  List.iter
+    (fun scheme ->
+      let drawn =
+        Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+          ~project:truecolor (Some scheme.palette)
+      in
+      match parse_fg_bg drawn with
+      | None ->
+        Alcotest.failf "%s: expected Truecolor fg+bg selection bar, got %S"
+          scheme.name drawn
+      | Some (fg, bg) ->
+        let fg_ratio = Color.contrast_ratio fg bg in
+        let page_ratio = Color.contrast_ratio bg (background scheme) in
+        check bool
+          (Printf.sprintf "%s: selection fg reads at %.2f over band" scheme.name
+             fg_ratio)
+          true
+          (fg_ratio >= text_floor);
+        check bool
+          (Printf.sprintf "%s: selection band separates %.2f from page"
+             scheme.name page_ratio)
+          true
+          (page_ratio >= 1.15))
+    schemes
+;;
+
+let test_selection_bar_falls_back_to_reverse_without_truecolor () =
+  let sample = List.hd schemes in
+  let reverse = Masc_tui_theme.Sgr.reverse in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  check string "NO_COLOR keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:false
+       ~project:truecolor (Some sample.palette));
+  check string "missing palette keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:truecolor None);
+  check string "Ansi256 keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Ansi256) (Some sample.palette));
+  check string "Ansi16 keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Ansi16) (Some sample.palette));
+  check string "Unknown capability keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Unknown) (Some sample.palette));
+  (* Palette with no blue/cyan accent exercises the neutral Truecolor fallback. *)
+  let empty_slots = Array.make Palette.ansi_slot_count None in
+  let neutral_palette =
+    Palette.of_responses ~foreground:(Some (rgb 230 230 230))
+      ~background:(Some (rgb 24 24 32)) ~ansi:empty_slots
+  in
+  let neutral_drawn =
+    Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+      ~project:truecolor neutral_palette
+  in
+  check bool "missing accent slots use neutral Truecolor band" true
+    (String.starts_with ~prefix:truecolor_prefix neutral_drawn);
+  (* Unreadable low-contrast palette falls all the way back to reverse video. *)
+  let low_contrast_palette =
+    Palette.of_responses ~foreground:(Some (rgb 128 128 128))
+      ~background:(Some (rgb 120 120 120)) ~ansi:empty_slots
+  in
+  check string "unreadable palette falls back to reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:truecolor low_contrast_palette)
+;;
+
+let test_border_muted_is_softer_than_recede_on_every_scheme () =
+  let hairline_floor = 2.2 in
+  List.iter
+    (fun scheme ->
+      let surfaces =
+        [ "page", Masc_tui_theme.Page, background scheme
+        ; "side_pane", side_pane, side_pane_ground scheme.palette
+        ]
+      in
+      List.iter
+        (fun (surface_name, surface, ground) ->
+          let drawn_border =
+            Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+              ~default_foreground:"\027[39m"
+              ~project:truecolor ~surface (Some scheme.palette)
+          in
+          let drawn_recede =
+            Masc_tui_theme.For_testing.recede ~colors_enabled:true
+              ~default_foreground:"\027[39m"
+              ~project:truecolor ~surface (Some scheme.palette)
+          in
+          match truecolor_rgb ~prefix:truecolor_prefix drawn_border with
+          | None ->
+            Alcotest.failf "%s/%s: expected Truecolor hairline, got %S"
+              scheme.name surface_name drawn_border
+          | Some border_rgb ->
+            let border_ratio = Color.contrast_ratio border_rgb ground in
+            check bool
+              (Printf.sprintf "%s/%s: hairline border reads at %.2f"
+                 scheme.name surface_name border_ratio)
+              true
+              (border_ratio >= hairline_floor -. 0.01);
+            (match truecolor_rgb ~prefix:truecolor_prefix drawn_recede with
+             | Some recede_rgb ->
+               let recede_ratio = Color.contrast_ratio recede_rgb ground in
+               check bool
+                 (Printf.sprintf
+                    "%s/%s: hairline (%.2f) sits quieter than recede (%.2f)"
+                    scheme.name surface_name border_ratio recede_ratio)
+                 true
+                 (border_ratio < recede_ratio)
+             | None -> ()))
+        surfaces)
+    schemes
+;;
+
+let test_border_muted_fallbacks () =
+  let sample = List.hd schemes in
+  let default_fg = "\027[39m" in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  check string "NO_COLOR suppresses hairline" ""
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:false
+       ~default_foreground:default_fg ~project:truecolor
+       ~surface:Masc_tui_theme.Page (Some sample.palette));
+  check string "missing palette keeps default foreground" default_fg
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:truecolor
+       ~surface:Masc_tui_theme.Page None);
+  let ansi256_recede =
+    Masc_tui_theme.For_testing.recede ~colors_enabled:true
+      ~default_foreground:default_fg ~project:(project Palette.Ansi256)
+      ~surface:Masc_tui_theme.Page (Some sample.palette)
+  in
+  check string "Ansi256 falls back to recede" ansi256_recede
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:(project Palette.Ansi256)
+       ~surface:Masc_tui_theme.Page (Some sample.palette));
+  let ansi16_recede =
+    Masc_tui_theme.For_testing.recede ~colors_enabled:true
+      ~default_foreground:default_fg ~project:(project Palette.Ansi16)
+      ~surface:Masc_tui_theme.Page (Some sample.palette)
+  in
+  check string "Ansi16 falls back to recede" ansi16_recede
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:(project Palette.Ansi16)
+       ~surface:Masc_tui_theme.Page (Some sample.palette))
+;;
+
+let with_direct_truecolor enabled f =
+  let restore = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Masc_tui_theme.set_direct_truecolor enabled;
+  Fun.protect
+    ~finally:(fun () -> Masc_tui_theme.set_direct_truecolor restore)
+    f
+;;
+
+let test_direct_truecolor_emits_rgb_for_every_token_on_every_scheme () =
+  with_direct_truecolor true (fun () ->
+      with_lift true (fun () ->
+          List.iter
+            (fun scheme ->
+              let bg = background scheme in
+              List.iter
+                (fun (label, colour) ->
+                  let drawn = readable scheme colour in
+                  match truecolor_rgb ~prefix:truecolor_prefix drawn with
+                  | None ->
+                    Alcotest.failf
+                      "%s: %s expected direct Truecolor RGB, got %S"
+                      scheme.name label drawn
+                  | Some rgb ->
+                    let ratio = Color.contrast_ratio rgb bg in
+                    check bool
+                      (Printf.sprintf
+                         "%s: direct Truecolor %s reads at %.2f"
+                         scheme.name label ratio)
+                      true
+                      (ratio >= text_floor -. 0.01))
+                named_colours)
+            schemes);
+      (* Missing ANSI slot with lift_enabled = false still preserves the ANSI
+         code even under Default_foreground status text. *)
+      with_lift false (fun () ->
+          let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+          let empty_slots = Array.make Palette.ansi_slot_count None in
+          let palette =
+            Palette.of_responses ~foreground:(Some (rgb 240 240 240))
+              ~background:(Some (rgb 24 24 32)) ~ansi:empty_slots
+          in
+          check string "lift off with missing slot keeps ANSI code"
+            (Masc_tui_theme.For_testing.ansi_color_code Masc_tui_theme.Bright_cyan)
+            (Masc_tui_theme.For_testing.status_text_readable
+               ~colors_enabled:true ~project:truecolor
+               ~surface:Masc_tui_theme.Page palette Masc_tui_theme.Info)))
+;;
+
+let test_direct_truecolor_default_scheme_passes_natively () =
+  let name = Masc_tui_theme_choice.default_truecolor_theme in
+  match Catalog.find ~base_path:(themes_base_path ()) name with
+  | None -> Alcotest.fail (name ^ " is missing from config/themes")
+  | Some scheme ->
+    check bool (name ^ " is dark") false (Catalog.light scheme);
+    let entry =
+      List.find_opt
+        (fun (e : Masc_tui_theme_choice.entry) -> String.equal e.name name)
+        (Masc_tui_theme_choice.entries ())
+    in
+    (match entry with
+     | None -> Alcotest.fail (name ^ " is missing from picker entries")
+     | Some entry ->
+       check int (name ^ " clears all 7 measured slots natively") 0 entry.lifted)
+;;
+
+let test_terminal_probe_does_not_clobber_active_theme () =
+  let previous_palette = Palette.current () in
+  let previous_direct = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_tui_theme_choice.follow_terminal ();
+      Masc_tui_theme_choice.record_terminal_palette None;
+      Masc_tui_theme.set_direct_truecolor previous_direct;
+      Palette.set_current previous_palette)
+    (fun () ->
+      check bool "apply default truecolor theme" true
+        (Masc_tui_theme_choice.apply
+           Masc_tui_theme_choice.default_truecolor_theme);
+      check bool "apply enables direct truecolor" true
+        (Masc_tui_theme.direct_truecolor_is_enabled ());
+      let chosen_palette = Palette.current () in
+      let terminal_palette = (List.hd schemes).palette in
+      Masc_tui_theme_choice.record_terminal_palette (Some terminal_palette);
+      check bool "late OSC probe keeps active theme palette" true
+        (Palette.current () = chosen_palette);
+      Masc_tui_theme_choice.follow_terminal ();
+      check bool "follow_terminal disables direct truecolor" false
+        (Masc_tui_theme.direct_truecolor_is_enabled ());
+      check bool "follow_terminal restores observed terminal palette" true
+        (Palette.current () = Some terminal_palette))
+;;
+
+let test_truecolor_diff_rows_clear_contrast_on_every_scheme () =
+  List.iter
+    (fun scheme ->
+      let page = background scheme in
+      List.iter
+        (fun (label, kind) ->
+          let bg_code, fg_code =
+            Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+              ~project:truecolor ~kind (Some scheme.palette)
+          in
+          match
+            ( truecolor_rgb ~prefix:"\027[48;2;" bg_code
+            , truecolor_rgb ~prefix:truecolor_prefix fg_code )
+          with
+          | Some bg_rgb, Some fg_rgb ->
+            check bool
+              (Printf.sprintf "%s: %s diff bg differs from page" scheme.name
+                 label)
+              true (bg_rgb <> page);
+            let ratio = Color.contrast_ratio fg_rgb bg_rgb in
+            check bool
+              (Printf.sprintf "%s: %s diff fg reads at %.2f over tint"
+                 scheme.name label ratio)
+              true
+              (ratio >= text_floor -. 0.01)
+          | _ ->
+            Alcotest.failf "%s: %s expected Truecolor diff pair, got (%S, %S)"
+              scheme.name label bg_code fg_code)
+        [ "added", `Added; "removed", `Removed ])
+    schemes
+;;
+
+let test_diff_rows_fall_back_without_truecolor () =
+  let sample = List.hd schemes in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  check (Alcotest.pair string string) "NO_COLOR suppresses diff styles" ("", "")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:false
+       ~project:truecolor ~kind:`Added (Some sample.palette));
+  check (Alcotest.pair string string) "missing palette falls back to 256-colour diff"
+    ("\027[48;5;22m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:truecolor ~kind:`Added None);
+  check (Alcotest.pair string string) "Ansi256 falls back to 256-colour added diff"
+    ("\027[48;5;22m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:(project Palette.Ansi256) ~kind:`Added (Some sample.palette));
+  check (Alcotest.pair string string) "Ansi16 falls back to 256-colour removed diff"
+    ("\027[48;5;52m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:(project Palette.Ansi16) ~kind:`Removed (Some sample.palette))
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
 let test_theme_command_applies_a_retro_preset_by_name () =
-  check bool "apply accepts a bundled preset" true
-    (Masc_tui_theme_choice.apply "norton-commander");
-  check bool "apply rejects a name no scheme carries" false
-    (Masc_tui_theme_choice.apply "no-such-retro-preset")
+  let previous_palette = Palette.current () in
+  let previous_direct = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_tui_theme_choice.follow_terminal ();
+      Masc_tui_theme.set_direct_truecolor previous_direct;
+      Palette.set_current previous_palette)
+    (fun () ->
+      check bool "apply accepts a bundled preset" true
+        (Masc_tui_theme_choice.apply "norton-commander");
+      check bool "apply rejects a name no scheme carries" false
+        (Masc_tui_theme_choice.apply "no-such-retro-preset"))
 ;;
 
 let () =
@@ -1076,6 +1390,24 @@ let () =
             test_side_pane_recede_reads_on_every_scheme
         ; Alcotest.test_case "a declared-limit blend clears the floor on every scheme and surface"
             `Quick test_limit_blend_clears_floor_on_every_scheme_and_surface
+        ; Alcotest.test_case "truecolor selection bar clears contrast on every scheme"
+            `Quick test_truecolor_selection_bar_clears_contrast_on_every_scheme
+        ; Alcotest.test_case "selection bar falls back to reverse without truecolor"
+            `Quick test_selection_bar_falls_back_to_reverse_without_truecolor
+        ; Alcotest.test_case "hairline border is softer than recede on every scheme"
+            `Quick test_border_muted_is_softer_than_recede_on_every_scheme
+        ; Alcotest.test_case "hairline border fallbacks follow capability"
+            `Quick test_border_muted_fallbacks
+        ; Alcotest.test_case "direct truecolor emits RGB for every token on every scheme"
+            `Quick test_direct_truecolor_emits_rgb_for_every_token_on_every_scheme
+        ; Alcotest.test_case "default truecolor scheme passes all measured slots natively"
+            `Quick test_direct_truecolor_default_scheme_passes_natively
+        ; Alcotest.test_case "late terminal probe does not clobber active theme"
+            `Quick test_terminal_probe_does_not_clobber_active_theme
+        ; Alcotest.test_case "truecolor diff rows clear contrast on every scheme"
+            `Quick test_truecolor_diff_rows_clear_contrast_on_every_scheme
+        ; Alcotest.test_case "diff rows fall back cleanly without truecolor"
+            `Quick test_diff_rows_fall_back_without_truecolor
 
         ] )
     ; ( "toml theme loading"

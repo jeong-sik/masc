@@ -111,7 +111,7 @@ let render_telemetry ~ko ~width ~height snap =
       if snap.fleet_bootable > 0 then
         Chart.meter ~width:col_w ~value:snap.fleet_running
           ~max_value:(max 1 snap.fleet_bootable)
-          ~label:(say "실행" "Run")
+          ~label:(say "실행" "Run") ~label_style:(Theme.recede ())
           ~suffix:(Printf.sprintf "%d/%d" snap.fleet_running snap.fleet_bootable)
           ~scale:(Chart.Series { paint = Theme.paint (); series = Palette.Capacity })
           ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
@@ -130,7 +130,7 @@ let render_telemetry ~ko ~width ~height snap =
         in
         Chart.meter ~width:col_w ~value:snap.capacity_avail
           ~max_value:(max 1 snap.capacity_target)
-          ~label:(say "여력" "Cap")
+          ~label:(say "여력" "Cap") ~label_style:(Theme.recede ())
           ~suffix
           ~scale:(Chart.Series { paint = Theme.paint (); series = Palette.Capacity })
           ?suffix_style:
@@ -147,7 +147,7 @@ let render_telemetry ~ko ~width ~height snap =
       with
       | Some live, Some total, Some live_s, Some total_s when total > 0 ->
           Chart.meter ~width:right_w ~value:live ~max_value:(max 1 total)
-            ~label:(say "힙" "Heap")
+            ~label:(say "힙" "Heap") ~label_style:(Theme.recede ())
             ~suffix:(Printf.sprintf "%s/%s" live_s total_s)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Palette.Memory })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
@@ -160,12 +160,13 @@ let render_telemetry ~ko ~width ~height snap =
       let sched_part =
         match snap.sched_p95_ms, snap.sched_stalls with
         | Some p95, Some stalls when stalls > 0 ->
-            Theme.warn ()
-            ^ Printf.sprintf (if ko then "p95 %.2fms · 정체 %d" else "p95 %.2fms · %d stalls")
+            Theme.recede () ^ "p95 " ^ Ansi.reset
+            ^ Theme.warn ()
+            ^ Printf.sprintf (if ko then "%.2fms · 정체 %d" else "%.2fms · %d stalls")
                 p95 stalls
             ^ Ansi.reset
         | Some p95, _ ->
-            Printf.sprintf "p95 %.2fms" p95
+            Theme.recede () ^ "p95 " ^ Ansi.reset ^ Printf.sprintf "%.2fms" p95
         | None, _ ->
             Theme.recede () ^ "p95 " ^ Value.Unknown.(glyph Unread) ^ Ansi.reset
       in

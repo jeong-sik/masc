@@ -166,6 +166,8 @@ type t =
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
   | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
+  | TurnLogAppendFailures       (* counter: a line in the turn log was not written (a turn's Opened at admission, its Closed at its end, the line of a process start); the turn or the start went on all the same *)
+  | TurnLogOpenCloseFailures    (* counter: a process start could not close the open messages of the turn the process had left open; the next turn's closing save closes them *)
   | HistoryFragmentFailures     (* counter: a history line (a turn's message or tool observation) was not built or not written *)
   | WorkingStateNotCarried      (* counter: an official client left the Librarian working state out, because carried in front of the range it would have displaced atoms it does not cover *)
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
@@ -359,6 +361,8 @@ let to_string = function
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
   | TurnBoundaryFailures -> "masc_keeper_turn_boundary_failures_total"
+  | TurnLogAppendFailures -> "masc_keeper_turn_log_append_failed_total"
+  | TurnLogOpenCloseFailures -> "masc_keeper_turn_log_open_close_failed_total"
   | HistoryFragmentFailures -> "masc_keeper_history_fragment_failures_total"
   | WorkingStateNotCarried -> "masc_keeper_librarian_working_state_not_carried_total"
   | WorkspaceMemoryBriefingBytes -> "masc_keeper_workspace_memory_briefing_bytes"
@@ -426,6 +430,7 @@ let collection = function
   | PromptSegmentBytes | KeeperTurnInstructionHash | RawTraceSinkDegraded | RawTraceRetentionDeleted
   | RawTraceRetentionSkipped | RawTraceRetentionUnlinkFailed | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures | WireCaptureRecordSkipped | TurnBoundaryFailures
+  | TurnLogAppendFailures | TurnLogOpenCloseFailures
   | HistoryFragmentFailures | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected

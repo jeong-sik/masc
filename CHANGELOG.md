@@ -917,9 +917,10 @@
 - A key account whose key the server did not read no longer says that a
   Keeper can run, and its models are not offered to a Keeper (#53169).
 - The Dashboard schedule calendar no longer calls days empty when the server left active schedules off the page it read. It says how many active schedules were not loaded and from when they are due, shows the 7-day empty sentence only when every day is fully known, and marks day counts that may be short. Without a schedule projection the calendar and cadence counts are not drawn. The remaining rows are still not read (#52961). (#53173)
-- At start the account server ends the removals of key accounts a stopped
-  server left before the deletions of conversations, so a key no longer
-  stays on disk while those wait for a vendor client (#53183).
+- At start the account server and `masc auth preview` end the removals of
+  key accounts a stopped server left before the deletions of conversations,
+  so a key no longer stays on disk while those wait for a vendor client
+  (#53183).
 - The removal of a key account no longer waits for ever when a FIFO stands
   in the place of the folder of the keys (#53183).
 - The TUI usage screen's account limit list starts every bar in one column.
@@ -1015,13 +1016,15 @@
 - A key replacement makes or finds the runtime root of the person before it
   writes its record. Under a root that was not reached it recorded the
   replacement, answered 503 `key_not_stored` and removed nothing, so the
-  key before stayed on disk. It now answers 503 `replacement_not_recorded`
-  with nothing written (#53368).
-- The read of a file's last lines (the newest decision row of a Keeper, the decisions and practice feeds, the history tail of the Keeper status detail, the turn pulse's seed) dropped a whole line when its byte window started at a newline or inside a blank line. It passed over blank lines before it dropped the piece the window may have cut, so the line behind a blank cut piece went instead. The cut piece now goes first. A Keeper whose decision record held only blanks in the reader's window before its newest row read as having no decision row while the server's kept row was that row; both now answer the row. (#53383)
+  key before stayed on disk. It now answers 503 `files_not_reached`
+  with no record written (#53368).
+- The read of a file's last lines (the newest decision row of a Keeper, the decisions and practice feeds, the history tail of the Keeper status detail, the turn pulse's seed) dropped a whole line when the first piece of what it read was blank: a read that began at a newline, inside a blank line, or inside the blanks that end a line. It passed over blank lines before it dropped the piece the window may have cut, so the line behind a blank cut piece went instead. The cut piece now goes first. A Keeper whose decision record held only blanks in the reader's window before its newest row read as having no decision row while the server's kept row was that row; both now answer the row. (#53383)
 - The TUI runtime table no longer says a spent account twice. A runtime
   resting for its provider quota (a quota refusal or a usage read that found
   the window spent) read `한도 소진 (…)` and then `계정 한도 소진` on the same
-  row; the rest, which carries when it ends, now says it alone. A payment
+  row; the rest, which carries when it ends, now says it alone. The rest
+  names one end, so a usage reading with several windows shows each
+  window's reset only in the Overview providers view. A payment
   refusal still shows the account limit beside it (#53403).
 - The TUI runtime table's status column is measured from the cell each row
   draws, not from a longer sentence it never shows, and the selected row's
@@ -1061,7 +1064,7 @@
 - Tools Async 창은 실제로 그려지는 요청 행만 나이 글자로 다시 그리기를 예약해요 (#53179).
 - A Keeper row reads the Keeper's newest execution receipt from a value its store keeps in memory instead of from the day files, and `Keeper_execution_receipt.append` moves that value (`Dated_jsonl.newest_parsed_row`). `Keeper_execution_receipt.latest_json` gives the newest row that is JSON, as it did and as `read_latest_receipt` does. It no longer reads a `.jsonl` file whose name begins with a dot, except in a store the strict read refuses, which it reads as before. (#53222)
 - A Keeper row finds the Keeper's newest tool call in the newest 16 rows of the tool call ledger that the ledger's store keeps in memory, instead of reading those rows from the day files for every Keeper, and each logged call moves the kept rows (`Dated_jsonl.last_rows`). `Keeper_tool_call_log.read_latest` answers as it did, except that it no longer reads a `.jsonl` file whose name begins with a dot: the strict read passes such a file over. (#53225)
-- A Keeper row no longer reads the tail of the Keeper's decision record each time it is built. The server keeps the record's newest row in memory, and `append_decision_record` moves it with every row it appends. A row longer than half the reader's window, or one that is not a JSON object, is not kept: the next read is of the file. (#53245)
+- A Keeper row no longer reads the tail of the Keeper's decision record each time it is built. The server keeps the record's newest row in memory, and `append_decision_record` moves it with every row it appends. A row as long as the reader's window or longer, or one that is not a JSON object, is not kept: the next read is of the file. (#53245)
 - The tool audit of a Keeper's newest turn, shown in the Keeper row, the briefing and the Keeper detail, is kept in memory by the server instead of being looked up through the metrics store's day files on every read. A turn row moves it and a heartbeat row leaves it as it is (`Dated_jsonl.newest_selected`). (#53267)
 - One JSONL append resolves its file's path once, where it resolved it twice: the lock key it had just resolved was resolved again to take the lock. Each resolution is a `Unix.realpath` of the directory, which on OCaml 5.5.2 keeps the runtime lock for the whole call. Outside Eio, at load average about 120, the fastest of 28 rounds of 10000 appends went from 62.9 µs to 36.2 µs an append for a directory 9 levels below the root, and from 177.5 µs to 94.7 µs for one 33 levels below it. (#53298)
 - The workspace event log no longer makes its month directory before each event: the append makes it in its own job since #53288, so one `stat` an event goes. (#53325)

@@ -628,6 +628,22 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_snapshot_golden
+  test_librarian_answer
+  test_librarian_plan
+  test_librarian_scoring
+  test_keeper_turn_log
+  test_keeper_turn_log_store
+  test_keeper_turn_log_marks
+  test_keeper_turn_log_writer
+  test_keeper_turn_log_head
+  test_keeper_turn_log_ends
+  test_keeper_turn_log_recorder
+  test_keeper_turn_log_turn
+  test_keeper_turn_log_process_start
+  test_keeper_turn_log_reset
+  test_keeper_shutdown_session_turn_log
+  test_keeper_purge_turn_log
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
@@ -966,6 +982,22 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_keeper_memory_os_events
+  test_keeper_memory_snapshot_golden
+  test_librarian_answer
+  test_librarian_plan
+  test_librarian_scoring
+  test_keeper_turn_log
+  test_keeper_turn_log_store
+  test_keeper_turn_log_marks
+  test_keeper_turn_log_writer
+  test_keeper_turn_log_head
+  test_keeper_turn_log_ends
+  test_keeper_turn_log_recorder
+  test_keeper_turn_log_turn
+  test_keeper_turn_log_process_start
+  test_keeper_turn_log_reset
+  test_keeper_shutdown_session_turn_log
+  test_keeper_purge_turn_log
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
@@ -4875,7 +4907,8 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout
+  masc_tui_scroll))
 
 (test
  (name test_tui_decode_overview_goals)
@@ -4923,6 +4956,14 @@
  (name test_tui_keeper_turns)
  (modules test_tui_keeper_turns)
  (libraries alcotest masc_tui_keeper_turns masc.masc_types))
+
+(test
+ (name test_tui_render_list_heights)
+ (modules test_tui_render_list_heights)
+ (libraries alcotest masc masc_tui_types masc_tui_render_prim masc_tui_render_board
+  masc_tui_render_config masc_tui_ansi masc_tui_render_schedule masc_tui_theme
+  masc_tui_frame_presenter masc_tui_fetched masc_tui_model_runtime_table
+  masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_render_memory)

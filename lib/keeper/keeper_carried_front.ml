@@ -7,6 +7,8 @@ type source =
   | Turn_start_after_librarian_refusal
   | This_turn_start_after_seed_refusal
   | This_turn_start_after_librarian_refusal
+  | Turn_start_at_max_context
+  | Librarian_point_at_max_context
 
 type seed =
   { first_atom : int
@@ -427,6 +429,8 @@ let source_to_string = function
   | Turn_start_after_librarian_refusal -> "turn_start_after_librarian_refusal"
   | This_turn_start_after_seed_refusal -> "this_turn_start_after_seed_refusal"
   | This_turn_start_after_librarian_refusal -> "this_turn_start_after_librarian_refusal"
+  | Turn_start_at_max_context -> "turn_start_at_max_context"
+  | Librarian_point_at_max_context -> "librarian_point_at_max_context"
 ;;
 
 let seed_to_json (seed : seed) =
@@ -461,6 +465,10 @@ let rec origin_to_json = function
     `Assoc [ "kind", `String "this_turn_start_after_seed_refusal" ]
   | Carried This_turn_start_after_librarian_refusal ->
     `Assoc [ "kind", `String "this_turn_start_after_librarian_refusal" ]
+  | Carried Turn_start_at_max_context ->
+    `Assoc [ "kind", `String "turn_start_at_max_context" ]
+  | Carried Librarian_point_at_max_context ->
+    `Assoc [ "kind", `String "librarian_point_at_max_context" ]
   | Past_librarian_point { librarian_end_atom; source } ->
     `Assoc
       [ "kind", `String "past_librarian_point"

@@ -71,6 +71,36 @@ let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
     "unit", `String "fraction"; "value", `Float 1.]]);
   check int "late stored old cap stays removed" 1 (List.length (points config (day +. 31.))))
 
+let credit_balances_survive_durable_history () = fixture (fun config scope day ->
+  Usage.record ~scope ~observed_at:(day +. 10.)
+    (decode Usage.decode_openrouter_credits
+       {|{"data":{"total_credits":100.5,"total_usage":25.75}}|});
+  Usage.record ~scope ~observed_at:(day +. 20.)
+    (decode Usage.decode_ollama_balance
+       {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"from":"2026-09-15T09:30:00Z","until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":25}}|});
+  Usage.record ~scope ~observed_at:(day +. 30.)
+    (decode Usage.decode_codex_rate_limits_updated
+       {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":true,"balance":null}}}|});
+  let rows = points config (day +. 31.) in
+  check int "OpenRouter, Ollama and Codex Credit reports coexist" 4 (List.length rows);
+  let open Yojson.Safe.Util in
+  let account = List.find (fun row -> kind row = "provider:account credit balance") rows in
+  check string "OpenRouter source" "openrouter.credits" (account |> member "source" |> to_string);
+  check string "Credit unit" "credit_balance" (account |> member "unit" |> to_string);
+  check string "USD currency" "USD" (account |> member "currency" |> to_string);
+  check (float 0.0001) "account total" 100.5 (account |> member "total" |> to_float);
+  check (float 0.0001) "account remaining" 74.75 (account |> member "remaining" |> to_float);
+  let included = List.find (fun row -> kind row = "provider:included credit period") rows in
+  check (float 0.0001) "included total" 100.0 (included |> member "total" |> to_float);
+  check (float 0.0001) "included remaining" 72.5 (included |> member "remaining" |> to_float);
+  check (float 0.) "included reset" 1792056600.0 (included |> member "resets_at" |> to_float);
+  let purchased = List.find (fun row -> kind row = "provider:purchased credit balance") rows in
+  check bool "purchased has no fabricated total" true (purchased |> member "total" = `Null);
+  check (float 0.0001) "purchased remaining" 25.0 (purchased |> member "remaining" |> to_float);
+  let unlimited = List.find (fun row -> kind row = "provider:credit balance") rows in
+  check string "Codex source" "codex.account_rate_limits_updated" (unlimited |> member "source" |> to_string);
+  check string "unlimited Credit unit" "credit_unlimited" (unlimited |> member "unit" |> to_string))
+
 let complete_and_sparse_sources () = fixture (fun config scope day ->
   let antigravity disabled = decode Usage.decode_antigravity_usage (Printf.sprintf
     {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"week","window":"weekly","remaining_fraction":0},{"id":"short","window":"5h","remaining_fraction":0,"disabled":%b}]}]}}}|} disabled) in
@@ -215,7 +245,8 @@ let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
     match point.puhp_unit with
     | Tui_decode_usage.Utilization_percent value ->
         check int "neighbor utilization survives" expected value
-    | Utilization_fraction _ | Utilization_usd _ -> fail "neighbor unit changed")
+    | Utilization_fraction _ | Utilization_usd _ | Utilization_credit_balance _
+    | Utilization_credit_unlimited | Utilization_credit_retracted -> fail "neighbor unit changed")
     ["before", day +. 10., 10; "after", day +. 20., 20];
   let prior = List.find
     (fun (point : Tui_decode_usage.provider_usage_history_point) ->
@@ -230,7 +261,8 @@ let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
   | Tui_decode_usage.Utilization_usd { used; limit = None } ->
       check (float 0.) "later uncapped report survives malformed rows" 21.5 used
   | Utilization_usd { limit = Some _; _ } | Utilization_fraction _
-  | Utilization_percent _ -> fail "later report lost its uncapped USD amount")
+  | Utilization_percent _ | Utilization_credit_balance _ | Utilization_credit_unlimited
+  | Utilization_credit_retracted -> fail "later report lost its uncapped USD amount")
 
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then (mkdir_p (Filename.dirname dir); Unix.mkdir dir 0o755)
@@ -448,6 +480,40 @@ let restart_reads_each_window_of_a_sparse_source () = fixture (fun config scope 
     [ day +. 10.; day +. 20. ]
     (List.sort Float.compare (List.map snd (restored scope))))
 
+let codex_credit_retraction_survives_restart () = fixture (fun config scope day ->
+  let update_to_read = other_scope config "codex-update-to-read" in
+  let finite_read =
+    decode Usage.decode_codex_rate_limits_read
+      {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}},"rateLimitsByLimitId":null}|}
+  in
+  let finite_update =
+    decode Usage.decode_codex_rate_limits_updated
+      {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}}}|}
+  in
+  let disabled_update =
+    decode Usage.decode_codex_rate_limits_updated
+      {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":false,"balance":null}}}|}
+  in
+  let hidden_read =
+    decode Usage.decode_codex_rate_limits_read
+      {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|}
+  in
+  store_only config scope ~observed_at:(day +. 10.) finite_read;
+  store_only config scope ~observed_at:(day +. 20.) disabled_update;
+  store_only config update_to_read ~observed_at:(day +. 10.) finite_update;
+  store_only config update_to_read ~observed_at:(day +. 20.) hidden_read;
+  check int "both cross-source retractions leave no daily balance" 0
+    (List.length (points config (day +. 21.)));
+  restore config ~now:(day +. 30.) [scope; update_to_read];
+  List.iter
+    (fun scope ->
+      match Usage.state ~scope with
+      | Usage.Reported_no_windows { observed_at; _ } ->
+          check (float 0.) "the cross-source retraction time survives restart" (day +. 20.) observed_at
+      | Usage.Reported _ | Usage.Not_reported_since_start ->
+          fail "the old balance returned after cross-source restart")
+    [scope; update_to_read])
+
 (* The stored row of window [limit_id] with [key] rewritten. *)
 let rewrite ~limit_id key value = function
   | `Assoc fields when List.assoc_opt "limit_id" fields = Some (`String limit_id) ->
@@ -552,6 +618,8 @@ let () = run "provider usage durable snapshots" ["history", [
     restart_rests_a_scope_only_as_a_live_report_would;
   test_case "a restart reads each window of a sparse source" `Quick
     restart_reads_each_window_of_a_sparse_source;
+  test_case "Codex Credit retraction survives restart" `Quick
+    codex_credit_retraction_survives_restart;
   test_case "a restart puts back no part of a complete report" `Quick
     restart_puts_back_no_part_of_a_complete_report;
   test_case "a restart leaves out rows without a role" `Quick
@@ -568,6 +636,7 @@ let () = run "provider usage durable snapshots" ["history", [
       ~current_kind:"provider:API key usage (all time)"
       ~report:{|{"data":{"limit":null,"usage":21.5}}|}
       ~unit:"usd" ~value:12.5 ~extra:["limit", `Null]);
+  test_case "Credit balances survive durable history" `Quick credit_balances_survive_durable_history;
   test_case "overlapping source windows survive another source's empty report" `Quick overlapping_sources;
   test_case "empty-only day, recovery and another reporting source" `Quick empty_day_and_recovery;
   test_case "removed cap, empty report, prior day and delayed journal" `Quick removed_cap_and_empty_snapshot;

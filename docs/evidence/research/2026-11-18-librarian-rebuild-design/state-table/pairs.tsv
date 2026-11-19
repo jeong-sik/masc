@@ -1,0 +1,90 @@
+state	event	condition	action
+Booting	Boot_finished		boot 표(§8.6). `Stopped _` 이거나 다음 묻기
+Booting	Turn_closed		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Pulse		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Write		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Ask_ended		늦은 답
+Booting	Declaration_changed		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Resume		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Skip_item		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Skip_line		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Restart_reading		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Adopt		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Booting	Retire		mailbox 에서 기다린다. boot 가 끝나면 온 순서대로 다룬다
+Idle	Boot_finished		버린다
+Idle	Turn_closed		다음 묻기
+Idle	Pulse		턴 기록의 길이를 본다(stat). 적어 둔 길이와 같으면 `Idle` 이고 읽지 않는다. 다르면 다음 묻기
+Idle	Write		반영하고 답한다 → `Idle`
+Idle	Ask_ended		늦은 답
+Idle	Declaration_changed		저장하고 폭 기억을 비운다 → 다음 묻기
+Idle	Resume		`Refused Nothing_to_resume`
+Idle	Skip_item		건너뛰기 규칙
+Idle	Skip_line		건너뛰기 규칙
+Idle	Restart_reading		건너뛰기 규칙
+Idle	Adopt		`Refused Not_stopped`
+Idle	Retire		파일을 닫고 잠금을 놓는다 → `Retired`
+Asking	Boot_finished		버린다
+Asking	Turn_closed		`Asking a`
+Asking	Pulse		`Asking a`
+Asking	Write		바로 반영하고 답한다. fact 를 지웠으면 그 id 를 `a.removed_since` 에 더한다 → `Asking a`. 쓰기는 모델을 기다리지 않는다
+Asking	Ask_ended	지금 묻기	아래 표
+Asking	Ask_ended	다른 번호	늦은 답
+Asking	Declaration_changed	질문 쪽이 다르거나 lane 이 꺼진다	묻기를 취소하고 저장하고 폭 기억을 비운다 → 다음 묻기, lane 이 꺼졌으면 `Idle`
+Asking	Declaration_changed	slot 목록만 다르다	저장하고 폭 기억을 비운다 → `Asking a`
+Asking	Resume		`Refused Nothing_to_resume`
+Asking	Skip_item		건너뛰기 규칙
+Asking	Skip_line		건너뛰기 규칙
+Asking	Restart_reading		건너뛰기 규칙
+Asking	Adopt		`Refused Not_stopped`
+Asking	Retire		묻기를 취소한다 → `Retired`
+Resting	Boot_finished		버린다
+Resting	Turn_closed		`Resting`
+Resting	Pulse		선언한 slot 이 모두 provider 가 잡아 둔 slot 이면 `Resting` 이고 읽지 않는다. 아니면 다음 묻기
+Resting	Write		반영하고 답한다 → `Resting`
+Resting	Ask_ended		늦은 답
+Resting	Declaration_changed		저장하고 폭 기억을 비운다 → 다음 묻기, lane 이 꺼졌으면 `Idle`
+Resting	Resume		바닥의 크기 사실을 비운다 → 다음 묻기
+Resting	Skip_item		건너뛰기 규칙
+Resting	Skip_line		건너뛰기 규칙
+Resting	Restart_reading		건너뛰기 규칙
+Resting	Adopt		`Refused Not_stopped`
+Resting	Retire		`Retired`
+Refused_at_bottom	Boot_finished		버린다
+Refused_at_bottom	Turn_closed		`Refused_at_bottom`. 묻지도 읽지도 않는다
+Refused_at_bottom	Pulse		`Refused_at_bottom`. 묻지도 읽지도 않는다
+Refused_at_bottom	Write		반영하고 답한다 → 다음 묻기. Memory 가 바뀌었으면 Memory 를 실은 질문이 새 질문이다
+Refused_at_bottom	Ask_ended		늦은 답
+Refused_at_bottom	Declaration_changed		저장하고 폭 기억을 비운다 → 다음 묻기, lane 이 꺼졌으면 `Idle`
+Refused_at_bottom	Resume		바닥의 크기 사실을 비운다 → 다음 묻기
+Refused_at_bottom	Skip_item		건너뛰기 규칙
+Refused_at_bottom	Skip_line		건너뛰기 규칙
+Refused_at_bottom	Restart_reading		건너뛰기 규칙
+Refused_at_bottom	Adopt		`Refused Not_stopped`
+Refused_at_bottom	Retire		`Retired`
+Stopped	Boot_finished		버린다
+Stopped	Turn_closed		`Stopped s`
+Stopped	Pulse		`Stopped s`
+Stopped	Write		`Refused (Store_stopped s)`
+Stopped	Ask_ended		늦은 답
+Stopped	Declaration_changed		저장하고 폭 기억을 비운다 → `Stopped s`
+Stopped	Resume		`Booting`. 저장소 시작을 다시 한다. 턴 기록 모듈이 파일을 확인하고, 그다음 boot 다(§8.6)
+Stopped	Skip_item		`Refused (Store_stopped s)`
+Stopped	Skip_line		`Refused (Store_stopped s)`
+Stopped	Restart_reading		`Refused (Store_stopped s)`
+Stopped	Adopt	s 가 `Log_diverged` 나 `Log_unreadable` 이고, 파일의 sha 가 `observed` 와 같고 codec 으로 해석된다	§8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기
+Stopped	Adopt	s 가 그 둘인데 파일의 sha 가 다르다	`Refused Snapshot_mismatch`
+Stopped	Adopt	s 가 그 둘이고 sha 는 같은데 파일이 해석되지 않는다	`Refused Snapshot_unreadable`
+Stopped	Adopt	s 가 `Memory_unreadable` 이나 `Store_unwritable`	`Refused (Store_stopped s)`
+Stopped	Retire		`Retired`
+Retired	Boot_finished		`Retired`
+Retired	Turn_closed		`Retired`
+Retired	Pulse		`Retired`
+Retired	Write		`Refused Keeper_retired`
+Retired	Ask_ended		`Retired`
+Retired	Declaration_changed		`Retired`
+Retired	Resume		`Refused Keeper_retired`
+Retired	Skip_item		`Refused Keeper_retired`
+Retired	Skip_line		`Refused Keeper_retired`
+Retired	Restart_reading		`Refused Keeper_retired`
+Retired	Adopt		`Refused Keeper_retired`
+Retired	Retire		`Retired`

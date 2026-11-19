@@ -60,13 +60,13 @@ let palette ~closing : Markdown.palette =
   ; json_punctuation = (Theme.Syntax.json_punctuation, closing)
   (* Changed rows follow the dedicated diff surfaces: their background runs
      through the code gutter and the unused cells, so lines of different
-     lengths still read as one patch. The fixed light foreground is paired
-     with the two fixed dark backgrounds by Theme; the +/- source marker and
-     the background already say which side of the change this is. *)
+     lengths still read as one patch. On Truecolor terminals both the tinted
+     background and 4.5:1 foreground adapt to the active palette; non-Truecolor
+     terminals keep the fixed 256-colour fallback pair. *)
   ; code_diff_added =
-      (Theme.Syntax.diff_added_bg ^ Theme.Syntax.diff_row_foreground, closing)
+      (Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), closing)
   ; code_diff_removed =
-      (Theme.Syntax.diff_removed_bg ^ Theme.Syntax.diff_row_foreground, closing)
+      (Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), closing)
   }
 
 

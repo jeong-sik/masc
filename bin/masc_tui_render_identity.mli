@@ -19,6 +19,10 @@ type drawn =
       (** The index in [rows] of the provider the cursor is on, for the pane
           that scrolls these rows to keep it in view; [None] when no provider
           row is drawn. *)
+  ; separator_rows : int
+      (** Blank rows between providers (the one that sets the attached
+          services apart): drawn among the provider rows, but no provider is
+          on them, so a page of providers is the window less these. *)
   }
 
 (** Preserve provider numbering, notices, filtered-empty readings and login URL

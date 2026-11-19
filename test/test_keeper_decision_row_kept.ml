@@ -14,8 +14,8 @@
     1. Once read, the row comes from memory: the reader answers with the
        file gone, until the removal is told.
     2. An appended row replaces the kept one, also across a rotation.
-    3. A row a read is not sure to answer with (not an object, or longer than
-       half the reader's window) is not kept: the next reader reads the file.
+    3. A row a read is not sure to answer with (not an object, or as long as
+       the reader's window) is not kept: the next reader reads the file.
     4. An append that fails, and a file that cannot be read, keep nothing.
     5. Two spellings of one record reach one kept row. A record that comes
        to exist under another name than the one its cell was chosen by, and
@@ -153,20 +153,28 @@ let test_a_row_that_is_not_an_object_is_not_kept () =
     check string "and keeps that" "kept: turn 1" (kept config))
 ;;
 
-(* A row of half the reader's window is kept. One byte more and the writer
-   forgets. A row longer than the window is not a row the reader finds at
-   all. *)
+(* The longest row that is kept is one byte shorter than the reader's
+   window: the newline before it is then the window's first byte, and the
+   file read finds the row. One byte more and the window starts at the row's
+   first byte. The file read drops the row as the piece its window may have
+   cut, so the writer keeps nothing. A row longer than the window is not a
+   row the reader finds either. *)
 let test_how_long_a_kept_row_can_be () =
   with_workspace (fun config ->
-    let half = Keeper_row_facts.decision_window_bytes / 2 in
+    let longest = Keeper_row_facts.decision_window_bytes - 1 in
     append config (row 1);
     check string "the first row" "turn 1" (shown config);
-    append config (row_of_bytes 2 half);
-    check string "half the window is kept" "kept: turn 2" (kept config);
+    append config (row_of_bytes 2 longest);
+    check string "a row one byte shorter than the window is kept" "kept: turn 2" (kept config);
     check string "and is what the file says" "turn 2" (in_the_file config);
-    append config (row_of_bytes 3 (half + 1));
-    check string "one byte more is not" "nothing kept" (kept config);
-    check string "the reader reads it from the file" "turn 3" (shown config);
+    append config (row_of_bytes 3 (longest + 1));
+    check string "a row as long as the window is not" "nothing kept" (kept config);
+    check
+      bool
+      "the file read does not find that row"
+      false
+      (String.equal (in_the_file config) "turn 3");
+    check string "the reader answers as the file" (in_the_file config) (shown config);
     append config (row_of_bytes 4 (Keeper_row_facts.decision_window_bytes + 5_000));
     check string "nothing is kept after a row longer than the window" "nothing kept" (kept config);
     check string "the reader answers as the file" (in_the_file config) (shown config))
@@ -484,7 +492,7 @@ let steps = 300
 let test_the_kept_row_is_the_files_over_random_steps () =
   with_workspace (fun config ->
     let random = Random.State.make [| 53_232 |] in
-    let half = Keeper_row_facts.decision_window_bytes / 2 in
+    let longest = Keeper_row_facts.decision_window_bytes - 1 in
     let turn = ref 0 in
     let next () =
       incr turn;
@@ -495,8 +503,8 @@ let test_the_kept_row_is_the_files_over_random_steps () =
       (match Random.State.int random 13 with
        | 0 | 1 | 2 | 3 -> append config (row (next ()))
        | 4 -> append config (`List [ `Int (next ()) ])
-       | 5 -> append config (row_of_bytes (next ()) half)
-       | 6 -> append config (row_of_bytes (next ()) (half + 1))
+       | 5 -> append config (row_of_bytes (next ()) longest)
+       | 6 -> append config (row_of_bytes (next ()) (longest + 1))
        | 7 ->
          append
            config

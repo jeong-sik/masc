@@ -40,6 +40,21 @@ let issue_proof_state partition =
   | [] | _ :: _ :: _ -> None
 ;;
 
+type admitted_source = { source_text : string }
+
+let issue_admitted_source layer =
+  let sections = Keeper_context_layers.sections layer
+    |> List.filter (fun (section : Keeper_context_layers.section) ->
+        section.section_source =
+          Keeper_context_layers.Layer Keeper_context_layers.Direct_input_source) in
+  match sections with
+  | [ (_ : Keeper_context_layers.section) ] ->
+    (match Keeper_context_layers.text layer with
+     | "" -> None
+     | text -> Some { source_text = Inference_utils.sanitize_text_utf8 text })
+  | [] | _ :: _ :: _ -> None
+;;
+
 type system_prompt =
   { base_text : string
   ; observations : system_observation list
@@ -53,9 +68,11 @@ type t =
   ; dynamic_context_partition : Keeper_context_layers.rendered option
   ; system_prompt : system_prompt option
   ; proof_state : proof_state option
+  ; admitted_source : admitted_source option
   }
 
 let with_proof_state proof_state assembly = { assembly with proof_state }
+let with_admitted_source admitted_source assembly = { assembly with admitted_source }
 
 let sha256 text = Agent_core_sha256.(digest_string text |> to_hex)
 
@@ -111,7 +128,15 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     | Some _ | None -> None
   in
   if not !present
-  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition; system_prompt = None; proof_state = None }
+  then
+    { extra_system_context = None
+    ; blocks
+    ; receipt = None
+    ; dynamic_context_partition
+    ; system_prompt = None
+    ; proof_state = None
+    ; admitted_source = None
+    }
   else
     let text = Buffer.contents buffer in
     { extra_system_context = Some text
@@ -121,6 +146,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     ; dynamic_context_partition
     ; system_prompt = None
     ; proof_state = None
+    ; admitted_source = None
     }
 ;;
 
@@ -139,7 +165,13 @@ let split_block block assembly =
         ~existing_extra_system_context
         ~blocks:(List.filter (fun block -> not (wanted block)) assembly.blocks)
     in
-    Some ({ rest with system_prompt = assembly.system_prompt; proof_state = assembly.proof_state }, text)
+    Some
+      ( { rest with
+          system_prompt = assembly.system_prompt
+        ; proof_state = assembly.proof_state
+        ; admitted_source = assembly.admitted_source
+        }
+      , text )
   | ([] | _ :: _ :: _), _, _ | [ _ ], None, _ | [ _ ], Some _, None -> None
 ;;
 

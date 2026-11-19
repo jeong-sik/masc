@@ -87,6 +87,15 @@ val frame_acting_pane :
 val frame_tools_task : tools_task_frame option ref
 (** Task viewport from the current draw; commit only after presentation. *)
 
+val frame_lists : drawn_list list ref
+(** The lists the current draw drew ({!report_drawn_list}); the frame hands
+    them to the state once it is built. *)
+
+val report_drawn_list : paged_list -> height:int -> unit
+(** Says the frame being drawn draws [list] in [height] rows: the rows its
+    window was cut to, which a page key moves it by less one. A second
+    report of the same list replaces the first. *)
+
 val frame_panes : Masc_tui_pane_selection.layout ref
 (** Where each pane of the frame being drawn sits, set by the surface ends
     ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
@@ -962,9 +971,10 @@ val studio_panel : width:int -> title:string -> lines:string list -> string list
 (** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
 
 
-val detail_section_heading : ?first:bool -> string -> (string * string) list
-(** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
-    scrollable detail readers. *)
+val detail_section_heading : ?first:bool -> ?width:int -> string -> (string * string) list
+(** Numbered/grouped section header [  ── Title ─────] in [(style, text)] pairs
+    for scrollable detail readers. Wraps at word boundaries when [?width] is
+    supplied. *)
 
 val detail_page :
   width:int -> (string * Masc_tui_page_line.t list) list -> (string * string) list
@@ -975,8 +985,10 @@ val section_heading_line : string -> string
 (** A detail's section heading, [── title ─────] in bold on the reader's
     foreground (RFC tui-one-screen-grammar §5.2, §7.3). *)
 
-val detail_section_lines : ?first:bool -> string -> string list
-(** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
+val detail_section_lines : ?first:bool -> ?width:int -> string -> string list
+(** Numbered/grouped section header [  ── Title ─────] as pre-styled strings.
+    Wraps at word boundaries when [?width] is supplied and the heading exceeds
+    [width - 2] cells. *)
 
 val split_summary_columns :
   titled:bool ->

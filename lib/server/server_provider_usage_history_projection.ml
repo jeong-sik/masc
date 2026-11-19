@@ -90,9 +90,10 @@ let number key json =
   | Some (`Int value) -> Ok (float_of_int value)
   | _ -> Error ("provider usage history: invalid " ^ key)
 
-(* The stored line back into the variant [Usage.utilization_fields] wrote: the unit
-   word and the value's JSON type decide together, and anything else is not
-   a report this store wrote. *)
+(* The stored line back into the variant [Usage.utilization_fields] wrote.
+   Usage units carry [value]; Credit balances carry [currency], [total] and
+   [remaining]; unlimited Credit carries only [unit]. Anything else is not a
+   report this store wrote. *)
 let utilization_of_json json =
   match member "unit" json, member "value" json with
   | Some (`String "fraction"), Some (`Float value) when Float.is_finite value ->
@@ -111,6 +112,24 @@ let utilization_of_json json =
       in
       if used >= 0.0 then Ok (Usage.Usd { used; limit })
       else Error "provider usage history: invalid USD usage"
+  | Some (`String "credit_balance"), _ ->
+      let* currency = string "currency" json in
+      let* total =
+        match member "total" json with
+        | Some `Null -> Ok None
+        | Some _ ->
+            let* total = number "total" json in
+            if total >= 0.0 then Ok (Some total)
+            else Error "provider usage history: invalid Credit total"
+        | None -> Error "provider usage history: missing Credit total"
+      in
+      let* remaining = number "remaining" json in
+      if remaining < 0.0 then Error "provider usage history: invalid Credit remaining"
+      else if Option.fold ~none:false ~some:(fun total -> remaining > total) total then
+        Error "provider usage history: Credit remaining exceeds its total"
+      else Ok (Usage.Credit_balance { currency; total; remaining })
+  | Some (`String "credit_unlimited"), _ -> Ok Usage.Credit_unlimited
+  | Some (`String "credit_retracted"), _ -> Ok Usage.Credit_retracted
   | _ -> Error "provider usage history: invalid unit or value"
 
 let decode_point json =
@@ -595,6 +614,11 @@ let response_json ~days t =
   let daily = daily_points t in
   let points =
     Display_day_map.fold (fun _ point points -> point :: points) daily []
+    |> List.filter (fun (point : point) ->
+         match point.utilization with
+         | Usage.Credit_retracted -> false
+         | Usage.Fraction _ | Usage.Percent _ | Usage.Usd _
+         | Usage.Credit_balance _ | Usage.Credit_unlimited -> true)
     |> List.sort (fun (a : point) (b : point) ->
         let c = String.compare a.scope_id b.scope_id in
         if c <> 0 then c

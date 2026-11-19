@@ -4989,6 +4989,27 @@ let test_dashboard_schedule_pages_bind_the_selector () =
   in
   check string "a cursor cannot cross Keeper targets" "invalid_cursor"
     (wrong_keeper |> member "status" |> to_string);
+  let active_first =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~active_only:true config
+  in
+  check int "an active-only page is capped at 200" 200 (List.length (rows active_first));
+  let active_cursor = active_first |> member "next_cursor" |> to_string in
+  let active_second =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~active_only:true ~cursor:active_cursor config
+  in
+  check (list string) "204 active rows traverse the boundary exactly once"
+    (List.sort String.compare (expected @ extra))
+    (List.sort String.compare (rows active_first @ rows active_second));
+  check string "an active-only cursor does not continue the fleet list" "invalid_cursor"
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~cursor:active_cursor config
+     |> member "status" |> to_string);
+  check string "and a fleet cursor does not continue the active-only list" "invalid_cursor"
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~active_only:true ~cursor config
+     |> member "status" |> to_string);
   let tail_id = match rows alpha_second with
     | [id] -> id
     | _ -> fail "expected one row after the Keeper's first page" in
@@ -5012,6 +5033,60 @@ let test_dashboard_schedule_pages_bind_the_selector () =
   in
   check string "malformed cursor is not an empty page" "invalid_cursor"
     (invalid |> member "status" |> to_string)
+;;
+
+(* The fleet page holds the 20 soonest schedules. Once polling schedules took
+   those rows, the Dashboard calendar drew a week without the schedules due
+   after them (#52961). The active-only page holds every schedule that is still
+   going to run, and it narrows the counts with the rows. *)
+let test_dashboard_schedule_page_can_hold_only_active_schedules () =
+  with_workspace @@ fun config ->
+  let active =
+    List.init 25 (fun index ->
+      let schedule_id = Printf.sprintf "active-schedule-%02d" index in
+      ignore (create_named_keeper_wake_schedule config ~schedule_id ~keeper_name:"alpha"
+              : Schedule_domain.schedule_request);
+      schedule_id)
+  in
+  let ended = "ended-schedule" in
+  ignore (create_named_keeper_wake_schedule config ~schedule_id:ended ~keeper_name:"alpha"
+          : Schedule_domain.schedule_request);
+  (match
+     Schedule_service.cancel config ~authority:Schedule_store.Operator_authority
+       ~schedule_id:ended ~cancelled_by:(human "operator") ~reason:"active-only fixture"
+       ~withdraw_queued_wakes:(fun _ _ -> Ok ())
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Schedule_service.service_error_to_string error));
+  let open Yojson.Safe.Util in
+  let rows page =
+    page |> member "requests" |> to_list
+    |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+  in
+  let fleet = Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config in
+  check int "the fleet page is cut at its cap" 20 (List.length (rows fleet));
+  check int "and counts the ended schedule" 26 (fleet |> member "request_count" |> to_int);
+  check bool "and says it is no active-only page" false
+    (fleet |> member "active_only_selector" |> to_bool);
+  let active_page =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~active_only:true config
+  in
+  check (list string) "the active-only page holds every active schedule"
+    (List.sort String.compare active) (List.sort String.compare (rows active_page));
+  check bool "and says what it is narrowed to" true
+    (active_page |> member "active_only_selector" |> to_bool);
+  check int "its counts are the selection's" 25
+    (active_page |> member "request_count" |> to_int);
+  check int "which holds no ended schedule" 0
+    (active_page |> member "fsm" |> member "terminal_count" |> to_int);
+  check bool "nothing is left out" false (active_page |> member "truncated" |> to_bool);
+  check bool "so there is no next page" true (active_page |> member "next_cursor" = `Null);
+  let both =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:beta" ~active_only:true config
+  in
+  check int "the two selectors combine" 0 (both |> member "request_count" |> to_int)
 ;;
 
 let () =
@@ -5149,6 +5224,8 @@ let () =
             test_a_runner_tick_refreshes_the_cached_schedule_list
         ; test_case "dashboard schedule pages bind the selector" `Quick
             test_dashboard_schedule_pages_bind_the_selector
+        ; test_case "dashboard schedule page can hold only active schedules" `Quick
+            test_dashboard_schedule_page_can_hold_only_active_schedules
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

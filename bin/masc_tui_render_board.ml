@@ -83,7 +83,9 @@ let board_kind_mark kind =
   let mark = Masc_tui_board_kind_mark.glyph kind in
   match kind with
   | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ mark ^ Ansi.reset
-  | Some Post_by_automation -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  (* An automation's post is not a warning (RFC tui-one-screen-grammar 7.3):
+     it recedes, so the person's posts the column exists for stand out. *)
+  | Some Post_by_automation -> (Theme.recede ()) ^ mark ^ Ansi.reset
   | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ mark ^ Ansi.reset
   | Some Post_by_system | None -> mark
 
@@ -324,7 +326,7 @@ let board_hearth_census_line ~cols (state : state) =
   let notice text = tone
     ^ Message_layout.truncate_middle (framed_inner_width cols) ((words "게시판 · " "hearths · ") ^ text) ^ Ansi.reset in
   match Masc_tui_fetched.value observation with
-  | None -> notice (match status with Some text -> text | None -> (words "집계 미관측" "census not observed"))
+  | None -> notice (match status with Some text -> text | None -> (words "집계 미조회" "census not read"))
   | Some [] -> notice (match status with Some text -> (words "이전 집계는 비어 있음 · " "last census empty; ") ^ text | None -> (words "집계 결과 없음" "census empty"))
   | Some census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -535,7 +537,7 @@ let render_board_list (state : state) =
          | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
              ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")
-                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미관측)" "  (last listing empty; requested query not observed)")
+                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
                 else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
@@ -555,6 +557,7 @@ let render_board_list (state : state) =
           Rows.of_list ~first:scroll_offset ~height:content_height
             (board_posts state)
         in
+        report_drawn_list Board_post_rows ~height:content_height;
         for i = 0 to content_height - 1 do
           let idx = i + scroll_offset in
           match Rows.at board_posts_window idx with
@@ -967,7 +970,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                | Some at ->
                    (match Board_read_layout.close_time at with
                     | Ok time -> field (words state "종료 시각 " "Closed at ") time
-                    | Error raw -> field (words state "종료 시각 미확인 · 원래 Unix 초 " "Close time unavailable · raw Unix seconds ")
+                    | Error raw -> field (words state "종료 시각을 읽을 수 없음 · 원래 Unix 초 " "Close time unreadable · raw Unix seconds ")
                         (Printf.sprintf "%.17g" raw))) in
             let conclusion =
               (match closed.bpc_successor_id with
@@ -999,7 +1002,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         match detail with
         | Board_detail.Absent ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 미관측" "  Board detail unavailable") ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
         | Board_detail.Loading ->
             [ Board_read_layout.Thread_note
                 (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail...") ^ Ansi.reset) ]
@@ -1118,7 +1121,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
               Board_read_layout.Thread_note
-                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개 (o:전체 댓글)" else "  Showing %d of %d comments (o: all comments)")
+                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개  o:전체 댓글" else "  Showing %d of %d comments  o:all comments")
                    (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else

@@ -40,10 +40,16 @@ val of_history :
   Masc.Tui_decode_usage.provider_usage_history ->
   t
 (** [share] reads a reported value as a part of its full window. An uncapped
-    monetary report has no share and draws [$], distinct from no report. A report
-    without windows draws [empty_report_mark] and counts as a reported day.
+    monetary report has no share and draws [$] for USD or [C] for Credit,
+    distinct from no report. A report without windows draws [empty_report_mark]
+    and counts as a reported day.
     A point outside the answered window keeps its row and draws no day. When one day
     holds several points for a row, the last one in the answer is drawn. *)
+
+val has_unmetered_credit : row -> bool
+(** Whether any sample is Credit without a meter, so raw daily values and
+    state transitions must replace the percentage plot rather than collapse
+    into one neutral marker. *)
 
 val latest : row -> sample option
 (** Most recent report in the answered window, not the answer's generation time. *)

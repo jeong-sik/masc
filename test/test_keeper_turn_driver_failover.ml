@@ -4915,6 +4915,7 @@ let test_the_read_after_a_403_does_not_refresh_a_credential () =
         { Runtime_schema.shape = Runtime_schema.Kimi_coding_usages
         ; url = "https://127.0.0.1/coding/v1/usages"
         ; refresh_s = None
+        ; credit_url = None
         }
     }
   in

@@ -159,7 +159,10 @@ let test_non_canonical_outcome_is_read_without_writing () =
         | Ok Keeper_meta_store.Meta_absent -> failf "%S: the file was not seen" raw
         | Error detail -> failf "%S: the read was refused: %s" raw detail);
        ignore (Keeper_meta_store.keepalive_keeper_names config);
-       ignore (Keeper_meta_store.persistent_agent_names config);
+       ignore
+         (Keeper_meta_store.persistent_agent_names_with_unread
+            config
+            ~read_meta:(Keeper_meta_store.read_meta config));
        (match Keeper_meta_store.read_meta config name with
         | Ok None -> ()
         | Ok (Some _) -> failf "%S: read_meta served a non-current meta" raw

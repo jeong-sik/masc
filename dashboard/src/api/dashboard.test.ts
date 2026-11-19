@@ -2336,6 +2336,24 @@ describe('fetchDashboardMemory', () => {
     expect(url).toContain('/api/v1/dashboard/board?')
     expect(url).toContain('voter=')
   })
+
+  it('sends the Board search text as q only when there is one', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ posts: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMemory('recent', { search: 'old needle' })
+    await fetchDashboardMemory('recent', { search: '' })
+    await fetchDashboardMemory('recent')
+
+    const sent = fetchMock.mock.calls.map(([url]) =>
+      new URL(String(url), 'http://localhost').searchParams.get('q'))
+    expect(sent).toEqual(['old needle', null, null])
+  })
 })
 
 describe('fetchDashboardGate', () => {

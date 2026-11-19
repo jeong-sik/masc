@@ -12,6 +12,7 @@ import { createChecks } from './check'
 import { createConnect } from './connect'
 import { createKeyAdds } from './key-add'
 import { createRemovals } from './key-remove'
+import { createReplacements } from './key-replace'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
 import { createSubscriptions, follow } from './subscriptions'
@@ -97,6 +98,7 @@ const waitingPanel = (): SubscriptionsModel => ({
   checking: createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   adding: createKeyAdds({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   removing: createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  replacing: createReplacements({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   stop: vi.fn(),
 })
 

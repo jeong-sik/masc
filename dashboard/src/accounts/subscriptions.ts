@@ -26,6 +26,8 @@ import type { KeyAddModel } from './key-add'
 import { KeyArea } from './key-area'
 import { createRemovals } from './key-remove'
 import type { RemovalsModel, Removing } from './key-remove'
+import { createReplacements } from './key-replace'
+import type { ReplacementsModel, Replacing } from './key-replace'
 import { checkable, integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
 import type { Integration, Owned, Problem, Send, Session } from './wire'
 
@@ -65,6 +67,8 @@ export interface SubscriptionsModel {
   readonly adding: KeyAddModel
   /** The removals of a key account by the person the panel shows. */
   readonly removing: RemovalsModel
+  /** The replacements of the key of a key account by the person the panel shows. */
+  readonly replacing: ReplacementsModel
   /** Forgets what was read once the console shows no one signed in: the
       account changed, or the browser leaves. A reading still under way then
       changes nothing, and the next `load` reads again, for the same person
@@ -89,11 +93,24 @@ async function readBoth(send: Send): Promise<Found> {
   return { ok: true, integrations: offered.value, owned: mine.value }
 }
 
+/** An end, and what brings it. */
+interface Ending { readonly ended: Promise<void>; readonly end: () => void }
+
+function ending(): Ending {
+  let end = (): void => undefined
+  const ended = new Promise<void>((resolve) => { end = resolve })
+  return { ended, end }
+}
+
 export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsModel {
   const view = signal<PanelView>({ kind: 'waiting' })
   /** The reading whose answer the panel takes. A later one, a retry or the
       reading for another person signed in meanwhile, replaces it. */
   let latest = 0
+  /** The end of the readings that replace one another. It comes once the
+      newest of them wrote what it found, or the panel was stopped. No one
+      waits for the answer of a reading that was replaced. */
+  let overlapping: Ending | null = null
   /** The session of the person the panel shows. A login sends its token. */
   let session: Session | null = null
   /** The person whose login and checks the panel holds. `stop` keeps them. */
@@ -103,9 +120,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       changed, and is read again. */
   let landed = 0
 
-  const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
-    latest += 1
-    const mine = latest
+  const reading = async (mine: number, forUser: string, attemptsBefore: number): Promise<void> => {
     const asOf = landed
     const slow = setTimeout(() => {
       const now = view.peek()
@@ -115,7 +130,10 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     clearTimeout(slow)
     if (mine !== latest) return
     if (found.ok) {
-      if (landed !== asOf) return read(forUser, attemptsBefore)
+      if (landed !== asOf) {
+        void read(forUser, attemptsBefore)
+        return
+      }
       view.value = { kind: 'read', forUser, integrations: found.integrations, owned: found.owned }
       return
     }
@@ -128,6 +146,24 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       return
     }
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
+  }
+
+  const endOverlapping = (): void => {
+    const now = overlapping
+    overlapping = null
+    now?.end()
+  }
+
+  /** Begins a reading, which replaces the one before it. It ends with the
+      readings it overlaps: whoever waits for a reading waits for what the
+      newest one wrote. */
+  const read = (forUser: string, attemptsBefore: number): Promise<void> => {
+    latest += 1
+    const mine = latest
+    overlapping ??= ending()
+    const { ended } = overlapping
+    void reading(mine, forUser, attemptsBefore).then(() => { if (mine === latest) endOverlapping() })
+    return ended
   }
 
   /** Reads again what the panel shows, which stays on the page meanwhile. A
@@ -143,6 +179,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   const checking = createChecks({ send, leave, token, refresh })
   const adding = createKeyAdds({ send, leave, token, refresh })
   const removing = createRemovals({ send, leave, token, refresh })
+  const replacing = createReplacements({ send, leave, token, refresh })
 
   // The methods read the state with peek(): a caller inside an effect does
   // not come to depend on the panel's state.
@@ -156,6 +193,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       checking.reset()
       adding.reset()
       removing.reset()
+      replacing.reset()
     }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
@@ -172,9 +210,10 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     if (view.peek().kind === 'waiting') return
     latest += 1
     view.value = { kind: 'waiting' }
+    endOverlapping()
   }
 
-  return { view, load, retry, connecting, checking, adding, removing, stop }
+  return { view, load, retry, connecting, checking, adding, removing, replacing, stop }
 }
 
 /** Reads the subscriptions of each person the console comes to show
@@ -218,14 +257,30 @@ function leftWordsOf(accountId: string, removing: Removing): string | null {
   }
 }
 
+/** What became of one account this page sent a key for and the server
+    does not have: another page removed it. */
+function goneWordsOf(accountId: string, replacing: Replacing): string | null {
+  switch (replacing.kind) {
+    case 'gone': return `계정 ${idTail(accountId)}은 이미 없는 계정이에요. 보낸 key 는 저장되지 않았어요.`
+    case 'open':
+    case 'sending':
+    case 'replaced':
+    case 'leaving':
+      return null
+  }
+}
+
 /** What the line of the panel says of the accounts this page asked to
-    remove: said of an account only once the list has it no more, so the
-    line never says an account went while its card is on the page. */
-function leftWords(removing: ReadonlyMap<string, Removing>, owned: Owned): string {
-  return [...removing]
-    .filter(([accountId]) => !owned.accounts.some((account) => account.id === accountId))
-    .flatMap(([accountId, one]) => leftWordsOf(accountId, one) ?? [])
-    .join(' ')
+    remove, or sent a key for and found gone: said of an account only once
+    the list has it no more, so the line never says an account went while
+    its card is on the page. An account this page removed is said by its
+    removal alone. */
+function leftWords(removing: ReadonlyMap<string, Removing>, replacing: ReadonlyMap<string, Replacing>, owned: Owned): string {
+  const listed = (accountId: string): boolean => owned.accounts.some((account) => account.id === accountId)
+  return [
+    ...[...removing].filter(([accountId]) => !listed(accountId)).flatMap(([accountId, one]) => leftWordsOf(accountId, one) ?? []),
+    ...[...replacing].filter(([accountId]) => !listed(accountId) && !removing.has(accountId)).flatMap(([accountId, one]) => goneWordsOf(accountId, one) ?? []),
+  ].join(' ')
 }
 
 /** Whether the area of a key is on the page: a subscription takes a key, or
@@ -236,12 +291,13 @@ const showsKeyArea = (view: PanelView, adding: KeyAddModel): boolean =>
   view.kind === 'read'
   && (view.integrations.some((integration) => integration.takesKey) || adding.view.value.kind !== 'closed')
 
-function PanelBody({ view, connecting, checking, adding, removing, onRetry }: {
+function PanelBody({ view, connecting, checking, adding, removing, replacing, onRetry }: {
   readonly view: PanelView
   readonly connecting: ConnectModel
   readonly checking: ChecksModel
   readonly adding: KeyAddModel
   readonly removing: RemovalsModel
+  readonly replacing: ReplacementsModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -262,8 +318,8 @@ function PanelBody({ view, connecting, checking, adding, removing, onRetry }: {
         <${Offer} integrations=${view.integrations} />
         ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
         ${showsKeyArea(view, adding) ? html`<${KeyArea} model=${adding} integrations=${takingKey} />` : null}
-        <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} />
-        <p class="hint" role="status">${leftWords(removing.removing.value, view.owned)}</p>
+        <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} replacements=${replacing} />
+        <p class="hint" role="status">${leftWords(removing.removing.value, replacing.replacing.value, view.owned)}</p>
       `
     }
   }
@@ -301,7 +357,7 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     <section aria-labelledby="subscriptions-heading">
       <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
       <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} adding=${model.adding} removing=${model.removing} onRetry=${() => { void model.retry() }} />
+      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} adding=${model.adding} removing=${model.removing} replacing=${model.replacing} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

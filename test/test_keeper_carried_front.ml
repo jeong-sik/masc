@@ -373,23 +373,21 @@ let test_the_composer_is_read_from_the_execution_kind () =
   check composer_t "not in the catalog" Front.Not_materialized (Front.composer_of_runtime None)
 ;;
 
+(* A ledger is built the way the turn driver builds one, by observing a
+   request: its turn growth is abstract outside the ledger. *)
 let ledger_with ~first_atom ~atom_count ends : Ledger.t =
-  { prefix_digest = "f"
-  ; total_tokens = Some 10
-  ; measured_end_atom = Some atom_count
-  ; measured_demote_before = Some 0
-  ; blocks = []
-  ; last =
-      { prefix_digest = "f"
-      ; first_atom
-      ; atom_count
-      ; ends
-      ; tail_bytes = 0
-      ; turn_context = false
-      ; demote_before = 0
-      }
-  ; last_usage = None
-  }
+  let request : Ledger.request =
+    { prefix_digest = "f"
+    ; first_atom
+    ; atom_count
+    ; ends
+    ; tail_bytes = 0
+    ; turn_context = false
+    ; demote_before = 0
+    ; working_state = None
+    }
+  in
+  (Ledger.observe ~digest_at:(fun _ -> None) None request None).Ledger.ledger
 ;;
 
 let test_of_ledger_reads_the_last_request_front () =

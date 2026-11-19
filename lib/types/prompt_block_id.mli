@@ -9,9 +9,12 @@
     [Active_goals] is the renderer-attributed Goal snapshot split from the
     per-turn world context, including current criterion and measurement.
     [Direct_input_source] is the immutable source of an admitted direct
-    operation, issued as a separate System observation after [Active_goals].
-    It names that operation's typed source without granting authority or
-    authenticating a local request as an operator.
+    operation, issued to an official client as a separate System observation
+    after [Active_goals]. Agent Core does not issue it: the source stays inside
+    the first round's [Dynamic_context], so the System does not change with
+    the turn kind (RFC a-sent-request-prefix-changes-only-when-the-window-moves
+    §3.2). It names that operation's typed source without granting authority
+    or authenticating a local request as an operator.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
     [Goals_awaiting_proof] names the Goals in [Verifying]: completion was
@@ -134,8 +137,12 @@ val injected_on_post_tool_round : t -> bool
     re-answer it on every round (task-514, 2026-08-24). Recurring state
     blocks therefore stay on the first round only. [Active_goals] is the
     separately produced immutable Goal snapshot and stays in the System after
-    tools. [Direct_input_source] stays there as well, retaining the original
-    admitted operation across tool rounds. [Completion_authority] carries this turn's approval/rejection
+    tools. [Direct_input_source] stays in an official client's System as
+    well. On Agent Core it rides the first round's [Dynamic_context] only, so
+    no round that follows tool results adds a User tail for it. An Anthropic
+    lane keeps that first context in its history after a response with
+    signed thinking ([Historical_system_context], RFC-AC-041) and sends it
+    again in place, source included. [Completion_authority] carries this turn's approval/rejection
     correlation keys and rides every round of its turn, without rebroadcasting
     Task, Gate, Lane or other inbox state. [Goals_awaiting_proof] rides every
     round as well: a later round that lost it would read a Goal under proof as

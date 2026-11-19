@@ -20,6 +20,8 @@ type tail_lines = {
    ([Error class]).  The catch-all classifies the exception through the
    closed sum {!Keeper_memory_recall_exn_class.t} so the caller can
    branch on a bounded label instead of a free-form string. *)
+let tail_chunk_bytes = 64 * 1024
+
 (* The last lines of an open file. *)
 let tail_lines_of_fd fd ~max_bytes ~max_lines =
   let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
@@ -28,7 +30,7 @@ let tail_lines_of_fd fd ~max_bytes ~max_lines =
     then 0L
     else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
   in
-  let chunk_size = 64 * 1024 in
+  let chunk_size = tail_chunk_bytes in
   let pos = ref file_len in
   let chunks = ref [] in
   let newline_count = ref 0 in

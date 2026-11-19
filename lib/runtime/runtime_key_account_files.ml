@@ -16,21 +16,23 @@ type make_error =
   | Home_not_made of string
   | Key_not_written of Runtime_api_key_file.write_error
 
+let make_home ~runtime_root ~account_id =
+  Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
+    match
+      Runtime_account_home_folder.make
+        ~runtime_root
+        ~account_id:(Authz_types.Provider_account_id.to_string account_id)
+        ~client
+    with
+    | Ok (_ : string) -> Ok ()
+    | Error detail -> Error detail
+    | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument))
+;;
+
 let make ~runtime_root ~account_id ~generation key =
-  let home =
-    Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
-      match
-        Runtime_account_home_folder.make
-          ~runtime_root
-          ~account_id:(Authz_types.Provider_account_id.to_string account_id)
-          ~client
-      with
-      | result -> result
-      | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument))
-  in
-  match home with
+  match make_home ~runtime_root ~account_id with
   | Error detail -> Error (Home_not_made detail)
-  | Ok (_ : string) ->
+  | Ok () ->
     Runtime_api_key_file.write ~runtime_root ~account_id ~generation key
     |> Result.map_error (fun error -> Key_not_written error)
 ;;

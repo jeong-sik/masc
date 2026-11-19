@@ -10,9 +10,11 @@ import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
 import type { RemovalStopped, RemovalsModel, Removing } from './key-remove'
+import type { ReplacementsModel } from './key-replace'
+import { ReplaceArea } from './key-replace-area'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
-import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
+import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Replacement, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -50,13 +52,16 @@ export type KeeperOn =
   /** A removal of the account did not go through. The server refuses every
       use of it, whatever its subscription lets a Keeper do. */
   | { readonly kind: 'removal_left' }
+  /** A replacement of the key of the account did not go through. The server
+      refuses every use of it until its key is sent again. */
+  | { readonly kind: 'replacement_left' }
 
 /** Whether a call of the account has what it runs on: a login, or a key
     the server read when it listed the account. */
 const holdsWhatItRunsOn = (held: Held): boolean => held.kind === 'login' || held.key === 'readable'
 
 function keeperOn(account: ProviderAccount, offered: Integration | null, checked: boolean): KeeperOn {
-  if (account.removal !== null) return { kind: 'removal_left' }
+  if (account.left !== null) return account.left.kind === 'removal' ? { kind: 'removal_left' } : { kind: 'replacement_left' }
   if (offered === null) return { kind: 'not_offered' }
   if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
   if (checked) return holdsWhatItRunsOn(account.held) ? { kind: 'can_run' } : { kind: 'key_not_readable' }
@@ -102,8 +107,8 @@ function keyWords(key: KeyState): string | null {
   switch (key) {
     case 'readable': return null
     case 'key_missing':
-      return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요.'
-    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. ${operatorWords}`
+      return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣을 수 있어요.'
+    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣어 보세요. 그래도 읽지 못하면 ${operatorWords}`
     case 'not_looked_at': return `이 서버가 이 계정의 key 파일을 확인하지 못했어요. ${operatorWords}`
     case 'unrecognised': return '서버가 이 계정의 key 상태를 알려 주지 않았어요.'
   }
@@ -134,6 +139,19 @@ function removalWords(removal: Removal, held: Held): string {
     case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. 계정의 다른 파일이 이 서버에 남아 있어요.${left}`
     case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요.${left}`
     case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요.${left}`
+  }
+}
+
+/** What a replacement of the key that did not go through left on the
+    server (lib/auth_preview.ml, `provider_accounts`). No record of the
+    replacement went in: a key the server has for the account is the one
+    from before. Whether it has one is not said here. */
+function replacementWords(replacement: Replacement): string {
+  const left = '이 계정으로는 아무것도 실행되지 않아요.'
+  switch (replacement) {
+    case 'start_given_up':
+      return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버의 key 는 바뀌지 않았어요. ${left} key 를 다시 보내면 풀려요. 계정을 없애도 돼요.`
+    case 'unrecognised': return `이 계정의 key 를 바꾸는 일이 끝나지 않았어요. ${left}`
   }
 }
 
@@ -225,7 +243,7 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
 function checkFailureWords(failure: CheckFailure): string {
   switch (failure) {
     case 'key_refused':
-      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 이 계정을 없애고 key 를 다시 넣어 주세요.'
+      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 「key 바꾸기」로 key 를 다시 넣어 주세요.'
     case 'rate_limited': return '구독 쪽이 요청 한도나 사용 시간대에 걸렸다며 막았어요. 한도가 풀린 뒤 다시 확인해 주세요.'
     case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
     case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'
@@ -282,6 +300,7 @@ function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
   const { keeper, checked } = facts
   const held = facts.account.held.kind === 'key' ? html`<span class="chip">API key 로 연결</span>` : null
   if (keeper.kind === 'removal_left') return html`<p class="chips">${held}<span class="chip chip-todo">없애기가 끝나지 않음</span></p>`
+  if (keeper.kind === 'replacement_left') return html`<p class="chips">${held}<span class="chip chip-todo">key 바꾸기가 끝나지 않음</span></p>`
   if (keeper.kind === 'not_offered') return html`<p class="chips">${held}<span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
   return html`
     <p class="chips">
@@ -370,7 +389,7 @@ function CheckArea({ accountId, models, withheld, check, checks, card }: {
   `
 }
 
-/** What the card of an account says and offers while no removal is left on
+/** What the card of an account says and offers while nothing is left on
     it: what stands in the way of its use, the models checked on it, and the
     check of one. */
 function InUse({ facts, name, checks, card }: {
@@ -443,26 +462,30 @@ function RemoveArea({ accountId, removals, card, again }: {
   `
 }
 
-function AccountRow({ facts, checks, removals }: {
+function AccountRow({ facts, checks, removals, replacements }: {
   readonly facts: AccountFacts
   readonly checks: ChecksModel
   readonly removals: RemovalsModel
+  readonly replacements: ReplacementsModel
 }): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const removal = account.removal
-  const canCheck = removal === null && offered !== null && checkable(offered)
-  const couldCheck = useRef(canCheck)
-  // A reading after a check can find the subscription with no model to
-  // check, or its calls refused, which takes the pressed button away. The focus then
-  // goes to the title of the card, not to the body of the page; a focus the
-  // person moved elsewhere meanwhile stays.
+  const left = account.left
+  const canCheck = left === null && offered !== null && checkable(offered)
+  const canReplace = account.held.kind === 'key' && left?.kind !== 'removal'
+  const could = useRef({ canCheck, canReplace })
+  // A reading can take a control away with the focus on it. One after a
+  // check can find the subscription with no model to check, or its calls
+  // refused, and the pressed button goes. One after a key was sent can find
+  // a removal left on the account, and the field of the key goes. The
+  // focus then goes to the title of the card, not to the body of the page;
+  // a focus the person moved elsewhere meanwhile stays.
   useEffect(() => {
-    const before = couldCheck.current
-    couldCheck.current = canCheck
-    if (before && !canCheck && fell()) title.current?.focus()
-  }, [canCheck])
+    const before = could.current
+    could.current = { canCheck, canReplace }
+    if (((before.canCheck && !canCheck) || (before.canReplace && !canReplace)) && fell()) title.current?.focus()
+  }, [canCheck, canReplace])
   const titleId = `row-title-${account.id}`
   const accountLine = `row-account-${account.id}`
   return html`
@@ -470,24 +493,30 @@ function AccountRow({ facts, checks, removals }: {
       <h3 ref=${title} id=${titleId} class="row-title" tabindex="-1">${name}</h3>
       <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
-      ${removal !== null ? html`<p class="hint">${removalWords(removal, account.held)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
+      ${left === null
+        ? html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`
+        : html`<p class="hint">${left.kind === 'removal' ? removalWords(left.stage, account.held) : replacementWords(left.stage)}</p>`}
+      ${canReplace
+        ? html`<${ReplaceArea} accountId=${account.id} replacements=${replacements} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'replacement'} />`
+        : null}
       ${account.held.kind === 'key'
-        ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${removal !== null} />`
+        ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'removal'} />`
         : null}
     </li>
   `
 }
 
-export function AccountList({ integrations, owned, checks, removals }: {
+export function AccountList({ integrations, owned, checks, removals, replacements }: {
   readonly integrations: readonly Integration[]
   readonly owned: Owned
   readonly checks: ChecksModel
   readonly removals: RemovalsModel
+  readonly replacements: ReplacementsModel
 }): VNode {
   if (owned.accounts.length === 0) return html`<p>아직 연결한 구독이 없어요.</p>`
   return html`
     <ul class="rows">
-      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} removals=${removals} />`)}
+      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} removals=${removals} replacements=${replacements} />`)}
     </ul>
   `
 }

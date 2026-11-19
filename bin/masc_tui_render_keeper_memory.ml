@@ -235,13 +235,14 @@ let change_diagram (state : Masc_tui_types.state) ~keeper_name =
     let palette = Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()) in
     Masc_tui_image_preview.graph
       ~name:((if ko then "기억 형성 · " else "Memory formation · ") ^ keeper_name)
-      (Masc_tui_memory_lineage.lineage_graph ~ko ?palette ~keeper_name chart))
+      (Masc_tui_memory_lineage.lineage_graph ~ko ~now:(Unix.gettimeofday ()) ?palette ~keeper_name chart))
 
 let change_focus_diagram (state : Masc_tui_types.state) ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let now = Unix.gettimeofday () in
   change_chart state ~keeper_name |> Option.map (fun chart ->
     let name = (if ko then "기억의 변화 · " else "Memory change · ") ^ keeper_name in
     match Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()) with
     | Some palette -> Masc_tui_image_preview.inline_svg ~name
-        (Masc_tui_memory_lineage.transition_svg ~ko ~palette chart)
-    | None -> Masc_tui_image_preview.mermaid ~name (Masc_tui_memory_lineage.transition_mermaid ~ko chart))
+        (Masc_tui_memory_lineage.transition_svg ~ko ~now ~palette chart)
+    | None -> Masc_tui_image_preview.mermaid ~name (Masc_tui_memory_lineage.transition_mermaid ~ko ~now chart))

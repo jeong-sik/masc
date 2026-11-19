@@ -263,18 +263,6 @@ let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =
 (* A countdown changes while the reader looks, so it reads on the ongoing
    ladder like every other such span (RFC tui-one-screen-grammar §6.2). *)
 
-(* The screen's clock is the terminal's zone, like every other row clock. A
-   time on another day carries its date. *)
-let clock_text ~now at =
-  let tm = Unix.localtime at in
-  let today = Unix.localtime now in
-  if Int.equal tm.Unix.tm_year today.Unix.tm_year
-     && Int.equal tm.Unix.tm_yday today.Unix.tm_yday
-  then Printf.sprintf "%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
-  else
-    Printf.sprintf "%02d-%02d %02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min
-
 (* A reset time that has passed is said, not hidden and not drawn as an empty
    window: the server keeps the last report until a newer one arrives, so the
    meter still shows what the provider last said. The short form keeps the
@@ -295,7 +283,9 @@ let reset_words ~now = function
   | Some at ->
       { reset_tone = None
       ; reset_full =
-          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at)
+          Printf.sprintf "resets %s (%s)"
+            (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at)
+            (Masc_tui_value.Ongoing.until ~now at)
       ; reset_short = Printf.sprintf "resets in %s" (Masc_tui_value.Ongoing.until ~now at)
       }
 
@@ -378,7 +368,8 @@ let exhausted_tag ~now = function
   | Observed_exhausted (Some at) ->
       Some
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
-           (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at))
+           (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at)
+           (Masc_tui_value.Ongoing.until ~now at))
 
 (* ---- group the reported and observed evidence --------------------------- *)
 
@@ -776,7 +767,7 @@ let no_window_body ~now (account : Masc.Tui_decode_usage.provider_usage_account)
   | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
       State_text
         ("Provider reported no usage windows \xc2\xb7 Last report "
-         ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source)
+         ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source)
   | Masc.Tui_decode_usage.Account_reported _ ->
       State_text "No reported window gates model calls"
 

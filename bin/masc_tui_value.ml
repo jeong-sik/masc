@@ -77,6 +77,11 @@ module Instant = struct
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm
 
+  let day_of ?(localtime = Unix.localtime) ~now at =
+    distance ~now:(localtime now) (localtime at)
+
+  let clock_within_day = clock
+
   let minutes_per_hour = 60
   let minutes_per_day = 24 * minutes_per_hour
 
@@ -114,6 +119,86 @@ module Instant = struct
     let local = Unix.localtime now in
     clock To_minute local ^ " "
     ^ zone_label ~offset_minutes:(offset_minutes ~utc:(Unix.gmtime now) ~local)
+
+  let axis_hour at =
+    let local = Unix.localtime at in
+    if local.Unix.tm_min = 0 && local.Unix.tm_sec = 0 then Some (clock To_minute local)
+    else None
+
+  let day_start at =
+    let day = Unix.localtime at in
+    match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
+    | start, _ -> Some start
+    | exception Unix.Unix_error _ -> None
+
+  let file_stamp at =
+    let tm = Unix.localtime at in
+    Printf.sprintf "%04d%02d%02d-%02d%02d" (tm.Unix.tm_year + tm_year_origin)
+      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+end
+
+let date_text ~year ~month ~day = Printf.sprintf "%04d-%02d-%02d" year month day
+
+module Local_day = struct
+  type t =
+    { year : int
+    ; month : int
+    ; day : int
+    }
+
+  let of_moment at =
+    let tm = Unix.localtime at in
+    { year = tm.Unix.tm_year + Instant.tm_year_origin
+    ; month = tm.Unix.tm_mon + 1
+    ; day = tm.Unix.tm_mday
+    }
+
+  let text { year; month; day } = date_text ~year ~month ~day
+end
+
+module Local_hour = struct
+  type t =
+    { year : int
+    ; month : int
+    ; day : int
+    ; hour : int
+    ; is_dst : bool
+    }
+
+  let of_tm (tm : Unix.tm) =
+    { year = tm.Unix.tm_year + Instant.tm_year_origin
+    ; month = tm.Unix.tm_mon + 1
+    ; day = tm.Unix.tm_mday
+    ; hour = tm.Unix.tm_hour
+    ; is_dst = tm.Unix.tm_isdst
+    }
+
+  let equal left right =
+    Int.equal left.year right.year
+    && Int.equal left.month right.month
+    && Int.equal left.day right.day
+    && Int.equal left.hour right.hour
+    && Bool.equal left.is_dst right.is_dst
+
+  let heading { year; month; day; hour; is_dst } =
+    date_text ~year ~month ~day
+    ^ Printf.sprintf " \xc2\xb7 %02d:00" hour
+    ^ if is_dst then " DST" else ""
+end
+
+module Utc_day = struct
+  (* Whole days since the epoch: the UTC day is the floor of the moment in
+     days, so two moments on one UTC day give the same value. *)
+  type t = int
+
+  let seconds_per_day = 86_400.
+  let of_moment at = int_of_float (Float.floor (at /. seconds_per_day))
+  let breakdown day = Unix.gmtime (float_of_int day *. seconds_per_day)
+
+  let month_day day = Instant.month_day (breakdown day)
+  let date day = Instant.year_month_day (breakdown day)
+  let day_of_month day = (breakdown day).Unix.tm_mday
+  let day_of_month_text day = Printf.sprintf "%02d" (day_of_month day)
 end
 
 module Ongoing = struct

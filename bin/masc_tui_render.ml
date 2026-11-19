@@ -203,11 +203,8 @@ let overview_capacity_status (state : state) : Masc_tui_card.status =
       ; word = Masc_tui_fleet_line.status_text ~ko fleet.fs_status
       ; tone }
 
-(* The plain rows drawn when the cards do not fit have no edge, so a status
-   that needs a look leads them. A settled fleet spends no row: the plain rows
-   are drawn in spare room, where a meter or the Tool calls row is worth more
-   than "ok". With no reading the rows under it say why, which the edge's lone
-   mark stands for. *)
+(* An observed fleet status that needs attention leads its plain rows. A
+   settled fleet leaves room for the readings or the Tool calls row. *)
 let overview_capacity_status_rows (status : Masc_tui_card.status) =
   let row mark = [ status.tone ^ Masc_tui_value.Mark.glyph mark ^ " " ^ status.word ^ Ansi.reset ] in
   match status.symbol with
@@ -217,25 +214,46 @@ let overview_capacity_status_rows (status : Masc_tui_card.status) =
       row mark
   | Masc_tui_card.Unknown _ -> []
 
-let overview_capacity_lines ?(cells = 48) (state : state) =
+(* Where the capacity's status mark is drawn. The card layout draws it on
+   the card's top edge ({!overview_capacity_status}). The plain list has no
+   edge, so the body's first sentence carries the same mark: with no current
+   reading that sentence is the only place the capacity appears, and the mark
+   stands where the value goes (RFC tui-one-screen-grammar §6.4). *)
+type capacity_mark =
+  | Mark_on_card_edge
+  | Mark_in_body
+
+let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
   let text ko en = ui_text state ~ko ~en in
   let quiet line = Theme.recede () ^ line ^ Ansi.reset in
   let warning line = Theme.warn () ^ line ^ Ansi.reset in
   let wrap line = Message_layout.wrap_styled_words ~max_cells:(max 1 cells) line in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
+  (* The sentence that stands in for the capacity's value: what the card
+     waits on, or that the figures below are the last reading. A status word
+     such as 미관측 is not drawn where the value goes (§6.4); the mark is. *)
+  let lead sentence =
+    match mark with
+    | Mark_on_card_edge -> wrap (warning sentence)
+    | Mark_in_body ->
+        let status = overview_capacity_status state in
+        wrap
+          (status.Masc_tui_card.tone ^ Masc_tui_card.symbol_glyph status.Masc_tui_card.symbol
+           ^ Ansi.reset ^ " " ^ warning sentence)
+  in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      wrap (warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading"))
+      lead (text "fleet 첫 관측 대기" "Awaiting fleet reading")
   (* With no reading the edge draws the failure mark, and one row says why:
      the row that names the cause with its age. A general row above it
      ("not observed · fleet unreachable") said the same thing again. *)
   | Unreachable { since } ->
-      wrap (warning (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
+      lead (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)
   | Unavailable { degradation; disconnected_since } ->
-      wrap (warning (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
+      lead (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)
   | Cannot_read failure ->
-      wrap (warning (Masc_tui_fleet_line.failure_text ~ko failure))
+      lead (Masc_tui_fleet_line.failure_text ~ko failure)
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let identity_confirmed = state.workspace_identity = Workspace_identity_match in
@@ -243,9 +261,15 @@ let overview_capacity_lines ?(cells = 48) (state : state) =
       (* The first row says the counts below are an earlier reading and why,
          before any of them can be read as the fleet's current state. *)
       let scope =
-        List.concat_map
-          (fun row -> wrap (warning (Masc_tui_fleet_line.retained_row_text ~ko ~now row)))
-          (Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed)
+        let retained_text = Masc_tui_fleet_line.retained_row_text ~ko ~now in
+        match Masc_tui_fleet_line.retained_rows ~trouble ~identity_confirmed with
+        | first :: rest ->
+            lead (retained_text first)
+            @ List.concat_map (fun row -> wrap (warning (retained_text row))) rest
+        | [] ->
+            (match mark with
+             | Mark_on_card_edge -> []
+             | Mark_in_body -> overview_capacity_status_rows (overview_capacity_status state))
       in
       let avail =
         max 0 (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
@@ -322,7 +346,7 @@ let render_overview (state : state) home =
   let operator_rows = Masc_tui_home.home_operator_rows home in
   let selected = Masc_tui_home.home_selected_action home in
   let inner_cols = framed_inner_width cols in
-  let capacity_lines = overview_capacity_lines ~cells:inner_cols state in
+  let capacity_lines = overview_capacity_lines ~cells:inner_cols ~mark:Mark_in_body state in
   (* The last day of tool calls, whatever window Usage's [w] holds
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
@@ -409,7 +433,7 @@ let render_overview (state : state) home =
                 ; focus = Masc_tui_card.Unfocused }
             }
           in
-          let status ~cells = overview_capacity_lines ~cells state in
+          let status ~cells = overview_capacity_lines ~cells ~mark:Mark_on_card_edge state in
           Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
             ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
@@ -426,8 +450,7 @@ let render_overview (state : state) home =
            List.iter draw_row body.hb_rows;
            let spare = max 0 (body.hb_spare - 1) in
            List.take spare
-             (overview_capacity_status_rows (overview_capacity_status state)
-              @ capacity_lines @ [tool_calls_line ~cells:inner_cols])
+             (capacity_lines @ [tool_calls_line ~cells:inner_cols])
            |> List.iter c.push);
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
@@ -489,10 +512,9 @@ let render_memory (state : state) =
           ; (match current_memory_starving_count s with
              | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
              | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
-          ; (let tm = Unix.localtime s.mhs_generated_at in
-             Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
-               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-               tm.Unix.tm_hour tm.Unix.tm_min)
+          ; Printf.sprintf (if ko then "%s 관측" else "read %s")
+              (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
+                 s.mhs_generated_at)
           ]
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"

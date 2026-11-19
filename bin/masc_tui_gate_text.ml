@@ -200,7 +200,13 @@ let fold_argument ~cap text =
       let prefix_cells = Message_layout.display_width prefix in
       let actual_held = width - prefix_cells in
       if actual_held = held then
-        { fa_text = prefix ^ Message_layout.take_cells tail (cap - prefix_cells)
+        (* The tail is the fold's own mark. A cap narrower than it keeps
+           what fits of the mark rather than adding a second one. *)
+        let tail =
+          match Message_layout.take_cells tail (cap - prefix_cells) with
+          | Message_layout.Whole tail | Message_layout.Cut tail -> tail
+        in
+        { fa_text = prefix ^ tail
         ; fa_held_cells = held
         }
       else

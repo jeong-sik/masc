@@ -2041,7 +2041,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  (match activation.delivery with
                   | Some delivery ->
                     [ ( delivery.delivered_at,
-                        Say.code (Printf.sprintf "%-8s " (time_of delivery.delivered_at))
+                        Say.code (Printf.sprintf "%-*s " Terminal_text.clock_timestamp_cells (time_of delivery.delivered_at))
                         ++ event_kind (Say.both ~ko:"전달" ~en:"delivery")
                         ++ Say.code
                              (Printf.sprintf
@@ -2065,7 +2065,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                      (fun (act :
                              Masc.Keeper_skill_activation_ledger.action) ->
                         ( act.observed_at,
-                          Say.code (Printf.sprintf "%-8s " (time_of act.observed_at))
+                          Say.code (Printf.sprintf "%-*s " Terminal_text.clock_timestamp_cells (time_of act.observed_at))
                           ++ event_kind (Say.both ~ko:"동작" ~en:"action")
                           ++ Say.code
                                (Printf.sprintf " %-20s turn#%d %s"

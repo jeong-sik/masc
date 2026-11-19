@@ -130,17 +130,20 @@ let unit_suffix = function
   | Series.Series_hour -> "/h"
   | Series.Series_day -> "/d"
 
+(* An hour bucket starts at a moment, and reads in the operator's zone like
+   every other moment, the heading's "as of" among them (RFC
+   tui-one-screen-grammar §6.1). A day bucket is a UTC day the server chose:
+   it starts at 09:00 in Seoul, so it is no local day and says UTC. The card
+   drew both in UTC under an "as of" in local time, nine hours apart. *)
 let time_text series_width start =
-  let moment = Unix.gmtime start in
   match series_width with
   | Series.Series_hour ->
-      Printf.sprintf "%02d-%02d %02d:00" (moment.Unix.tm_mon + 1) moment.Unix.tm_mday
-        moment.Unix.tm_hour
-  | Series.Series_day ->
-      Printf.sprintf "%02d-%02d" (moment.Unix.tm_mon + 1) moment.Unix.tm_mday
+      Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute
+        ~now:(Unix.gettimeofday ()) start
+  | Series.Series_day -> Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment start)
 
 let time_header = function
-  | Series.Series_hour -> "HOUR (UTC)"
+  | Series.Series_hour -> "HOUR"
   | Series.Series_day -> "DAY (UTC)"
 
 let totals buckets =
@@ -169,14 +172,14 @@ let span_text window =
   span_name window
   ^
   match width window with
-  | Series.Series_hour -> " · per UTC hour"
+  | Series.Series_hour -> " · per hour"
   | Series.Series_day -> " · per UTC day"
 
 (* The first of the wordings that fits [cells]; the last one is cut to [cells]
    when it does not fit either. *)
 let rec first_within ~cells wording rest =
   match rest with
-  | [] -> Layout.take_cells wording cells
+  | [] -> Layout.truncate_end cells wording
   | next :: later ->
       if Layout.display_width wording <= cells then wording
       else first_within ~cells next later
@@ -185,10 +188,10 @@ let rec first_within ~cells wording rest =
    stays in every wording: the answer can be a read behind the store, and this
    time is what says by how much. *)
 let heading ~cells t =
-  let as_of = Unix.gmtime t.series.Series.tsr_generated_at in
   let time =
-    Printf.sprintf "as of %02d-%02d %02d:%02d UTC" (as_of.Unix.tm_mon + 1)
-      as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min
+    "as of "
+    ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ())
+        t.series.Series.tsr_generated_at
   in
   first_within ~cells
     (Printf.sprintf " Tool calls (%s) · %s" (span_text t.window) time)
@@ -525,7 +528,7 @@ let legend ~cells ~at_most =
   let rows =
     match List.find_opt fits legend_wordings with
     | Some rows -> rows
-    | None -> [ Layout.take_cells legend_shortest room ]
+    | None -> [ Layout.truncate_end room legend_shortest ]
   in
   List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
 
@@ -582,7 +585,7 @@ let summary_line ~cells t =
   let calls, failures, _deferred = totals buckets in
   if calls = 0 then
     Theme.recede ()
-    ^ Layout.take_cells (label ^ summary_gap ^ "no calls") cells
+    ^ Layout.truncate_end cells (label ^ summary_gap ^ "no calls")
     ^ Ansi.reset
   else
     let figures =
@@ -604,10 +607,10 @@ let summary_line ~cells t =
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures
     else
       Theme.recede ()
-      ^ Layout.take_cells (label ^ summary_gap ^ figures) cells
+      ^ Layout.truncate_end cells (label ^ summary_gap ^ figures)
       ^ Ansi.reset
 
 let summary_note ~cells window note =
   Theme.recede ()
-  ^ Layout.take_cells (summary_label window ^ summary_gap ^ note) cells
+  ^ Layout.truncate_end cells (summary_label window ^ summary_gap ^ note)
   ^ Ansi.reset

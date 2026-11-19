@@ -1,4 +1,6 @@
-type timestamp = { epoch : float; local : Unix.tm }
+(* A moment the zone can break down, checked when read so that drawing it
+   cannot fail later. *)
+type timestamp = { epoch : float }
 type successful_outcome = Completed | Checkpoint | Input_required
 type recent = { timestamp : timestamp; outcome : successful_outcome; input : int option; output : int option }
 type stats = {
@@ -31,7 +33,7 @@ let number = function
 let time value =
   let* epoch = number value in
   match Unix.localtime epoch with
-  | local -> Ok { epoch; local }
+  | _ -> Ok { epoch }
   | exception (Unix.Unix_error _ | Invalid_argument _) ->
       Error "runtime evidence has an unrenderable timestamp"
 let successful_outcome = function
@@ -130,10 +132,7 @@ let decode json =
   then Ok {history; specifications}
   else Error "runtime specifications repeat an identity"
 let timestamp ts =
-  let tm = ts.local in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) ts.epoch
 let count = function Some n -> string_of_int n | None -> "not reported"
 let lines t ~runtime_id =
   let specifications = match List.find_opt (fun (row : specification) -> row.id = runtime_id) t.specifications with

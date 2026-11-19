@@ -218,6 +218,20 @@ let deferred_names_absent_from ~declared_names ~actual_names =
   absent
 ;;
 
+(* The tools a run is offered: a held task skill's own set, or every
+   descriptor and lane add-on export. Nothing here depends on whether the run
+   serves a chat execution: the tool array is part of the request prefix a
+   provider caches, so a surface that followed the run kind rewrote it
+   whenever a chat turn and a self-woken turn took turns (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A
+   [keeper_receipt_wait] call in a run with no chat execution is refused
+   ([Keeper_tool_receipt_wait.handle]). *)
+let offered_descriptors ~task_skill_descriptors ~lane_descriptors =
+  match task_skill_descriptors with
+  | Some descriptors -> descriptors
+  | None -> Keeper_tool_descriptor.all_descriptors () @ lane_descriptors ()
+;;
+
 let prepare_agent_setup
       ?preview
       ?observation_token
@@ -337,19 +351,12 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.name in
-  (* A run gets the same tools whether or not it serves a chat execution:
-     the tool array is part of the request prefix a provider caches, so a
-     surface that followed the run kind rewrote it whenever a chat turn and
-     a self-woken turn took turns (RFC
-     a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A
-     [keeper_receipt_wait] call in a run with no chat execution is refused
-     ([Keeper_tool_receipt_wait.handle]). *)
-  let* tool_descriptors = match Keeper_task_skill_turn.descriptors task_skill_selection with
-    | Some descriptors -> Ok descriptors
-    | None ->
+  let tool_descriptors =
+    offered_descriptors
+      ~task_skill_descriptors:(Keeper_task_skill_turn.descriptors task_skill_selection)
+      ~lane_descriptors:(fun () ->
         let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
-        Ok (Keeper_tool_descriptor.all_descriptors ()
-          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
+        List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
   let* (task_skill_selection, preparation) =
     Keeper_skill_preparation_runtime_observation.with_turn_result
       ?preview

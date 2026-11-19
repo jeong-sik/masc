@@ -140,24 +140,18 @@ let waitable ~base_path ~keeper_name = function
    that records the wait; this read only lets the model hear it now. The
    journal is read outside the Owner, so a wait that starts after this read is
    still caught by that transaction. *)
-let not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id =
-  match execution_scope with
-  | None ->
-    Error
-      ( Tool_result.Workflow_rejection
-      , "This run serves no conversation, so it has no turn to end on a receipt." )
-  | Some scope ->
-    (match Keeper_receipt_wait_resolution.request_owner ~base_path ~keeper_name ~request_id with
-     | Error detail -> Error (Tool_result.Dependency_unavailable, detail)
-     | Ok None -> Ok ()
-     | Ok (Some owner) ->
-       if Keeper_execution_scope_id.equal owner scope
-       then Ok ()
-       else
-         Error
-           ( Tool_result.Workflow_rejection
-           , "Another conversation of this Keeper already waits for the receipt of this \
-              request." ))
+let not_waited_by_another ~base_path ~keeper_name ~scope request_id =
+  match Keeper_receipt_wait_resolution.request_owner ~base_path ~keeper_name ~request_id with
+  | Error detail -> Error (Tool_result.Dependency_unavailable, detail)
+  | Ok None -> Ok ()
+  | Ok (Some owner) ->
+    if Keeper_execution_scope_id.equal owner scope
+    then Ok ()
+    else
+      Error
+        ( Tool_result.Workflow_rejection
+        , "Another conversation of this Keeper already waits for the receipt of this \
+           request." )
 ;;
 
 let handle
@@ -166,16 +160,23 @@ let handle
       ~execution_scope
       ~args
   =
-  match target_of_args args with
-  | Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
-  | Ok target ->
+  (* Every run is offered the wait (RFC
+     a-sent-request-prefix-changes-only-when-the-window-moves §3.2). One that
+     serves no conversation has no turn to end on a receipt, whatever the call
+     names, so it is refused before anything is read. *)
+  match execution_scope, target_of_args args with
+  | None, (Ok _ | Error _) ->
+    refusal ~class_:Tool_result.Workflow_rejection
+      "This run serves no conversation, so it has no turn to end on a receipt."
+  | Some _, Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
+  | Some scope, Ok target ->
     let base_path = config.Workspace.base_path in
     let keeper_name = meta.Keeper_meta_contract.name in
     (match
        Result.bind (waitable ~base_path ~keeper_name target) (fun request_id ->
          Result.map
            (fun () -> request_id)
-           (not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id))
+           (not_waited_by_another ~base_path ~keeper_name ~scope request_id))
      with
      | Error (class_, detail) -> refusal ~class_ detail
      | Ok request_id ->

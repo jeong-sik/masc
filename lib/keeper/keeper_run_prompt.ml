@@ -42,28 +42,6 @@ let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let assemble_extra_system_context = Keeper_context_assembly.assemble
 
-(* The admitted operation source an official client reads as a System
-   observation, right behind the Goal snapshot. Only a source the renderer
-   attributes to exactly one section qualifies. *)
-let official_source_observation partition =
-  match
-    List.filter
-      (fun (section : Keeper_context_layers.section) ->
-         section.section_source
-         = Keeper_context_layers.Layer Keeper_context_layers.Direct_input_source)
-      (Keeper_context_layers.sections partition)
-  with
-  | [ _ ] ->
-    let source, (_ : Keeper_context_layers.rendered) =
-      Keeper_context_layers.partition_layer Keeper_context_layers.Direct_input_source partition
-    in
-    (match Keeper_context_layers.text source with
-     | "" -> []
-     | text ->
-       [ Keeper_context_assembly.Direct_input_source (Inference_utils.sanitize_text_utf8 text) ])
-  | [] | _ :: _ :: _ -> []
-;;
-
 (* RFC-0491 §3.1: the Completion Authority layer is world state that comes and
    goes between turns, so it is a context block, not a System observation.
    The Goal snapshot is a System suffix. The admitted operation source is one
@@ -82,47 +60,29 @@ let official_source_observation partition =
    [Constitution_amendments] block. *)
 let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
-  let observations, blocks, dynamic_context_partition, proof_state =
+  let observations, blocks, dynamic_context_partition, proof_state, admitted_source =
     if post_tool_round then
       match previous_assembly with
-      | None -> [], blocks, dynamic_context_partition, None
+      | None -> [], blocks, dynamic_context_partition, None, None
       | Some (previous : Keeper_context_assembly.t) ->
         let observations = match previous.system_prompt with
           | None -> [] | Some issued -> issued.observations in
-        (* Proof state and the current norms are issued again below, from the
-           carried proof state and from [system], for the owner of this
-           request. A copy the previous round's System held is dropped. *)
+        (* Proof state, the current norms and the admitted source are issued
+           again below, from the carried proof state and source and from
+           [system], for the owner of this request. A copy the previous
+           round's System held is dropped. *)
         let observations = List.filter (function
-            | Keeper_context_assembly.Current_norms _ -> false
+            | Keeper_context_assembly.Current_norms _
+            | Keeper_context_assembly.Direct_input_source _ -> false
             | Keeper_context_assembly.Goals_awaiting_proof _ ->
               Option.is_none previous.proof_state
-            | Keeper_context_assembly.Active_goals _
-            | Keeper_context_assembly.Direct_input_source _ -> true) observations in
-        (* An official client that takes the turn over after an Agent Core
-           round reads the admitted source as its own first round would.
-           Agent Core issued none, so it is read from the turn's partition. *)
-        let observations =
-          match checkpoint_owner, dynamic_context_partition with
-          | Runtime_execution.Official_client, Some partition
-            when not (List.exists (function
-                | Keeper_context_assembly.Direct_input_source _ -> true
-                | Keeper_context_assembly.Current_norms _
-                | Keeper_context_assembly.Active_goals _
-                | Keeper_context_assembly.Goals_awaiting_proof _ -> false) observations) ->
-            let goals, rest = List.partition (function
-                | Keeper_context_assembly.Active_goals _ -> true
-                | Keeper_context_assembly.Current_norms _
-                | Keeper_context_assembly.Direct_input_source _
-                | Keeper_context_assembly.Goals_awaiting_proof _ -> false) observations in
-            goals @ official_source_observation partition @ rest
-          | Runtime_execution.Official_client, (Some _ | None)
-          | Runtime_execution.Masc_agent_core, (Some _ | None) -> observations
-        in
+            | Keeper_context_assembly.Active_goals _ -> true) observations in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
             || (Option.is_none previous.proof_state
                 && Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof)) previous.blocks in
-        observations, carried @ blocks, dynamic_context_partition, previous.proof_state
+        ( observations, carried @ blocks, dynamic_context_partition, previous.proof_state
+        , previous.admitted_source )
     else
       match dynamic_context_partition,
         List.filter (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Dynamic_context) blocks with
@@ -132,21 +92,22 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
           section.section_source = Keeper_context_layers.Layer layer) sections) <= 1 in
         if not (unique Active_goals && unique Direct_input_source
                 && unique Goals_awaiting_proof && unique Completion_authority)
-        then [], blocks, dynamic_context_partition, None
+        then [], blocks, dynamic_context_partition, None, None
         else
           let observation make layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [make (Inference_utils.sanitize_text_utf8 text)] in
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
-          (* Agent Core keeps the source in [remaining], the end context. *)
-          let source, remaining = match checkpoint_owner with
-            | Runtime_execution.Official_client ->
-              let source, remaining = Keeper_context_layers.partition_layer Direct_input_source remaining in
-              observation (fun text -> Keeper_context_assembly.Direct_input_source text) source, remaining
-            | Runtime_execution.Masc_agent_core -> [], remaining in
+          let source, without_source =
+            Keeper_context_layers.partition_layer Direct_input_source remaining in
+          (* Agent Core keeps the source in the end context; an official client
+             reads it in System (below), so its end context drops it. *)
+          let remaining = match checkpoint_owner with
+            | Runtime_execution.Official_client -> without_source
+            | Runtime_execution.Masc_agent_core -> remaining in
           let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
           let observations =
-            observation (fun text -> Keeper_context_assembly.Active_goals text) goals @ source in
+            observation (fun text -> Keeper_context_assembly.Active_goals text) goals in
           let block id layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
           let proof_state = Keeper_context_assembly.issue_proof_state awaiting in
@@ -154,7 +115,23 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
           observations, split @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining, proof_state
-      | Some _, _ | None, _ -> [], blocks, dynamic_context_partition, None
+          , Keeper_context_assembly.issue_admitted_source source
+      | Some _, _ | None, _ -> [], blocks, dynamic_context_partition, None, None
+  in
+  (* Only a matching renderer partition or the prior issued assembly supplies
+     [admitted_source], and only an official client reads it in System, right
+     behind the Goal snapshot. *)
+  let observations =
+    match checkpoint_owner, admitted_source with
+    | Runtime_execution.Official_client, Some (source : Keeper_context_assembly.admitted_source) ->
+      let goals, rest = List.partition (function
+          | Keeper_context_assembly.Active_goals _ -> true
+          | Keeper_context_assembly.Current_norms _
+          | Keeper_context_assembly.Direct_input_source _
+          | Keeper_context_assembly.Goals_awaiting_proof _ -> false) observations in
+      goals @ [ Keeper_context_assembly.Direct_input_source source.source_text ] @ rest
+    | Runtime_execution.Official_client, None
+    | Runtime_execution.Masc_agent_core, (Some _ | None) -> observations
   in
   (* Only a matching renderer partition or the prior issued assembly supplies
      [proof_state]. A raw caller block must not acquire System authority. *)
@@ -206,6 +183,7 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
   |> Keeper_context_assembly.with_system_observations
        ~base_text:(Inference_utils.sanitize_text_utf8 system.text) ~observations
   |> Keeper_context_assembly.with_proof_state proof_state
+  |> Keeper_context_assembly.with_admitted_source admitted_source
 
 (* See the mli: a position question about the last message, deliberately not
    [Hooks.last_tool_results], which answers containment over the whole

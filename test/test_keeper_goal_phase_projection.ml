@@ -818,13 +818,30 @@ let test_proof_state_follows_the_runtime_execution_owner () =
     Keeper_run_prompt.assemble_request_context ~checkpoint_owner
       ~system:(system_of_text "BASE") ~post_tool_round ~previous_assembly
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None ~blocks in
+  let system_sources (assembly : Keeper_context_assembly.t) =
+    match assembly.system_prompt with
+    | None -> fail "the admitted source requires an issued System"
+    | Some issued -> List.filter_map (function
+        | Keeper_context_assembly.Direct_input_source text -> Some text
+        | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
+  (* RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2:
+     Agent Core never puts the source in System; it rides the end context of
+     the turn's first request only. *)
+  let check_agent_core_source ~first_round (assembly : Keeper_context_assembly.t) =
+    check (list string) "Agent Core issues no admitted source in System" []
+      (system_sources assembly);
+    check bool "the Agent Core System holds no source bytes" false
+      (contains_in (issued_system assembly) source);
+    check bool "the source acquires no block of its own" false
+      (List.mem_assoc Prompt_block_id.Direct_input_source assembly.blocks);
+    List.iter (fun identity ->
+      check bool "only the first request's end context names the operation and peer" first_round
+        (match assembly.extra_system_context with
+         | Some carrier -> contains_in carrier identity
+         | None -> false)) [operation; peer] in
   let check_source (assembly : Keeper_context_assembly.t) =
-    let sources = match assembly.system_prompt with
-      | None -> fail "the admitted source requires an issued System"
-      | Some issued -> List.filter_map (function
-          | Keeper_context_assembly.Direct_input_source text -> Some text
-          | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
-    check (list string) "the exact admitted source stays in System once" [source] sources;
+    check (list string) "the exact admitted source stays in System once" [source]
+      (system_sources assembly);
     check bool "the actual issued System retains the exact source bytes" true
       (contains_in (issued_system assembly) source);
     check bool "the source acquires no User context block" false
@@ -837,7 +854,7 @@ let test_proof_state_follows_the_runtime_execution_owner () =
   List.iter (fun extra_blocks ->
     let first = assemble Runtime_execution.Masc_agent_core false None
         ((Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition) :: extra_blocks) in
-    check_source first;
+    check_agent_core_source ~first_round:true first;
     check bool "only renderer-issued proof enters System" false
       (contains_in (issued_system first) "UNISSUED_PROOF");
     let official = assemble Runtime_execution.Official_client true (Some first) [] in
@@ -850,7 +867,7 @@ let test_proof_state_follows_the_runtime_execution_owner () =
       ["goals_awaiting_proof", "CURRENT_PROOF_STATE"]
       (List.map (fun (id, text) -> Prompt_block_id.to_string id, text) official.blocks);
     let core = assemble Runtime_execution.Masc_agent_core true (Some official) [] in
-    check_source core;
+    check_agent_core_source ~first_round:false core;
     check string "Agent Core fallback restores the same System"
       (issued_system first) (issued_system core);
     check (option string) "Agent Core fallback leaves no proof User carrier" None core.extra_system_context)

@@ -280,22 +280,33 @@ let test_admitted_source_leaves_the_agent_core_system () =
   let self_woken = partition None in
   check bool "the fixture renders the admitted source" true
     (names_source (Keeper_context_layers.text admitted));
+  (* A round after tool results gets the partition production passes then:
+     the turn's text, unattributed. *)
+  let after_tools checkpoint_owner partition previous =
+    assemble checkpoint_owner
+      (Keeper_context_layers.unattributed Keeper_context_layers.Unprojected_input
+         (Keeper_context_layers.text partition))
+      ~previous:(Some previous)
+  in
   let chat_first = assemble Runtime_execution.Masc_agent_core admitted ~previous:None in
   let woken_first = assemble Runtime_execution.Masc_agent_core self_woken ~previous:None in
   check string "a chat turn and a self-woken turn send Agent Core the same System"
     (effective woken_first) (effective chat_first);
   check bool "the chat turn's first end context carries the source" true
     (names_source (end_context chat_first));
-  let chat_later = assemble Runtime_execution.Masc_agent_core admitted ~previous:(Some chat_first) in
+  let chat_later = after_tools Runtime_execution.Masc_agent_core admitted chat_first in
   check bool "a round after tool results carries no source" false
     (names_source (effective chat_later) || names_source (end_context chat_later));
   let official_first = assemble Runtime_execution.Official_client admitted ~previous:None in
   check bool "an official client reads the source in its System" true
     (in_official_system official_first);
   check bool "and not again in its end context" false (names_source (end_context official_first));
-  check bool "an official client that takes over after an Agent Core round reads it too" true
-    (in_official_system
-       (assemble Runtime_execution.Official_client admitted ~previous:(Some chat_first)))
+  let official_takeover = after_tools Runtime_execution.Official_client admitted chat_later in
+  check bool "an official client that takes over after Agent Core rounds reads it too" true
+    (in_official_system official_takeover);
+  let core_again = after_tools Runtime_execution.Masc_agent_core admitted official_takeover in
+  check string "Agent Core after an official round sends its own System again"
+    (effective chat_first) (effective core_again)
 
 let test_goal_survives_read_then_task_creation ~peer () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->

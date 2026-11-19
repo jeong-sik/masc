@@ -544,6 +544,24 @@ let test_a_post_cannot_share_a_batch_with_a_wait () =
         fail "a wait claims to be a terminal tool"))
 ;;
 
+(* Every run is offered the wait, whether or not it serves a chat execution:
+   the tool array is part of the request prefix a provider caches (RFC
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A call from
+   a run that serves none is refused before anything is read (above). *)
+let test_every_run_is_offered_the_wait () =
+  let names descriptors =
+    List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.internal_name) descriptors
+  in
+  let offered =
+    Keeper_run_tools_setup.offered_descriptors ~task_skill_descriptors:None
+      ~lane_descriptors:(fun () -> [])
+  in
+  check bool "a run without a held task skill is offered the wait" true
+    (List.mem "keeper_receipt_wait" (names offered));
+  check int "and every registered descriptor"
+    (List.length (Keeper_tool_descriptor.all_descriptors ())) (List.length offered)
+;;
+
 let () =
   run
     "keeper receipt wait tool"
@@ -572,5 +590,7 @@ let () =
         ; test_case "a post cannot share a batch with a wait" `Quick
             test_a_post_cannot_share_a_batch_with_a_wait
         ] )
+    ; ( "surface"
+      , [ test_case "every run is offered the wait" `Quick test_every_run_is_offered_the_wait ] )
     ]
 ;;

@@ -18,8 +18,9 @@
     A request that an execution other than [execution_scope] already waits for
     is refused with a message the model reads, and nothing is recorded. That
     check reads the journal without the Owner, so the transaction above still
-    refuses a wait that began after it. A run with no [execution_scope] serves
-    no conversation and its call is refused. *)
+    refuses a wait that began after it. Every run is offered the tool; one with
+    no [execution_scope] serves no conversation, and its call is refused
+    before anything is read or its arguments are checked. *)
 
 val handle
   :  config:Workspace.config

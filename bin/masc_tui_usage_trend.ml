@@ -107,7 +107,7 @@ let latest row = List.find_map Fun.id (List.rev row.samples)
 let dated_samples trend row =
   let first_day = utc_day trend.generated_at - List.length row.samples + 1 in
   List.mapi (fun offset sample ->
-    (Unix.gmtime (float_of_int (first_day + offset) *. seconds_per_day), sample))
+    (Masc_tui_value.Utc_day.of_moment (float_of_int (first_day + offset) *. seconds_per_day), sample))
     row.samples
 
 (* Five braille rows of line over the fixed 0-100% scale: twenty dot-levels.
@@ -284,7 +284,7 @@ let plot ~width trend row =
       | Some {report = Reported_no_windows; _} -> pad empty_report_mark
       | Some {report = Measured (_, Some _); _} -> pad "─") row.samples |> String.concat "") in
     let dates = List.map (fun (day, _) ->
-      Printf.sprintf "%02d%s" day.Unix.tm_mday (String.make (max 0 (step - 2)) ' '))
+      Masc_tui_value.Utc_day.day_of_month_text day ^ String.make (max 0 (step - 2)) ' ')
       (dated_samples trend row)
       |> String.concat "" in
     bands @ [baseline; " UTC   " ^ dates]

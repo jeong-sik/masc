@@ -77,8 +77,8 @@ val level_glyph : peak:int -> int -> string
     [value], so the glyph never passes the top. *)
 
 val due_text : now:float -> localtime:(float -> Unix.tm) -> Masc_tui_keeper_next_run.t -> string
-(** The due column: the next run's clock time within a day, the span to it
-    past a day, [late] for a due run that has not started, [held] for a held
+(** The due column: the next run's clock time when it is due today, the span
+    to it when it is due on another day, [late] for a due run that has not started, [held] for a held
     one ([held?] when the hold is known only as of an earlier reading), [>12h]
     for a lower bound past twelve hours, and [?] for a time that is not known:
     a lower bound nearer than that, or no reading. A Keeper with no schedule
@@ -108,10 +108,6 @@ val lag_fill : cells:int -> peak:int -> int -> int
 val short_span : float -> string
 (** A span of seconds in at most five cells, the mock's [dur]: [42s], [17m],
     [3h05m], [27h], [9d]. A negative span reads as [0s]. *)
-
-val dated_clock_text : now:float -> localtime:(float -> Unix.tm) -> float -> string
-(** The clock time of [at], [HH:MM], with the date in front, [MM-DD HH:MM],
-    from half a day before [now] back: an older time of day reads as today's. *)
 
 val chain_attempts : int
 (** How many attempts the failure line draws before it cuts the chain: 4. *)

@@ -377,8 +377,9 @@ let skill name : Tools.effective_skill_profile =
     | Ok reference -> reference
     | Error _ -> Alcotest.failf "the reference of %s does not decode" name
   in
-  { esp_reference = reference; esp_name = name; esp_kind = "instruction"
-  ; esp_execution = "on-demand"; esp_body_bytes = 0; esp_discovery_bytes = 0
+  { esp_reference = reference; esp_name = name
+  ; esp_surface = Masc.Keeper_skill_observability.Instruction_skill
+  ; esp_body_bytes = 0; esp_discovery_bytes = 0
   ; esp_load_reasons = []; esp_node_count = 0; esp_batch_count = 0
   ; esp_max_parallelism = 0; esp_flow = None; esp_io = Model_orchestrated }
 

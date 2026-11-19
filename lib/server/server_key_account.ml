@@ -186,7 +186,14 @@ let state_answer : S.refusal -> R.answer = function
       ( Accounts.Already_linked (_ : Authz_types.Provider_account_id.t)
       | Accounts.Linked_for_another { author = _; user_id = _ }
       | Accounts.Not_a_human (_ : Authz_types.Principal.t)
-      | Accounts.Not_a_link_author (_ : Authz_records.Author.t) )
+      | Accounts.Not_an_account_author (_ : Authz_records.Author.t)
+      | Accounts.Replaced_for_another { author = _; user_id = _ }
+      | Accounts.Not_linked (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Not_the_owner (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Not_a_key_account (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Account_removed (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Removal_stopped (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Generation_not_next { held = _; given = _ } )
   | S.Provider_account_unreadable _
   | S.Pat_unreadable _
   | S.Pat _

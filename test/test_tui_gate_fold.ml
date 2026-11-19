@@ -34,7 +34,6 @@ let entry ?gate role text =
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_block = []
-  ; me_timestamp = ""
   ; me_keeper_name = "k"
   ; me_request_id = ""
   ; me_execution_source = None

@@ -75,7 +75,7 @@ anyang-keepers 또는 리더 레인의 명시적 감사 로그가 함께 확인�
       (activity ~notes:[duplicated_note; duplicated_note] [e1; e2]) |> Option.get in
   let e2_chart = Lineage.select ~event_id:"e2"
       (activity ~notes:[duplicated_note; duplicated_note] [e1; e2]) |> Option.get in
-  let json_str = Lineage.lineage_graph ~ko:true ~keeper_name:"e-masc-the-leader" chart in
+  let json_str = Lineage.lineage_graph ~ko:true ~now:1_794_700_000. ~keeper_name:"e-masc-the-leader" chart in
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string json_str in
   let notes = json |> member "notes" |> to_list |> List.map to_string in
@@ -98,7 +98,7 @@ anyang-keepers 또는 리더 레인의 명시적 감사 로그가 함께 확인�
   Alcotest.(check bool) "selected flag preserved" true (evt_node |> member "selected" |> to_bool);
   let reason_lines = evt_node |> member "reasonLines" |> to_list |> List.map to_string |> String.concat " " in
   Alcotest.(check bool) "event reason preserved" true (contains ~needle:"통합 흡수함" reason_lines);
-  let json_u = Yojson.Safe.from_string (Lineage.lineage_graph ~ko:true ~keeper_name:"k" e2_chart) in
+  let json_u = Yojson.Safe.from_string (Lineage.lineage_graph ~ko:true ~now:1_794_700_000. ~keeper_name:"k" e2_chart) in
   let edges_u = json_u |> member "edges" |> to_list in
   Alcotest.(check bool) "unresolved edge keeps dashed flag" true
     (List.exists (fun e -> e |> member "dashed" |> to_bool) edges_u)
@@ -117,7 +117,7 @@ let transition_svg_full_claims () =
       [fact ~claim:long_claim "mem-long-001"]
       [fact ~claim:"갱신된 최종 결론 텍스트 END_TOKEN" "mem-long-002"] in
   let chart = Lineage.select ~event_id:"e1" (activity ~notes:["note-a"; "note-a"] [e1]) |> Option.get in
-  let svg = Lineage.transition_svg ~ko:true ~palette chart in
+  let svg = Lineage.transition_svg ~ko:true ~now:1_794_700_000. ~palette chart in
   Alcotest.(check bool) "long claim tail token preserved in SVG" true
     (contains ~needle:"TAIL_VERIFICATION_TOKEN" svg);
   Alcotest.(check bool) "after token preserved in SVG" true
@@ -130,7 +130,7 @@ let transition_svg_full_claims () =
     (contains ~needle:"표시" svg);
   Alcotest.(check bool) "no truncation ellipsis in transition SVG" false
     (contains ~needle:" …</text>" svg);
-  let mm = Lineage.mermaid ~ko:true chart in
+  let mm = Lineage.mermaid ~ko:true ~now:1_794_700_000. chart in
   Alcotest.(check bool) "mermaid retains full tail token without 48-char cut" true
     (contains ~needle:"TAIL_VERIFICATION_TOKEN" mm);
   Alcotest.(check bool) "mermaid uses classDef styling" true

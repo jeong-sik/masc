@@ -15,7 +15,7 @@ type reading =
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side
 type presentation = Document | Source
-type day = { year : int; month : int; day : int }
+type day = Masc_tui_value.Local_day.t = { year : int; month : int; day : int }
 val local_day : float -> day
 val on_day : day -> t -> bool
 val select : scope:scope -> day:day option -> t list -> t list

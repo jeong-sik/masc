@@ -1180,6 +1180,28 @@ let test_turns_names_the_keeper_of_a_plain_correlated_event () =
     [ Acting.Actor_named lane ]
     (keepers (Acting.chunk_rows ~ko:false ~traces:[] (entries_of [ started ])))
 
+(* A row's receipt time carries its date once the day differs (RFC
+   tui-one-screen-grammar §6.1). The column it is drawn in is as wide as that
+   form, so a row from the day before fits the frame whole: sized from a bare
+   clock, the row overflowed and the frame cut off its minutes. *)
+let test_the_receipt_column_holds_a_moment_from_another_day () =
+  let now = 1_763_500_000. in
+  let yesterday = now -. 86_400. in
+  let drawn =
+    Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now yesterday
+  in
+  let inner_width = 200 in
+  let columns = Acting.columns ~inner_width [] in
+  check bool "a wide frame shows the receipt time" true columns.Acting.show_clock;
+  let gaps_and_glyph = 5 in
+  let clock_room =
+    inner_width - gaps_and_glyph - columns.Acting.keeper_cells - columns.Acting.content_cells
+  in
+  check bool
+    (Printf.sprintf "%d cells hold a gap and %S" clock_room drawn)
+    true
+    (clock_room >= String.length drawn + 1)
+
 let test_measuring_reads_what_the_row_draws () =
   let traces = [ ("keeper-one", "trace-1") ] in
   let correlated =
@@ -1300,6 +1322,8 @@ let () =
             test_call_key_prefers_the_provider_id
         ; test_case "measuring reads what the row draws" `Quick
             test_measuring_reads_what_the_row_draws
+        ; test_case "the receipt column holds a moment from another day" `Quick
+            test_the_receipt_column_holds_a_moment_from_another_day
         ; test_case "Turns names the keeper of a plain correlated event" `Quick
             test_turns_names_the_keeper_of_a_plain_correlated_event
         ;] )

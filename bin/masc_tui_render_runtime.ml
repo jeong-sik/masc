@@ -405,10 +405,8 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
         | false, _ -> []
         | true, Some resets_at ->
-          let tm = Unix.localtime resets_at in
           fact ~tone:Page_line.Attention "Rate limit"
-            (Printf.sprintf "until %02d:%02d or the next successful answer"
-               tm.Unix.tm_hour tm.Unix.tm_min)
+            (Printf.sprintf "until %s or the next successful answer" (runtime_moment_text resets_at))
         | true, None ->
           fact ~tone:Page_line.Attention "Rate limit"
             "no wait stated, cleared by the next successful answer"
@@ -417,10 +415,8 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_credential_refused_at with
         | None -> []
         | Some at ->
-          let tm = Unix.localtime at in
           fact ~tone:Page_line.Attention "Credential"
-            (Printf.sprintf "refused %02d-%02d %02d:%02d, until a call on it is answered"
-               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min)
+            (Printf.sprintf "refused %s, until a call on it is answered" (runtime_moment_text at))
       in
       let probe_lines =
         match probe with
@@ -501,10 +497,7 @@ let runtime_detail_lines state target ~width =
                 let limit = match window.puw_limit_id with
                   | Some id -> Terminal_text.single_line id
                   | None -> "account" in
-                let tm = Unix.localtime window.puw_observed_at in
-                let observed = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-                    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-                    tm.Unix.tm_hour tm.Unix.tm_min in
+                let observed = runtime_moment_text window.puw_observed_at in
                 fact ~tone:Page_line.Attention "Spent limit"
                   (limit ^ " (observed " ^ observed ^ ")")) windows
       in
@@ -707,9 +700,7 @@ let render_runtime_reading (state : state) =
         (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
          | None -> if ko then "관측 시각 없음" else "reading time unavailable"
          | Some generated_at ->
-             let recorded = Unix.localtime generated_at in
-             Printf.sprintf (if ko then "관측 %02d:%02d:%02d" else "reading %02d:%02d:%02d")
-               recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
+             Printf.sprintf (if ko then "관측 %s" else "reading %s") (runtime_moment_text generated_at))
   in
   let header =
     match state.runtime_surface with
@@ -1203,7 +1194,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read trend ->
       let days = trend.Masc_tui_usage_trend.days in
-      let as_of = Unix.gmtime trend.generated_at in
+      let as_of = Masc_tui_value.Utc_day.of_moment trend.generated_at in
       let scopes =
         match state.overview_providers with
         | Providers_read reading -> reading.puws_accounts
@@ -1263,10 +1254,8 @@ let provider_history_lines ~cols ~rows (state : state) =
         let latest = match Masc_tui_usage_trend.latest row with
           | None -> "No reports in this window"
           | Some sample ->
-            let time = Unix.gmtime sample.observed_at in
-            Printf.sprintf "Latest report %s · %02d-%02d %02d:%02d UTC"
-              (daily_value (Some sample))
-              (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min in
+            Printf.sprintf "Latest report %s · %s"
+              (daily_value (Some sample)) (runtime_moment_text sample.observed_at) in
         let name = text (label row.scope_id) in
         let full_name =
           if not bare && Message_layout.display_width name <= inner then []
@@ -1277,9 +1266,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           else
             "Daily values (UTC)" ::
             List.map (fun (day, sample) ->
-              Printf.sprintf "%04d-%02d-%02d %s"
-                (day.Unix.tm_year + 1900) (day.Unix.tm_mon + 1) day.Unix.tm_mday
-                (daily_value sample))
+              Masc_tui_value.Utc_day.date day ^ " " ^ daily_value sample)
               (Masc_tui_usage_trend.dated_samples trend row)
             |> List.concat_map wrap in
         let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
@@ -1308,12 +1295,14 @@ let provider_history_lines ~cols ~rows (state : state) =
           List.init height (fun index -> prefix ^ row left index ^ "  " ^ row right index)
           @ [""] @ arrange rest
         | row :: rest -> List.map (fun line -> prefix ^ line) (chart row) @ [""] @ arrange rest in
-      let first = Unix.gmtime (trend.generated_at -. float_of_int (days - 1) *. 86400.0) in
+      let first =
+        Masc_tui_value.Utc_day.of_moment (trend.generated_at -. float_of_int (days - 1) *. 86400.0)
+      in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC"
-         days (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min)
-      :: Printf.sprintf " %02d-%02d → %02d-%02d UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
-           (first.Unix.tm_mon + 1) first.Unix.tm_mday (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
+         " Quota scope trend (%d UTC days) · latest report per day · as of %s"
+         days (runtime_moment_text trend.generated_at))
+      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
+           (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
       :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []
@@ -1398,12 +1387,9 @@ let usage_lines ~cols ~rows (state : state) =
               Some ("[" ^ Overview_providers.meter ~cells:bar_cells share ^ "]")
           | _ -> None
         in
-        let generated = Unix.gmtime kuw_generated_at in
         [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics"
             (Overview_providers.minutes_label kuw_window_minutes)
-        ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
-            (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
-            generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
+        ; " As of " ^ runtime_moment_text kuw_generated_at
         ; " Bars: relative to largest read value per metric; not quota."
         ; " Partial rows: no bars. Missing values can understate totals."
         ; Printf.sprintf " Scale: tokens %s · cost %s"

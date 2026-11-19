@@ -94,6 +94,40 @@ val closable : t -> Authz_external_store.Change.t -> Authz_record.Hash.t list
     [revocation_pending(subject)]). *)
 val revocation : t -> Authz_records.Subject.t -> Authz_records.Revocation_state.t
 
+(** What the records say of the removal of an account. *)
+type account_removal =
+  | Removal_not_begun
+  | Removal_begun  (** Its purge is pending or went through: the account is on its way out, or gone. *)
+  | Removal_stayed of Authz_purge_event.account_failed_stage
+      (** The removal ended with this stage still there. *)
+  | Removal_start_given_up
+      (** The start of a removal wrote its intent and no record (design 8.3):
+          a [Purge] of the credential is held, and no purge is recorded. *)
+
+(** The removal of [provider_account_id] of [owner]. A list of the accounts
+    of a person and a replacement of a key read the same value, so what one
+    shows as stopped the other refuses. *)
+val account_removal
+  :  t
+  -> owner:Authz_types.User_id.t
+  -> Authz_types.Provider_account_id.t
+  -> account_removal
+
+(** Whether the start of a replacement of the key of the account wrote its
+    intent and no record (design 8.3): a [Credential_replace] of the
+    credential is held. The account is blocked until its owner asks for the
+    replacement again, or removes the account. *)
+val key_replacement_given_up : t -> Authz_types.Provider_account_id.t -> bool
+
+(** The generation of the key of [provider_account_id] that [user_id] may
+    replace now, as a record that replaces it is read
+    ({!Authz_provider_account_state.key_to_replace}). *)
+val key_to_replace
+  :  t
+  -> user_id:Authz_types.User_id.t
+  -> Authz_types.Provider_account_id.t
+  -> (Authz_types.Key_generation.t, Authz_provider_account_state.refusal) result
+
 (** The status of a provider account that a record linked, and [None] for one
     that none linked. An account is [Purged] from the start of its purge on,
     whatever became of the purge since: a target is out of reads while its
@@ -211,7 +245,10 @@ val refusal_to_string : refusal -> string
     sign-in that ends the session its browser held, on that session; a sign-in
     that ends nothing has none (plan C3). The link of a provider account has
     none: a log restored from before it leaves the account with no owner, and
-    no Runtime may spend it (plan D1-1). A Runtime has none either: a log
+    no Runtime may spend it (plan D1-1). The replacement of the key of a key
+    account is a [Credential_replace] on the account, so a log restored from
+    before it does not make the key before it the key of the account again
+    (RFC a-persons-api-key-is-their-own-provider-account 3.7). A Runtime has none either: a log
     restored from before it has no such Runtime and no Self grant on it (plan
     D1). Nor does a Keeper record: a log restored from before it leaves the Keeper
     with no owner, or with the Runtime it was given before (plan D1-5). The

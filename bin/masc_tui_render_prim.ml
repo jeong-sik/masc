@@ -2060,7 +2060,7 @@ let zone_two_title ~cols (state : state) ~position ~title =
    masc_tui_render_work.ml call this while another change owns that file.
    Root fix: [surface_chrome] takes [title : cols:int -> string] the way
    [zone_two_title] does, those two rows call [zone_two_title], and this
-   goes. *)
+   goes (issue #53287). *)
 let titled_row ~cols (state : state) ~title ~position =
   zone_two_title ~cols state ~position ~title:(fun ~cols:_ -> title)
 

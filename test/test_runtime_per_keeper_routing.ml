@@ -1247,7 +1247,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Candle_appraiser -> false
+        | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
       in
       let expected =
         if is_verifier && not judges
@@ -1276,14 +1276,19 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Candle_appraiser -> false
+           | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
-    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
-      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
-         config.exact_output_lane_decls)
+    List.iter
+      (fun (lane, what) ->
+         Alcotest.(check bool) (what ^ " is explicitly configured") false
+           (List.exists (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+              String.equal (Runtime_schema.exact_lane_key decl.owner) (Standalone_lane.to_id lane))
+              config.exact_output_lane_decls))
+      [ Standalone_lane.Candle_appraiser, "Candle appraisal"
+      ; Standalone_lane.Librarian_memory, "The Librarian's Memory lane"
+      ]
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =

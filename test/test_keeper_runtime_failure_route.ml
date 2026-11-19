@@ -323,7 +323,7 @@ let test_provider_config_judges () =
       (KFR.route_kind_label other)
 
 
-(* RFC last-path-resumes-after-progress §4: the stream ended before the
+(* The stream ended before the
    completion contract's stop. The provider took the request and the bytes
    that would have said why never came, so the failure passes with time, as a
    dropped transport does. The other wire kinds are defects in what did
@@ -644,7 +644,7 @@ let test_response_observed_fences_follow_the_disposition () =
              ~diagnostic:"Turn_input_write_failed")))
 
 
-(* RFC last-path-resumes-after-progress §3.3: which failures pass with time on
+(* Which failures pass with time on
    the path that answered them. A quota resumes only with a reset it named. *)
 let test_route_resumes_on_same_path_per_class () =
   let retry ?retry_after retry_class =

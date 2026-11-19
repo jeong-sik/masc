@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # build-shim-static.sh — build a statically linked Linux masc-exec-shim.
 #
-# The shim ships to remote Linux hosts as a single static ELF
-# (docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md §4.2).
+# The shim ships to remote Linux hosts as a single static ELF.
 # Host (macOS) builds of bin/masc_exec_shim.exe stay dynamic; this script
 # produces the Linux artifact on demand inside an ocaml/opam:alpine
 # container (musl → true static linking without glibc's NSS caveats).

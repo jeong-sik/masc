@@ -251,7 +251,7 @@ let test_truncation_offloads_full_text () =
             (String_util.contains_substring stored (line 200));
           check int "offloaded blob is complete" 400
             (List.length (String.split_on_char '\n' stored));
-          (* RFC-0383: the same round trip appended one fact row to the
+          (* The same round trip appended one fact row to the
              corpus index, and the row agrees with the artifact. *)
           let index_path =
             List.fold_left Filename.concat tmp_base

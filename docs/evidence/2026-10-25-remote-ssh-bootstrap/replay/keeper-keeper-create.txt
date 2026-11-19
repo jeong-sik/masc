@@ -1,4 +1,0 @@
-native-bootstrap-keeper: created
-  sandbox_profile  remote_ssh
-  network_mode     inherit
-Its keepalive lane is running.

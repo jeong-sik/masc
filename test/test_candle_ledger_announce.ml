@@ -1,4 +1,4 @@
-(* RFC-0481 §3.2: a Candle ledger append tells the workspace's roster readers
+(* A Candle ledger append tells the workspace's roster readers
    which Keepers' rows it moved. *)
 
 open Alcotest

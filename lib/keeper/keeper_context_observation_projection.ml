@@ -1,6 +1,6 @@
 (** Current Keeper context-observation projection.
 
-    Context occupancy is projected from the newest TurnRecord (RFC-0233):
+    Context occupancy is projected from the newest TurnRecord:
     [input_tokens] is the provider-reported prompt total for the last
     completed turn with explicit [Measured_request] provenance. Estimates and
     unknown provenance retain their raw count as diagnostics only.

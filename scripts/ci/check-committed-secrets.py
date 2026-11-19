@@ -12,9 +12,9 @@ tokens still authenticated against api.anthropic.com. They were live for
 five months.
 
 GitHub push protection would not have stopped two of the three. It matches
-known provider patterns, so it caught the `sk-ant-` key in
-docs/evidence/task-362-bundle (the redaction marker there is its own) and
-let a postgres URL carrying inline credentials through in the same bundle.
+known provider patterns, so it caught an `sk-ant-` key in the task-362
+capture and let a postgres URL carrying inline credentials through in the
+same capture.
 This scanner exists for the shapes that protection does not name.
 
 Written without any literal that its own rules match, so that scanning the

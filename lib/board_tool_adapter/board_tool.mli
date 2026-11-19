@@ -107,7 +107,7 @@ val handle_tool :
     result meets on its way to the caller's reader;
     [masc_board_post_get] sizes its comment page by it.
 
-    RFC-0189 PR-1b.4 — [handle_tool] returns typed [Tool_result.result]
+    [handle_tool] returns typed [Tool_result.result]
     end-to-end. Legacy [Tool_result.result] projection lives at the
     {!Tool_dispatch.handler} registration boundary inside {!register},
     so external callers (MCP transport) see no behavior change. *)

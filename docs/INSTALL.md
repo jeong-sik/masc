@@ -722,8 +722,6 @@ configuration before using it.
 The server/dashboard and the companion executables in the prefix are restored
 to their previous state when an install fails. The workspace's guest shim and
 configuration you explicitly reset are not part of this prefix transaction.
-If the process was killed and a `.masc-install-transaction` is left behind,
-see the [distribution transaction guide](design/installed-dashboard-distribution.md).
 
 Some releases change a state file's contract instead of converting the old
 file. The `Fresh state required` entries in `CHANGELOG.md` list those files.

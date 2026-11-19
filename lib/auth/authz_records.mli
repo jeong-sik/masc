@@ -127,9 +127,8 @@ module Author : sig
     | Local_operator
     | System_cron
     | System_maintenance
-    | System_migration
 
   (** The author as refusal messages name it: [the principal <id>],
-      [the local operator], or [the system <cron|maintenance|migration>]. *)
+      [the local operator], or [the system <cron|maintenance>]. *)
   val label : t -> string
 end

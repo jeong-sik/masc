@@ -8,7 +8,7 @@
 
     A test of the routes has no browser, so what is read is the document a
     browser starts from. What a script of the page or a style sheet changes
-    afterwards is measured in a browser (docs/evidence). *)
+    afterwards is measured in a browser. *)
 
 type login =
   | Open

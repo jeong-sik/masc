@@ -1,4 +1,4 @@
-(* RFC-0317 PR-1 — pure state-machine unit tests for Slack_gateway_state.
+(* Pure state-machine unit tests for Slack_gateway_state.
 
    No live WSS, no Eio. Drives Slack_gateway_state.step with typed inputs
    constructed in-process, and exercises parse_envelope / decode_event

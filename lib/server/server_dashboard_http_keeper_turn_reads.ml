@@ -84,7 +84,7 @@ let keeper_turn_transcript_lookup_response ~(config : Workspace.config) ~keeper_
 ;;
 
 let handle_records_get state req reqd name =
-  (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
+  (* Serve TurnRecords with server-side
      consecutive-pair block diffs so the dashboard stays a renderer
      of the tested OCaml diff (views derive; no view-side repair). *)
   if not (Keeper_config.validate_name name) then
@@ -214,12 +214,12 @@ let handle_records_get state req reqd name =
 ;;
 
 let handle_transcript_get state req reqd name =
-  (* RFC-0233 §7: serve one keeper turn's operator request + keeper
+  (* Serve one keeper turn's operator request + keeper
      response by an exact join on the persisted chat row turn_ref
      ("<trace_id>#<absolute_turn>"). Lazily fetched by the turn
      inspector so the transcript (which can be large) never bloats the
      turn-records list. Content is the load-time redacted view the chat
-     history endpoint already serves (RFC-0132); an unmatched turn_ref
+     history endpoint already serves; an unmatched turn_ref
      returns [found:false] rather than a fabricated transcript. *)
   if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request

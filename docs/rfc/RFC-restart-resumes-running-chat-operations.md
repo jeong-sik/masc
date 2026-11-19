@@ -54,8 +54,6 @@ Owner 는 이미 「멈춘 작업의 native 호출은 열어 두고 다음 기�
 
 ### 1.2 11-01~11-05 (UTC)
 
-`docs/evidence/restart-cancelled-turns-2026-11/README.md` 가 이미 셌다.
-
 - 종료 절차에 끊긴 채팅 작업이 118건이다. 모두 SIGTERM 60초 안에 끝났다.
 - 다른 Keeper 의 위임 39건과 MCP 에이전트 50건은 같은 입력으로 다시 들어온 적이 한 번도 없다.
 - 대시보드에서 사람이 보낸 29건 가운데 7건만 다시 들어왔다.
@@ -67,7 +65,7 @@ Owner 는 이미 「멈춘 작업의 native 호출은 열어 두고 다음 기�
 - 운영자가 배포하려고 정상적으로 내리는 쪽이 비정상 종료보다 일을 더 많이 잃는다. 같은 사건인데 경로에 따라 결과가 갈린다.
 - 입력이 지워져서 무엇을 잃었는지도 남지 않는다.
 - 종료를 더 오래 기다리는 방법은 얻는 몫이 작다. 60초를 더 기다려도 끝나는 턴은 상한이 8.2% 다(evidence README「종료를 기다리면」).
-- 설계 문서는 지금 동작만 적는다(`docs/design/keeper-repetition-scope-boundaries.md:13`). 「작업을 실패로 끝내야 한다」는 근거를 적은 문서는 찾지 못했다. `Interrupted_by_restart` 라는 이름을 정한 #49333 과 SIGKILL 을 고른 #49923 은 이름과 종료 속도만 다룬다.
+- 「작업을 실패로 끝내야 한다」는 근거를 적은 문서는 찾지 못했다. `Interrupted_by_restart` 라는 이름을 정한 #49333 과 SIGKILL 을 고른 #49923 은 이름과 종료 속도만 다룬다.
 
 ## 3. 지금 일어나는 일
 
@@ -496,7 +494,7 @@ masc:
   - L4.2: `keeper_direct_native_continuation.ml:349-350` 주석. 미룬 작업이 같은 프로세스에서 호출을 잇는다고 적는데, 미루기는 `Active` 호출을 둔 채 못 한다(4.5).
   - L4.3: `packages/agent_core/lib/agent/agent.mli:353` 과 `agent_uncollected_turn.ml:24`. 닫는 때를 「restart settlement」라고 적는다. masc 에서 그 말은 기동 정리를 가리킨다.
   - L4.3: `keeper_owner.ml` 의 `active_native_call_policy` 주석. 불러온 호출을 열지 못하면(「a resumed call failed to load」) 호출을 남긴다고 적는다. #52359 §4.2 의 5 와 §10 의 둘째 항목, `a-keeper-takes-every-waiting-message-in-one-turn` 4.1 의 1 도 같은 동작을 적는다.
-  - L5: `docs/design/keeper-repetition-scope-boundaries.md:13`, `keeper_owner_registry.ml:426-434`, `keeper_owner.ml:951-956`·1862-1868.
+  - L5: `keeper_owner_registry.ml:426-434`, `keeper_owner.ml:951-956`·1862-1868.
 
 ## 10. 정할 것
 

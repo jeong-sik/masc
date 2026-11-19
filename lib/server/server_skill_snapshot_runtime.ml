@@ -50,7 +50,7 @@ let observation_input (observation : Runtime.config_observation)
   { path = observation.path; source_text = observation.source_text }
 ;;
 
-(* RFC-0506: every catalog publication re-checks recently activated Skill
+(* Every catalog publication re-checks recently activated Skill
    names against the sources the snapshot just scanned. Observation only —
    detection never raises into the publication path. *)
 let observe_missing_on_disk ~base_path = function

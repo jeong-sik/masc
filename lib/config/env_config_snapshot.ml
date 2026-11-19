@@ -190,10 +190,6 @@ let dashboard_entries =
       "Execution surface compute timeout (floor 5)";
     entry ~default:"30" "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC"
       "Execution-trust surface compute timeout (floor 1)";
-    entry ~default:"(none)" "MASC_DASHBOARD_FIXTURE"
-      "Dashboard fixture name override";
-    entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
-      "Enable dashboard test fixtures";
     entry ~default:"3600.0" "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
       "Keeper action-age threshold (seconds, 1 hour)";
     entry ~default:"25" "MASC_DASHBOARD_MISSION_TIMEOUT_SEC"

@@ -200,7 +200,7 @@ val sse_stalled_after_s : float
 (** Three {!sse_ping_interval_s}. The HTTP/2 listeners give each stream's
     response flushes this bound ({!Server_bootstrap_http.serve_h2_connection},
     RFC-0518 D2), and an HTTP/1.1 SSE frame that has not reached the socket
-    after this long closes its response (RFC-0493 §3.3). The server keeps one
+    after this long closes its response. The server keeps one
     stall bound, so an SSE stream whose client takes nothing is cut at the
     same age on either transport. A frame longer than a slice is where they
     differ: HTTP/1.1 gives the whole frame the bound, HTTP/2 each slice. A

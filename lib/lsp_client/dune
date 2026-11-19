@@ -5,7 +5,7 @@
 ; them above [masc] in the dependency order — so nothing in [masc], including
 ; the Keeper tool dispatch in lib/keeper, could reach a language server. This
 ; library sits below both, so the proxy and a Keeper surface can share one
-; client (RFC a-language-server-the-keeper-can-ask §3.2).
+; client.
 (library
  (name masc_lsp_client)
  (public_name masc.lsp_client)

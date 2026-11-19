@@ -5,7 +5,7 @@
     function {!decide_transition}. Used by the goal subsystem to keep
     transition logic out of caller code.
 
-    RFC-0387 stage 2: [Verifying] sits between [Executing] and
+    [Verifying] sits between [Executing] and
     [Completed] — [Request_complete] enters it, and the verifier's
     [Record_proof_proven] leaves it for [Awaiting_confirmation]. The
     operator can leave it without a verdict: [Drop] to [Dropped], [Reopen]
@@ -18,8 +18,7 @@ type resumable = Resume_executing | Resume_verifying | Resume_awaiting_confirmat
 type t =
   | Executing
   | Verifying
-      (** Completion requested; the proof verdict is pending out-of-band
-          (RFC-0387 B3). *)
+      (** Completion requested; the proof verdict is pending out-of-band. *)
   | Awaiting_confirmation
   | Completed
   | Dropped

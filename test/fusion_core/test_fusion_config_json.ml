@@ -1,4 +1,4 @@
-(* RFC-0306 §3.1 — Fusion_config_json.to_yojson projects the active fusion config
+(* Fusion_config_json.to_yojson projects the active fusion config
    for the dashboard settings editor. This fixes the JSON shape end-to-end through
    of_toml, covering the JoJ [[...judges]] array-of-tables path that the read
    endpoint must surface (the field the current read-only UI cannot show). *)

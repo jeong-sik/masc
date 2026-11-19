@@ -304,9 +304,6 @@ let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
 module String_set = Set_util.StringSet
 
-(* Compute the request-listing projection from an already-loaded list.
-   Factored out so [proof_compose] can share the disk scan between
-   summary and request listing. *)
 let id_set (requests : listed list) =
   List.fold_left
     (fun acc (r : listed) -> String_set.add r.listed_id acc)
@@ -453,21 +450,3 @@ let summary_json ~base_path () : Yojson.Safe.t =
      ]
      @ unreadable_fields scan
      @ fd_pressure_fields ())
-
-(* Single-load companion for handlers that emit both projections side by side.
-   One request-store scan feeds both projections. *)
-let proof_compose ~base_path ?limit () : Yojson.Safe.t * Yojson.Safe.t =
-  let limit = clamp_limit limit in
-  let scan = load_scan ~base_path () in
-  let summary =
-    `Assoc
-      ([ ("updated_at", `String (Masc_domain.now_iso ()))
-       ; ("total", `Int (List.length scan.V.readable))
-       ]
-       @ unreadable_fields scan
-       @ fd_pressure_fields ())
-  in
-  let requests =
-    requests_json_of_requests ~limit ~offset:0 ~view:All_requests scan
-  in
-  summary, requests

@@ -1,4 +1,4 @@
-(** The keeper tools that write and take back a world's norms (RFC-0442). *)
+(** The keeper tools that write and take back a world's norms. *)
 
 module Tools = Masc.Keeper_tool_constitution_runtime
 module Store = Masc.World_constitution_store
@@ -425,7 +425,7 @@ let test_an_unreadable_ledger_is_not_rendered_as_no_articles () =
         Alcotest.failf "the prompt builds again once the ledger reads: %s"
           (Store.read_error_to_string error))
 
-(* RFC-0504 §2.2: naming held articles in [replaces] retires them and records
+(* Naming held articles in [replaces] retires them and records
    the norm as their replacement. *)
 let test_replacing_merges_held_norms_into_one () =
   with_world (fun base_path ->
@@ -514,7 +514,7 @@ let test_malformed_replaces_is_refused_before_the_ledger_is_touched () =
       Alcotest.(check int) "nothing was written" 0
         (List.length (held ~base_path)))
 
-(* RFC-0504 §2.3: the replacement must render smaller than the bundle it
+(* The replacement must render smaller than the bundle it
    retires, while the render stays within the ceiling. The per-article cap
    does not bind a merge. *)
 let test_a_merge_must_shrink_the_render () =
@@ -628,7 +628,7 @@ let test_a_merge_over_the_ceiling_is_refused () =
         (Some "workflow_rejection") (failure_class over);
       Alcotest.(check int) "nothing was retired" 2 (List.length (held ~base_path)))
 
-(* RFC-0504 §2.4: the read reports lines from outside the roster beside the
+(* The read reports lines from outside the roster beside the
    unreadable ones, and counts only the roster's norms as held. *)
 let test_isolated_lines_are_reported_to_the_caller () =
   with_world (fun base_path ->

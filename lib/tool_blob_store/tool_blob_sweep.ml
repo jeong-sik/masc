@@ -380,7 +380,7 @@ type deletable_tally =
   ; unstatable_count : int
   }
 
-(* RFC-0499 §4.2: candidates of both scans, minus this process's marks,
+(* Candidates of both scans, minus this process's marks,
    minus files written since the previous scan opened. *)
 let deletable_now ~store ~touches ~(previous : record) ~candidates =
   String_set.fold
@@ -466,7 +466,7 @@ let observe ~base_path ~scope =
       (Tool_blob_maintenance.live_references ~base_path ~scope)
   in
   (* An entry no rule classifies is a place the scan does not read. The scan
-     still records, but names nothing deletable (RFC-0499 §5.3). *)
+     still records, but names nothing deletable. *)
   let* unclassified =
     Result.map_error
       (fun error -> Scan_failed error)

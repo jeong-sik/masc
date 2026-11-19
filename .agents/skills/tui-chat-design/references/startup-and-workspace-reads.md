@@ -69,14 +69,12 @@
   소유한다. 병렬 child는 원래 binding을 상속하고 형제 collector의 identity를 빌리지 않는다.
   성공 본문과 304 모두 정확한 단일 영수증이 있어야 현재 관측이나 캐시를 반환한다.
   캐시 주소는 expected root를 포함한다. 관측 확인은 효과·재전송 허가가 아니며 기존
-  항목 ID·조회 generation·workspace authority의 응답 적용 조건도 유지한다. 비교와
-  미실행 protocol 시나리오는 `docs/audits/2026-10-19-tui-history-workspace-admission.md`를 따른다.
+  항목 ID·조회 generation·workspace authority의 응답 적용 조건도 유지한다.
   이력 GET 거절은 해당 source의 실패이며 마지막 정상 관측을 보존한다. 그 실패를 전역
   identity 관측으로 만들지 않고 기존 공유 refresh가 실제 identity를 관측한다. 일반
   `launch_workspace_request`와 효과의 사전 확인은 유지한다. 명시적 read chain의 HTTP는
   identity+history 두 GET에서 history 한 GET으로 줄지만 auth 갱신·연결·재조회·화면 시간은
-  별도이며 속도 50% 개선을 뜻하지 않는다. 후속 비교는
-  `docs/audits/2026-10-19-tui-history-single-admitted-read.md`를 따른다.
+  별도이며 속도 50% 개선을 뜻하지 않는다.
 - `capture_workspace_json_read`는 UI 호출 시점에 원래 owner를 캡처해 기존 Eio child가
   실행할 callback을 만든다. 현재 턴 조회도 이 callback을 기존 `Masc_tui_async_read.launch`에
   넘긴다. source 오류 귀속·`on_not_run` inflight 해제·Fork_guard를 유지하고 launcher를
@@ -84,8 +82,7 @@
   Keeper별 제어 generation과 workspace completion의 적용 조건은 UI가 계속 소유한다.
   `load_keeper_turns`의 순수 row 해석만 공통 CPU 경로에 넘기며 `keeper.turns.decode_wait`는
   pool 대기·해석·반환 관측이다. 조회는 여전히 명시적 GET 하나이고, 이 변경을 HTTP 감소나
-  paint·유용한 작업의 실측 개선으로 부르지 않는다. 비교는
-  `docs/audits/2026-10-19-tui-turns-workspace-admission.md`를 따른다.
+  paint·유용한 작업의 실측 개선으로 부르지 않는다.
 - 같은 항목 ID를 다시 열거나 새로 읽을 수 있으므로 ID만으로 응답을 적용하지 않는다.
   `begin_task_history_read`/`begin_goal_timeline_read`가 받은 원래 request를 완료까지 보관한다.
   명시 재조회는 `Masc_tui_fetched.refresh`로 이전 요청을 대체하고, 일반 `start`의 공유 정책은
@@ -93,13 +90,11 @@
   마지막 관측과 실패 이유를 함께 남긴다. 최초 값 없는 실패는 빈 이력이 아니다.
   값 없는 실패의 명시 재시도도 알려진 원인을 유지한다. 이때 view는 `Failed`이며
   `in_flight`가 새 요청의 대기를 구분한다. 재시도만으로 복구됐다고 표시하거나 빈 값을 만들지
-  않는다. suspension은 재시도 소유자만 철회하고 원인은 보존한다. 상세 비교는
-  `docs/audits/2026-10-19-tui-retry-failure-observation.md`를 따른다.
+  않는다. suspension은 재시도 소유자만 철회하고 원인은 보존한다.
 - workspace 철회 시 `withdraw_detail_histories`로 두 값과 대기 소유자를 함께 철회한다.
   재진입/다른 workspace의 같은 ID가 이전 request를 빌리지 않게 generation을 초기화하지 않는다.
   조회 중/조회 완료는 Task 진행·효과·Goal 성공이 아니다. 상태/원래 이벤트 경계를 검사하며
-  문구·배치·행 순서·PTY 검사를 추가하지 않는다. Before/After는
-  `docs/audits/2026-10-19-tui-detail-history-ownership.md`를 따른다.
+  문구·배치·행 순서·PTY 검사를 추가하지 않는다.
 
 ## Tools 구성 조회
 
@@ -120,8 +115,7 @@
   pending·선택·UI 상태를 worker로 옮기지 않는다. `tools.inventory.decode_wait`·
   `skills.catalog.decode_wait`·`tools.async_observation.decode_wait`는 pool 대기와 반환도
   포함하며 순수 CPU 시간·paint·Task 진척이 아니다. 명시적 정상 경로의 GET 6→3은
-  실제 속도 50% 개선을 뜻하지 않는다. 비교와 미실행 시나리오는
-  `docs/audits/2026-10-19-tui-tools-composed-workspace-reads.md`를 따른다.
+  실제 속도 50% 개선을 뜻하지 않는다.
 
 ## Task 검증 증거
 

@@ -1,5 +1,5 @@
-(** Tells roster readers which Keepers' rows a Candle ledger append moved
-    (RFC-0481 §3.2). A row shows the Keeper's portrait, and to an operator its
+(** Tells roster readers which Keepers' rows a Candle ledger append moved.
+    A row shows the Keeper's portrait, and to an operator its
     balance and account revision, all read from the ledger. The ledger library
     knows neither Keepers' rows nor SSE, so the server installs its append
     observer here. A moved half-life sends

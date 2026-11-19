@@ -62,7 +62,6 @@ let prepare_exact ~net candidate =
      ignore (Keeper_registry.register_offline ~base_path keeper_name meta));
   Exact_flow.prepare
     ~base_path
-    ~keeper_name
     ~net
     candidate
 ;;
@@ -354,66 +353,6 @@ let test_domain_candidate_id_mismatch_advances_to_declared_successor () =
       | _ -> Alcotest.fail "semantic failover did not preserve declared dispatch order"))
 ;;
 
-let test_keeper_preference_reorders_the_board_lane () =
-  with_prompt_registry (fun () ->
-    run_eio (fun ~sw ~net ~clock ->
-      with_temp_base "board-attention-per-keeper-preference" @@ fun base_path ->
-      let candidate = candidate "board-attention-per-keeper-preference" in
-      let response =
-        Fixture.openai_response
-          (judgment_output ~candidate_id:candidate.candidate_id)
-      in
-      let first = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
-      let preferred =
-        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
-      in
-      publish_lane
-        [ target "board-default" first.base_url
-        ; target "board-preferred" preferred.base_url
-        ];
-      (match
-         Keeper_exact_lane_preference.set
-           (Workspace.default_config base_path)
-           ~actor:"test"
-           ~keeper_name:candidate.keeper_name
-           ~lane_id:Exact_flow.lane_id
-           (Some "board-preferred")
-       with
-       | Ok _ -> ()
-       | Error detail -> Alcotest.fail detail);
-      let prepared =
-        match
-          Exact_flow.prepare
-            ~base_path
-            ~keeper_name:candidate.keeper_name
-            ~net:(Some net)
-            candidate
-        with
-        | Ok prepared -> prepared
-        | Error _ -> Alcotest.fail "preferred Board lane did not prepare"
-      in
-      let result =
-        Exact_flow.execute
-          ~clock
-          ~callback_error_to_string:Fun.id
-          ~before_dispatch:(fun _ -> Ok ())
-          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-          prepared
-      in
-      (match result with
-       | Ok judgment ->
-         Alcotest.(check string)
-           "preferred Board slot selected"
-           "board-preferred"
-           judgment.slot_id
-       | Error _ -> Alcotest.fail "preferred Board exact flow failed");
-      Alcotest.(check int) "default Board slot not called" 0 (Fixture.post_count first);
-      Alcotest.(check int)
-        "preferred Board slot called once"
-        1
-        (Fixture.post_count preferred)))
-;;
-
 let test_missing_lane_is_setup_error_without_dispatch () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
@@ -494,7 +433,7 @@ let test_prepare_resumable_status_gate () =
 
 
 
-(* --- cli tail (RFC cli-runtimes-as-lane-slots) --------------------------- *)
+(* --- cli tail ------------------------------------------------------------ *)
 
 let contains_substring ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -1321,7 +1260,7 @@ let latest_board_attention_run ~actor =
   | [] -> Alcotest.fail "no board attention run was recorded"
 ;;
 
-(* RFC cli-runtimes-as-lane-slots §3: a run a CLI slot answered is recorded
+(* A run a CLI slot answered is recorded
    with [selected_slot] = that runtime id. The record used to close as failed
    on the last HTTP slot before the tail ran (2026-09-19: 12 of 12 runs a CLI
    slot answered read "failed"). *)
@@ -3201,10 +3140,6 @@ let () =
             "a wrong shape on every slot keeps the shape in the run record"
             `Quick
             test_wrong_shape_run_record_keeps_the_shape
-        ; Alcotest.test_case
-            "Keeper preference reorders the Board lane"
-            `Quick
-            test_keeper_preference_reorders_the_board_lane
         ; Alcotest.test_case
             "missing lane is setup error without dispatch"
             `Quick

@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine §2.9: pad buttons, strict layout
+; Pad buttons, strict layout
 ; files, and the workspace-then-builtin lookup.
 
 (test

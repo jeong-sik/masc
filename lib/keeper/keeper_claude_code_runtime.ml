@@ -448,7 +448,7 @@ let claude_error_to_core_error = function
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"
          ; detail = Process_eio.spawn_refusal_to_string refusal })
-  (* RFC-0454 P2, the twin of the Codex runtime's closed connection: the
+  (* The twin of the Codex runtime's closed connection: the
      client exited or its stdout reached EOF. Rotation is unchanged —
      [Keeper_runtime_attempt.core_error_to_runtime_outcome] rebuilds the
      [ProviderUnavailable] this used to be. *)
@@ -558,8 +558,7 @@ let recovery_failure_of_client_error = function
     (* Same activity axis as [context_overflow_retry_safe] above: an
        observation-free overflow exhausted the in-run shrink floor; observed
        response/tool activity instead fenced the retry. Both retain recovery
-       on the same identity, but only the former establishes floor rejection
-       (RFC claude-code-context-overflow-bounded-restart §6). *)
+       on the same identity, but only the former establishes floor rejection. *)
     Session_store.Input_rejected
       (if tool_effect_attempted || response_emitted
        then Session_store.Effect_fenced
@@ -705,7 +704,7 @@ module For_testing = struct
   let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
 end
 
-(* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run shrink
+(* The same-run shrink
    retry is the one re-entry an input rejection admits. [on_shrink_retry]
    fires only after the sequence verified every authority condition — a typed
    observation-free overflow (the only shape mapped to [Api ContextOverflow]

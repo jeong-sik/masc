@@ -1,7 +1,7 @@
 (* HIGH-RISK-UNREVIEWED: this pass deletes Exact records and execution links. *)
 
 (** Delete the Exact records and original execution links that no live
-    original owns (RFC-0498 §4.4).
+    original owns.
 
     Only a configured declaration whose package needs an original is swept:
     {!Server_workspace_memory_addon_validation.original_required} or

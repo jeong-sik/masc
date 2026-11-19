@@ -9,7 +9,7 @@ open Keeper_types_profile
 
 include Keeper_tool_surface_ops
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
+(* ctx-free body for keeper_dispatch_ref path.  Uses
    [Workspace.config] only (no Eio fields), letting Keeper_tool_surface register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
 let keeper_list_body ~(config : Workspace.config) args : tool_result =
@@ -23,7 +23,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
     | _ -> Ok false
   in
   (* [name] narrows the listed names to one Keeper, so a reader told that one
-     Keeper changed rereads only that row (RFC-0481 §3.1). The roster's
+     Keeper changed rereads only that row. The roster's
      [limit] window does not hide it: a Keeper sorted past the window still
      answers its row. *)
   let named =
@@ -195,7 +195,7 @@ let validation_error_data message =
     ; "message", `String message
     ]
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
@@ -232,7 +232,7 @@ let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_sandbox_start ctx args : tool_result =
   keeper_sandbox_start_body ~config:ctx.config args
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
   let timeout_sec = get_float args "timeout_sec" nan in
   if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
@@ -277,7 +277,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
     Do not retarget requests across other base_path registries. *)
 let resolve_ctx ctx ~name:_ = ctx
 
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* ctx-free body for keeper_dispatch_ref path. *)
 let keeper_reset_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err

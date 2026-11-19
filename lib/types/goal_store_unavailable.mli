@@ -1,5 +1,5 @@
 (** Goal_store_unavailable — the value a goal store this build cannot read
-    produces (RFC-0444 §2.1).
+    produces.
 
     Defined here, below both [masc_workspace] and [masc_goal], so the
     task-creation contract in [masc_workspace] can carry it while the store
@@ -48,7 +48,7 @@ and mirror_status =
 
 and reset_step =
   | Repair_field of string  (** Inspect and repair this named location. *)
-  | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
+  | Reset_goal_store  (** Move the store aside. *)
   | Restore_permission  (** [Unreadable EACCES]. *)
   | Inspect_path  (** Inspect file paths, links and mounts before recovery. *)
 

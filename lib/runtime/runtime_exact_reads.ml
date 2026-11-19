@@ -1,5 +1,5 @@
 (* The five capabilities of its model an exact-output slot needs runtime.toml
-   to state (RFC-0514 §2.2). A model the catalog has no row for is a slot only
+   to state. A model the catalog has no row for is a slot only
    when runtime.toml states each of them; a provider preset never stands in
    for one of these five. *)
 

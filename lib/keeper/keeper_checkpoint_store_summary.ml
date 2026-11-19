@@ -92,7 +92,7 @@ type canonical_identity =
 (* Whether this process has seen every object a head names: it wrote them,
    or a load read them back against their digests. A head that was only
    parsed names objects nobody here has looked for, so a save checks that
-   they are there before it names them again (RFC-0476 §3.3). Objects are
+   they are there before it names them again. Objects are
    never removed while a head names them, so a head seen once stays seen. *)
 type head_objects =
   | Objects_seen

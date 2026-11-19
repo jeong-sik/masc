@@ -7,7 +7,7 @@
 
 open Result.Syntax
 
-(* RFC-0361 D7(b): fixed authority identity — every judgement carries the
+(* Fixed authority identity — every judgement carries the
    same actor string (the [verifier_exact] lane id) so verdicts aggregate by
    actor; run identity stays with the per-review [verification_id]. *)
 let authority_actor = Masc_domain.completion_authority_actor Verifier_review_publication.authority
@@ -341,7 +341,7 @@ let evidence_posture_of_snapshot
   else Task.Anti_rationalization.Usable_artifacts usable
 ;;
 
-(* RFC-0436 §4.3/§4.4: what the judge receives of the binary image
+(* What the judge receives of the binary image
    artifacts. [images] are the ones attached as image blocks. [unread] are
    the image-format artifacts whose filed body did not come back, each with
    the store's typed reason: the judge rests on the reference-and-hash line
@@ -583,7 +583,7 @@ let prepare_review
           }
 ;;
 
-(* RFC-0361 D7(b): the one authority identity every review commits under. *)
+(* The one authority identity every review commits under. *)
 let system_authority = Verifier_review_publication.authority
 
 (* What one review attempt asks of the scheduler. This is a request: whether

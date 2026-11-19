@@ -198,7 +198,7 @@ let test_reviewed_observation_survives_replay () =
   | _ -> fail "reviewed Goal verification observation did not replay"
 ;;
 
-(* RFC-0444 §2.3 row 7: a skipped scan is terminal when written, so it
+(* A skipped scan is terminal when written, so it
    survives replay with the whole typed value, and it is served under the
    goal_store_unavailable envelope's own members. *)
 let unavailable : Goal_store.unavailable =

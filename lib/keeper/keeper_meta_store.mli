@@ -217,7 +217,7 @@ val read_effective_meta_presence :
 
 (** The presence together with the Keeper identity minted from the requested
     name. The name is parsed once, here: a blank name is [Error] and every
-    [Ok] carries an identity (RFC-0468 §3.1). *)
+    [Ok] carries an identity. *)
 val read_effective_meta_presence_named :
   Workspace.config ->
   string ->

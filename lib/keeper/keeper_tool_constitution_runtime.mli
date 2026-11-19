@@ -1,4 +1,4 @@
-(** Keeper tools for the world constitution (RFC-0442).
+(** Keeper tools for the world constitution.
 
     A keeper writes a norm its world agreed on, or takes one back. Whether the
     world agreed is settled on the board before either call; these tools carry
@@ -18,7 +18,7 @@ val read_with_outcome : config:Workspace.config -> Keeper_tool_execution.t
     later Keeper recover removal reasons without putting withdrawn norms back
     into its prompt. Lines whose subject the keeper roster does not resolve
     are reported as isolated beside the unreadable lines, because a norm that
-    stopped rendering must not vanish quietly (RFC-0504 §2.4). *)
+    stopped rendering must not vanish quietly. *)
 
 val write_with_outcome :
   config:Workspace.config ->

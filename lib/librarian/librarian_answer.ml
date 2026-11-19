@@ -21,6 +21,10 @@ type op =
       { ref_ : string
       ; into : new_fact
       }
+  | Seen of
+      { ref_ : string
+      ; from_units : string list
+      }
 
 type working_state =
   | Keep
@@ -63,14 +67,16 @@ type op_kind =
   | Kind_drop
   | Kind_merge
   | Kind_revise
+  | Kind_seen
 
-let op_kinds = [ Kind_add; Kind_drop; Kind_merge; Kind_revise ]
+let op_kinds = [ Kind_add; Kind_drop; Kind_merge; Kind_revise; Kind_seen ]
 
 let op_kind_token = function
   | Kind_add -> "add"
   | Kind_drop -> "drop"
   | Kind_merge -> "merge"
   | Kind_revise -> "revise"
+  | Kind_seen -> "seen"
 ;;
 
 let op_kind_of_token token =
@@ -79,12 +85,13 @@ let op_kind_of_token token =
 
 let op_field kind = field_op, `String (op_kind_token kind)
 let new_fact_fields = [ field_claim; field_category; field_basis; field_from ]
+let units_json names = `List (List.map (fun unit_name -> `String unit_name) names)
 
 let new_fact_to_fields (fact : new_fact) =
   [ field_claim, `String fact.claim
   ; field_category, `String (category_to_string fact.category)
   ; field_basis, basis_to_json (Observed fact.observation)
-  ; field_from, `List (List.map (fun unit_name -> `String unit_name) fact.from_units)
+  ; field_from, units_json fact.from_units
   ]
 ;;
 
@@ -99,6 +106,8 @@ let op_to_json = function
        :: new_fact_to_fields into)
   | Revise { ref_; into } ->
     `Assoc (op_field Kind_revise :: (field_ref, `String ref_) :: new_fact_to_fields into)
+  | Seen { ref_; from_units } ->
+    `Assoc [ op_field Kind_seen; field_ref, `String ref_; field_from, units_json from_units ]
 ;;
 
 let to_json answer =
@@ -202,7 +211,16 @@ let op_of_json = function
        in
        let* ref_ = nonblank_field field_ref fields in
        let* into = new_fact_of_fields fields in
-       Ok (Revise { ref_; into }))
+       Ok (Revise { ref_; into })
+     | Some Kind_seen ->
+       let* () = exact_field_names_result [ field_op; field_ref; field_from ] fields in
+       let* ref_ = nonblank_field field_ref fields in
+       let* from_units = names_field field_from fields in
+       (* Seen again says where. Without a unit it is the question's own
+          Memory read back, which is no observation. *)
+       (match from_units with
+        | [] -> wire_fail [ Wire_field field_from ] Empty_list
+        | _ :: _ -> Ok (Seen { ref_; from_units })))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;

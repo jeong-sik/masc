@@ -309,7 +309,7 @@ val media_walk :
   ?initial_messages:Agent_core.Types.message list ->
   Agent_core.Types.content_block list ->
   Runtime_instance.t list
-(** RFC-0440 walk for a run that carries media: the [candidates] whose effective
+(** Walk for a run that carries media: the [candidates] whose effective
     input capabilities admit every modality the run requires (goal blocks plus
     the checkpoint and initial history), in [candidates] order. [[]] when the
     run requires no media: a text run has no media walk and keeps its lane
@@ -339,7 +339,7 @@ val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** RFC-0265 follow-up media degrade. Drop the [Image]/[Document]/[Audio] blocks
+(** Media degrade. Drop the [Image]/[Document]/[Audio] blocks
     whose modality [caps] does not admit; keep text/thinking/tool blocks. Descends
     into [ToolResult.content_blocks] and strips there too, keeping the enclosing
     [ToolResult] with its remaining blocks. Returns the kept blocks and a

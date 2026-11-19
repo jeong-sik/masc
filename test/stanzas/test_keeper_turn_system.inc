@@ -1,4 +1,4 @@
-; RFC-0491 §3.2: the System a keeper turn sends keeps the articles it was
+; The System a keeper turn sends keeps the articles it was
 ; rendered with while the carried range keeps its front.
 
 (test

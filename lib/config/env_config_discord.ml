@@ -1,4 +1,4 @@
-(** Env_config_discord — Discord connector env accessor (RFC-0371 B8).
+(** Env_config_discord — Discord connector env accessor.
 
     Centralizes the [DISCORD_BOT_TOKEN] read at the config boundary. Before
     this module, four call sites each held their own [Sys.getenv_opt] +

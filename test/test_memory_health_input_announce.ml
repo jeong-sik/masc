@@ -1,4 +1,4 @@
-(* RFC-0487 L3: a write to a file a Keeper's memory health row reads tells the
+(* A write to a file a Keeper's memory health row reads tells the
    workspace's readers that this Keeper's row moved, after emptying the fleet
    answer the route caches. *)
 
@@ -436,7 +436,7 @@ let test_a_reconciled_removal_line_tells_the_signal () =
 ;;
 
 (* The retention pass tells the row's readers about each Keeper whose turn
-   records lost a day file (RFC-0487 §2.7), and about no other store's. *)
+   records lost a day file, and about no other store's. *)
 let test_a_turn_record_prune_tells_its_keeper () =
   with_workspace
   @@ fun ~clock:_ ~mono_clock:_ ~await_health:_ ~config ~fleet_key:_ ~elsewhere:_

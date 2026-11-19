@@ -30,7 +30,7 @@ module Task_id : sig
   val of_yojson : Yojson.Safe.t -> (t, string) result
 end
 
-(** Tool execution identifier — RFC-0233. Minted exactly once at the
+(** Tool execution identifier. Minted exactly once at the
     dispatch boundary for each tool execution and stamped into every
     store that records that execution (tool_calls JSONL, trajectory;
     agent_core-event join lands in RFC-0233 PR-2), so one physical execution
@@ -49,7 +49,7 @@ module Execution_id : sig
   val of_yojson : Yojson.Safe.t -> (t, string) result
 end
 
-(** Turn reference — RFC-0233 §7. Canonical per-turn join key derived from
+(** Turn reference. Canonical per-turn join key derived from
     [(trace_id, absolute_turn)]; serializes as ["<trace_id>#<absolute_turn>"].
     The identity keeper chat rows and board posts join on. [of_string]
     returns [None] on malformed input rather than repairing it. Distinct

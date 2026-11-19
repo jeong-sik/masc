@@ -63,17 +63,6 @@ let public_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 ;;
 
-let source_label = "agent_core_runtime_bridge"
-let durable_replay_surface = "/api/v1/dashboard/telemetry?source=agent_core_event"
-
-let retention_json =
-  `Assoc
-    [
-      ("scope", `String "in_process_runtime_lane");
-      ("per_provider_cap", `Int per_provider_cap);
-      ("durable_replay_surface", `String durable_replay_surface);
-    ]
-
 let normalize_sample (s : sample) =
   {
     s with
@@ -110,10 +99,6 @@ let sample_entry_to_yojson (s, recorded_at) =
       ("sample", sample_to_yojson s);
       ("recorded_at", `Float recorded_at);
     ]
-
-let provider_json = function
-  | Some _ -> `String public_runtime_provider_label
-  | None -> `Null
 
 let broadcast_sample_entry entry =
   let sample, recorded_at = entry in
@@ -389,48 +374,6 @@ let summary ?provider ?limit () =
         error_ratio = float_of_int errors /. float_of_int n;
         cancelled_count = cancels;
       }
-
-let summary_to_yojson (s : summary) =
-  `Assoc
-    [
-      ("sample_count", `Int s.sample_count);
-      ("ttfb_p50_ms", `Float s.ttfb_p50_ms);
-      ("ttfb_p95_ms", `Float s.ttfb_p95_ms);
-      ("total_duration_p50_ms", `Float s.total_duration_p50_ms);
-      ("total_duration_p95_ms", `Float s.total_duration_p95_ms);
-      ("total_duration_p99_ms", `Float s.total_duration_p99_ms);
-      ("cache_hit_ratio", `Float s.cache_hit_ratio);
-      ("total_cost_usd", `Float s.total_cost_usd);
-      ("error_ratio", `Float s.error_ratio);
-      ("cancelled_count", `Int s.cancelled_count);
-    ]
-
-let recent_json ?provider ?limit () =
-  let samples = recent ?provider ?limit () in
-  `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("dashboard_surface", `String "/api/v1/dashboard/agent_core/telemetry/recent");
-      ("source", `String source_label);
-      ("retention", retention_json);
-      ("provider", provider_json provider);
-      ( "limit", Json_util.int_opt_to_json limit );
-      ("count", `Int (List.length samples));
-      ("samples", `List (List.map sample_entry_to_yojson samples));
-    ]
-
-let summary_json ?provider ?limit () =
-  let summary = summary ?provider ?limit () in
-  `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("dashboard_surface", `String "/api/v1/dashboard/agent_core/telemetry/summary");
-      ("source", `String source_label);
-      ("retention", retention_json);
-      ("provider", provider_json provider);
-      ( "limit", Json_util.int_opt_to_json limit );
-      ("summary", summary_to_yojson summary);
-    ]
 
 let clear ?provider () =
   with_lock (fun () ->

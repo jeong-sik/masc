@@ -282,7 +282,7 @@ let dispatch_message
            is fixed for the session besides: [tool_specs] closes over an
            immutable list bound when the turn starts. Declaring the capability
            would promise a notification nothing can deliver about a set that
-           does not change; the lane's real pin is elsewhere (RFC-0413 §3.3). *)
+           does not change; the lane's real pin is elsewhere. *)
         Mcp_transport_protocol.make_response
           ~id
           (`Assoc

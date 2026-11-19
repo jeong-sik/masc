@@ -134,7 +134,7 @@ let run_cmd cli_base_path =
         ~input_base_path:workspace.Workspace_root.requested
           (* The stdio runtime has no --accept-store-quarantine: a keeper store
              this build cannot decode makes it refuse, and the operator strips
-             the file or starts the HTTP runtime with the flag (RFC-0420). *)
+             the file or starts the HTTP runtime with the flag. *)
         ~accept_store_quarantine:false
         ~clock
         ~mono_clock

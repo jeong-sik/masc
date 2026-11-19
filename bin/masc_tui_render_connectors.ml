@@ -137,22 +137,22 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None -> Masc_tui_keys.footer_hints_browser_lane_reading ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
-        | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
+        | Loading (_, Discover _) -> "Reading browser connections", Theme.info ()
         | Loading (_, Read) ->
             (match browser_label view with
-             | Some browser -> "Reading " ^ browser ^ "…"
-             | None -> "Reading…"), Theme.info ()
-        | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
-        | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
-        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
-        | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
-        | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
-        | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
-        | Loading (_, Scene_follow _) -> "Following observed browser link…", Theme.info ()
-        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination…", Theme.info ()
-        | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
-        | Loading (_, (Viewport_refresh _ | Viewport_observed _)) -> "Refreshing selected browser viewport…", Theme.info ()
-        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
+             | Some browser -> "Reading " ^ browser
+             | None -> "Reading"), Theme.info ()
+        | Loading (_, Read_refresh) -> "Refreshing browser text", Theme.info ()
+        | Loading (_, Scene_regions _) -> "Reading page regions", Theme.info ()
+        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene", Theme.info ()
+        | Loading (_, Scene_focus _) -> "Reading selected page region", Theme.info ()
+        | Loading (_, Scene_read _) -> "Reading browser text and controls", Theme.info ()
+        | Loading (_, Scene_refresh _) -> "Refreshing current browser view", Theme.info ()
+        | Loading (_, Scene_follow _) -> "Following observed browser link", Theme.info ()
+        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination", Theme.info ()
+        | Loading (_, Scene_click _) -> "Clicking observed browser control", Theme.info ()
+        | Loading (_, (Viewport_refresh _ | Viewport_observed _)) -> "Refreshing selected browser viewport", Theme.info ()
+        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport", Theme.info ()
         | Loading
             ( _
             , Viewport_pointer
@@ -168,11 +168,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Browser_lane.Click_target _ | Browser_lane.Fill_target _
                     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ )
                 ; _
-                } ) -> "Interacting with selected browser viewport…", Theme.info ()
+                } ) -> "Interacting with selected browser viewport", Theme.info ()
         | Loading (_, Screenshot _) ->
             (match browser_label view with
-             | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
-             | None -> "Capturing selected tab… (any key cancels preview)"), Theme.info ()
+             | Some browser -> "Capturing selected " ^ browser ^ " tab (any key cancels preview)"
+             | None -> "Capturing selected tab (any key cancels preview)"), Theme.info ()
         | Failed detail ->
             let retry = match view.scene_guard with
               | Some _ -> " · followed destination pending · r:recheck"
@@ -327,7 +327,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
     ~hints:(Masc_tui_keys.footer_hints_browser_observations ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status = match history.content with
-        | Listing -> "Reading the Keeper's recent tool receipts…"
+        | Listing -> "Reading the Keeper's recent tool receipts"
         | List_failed detail -> "Could not read observations: " ^ Terminal_text.single_line detail
         | List_kept_back notice -> Terminal_text.single_line notice
         | Entries {entries;cursor;selection} ->
@@ -337,7 +337,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
               (Masc_tui_value.Position.row ~selected:(Some cursor)
                  ~total:(List.length entries));
           "Observations from 100 recent tool calls"
-          ^ (match selection with Loading -> " · loading saved page…"
+          ^ (match selection with Loading -> " · loading saved page"
             | Failed detail -> " · " ^ Terminal_text.single_line detail | Observed _ -> "") in
       c.push_styled ~style:(Theme.info ()) ("  " ^ status);
       c.push_styled ~style:(Theme.recede ()) "  Historical read · browser actions and live screenshots are inactive here";

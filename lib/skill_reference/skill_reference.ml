@@ -263,8 +263,7 @@ let of_yojson json =
    valid asks and they are not the same ask, so the decode says which rather
    than defaulting one into the other: [Pinned] must be honoured or refused
    exactly, and [By_identity] has to be resolved against the frozen snapshot by
-   whoever holds it. This module does not hold it, so it does not resolve.
-   RFC-0411 §4.2. *)
+   whoever holds it. This module does not hold it, so it does not resolve. *)
 let request_of_yojson json =
   let object_name = "skill_reference" in
   let* fields = object_fields ~field:object_name json in

@@ -1,5 +1,5 @@
 (** Durable record of one recall judgment
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section 4.6) and the edge
+    and the edge
     between the recall flow and the TypeSafe client.
 
     The flow asks questions through {!Keeper_memory_recall_flow.evaluate}.

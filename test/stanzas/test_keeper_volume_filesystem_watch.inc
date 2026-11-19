@@ -1,4 +1,4 @@
-; RFC keeper-volume-filesystem-repair §3.2: the server's last read of each
+; The server's last read of each
 ; image-backed Keeper volume. masc.server links the maintenance sweep that
 ; feeds it.
 (test

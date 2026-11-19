@@ -134,7 +134,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
    runner, pipeline_runner
 ;;
 
-(* A microvm guest's tree is on the work volume (RFC-0400), so a stage
+(* A microvm guest's tree is on the work volume, so a stage
    travels the remote lane: the framed request reaches the guest's shim over
    [container exec], and the remote runner translates the host cwd into the
    guest's spelling. The endpoint is acquired per call, which is what boots
@@ -180,7 +180,7 @@ let observation_run_for ~base_path ~keeper_name =
   | Error error -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
 ;;
 
-(* The box for one endpoint (RFC-0422): the same transport, with the request
+(* The box for one endpoint: the same transport, with the request
    asking the shim for the box the keeper TOML chose. Built only after the
    shim has said it can build one, so a runner here never asks a shim that
    would refuse; a shim that predates the box, or a host without Landlock,

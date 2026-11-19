@@ -6,7 +6,6 @@ val dashboard_client_json : Masc_domain.agent * Workspace.agent_source -> Yojson
     and [last_seen] [null] unless the row is an agent record: a Keeper
     registry row carries the time of the read there, and a workspace-state
     row the workspace's start — neither is a fact about the client. *)
-val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 

@@ -3,8 +3,7 @@
     Parses swiss-verdict JSON (Agent Core contract schema v1) produced by the AGENT_CORE
     harness and exposes eval snapshots for dashboard rendering.
 
-    This module only reads.  It never writes or modifies eval data.
-    Data ownership belongs to AGENT_CORE ({!Agent_core.Harness}). *)
+    This module only reads.  It never writes or modifies eval data. *)
 
 type layer_result_json = {
   layer_name : string;

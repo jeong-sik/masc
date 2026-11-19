@@ -153,7 +153,7 @@ export function shouldShowCopilotFab({
 }
 
 export function App() {
-  // RFC-0012 §3.2: single document-level keydown host bound once at the root.
+  // Single document-level keydown host bound once at the root.
   useKeyboardShortcutHost(globalShortcutManager)
   // Multi-keeper pin shortcuts share the root keyboard host.
   useKeeperPinShortcuts(globalShortcutManager)

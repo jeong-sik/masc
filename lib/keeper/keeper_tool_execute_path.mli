@@ -22,8 +22,7 @@ val resolve_tool_execute_cwd :
     directory exists here and verifies the immutable allowed-root identity.
     For a tree the endpoint owns (microvm, remote_ssh) the host is not asked
     whether the directory exists: the confined host-form path is returned
-    for the remote lane to map, and the endpoint answers ENOENT itself
-    (RFC-0427 A-1). *)
+    for the remote lane to map, and the endpoint answers ENOENT itself. *)
 
 type execute_cwd_resolution_error
 

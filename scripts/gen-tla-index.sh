@@ -270,6 +270,6 @@ cat <<'EOF'
 ## Notes
 
 - Bug-model pattern: each spec under `specs/bug-models/` and clean/buggy pairs under `specs/keeper-state-machine/` (and others) follow the convention from `software-development.md` (TLA+ Bug Model — clean must pass, buggy must violate the same invariant).
-- TLC entry point: `specs/Makefile` (`make check-all` etc.). CI wiring lives in `scripts/tla-check.sh`.
+- TLC entry point: `scripts/tla-check.sh`.
 - Discrepancy log: external strategy notes claimed "19 specs"; the real tree currently holds the count above. Re-run this script to update after spec additions.
 EOF

@@ -5,7 +5,7 @@
 
     @since God file decomposition *)
 
-(* Delegations to the canonical clamped readers (RFC-0371 B7). *)
+(* Delegations to the canonical clamped readers. *)
 let int_of_env_default name ~default ~min_v ~max_v =
   Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 

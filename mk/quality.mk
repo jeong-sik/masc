@@ -1,4 +1,4 @@
-.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard fmt fmt-check ocaml-health check-memory-leak ci
+.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard fmt fmt-check check-memory-leak ci
 
 # Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
 diagnostics-disk-hygiene:
@@ -19,13 +19,6 @@ fmt:
 # Check formatting
 fmt-check:
 	dune fmt --root . --preview || true
-
-# Warn-only OCaml north-star snapshot. This reports risk-pattern counts without
-# changing CI policy or the public AGENT_CORE/MCP/task semantics.
-ocaml-health:
-	@mkdir -p .health
-	bash scripts/ocaml-north-star-health.sh --json-out .health/ocaml-north-star-health.json
-	@echo "OCaml north-star snapshot: .health/ocaml-north-star-health.json"
 
 # Build and run a Valgrind-based startup/MCP smoke check for memory leaks
 check-memory-leak:

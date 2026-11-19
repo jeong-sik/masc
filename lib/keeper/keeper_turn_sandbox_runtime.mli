@@ -72,7 +72,7 @@ val cleanup : t -> unit
 
 val microvm_remote_endpoint_of_running :
   t -> container_name:string -> (Keeper_sandbox_remote.t, string) result
-(** The running guest as a remote endpoint (RFC-0400): [container exec] into
+(** The running guest as a remote endpoint: [container exec] into
     [container_name] delivering the framed request to the intended shim, the
     work volume as the remote root, the intended guest identity path as
     [GH_CONFIG_DIR] (and its derived credential config as

@@ -66,7 +66,7 @@ let retain_initial (session : session) ~checkpoint ~outcome =
     |> Result.map_error (fun cause -> Snapshot_failed cause) in
   let* expected = Checkpoint.exact_snapshot_of_value ~expected_session_id:creation.trace_id checkpoint
     |> Result.map_error (fun cause -> Snapshot_failed cause) in
-  (* Equal content digests are equal content (RFC-0476 §3.2). *)
+  (* Equal content digests are equal content. *)
   let* () = if Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference snapshot)
       (Checkpoint.exact_snapshot_reference expected) then Ok () else Error Initial_source_changed in
   let* () = retain ~session_dir snapshot in

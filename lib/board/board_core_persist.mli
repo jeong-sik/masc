@@ -27,12 +27,6 @@ val flusher_schedule_dropped_count : unit -> int
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
-(** [persist_io_error ~where msg] records the failure via
-    {!record_persist_error} and returns the typed
-    [Error (Io_error "<where>: <msg>")] the append paths surface to
-    their callers. *)
-val persist_io_error : where:string -> string -> ('a, board_error) result
-
 val create_store : base_path:string -> unit -> store
 (** Capture one explicit BasePath, including its original anchored spelling and
     physical-root result. Exactly empty input raises [Invalid_argument]. No
@@ -332,7 +326,7 @@ val update_post_with_outcome :
   unit ->
   (post_edit, board_error) result
 
-(** RFC-0233 §7: maintain the [posts_by_turn_ref] / [posts_by_run_id]
+(** Maintain the [posts_by_turn_ref] / [posts_by_run_id]
     secondary indexes from a post's [origin].  Idempotent; a [None] origin is
     a no-op.  Called on create and on load so the two paths stay in lockstep. *)
 val index_post_origin : store -> post -> unit

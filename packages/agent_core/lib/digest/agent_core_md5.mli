@@ -1,5 +1,5 @@
 (** MD5 fed in bounded slices, so a stop-the-world request waits for one
-    slice at most (RFC-0474 L2). Digests are [Digestif.MD5] digests. *)
+    slice at most. Digests are [Digestif.MD5] digests. *)
 
 type ctx
 

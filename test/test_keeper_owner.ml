@@ -280,7 +280,7 @@ let test_operation_payload_preserves_connector_route () =
     true
     (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown));
   (* One source names one speaker: a connector person and a sender Keeper
-     cannot both be on it (RFC-0468 §3.2). *)
+     cannot both be on it. *)
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
     | Some keeper_id -> keeper_id
@@ -757,7 +757,7 @@ let test_identity_and_delete_guards () =
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
 ;;
 
-(* RFC-0487: a Keeper's memory health row measures the Librarian gap on the
+(* A Keeper's memory health row measures the Librarian gap on the
    meta's trace and has none to measure without a meta. The Owner tells the
    row's readers when the meta is created, removed or moves to a new trace,
    and not for a change that keeps the trace. *)
@@ -1074,7 +1074,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
    transitions, 0 violations.
 
    The test states the blocked lane, not just the fact of blocking, because the
-   holder's identity is what a fairness change would alter (RFC-0373). *)
+   holder's identity is what a fairness change would alter. *)
 (* The release signal states availability, not completion. A listener woken by
    "a turn ended" would find the slot already taken whenever a chat operation
    was queued behind it, defer, and wait out its own cadence again — the exact
@@ -1613,7 +1613,7 @@ let test_health_observer_wakes_after_persistence_exception () =
       (!observations = [ Some true; None; Some true ]))
 ;;
 
-(* RFC-0481 §3.2: every metadata write the Owner attempts tells the roster
+(* Every metadata write the Owner attempts tells the roster
    readers of its own workspace to reread that Keeper's row. *)
 let hearing_row_changes ~base_path ?(on_heard = fun _ -> ()) f =
   let id = Printf.sprintf "keeper-owner-row-changed-%d-%s" (Unix.getpid ())
@@ -1648,7 +1648,7 @@ let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_met
   |> owner_ok
 ;;
 
-(* RFC-0481 §3.4: a chat control token rotation tells the turns readers to
+(* A chat control token rotation tells the turns readers to
    read again, after the new token is in place. *)
 let test_a_token_rotation_announces_the_keeper_turns () =
   let base_path = Masc_test_deps.setup_test_workspace () in
@@ -2817,29 +2817,30 @@ let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
   ignore (await_terminal owner first_id 1_000);
   check bool "replacement operation started" true
     (Chat_operation.Operation_id.equal (Eio.Stream.take started) second_id);
-  (match Owner.interrupt_running_operation owner first_id with
-   | Ok
-       (Owner.Operation_not_current
-          { running_operation_id = Some running }) ->
+  let interrupt_operation operation_id =
+    match fst (owner_ok (Owner.interrupt_turn owner (Owner.Direct_operation operation_id))) with
+    | Owner.Interrupt_result result -> result
+    | Owner.Pending_admission_paused -> fail "a running owner reported a paused pending admission"
+  in
+  (match interrupt_operation first_id with
+   | Owner.Operation_not_current { running_operation_id = Some running } ->
        check bool "stale interrupt observes replacement identity" true
          (Chat_operation.Operation_id.equal running second_id)
-   | Ok Owner.Operation_interrupt_signalled ->
+   | Owner.Operation_interrupt_signalled ->
        fail "stale interrupt signalled the replacement operation"
-   | Ok (Owner.Operation_not_current { running_operation_id = None }) ->
+   | Owner.Operation_not_current { running_operation_id = None } ->
        fail "replacement lost its running identity"
-   | Ok Owner.Operation_settling -> fail "a finished operation was reported as settling"
-   | Ok Owner.Operation_maintenance_running -> fail "a finished operation was reported as maintenance running"
-   | Ok Owner.Operation_slot_held_by_autonomous_turn -> fail "a finished operation was reported as held by an autonomous turn"
-   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
-   | Error error -> fail (Owner.error_to_string error));
-  (match Owner.interrupt_running_operation owner second_id with
-   | Ok Owner.Operation_interrupt_signalled -> ()
-   | Ok (Owner.Operation_not_current _) -> fail "exact replacement was not current"
-   | Ok Owner.Operation_settling -> fail "the running replacement was reported as settling"
-   | Ok Owner.Operation_maintenance_running -> fail "the running replacement was reported as maintenance running"
-   | Ok Owner.Operation_slot_held_by_autonomous_turn -> fail "the running replacement was reported as held by an autonomous turn"
-   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
-   | Error error -> fail (Owner.error_to_string error));
+   | Owner.Operation_settling -> fail "a finished operation was reported as settling"
+   | Owner.Operation_maintenance_running -> fail "a finished operation was reported as maintenance running"
+   | Owner.Operation_slot_held_by_autonomous_turn -> fail "a finished operation was reported as held by an autonomous turn"
+   | Owner.Operation_interrupt_failed detail -> fail detail);
+  (match interrupt_operation second_id with
+   | Owner.Operation_interrupt_signalled -> ()
+   | Owner.Operation_not_current _ -> fail "exact replacement was not current"
+   | Owner.Operation_settling -> fail "the running replacement was reported as settling"
+   | Owner.Operation_maintenance_running -> fail "the running replacement was reported as maintenance running"
+   | Owner.Operation_slot_held_by_autonomous_turn -> fail "the running replacement was reported as held by an autonomous turn"
+   | Owner.Operation_interrupt_failed detail -> fail detail);
   let terminal = await_terminal owner second_id 1_000 in
   match terminal.state with
   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
@@ -3090,7 +3091,7 @@ let test_pending_stop_cannot_pause_different_active_child () =
   check bool "active successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
   (* The refusal deliberately leaves this child working. End only that fixture
      execution so the enclosing switch can finish after the assertions. *)
-  ignore (owner_ok (Owner.interrupt_running_operation owner (operation_id "active-other")));
+  ignore (interrupt_turn owner (Direct_operation (operation_id "active-other")));
   ignore (await_terminal owner (operation_id "active-other") 1_000)
 ;;
 
@@ -4067,7 +4068,7 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
    | Some { lane = Owner.Autonomous; _ } -> ()
    | Some { lane = Owner.Chat_operation | Owner.Maintenance; _ } | None ->
      fail "the autonomous cycle does not hold the slot");
-  (match owner_ok (Owner.interrupt_running_operation owner stuck_id) with
+  (match interrupt_turn owner (Owner.Direct_operation stuck_id) with
    | Owner.Operation_slot_held_by_autonomous_turn -> ()
    | Owner.Operation_interrupt_signalled -> fail "the operation id cancelled the autonomous cycle"
    | Owner.Operation_not_current _ | Owner.Operation_settling | Owner.Operation_maintenance_running

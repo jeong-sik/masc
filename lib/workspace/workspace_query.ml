@@ -178,7 +178,7 @@ let agents_persistence_surface = "workspace_agents"
 
 (* A file under [agents/] that does not decode is dropped from the listing
    and counted on [masc_persistence_read_drops_total]; nothing rewrites it.
-   An open() that failed under fd pressure is not a loss (RFC-0134) and is
+   An open() that failed under fd pressure is not a loss and is
    logged without the data-integrity counter. *)
 let load_agents_from_dir config dir ~include_inactive =
   list_leaf_json_names config dir
@@ -349,7 +349,7 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else audit_orphan_tasks_in_tasks config (read_backlog config).tasks
 
-(* RFC-0294 PR-4: the single typed source of truth for "is this status
+(* The single typed source of truth for "is this status
    orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]
    ([@warning "-4"] absent on purpose): adding a new constructor forces a
    classification decision here at compile time, so a future orphan-eligible

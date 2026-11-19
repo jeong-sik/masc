@@ -1,4 +1,4 @@
-(* The HTTPS listener (RFC-0512 D6): the certificate material under
+(* The HTTPS listener: the certificate material under
    [.masc/tls], and the accept loop choosing the connection handler from the
    ALPN result of a real TLS 1.3 handshake on a loopback port. *)
 

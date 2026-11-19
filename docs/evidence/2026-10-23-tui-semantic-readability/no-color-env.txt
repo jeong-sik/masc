@@ -1,1 +1,0 @@
-PASS: actual NO_COLOR startup policy and production recede token

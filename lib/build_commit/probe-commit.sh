@@ -3,7 +3,7 @@
 # that commit was authored, and the source identity declaration, or None for
 # each value that is not knowable.
 #
-# RFC-0382 follow-up, "binary unknown" root fix: a copied binary (e.g. the
+# "binary unknown" root fix: a copied binary (e.g. the
 # launchd deploy at <base>/bin) must testify to its own origin. The dune rule
 # that runs this disables sandboxing so git can ascend to the checkout being
 # built -- in a worktree that is the worktree HEAD, which is the truth we want.

@@ -1034,7 +1034,7 @@ let test_slice_fanout_flag_reads_env () =
         Alcotest.(check bool) "env=false → disabled"
           false (Ws.slice_index_enabled ())))
 
-(* ====== Dashboard auth state (RFC-0204 §8.4, Phase 1) ====== *)
+(* ====== Dashboard auth state ====== *)
 
 let test_dashboard_auth_unauthenticated () =
   Alcotest.(check bool) "Unauthenticated is not authenticated"
@@ -1300,7 +1300,7 @@ let () =
       Alcotest.test_case "stale ack throttles delivery before send" `Quick
         test_backpressure_gate_stale_ack_throttles_delivery;
     ]);
-    (* RFC-0286: the frame/message reassembly + size-classify unit tests were
+    (* The frame/message reassembly + size-classify unit tests were
        removed with the manual reassembler; ws-direct's Connection owns that
        logic and is covered by its own test suite. The env-default knob test
        stays — masc still reads the caps and feeds them to Endpoint.create. *)

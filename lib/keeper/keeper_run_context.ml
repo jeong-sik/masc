@@ -73,7 +73,7 @@ let build_base_system_prompt
   Ok (workspace_root, prompt)
 
 (* Who composes the turn's first request, and for Agent Core where its range
-   opens against the last request on that runtime (RFC-0491 §3.2). The
+   opens against the last request on that runtime. The
    runtime is the head of the walk a fresh turn takes, as the turn driver
    orders it; the range is the one the driver composes over [history] before
    the turn's input is appended, read the way the forecast reads it. *)

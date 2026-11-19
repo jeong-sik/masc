@@ -663,40 +663,5 @@ class FrameLatency(Workdir):
         self.assert_stops_unnamed(self.run_python("tui-frame-latency.py"), "--base-path")
 
 
-class ProgressExtract(Workdir):
-    SCRIPT = "progress/extract_progress.py"
-
-    # The repository folder is empty, so a run that has its masc root goes on
-    # to miss the feature matrix; one that lacks it stops before that.
-    def extract(self, *args, base=None):
-        repo = self.root / "repo"
-        repo.mkdir(exist_ok=True)
-        return self.run_python(self.SCRIPT, "--repo-root", str(repo), *args, base=base)
-
-    def assert_went_on(self, result):
-        self.assertNotIn("is required", result.stderr)
-        self.assertIn("keeper-feature-state-matrix", result.stderr)
-
-    def test_stops_when_no_masc_root_is_named(self):
-        self.assert_stops_unnamed(self.extract(), "--masc-root")
-
-    def test_the_environment_names_the_masc_root(self):
-        self.assert_went_on(self.extract(base=self.root / "base"))
-
-    def test_a_named_masc_root_needs_no_base(self):
-        self.assert_went_on(self.extract("--masc-root", str(self.root / "named")))
-
-    def test_an_empty_masc_root_does_not_fall_back_to_the_environment(self):
-        for empty in ("", "  "):
-            result = self.extract("--masc-root", empty, base=self.root / "base")
-            self.assert_stops_unnamed(result, "--masc-root")
-
-    def test_a_tilde_masc_root_is_refused(self):
-        for tilde in ("~", "~/nowhere/.masc", "~someone/.masc"):
-            result = self.extract("--masc-root", tilde, base=self.root / "base")
-            self.assertEqual(result.returncode, 2, result.stderr)
-            self.assertIn("starts with a tilde the shell did not expand", result.stderr)
-
-
 if __name__ == "__main__":
     unittest.main()

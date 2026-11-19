@@ -1,3 +1,0 @@
-python3 scripts/changelog-fragments.py check
-9 changelog fragment(s) OK
-exit_code=0

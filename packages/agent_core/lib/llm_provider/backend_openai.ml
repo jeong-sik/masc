@@ -1451,7 +1451,7 @@ let%test
   ctk |> member "enable_thinking" |> to_bool = true && json |> member "thinking" = `Null
 ;;
 
-(* llama-server prefill liveness (RFC-0382 §7): a binding that declares return-progress asks the
+(* llama-server prefill liveness: a binding that declares return-progress asks the
    server to stream prompt_progress chunks during prefill, so the first-event
    and idle deadlines observe liveness instead of prefill silence. The field
    rides only streamed requests — a non-stream request has no chunks to

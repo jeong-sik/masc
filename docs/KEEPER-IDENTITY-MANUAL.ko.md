@@ -219,5 +219,4 @@ Keeper 상세 화면의 서비스 탭에서 `D` 를 두 번 누릅니다. 첫 �
 | 문서 | 용도 |
 |---|---|
 | [`docs/KEEPER-USER-MANUAL.ko.md`](KEEPER-USER-MANUAL.ko.md) | Keeper 를 만들고 운영하기 |
-| [`docs/rfc/RFC-0392-keeper-identity-for-oauth-services.md`](rfc/RFC-0392-keeper-identity-for-oauth-services.md) | 왜 이렇게 설계했는지 |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 대시보드 쓰기 권한 |

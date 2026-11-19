@@ -2,7 +2,7 @@
 # MCP tool-call helpers shared by the live harness scripts.
 #
 # Extracted from scripts/harness_tool_call_quality.sh so that
-# harness_coding_eval.sh does not carry a second copy (RFC-0396). Depends on
+# harness_coding_eval.sh does not carry a second copy. Depends on
 # call_tool / extract_result / extract_text / extract_error and
 # CURL_TIMEOUT_SEC from scripts/harness/lib/test_framework.sh, which callers
 # source first.

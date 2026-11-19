@@ -225,7 +225,7 @@ let with_current_gate_keeper_observations ~(config : Workspace_utils.config) sna
   let project = project_keeper_observations ~request_sequence ~candle ~config in
   (* The roster answer carries the fold's basis beside [candle], from the same
      ledger view, so a reader computes the balances and the supply at a later
-     time without reading again (RFC-0481 §3.7). *)
+     time without reading again. *)
   let decay =
     match Candle_observe.decay_basis candle with
     | Some (Ok basis) -> Candle_decay_basis.to_json basis

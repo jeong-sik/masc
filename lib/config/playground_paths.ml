@@ -29,7 +29,7 @@ let bundle_repos_dirname = "repos"
 
 (** Sanitize a keeper name into a filesystem-safe component.
 
-    RFC-0393: the keeper name is the only spelling, so no wrapper
+    The keeper name is the only spelling, so no wrapper
     stripping happens here. Allows [A-Za-z0-9._-] and replaces
     everything else with [_]. An empty input or the special path
     components [.] / [..] are replaced with [_], so

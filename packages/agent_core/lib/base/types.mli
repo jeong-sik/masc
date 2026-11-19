@@ -14,7 +14,7 @@ include module type of struct
 end
 
 (* ================================================================ *)
-(* History content (RFC-0476 D5)                                    *)
+(* History content                                                  *)
 (* ================================================================ *)
 
 (** Agent history holds media by reference. [media_source] here is

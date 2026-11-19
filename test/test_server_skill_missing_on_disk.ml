@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-(* RFC-0506: a Skill activated recently whose package is gone from every
+(* A Skill activated recently whose package is gone from every
    catalog source is detected at catalog publication and recorded as
    skill_missing_on_disk (WARN log line, audit row, runtime-observer event).
    These tests build a real workspace: one present Skill on disk, retained

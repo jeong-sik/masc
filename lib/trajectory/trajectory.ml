@@ -31,7 +31,7 @@ type tool_call_entry = {
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
   execution_id : string option;
-      (** RFC-0233 canonical join key minted at the dispatch boundary; the
+      (** Canonical join key minted at the dispatch boundary; the
           tool_calls JSONL row for the same execution carries the identical
           value. Plain string here: Trajectory is a dependency-leaf
           persistence record, the typed [Ids.Execution_id.t] lives at the

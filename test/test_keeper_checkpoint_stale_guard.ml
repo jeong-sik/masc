@@ -1,4 +1,4 @@
-(** RFC-0225 §3.2: stale AGENT_CORE checkpoint writes are a disk-SSOT no-op.
+(** Stale AGENT_CORE checkpoint writes are a disk-SSOT no-op.
 
     Two writers for the same session are last-writer-wins on disk; the
     2026-06-10 voice incident had a stale lane (turn_count=1324) clobber
@@ -84,7 +84,7 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     working_context = None;
   }
 
-(* A reference names the head's content digest (RFC-0476 §3.2). *)
+(* A reference names the head's content digest. *)
 let content_digest_of_head bytes =
   match Agent_core.Checkpoint_objects.head_of_string bytes with
   | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
@@ -131,7 +131,7 @@ let test_measured_save_counts_noop_and_fallback () =
       | Ok value -> value
       | Error error -> fail error in
     let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
-    (* The messages are written as objects before the head (RFC-0476 §3.3). *)
+    (* The messages are written as objects before the head. *)
     let object_bytes () =
       let directory = Filename.concat session_dir Masc.Keeper_checkpoint_object_store.dirname in
       if Sys.file_exists directory
@@ -519,8 +519,7 @@ let test_forward_equal_and_stale () =
         on_disk.Agent_core.Checkpoint.turn_count
     | Error _ -> fail "load after rejection failed")
 
-(* The canonical checkpoint file is the only durable admission watermark
-   (RFC-0225 §3.2). *)
+(* The canonical checkpoint file is the only durable admission watermark. *)
 let test_disk_is_the_watermark_ssot () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2118,8 +2117,7 @@ let rec remove_tree path =
       Unix.rmdir path)
     else Unix.unlink path
 
-(* Without a summary the message count is the head's: no object is read
-   (RFC-0476 §3.5). *)
+(* Without a summary the message count is the head's: no object is read. *)
 let test_a_message_count_without_a_summary_reads_no_object () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3217,7 +3215,7 @@ let test_history_window_follows_the_runtime_setting () =
   check int "clearing the override puts the default window back"
     default_window (retained_files ())
 
-(* ── RFC-0476 head and objects: what a save and a backup can rely on ── *)
+(* ── Head and objects: what a save and a backup can rely on ── *)
 
 let head_at path =
   match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with

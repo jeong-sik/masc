@@ -10,7 +10,7 @@ type timeout_source =
   | Agent_core_provider
 
 (** Typed observation derived where the original agent-core error is still
-    in hand, carried alongside the verbatim wire (RFC-0371 §6.1(3)).
+    in hand, carried alongside the verbatim wire.
     [None] on values rehydrated from persisted wire strings. *)
 type agent_core_timeout =
   { source : timeout_source

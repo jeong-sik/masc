@@ -9,7 +9,7 @@ type memory_fact_retrieval =
   | Retrieved of { count : int; distinct_days : int; last_at : float }
 
 (** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): whether and how a search returned it,
+    memory-events sidecar: whether and how a search returned it,
     how often it was retracted, and which dropped facts it continues. No
     strength or score; the numbers are the record. *)
 type memory_fact_events = {

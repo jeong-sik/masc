@@ -391,7 +391,6 @@ helper를 보존합니다. 이미 캐시된 연결과 연결된 파일 읽기는
 확인 가능한 경우 `container list --all --format json`과 `container inspect <helper-이름>`으로
 helper의 상태와 마운트를 읽어 책임 작업과 다른 작업 공간의 사용 여부를 조사하세요.
 목록이 응답하지 않거나 소유자·작업 종료를 확인하지 못하면 helper와 볼륨을 보존하세요.
-[guest 생존 RFC](rfc/RFC-keeper-guest-survives-restart.md)에 결정 배경이 있습니다.
 
 ### `mention_targets` 는 목록이고, 한 칸이 이름 하나입니다
 
@@ -451,8 +450,6 @@ Auto Judge에서는 `file`, `uniq`, `git ls-remote`, `git cat-file`,
 Keeper 수가 아닙니다. 기본값은 `lib/config/env_config_sandbox.ml`과
 `lib/runtime/exec_ssh_endpoint.ml`에 있고, 이 표와 코드가 다르면 코드가
 맞습니다. Keeper 전체 수나 호스트 메모리 총량을 제한하는 기능은 아직 없습니다.
-[호스트 메모리 예산 RFC](rfc/RFC-keeper-guests-stay-inside-a-host-memory-budget.md)와
-그 안의 hibernation 설계도 아직 초안입니다.
 
 | 프로필 / backend | 실행 단위와 지금 제한 | 네트워크와 공유 범위 |
 |---|---|---|
@@ -503,8 +500,8 @@ allow = ["github.com", "api.github.com", "*.githubusercontent.com"]
 `githubusercontent.com` 자체를 포함하지 않습니다. `policy`를 지원하지 않는
 backend는 `inherit`로 몰래 바꾸지 않고 요청을 거부합니다.
 
-Apple container 게스트는 모든 요청을 게스트 agent 로 받습니다
-([RFC](rfc/RFC-microvm-guest-agent-over-socket.md)). 게스트의 첫 프로세스가 shim agent 이고,
+Apple container 게스트는 모든 요청을 게스트 agent 로 받습니다.
+게스트의 첫 프로세스가 shim agent 이고,
 agent 소켓의 호스트 쪽 끝은 `<base>/.masc/microvm/agent/` 아래에 있습니다.
 Keeper TOML 에는 이것을 고르는 키가 없습니다. `nerdctl_kata` 와 `microsandbox` 게스트는
 요청마다 shim 을 exec 로 하나씩 띄웁니다.

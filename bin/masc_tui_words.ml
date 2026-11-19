@@ -207,7 +207,6 @@ module Kept_request = struct
     | Image_read
     | Gate_mode_change
     | Tool_modes_read
-    | Gate_settings_read
     | Tool_mode_change
     | Board_requeue
     | Service_switch
@@ -362,7 +361,6 @@ module Kept_request = struct
     | Image_read -> text "그림 읽기" "image read"
     | Gate_mode_change -> text "게이트 모드 변경" "Gate mode change"
     | Tool_modes_read -> text "도구 승인 모드 읽기" "tool approval modes read"
-    | Gate_settings_read -> text "게이트 설정 읽기" "Gate settings read"
     | Tool_mode_change -> text "도구 승인 모드 변경" "tool approval mode change"
     | Board_requeue -> text "게시판 다시 넣기" "Board requeue"
     | Service_switch -> text "서비스 켜고 끄기" "service switch"

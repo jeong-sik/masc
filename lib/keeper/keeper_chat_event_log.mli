@@ -1,5 +1,5 @@
 (** Versioned JSON codec and per-operation JSONL journal for
-    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
+    [Keeper_chat_events.keeper_chat_event].
     Persisted codec v2 refuses earlier epochs without rewriting their files. *)
 
 (** One journaled event: the bus-assigned sequence number, the publish-time

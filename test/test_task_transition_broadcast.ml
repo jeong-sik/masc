@@ -510,7 +510,7 @@ let test_explicit_reason_outranks_handoff_context () =
 ;;
 
 (* A note already on the Task is the previous owner's: a release summary kept
-   across the claim so the incoming owner can read it (RFC-0365). It is not
+   across the claim so the incoming owner can read it. It is not
    this owner's reason to stop. The Cancelled record and the message log read
    one value: this call's [reason] or [handoff_context] — and with neither, the
    cancel is refused rather than explained by someone else. *)

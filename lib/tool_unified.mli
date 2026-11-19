@@ -56,7 +56,7 @@ val summary_report :
 (** [public_names internal] is the public names one internal tool is offered
     under, and it arrives as an argument: which names a Keeper's descriptor
     set projects is the Keeper domain's fact, and a tool surface module may
-    not reach for it (RFC-0194).
+    not reach for it.
     The server is above both and passes it.
 
     A list rather than one name, because a descriptor set can project one

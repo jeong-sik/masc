@@ -99,7 +99,7 @@ let record_keeper_internal_tool_call ~tool_name ~disposition ~duration_ms =
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
 
-(** RFC-0006 Phase A.2: build the per-tool handler closure.
+(** Build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so
     that alias [Tool.t] entries (e.g. [Execute]) can reuse

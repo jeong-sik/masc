@@ -638,7 +638,7 @@ let tail_lines rows = List.map (fun row -> row.line) rows
    section 8.8). *)
 let off_fiber ~name f = Domain_pool_ref.submit_io_or_inline ~name f
 
-(* The pool job's name for a read of [t]'s store (RFC-0474 L4c). A read given
+(* The pool job's name for a read of [t]'s store. A read given
    only a path is named by the function that reads it. *)
 let job_name t = "dated_jsonl:" ^ Store.pool_job_name (Store.of_location t.location)
 

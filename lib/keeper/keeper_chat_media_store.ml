@@ -1,6 +1,6 @@
 (** Keeper_chat_media_store — content-addressed store for model-generated media.
 
-    RFC-0301: model-generated media (image / audio / document) streamed by AGENT_CORE as
+    model-generated media (image / audio / document) streamed by AGENT_CORE as
     [MediaDelta { media_type; source }] is persisted here and surfaced in keeper chat
     by URL token, instead of being reduced to a byte count at the bridge. This
     generalizes the voice-clip token/serve pattern (RFC-0235:
@@ -21,7 +21,7 @@ type persist_error =
   | Write_failed of string
 
 (* Broad category of a media type, driving the keeper-chat block type used when the
-   generated media is persisted for reload (RFC-0301 item 6). Unknown types are
+   generated media is persisted for reload. Unknown types are
    [Other] and are stored/served opaquely rather than dropped. *)
 type media_category =
   | Image

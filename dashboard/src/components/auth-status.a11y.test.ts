@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// jest-axe coverage for AuthStatus popover (RFC 0002 Iter 2). Locks the
+// jest-axe coverage for AuthStatus popover. Locks the
 // aria-expanded / aria-haspopup / aria-controls / aria-labelledby wiring
 // + role="dialog" + sr-only label so future migrations land as
 // zero-regression. axe verifies the trigger↔panel id wiring is sound.

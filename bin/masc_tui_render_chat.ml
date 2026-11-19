@@ -868,7 +868,6 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
         let yolo = List.mem keeper.k_name state.keeper_yolo_names in
         let chat_mode, gate_mode =
           keeper_chat_mode_labels ~yolo
-            ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
             ~workspace_gate_mode:
               (Option.map (fun modes -> modes.Tui_decode.glm_workspace) state.gate_modes)
         in

@@ -86,5 +86,3 @@ HWP5 bytes → 컨테이너·압축 입력 검사 → RHWP worker
   동작만 증명하며, 실제 변환 시험을 대신하지 않는다.
 - 실제 브라우저 다운로드와 한컴·Word 화면은 별도 증거다. 자체 parser의
   왕복이나 데이터 일치를 전체 문서의 화면 충실도로 보고하지 않는다.
-
-조사: [기존 HWP의 표와 차트 데이터](../research/artifact-hwp-import.md).

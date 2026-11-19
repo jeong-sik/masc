@@ -65,14 +65,10 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 
 대표 항목:
 
-- benchmark / keeper fleet proof
-  - `scripts/harness/workload/agent_swarm_live.sh`
+- benchmark
   - `docs/BENCHMARK-RUNBOOK.md`
 - supervised delivery / operator path
   - `docs/SUPERVISOR-MODE.md`
-- local runtime capacity
-  - `scripts/llama-runtime-pool.sh`
-  - `docs/PERFORMANCE-SLO.md`
 
 규칙:
 

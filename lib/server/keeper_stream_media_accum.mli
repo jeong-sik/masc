@@ -1,4 +1,4 @@
-(** Keeper_stream_media_accum — RFC-0301 item 6.
+(** Keeper_stream_media_accum.
 
     Accumulates model-generated media streamed during a keeper turn so the turn's
     persist path can record it as reload-visible chat blocks. Fed the same raw AGENT_CORE

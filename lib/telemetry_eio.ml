@@ -37,7 +37,7 @@ type event =
       session_id: string option [@default None];
       operation_id: string option [@default None];
       worker_run_id: string option [@default None];
-      (* RFC-0233 canonical join key, minted once at the dispatch boundary.
+      (* Canonical join key, minted once at the dispatch boundary.
          The tool_calls row for the same execution carries the identical
          value, so a consumer reading both streams can tell one physical
          call reported twice from two calls. [None] on lanes that write no

@@ -214,7 +214,7 @@ end
 val dispatch : Stream_end.t -> (unit -> unit) -> unit
 (** [dispatch stream_end work] runs [work] in a daemon fiber of the stream's
     switch, after yielding once, so the h2 parser gets its turn before any
-    request computation, pool wait or response mutation starts (RFC-0350).
+    request computation, pool wait or response mutation starts.
     [work] runs with [stream_end] bound ({!Stream_end.with_current}) and in
     the response ledger scope of the calling fiber. An exception from [work]
     {!reset}s the stream with [Raised]; cancellation propagates. *)

@@ -9,7 +9,7 @@ import { isRecord } from './common/normalize'
 import type { Keeper } from '../types'
 
 export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
-  // RFC-0139 PR-2: SSOT-routed offline check — see
+  // SSOT-routed offline check — see
   // keeper-store-normalize.ts for the parallel migration.
   const isOffline = isKeeperOffline(keeper)
 

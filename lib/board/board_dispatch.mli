@@ -610,8 +610,6 @@ val get_comment_parent_for_evidence_unchecked :
 (** Internal projection lookup. Resolves the actual comment parent and applies
     the primary posts-source gate before returning it. *)
 
-val get_post_unchecked : post_id:string -> (Board.post, Board.board_error) Result.t
-
 val list_posts_by_run_origin_unchecked : unit -> Board.post list
 
 val find_post_by_run_id_unchecked : run_id:string -> Board.post option
@@ -633,19 +631,8 @@ val read_comments_unchecked :
   post_id:string ->
   (Board.comment list, Board.board_read_error) Result.t
 
-val get_comments_unchecked :
-  post_id:string ->
-  (Board.comment list, Board.board_error) Result.t
-
 val get_post_and_comments_unchecked :
   post_id:string ->
   (Board.post * Board.comment list, Board.board_error) Result.t
-
-val list_comments_unchecked : ?limit:int -> unit -> Board.comment list
-
-val search_unchecked :
-  query:string ->
-  limit:int ->
-  Board.post list
 
 val require_readable_target : reader:Board_access.reader -> target_type:Board.reaction_target_type -> target_id:string -> (unit, Board.board_error) result

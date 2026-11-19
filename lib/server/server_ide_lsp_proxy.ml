@@ -62,7 +62,7 @@ type resolved_document_request =
     via {!disconnect} rather than switch teardown, because under the
     Gluten upgrade model ({!Server_mcp_transport_ws.respond_and_drive_upgrade})
     the upgrade handler cannot block to hold a per-connection switch
-    open.  RFC-0281 Phase 2. *)
+    open. *)
 (** Per-language LSP health (task-1691). A language is [Connected] once its
     LSP process is spawned and initialized; it is [Unavailable] (carrying the
     last error) when the process could not be started or initialized.
@@ -208,7 +208,7 @@ type conn_state =
   ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
-        (* RFC-0287: fragment reassembly + size caps live in the ws-direct
+        (* Fragment reassembly + size caps live in the ws-direct
            Endpoint, which delivers complete messages to [on_message]. *)
   }
 
@@ -314,9 +314,9 @@ let stop_dispatch_workers cs =
     raise so those fibers exit — so this reclaims the processes AND their
     fibers without a switch teardown.  Required because [cs.sw] is the
     server switch: without explicit shutdown the processes would leak
-    until server shutdown (RFC-0261).  The process table is drained under
+    until server shutdown.  The process table is drained under
     [process_mutex]; concurrent spawns re-check [disconnected] before they can
-    publish a process.  RFC-0281 Phase 2. *)
+    publish a process. *)
 let disconnect cs =
   if Atomic.compare_and_set cs.disconnected false true
   then (
@@ -1207,14 +1207,14 @@ let add_routes ~transport_sw:sw ~clock router =
                       ~code:err.Server_ide_scope.code
                       err.Server_ide_scope.message
                   | Ok (anchor_authority, workspace_base) ->
-                 (* RFC-0281: drive the upgraded connection via the shared
+                 (* Drive the upgraded connection via the shared
                     attachment SSOT.  The previous code built [ws_conn] and
                     [ignore]d it (never calling Gluten [upgrade]), so frames
                     were never read; it also blocked on a per-connection
                     [Eio.Switch.run] + promise, which the Gluten model
                     forbids.  Subprocesses are now reclaimed explicitly in
                     {!disconnect} (called from [Connection_close]/[eof]). *)
-                 (* RFC-0287: drive the upgraded connection via the shared
+                 (* Drive the upgraded connection via the shared
                     ws-direct attachment SSOT. The Endpoint reassembles
                     fragments, validates UTF-8, enforces the size caps, and
                     auto-replies to pings, so [on_message] receives a complete

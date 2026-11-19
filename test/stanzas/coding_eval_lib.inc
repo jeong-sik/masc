@@ -1,4 +1,4 @@
-; Coding-outcome eval (RFC-0396) — shared case/report modules as a library
+; Coding-outcome eval — shared case/report modules as a library
 ; so the report CLI and the corpus contract test link the same code.
 
 (library

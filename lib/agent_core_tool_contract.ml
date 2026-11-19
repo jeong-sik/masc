@@ -33,7 +33,7 @@ let canonical_add_task =
 
 (* The deliberately narrower agent-core wording and input shape live in the
    [agent_core_projection] table of the tool's own config/tools/<name>.toml
-   declaration (RFC prompts-and-tool-definitions-outside-ocaml §2.2), decoded
+   declaration, decoded
    once here at module initialization. A missing file, a missing table, or a
    declaration that does not decode refuses the boot — the same posture as
    [canonical_add_task] above. *)

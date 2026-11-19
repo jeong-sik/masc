@@ -323,7 +323,7 @@ let launch_supervised_fiber_body
              (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
              ()
            | exn ->
-             (* RFC-0002: unified crash handler.
+             (* Unified crash handler.
                 Keeper_fiber_crash carries no payload — failure_reason is
                 pre-stored in registry by the raise site.
                 For unexpected exceptions, wrap in Exception variant. *)

@@ -77,7 +77,7 @@ let running_of_apple_inspect_json raw =
 (* Apple inspect configuration. Unknown metadata is left alone; every
    identity/isolation field below is mandatory and duplicate-free.
    [publishedSockets] and [useInit] were read from 1.6.1, which reports both
-   for every guest (docs/evidence/2026-11-03-microvm-request-transport). *)
+   for every guest. *)
 let apple_guest_facts ~container_name raw =
   let module Plan = Keeper_microvm_boot_plan in
   let open Result.Syntax in

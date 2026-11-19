@@ -3,7 +3,7 @@
 type tool_failure_class =
   | Dependency_unavailable (** A required external dependency was unavailable. *)
   | Policy_rejection
-      (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
+      (** Permission, guardrail, validation reject — permanent.
           Covers caller-input/argument validation, not only auth/boundary. *)
   | Runtime_failure (** Internal error/bug. *)
   | Workflow_rejection (** Business rule violation. *)
@@ -344,7 +344,7 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     }
 ;;
 
-(** {1 Typed constructors (RFC-0189)}
+(** {1 Typed constructors}
 
     Same intent as {!ok}/{!error} but with the [class_] requirement
     enforced positionally for new code that wants to commit to a

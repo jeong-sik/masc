@@ -1,9 +1,7 @@
 # Vibe headless fixtures
 
-Copies of the sanitized Vibe 3.1.0 captures in
-`docs/evidence/vibe-official-client-lane-20261107/fixtures/` (see that README for
-the commands, the environment and what was replaced). They are derivatives, not
-the bytes Vibe wrote.
+Copies of sanitized Vibe 3.1.0 captures. They are derivatives, not the bytes
+Vibe wrote.
 
 | fixture | evidence run |
 |---|---|

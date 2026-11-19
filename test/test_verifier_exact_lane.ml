@@ -1,4 +1,4 @@
-(* RFC-0361 D7(a) — the completion-authority judgement call runs on the
+(* The completion-authority judgement call runs on the
    dedicated [verifier_exact] exact-output lane: lane resolution returns the
    admitted slots in frozen declaration order, and [review] fails over in that
    order when a slot produces no usable verdict. *)
@@ -472,7 +472,7 @@ let test_failures_time_does_not_change_still_stop_the_review () =
       ])
 ;;
 
-(* RFC-0436 §4.3: recorded images ride to the reviewer as attached blocks
+(* Recorded images ride to the reviewer as attached blocks
    after the prompt text. An imageless request sends no blocks at all — the
    prompt string stays the whole goal, as before this channel existed. *)
 let image_request =

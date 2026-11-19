@@ -26,6 +26,4 @@ programs, guest saves, checkpoints, pad layouts and replacement behavior.
 Native amd64/arm64 image verification includes stdio execution, PNG output and
 checkpoint restoration in a replacement worker using synthetic state; the
 [state guide](../../docs/guides/machine-addon-state.md) records the exact source
-and run. Actual games and installed-host reconciliation remain separate checks. See
-[tool ownership](../../docs/design/lane-addon-tool-exports.md) for remaining
-integration and evidence requirements.
+and run. Actual games and installed-host reconciliation remain separate checks.

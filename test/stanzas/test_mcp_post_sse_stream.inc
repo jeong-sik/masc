@@ -1,5 +1,4 @@
-; A tools/call POST for a streaming tool over the real HTTP/1 route
-; (RFC-0493 §3.2).
+; A tools/call POST for a streaming tool over the real HTTP/1 route.
 
 (test
  (name test_mcp_post_sse_stream)

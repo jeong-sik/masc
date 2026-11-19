@@ -41,7 +41,7 @@ let decode_write_body ~config ~body =
 ;;
 
 (* Frames a press holds its keys down, and the frames the call advances in
-   all, when the body names neither (RFC-0439 §3.3): a tap. *)
+   all, when the body names neither: a tap. *)
 let press_default_hold_frames = 5
 let press_default_step_frames = 15
 
@@ -211,7 +211,7 @@ let handle_load ~state ~agent_name request reqd =
       respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
-(* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
+(* Frames per poll-cadence tick. At the TUI's ~3 Hz spectator
    poll this advances ~54 frames a second, close enough to the machine's 60 Hz
    that a game reads as live without a server-side ticker. *)
 let msx_tick_default_frames = 18
@@ -286,19 +286,6 @@ let restore_names_no_slot ~restore = function
   | `Assoc fields -> restore && not (List.mem_assoc "slot" fields)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
-let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
-  match decode_write_body ~config ~body with
-  | Error refusal -> refusal
-  | Ok (`Assoc fields)
-    when List.length fields <> List.length (List.sort_uniq String.compare (List.map fst fields)) ->
-      `Bad_request, load_result_json ~ok:false ~message:"checkpoint has duplicate fields"
-  | Ok arguments when restore_names_no_slot ~restore arguments ->
-      `Bad_request, load_result_json ~ok:false ~message:"restore requires a slot"
-  | Ok arguments ->
-      let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
-      let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
-      result.status, answer_json result
-;;
 ;;
 
 module Checkpoint_receipt = Server_msx_checkpoint_receipt
@@ -398,7 +385,7 @@ let settle_checkpoint_effect ~restore ~persist ~notify settled =
       let message = "MSX restore observer notification failed: " ^ Printexc.to_string exn in
       Error (match persisted with Ok () -> message | Error cause -> cause ^ "; " ^ message)
 
-let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
+let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   let refused binding message =
     `Service_unavailable, `Assoc (receipt_json ~config
       {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=Refused message}) in
@@ -502,12 +489,6 @@ let checkpoint_status_response ~(config : Workspace.config) ~body =
        | _ -> `Bad_request,write_error_json "checkpoint must name save or restore")
   | Ok _ -> `Bad_request,write_error_json "checkpoint status request must be an object"
 
-let checkpoint_response ~config ~restore ~body =
-  match Yojson.Safe.from_string body with
-  | `Assoc fields when List.mem_assoc "operation_id" fields -> checkpoint_operation_response ~config ~restore ~body
-  | _ | exception Yojson.Json_error _ -> checkpoint_legacy_response ~config ~restore ~body
-;;
-
 let change_disk_response ~(config : Workspace.config) ~body =
   match decode_write_body ~config ~body with
   | Error refusal -> refusal
@@ -535,8 +516,8 @@ let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/msx/activity" (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
            (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
-  (* The cartridge inventory the TUI load menu reads before it can pick a game
-     (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace state,
+  (* The cartridge inventory the TUI load menu reads before it can pick a game:
+     file names under <.masc>/msx/carts, not workspace state,
      so it stays open under strict auth. Loading a game stays a write, gated
      like the MSX tools. *)
   |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/msx/carts" (fun state req reqd ->

@@ -884,7 +884,7 @@ val keeper_of_runtime : keeper_runtime -> keeper
 (** Project the public row into a remote Keeper. No local metadata, task or
     usage measurements are inferred from the runtime state. *)
 
-(** The roster's Candle reading (RFC-0481 §3.7). A ready reading carries the
+(** The roster's Candle reading. A ready reading carries the
     fold's basis, and the TUI computes balances and supply from it when it
     draws them. *)
 type candle_reading =
@@ -1195,30 +1195,6 @@ type keeper_tool_approval = {
 type gate_mode =
   | Gate_mode of Keeper_gate_mode.t
   | Unrecognised_gate_mode of string
-
-(** The slot one Keeper reaches first in one exact-output lane. *)
-type keeper_exact_lane_first = {
-  kel_keeper : string;
-  kel_lane_id : string;
-  kel_slot_id : string;
-  kel_offered : bool;
-      (** [false]: the published lane no longer offers [kel_slot_id], so the
-          lane walks its declared order and this row has no effect. *)
-}
-
-val decode_keeper_gate_settings :
-  Yojson.Safe.t ->
-  ((string * gate_mode) list * keeper_exact_lane_first list, string) result
-(** [(keeper, mode) list, exact-lane firsts] from
-    [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
-    list whose [*_state] says [unavailable] is an [Error], never an empty
-    list.
-
-    Distinct from {!decode_tool_approval_mode_overrides}: that one is the
-    in-memory YOLO stance a restart clears, this is what the Gate decides an
-    external effect under. Two per-Keeper settings with similar names, and an
-    operator reading one for the other is the reason both are named in
-    full. *)
 
 type runtime_param_surface =
   { rps_order : int  (** Catalog position, so groups render in registry order. *)

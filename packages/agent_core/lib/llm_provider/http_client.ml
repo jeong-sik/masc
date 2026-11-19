@@ -1587,7 +1587,7 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
 ;;
 
 (* Same receipt shape as get_sync over the DELETE verb. The Files API deletes
-   by file id (RFC-0430 Phase 3) and answers with a JSON body even on 2xx, so
+   by file id and answers with a JSON body even on 2xx, so
    the caller keeps reading status + body the same way. *)
 let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   let* deadline =

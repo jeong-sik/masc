@@ -1,4 +1,4 @@
-(** RFC-0267 Phase 2 — explicit, validated task->goal assignment.
+(** Explicit, validated task->goal assignment.
 
     See {!Task_goal_assignment} (the .mli) for the contract. *)
 
@@ -8,9 +8,7 @@
    [Workspace_goal_index] (the link write). The task domain already integrates
    with goals (e.g. [handle_add_task] validates a goal_id), so a task->goal
    reference here is the established, allowed direction. Putting it in [lib/goal]
-   instead would teach the goal *leaf* domain about the task domain. Both the
-   MCP tool handler and the dashboard HTTP route call this one function, so the
-   precondition checks live in a single place. *)
+   instead would teach the goal *leaf* domain about the task domain. *)
 
 type set_task_goal_error =
   | Goal_source_unavailable of Goal_store.unavailable

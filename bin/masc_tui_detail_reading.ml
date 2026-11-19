@@ -22,7 +22,7 @@ let replace_prepared ~title ~hints ~width rows reading =
 
 let prepare_rows ~width reading = match reading.prepared with
   | Some (prepared_width, rows) when prepared_width=width -> rows
-  | Some _ -> [Note "Preparing document for this width…"]
+  | Some _ -> [Note "Preparing document for this width"]
   | None ->
   let wrap text =
     Masc_tui_text_block.lines text

@@ -66,7 +66,7 @@ val keeper_skill_publish_fn :
     [Ok true] = registered, [Ok false] = absent, [Error] = read failure.
     Default allows every target; the runtime installs the
     durable-metadata reader at boot so the tool layer keeps no static
-    keeper dependency (RFC-0194). *)
+    keeper dependency. *)
 val schedule_wake_target_registered_fn :
   (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
 val hebbian_on_task_done_fn : (Workspace_utils_backend_setup.config ->
@@ -147,7 +147,7 @@ val telemetry_observe_failure_fn : (string -> unit) Atomic.t
 val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
 (** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids and kinds in frozen
-    declaration order for the completion-authority evaluator (RFC-0361 D7(a)).
+    declaration order for the completion-authority evaluator.
     Wired to [Runtime.verifier_exact_lane_slots] at startup; the unconnected
     default is an explicit [Error], so test contexts that drive a review must
     install their own slot list rather than inherit a silent runtime default. *)
@@ -195,7 +195,7 @@ val verification_submit_request_fn :
    claim:Masc_domain.verification_claim ->
    (unit, string) result) Atomic.t
 
-(** RFC-0221 §3.1: compensation hook — delete a verification record whose
+(** Compensation hook — delete a verification record whose
     task_status commit failed, so the record store and [task_status] never
     disagree. The default returns an explicit not-installed error until the
     runtime fills it at boot. *)
@@ -228,7 +228,7 @@ val verification_submitted_fn :
    verification_id:string ->
    unit) Atomic.t
 
-(** Notify the goal verifier lane (RFC-0387 stage 2) after a durable
+(** Notify the goal verifier lane after a durable
     verification request committed on the goal ledger — the [Proof_pending]
     row written before the phase enters [Verifying]. The
     goal-side analogue of {!verification_submitted_fn}: the callback only

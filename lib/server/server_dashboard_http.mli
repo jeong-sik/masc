@@ -77,9 +77,6 @@ val dashboard_scheduled_automation_query_http_json :
     [payload_target], a [cursor] and an exact [schedule_id] lookup read the
     schedule store without populating a client-controlled cache key. *)
 
-val dashboard_proof_http_json :
-  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
-
 val dashboard_gate_resolve_http_json :
   ?workspace_config:Workspace.config ->
   base_path:string ->
@@ -139,7 +136,7 @@ val cached_goals_tree_payload :
 (** The goals tree as a cached read. Its key names the goal projection
     generation; when the current generation has no entry yet, the tree of the
     highest generation this function filled for the workspace answers at once
-    and the new one is computed in the background (RFC-0474 L4d). *)
+    and the new one is computed in the background. *)
 
 val dashboard_goal_detail_http_json :
   config:Workspace.config -> goal_id:string -> Yojson.Safe.t

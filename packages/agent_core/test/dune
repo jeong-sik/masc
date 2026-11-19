@@ -120,8 +120,6 @@
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases
-  test_harness
-  test_harness_deep
   test_hooks
   test_hooks_integration
   test_http_client
@@ -242,8 +240,6 @@
   test_schema_surface_index
   test_fs_result
   test_gemini_edge_cases
-  test_harness
-  test_harness_deep
   test_hooks
   test_hooks_integration
   test_http_client

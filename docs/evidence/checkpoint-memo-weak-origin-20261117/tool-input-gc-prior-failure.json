@@ -1,9 +1,0 @@
-{
-  "result": "HARNESS_COMPILE_FAILED_NO_MEASUREMENT",
-  "exit_code": 2,
-  "diagnostic": "File \"gc_probe.ml\", line 1:\nError: The files <workspace>/_build/default/packages/agent_core/lib/.agent_core.objs/byte/agent_core.cmi\n       and <workspace>/artifacts/cpu-memory-20261116/checkpoint-memo-original-retention-20261117/baseline-r1/objects_under_test.cmi\n       make inconsistent assumptions over interface Llm_provider__Types\n",
-  "original_stderr_sha256": "3cfdde26f2682a8246a21b8f4f4b1d48849d9570316d8d7574697be26e225bdb",
-  "commands_sha256": "c5a080a87446496224dc5476f9377d025f24c117a5773df932ff1e14f73891cd",
-  "independent_review_sha256": "b4d5044d6f15b23062d645e9191d0465f2de4718606a1bd77a1290a82ab8f621",
-  "scope": "Retained CMI/current prebuilt interface assumptions disagree; no performance verdict from R1."
-}

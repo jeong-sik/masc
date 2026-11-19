@@ -577,7 +577,7 @@ let parse_model (id : string) (tbl : Otoml.t)
      unset and inherit the catalog's max-context (see
      [Runtime_instance.resolve_max_context_of_runtime]). An operator-supplied value
      must still be positive; [materialize_config] fail-closes at load time on
-     a runtime that resolves neither source (RFC-0206 §2.1). *)
+     a runtime that resolves neither source. *)
   let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
   (
     let tools_support_result =

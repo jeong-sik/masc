@@ -64,7 +64,7 @@ let test_applied_key_is_retained () =
     let path = Filename.concat home "runtime.toml" in
     (* api-name points at a catalog model: the capability gate rejects
        configured runtimes whose model is absent from the AGENT_CORE
-       catalog (RFC-0206), so the fixture uses a provider-qualified embedded row (provider_name="deepseek",
+       catalog, so the fixture uses a provider-qualified embedded row (provider_name="deepseek",
        model_id="deepseek-v4-pro"): a named [providers] entry never falls
        back to bare model rows instead of a made-up id. *)
     let original = {|[providers."deepseek"]

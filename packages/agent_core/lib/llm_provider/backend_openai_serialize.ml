@@ -223,7 +223,7 @@ let openai_content_parts_of_blocks blocks =
          inline data are mutually exclusive on the wire. [Url] and [File_id]
          carry the URL or the file id verbatim for the two reference forms; the
          base64_data_url below still rejects them, which is what kept these
-         sources dead until the catalog gained a Files surface (RFC-0430). *)
+         sources dead until the catalog gained a Files surface. *)
       match source with
       | Url url ->
         Some (`Assoc [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ])

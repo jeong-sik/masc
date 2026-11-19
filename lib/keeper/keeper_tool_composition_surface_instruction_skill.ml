@@ -206,7 +206,7 @@ let make_instruction_skill_tool
               Two carried Skills sharing an identity cannot be told apart by
               name, so that ask is refused rather than answered with a guess;
               the refusal carries the exact references, which is the one
-              contract that can still separate them. RFC-0411 §4.2, §4.3. *)
+              contract that can still separate them. *)
            (match
               match asked with
               | Skill_reference.Pinned reference ->

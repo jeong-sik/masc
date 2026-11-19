@@ -188,7 +188,7 @@ type keeper_chat_stream_request = {
           after the last journal seq the client received, or the whole turn
           — which is also what an absent field, a first submit, says. When
           the owner already holds the operation the handler replays the
-          journaled suffix before the live sink attaches (RFC-0412 §3.2). *)
+          journaled suffix before the live sink attaches. *)
 }
 
 let keeper_chat_stream_error_json message =
@@ -265,7 +265,7 @@ let chat_speaker_of_request payload =
         speaker_authority = Keeper_chat_store.Owner }
 
 (* The same three cases as [chat_speaker_of_request], as the typed speaker the
-   turn stamps on the User message it creates (RFC-0468 §3.2). The Librarian
+   turn stamps on the User message it creates. The Librarian
    reads the conversation, not the chat store, so the speaker has to travel
    with the message. *)
 let input_speaker_of_request payload =
@@ -754,7 +754,7 @@ let execute_keeper_stream_tool_streaming
   let start_time = Eio.Time.now clock in
   let body, disposition =
     (* Every failure here is a typed value first; its summary is what the
-       string-shaped stream and row API still take (RFC-0454 D2). *)
+       string-shaped stream and row API still take. *)
     let failed failure_class cause =
       ( Keeper_request_failure.summary { Keeper_request_failure.cause }
       , Tool_result.Failed failure_class )
@@ -1048,7 +1048,7 @@ let persisted_error_reply err =
   "Keeper request failed: " ^ detail
 
 (* The two answers this returns are causes, not sentences: the contract
-   refused the payload, or the turn produced nothing to show (RFC-0454 D2). *)
+   refused the payload, or the turn produced nothing to show. *)
 let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply
   : Keeper_request_failure.cause option
   =
@@ -1388,14 +1388,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | `Client_disconnected ->
         observe_stream_event_cutoff "client_disconnected")
   in
-  (* RFC-0232 P5: the typed surface is the write-side truth; the label
+  (* The typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for metric labels. *)
   let chat_surface =
     match submission with
     | Owner_operation { surface; _ } -> surface
   in
   let chat_source = Surface_ref.lane_label chat_surface in
-  (* RFC-0223 P1: authority derives from the arrival route. A non-empty
+  (* Authority derives from the arrival route. A non-empty
      [channel_user_id] means an arbitrary external person on that channel;
      a channel label without a user id (e.g. dashboard Copilot Dock) is
      still an authenticated dashboard operator, so it keeps Owner authority
@@ -1488,7 +1488,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     persist_operation_attempt ~settlement:Server_keeper_operation_transcript.Runtime_deferred
       ~tool_calls ?turn_ref ()
   in
-  (* RFC-0301 item 6: collect generated media from the same stream so the assistant
+  (* Collect generated media from the same stream so the assistant
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
@@ -1847,7 +1847,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
             let body = canonical_reply.poll_body in
             let turn_ref = Some canonical_reply.turn_ref in
             let visible_reply = canonical_reply.visible_reply in
-            (* RFC-0301 item 6: attach any generated media (accumulated from
+            (* Attach any generated media (accumulated from
                this turn's stream) as reload-visible chat blocks so a dashboard
                reload shows media-only replies too, not just text-bearing
                replies. *)
@@ -2935,7 +2935,7 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
      | None, Ok (Keeper_chat_event_log.Existing_terminal_error _) -> ()
      | (Some Wire_started | None), Error journal_error ->
        (* A rejected append leaves no durable seq, and both reconnect replay
-          and the RFC-0412 live dedup key off seq membership. Broadcasting the
+          and the live dedup key off seq membership. Broadcasting the
           terminal seq-less would close one live client while reconnecting
           clients replay the operation as still running (#41687 recurrence),
           so the failed delivery is logged, not projected as consumed. *)
@@ -3012,7 +3012,7 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
   }
 ;;
 
-let keeper_chat_stream_headers origin =
+let keeper_chat_stream_request_headers request =
   Httpun.Headers.of_list
     ([
        ("content-type", "text/event-stream");
@@ -3024,21 +3024,11 @@ let keeper_chat_stream_headers origin =
        ("connection", "close");
        ("x-accel-buffering", "no");
      ]
-    @ cors_headers origin)
-
-let keeper_chat_stream_request_headers request =
-  Httpun.Headers.of_list
-    ([
-       ("content-type", "text/event-stream");
-       ("cache-control", "no-cache");
-       ("connection", "close");
-       ("x-accel-buffering", "no");
-     ]
     @ admitted_cors_headers request)
 
 
 
-(* Reconnect dedup (RFC-0412 §3.2): a live or buffered event is dropped only
+(* Reconnect dedup: a live or buffered event is dropped only
    when the replay already wrote that exact seq. A "highest seq written" mark
    would also drop an event whose journal append failed (stage-1 fail-open):
    with seq 4 absent from the journal and 5 replayed, a mark of 5 loses 4,
@@ -3191,8 +3181,8 @@ let keeper_chat_idle ~client_gone ~operation_state : Server_sse_pump.idle =
       Quiet
 ;;
 
-(* What a Keeper chat stream writes after an accepted submit, in order
-   (RFC-0493 §3.2): the acceptance, the reconnect replay, then the live
+(* What a Keeper chat stream writes after an accepted submit, in order:
+   the acceptance, the reconnect replay, then the live
    events through the pump. [missed_terminal] is asked after the replay, and
    its marker and [Settled] go behind the live events queued meanwhile.
    [None] when the client was gone before the live part. *)
@@ -3301,7 +3291,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                    "interrupt_error_code", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.code) interrupt_error;
                    "interrupt_incident_id", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.incident_id) interrupt_error]])))
       in
-      (* Replay before live (RFC-0412 §3.2): the journaled suffix above
+      (* Replay before live: the journaled suffix above
          [since_seq] goes out through the same pure projection the live
          adapter uses, with the ts the bus stamped, so the bytes equal the
          frames the client missed. *)

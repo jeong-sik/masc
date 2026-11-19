@@ -4,7 +4,7 @@ module Fs = Keeper_volume_filesystem
 module Watch = Keeper_volume_filesystem_watch
 module Repair = Keeper_volume_repair
 
-(* RFC keeper-volume-filesystem-repair §3.3: the repair flow with every
+(* The repair flow with every
    effect faked, so each outcome shows which effects ran and in what order. *)
 
 let damaged = Fs.Errors_recorded { count = 3; first = None; last = None }

@@ -265,7 +265,7 @@ let find_pending_id_in_map
 (* An approved resolution whose one-shot grant is still unconsumed is the
    same effect request one step further along: the host owes the Keeper a
    replay of exactly this call. A resubmission folds onto it instead of
-   opening a second approval — "an approval owns its effect" (RFC-0356)
+   opening a second approval — "an approval owns its effect"
    implies its dual, an effect has one approval. Rejected and
    grant-consumed deliveries never match: a retry after rejection is a new
    approval cycle, and a retry after the effect ran is a new effect. *)

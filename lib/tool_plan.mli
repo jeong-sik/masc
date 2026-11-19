@@ -1,10 +1,8 @@
 
 (** Plan Tool Handlers
 
-    Extracted from mcp_server_eio.ml for testability, which [dispatch]
-    provides: test_tool_plan_coverage drives all three tools through it by
-    name and never named a handler. The handlers themselves were exported
-    too, and nothing outside this module ever called one.
+    Extracted from mcp_server_eio.ml. Callers reach all three tools through
+    [dispatch] by name; no handler is exported.
 
     3 tools: plan_set_task, plan_get_task, plan_clear_task
 *)

@@ -1003,30 +1003,30 @@ let test_non_eio_source_inspection () =
     (* Keeper's deploy preflight can run outside an Eio main scope. Read the
        real source there through the same lower-shell entrypoint it uses. *)
     let bytes = read_bytes path in
-    (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board_core.Inspected {
+    (match Masc_board_handlers.Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
+     | Masc_board_handlers.Board_core.Inspected {
          observation = Observed_present {
            accepted_rows = 1; errors = []; framing = Complete_rows };
          settlement_diagnostic = None } -> ()
-     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
+     | Masc_board_handlers.Board_core.Inspected _ | Masc_board_handlers.Board_core.Inspection_failed _ ->
        Alcotest.fail "non-Eio inspection did not read the complete source");
     Alcotest.(check string) "preflight preserves the actual producer bytes"
       bytes (read_bytes path);
     let partial = bytes ^ "{}\n" in
     write_bytes path partial;
-    (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board_core.Inspected {
+    (match Masc_board_handlers.Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
+     | Masc_board_handlers.Board_core.Inspected {
          observation = Observed_present {
            accepted_rows = 1; errors = [_]; framing = Complete_rows };
          settlement_diagnostic = None } -> ()
-     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
+     | Masc_board_handlers.Board_core.Inspected _ | Masc_board_handlers.Board_core.Inspection_failed _ ->
        Alcotest.fail "preflight lost the actual malformed-row refusal");
     Alcotest.(check string) "partial preflight preserves rejected-source bytes"
       partial (read_bytes path);
     let torn = bytes ^ "{" in
     write_bytes path torn;
-    (match Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
-     | Board_core.Inspected {
+    (match Masc_board_handlers.Board_core.inspect_posts_source ~workspace_masc_dir:workspace with
+     | Masc_board_handlers.Board_core.Inspected {
          observation = Observed_present {
            accepted_rows = 1; errors = []; framing = Torn_tail { rows_end; end_offset } };
          settlement_diagnostic = None } ->
@@ -1034,7 +1034,7 @@ let test_non_eio_source_inspection () =
          (String.length bytes) rows_end;
        Alcotest.(check int) "torn observation retains the actual end offset"
          (String.length torn) end_offset
-     | Board_core.Inspected _ | Board_core.Inspection_failed _ ->
+     | Masc_board_handlers.Board_core.Inspected _ | Masc_board_handlers.Board_core.Inspection_failed _ ->
        Alcotest.fail "preflight lost the incomplete-tail observation");
     Alcotest.(check string) "preflight never repairs the torn source"
       torn (read_bytes path))

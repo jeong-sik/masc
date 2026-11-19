@@ -29,7 +29,7 @@ let scheduled_autonomous_outcome_of_result
   | false, true -> Proactive_tool_use
   | true, true -> Proactive_mixed_response
 
-(* RFC-0182 §3.1 cycle break (2026-05-27) — [turn_mode] and its
+(* Cycle break (2026-05-27) — [turn_mode] and its
    codec functions were extracted to [Turn_mode_codec] in lib/ so
    [Tool_agent_timeline] can parse keeper turn payloads without
    importing this module (which would form a Config-mediated dependency
@@ -46,7 +46,7 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-(* RFC-0132 PR-2: Otel_metric_store metric label = external boundary; redact via SSOT. *)
+(* Otel_metric_store metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 let classify_usage_trust ~(usage_reported : bool)
@@ -197,7 +197,7 @@ let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
     ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 
-(* RFC-0182 §3.1 cycle break — codecs live in [Turn_mode_codec]. *)
+(* Cycle break — codecs live in [Turn_mode_codec]. *)
 let turn_mode_to_string = Turn_mode_codec.turn_mode_to_string
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
@@ -251,7 +251,7 @@ let validated_evidence_preview
   | names ->
     Printf.sprintf "(validated evidence: %s)" (String.concat ", " names)
 
-(* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
+(* The scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
    carried by [Keeper_agent_result.turn_outcome] — an AGENT_CORE turn-limit observation
    may have no visible reply text, and a

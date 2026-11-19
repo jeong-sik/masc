@@ -116,7 +116,7 @@ let test_supplied_evidence_refs_reach_the_task_prompt () =
     (Astring.String.is_infix ~affix:(marker "evidence_refs") (rendered_with_lookup ()))
 ;;
 
-(* RFC-0436 §4.3/§4.4: a review with image artifacts names them in the prompt
+(* A review with image artifacts names them in the prompt
     with their reference and hash — the text a text-only evaluator is degraded
     to — and a review without none renders no section at all, so the prompt of
     an imageless review is byte-identical to before this channel existed. *)

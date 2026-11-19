@@ -109,9 +109,6 @@ let note_read_without_reset ~scope = note_observed ~scope Usage_read
 let note_observed_exhausted_at ~now ~scope ~source =
   note_observed_at ~now ~scope (Refused source)
 
-let note_read_without_reset_at ~now ~scope =
-  note_observed_at ~now ~scope Usage_read
-
 let note_succeeded ~scope =
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope with

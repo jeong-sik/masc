@@ -81,7 +81,7 @@ type credential =
 
 (** {1 Layer 1: Provider — how to connect} *)
 
-(** Per-provider behavioral capabilities (RFC-0058 §2.4). Describes how the
+(** Per-provider behavioral capabilities. Describes how the
     transport/tool lane must be driven for a provider, independent of model. *)
 type capabilities =
   { supports_inline_tools : bool
@@ -518,7 +518,7 @@ type exact_output_lane_decl =
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
-    [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
+    [runtime_config] are dropped: the single-binding Runtime model
     has no routing layer. *)
 (** One System One server [\[typesafeai\] destinations] names. *)
 type typesafeai_destination =
@@ -681,7 +681,7 @@ type config =
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
-        reach (RFC-0415). Beside the endpoint registry rather than in the
+        reach. Beside the endpoint registry rather than in the
         keeper TOML for the same reason: a keeper names a mode, and what
         that mode permits is the operator's to say. A keeper with no entry
         has an empty allowlist, which admits nothing. *)

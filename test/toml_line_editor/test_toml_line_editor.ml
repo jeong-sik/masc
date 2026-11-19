@@ -1,4 +1,4 @@
-(* RFC-0306 §3.2 / §6 — the reason this module exists is comment preservation:
+(* The reason this module exists is comment preservation:
    editing a value must leave every comment, blank, and unrelated key byte-for-byte
    unchanged. These tests fix that property for the scalar and multi-line-array
    edits the fusion settings writer depends on. *)

@@ -28,7 +28,7 @@ type context =
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   ; mcp_session_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
-    (* RFC-0320: the connector conversation the current turn started from,
+    (* The connector conversation the current turn started from,
        so async tools (masc_fusion) can route their completion wake back to
        the originating channel. [None] on non-connector turns and on callers
        without turn context (AGENT_CORE handler defaults, tests). *)

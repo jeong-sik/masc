@@ -299,9 +299,7 @@ node/child snapshots and current authorization. Later discovery errors can
 coexist with earlier reservations, whose lifetime switch still owns cleanup.
 The report records observations made during the pass, even if callbacks have
 already made a candidate stale. Report-only discovery and guarded retirement
-keep their existing contracts. The
-[early intake comparison](../audits/2026-10-19-composition-early-intake.md)
-separates reservation from actual intake, execution and Task progress.
+keep their existing contracts.
 
 The explicit typed continuation intake can submit the original prepared worker
 without a provider turn. A sealed continuation loads only its original

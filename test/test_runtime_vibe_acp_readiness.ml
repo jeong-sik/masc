@@ -1,8 +1,8 @@
 open Alcotest
 
-(* The JSON below follows the field names vibe-acp 3.1.0 answered with
-   (docs/evidence/vibe-official-client-lane-20261107/acp/). The values are
-   made up: the bundle keeps only field names and kinds of account values. *)
+(* The JSON below follows the field names vibe-acp 3.1.0 answered with on
+   2026-11-07. The values are made up: only field names and kinds of account
+   values were kept. *)
 
 module R = Runtime_vibe_acp_readiness
 

@@ -1,7 +1,6 @@
 // MASC Dashboard — runtime cost & latency dashboard
 //
-// Phase 2 spec (`design-system/preview/cb-group-f.jsx:CostPerAgent`)
-// renders a 4-cell totals header (cost / tokens / p50 / p95) plus a
+// CostPerAgent renders a 4-cell totals header (cost / tokens / p50 / p95) plus a
 // per-agent table with cost bar + p95 latency bar. Production has
 // redacted runtime-lane cost + latency telemetry on
 // `DashboardRuntimeModelMetric` (`/api/v1/models/metrics`), consolidated into

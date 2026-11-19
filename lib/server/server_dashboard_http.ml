@@ -229,65 +229,6 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
     ()
 ;;
 
-(* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
-   live load. The verification projection walks the on-disk request store, so
-   an uncached computation must not run on the Eio main domain.
-
-   Same fix pattern as PR #18991 / #18993 / #18994: wrap in
-   [Dashboard_cache.get_or_compute] for stale-while-revalidate, which
-   submits the compute to a worker as [Pool_work.cpu], so the main domain
-   keeps serving requests during refresh. *)
-let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
-  let base_path = config.Workspace.base_path in
-  (* Single disk scan via [proof_compose]; the historical
-     [summary_json] + [requests_json] sequence walked the verification
-     store twice per refresh. *)
-  let verification_summary, verification_requests =
-    Dashboard_verification.proof_compose ~base_path ~limit ()
-  in
-  let proof_source ~id ~label ~route =
-    `Assoc [ "id", `String id; "label", `String label; "route", `String route ]
-  in
-  let proof_sources =
-    [
-      proof_source ~id:"verification_summary"
-        ~label:"Verification submission summary"
-        ~route:"/api/v1/verification/summary";
-      proof_source ~id:"verification_requests"
-        ~label:"Verification request evidence"
-        ~route:"/api/v1/verification/requests";
-      proof_source ~id:"tlc_results"
-        ~label:"TLA+ verification logs"
-        ~route:"/api/v1/verification/tlc-results";
-      proof_source ~id:"execution_trust"
-        ~label:"Execution trust provenance"
-        ~route:"/api/v1/dashboard/execution-trust";
-    ]
-  in
-  `Assoc
-    [
-      "generated_at", `String (Masc_domain.now_iso ());
-      ( "summary",
-        `Assoc
-          [
-            "verification_total",
-            (match verification_summary with
-             | `Assoc fields -> (
-                 match List.assoc_opt "total" fields with
-                 | Some (`Int n) -> `Int n
-                 | _ -> `Int 0)
-             | _ -> `Int 0);
-          ] );
-      ( "verification",
-        `Assoc
-          [
-            "summary", verification_summary;
-            "requests", verification_requests;
-          ] );
-      "proof_sources", `List proof_sources;
-    ]
-;;
-
 (* Both the HTTP/1 router and the H2 gateway serve this projection, and the H2
    registration carries a comment requiring the two to stay identical. Caching
    at each call site would have been two copies of the policy and the first
@@ -361,15 +302,6 @@ let dashboard_scheduled_automation_query_http_json
            projection stays a pure function of (state, now). *)
         ~now:(Unix.gettimeofday ())
         ~schedule_id)
-;;
-
-let dashboard_proof_http_json ~config request : Yojson.Safe.t =
-  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
-  let key =
-    Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
-  in
-  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-    dashboard_proof_compute ~config ~limit ()))
 ;;
 
 type approval_resolve_http_error =

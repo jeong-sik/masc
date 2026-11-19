@@ -1,6 +1,6 @@
 (** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
 
-    Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
+    Provider × Model × Binding declarative schema,
     as types owned by
     [lib/runtime/]. Routing layers (aliases/routes/profiles/strategy) are
     intentionally left out: a Runtime is a single pre-selected binding. *)
@@ -438,8 +438,8 @@ type exact_output_lane_decl =
   ; slot_ids : string list
   ; cli_slot_ids : string list
         (** [cli_slots] — official-client runtime ids walked as one-shot
-            fallbacks AFTER every catalog slot is exhausted
-            (RFC cli-runtimes-as-lane-slots). Empty keeps the lane
+            fallbacks AFTER every catalog slot is exhausted.
+            Empty keeps the lane
             HTTP-only. *)
   ; max_output_tokens : int option
         (** [max_output_tokens] — the output budget the lane's requests
@@ -596,7 +596,7 @@ type config =
     (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
   ; egress_allowlists : Egress_allowlist.t list
     (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
-        reach (RFC-0415). A keeper with no entry has an empty allowlist,
+        reach. A keeper with no entry has an empty allowlist,
         which admits nothing. *)
   }
 [@@deriving show, eq]

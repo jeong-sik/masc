@@ -168,7 +168,7 @@ let save_file_unix (path : string) (content : string) : unit =
   write_all_and_close fd content
 ;;
 
-(* RFC-0108: per-path Stdlib.Mutex registry + fresh-fd open/close
+(* per-path Stdlib.Mutex registry + fresh-fd open/close
    on every append.
 
    Background: prior [Append_fd_cache] LRU cached an [out_channel]

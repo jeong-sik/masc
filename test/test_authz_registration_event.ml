@@ -277,7 +277,6 @@ let no_other_author_may_write_one () =
     [ "the local operator", Author.Local_operator
     ; "system cron", Author.System_cron
     ; "system maintenance", Author.System_maintenance
-    ; "system migration", Author.System_migration
     ]
 ;;
 

@@ -273,8 +273,7 @@ its repository panel consumes that projection. Basic agent status reads can
 leave it disabled, avoiding directory discovery, sandbox entry and Git calls
 for that section. Other status sections retain their own controls.
 
-The [captured baseline](../evidence/keeper-status-selective-checkouts-20261016/baseline.json)
-records one existing live MCP response at 2026-10-16T08:02:38.820Z: 50,753 UTF-8
+The captured baseline records one existing live MCP response at 2026-10-16T08:02:38.820Z: 50,753 UTF-8
 bytes and 32 checkout entries. Its checkout subdocument contains 15,082 bytes.
 Replacing only that subdocument and recording the new section selection in the
 same compact JSON predicts a 15,007-byte reduction (50,747 to 35,740 bytes).

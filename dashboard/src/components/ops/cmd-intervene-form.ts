@@ -1,7 +1,7 @@
 // MASC Dashboard — Command Intervene form + Gate links (keeper-v2 command.jsx parity)
 //
-// Design: prototypes/keeper-v2/command.jsx — CmdOps (cmd-form/cmd-text/cmd-actions)
-// and the Gate/HITL link panel (cmd-gatelinks).
+// CmdOps (cmd-form/cmd-text/cmd-actions) and the Gate/HITL link panel
+// (cmd-gatelinks).
 // Live wiring:
 //   · action dispatch → dispatchOperatorAction (operator action endpoint) via
 //     executeAction; server accepts broadcast (target_type=workspace) and

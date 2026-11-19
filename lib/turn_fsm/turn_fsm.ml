@@ -11,8 +11,8 @@
 
    Formal contract: specs/keeper-turn-fsm/KeeperTurnFSM.tla. The [@tla.*] /
    [@@deriving tla] / [@@fsm_guard] annotations bind each state and the
-   transition matrix to that spec; test_keeper_turn_fsm_tla_parity verifies
-   parity, so this library can be tlc-checked independently of the driver. *)
+   transition matrix to that spec, so this library can be tlc-checked
+   independently of the driver. *)
 
 type cancel_reason =
   | Cancelled_supervisor_stop

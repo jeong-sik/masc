@@ -3,7 +3,7 @@ open Masc
 module Fs = Keeper_volume_filesystem
 module Watch = Keeper_volume_filesystem_watch
 
-(* RFC keeper-volume-filesystem-repair §3.2: the server's last read of each
+(* The server's last read of each
    image-backed volume. The latest read is process-wide, so every case uses
    its own volume name. *)
 

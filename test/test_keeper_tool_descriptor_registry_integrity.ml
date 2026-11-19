@@ -1798,7 +1798,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
        [ "tool_execute"; "tool_search_files" ])
 ;;
 
-(* RFC-0182 §3.1 — verify keeper descriptors project from name → descriptor
+(* Verify keeper descriptors project from name → descriptor
    via [descriptors_for_internal] with the expected [runtime_handler].
 
    This catches future typos in the [~name:"masc_X"] strings (which the
@@ -1862,7 +1862,7 @@ let with_temp_dir prefix f =
     (fun () -> f dir)
 ;;
 
-(* RFC-0267 Phase 2 — [masc_task_set_goal] must have a descriptor that
+(* [masc_task_set_goal] must have a descriptor that
    projects from the task schema registry and must actually dispatch
    through [Task.Tool.dispatch]. The descriptor makes the tool visible
    to the keeper surface; the dispatch check proves the runtime handler

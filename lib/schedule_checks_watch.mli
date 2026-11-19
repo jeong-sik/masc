@@ -15,7 +15,7 @@
     new happening, not a check of the commit: on the 60 most recent pull request
     heads of jeong-sik/masc, 6 had an instant where every run made so far had
     ended and a check run was still to come, because an approval run had ended
-    first (docs/evidence/check-wake-harness-2026-11). The check runs alone had no
+    first. The check runs alone had no
     such instant. The commit is read as a full sha, so no short sha can be read
     as another commit. *)
 

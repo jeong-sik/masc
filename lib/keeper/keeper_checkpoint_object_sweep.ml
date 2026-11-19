@@ -134,37 +134,6 @@ let read_root ~ownership_root path =
     Error (Root_unreadable { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
 ;;
 
-let rec collect_roots read = function
-  | [] -> Ok []
-  | path :: paths ->
-    let* found = read path in
-    let* rest = collect_roots read paths in
-    Ok (Option.to_list found @ rest)
-;;
-
-(* The copied heads under [journal_inputs_dir], by the session their header
-   names. A head of an earlier version is not a root, so its session does
-   not matter. *)
-let journal_input_roots ~journal_inputs_dir ~journal_input_head =
-  let* inputs = subdirectories journal_inputs_dir in
-  let paths =
-    List.map (fun id -> Filename.concat (Filename.concat journal_inputs_dir id) journal_input_head) inputs
-  in
-  let* roots = collect_roots (read_root ~ownership_root:journal_inputs_dir) paths in
-  List.fold_left
-    (fun acc root ->
-       let* by_session = acc in
-       match root_head root.bytes with
-       | Earlier_version -> Ok by_session
-       | Unusable detail -> Error (Root_unusable { root = root.where; detail })
-       | Current head ->
-         let session = head.header.session_id in
-         let others = Option.value ~default:[] (String_map.find_opt session by_session) in
-         Ok (String_map.add session (root :: others) by_session))
-    (Ok String_map.empty)
-    roots
-;;
-
 let gate_roots (records : Keeper_retained_checkpoint_sweep.owner_records) =
   List.concat_map Keeper_semantic_execution.gate_preparation_heads records.semantic_executions
   |> List.fold_left
@@ -307,15 +276,12 @@ let remove_unreached report { objects_dir; live } =
       prefixes
 ;;
 
-let run ~runtime_root ~journal_inputs_dir ~journal_input_head =
+let run ~runtime_root =
   let* records =
     Keeper_retained_checkpoint_sweep.owner_records ~runtime_root
     |> Result.map_error (fun error -> Owner_stores_unreadable error)
   in
-  let* journal = journal_input_roots ~journal_inputs_dir ~journal_input_head in
-  let external_roots =
-    String_map.union (fun _ gate journal -> Some (gate @ journal)) (gate_roots records) journal
-  in
+  let external_roots = gate_roots records in
   let* session_root = resolved (Keeper_fs.session_store_path_for_runtime_root runtime_root) in
   let* roots, plans =
     match session_root with

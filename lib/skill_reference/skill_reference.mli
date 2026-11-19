@@ -115,7 +115,7 @@ val request_of_yojson : Yojson.Safe.t -> (request, decode_error) result
     caller named a Skill and left the revision to whoever holds the frozen turn
     snapshot; present, it is decoded and validated exactly as before, so a
     revision that was spelled out is still honoured or refused rather than
-    quietly replaced. RFC-0411 §4.2. *)
+    quietly replaced. *)
 val list_of_yojson : Yojson.Safe.t -> (t list, decode_error) result
 (** Decoders are strict: objects reject unknown and duplicate fields, lists
     reject duplicate exact references, and the former string-only Task shape is

@@ -1,5 +1,4 @@
-(** The two local-runtime tools, read from [config/tools/masc_runtime_*.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The two local-runtime tools, read from [config/tools/masc_runtime_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
@@ -8,9 +7,7 @@
     The operation vocabulary stays in OCaml: [Local_runtime_tool_policy] maps
     each operation to an execution policy and a model-exposure decision, and
     those are code rather than declarations. Only the name, description and
-    parameters moved. [test_local_runtime_tool_toml_parity] keeps the
-    publication order and the clamped bounds; the descriptions and schemas it
-    also pinned were copies of these values. *)
+    parameters moved. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

@@ -2977,7 +2977,7 @@ let seed_an_earlier_failure ~base_path ~keeper_name =
 ;;
 
 (* A quota refusal whose reset the CLI states, before any tool ran, rests the
-   Keeper; it is not a turn failure (RFC-turn-failure-visible-stop §2.4). The
+   Keeper; it is not a turn failure. The
    cycle ends as [Turn_rested] at that reset, and the turn-failure streak and
    the registry failure cause an earlier turn left stay as they were. *)
 let test_dated_quota_refusal_rests_the_keeper () =
@@ -5803,7 +5803,7 @@ let test_every_posture_names_the_schema_lookup () =
     (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_full)
 ;;
 
-(* RFC-0454 P2. A Claude Code client that exited, or whose stdout reached EOF,
+(* A Claude Code client that exited, or whose stdout reached EOF,
    is the twin of the Codex runtime's closed connection. It shared one rendered
    sentence with a failed spawn, which is what the chat pane had to read back;
    now the two are separate values and the spawn keeps its old carriage. *)
@@ -5842,7 +5842,7 @@ let check_disposition label (expected : Keeper_provider_attempt_effect.t)
     (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)
 ;;
 
-(* RFC-0390: under [full] the client's own built-ins may act once the prompt
+(* Under [full] the client's own built-ins may act once the prompt
    is on its way, so a partial user-message write that times out keeps the
    turn fenced. Under [none] the only effects are MASC handlers, none of which
    ran, so the same timeout leaves the attempt free to rotate. *)
@@ -6522,7 +6522,7 @@ let working_state_not_carried ~reason =
     ()
 ;;
 
-(* The declared ceiling cuts before the working state is known (RFC-0460).
+(* The declared ceiling cuts before the working state is known.
    A working state carried in front of a range the ceiling then has to cut
    would push out atoms it does not cover, so it stays out and the
    Librarian's position goes alone: the same range, every atom of it. The

@@ -1,4 +1,4 @@
-(** RFC-0217 S1 — OTel metric bridge (push-model replacement for the retired
+(** OTel metric bridge (push-model replacement for the retired
     scrape endpoint). A {!sample} mirrors one Otel_metric_store_core cell; a registered
     source is polled by the OTel backend each export tick and emitted as OTLP. *)
 

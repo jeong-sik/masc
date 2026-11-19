@@ -1,7 +1,7 @@
 (* The runtime's provider transport takes its connections from the installed
    cache (RFC-0492 §3.1): two runs against one provider origin share one
    connection, and the [/health?full=1] response reports it without naming
-   the origin (RFC-0492 §6, RFC-0132). A run on a domain other than the one
+   the origin (RFC-0492 §6). A run on a domain other than the one
    that installed the cache opens its own connection, because Eio refuses a
    switch from another domain. A Keeper turn streams, so the streaming path
    shares the connection the same way. The cache leaves with its switch. *)

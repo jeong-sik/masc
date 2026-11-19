@@ -221,7 +221,7 @@ let speaker_of_endpoint endpoint =
   (adapter_for_endpoint endpoint).transport |> speaker_of_transport
 ;;
 
-(* RFC-0166: the default per-agent voice mapping was a closed roster
+(* The default per-agent voice mapping was a closed roster
    of MCP-client names ("claude"/"codex"/"gemini"/"llama"). The
    server holds no such roster; operators supply per-agent voices
    through [voice_bridge_core] config (TOML/JSON). When the

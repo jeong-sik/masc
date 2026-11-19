@@ -40,7 +40,7 @@ type judgment_source =
           against the durable pre-dispatch binding. *)
   | Cli_lane_slot
       (** A [cli_slots] official client answered as a one-shot after every
-          catalog slot was exhausted (RFC cli-runtimes-as-lane-slots). No
+          catalog slot was exhausted. No
           AGENT_CORE attempt was allocated, so no receipt exists to name and
           none is invented: the slot id is the whole provenance. *)
   | Vendor_system_one of system_one_provenance

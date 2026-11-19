@@ -47,7 +47,7 @@ val build_backlog_update
     Entry-class actions ([Claim | Start]) neither read nor write it: their
     caller never supplies one — {!Tool_task_args} returns [None] for an absent
     field and calls that the expected shape — so applying the argument would
-    erase the previous owner's note at the one boundary it exists to cross
-    (RFC-0365). The stored note carries [updated_by] and [updated_at], so a note
+    erase the previous owner's note at the one boundary it exists to cross.
+    The stored note carries [updated_by] and [updated_at], so a note
     from an earlier owner stays attributable rather than being deleted for
     being stale. *)

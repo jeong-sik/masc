@@ -1,4 +1,4 @@
-(* RFC-0474 L4f. A Keeper-scoped [Audit.read_recent] scanned the approval
+(* A Keeper-scoped [Audit.read_recent] scanned the approval
    audit store backwards, decoding every row, until it held [n] of that
    Keeper's rows. A Keeper with no rows in the newest day files read all of
    them: on 2026-10-28 the store held 278,731 rows in 24 files (131 MB), and

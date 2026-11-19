@@ -1,9 +1,8 @@
-(** Why one keeper request failed (RFC-0454 D2).
+(** Why one keeper request failed.
 
     Every place that ends a keeper request with a failure builds one of these
     instead of formatting a sentence. The constructor names the producer, so a
-    reader matches a value rather than searching the text for a phrase
-    (RFC-0454 §1.3).
+    reader matches a value rather than searching the text for a phrase.
 
     No constructor takes a free-form reason. Leaf strings are text for people
     — a store's own error, a caught exception's rendering, agent-core's

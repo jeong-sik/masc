@@ -267,7 +267,7 @@ let perform_task_transition
 
            Only this call's arguments. The note already on the Task is the
            previous owner's release summary, kept across the claim so the
-           incoming owner can read it (RFC-0365); resolving from it would put
+           incoming owner can read it; resolving from it would put
            that owner's sentence forward as this owner's reason. *)
         let stated_reason =
           Masc_domain.stated_reason
@@ -485,7 +485,7 @@ let perform_task_transition
                   }
               }
           in
-          (* RFC-0221 §3.1: [write_backlog] is the atomic commit point for the
+          (* [write_backlog] is the atomic commit point for the
              task outcome. A transition into [AwaitingVerification] writes the
              verification record before this commit (content the verifier
              reads); if the commit fails after the record was written,
@@ -561,7 +561,7 @@ let perform_task_transition
                     "task transition committed but projection failed task_id=%s agent=%s action=%s label=%s detail=%s"
                     task_id agent_name action_s label (Printexc.to_string exn)
               in
-              (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
+              (* Clear stale agent task-cache entries AFTER the
                  commit so agents that cache the task don't emit stale broadcasts
                  referencing the old status. *)
               run_post_commit "task_cache" (fun () ->
@@ -681,7 +681,7 @@ let perform_task_transition
                   | Masc_domain.InProgress _
                   | Masc_domain.Done _
                   | Masc_domain.Cancelled _ -> ());
-              (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
+              (* Completion side effects key off the RESULT (Done), not
                  the action — a verdict-produced completion arrives through
                  [decide_verdict] and never as an agent action, so keying off the
                  action would record no duration for it. The value measures the last
@@ -719,7 +719,7 @@ let perform_task_transition
                      ?reason:(if reason = "" then None else Some reason)
                      ?duration_ms
                      ());
-              (* RFC-0323 G-3: done hooks (relation/hebbian) fire for every transition
+              (* Done hooks (relation/hebbian) fire for every transition
                  that PRODUCES Done, including a Done produced by an approval verdict.
                  The completer is the Done record's assignee — never the actor, which
                  for a verdict is a completion authority rather than an agent. *)

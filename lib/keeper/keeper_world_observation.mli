@@ -244,7 +244,7 @@ type world_observation = {
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
   active_goals : (string list, Goal_store.unavailable) result;
-  (** Primary Goal IDs or the typed source failure (RFC-0444 §2.3 row 6);
+  (** Primary Goal IDs or the typed source failure;
       [Error] never means zero Goals. {!Goal_store.Uninitialized} is [Ok []]. *)
 
   unclaimed_task_count : int;
@@ -280,7 +280,7 @@ type world_observation = {
   (** Number of live keeper fibers for this workspace base path. *)
 
   connected_surfaces : Gate_surface.surface_presence list;
-  (** Connector surfaces attached to this keeper (RFC-0223 P2).
+  (** Connector surfaces attached to this keeper.
       Recomputed from binding stores + connector liveness on every
       observation; the dashboard entry is always present. Presence
       only — no conversation content, no counts. *)
@@ -418,7 +418,7 @@ val collect_board_events_without_advancing_cursor :
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
-(** RFC-0266: build the actionable [pending_board_event] for a completed async
+(** Build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
     event so the woken turn can inspect it as neutral Board context.
     [board_post_id = ""] falls back to a synthetic [fusion-run:<id>] post id. *)
@@ -456,7 +456,7 @@ val pending_board_event_of_external_attention :
   pending_board_event
 
 (** Convert a queued Event Layer stimulus into structured turn activity
-    for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
+    for the next keeper prompt. [Board_signal], [Fusion_completed],
     and [Schedule_due] can produce [Some]. Board delivery rechecks this
     Keeper's current readership before projecting any queued content;
     unreadable Direct stimuli and non-discoverable attention return [None].

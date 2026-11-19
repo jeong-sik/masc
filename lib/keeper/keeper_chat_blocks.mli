@@ -7,7 +7,7 @@
     Supported shapes:
     - Explicit server-provided dashboard blocks round-trip through the
       codec: p, h4, ul, callout, table, code, mermaid, svg, voice, attach,
-      image, link, and fusion. Thinking (RFC-0302) carries assistant
+      image, link, and fusion. Thinking carries assistant
       reasoning content (empty string for a signature-only [RedactedThinking]) so
       reload can restore the dashboard thinking UI; [parse_text_to_blocks]
       never produces one.
@@ -91,7 +91,7 @@ type attach_block = {
 }
 
 (** A reference from a keeper chat message to a fusion deliberation's board
-    post (RFC-0252). Carries only ids — the dashboard lazy-fetches the board
+    post. Carries only ids — the dashboard lazy-fetches the board
     post by [board_post_id] and renders the panel answers + judge synthesis
     from its [meta_json]. Kept out of [content] so the keeper observation
     projection (which reads role/content only) is not polluted. *)
@@ -187,7 +187,7 @@ type trace_block =
           raw-trace surface. *) }
 
 (** A block of keeper/assistant reasoning persisted so the dashboard can
-    replay assistant thinking on reload (RFC-0302). [content] is the
+    replay assistant thinking on reload. [content] is the
     thinking/reasoning text (empty string for a signature-only [RedactedThinking]);
     [redacted] marks that case so the dashboard renders a placeholder rather
     than an empty card. Not produced by [parse_text_to_blocks] — text-only

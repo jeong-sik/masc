@@ -11,11 +11,11 @@
 
 type t =
   | Fd_exhaustion
-      (** RFC-0097.  [Unix.EMFILE] / [Unix.ENFILE], or substrings
+      (** [Unix.EMFILE] / [Unix.ENFILE], or substrings
           ["too many open files"], ["emfile"], ["enfile"],
           ["file descriptor"], ["os error 24"]. *)
   | Disk_exhaustion
-      (** RFC-0122.  [Unix.ENOSPC], or substrings
+      (** [Unix.ENOSPC], or substrings
           ["no space left on device"], ["enospc"],
           ["disk quota exceeded"], ["quota exceeded"], ["disk full"],
           ["not enough space"]. *)

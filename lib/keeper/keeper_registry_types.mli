@@ -78,7 +78,7 @@ val failure_reason_to_string : failure_reason -> string
     OCaml's exhaustive-match check — Option B mitigation for the
     recurring P0 pattern (#10490, #10574). *)
 
-(** Pure control-flow signal for immediate fiber termination (RFC-0002).
+(** Pure control-flow signal for immediate fiber termination.
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)
 exception Keeper_fiber_crash
@@ -117,7 +117,7 @@ type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
     snake_case form for dashboards. *)
 val packed_turn_phase_label : packed_turn_phase -> string
 
-(** RFC-0072 Phase 4: GADT-encoded turn_phase transitions.  Enumerates the
+(** GADT-encoded turn_phase transitions.  Enumerates the
     23 valid cross-state transitions
     of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
     constructor and are therefore type-unrepresentable.  Idempotent
@@ -149,7 +149,7 @@ module Turn_phase_transition : sig
   val to_tag : ('from, 'to_) t -> string
 end
 
-(** RFC-0072 Phase 4: typed error for turn_phase transition spec violations. *)
+(** Typed error for turn_phase transition spec violations. *)
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
@@ -167,7 +167,7 @@ val turn_phase_transition_spec_violation_to_tag
   :  turn_phase_transition_spec_violation
   -> string
 
-(** RFC-0072 Phase 5: raised by [set_turn_phase] and [set_turn_phase_direct]
+(** Raised by [set_turn_phase] and [set_turn_phase_direct]
     on a forbidden turn_phase transition, carrying the
     typed [turn_phase_transition_spec_violation] payload (replaces the
     prior string-formatted [Invalid_argument]).  [where] is a diagnostic
@@ -181,7 +181,7 @@ exception
     ; violation : turn_phase_transition_spec_violation
     }
 
-(** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
+(** Resolve a (from, target) packed pair to one of three
     outcomes. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
@@ -303,7 +303,7 @@ type registry_entry = {
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
   egress_proxy_port : int option Atomic.t;
-      (** The port this keeper's egress proxy bound, once it has (RFC-0415).
+      (** The port this keeper's egress proxy bound, once it has.
 
           It lives here because the two ends have different lifetimes: the
           proxy is forked once per keeper lane, and a guest boots per turn

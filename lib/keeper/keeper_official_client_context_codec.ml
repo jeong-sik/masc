@@ -120,7 +120,7 @@ let message_to_json rendering (message : Agent_core.Types.message) =
        ; ( "tool_call_id"
          , Option.fold ~none:`Null ~some:(fun value -> `String value) message.tool_call_id )
        ; (* Two Agent Core keys stay out. The input speaker is host
-            attribution for the Librarian (RFC-0468 §3.2). The appended-at
+            attribution for the Librarian. The appended-at
             stamp reaches the model as [result_time] above, not as a bare Unix
             float. The official client reads this framing as prompt text and
             its snapshot hashes cover it. *)

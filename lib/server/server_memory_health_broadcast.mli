@@ -1,5 +1,4 @@
-(** Tells a workspace's readers which Keeper's memory health row moved
-    (RFC-0487 L3).
+(** Tells a workspace's readers which Keeper's memory health row moved.
 
     A write to a file the row reads arrives through
     {!Keeper_memory_health_input} or {!Keeper_memory_commit_notifications},

@@ -15,7 +15,6 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
 ;;
 
 let agent_json ~session_bound_at ~last_seen (agent : Masc_domain.agent) =
-  let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
   `Assoc
     [ "name", `String agent.name
@@ -28,8 +27,8 @@ let agent_json ~session_bound_at ~last_seen (agent : Masc_domain.agent) =
     ; "session_bound_at", session_bound_at
     ; "last_seen", last_seen
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
-    ; "emoji", `String profile.emoji
-    ; "koreanName", `String profile.korean_name
+    ; "emoji", `String Dashboard_execution_helpers.agent_emoji
+    ; "koreanName", `String agent.name
     ]
 ;;
 
@@ -49,28 +48,11 @@ let dashboard_client_json ((agent : Masc_domain.agent), (source : Workspace.agen
     agent_json ~session_bound_at:`Null ~last_seen:`Null agent
 ;;
 
-let dashboard_message_json (message : Masc_domain.message) =
-  `Assoc
-    [ "request_id", `String message.request_id
-    ; ( "mention_delivery"
-      , `String
-          (Masc_domain.message_mention_delivery_to_string message.mention_delivery) )
-    ; "from", `String message.from_agent
-    ; "type", `String message.msg_type
-    ; "content", `String message.content
-    ; "mention", Json_util.string_opt_to_json message.mention
-    ; "timestamp", `String message.timestamp
-    ; "trace_context", Json_util.string_opt_to_json message.trace_context
-    ; "expires_at", Json_util.float_opt_to_json message.expires_at
-    ; "seq", `Int message.seq
-    ]
-;;
-
 let dashboard_tasks_safe config = Workspace.get_tasks_safe config
 let dashboard_agents_safe config = Workspace.get_active_agents config
 
 let active_agent_summary_json json =
-  (* RFC-0089: classify the agent "status" via the closed agent_status ADT
+  (* Classify the agent "status" via the closed agent_status ADT
      (Masc_domain.agent_status_of_string_opt) instead of string literals, so a
      new status constructor forces a compile error here too. Behavior is
      unchanged: only Active/Busy/Listening yield a summary; Inactive and any

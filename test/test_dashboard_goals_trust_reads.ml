@@ -1,4 +1,4 @@
-(** RFC-0474 L4e: the goals tree reads a Keeper's runtime trust only when a
+(** The goals tree reads a Keeper's runtime trust only when a
     goal's task is assigned to that Keeper, and once per build. Reading every
     Keeper's snapshot first was what made the tree slow: on 2026-10-28 the 40
     snapshots took 7.3 s of a 7.5 s tree, and the 19 Keepers any goal named

@@ -4,10 +4,7 @@
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
     partial run surface, so a reader of these values never has to ask whether a
-    schema loaded.
-
-    [test_run_tool_toml_parity] keeps the publication order; the descriptions
-    and schemas it also pinned were copies of these values. *)
+    schema loaded. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

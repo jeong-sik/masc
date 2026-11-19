@@ -1,4 +1,4 @@
-; Per-file dune stanza for Goal_phase.all / all_actions completeness (RFC-0089).
+; Per-file dune stanza for Goal_phase.all / all_actions completeness.
 ; Lives here per test/stanzas/README.md to avoid the conflict-runtime hotspot
 ; in the legacy grouped (tests ...) stanza.
 

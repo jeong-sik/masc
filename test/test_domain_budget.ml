@@ -1,6 +1,6 @@
 (* Domain_budget keeps the server's domains within
-   Domain.recommended_domain_count () - 1 (RFC-0474 L1), the read pool
-   included (RFC-0204 L3). *)
+   Domain.recommended_domain_count () - 1, the read pool
+   included. *)
 
 let plan ~recommended ~fixed ~override =
   match Domain_budget.plan ~recommended ~fixed ~override with

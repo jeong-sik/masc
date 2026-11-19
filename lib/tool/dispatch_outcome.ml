@@ -1,4 +1,4 @@
-(* RFC-0084 §3.3, §6 D3 — Typed tool dispatch outcome.
+(* Typed tool dispatch outcome.
    See dispatch_outcome.mli for the contract.
 
    Collapsed from a 5-arm sum to the two arms the system actually

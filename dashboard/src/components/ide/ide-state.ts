@@ -28,7 +28,7 @@ export type IdeWorkspaceIdentity =
   | {
       readonly kind: 'repository'
       readonly repoId: string
-      /** RFC-0378 §5.3b: server-minted codebase slug the co-view context
+      /** server-minted codebase slug the co-view context
        *  carries so the keeper can hand it back to `keeper_ide_annotate`
        *  verbatim. Absent when the repository has no canonical remote. */
       readonly codebase?: string | null

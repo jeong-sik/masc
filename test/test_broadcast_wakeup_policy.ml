@@ -724,7 +724,7 @@ let speaker_of_row ~base_path ~keeper_name ~request_id =
      | Some speaker -> speaker)
 ;;
 
-(* RFC-0468 §3.2: a broadcast from a registered Keeper reaches the other
+(* A broadcast from a registered Keeper reaches the other
    Keepers as that Keeper, with its id, not as an anonymous external author. *)
 let test_fleet_projection_from_a_keeper_is_keeper_speech () =
   with_workspace @@ fun config ->

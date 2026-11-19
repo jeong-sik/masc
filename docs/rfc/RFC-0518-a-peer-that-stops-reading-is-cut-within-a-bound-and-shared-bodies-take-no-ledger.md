@@ -14,7 +14,7 @@ related: ["0512", "0493", "0350"]
 
 - 상태: 초안.
 - 이슈: #50294(원장 고갈), #50295(생산자 수명), #50296(TLS 처리량), #49905(연결 준비 상한).
-- 근거: 조사는 `docs/research/2026-11-09-h2-sse-stalled-responses-and-tls-writes.md`, 실측 기록은 `docs/evidence/research/2026-11-09-h2-sse-tls/` 다. 코드 좌표는 `origin/main` `1cab54b0abea` 에서 읽었다.
+- 근거: 코드 좌표는 `origin/main` `1cab54b0abea` 에서 읽었다.
 - 먼저 있는 결정: RFC-0493 이 SSE 프레임을 소켓 flush 까지 기다리게 했다(`Written`·`Closed`·`Stalled`). RFC-0512 가 응답 손잡이를 `Http_reqd.t` 로 합치고 TLS·ALPN 리스너와 HTTP/2 응답 원장을 더했다. RFC-0350 이 HTTP/2 요청 fiber 의 admission 을 정했다. 이 RFC 는 그 위에서 멈춘 상대를 끝내는 방법을 정한다.
 - 사용자 요청(2026-11-09): 근본 원인을 고치고, 다른 OCaml 프로젝트가 HTTP/2·SSE 를 다루는 방식을 보고 개선한다.
 
@@ -127,7 +127,7 @@ related: ["0512", "0493", "0350"]
   - 조각 둘이면 프레임이 앞 조각의 끝에 닿을 때 뒤 조각이 이미 h2 에 있다. 그래서 프레임이 조각 끝에서 끊기지 않는다. 큐가 비어 있다가 작은 payload 둘 뒤에 큰 payload 가 오면, 그 작은 조각 둘이 나갈 때까지는 h2 가 쥔 양이 프레임 하나보다 적다. 그때 프레임이 한 번 짧게 나간다.
   - 창을 몰아서 돌려주는 클라이언트는 조각 하나일 때도 이렇게 느려지지 않는다. 돌려준 창이 다시 합쳐지기 때문이다. Go 는 4 KiB 가 밀리거나 밀린 양이 남은 창 이상이면 돌려준다(x/net/http2 flow.go `inflow.add`). 그 규칙으로는 조각 하나가 프레임 1,021개, 조각 둘이 513개였고 시간 차이는 측정 흔들림 안이었다.
   - 한 번에 돌려준 창이 h2 가 쥔 양(32 KiB)을 넘으면 조각 둘이어도 그 끝에서 프레임이 한 번 끊긴다. 받은 양이 창의 반 이상일 때 돌려주는 규칙(nghttp2 의 `nghttp2_should_send_window_update`)으로 창 65,535 B 를 쓰면 프레임이 767개였다. 통째로는 513개다. 창이 다시 합쳐지므로 더 작아지지는 않는다.
-  - 조건: 평문 TCP loopback, 양쪽 `TCP_NODELAY`, 손으로 쓴 HTTP/2 클라이언트를 다른 domain 에서 실행, 3회(32 MiB 장면은 5회) 중앙값을 3~4번 잼, 2026-11-10. 같은 장비에서 다른 빌드가 돌아 시간은 2~3배 흔들렸고 프레임 수는 매번 같았다. 탐침과 결과는 `docs/evidence/research/2026-11-09-h2-sse-tls/` 의 run7 이다.
+  - 조건: 평문 TCP loopback, 양쪽 `TCP_NODELAY`, 손으로 쓴 HTTP/2 클라이언트를 다른 domain 에서 실행, 3회(32 MiB 장면은 5회) 중앙값을 3~4번 잼, 2026-11-10. 같은 장비에서 다른 빌드가 돌아 시간은 2~3배 흔들렸고 프레임 수는 매번 같았다.
 - **`Http_reqd` 가 쓰는 본문은 모두 이 큐를 거친다.** 통째 본문과 스트리밍 writer 두 곳이고, 아래 셋을 덮는다.
   - 통째 본문(`h2_respond_with_string`)
   - MCP POST 결과. `safe_respond_chunked`(`server_mcp_transport_http.ml` 58~62줄)는 스트리밍 writer 에 결과를 한 번 쓰고 닫는다.
@@ -364,7 +364,7 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 고칠 곳은 `w
   - `ledger_starvation_probe.py`: 번들 90개를 쥔 클라이언트가 있어도 정상 클라이언트의 번들이 200 이다.
   - `h2_sse_leak_probe.py`: descriptor, 연결 수, `sse_clients` 가 지금처럼 제자리로 온다.
   - `tls_cpu_probe.py` 와 벤치: 서버 ms/MB 와 클라이언트(OpenSSL, Go) ms/MB 의 전·후 표를 남긴다.
-  - 결과는 `docs/evidence/` 에 새 묶음으로 남긴다.
+  - 결과는 PR 본문에 남긴다.
 
 ## 7. 하지 않는 것
 

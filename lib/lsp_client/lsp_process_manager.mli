@@ -171,5 +171,5 @@ val spawn :
     [stdout_r], [stderr_r]). The stderr-drain and response-reader fibers exit on
     the resulting close. Non-blocking — safe to call while holding the spawn
     mutex. Without it, a proc bound to the server-lifetime switch leaks until
-    shutdown (RFC-0261 / #21546). *)
+    shutdown (#21546). *)
 val shutdown : lsp_process -> unit

@@ -923,11 +923,6 @@ let recovery_evidence_from_tree ~read_node ~root =
   visit {recovery=Retire; has_tool_attempts=false; settled_tool_results=[]} [root]
 ;;
 
-let recovery_action_from_tree ~read_node ~root =
-  recovery_evidence_from_tree ~read_node ~root
-  |> Result.map (fun evidence -> evidence.recovery)
-;;
-
 let terminal_recovery_evidence scope =
   recovery_evidence_from_tree ~root:(Journal.run_root scope.run)
     ~read_node:(fun node ->

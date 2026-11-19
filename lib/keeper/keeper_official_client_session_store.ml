@@ -18,7 +18,7 @@ type settlement =
   ; turn_id : string
   }
 
-(* RFC claude-code-context-overflow-bounded-restart §6. A same-runtime input
+(* A same-runtime input
    rejection stays held for explicit recovery. [Bootstrap_floor_exceeded]
    means the provider rejected even the minimum bootstrap input.
    [Effect_fenced] means an input-capacity retry was stopped after observed

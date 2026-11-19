@@ -317,4 +317,3 @@ silently fabricating an empty briefing.
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)
 - [agent core/MASC Boundary](../AGENT-CORE-BOUNDARY.md)
-- [Keeper Continuity Validation](../KEEPER-CONTINUITY-VALIDATION.md)

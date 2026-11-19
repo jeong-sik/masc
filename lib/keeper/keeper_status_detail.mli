@@ -29,7 +29,7 @@ val kata_name_observation_config :
 (** Variant labels used in tool-input enum schemas. *)
 val valid_tail_order_strings : string list
 
-(** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
+(** ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_status_config :
   config:Workspace.config -> agent_name:string -> Yojson.Safe.t -> tool_result
 

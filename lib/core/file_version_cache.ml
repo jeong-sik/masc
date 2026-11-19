@@ -7,15 +7,17 @@ type version =
   ; mtime : float
   }
 
+let version_of_stats stats =
+  { device = stats.Unix.st_dev
+  ; inode = stats.Unix.st_ino
+  ; size = stats.Unix.st_size
+  ; mtime = stats.Unix.st_mtime
+  }
+;;
+
 let version_of_path path =
   match Unix.stat path with
-  | stats ->
-    Some
-      { device = stats.Unix.st_dev
-      ; inode = stats.Unix.st_ino
-      ; size = stats.Unix.st_size
-      ; mtime = stats.Unix.st_mtime
-      }
+  | stats -> Some (version_of_stats stats)
   | exception Unix.Unix_error _ -> None
 ;;
 

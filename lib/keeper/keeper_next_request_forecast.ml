@@ -144,9 +144,10 @@ let measure (message : Agent_core.Types.message) =
 
 let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~accepted
       ~turn_start ~history_at_start ~counted_tokens ~atom_count ~digest_at messages =
-  let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
+  let { Keeper_turn_driver_try_provider.start; outlived_seed = _; moved_at_max_context = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~past_max_context
+      ~held_window
       ~continuity
       ~front
       ~accepted
@@ -154,9 +155,8 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
       ~turn_boundary:turn_start
       ~history_at_start
   in
-  (* The ledger's count describes the range its front opened; any other
-     start carries a range nothing has counted, the turn boundary the size
-     signal moved to among them. *)
+  (* The ledger's count is read for a range its own front opened; any other
+     start shows none, the front the size signal moved to among them. *)
   let counted_tokens =
     match start with
     | Keeper_turn_driver_try_provider.From_seed { source = Keeper_carried_front.Ledger; _ } ->
@@ -168,7 +168,8 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
             | Keeper_carried_front.Turn_start_after_librarian_refusal
             | Keeper_carried_front.This_turn_start_after_seed_refusal
             | Keeper_carried_front.This_turn_start_after_librarian_refusal
-            | Keeper_carried_front.Turn_start_at_max_context )
+            | Keeper_carried_front.Turn_start_at_max_context
+            | Keeper_carried_front.Librarian_point_at_max_context )
         ; _
         }
     | Keeper_turn_driver_try_provider.From_snapshot _
@@ -502,7 +503,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
       , front
       , ledger.Keeper_model_input_ledger.total_tokens
       , Keeper_turn_driver_try_provider.past_max_context ~max_context
-          ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
+          ~continuity:(Some reads.continuity) ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
       , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~max_context
           ~history_digest_at:reads.digest_at (Some ledger) )
     | Some _ | None -> None, Lazy.force reads.seed, None, None, None

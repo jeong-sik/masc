@@ -154,6 +154,7 @@ let expected_source : Front.source -> Inspector.forecast_carried_origin = functi
   | Front.This_turn_start_after_librarian_refusal ->
     Inspector.Carried_this_turn_start_after_librarian_refusal
   | Front.Turn_start_at_max_context -> Inspector.Carried_turn_start_at_max_context
+  | Front.Librarian_point_at_max_context -> Inspector.Carried_librarian_point_at_max_context
 ;;
 
 let expected_origin : Front.origin -> Inspector.forecast_carried_origin = function
@@ -176,6 +177,7 @@ let test_every_server_origin_decodes () =
     ; Front.This_turn_start_after_seed_refusal
     ; Front.This_turn_start_after_librarian_refusal
     ; Front.Turn_start_at_max_context
+    ; Front.Librarian_point_at_max_context
     ]
   in
   let origins =

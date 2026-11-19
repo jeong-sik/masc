@@ -23,9 +23,11 @@ let rec origin_sentence ~safe_detail = function
       "the range from the turn boundary was refused too: front moved to where this turn began"
   | Inspector.Carried_turn_start_at_max_context ->
       "the last request plus the largest growth of one turn passed max-context: front moved to the turn boundary"
+  | Inspector.Carried_librarian_point_at_max_context ->
+      "the last request plus the largest growth of one turn passed max-context: front moved to the end of what the Librarian read"
   | Inspector.Carried_past_librarian_point { librarian_end_atom; front } ->
       Printf.sprintf
-        "the Librarian point is atom %d; the range opens later, where the provider last accepted it (%s)"
+        "the Librarian point is atom %d; the range opens where the provider last accepted it (%s)"
         librarian_end_atom (origin_sentence ~safe_detail front)
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
@@ -130,7 +132,7 @@ let candidate_lines ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail ~sc
                 "History preview: send the newest %d of %d original atoms, starting at #%d (%s tok estimated). The earlier %d atoms are represented by the Librarian working state (Turn Boundary log row %d covering the captured prefix)."
                 carried.kept_atoms candidate.history_atoms carried.first_atom
                 (approx carried.transmitted_bytes) end_atom boundary_line
-          | (Inspector.Carried_from_ledger | Inspector.Carried_turn_start_after_seed_refusal | Inspector.Carried_turn_start_after_librarian_refusal | Inspector.Carried_this_turn_start_after_seed_refusal | Inspector.Carried_this_turn_start_after_librarian_refusal | Inspector.Carried_turn_start_at_max_context | Inspector.Carried_from_turn_record _ | Inspector.Carried_turn_start _ | Inspector.Carried_turn_start_unknown _ | Inspector.Carried_librarian_progress _ | Inspector.Carried_past_librarian_point _) as origin -> Printf.sprintf
+          | (Inspector.Carried_from_ledger | Inspector.Carried_turn_start_after_seed_refusal | Inspector.Carried_turn_start_after_librarian_refusal | Inspector.Carried_this_turn_start_after_seed_refusal | Inspector.Carried_this_turn_start_after_librarian_refusal | Inspector.Carried_turn_start_at_max_context | Inspector.Carried_librarian_point_at_max_context | Inspector.Carried_from_turn_record _ | Inspector.Carried_turn_start _ | Inspector.Carried_turn_start_unknown _ | Inspector.Carried_librarian_progress _ | Inspector.Carried_past_librarian_point _) as origin -> Printf.sprintf
                 "History preview: send %d of %d original atoms, starting at #%d (%s tok estimated). %s."
                 carried.kept_atoms candidate.history_atoms carried.first_atom
                 (approx carried.transmitted_bytes) (origin_sentence ~safe_detail origin)
@@ -143,6 +145,7 @@ let candidate_lines ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail ~sc
          | Inspector.Carried_this_turn_start_after_seed_refusal
          | Inspector.Carried_this_turn_start_after_librarian_refusal
          | Inspector.Carried_turn_start_at_max_context
+         | Inspector.Carried_librarian_point_at_max_context
          | Inspector.Carried_past_librarian_point _ | Inspector.Carried_turn_start _
          | Inspector.Carried_librarian_snapshot _ | Inspector.Carried_librarian_progress _ ->
              fact history)

@@ -68,7 +68,13 @@ type source =
           started passed the binding's max-context. The front moved to the
           turn boundary for the rest of the turn (RFC
           a-sent-request-prefix-changes-only-when-the-window-moves §4), with
-          a Librarian point or without one. *)
+          no Librarian point or one at or before where the window opened. *)
+  | Librarian_point_at_max_context
+      (** As {!Turn_start_at_max_context}, with a Librarian point past where
+          the window opened: the front moved to the end of what the
+          Librarian read instead of the turn boundary, so the atoms the move
+          drops are in memory (RFC
+          a-sent-request-prefix-changes-only-when-the-window-moves §4). *)
 
 type seed =
   { first_atom : int
@@ -111,13 +117,18 @@ type origin =
           when no saved continuity snapshot fits this history and the
           position does (RFC keeper-context-window-in-tokens §13.6). *)
   | Past_librarian_point of { librarian_end_atom : int; source : source }
-      (** A Librarian point at [librarian_end_atom], and a later start the
-          provider accepted on this history ([source]: the newest
-          response-observed turn record, or this turn's boundary after a
-          size refusal). The range opens at that start (RFC
-          librarian-lifecycle §4.10, rule 2). The atoms from the point up to
-          it are not sent; which of them are also not in memory is
-          {!librarian_gap}'s answer, which weighs the read position too. *)
+      (** A Librarian point at [librarian_end_atom], and a start the provider
+          accepted on this history ([source]: the newest response-observed
+          turn record, or a front this turn held after a size refusal or the
+          size signal). The range opens at that start (RFC
+          librarian-lifecycle §4.10, rule 2). A start past the point leaves
+          the atoms from the point up to it unsent; which of them are also
+          not in memory is {!librarian_gap}'s answer, which weighs the read
+          position too. A window that stays holds its start behind the point
+          as well (RFC
+          a-sent-request-prefix-changes-only-when-the-window-moves §3.3):
+          the atoms from it up to the point are then in memory and in the
+          request both. *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
@@ -323,6 +334,7 @@ val origin_to_json : origin -> Yojson.Safe.t
     [turn_start_after_librarian_refusal];
     [this_turn_start_after_seed_refusal];
     [this_turn_start_after_librarian_refusal]; [turn_start_at_max_context];
+    [librarian_point_at_max_context];
     [librarian_snapshot] with [end_atom] and [boundary_line];
     [librarian_progress] with [end_atom]; [past_librarian_point] with
     [librarian_end_atom] and [front], the {!Carried} object of its source;

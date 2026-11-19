@@ -1,0 +1,16 @@
+== five_hour intervals 102
+  total d%=57.0 read=393.7M miss=15.61M out=0.704M n=1807
+  fit: d% = 2.25*miss(M) + 0.010*read(M) + 25.0*out(M)   R2=0.868
+   force read=0    %/M -> miss 2.50 out 25.0  R2=0.855
+   force read=0.01 %/M -> miss 2.25 out 25.0  R2=0.868
+   force read=0.05 %/M -> miss 2.25 out 5.0  R2=0.651
+   force read=0.1  %/M -> miss 1.50 out 0.0  R2=-0.240
+   force read=0.25 %/M -> miss 0.00 out 0.0  R2=-7.532
+== provider:usage (provider resetTime) intervals 105
+  total d%=24.0 read=395.8M miss=15.87M out=0.715M n=1843
+  fit: d% = 0.75*miss(M) + 0.002*read(M) + 12.0*out(M)   R2=0.301
+   force read=0    %/M -> miss 0.75 out 13.0  R2=0.299
+   force read=0.01 %/M -> miss 0.75 out 8.0  R2=0.278
+   force read=0.05 %/M -> miss 0.25 out 0.0  R2=-0.631
+   force read=0.1  %/M -> miss 0.00 out 0.0  R2=-3.859
+   force read=0.25 %/M -> miss 0.00 out 0.0  R2=-30.344

@@ -98,6 +98,9 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   /** The reading whose answer the panel takes. A later one, a retry or the
       reading for another person signed in meanwhile, replaces it. */
   let latest = 0
+  /** The reading that began last, by its number, and its end. `stop`
+      replaces a reading and begins none. */
+  let begun: { readonly number: number; readonly ended: Promise<void> } | null = null
   /** The session of the person the panel shows. A login sends its token. */
   let session: Session | null = null
   /** The person whose login and checks the panel holds. `stop` keeps them. */
@@ -107,9 +110,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       changed, and is read again. */
   let landed = 0
 
-  const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
-    latest += 1
-    const mine = latest
+  const reading = async (mine: number, forUser: string, attemptsBefore: number): Promise<void> => {
     const asOf = landed
     const slow = setTimeout(() => {
       const now = view.peek()
@@ -117,7 +118,12 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     }, slowAfterMs)
     const found = await readBoth(send)
     clearTimeout(slow)
-    if (mine !== latest) return
+    if (mine !== latest) {
+      // It ends with the reading that began after it: whoever waits for a
+      // reading waits for the list that is on the page after it.
+      if (begun !== null && begun.number !== mine) await begun.ended
+      return
+    }
     if (found.ok) {
       if (landed !== asOf) return read(forUser, attemptsBefore)
       view.value = { kind: 'read', forUser, integrations: found.integrations, owned: found.owned }
@@ -132,6 +138,14 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
       return
     }
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
+  }
+
+  /** Begins a reading, which replaces the one before it. */
+  const read = (forUser: string, attemptsBefore: number): Promise<void> => {
+    latest += 1
+    const ended = reading(latest, forUser, attemptsBefore)
+    begun = { number: latest, ended }
+    return ended
   }
 
   /** Reads again what the panel shows, which stays on the page meanwhile. A

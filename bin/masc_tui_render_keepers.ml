@@ -2103,8 +2103,8 @@ let keeper_waiting_refresh_line state =
           (Int64.to_float age /. 1e9) in
       Theme.warn ()
       ^ ui_text state
-          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed)
-          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed)
+          ~ko:("  대기 목록 갱신 중 · 마지막 관측 표시 · " ^ elapsed)
+          ~en:("  waiting refresh pending · last observation · " ^ elapsed)
       ^ Ansi.reset
 
 (* One row above the list that is always drawn, so a reading going stale or
@@ -2499,7 +2499,7 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
           | Some { Keeper_control.liveness = (Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Present _); _ }
           | None -> [])
     | Keeper_control.Roster_unobserved ->
-        [Theme.recede () ^ text "  실행 상태 미조회 · 저장된 목록을 표시합니다"
+        [Theme.recede () ^ text "  실행 상태 미조회 · 저장된 목록 표시"
            "  live status not read · showing stored roster" ^ Ansi.reset]
     | Keeper_control.Roster_complete _ -> []
   in
@@ -2689,9 +2689,9 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
   in
   let content = List.concat_map entry_lines projection.kpp_window in
   let content = if content <> [] || projection.kpp_entry_rows = 0 then content else
-    [Theme.recede () ^ (if projection.kpp_count > 0 then text "창이 좁아 행을 표시할 수 없습니다" "window too short for a row"
+    [Theme.recede () ^ (if projection.kpp_count > 0 then text "창이 좁아 행 표시 불가" "window too short for a row"
        else match keeper_rows_page state ~error:(Terminal_text.optional_single_line state.keepers_error) with
-         | Page_empty -> text "조회된 Keeper 목록이 비어 있습니다" "the Keeper roster reading is empty"
+         | Page_empty -> text "조회된 Keeper 없음" "Keeper roster empty"
          | Page_unread -> text "Keeper 목록 미조회" "Keeper roster not read"
          | Page_failed -> text "Keeper 목록 읽기 실패" "Keeper roster read failed") ^ Ansi.reset]
   in
@@ -4640,8 +4640,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then t "  (이 Keeper)" "  (this Keeper)"
                            else if missing_keeper then
-                             t "  (없는 Keeper · e 다시 배정 · u u 제거)"
-                               "  (MISSING KEEPER · e reassign · u u remove)"
+                             t "  (없는 Keeper · e:다시 배정  u×2:제거)"
+                               "  (MISSING KEEPER · e:reassign  u×2:remove)"
                            else "")
                           removal
                       in
@@ -4766,15 +4766,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                            mappings)
                 @ [ ""
                   ; Ansi.dim
-                    ^ t "  j/k 커넥터 · J/K 바인딩 · b 연결 · e 다시 배정 · u u 제거"
-                        "  j/k transport · J/K binding · b bind · e reassign · u u remove"
+                    ^ t "  j/k:커넥터  J/K:바인딩  b:연결  e:다시 배정  u×2:제거"
+                        "  j/k:transport  J/K:binding  b:bind  e:reassign  u×2:remove"
                     ^ Ansi.reset
                   ; Ansi.dim
-                    ^ t "  이 동작은 채널 라우팅만 바꾸고 커넥터 프로세스는 건드리지 않음."
-                        "  These actions change channel routing, not the connector process."
+                    ^ t "  채널 라우팅만 변경 · 커넥터 프로세스는 유지"
+                        "  Changes channel routing only; connector process stays untouched."
                     ^ Ansi.reset
-                  ; Ansi.dim ^ t "  PgUp/PgDn 으로 이 상세를 넘김" "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
-                  ; Ansi.dim ^ t "  r 로 바인딩과 알게 된 이름을 다시 읽음" "  r reloads bindings and learned names" ^ Ansi.reset
+                  ; Ansi.dim ^ t "  PgUp/PgDn:스크롤  r:바인딩·이름 새로고침" "  PgUp/PgDn:scroll  r:reload bindings and names" ^ Ansi.reset
                   ]
           in
           [ Printf.sprintf
@@ -5054,7 +5053,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset
       in
       let listing runs =
-        "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
+        "  Fusion runs  j/k:select  Enter:open  (same IDs as Fusion)" ::
         (if runs = [] then ["  No retained Fusion runs for this Keeper"]
          else List.mapi (fun index (run : Masc.Tui_decode_fusion.fusion_run) ->
            (* The clock the Fusion list and the run detail already draw for

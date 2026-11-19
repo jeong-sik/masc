@@ -1121,7 +1121,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
               Board_read_layout.Thread_note
-                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개 (o:전체 댓글)" else "  Showing %d of %d comments (o: all comments)")
+                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개  o:전체 댓글" else "  Showing %d of %d comments  o:all comments")
                    (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else

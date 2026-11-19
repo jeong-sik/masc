@@ -133,7 +133,7 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
   let rows, pictures = match evidence with
     | Masc_tui_fetched.Absent -> message (wrap ~prefix:"    "
         (if workspace_confirmed
-         then String.capitalize_ascii evidence_unread ^ text " · r로 새로 읽기" " · r to refresh"
+         then String.capitalize_ascii evidence_unread ^ text "  r:새로 읽기" "  r:refresh"
          else workspace_unconfirmed ^ " · " ^ evidence_unread))
     | Loading -> message (wrap ~prefix:"    "
         (if workspace_confirmed

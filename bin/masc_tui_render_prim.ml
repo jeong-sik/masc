@@ -946,11 +946,11 @@ let composer_row state ~rows ~cols =
   if state.view = Overview && not state.composer_focused then
     let note=match Composer.reading_note ~ko (Composer_projection.source_reading state) with
       | None ->
-          ui_text state ~ko:"쓰기 전에 키퍼를 고르세요"
+          ui_text state ~ko:"키퍼 선택 후 입력"
             ~en:"Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    let choose = focus_hint (ui_text state ~ko:"고르기" ~en:"choose") in
-    (Theme.recede () ^ fit_width (" " ^ note ^ " · " ^ choose) cols ^ Ansi.reset,
+    let choose = focus_hint (ui_text state ~ko:"선택" ~en:"choose") in
+    (Theme.recede () ^ fit_width (" " ^ note ^ "  " ^ choose) cols ^ Ansi.reset,
      Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
@@ -5018,9 +5018,9 @@ let help_lines ~width (state : state) =
     in
     let nav_text =
       if ko then
-        dim "j/k 한 줄 · Enter 안으로 · Esc 밖으로 · [ ] 옆 항목 · v 보기 · Tab 화면 · / 찾기 · r 새로고침 · ? 전체"
+        dim "j/k:이동  Enter:열기  Esc:뒤로  [/]:옆 항목  v:보기  Tab:화면  /:찾기  r:새로고침  ?:전체"
       else
-        dim "j/k row · Enter open · Esc back · [ ] sibling · v view · Tab screen · / find · r refresh · ? all"
+        dim "j/k:row  Enter:open  Esc:back  [/]:sibling  v:view  Tab:screen  /:find  r:refresh  ?:all"
     in
     let mark_text =
       if ko then
@@ -5063,7 +5063,7 @@ let help_lines ~width (state : state) =
   | [] ->
       [ Masc_tui_help.Whole
           [ Printf.sprintf
-              (if ko then "%s  \"%s\" 와 일치하는 키나 명령이 없습니다.%s"
+              (if ko then "%s  \"%s\" 일치 항목 없음%s"
                else "%s  No key or command matches \"%s\".%s")
               (Theme.recede ()) (Terminal_text.single_line query) Ansi.reset ] ]
 
@@ -6913,11 +6913,11 @@ let keeper_deletions_lines (state : state) ~cols =
           inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
       errors @ (match selected with
-        | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
+        | None -> [ say "저장된 키퍼 삭제 기록 없음" "No saved keeper deletion records." ]
         | Some row ->
           [Keeper_control.deletion_keeper_name row ^ " · " ^ Keeper_control.deletion_status ~ko row]
           @ (if row.Keeper_control.can_retry then []
-             else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
+             else [ say "정리 재시도 불가 단계" "This phase cannot retry cleanup." ])
           @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
                 "Shutdown ledger record (including cleanup failure causes):" ]
           @ String.split_on_char '\n'

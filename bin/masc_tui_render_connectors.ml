@@ -240,9 +240,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                   let label = match node.kind with
                     | Region _ -> "Region"
                     | Text | Raster | Control _ -> "Element" in
-                  Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
+                  Printf.sprintf "  %s %d/%d: %s  n/p:select  y:copy context"
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
-              | None -> "  No observed elements in this viewport • Ctrl-O:image")
+              | None -> "  No observed elements in this viewport  Ctrl-O:image")
          | None -> live_connection_row view);
       let tabs, page = match view.reading with
         | None -> [], None
@@ -258,8 +258,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let selected = List.nth_opt tabs index in
       c.push_styled ~style:(Theme.info ())
         (match selected with
-         | None -> "  No open tabs • Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s%s  [ / ]:select tab · 1-9:jump"
+         | None -> "  No open tabs · Open a page in the selected browser connection"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s%s  [/]:select tab  1-9:jump"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else "")
              (match tab.ego_page with None -> "" | Some page ->

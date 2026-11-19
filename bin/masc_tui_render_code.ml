@@ -148,8 +148,8 @@ let prepare_code_draft_rows ~ko ~cols draft =
     |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
   List.concat_map wrap
     [ status; comparing; bytes;
-      say "e 편집 · S 저장 · r 다시 읽기 · A 서버 판 받기 · X 버리기 · Esc 닫기"
-        "e edit · S save · r reread · A adopt compared revision · X discard · Esc close" ]
+      say "e:편집  S:저장  r:다시 읽기  A:서버 판 적용  X:버리기  Esc:닫기"
+        "e:edit  S:save  r:reread  A:adopt compared revision  X:discard  Esc:close" ]
   @ rows
 
 (* [same_draft] follows the editing session, including later edits. Only the
@@ -769,7 +769,7 @@ let render_code (state : state) =
        hand ~first:scroll ~shown:height ~total;
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           (ui_text state ~ko:"  Esc: 코드로 돌아가기" ~en:"  Esc returns to code");
+           (ui_text state ~ko:"  Esc:코드로 돌아가기" ~en:"  Esc:back to code");
        let window = Rows.of_list ~first:scroll ~height rendered in
        for index = 0 to height - 1 do
          match Rows.at window (scroll + index) with

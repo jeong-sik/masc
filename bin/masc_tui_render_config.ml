@@ -118,7 +118,7 @@ let render_runtime_params (state : state) =
     @
     match selected with
     | None ->
-      [ ui_text state ~ko:"  행을 선택하면 파라미터 명세와 허용 범위를 표시합니다"
+      [ ui_text state ~ko:"  행 선택 시 파라미터 명세·허용 범위 표시"
           ~en:"  Select a row to see its contract" ]
     | Some row ->
       let open Tui_decode in
@@ -335,19 +335,19 @@ let render_runtime_params (state : state) =
        (Printf.sprintf (if state.ui_language = Lang_ko then "  %s 편집 · %s" else "  editing %s · %s")
           (Terminal_text.single_line edit.rpe_key)
           (match edit.rpe_mode with
-           | Advanced_json -> ui_text state ~ko:"고급 JSON · Enter 적용 · Esc 취소" ~en:"advanced JSON · Enter apply · Esc cancel"
+           | Advanced_json -> ui_text state ~ko:"고급 JSON  Enter:적용  Esc:취소" ~en:"advanced JSON  Enter:apply  Esc:cancel"
            | Friendly_value when friendly_bool ->
-             ui_text state ~ko:"←/→/Space 전환 · Enter 적용 · Esc 취소" ~en:"Left/Right/Space toggle · Enter apply · Esc cancel"
+             ui_text state ~ko:"←/→/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
            | Friendly_value when friendly_choice ->
              (* The set is spelled out: a reader walking it one key at a time
                 cannot otherwise see how many values there are, or that a form
                 they can type by hand exists beside them. *)
              Printf.sprintf
-               (if state.ui_language = Lang_ko then "←/→/Space 선택 (%s) · Enter 적용 · Esc 취소"
-                else "Left/Right/Space cycle (%s) · Enter apply · Esc cancel")
+               (if state.ui_language = Lang_ko then "←/→/Space:선택 (%s)  Enter:적용  Esc:취소"
+                else "Left/Right/Space:cycle (%s)  Enter:apply  Esc:cancel")
                (String.concat " · " edit.rpe_choices)
            | Friendly_value ->
-             ui_text state ~ko:"입력하여 교체 · Enter 적용 · Esc 취소" ~en:"type to replace · Enter apply · Esc cancel")));
+             ui_text state ~ko:"직접 입력  Enter:적용  Esc:취소" ~en:"type to replace  Enter:apply  Esc:cancel")));
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -454,13 +454,13 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                         (if state.ui_language = Lang_ko then "⊘ 적용 안 됨 · 저장된 재정의 %d바이트 보존"
                          else "⊘ Not applied · saved override of %d bytes retained") entry.hbo_bytes;
                       entry.hbo_reason;
-                      ui_text state ~ko:"해당 변수를 빼고 같은 키를 다시 저장하세요"
+                      ui_text state ~ko:"해당 변수 제거 후 같은 키로 재저장 필요"
                         ~en:"Remove that variable and save the same key again"]
              in
              let moved = if row.pr_override_default_moved then
                  wrap (ui_text state
-                   ~ko:"△ 기본 프롬프트가 바뀌었지만 재정의는 계속 적용 중입니다 · 현재 기본값과 대조하세요"
-                   ~en:"△ The default changed; the override remains active · compare it with the current default")
+                   ~ko:"△ 기본 프롬프트 변경됨 · 재정의 유지 중 · 현재 기본값과 대조 필요"
+                   ~en:"△ Default changed; override remains active · compare with current default")
                else []
              in
              let authoring =
@@ -471,9 +471,9 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                          ["△ invalid_operator_surface";
                           field (ui_text state ~ko:"원문 값" ~en:"Value") (Printf.sprintf "operator_surface = %S" value);
                           field (ui_text state ~ko:"원본 파일" ~en:"Source file") source_file;
-                          ui_text state ~ko:"원본 마크다운의 operator_surface를 primary 또는 fragment로 고친 뒤 다시 등록하고 r로 새로 읽으세요"
-                            ~en:"Fix operator_surface to primary or fragment in the source Markdown, register it again, then reload with r";
-                          ui_text state ~ko:"본문 재정의 저장·해제는 이 작성 오류를 고치지 않습니다"
+                          ui_text state ~ko:"원본 MD의 operator_surface를 primary/fragment로 수정·재등록 후 r:새로고침"
+                            ~en:"Fix operator_surface to primary or fragment in source Markdown, re-register, then r:reload";
+                          ui_text state ~ko:"본문 재정의 저장·해제는 이 작성 오류를 고치지 않음"
                             ~en:"Saving or clearing a body override does not fix this authoring error"])
                  row.pr_authoring_issues
              in
@@ -932,8 +932,8 @@ let preset_confirmation_rows (state : state) ~cols =
        P.plain (ui_text state ~ko:"  기준 경로 · " ~en:"  Base · " ^ Terminal_text.single_line workspace.wi_base_path);
        P.plain (ui_text state ~ko:"  MASC 경로 · " ~en:"  MASC root · " ^ Terminal_text.single_line workspace.wi_masc_root)]
       @ description
-      @ [P.detail (ui_text state ~ko:"  전체 확인 후 Enter: 진행 · Esc: 취소"
-           ~en:"  After reviewing all rows, Enter: continue · Esc: cancel")]
+      @ [P.detail (ui_text state ~ko:"  확인 후 Enter:진행  Esc:취소"
+           ~en:"  After reviewing, Enter:continue  Esc:cancel")]
     | Some (Save_armed name) ->
       [P.caution (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
          ^ ui_text state ~ko:"이전 저장 결과 미확인 · " ~en:"Earlier save unconfirmed · "
@@ -1490,10 +1490,12 @@ let selected_model_reading (state : state) =
                [{Masc_tui_detail_reading.heading=
                    ui_text state ~ko:"1. 설정 출처 · 파일 경로" ~en:"1. Source";
                  body=reading.rcv_path}])
-        @ [{Masc_tui_detail_reading.heading=
-              ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼"
-                ~en:"2. Account / Model & Keepers";
-            body=String.concat "\n" (config_models_detail state row)}] in
+        @ (let section_num = if Option.is_some state.runtime_config_view then 2 else 1 in
+           [{Masc_tui_detail_reading.heading=
+               Printf.sprintf "%d. %s" section_num
+                 (ui_text state ~ko:"계정 · 모델 바인딩 및 배정 키퍼"
+                    ~en:"Account / Model & Keepers");
+             body=String.concat "\n" (config_models_detail state row)}]) in
       Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
         ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
 

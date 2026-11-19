@@ -1589,10 +1589,10 @@ let render_memory_body ~cols ~budget (state : state)
        rows up already counts through the helper that declines the plural. *)
     if query <> "" then
       if ko then
-        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %s[Esc:해제]%s"
+        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %sEsc:해제%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query) shown (Theme.recede ()) Ansi.reset
       else
-        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query)
           (Masc_tui_message_layout.count_noun shown "matching keeper")
           (Theme.recede ()) Ansi.reset
@@ -1834,7 +1834,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           else text "  d:분류 펼치기" "  d:show categories"
         in
         let pills =
-          if not show_category_strip then text "  c/C:분류 · Enter:사실 상세" "  c/C:category · Enter:fact detail"
+          if not show_category_strip then text "  c/C:분류  Enter:사실 상세" "  c/C:category  Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
@@ -1861,7 +1861,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        applied one drew the old word above rows the new one had left. *)
     let filter = memory_search_query state in
     if String.trim filter <> "" then
-      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %s[Esc:해제]%s" else "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s")
+      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %sEsc:해제%s" else "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s")
         Ansi.bold Ansi.reset (Terminal_text.single_line filter)
         (if ko then Printf.sprintf "일치 %d개" total else Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
@@ -1958,7 +1958,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         (fun snapshot -> category_count state snapshot category) in
     let header =
       [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
-      ; Theme.recede () ^ (if ko then "c/C:이동 · 클릭:선택" else "c/C:move · click:select") ^ Ansi.reset
+      ; Theme.recede () ^ (if ko then "c/C:이동  클릭:선택" else "c/C:move  click:select") ^ Ansi.reset
       ; Theme.border_muted () ^ draw_hline width ^ Ansi.reset
       ]
     in

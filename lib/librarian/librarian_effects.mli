@@ -2,12 +2,17 @@
     (RFC librarian-call-only-proposes §8.1).
 
     The effects are complete: Memory after the commit is {!apply} of Memory
-    before it, so a snapshot can be rewritten from the commit line alone. *)
+    before it, so a snapshot can be rewritten from the snapshot before it and
+    the commit line. *)
 
 open Keeper_memory_os_types
 
 (** Why a fact left Memory. The fact itself stays on the commit line, so a
-    removed claim can be found later together with what replaced it. *)
+    removed claim can be found later together with what replaced it.
+
+    These are the removals an answer can cause. The two a Keeper's direct
+    write causes ([Superseded_by], [Retracted] in the RFC) are added with the
+    writer. *)
 type removal =
   | Dropped of { reason : string }
   | Merged_into of string (** Memory id of the fact that now says it. *)
@@ -26,14 +31,16 @@ type why_not =
   | Not_valid_alone
   (** The answer saw one item and no Memory, and tried to remove a fact. *)
   | Successor_unsupported
-  (** The fact that was to replace the removed ones did not stay in Memory. *)
+  (** The fact the op stated did not stay in Memory: it was a derived fact
+      whose premises the same answer removed. *)
 
 type t =
   { added : fact list
   ; touched : string list (** Only [last_seen] moves. *)
   ; removed : (fact * removal) list
   ; not_applied : (int * why_not * Librarian_answer.new_fact option) list
-  (** Op number in the answer, the reason, and the claim it carried. *)
+  (** Op number in the answer counted from 0, the reason, and the claim it
+      carried. Ascending by op number. *)
   ; sources : (string * int list) list
   (** For a fact an op stated: the turn log offsets of the units it named. *)
   }

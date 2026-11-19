@@ -473,7 +473,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 - 검사 순서는 고정이다. 문서의 field 집합, 되돌려 적은 반쪽 둘이 문자열인가, 그 반쪽이 물은 질문의 것인가, 그다음이 하던 일과 op 다. 다른 질문의 답은 다른 흠이 있어도 `Echo_mismatch` 다.
 - `Empty_or_partial` 은 빈 글이다. provider 가 중간에 끊은 답은 묻기 층이 이 값으로 바꾼다. 끊긴 것을 아는 곳이 거기다.
 - 답이 적은 이름(`m3`, 단위 이름)은 codec 이 그대로 둔다. 질문의 표에 없는 이름은 계획이 그 op 만 빼는 이유다(§8.2).
-- `Read_item_alone` 의 답에서는 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 `Not_valid_alone` 으로 줄에 적는다. Memory 와 하던 일을 보지 않은 답이 그것을 지우거나 갈아 쓸 수는 없다.
+- `Read_item_alone` 의 답에서는 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 `Not_valid_alone` 으로 줄에 적는다. Memory 와 하던 일을 보지 않은 답이 그것을 지우거나 갈아 쓸 수는 없다. 하던 일을 바꾸려 한 것은 op 가 아니어서 계획이 따로 돌려준다(`working_state = Not_valid_alone`).
 
 ### 6.3 크기는 provider 가 잰다
 
@@ -768,7 +768,7 @@ type why_not =
   | Unknown_ref | Ref_used_twice | Source_outside_question
   | Removed_during_flight of { seq : int }
   | Not_valid_alone            (* 항목만 읽은 답이 Memory 를 지우거나 하던 일을 바꾸려 했다 (§7.4) *)
-  | Successor_unsupported      (* 이 op 가 지우려던 fact 를 대신할 새 fact 가 근거를 잃었다 *)
+  | Successor_unsupported      (* 이 op 가 말한 fact 가 근거를 잃어 남지 못했다 *)
 type effects =
   { added : Fact.t list                      (* fact 전체. 지금의 fact 모양 그대로 *)
   ; touched : Memory_id.t list               (* last_seen 만 옮김 *)
@@ -831,14 +831,15 @@ type log_line =
 
 계획의 규칙이다.
 
-- 답의 `m3` 같은 이름은 질문의 표로 fact id 가 된다. 표에 없는 이름은 `Unknown_ref` 다. 두 op 가 같은 이름을 쓰면 둘째가 `Ref_used_twice` 다.
+- 답의 `m3` 같은 이름은 질문의 표로 fact id 가 된다. 표에 없는 이름은 `Unknown_ref` 다. 두 op 가 같은 이름을 쓰면 둘째가 `Ref_used_twice` 다. op 하나에 흠이 둘이면 검사 순서에서 먼저 걸린 것을 적는다. 순서는 `librarian_plan.mli` 에 있다. op 번호는 0부터 센다.
 - `Add` 한 claim 을 이미 갖고 있으면 `last_seen` 만 옮긴다(`touched`). fact id 는 claim 의 sha256 이다.
+  - basis 는 올리지 않는다. 지금 코드는 올린다(`merge_basis`). 글자까지 같은 claim 은 질문이 보여 준 fact 를 되읽은 것일 수 있어서 새 근거로 치지 않는다.
 - `Drop` 은 `Dropped` 로 지운다. `Merge` 는 원본들을 `Merged_into` 로 지우고 새 fact 를 더한다. `Revise` 는 옛 fact 를 `Revised_into` 로 지우고 새 fact 를 더한다.
 - 지운 fact 는 줄에 통째로 남는다. `memory_search source=dropped|absorbed` 가 반영 기록에서 찾아 준다.
 - 반영하지 않은 op 는 번호, 이유, 새 claim 을 줄에 남긴다. 멈춘 `Revise` 나 `Merge` 의 새 claim 을 `Add` 로 바꿔 넣지는 않는다. 그러면 방금 철회한 것을 되살릴 수 있다.
 - op 의 흠은 답 전체를 버리지 않는다. 지금은 흠 하나에 답 전체가 거절됐다.
 - op 를 다 적용한 뒤 파생 fact 의 근거를 본다. 근거가 된 fact 가 없어진 파생 fact 는 `Support_lost` 로 같은 줄에서 지운다.
-- 그다음, 지운 것을 대신할 새 fact 가 그 확인에서 살아남지 못한 op 는 거둔다. 원본을 되살리고 그 op 를 `Successor_unsupported` 로 적는다. 달라지는 것이 없을 때까지 되풀이한다.
+- 그다음, 자기가 말한 fact 가 그 확인에서 살아남지 못한 op 는 거둔다. 그 op 가 지운 원본을 되살리고 그 op 를 `Successor_unsupported` 로 적는다. 달라지는 것이 없을 때까지 되풀이한다. 지운 것이 없는 `Add` 도 같다. 되살릴 것은 없고, 반영되지 않았다는 것이 줄에 남는다.
   - 이 순서가 없으면 `Merge` 가 원본과 새 fact 를 함께 잃는다. 새 fact 가 자기가 대신한 원본에서 파생된 경우다.
   - 지금 반영이 하는 일이다. `keeper_memory_os_disposition_core.plan` 안의 지역 함수 `settle` 이 한다. 새 모듈 `Librarian_plan` 이 같은 일을 op 번호와 함께 한다. 거둔 op 가 번호로 돌아온다. 옛 모듈은 부르던 곳 셋과 함께 지운다(§19).
   - `plan` 은 원본이 이미 없는 새 fact 를 따로 거절한다. 그 일은 쓰는 쪽의 규칙(§8.3)이 하므로 두 번 두지 않는다.
@@ -1789,7 +1790,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 |---|---|---|
 | L0 | 이 RFC, 연구 기록, 근거 폴더(상태 표와 검사 스크립트, 모델과 결과, 자리 재생, slot 결과 분류 표) | 독립 리뷰 판정. 상태 표와 slot 결과 표의 검사 스크립트를 돌린 결과를 근거 폴더에 적는다. 표가 OCaml 의 `match` 가 되는 L5·L6 부터는 컴파일러가 빠진 쌍을 잡는다 |
 | L1a | 답의 타입과 codec(§6.2), 질문 id 의 반쪽 둘, 스냅샷 codec 의 golden fixture | 네 op 의 왕복. 글로 고정한 wire 모양. 답 전체를 버리는 이유 넷과 op 하나의 흠. fixture 가 지금 codec 과 바이트로 같다 |
-| L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
+| L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기. `removal` 은 답이 만드는 넷만 넣는다. 직접 쓰기의 둘(`Superseded_by`, `Retracted`)은 L5 가 더한다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
 | L1c | 채점기. 프롬프트보다 먼저 고정한다. slot 별로 센다: 버린 답(이유별), 뺀 op(이유별), Memory 를 바꾼 답, 단위가 말한 것 가운데 Memory 에 든 것, merge 가 지킨 것. case 가 기대하는 것은 case 에 token 으로 적고, 채점기는 세기만 한다 | 고정한 답 일곱의 점수표가 시험에 글로 박혀 있다(`test_librarian_scoring`). 채점기를 고치면 그 표가 바뀐다 |
 | L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
 | L3a | 턴 기록: 줄 타입(자기 모듈 타입만), codec, 끝을 확인하는 덧붙임, 끝자리, slice. Agent-Core 턴 경로에 건다(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 속성 시험 T1(§13 F1). 끝나는 길마다 `Closed` 가 정확히 하나. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 덧붙임 실패 시험. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |

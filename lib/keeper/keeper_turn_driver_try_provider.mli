@@ -323,6 +323,30 @@ val past_max_context :
     or a boundary at or before the window: the signal moves a window early,
     and never moves it back or by a guess. Pure. *)
 
+(** Where a window that stays keeps its markers (RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
+type held_demotion =
+  { window_opened_at : int
+        (** Where the ledger's last request opened its range. *)
+  ; markers_before : int
+        (** The boundary that request demoted below. *)
+  }
+
+val held_demotion :
+  opens_turn:bool ->
+  max_context:int option ->
+  history_digest_at:(int -> string option) ->
+  Keeper_model_input_ledger.t option ->
+  held_demotion option
+(** [Some] when the ledger still holds its positions in this history and,
+    at a turn's first request ([opens_turn]), the size signal watches the
+    window: [max_context] is declared and the ledger knows how much one turn
+    grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
+    a window that keeps its results whole grows until the provider refuses
+    it, so that request demotes the turns that ended. Later in the turn the
+    markers stay where its first request put them, which the ledger's last
+    request records. Pure. *)
+
 val choose_range_start :
   past_max_context:past_max_context option ->
   continuity:continuity option ->
@@ -768,20 +792,23 @@ type current_turn_results =
 (** What a composition under {!Current_turn_verbatim} does with the tool
     results of turns that already ended, the atoms before the turn boundary.
     Marker projection also archives the supplied, independently bound completed
-    arguments. Unbound or signed-prefix-protected arguments stay verbatim.
+    arguments below the same boundary. Unbound or signed-prefix-protected arguments stay verbatim.
     The resend that answers a size refusal ignores it:
     {!Current_turn_demoted} covers every result of the refused request. *)
 type finished_turn_results =
   | Finished_turns_verbatim
       (** Every result goes as the range first sent it (RFC-0363 §3.4.1). *)
   | Finished_turns_as_markers
-      (** A result of turns that ended, in an atom before the turn boundary
-          and never the newest atom, goes as its externalized marker when its
-          body is at least {!aged_result_min_bytes} bytes. The
-          same result is the same marker on every later request, so it changes
-          once, on the first request after its turn ended
-          (RFC-tool-results-age-out-of-context). An unknown turn boundary
-          names no ended turn and demotes nothing. *)
+      (** A result of turns that ended, in an atom before the boundary and
+          never the newest atom, goes as its externalized marker when its
+          body is at least {!aged_result_min_bytes} bytes. The boundary is
+          the one the window last sent while the window stays
+          ({!held_demotion}), and the turn boundary once it moves (RFC
+          a-sent-request-prefix-changes-only-when-the-window-moves §3.1).
+          The same result is the same marker on every later request, so it
+          changes once, on the first request whose window moved after its
+          turn ended (RFC-tool-results-age-out-of-context). With an unknown
+          turn boundary a window that moves demotes nothing. *)
 
 val finished_turn_results_for : reader_available:bool -> finished_turn_results
 (** {!Finished_turns_as_markers} for a Keeper that can read markers back
@@ -897,9 +924,10 @@ type composed =
             request started over. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 under {!Current_turn_verbatim}
-            with {!Finished_turns_verbatim} or with no store, the last ended
-            turn's end under {!Finished_turns_as_markers}, the refused
-            request's atom count under {!Current_turn_demoted}. *)
+            with {!Finished_turns_verbatim} or with no store; under
+            {!Finished_turns_as_markers} the held boundary while the window
+            stays, else the last ended turn's end; the refused request's atom
+            count under {!Current_turn_demoted}. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): under {!Current_turn_demoted}
@@ -1035,12 +1063,15 @@ module For_testing : sig
       RFC-0510). Omitted, no tool does. The pointer is placed before the
       demotion plan, on the range the checkpoint history chose.
       [past_max_context] goes to {!choose_range_start}; omitted, no window
-      moves for size. The turn driver passes it at a turn's first request. *)
+      moves for size. The turn driver passes it at a turn's first request.
+      [held_demotion] keeps the markers and arguments of a window that stays
+      where they were last sent; omitted, they follow the turn boundary. *)
 
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
+    ?held_demotion:held_demotion ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->
@@ -1059,6 +1090,7 @@ module For_testing : sig
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
+    ?held_demotion:held_demotion ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->

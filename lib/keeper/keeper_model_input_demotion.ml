@@ -23,6 +23,18 @@ let prepend_argument_messages ~prefix arguments =
 
 let protect_argument_prefix ~through_message arguments =
   Occurrences.filter (fun (message_index, _) _ -> message_index > through_message) arguments
+
+let arguments_before ~atom messages arguments =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let labels = Array.of_list (List.map snd labelled) in
+  Occurrences.filter
+    (fun (message_index, _) _ ->
+       message_index < Array.length labels
+       &&
+       match labels.(message_index) with
+       | Runtime_model_input_tail_window.Atom index -> index < atom
+       | Runtime_model_input_tail_window.Pinned -> false)
+    arguments
 ;;
 
 type argument_binding_error =

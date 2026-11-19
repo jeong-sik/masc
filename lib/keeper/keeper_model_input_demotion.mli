@@ -13,8 +13,10 @@
     atoms. Every substitution rewrites a message a provider may already hold in
     its prompt cache, so the keeper's agent_core assembly asks for it in two
     places only: the results and verified arguments of turns that already
-    ended, once each, on the first request after their turn ended (RFC-tool-results-age-out-of-context,
-    an exception to RFC-0363 §3.4.1), and every result of the resend that
+    ended, once each, on the first request whose window moved after their
+    turn ended (RFC-tool-results-age-out-of-context, RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §3.1; an
+    exception to RFC-0363 §3.4.1), and every result of the resend that
     answers a size refusal.
 
     Durable state is untouched. This runs on the provider-bound copy, like the
@@ -60,6 +62,14 @@ val protect_argument_prefix : through_message:int -> completed_arguments -> comp
 (** Keep arguments after this original request message occurrence eligible.
     Earlier arguments stay verbatim when a signed reasoning replay depends on
     their exact prefix. This can only narrow an already frozen set. *)
+
+val arguments_before :
+  atom:int -> Agent_core.Types.message list -> completed_arguments -> completed_arguments
+(** Keep the occurrences in atoms below [atom] of [messages], the list the
+    set was bound over. A window that stays keeps its markers where it last
+    sent them (RFC a-sent-request-prefix-changes-only-when-the-window-moves
+    §3.1), so an argument at or past that atom stays verbatim. This can only
+    narrow an already frozen set. *)
 
 val bind_completed_arguments :
   completed_before:int ->
@@ -118,12 +128,12 @@ val plan
       unmodified message list. The caller owns where that boundary sits and
       owns the consequence: a boundary that moves while the range's front stays
       rewrites a message the provider already holds and costs its prompt cache
-      from that message on. A boundary at the current turn moves once per turn,
-      so each result changes once, on the first request after its turn ended,
-      and costs the cache from that message on. The keeper's agent_core
-      assembly passes the turn boundary for a Keeper that can read markers
-      back, and the refused request's atom count for the
-      one resend that answers a size refusal, so every result in the refused
+      from that message on. For a Keeper that can read markers back, the
+      keeper's agent_core assembly passes the boundary the window last sent
+      while the window stays, and the turn boundary once it moves, so each
+      result changes once, on the first request whose window moved after its
+      turn ended. It passes the refused request's atom count for the one
+      resend that answers a size refusal, so every result in the refused
       request leaves as a marker rather than failing the turn (#28845).
     - its result carries at least [min_result_bytes] bytes of text on one
       lane: [content], or with [Some] the longer of [content] and the sum of

@@ -160,8 +160,16 @@ masc 는 보내기 전에 크기를 재지 않는다(RFC-keeper-context-window-i
 - 마커로 바꾸는 경계(`demote_before`)는 창이 옮겨질 때만 움직인다.
 - 창이 옮겨진 요청은 지금처럼 그 턴의 경계를 쓴다.
 - 창이 그대로인 요청은 ledger 의 `last.demote_before` 를 쓴다. ledger 는 이 값을 이미 적는다.
-- 인자도 같은 경계로 묶는다(`bind_completed_arguments ~completed_before`).
+- 인자도 같은 경계 아래 것만 바꾼다.
+  - 시도마다 턴 경계로 한 번 묶는 것(`bind_completed_arguments ~completed_before`)은 그대로다.
+  - 묶은 인자 가운데 그 경계 아래 것만 고른다(`arguments_before`).
+- 턴 첫 요청은 §4 의 신호가 창을 볼 때만 붙잡는다.
+  - ledger 가 없거나, 한 턴이 자란 양을 모르거나, `max-context` 선언이 없으면 지금처럼 턴 경계를 쓴다.
+  - 신호 없이 붙잡으면 창은 provider 가 거절할 때까지 자란다.
+  - 턴 가운데 요청은 그 턴 첫 요청이 정한 경계를 따른다.
 - 크기 거절에 답하는 재전송(`Current_turn_demoted`)은 그대로다.
+  - 그 경계는 다음 턴으로 이어진다.
+  - 재전송이 마커로 바꾼 2,048 B 아래 결과는 다음 턴 첫 요청에서 원문으로 돌아온다. 지금도 그렇다.
 
 [RFC-tool-results-age-out-of-context](RFC-tool-results-age-out-of-context.md) 와의 관계:
 

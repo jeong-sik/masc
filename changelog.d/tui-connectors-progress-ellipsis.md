@@ -1,0 +1,6 @@
+### Changed
+
+- The Connectors screen's browser status lines (reading, refreshing,
+  scrolling, following, clicking, capturing) and the observation history's
+  loading lines no longer end in `…`, which RFC tui-one-screen-grammar 6.4
+  keeps for cut text.

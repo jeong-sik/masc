@@ -2056,7 +2056,7 @@ let render_schedule_list (state : state) =
                    }
                in
                if is_selected then
-                 c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+                 c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
                else
                  c.push ("  " ^ line)
              end

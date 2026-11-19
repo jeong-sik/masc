@@ -46,8 +46,9 @@ let judgement_list_columns state ~cols ~status_header ~statuses =
       (Message_layout.display_width status_header) statuses
     |> min (max 1 (inner_width - 3)) in
   let title_width = max 1 (inner_width - status_width - 2) in
-  let row title status =
-    "  " ^ fit_width (Terminal_text.single_line title) title_width
+  let row ?(selected = false) title status =
+    (if selected then "\xe2\x80\xba " else "  ")
+    ^ fit_width (Terminal_text.single_line title) title_width
     ^ "  " ^ fit_width status status_width in
   row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
 
@@ -238,13 +239,14 @@ let render_verification_list (state : state) =
       | None -> box_empty buf cols
       | Some r ->
           let open Masc.Tui_decode in
-          let line = request_row r.vr_task_title (verification_status state r) in
+          let is_selected = idx = state.verification_cursor in
+          let line = request_row ~selected:is_selected r.vr_task_title (verification_status state r) in
           let style =
             match r.vr_evidence_error with
             | Some _ -> (Theme.bad ())
             | None -> Ansi.reset
           in
-          if idx = state.verification_cursor then box_line_selected buf cols line
+          if is_selected then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
   (* Which list this is, and where in it -- drawn on every read rather than
@@ -426,7 +428,7 @@ let verification_evidence_index state request ~width observation =
     let index = max 0 (min (count - 1) state.verification_evidence_cursor) in
     let rows = List.mapi (fun i item ->
       (if i = index then Theme.category Theme.Slot_1 else Theme.recede ()),
-      Printf.sprintf "  %s %d. %s" (if i = index then "▸" else " ") (i + 1)
+      Printf.sprintf "  %s %d. %s" (if i = index then "\xe2\x80\xba" else " ") (i + 1)
         (fit_width (Terminal_text.single_line (evidence_name ~ko:(state.ui_language = Lang_ko) item))
            (max 1 (width - 9)))) items in
     let rows = if state.verification_evidence_index_open then rows
@@ -871,13 +873,14 @@ let render_harness_list (state : state) =
       | None -> box_empty buf cols
       | Some v ->
           let open Masc.Tui_decode in
-          let line = verdict_row v.hv_task_title (verdict_status v) in
+          let is_selected = idx = state.harness_cursor in
+          let line = verdict_row ~selected:is_selected v.hv_task_title (verdict_status v) in
           let style =
             match v.hv_fallback_reason with
             | Some _ -> (Theme.warn ())
             | None -> Ansi.reset
           in
-          if idx = state.harness_cursor then box_line_selected buf cols line
+          if is_selected then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
   Buffer.add_buffer buf tail;

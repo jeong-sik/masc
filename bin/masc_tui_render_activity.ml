@@ -369,8 +369,9 @@ let render_system_logs (state : state) =
           let level_style = system_log_level_style e.sl_level in
           (* Every cell is fitted to the width its header is drawn at; a long
              module name used to push every column right of it out of line. *)
+          let is_selected = idx = (system_logs_page state).lp_cursor in
           let line =
-            "  "
+            (if is_selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.system_log_row ~layout:log_layout ~level_style
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
@@ -390,7 +391,7 @@ let render_system_logs (state : state) =
                 ; slog_message = Terminal_text.single_line e.sl_message
                 }
           in
-          if idx = (system_logs_page state).lp_cursor then
+          if is_selected then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;

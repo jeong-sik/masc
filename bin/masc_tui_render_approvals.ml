@@ -1187,12 +1187,12 @@ let render_approvals (state : state) =
       List.fold_left (fun widest row ->
         max widest (Message_layout.display_width (approval_row_name row))) 16 approvals
       |> min 26
-      |> min (max 0 ((framed_inner_width cols - 6) / 2))
-      |> min (max 0 (framed_inner_width cols - 6 - phase_width)) in
-    let subject_width = max 1 (framed_inner_width cols - name_width - 6) in
+      |> min (max 0 ((framed_inner_width cols - 4) / 2))
+      |> min (max 0 (framed_inner_width cols - 4 - phase_width)) in
+    let subject_width = max 1 (framed_inner_width cols - name_width - 4) in
     if show_header then begin
       box_line_styled buf cols ~style:(Theme.recede ())
-        (Printf.sprintf "    %s  %s"
+        (Printf.sprintf "  %s  %s"
            (fit_width (ui_text state ~ko:"요청" ~en:"REQUEST") subject_width)
            (fit_width (ui_text state ~ko:"요청자" ~en:"ACTOR") name_width));
       box_divider buf cols
@@ -1219,7 +1219,7 @@ let render_approvals (state : state) =
                     else fit_width (Terminal_text.single_line pending.gp_display_tool) tool_width
                       ^ " · " ^ tone ^ phase ^ Ansi.reset
               in
-              Printf.sprintf "  %s  %s" (fit_width subject subject_width)
+              Printf.sprintf "%s  %s" (fit_width subject subject_width)
                 (fit_width (approval_row_name row) name_width)
         in
         let is_selected = idx = state.approval_cursor in

@@ -254,11 +254,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           let start = max 0 (cursor - room + 1) in
           choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
-              let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
+              let is_selected = index = cursor in
+              let line = (if is_selected then "\xe2\x80\xba " else "  ")
+                ^ Terminal_text.single_line (browser_choice_label choice)
                 ^ (if browser_choice_selected view choice then
                      ui_text state ~ko:" (현재)" ~en:" (current)"
                    else "") in
-              if index = cursor then c.push_selected line
+              if is_selected then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
              the cursor. *)
@@ -560,8 +562,9 @@ let render_connectors (state : state) =
                 if flag then ui_text state ~ko:"예" ~en:"yes"
                 else ui_text state ~ko:"아니오" ~en:"no"
               in
+              let is_selected = idx = state.connectors_cursor in
               let line =
-                "  " ^ Masc_tui_table.row (cells
+                (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells
                   ~name:(Terminal_text.single_line connector.cn_display_name)
                   ~configured:(yes_no available)
                   ~reachable:(yes_no connected)
@@ -578,7 +581,7 @@ let render_connectors (state : state) =
                 else if not available then Ansi.dim
                 else Ansi.reset
               in
-              if idx = state.connectors_cursor then c.push_selected line
+              if is_selected then c.push_selected line
               else c.push_styled ~style line
         done;
         c.position

@@ -492,7 +492,7 @@ let render_code (state : state) =
     in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Terminal_text.single_line where
        ^ workspace_entries_count_label total
        ^ Ansi.reset);
@@ -585,9 +585,9 @@ let render_code (state : state) =
           if selected then
             let plain_marker = Masc_tui_theme.strip_sgr marker in
             styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())
-              (" " ^ plain_marker ^ Masc_tui_theme.strip_sgr name)
+              ("\xe2\x80\xba " ^ plain_marker ^ Masc_tui_theme.strip_sgr name)
           else
-            framed_line pane_buf pane_cols (" " ^ marker ^ name)
+            framed_line pane_buf pane_cols ("  " ^ marker ^ name)
       | None -> framed_empty pane_buf pane_cols
     done;
     framed_bottom pane_buf pane_cols
@@ -740,7 +740,7 @@ let render_code (state : state) =
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else "   ")
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;

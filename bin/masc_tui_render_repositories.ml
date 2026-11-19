@@ -162,14 +162,15 @@ let render_workspace_activity (state : state) repo_id =
                 let date =
                   Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
                 let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
-                let line = "  " ^ Masc_tui_table.row (cells ~date
+                let is_selected = first + i = cursor in
+                let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
                   ~task:(Terminal_text.single_line task)
                   ~result:
                     (if change.fc_succeeded then (if ko then "성공" else "ok")
                      else if ko then "실패" else "failed")
                   ~path:(Terminal_text.single_line path)) in
-                if first + i = cursor then c.push_selected line else c.push line
+                if is_selected then c.push_selected line else c.push line
           done;
           c.push_divider ();
           c.push (match selected with
@@ -394,13 +395,14 @@ let render_repository_list (state : state) =
       let detail_width = geometry.rsg_detail_width in
       let content_height = geometry.rsg_content_height in
       let row_width = max 1 (list_width - if geometry.rsg_boxed then 4 else 0) in
-      let row repo =
+      let row ~selected repo =
+        let prefix = if selected then "\xe2\x80\xba " else "  " in
         let status = Terminal_text.single_line (Tui_decode.repository_status_word repo.rp_status) in
-        let status_cells = min (row_width / 3) (Message_layout.display_width status) in
-        let name_cells = max 1 (row_width - status_cells - 2) in
+        let status_cells = min (max 0 ((row_width - 2) / 3)) (Message_layout.display_width status) in
+        let name_cells = max 1 (row_width - status_cells - 4) in
         let name = Terminal_text.single_line repo.rp_name in
-        if row_width < 4 then Message_layout.truncate_middle row_width name
-        else Message_layout.fit_width
+        if row_width < 6 then prefix ^ Message_layout.truncate_middle (max 1 (row_width - 2)) name
+        else prefix ^ Message_layout.fit_width
           (Message_layout.truncate_middle name_cells name) name_cells
           ^ "  " ^ Message_layout.truncate_middle status_cells status in
       let max_scroll = max 0 (shown - content_height) in
@@ -421,8 +423,9 @@ let render_repository_list (state : state) =
           match Rows.at repos_window idx with
           | None -> ""
           | Some r ->
-              let line = row r in
-              if idx = state.repositories_cursor then
+              let is_selected = idx = state.repositories_cursor in
+              let line = row ~selected:is_selected r in
+              if is_selected then
                 Theme.selection_style () ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
@@ -733,16 +736,22 @@ let render_repository_changes (state : state) =
                     if Message_layout.display_width attr + min 8 path_cells <= available
                     then attr else ""
                   in
+                  let is_selected = idx = state.repository_changes_cursor in
+                  let lead =
+                    if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
+                    then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
+                    else if is_selected then "\xe2\x80\xba "
+                    else "  "
+                  in
                   let line =
                     Printf.sprintf "%s%-18s %s%s"
-                      (if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
-                       then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " else "  ")
+                      lead
                       (repository_change_status row)
                       (Message_layout.truncate_middle
                          (max 1 (available - Message_layout.display_width attr)) path)
                       attr
                   in
-                  if idx = state.repository_changes_cursor then c.push_selected line
+                  if is_selected then c.push_selected line
                   else c.push line
             done)
 

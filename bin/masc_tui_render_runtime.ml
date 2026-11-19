@@ -603,7 +603,7 @@ let runtime_picker_choice_rows ~ko picker =
       (Masc_tui_types.runtime_picker_empty_note ~ko picker)
   else
     List.iteri (fun offset choice ->
-      let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
+      let mark = if picker.rlp_selected_row = Some offset then "\xe2\x80\xba" else " " in
       let label = match choice, picker.rlp_pick with
         | Masc_tui_types.Runtime_choice runtime,
           (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
@@ -981,7 +981,8 @@ let render_runtime_reading (state : state) =
                         (Option.bind state.runtime_surface (fun snapshot ->
                            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                in
-               let line = "  " ^ Masc_tui_table.row
+               let is_selected = index + scroll = state.runtime_cursor in
+               let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row
                  (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
                    ~candidate:(Terminal_text.single_line runtime.ro_id)
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
@@ -989,7 +990,7 @@ let render_runtime_reading (state : state) =
                      (Option.bind state.runtime_surface (fun snapshot ->
                        Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
-               if index + scroll = state.runtime_cursor then
+               if is_selected then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
                else if Masc_tui_types.runtime_row_deemphasized state runtime then
                  c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
@@ -1080,12 +1081,13 @@ let render_runtime_reading (state : state) =
               (lane_fact @ assignment_fact @ default_fact
                @ runtime_probe_detail candidate.rcr_probe)
           in
-          let line = "  " ^ Masc_tui_table.row
+          let is_selected = index + scroll = state.runtime_cursor in
+          let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row
             (table_cells ~lane:lane_cell
               ~lane_is_label:(candidate.rcr_candidate_count > 1 && not is_first)
               ~candidate:candidate_label ~identity:provider_model ~status:route_probe
               ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
-          if index + scroll = state.runtime_cursor then
+          if is_selected then
             c.push_selected (Masc_tui_theme.strip_sgr line)
           else if Masc_tui_types.runtime_row_deemphasized state runtime then
             c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)

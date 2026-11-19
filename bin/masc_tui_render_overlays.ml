@@ -350,7 +350,7 @@ let render_detail_reading (state : state) reading =
             | Masc_tui_detail_reading.Heading text | Content text | Note text -> text in
           match mark with
           | Masc_tui_detail_reading.Current_match ->
-              c.push_selected ("> " ^ Masc_tui_theme.strip_sgr text)
+              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr text)
           | Match ->
               c.push_styled ~style:Ansi.underline ("* " ^ Masc_tui_theme.strip_sgr text)
           | No_match ->
@@ -1139,14 +1139,17 @@ let render_queue_panel (state : state) (panel : queue_panel) =
               Option.fold ~none:text ~some:(fun id ->
                 Terminal_text.single_line (queue_panel_item_identity id)) item.id
             else text in
-          let row = marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset in
+          let row =
+            if selected then marker ^ Masc_tui_theme.strip_sgr text
+            else marker ^ text
+          in
           let row = if selected && queue_selection_visible
               ~inner_width:(framed_inner_width queue_cols) ~marker ~text then
               match queue_selection_for_item state panel item with
               | Some authority -> pressable (Press_queue_selected authority) row
               | None -> row
             else row in
-          c.push row
+          if selected then c.push_selected row else c.push row
         end) items;
       if items <> [] then
         c.position
@@ -1168,7 +1171,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
 let render_answering (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = answering_lines state in
-  let paint ~selected (line : Masc_tui_answering.line) =
+  let paint (line : Masc_tui_answering.line) =
     let tone_prefix =
       match line.Masc_tui_answering.tone with
       | Masc_tui_answering.Heading -> Ansi.bold
@@ -1177,13 +1180,7 @@ let render_answering (state : state) =
       | Masc_tui_answering.Unknown -> Theme.warn ()
       | Masc_tui_answering.Quiet -> Ansi.dim
     in
-    (* The cursor is a gutter caret, not a full-row band: the row keeps its
-       tone, and rows Enter cannot act on never wear the caret. *)
-    let caret =
-      if selected && Option.is_some line.Masc_tui_answering.target then Masc_tui_theme.Glyph.current_entry ^ " "
-      else "  "
-    in
-    caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
+    "  " ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
   in
   let preview_lines =
     let cursor_preview =
@@ -1248,7 +1245,14 @@ let render_answering (state : state) =
         (fun i line ->
           if i >= scroll && i < scroll + content_height then begin
             incr drawn;
-            c.push (paint ~selected:(i = state.answering_cursor) line)
+            let is_selected =
+              i = state.answering_cursor
+              && Option.is_some line.Masc_tui_answering.target
+            in
+            if is_selected then
+              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line.Masc_tui_answering.text)
+            else
+              c.push (paint line)
           end)
         lines;
       for _ = !drawn + 1 to content_height do
@@ -1301,10 +1305,14 @@ let render_agenda (state : state) =
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then
-            (* Full-width adaptive selection band rather than leading glyph:
-               rows are already fitted to the column. *)
             if selected = Some index then
-              c.push_selected (Masc_tui_theme.strip_sgr line.Agenda.text)
+              let plain = Masc_tui_theme.strip_sgr line.Agenda.text in
+              let marked =
+                if String.length plain >= 2 && plain.[0] = ' ' && plain.[1] = ' ' then
+                  "\xe2\x80\xba " ^ String.sub plain 2 (String.length plain - 2)
+                else "\xe2\x80\xba " ^ plain
+              in
+              c.push_selected marked
             else
               c.push (paint line))
         lines;

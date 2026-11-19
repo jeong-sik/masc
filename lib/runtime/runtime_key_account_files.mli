@@ -38,11 +38,13 @@ type make_error =
     account that has its files ({!replace}): the home that is there is
     looked at and left as it is.
 
-    {!remove} is not the undo of a call: it takes the key of every
-    generation. On an account whose files are there, an error says what
-    this call did. [Key_not_written Generation_taken] says it wrote no key
-    and changed none: the key in place is the one that was there, and a
-    removal after it would take that key away. *)
+    {!remove} is not the undo of a call, and neither is {!remove_keys}:
+    each takes the key of every generation. On an account whose files are
+    there, an error says what this call did. [Key_not_written
+    Generation_taken] says it wrote no key and changed none: the key in
+    place is the one that was there, and a removal after it takes that key
+    away. A replacement asks for that after its record ({!remove_keys}),
+    where the key before is not read any more. *)
 val make
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
@@ -89,8 +91,12 @@ val remove
     not stored asks this (RFC
     a-persons-api-key-is-their-own-provider-account 3.7): the account is to
     read no key then, whatever the write left in the folder. A later write
-    makes the folder again ({!make}). [Error] when the folder is still
-    there, or was not looked at; the detail can name a path of the server. *)
+    makes the folder again ({!make}). Under a runtime root that is not there
+    it removes nothing and makes nothing. [Error] when the folder is still
+    there, was not looked at, or went while the folder it was in was not
+    synced; the detail can name a path of the server. What is in the folder
+    goes in no order of its own and the first that does not go ends the
+    removal, so a file that could have gone can stay beside it. *)
 val remove_keys
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
@@ -125,8 +131,8 @@ type key_state =
     account reads it, and gives nothing of the key. It makes nothing: where
     a use makes the runtime root of the person, this looks whether it is
     there. It takes no call of the account, so it says what was there at the
-    reading: an account whose registration or removal is under way can read
-    [Key_missing] for that moment. *)
+    reading: an account whose registration, replacement or removal is under
+    way can read [Key_missing] for that moment. *)
 val key_state
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

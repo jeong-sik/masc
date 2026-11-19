@@ -523,7 +523,8 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
     // A send whose stream ended wrote how it ended on its row, and it can stay
     // listed after that: a failed send reads the stored history before it
     // leaves. A stop pressed then has no response connection to stop, and the
-    // row keeps what the send said.
+    // row keeps what the send said. The caller still names an accepted
+    // operation to the server.
     const row = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === entryId)
     if (row && isInFlightDelivery(row.delivery)) {
       finalizeAssistantEntry(keeperName, entryId, {

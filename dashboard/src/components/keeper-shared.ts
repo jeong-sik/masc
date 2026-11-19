@@ -39,6 +39,7 @@ import {
   keeperRecovering,
   keeperSending,
   keeperStatusDetails,
+  keeperStopHeld,
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
@@ -866,11 +867,13 @@ export function KeeperConversationPanel({
     />
   `
 
-  // A stop pressed before the send read the server's acceptance waits for it,
-  // and its reply row says so. This is the way out of that wait. It is not the
-  // stop button, so pressing stop twice does not give the wait up. One value
-  // for the three composer layouts, as the busy toolbar above.
-  const heldStopNotice = rawThread.some(entry => entry.streamState === 'stop_pending')
+  // A stop pressed before the send read the server's acceptance waits for it.
+  // This is the way out of that wait, offered for as long as the stream's
+  // record holds the stop. The reply row says the same while it is there, and
+  // stored history can take its place. It is not the stop button, so pressing
+  // stop twice does not give the wait up. One value for the three composer
+  // layouts, as the busy toolbar above.
+  const heldStopNotice = keeperStopHeld.value[keeperName] === true
     ? html`
         <${HeldStopNotice}
           keeperName=${keeperName}

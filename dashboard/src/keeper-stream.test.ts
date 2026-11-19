@@ -18,6 +18,7 @@ import {
   updateThreadEntry,
 } from './keeper-state'
 import { keeperThreads, keeperToolApprovals } from './keeper-state'
+import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
 import {
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
@@ -1804,39 +1805,47 @@ describe('Keeper operation stream projection', () => {
     expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
   })
 
-  it('settles the row of the stream it stops and leaves a row its send already settled', () => {
+  it.each(IN_FLIGHT_DELIVERY)('settles the %s row of the stream it stops', delivery => {
     const live = new AbortController()
     assistantEntry()
+    updateThreadEntry('sangsu', 'reply-1', entry => ({ ...entry, delivery }))
     setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', live)
 
     expect(abortKeeperThreadMessage('sangsu')?.entryId).toBe('reply-1')
 
     expect(live.signal.aborted).toBe(true)
+    expect(activeStreamEntryId('sangsu')).toBeNull()
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toMatchObject({
       delivery: 'interrupted',
       streamState: null,
       error: null,
     })
+  })
 
-    // A send that failed wrote its failure and is still listed while it reads
-    // the stored history. A stop pressed then unlists it and rewrites nothing.
+  // A send whose stream ended wrote how it ended and can still be listed: a
+  // failed send reads the stored history before it leaves. A stop pressed then
+  // unlists the send and rewrites nothing on its row.
+  const settledDeliveries = ['delivered', 'no_reply', 'cancelled', 'error', 'timeout', 'interrupted'] as const
+  it.each(settledDeliveries)('leaves the row of a send that already ended as %s', delivery => {
     const ended = new AbortController()
+    assistantEntry()
     updateThreadEntry('sangsu', 'reply-1', entry => ({
       ...entry,
-      delivery: 'error',
-      error: 'the send failed',
+      delivery,
+      streamState: null,
+      error: 'what the send said',
       timestamp: '2026-11-19T00:00:00.000Z',
     }))
-    setActiveStream('sangsu', 'kmsg-operation-2', 'reply-1', ended)
+    setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', ended)
 
     expect(abortKeeperThreadMessage('sangsu')?.entryId).toBe('reply-1')
 
     expect(ended.signal.aborted).toBe(true)
     expect(activeStreamEntryId('sangsu')).toBeNull()
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toMatchObject({
-      delivery: 'error',
+      delivery,
       streamState: null,
-      error: 'the send failed',
+      error: 'what the send said',
       timestamp: '2026-11-19T00:00:00.000Z',
     })
   })

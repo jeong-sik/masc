@@ -66,6 +66,12 @@ export function isKeeperChatHistoryPending(keeperName: string): boolean {
   return keeperChatHistoryHydration.value[name] === undefined
 }
 export const keeperSending = signal<Record<string, boolean>>({})
+// keeperName -> true while a stop is held for the Keeper's first active
+// operation. The stream records hold that fact and are not reactive. This is
+// what the screen reads of it, written wherever a record's wait or the first
+// record changes. The reply row cannot carry it: stored history takes that
+// row's place while the stream is still open.
+export const keeperStopHeld = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
 export const keeperChatHistoryErrors = signal<Record<string, string | null>>({})
@@ -123,6 +129,13 @@ const acceptedLiveSendRequestIds = new Set<string>()
 
 export function _resetActiveKeeperStreamsForTests(): void {
   keeperActiveStreams.clear()
+  keeperStopHeld.value = {}
+}
+
+function publishStopHeld(name: string): void {
+  const first = keeperActiveStreams.get(name)?.values().next().value
+  const held = first?.acceptance === 'awaited_stop_held'
+  if ((keeperStopHeld.value[name] ?? false) !== held) setRecordValue(keeperStopHeld, name, held)
 }
 
 // --- Helpers ---
@@ -1992,6 +2005,7 @@ export function clearActiveStream(name: string, operationId: string): void {
   const streams = keeperActiveStreams.get(name)
   streams?.delete(operationId)
   if (streams?.size === 0) keeperActiveStreams.delete(name)
+  publishStopHeld(name)
   releaseLiveSendRequest(operationId)
 }
 
@@ -2020,8 +2034,9 @@ export function activeStreamRequestId(name: string): string | null {
  *  the submit, and closing the stream does not take back an operation the
  *  server accepts. Answers the reply row of the held operation, or null when
  *  there is nothing to hold: no active operation, or one whose wait is over.
- *  The held stop lives on the stream's record and ends with the wait: at the
- *  acceptance, when the stream throws, or when the operator closes the send. */
+ *  The held stop lives on the stream's record. It ends at the acceptance and
+ *  when the stream throws, which is also how a send the operator closes ends.
+ *  A stream that closes without either takes the held stop with its record. */
 export function holdStopUntilAccepted(name: string): string | null {
   const streams = keeperActiveStreams.get(name)
   const first = streams?.entries().next().value
@@ -2033,6 +2048,7 @@ export function holdStopUntilAccepted(name: string): string | null {
     case 'awaited':
     case 'awaited_stop_held':
       streams.set(operationId, { ...stream, acceptance: 'awaited_stop_held' })
+      publishStopHeld(name)
       return stream.entryId
   }
 }
@@ -2046,6 +2062,7 @@ export function endAcceptanceWait(name: string, operationId: string): boolean {
   const stream = streams?.get(operationId)
   if (!streams || !stream) return false
   streams.set(operationId, { ...stream, acceptance: 'not_awaited' })
+  publishStopHeld(name)
   return stream.acceptance === 'awaited_stop_held'
 }
 
@@ -2062,18 +2079,16 @@ export class KeeperSendClosedBeforeAcceptance extends Error {
 
 /** The operator stops waiting for the acceptance that the stop of the
  *  Keeper's first active operation is held for. Closes that send's stream:
- *  the held stop goes nowhere. Answers whether there was such a send. A send
- *  with no stop held is not closed here. */
-export function closeSendWithHeldStop(name: string): boolean {
+ *  the held stop goes nowhere. A send with no stop held is not closed here. */
+export function closeSendWithHeldStop(name: string): void {
   const first = keeperActiveStreams.get(name)?.values().next().value
-  if (!first) return false
+  if (!first) return
   switch (first.acceptance) {
     case 'awaited':
     case 'not_awaited':
-      return false
+      return
     case 'awaited_stop_held':
       first.controller.abort(new KeeperSendClosedBeforeAcceptance())
-      return true
   }
 }
 

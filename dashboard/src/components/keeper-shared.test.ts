@@ -35,7 +35,7 @@ const { mockedToolsData, mockedToolsError } = vi.hoisted(() => ({
 
 vi.mock('../keeper-actions', () => ({
   cancelActiveKeeperThreadMessage: vi.fn(async () => true),
-  closeKeeperSendWithHeldStop: vi.fn(() => true),
+  closeKeeperSendWithHeldStop: vi.fn(),
   hydrateKeeperStatus: vi.fn(async () => null),
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
@@ -64,6 +64,7 @@ vi.mock('../keeper-state', async () => {
     keeperProbing: signal({}),
     keeperRecovering: signal({}),
     keeperSending: signal({}),
+    keeperStopHeld: signal({}),
     keeperStatusDetails: signal({}),
     keeperStreamStartedAt: signal({}),
     keeperStreamLastEventAt: signal({}),
@@ -129,7 +130,7 @@ vi.mock('./common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-import { keeperChatHistoryErrors, keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-state'
+import { keeperChatHistoryErrors, keeperActionErrors, keeperHydrating, keeperSending, keeperStopHeld, keeperStreamStartedAt, keeperThreads } from '../keeper-state'
 import { keeperStatusDetails } from '../keeper-state'
 import {
   cancelActiveKeeperThreadMessage,
@@ -238,7 +239,7 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(cancelActiveKeeperThreadMessage).mockReset()
     vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
     vi.mocked(closeKeeperSendWithHeldStop).mockReset()
-    vi.mocked(closeKeeperSendWithHeldStop).mockReturnValue(true)
+    keeperStopHeld.value = {}
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
     cancelKeeperChatOperation.mockReset()
@@ -559,6 +560,7 @@ describe('KeeperConversationPanel', () => {
     it.each(layouts)('offers the way out in the $name layout', async ({ layout }) => {
       keeperThreads.value = { echo: sendingThread('stop_pending') }
       keeperSending.value = { echo: true }
+      keeperStopHeld.value = { echo: true }
 
       render(
         html`<${KeeperConversationPanel} keeperName="echo" placeholder="메시지 입력..." layout=${layout} />`,
@@ -589,6 +591,30 @@ describe('KeeperConversationPanel', () => {
       await Promise.resolve()
 
       expect(container.querySelector('button[aria-label="응답 중지"]')).not.toBeNull()
+      expect(container.querySelector('[data-keeper-held-stop]')).toBeNull()
+    })
+
+    it('offers the way out for as long as the stop is held, with or without a row that says so', async () => {
+      // Stored history took the place of the reply row the stop was held for.
+      // The stream still holds the stop, so the way out stays.
+      keeperThreads.value = {
+        echo: sendingThread(null).map(entry => ({ ...entry, delivery: 'history' as const })),
+      }
+      keeperSending.value = { echo: true }
+      keeperStopHeld.value = { echo: true }
+
+      render(html`<${KeeperConversationPanel} keeperName="echo" placeholder="메시지 입력..." />`, container)
+      await Promise.resolve()
+      expect(container.querySelector('[data-keeper-held-stop]')).not.toBeNull()
+
+      // The hold ends, and the way out goes with it.
+      keeperStopHeld.value = { echo: false }
+      await Promise.resolve()
+      expect(container.querySelector('[data-keeper-held-stop]')).toBeNull()
+
+      // A stop held for another Keeper is not this panel's.
+      keeperStopHeld.value = { other: true }
+      await Promise.resolve()
       expect(container.querySelector('[data-keeper-held-stop]')).toBeNull()
     })
   })

@@ -327,11 +327,10 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
 /** The way out of a held stop. The operator does not wait for the acceptance
  *  any longer: the send is closed, the stop is sent nowhere, and the reply row
  *  says so. It is its own action, not a second press of stop, so that pressing
- *  stop twice does not give the wait up. Answers whether a send was closed. */
-export function closeKeeperSendWithHeldStop(name: string): boolean {
+ *  stop twice does not give the wait up. */
+export function closeKeeperSendWithHeldStop(name: string): void {
   const keeperName = name.trim()
-  if (!keeperName) return false
-  return closeSendWithHeldStop(keeperName)
+  if (keeperName) closeSendWithHeldStop(keeperName)
 }
 
 export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
@@ -1811,9 +1810,9 @@ export async function sendKeeperThreadMessage(
       removeTrackedKeeperChatOperation(operationId)
     }
   } catch (err) {
-    // The stream is read no further. A send that failed stays the Keeper's
-    // first while it reads the stored history below, and a stop pressed in that
-    // time has no acceptance to wait for. A stop held until now is dropped.
+    // The stream is read no further. A send that failed stays listed while it
+    // reads the stored history below, and a stop pressed in that time has no
+    // acceptance to wait for. A stop held until now is dropped.
     endAcceptanceWait(keeperName, operationId)
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     // A stop aborts this stream only after the acceptance, where it also goes

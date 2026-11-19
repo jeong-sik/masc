@@ -10,9 +10,12 @@
     exactly [width] cells, the body padded one cell from the sides.
 
     Cards are laid out as columns of stacks. Each card is as tall as its body,
-    and the columns end on the same row: the card at the bottom of a shorter
+    and the columns end on the same row: the lowest full card of a shorter
     column takes the difference, so the grid is one block with a straight
-    bottom edge rather than boxes of unrelated heights.
+    bottom edge rather than boxes of unrelated heights. A card the height
+    cannot hold is squashed to its top edge alone, one row that keeps its
+    name, status mark and count (RFC section 2, after lazygit's squashed
+    frame).
 
     The caller passes the style codes, so the same card reads in whatever
     palette the screen probed. That includes a focused card's border, the
@@ -165,6 +168,54 @@ val column_widths : inner_width:int -> gap:int -> columns:int -> int list
     leftover cells going to the leftmost columns. The widths and the gaps add
     up to [inner_width]. *)
 
+type height =
+  | Full
+      (** Both edges and the body, as tall as the body, or taller when the
+          card is the lowest full card of a column shorter than the grid. *)
+  | Squashed
+      (** The top edge alone, one row of the column's width, its ends [╶] and
+          [╴] rather than corners. It keeps what a full card's top edge keeps
+          at that width ({!top_fit}), so its count says how many rows it
+          holds. With no bottom edge it writes no cut-off rows. *)
+
+type selection =
+  | Unselectable  (** No row of the card can be selected. *)
+  | Selectable
+      (** The selection can move to a row of the card and is elsewhere now,
+          or nowhere. *)
+  | Holds_selected_row
+      (** The selected row is in the card. At most one card of a grid holds
+          it: a column where two do is drawn only when both fit full. *)
+(** Where the selection is, as a grid sees each card. The caller passes it
+    beside the card: a card drawn alone by {!render} has none. *)
+
+type squash =
+  | By_selection of selection
+      (** An unfocused card. It stays full while it holds the selected row,
+          and its column must fit with it full whenever the selection can
+          reach it. *)
+  | Owns_keyboard  (** A focused card. It stays full whatever the selection. *)
+
+val heights :
+  row_gap:int -> max_rows:int -> (int * squash) list list -> height list list option
+(** The height of each card of each column, given each card's natural height
+    (its body and its two edges) and how the selection reaches it, so that
+    every column, [row_gap] rows between its cards, is at most [max_rows]
+    (RFC section 2).
+
+    [Some] exactly when every column fits with each card the selection can
+    reach ([Selectable] or [Holds_selected_row]) full in turn, the cards that
+    own the keyboard full and every other card squashed. So the answer does
+    not change when the selection moves between cards: moving it never
+    switches a screen between the cards and its plain layout (RFC section 8).
+
+    Each column is settled on its own, top card first: a card that holds the
+    selected row or owns the keyboard is full, and any other is full when the
+    column fits with it full and every card under it that may squash
+    squashed. So a column that fits squashes nothing, a column too tall loses
+    its lowest cards first, and an upper card too tall on its own squashes
+    while the cards under it open as far as they fit. *)
+
 val grid :
   ko:bool ->
   style:style ->
@@ -172,11 +223,14 @@ val grid :
   gap:int ->
   row_gap:int ->
   max_rows:int ->
-  t list list ->
+  (t * selection) list list ->
   string list option
 (** Lays out columns of stacked cards, [gap] cells between columns and
     [row_gap] blank rows between stacked cards. Every row is [inner_width]
-    cells wide, and the rows are those of the tallest column at its cards'
-    natural heights. [None] when that is more than [max_rows], so a caller
-    falls back to something shorter before anything is drawn. Each body is
-    asked once per card. *)
+    cells wide, and the rows are those of the tallest column at the heights
+    {!heights} chooses, so there are never more than [max_rows]. A focused
+    card owns the keyboard; any other card is reached by the selection as
+    its pair says. A column with no full card ends in blank rows. [None]
+    when {!heights} finds no fit, so a caller falls back to something
+    shorter before anything is drawn; the answer is the same wherever the
+    selection is. Each body is asked once per card. *)

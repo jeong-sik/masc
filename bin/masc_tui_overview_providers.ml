@@ -1257,7 +1257,10 @@ let draw_card_rows ~ko ~width ~tone entries =
   in
   let layout = layout_for ~show_names:false ~width:shared_cells entries in
   let row pair =
-    let cards = List.map (account_card ~tone ~layout) pair in
+    (* No row of an account card can be selected. *)
+    let cards =
+      List.map (fun entry -> (account_card ~tone ~layout entry, Masc_tui_card.Unselectable)) pair
+    in
     let columns =
       match cards with
       | [ only ] -> [ [ only ]; [] ]

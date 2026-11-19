@@ -55,15 +55,20 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
     (* The arguments as sent, so the operator can judge the call -- but
        redacted first: every other text on this bus was redacted by the
        stream bridge before publish, and the journal keeps what the bus
-       carries, so a raw secret here would be a raw secret at rest. *)
+       carries, so a raw secret here would be a raw secret at rest. The
+       listing of open waits shows an operator the same three texts, so the
+       registry is given these and not the raw ones. *)
+    let args = redact_text (Yojson.Safe.to_string request.input) in
+    let question = redact_text request.prompt.question in
+    let because = redact_text request.prompt.because in
     let requested =
       Keeper_chat_events.Tool_approval_requested
          { tool_call_id
          ; approval_id
          ; tool_call_name = request.tool_name
-         ; args = redact_text (Yojson.Safe.to_string request.input)
-         ; question = redact_text request.prompt.question
-         ; because = redact_text request.prompt.because
+         ; args
+         ; question
+         ; because
          }
     in
     let decision, label =
@@ -96,8 +101,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
               ~on_registered:(fun () -> publish requested)
               ~keeper_name ~tool_call_id ~approval_id
               ~tool_name:request.tool_name
-              ~args:(Yojson.Safe.to_string request.input)
-              ~question:request.prompt.question ~because:request.prompt.because
+              ~args ~question ~because
               ~timeout_sec
           in
           match outcome with

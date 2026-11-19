@@ -42,13 +42,13 @@ let approval_to_string : Agent_core.Hooks.tool_approval -> string = function
 
 let approval = testable (Fmt.of_to_string approval_to_string) ( = )
 
-let with_gate ~timeout_sec f =
+let with_gate ?(redact_text = Fun.id) ~timeout_sec f =
   Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       let registry = Registry.create () in
       let events = Events.create () in
       let gate =
-        Gate.create ~redact_text:Fun.id ~registry
+        Gate.create ~redact_text ~registry
           ~late_approvals:(Masc.Keeper_late_approval.create ())
           ~publish:(Keeper_chat_events_publish.publish events)
           ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec
@@ -127,14 +127,17 @@ let request ~tool_name ~input =
   ; input
   }
 
-let settle_when_pending registry ~clock decision =
+let wait_until_pending registry ~clock =
   let rec wait attempts =
     if Registry.pending registry = [] && attempts > 0 then begin
       Eio.Time.sleep clock 0.005;
       wait (attempts - 1)
     end
   in
-  wait 100;
+  wait 100
+
+let settle_when_pending registry ~clock decision =
+  wait_until_pending registry ~clock;
   let pending =
     Registry.pending registry
     |> List.find (fun (p : Registry.pending) ->
@@ -202,6 +205,61 @@ let test_the_settled_event_is_sent_on_every_path () =
       in
       check int "exactly one closing event" 1 (List.length settled))
 
+(* A stand-in for the turn's secret redaction: it masks one known value where
+   it stands as a whole word. *)
+let secret = "fixture-secret-value"
+
+let mask_secret text =
+  String.split_on_char ' ' text
+  |> List.map (fun word -> if String.equal word secret then "[REDACTED]" else word)
+  |> String.concat " "
+
+let test_the_listing_shows_what_the_stream_showed () =
+  (* An operator reads a held call in two places: the question on the stream
+     and the listing of open waits. The listing is read while the wait is
+     open, so it is taken here before the answer. A secret in the call is
+     masked in both, by the same redaction. *)
+  with_gate ~redact_text:mask_secret ~timeout_sec:5.0
+    (fun ~clock ~registry ~events ~gate ->
+      let listed = ref [] in
+      let answer =
+        Eio.Fiber.pair
+          (fun () ->
+            gate.Gate.tool_approval
+              { Agent_core.Hooks.prompt =
+                  { question = "Run with " ^ secret ^ " ?"
+                  ; because = "policy saw " ^ secret ^ " in the call"
+                  }
+              ; invocation = invocation ~tool_use_id:"call-1"
+              ; tool_name = "Edit"
+              ; input =
+                  `Assoc
+                    [ "command", `String ("deploy --token " ^ secret ^ " now") ]
+              })
+          (fun () ->
+            wait_until_pending registry ~clock;
+            listed :=
+              List.map
+                (fun (p : Registry.pending) -> p.args, p.question, p.because)
+                (Registry.pending registry);
+            settle_when_pending registry ~clock Registry.Approve)
+        |> fst
+      in
+      check approval "the call is admitted" Agent_core.Hooks.Approved answer;
+      let texts = list (triple string string string) in
+      check texts "the listing masks the secret in the arguments, question and reason"
+        [ ( {|{"command":"deploy --token [REDACTED] now"}|}
+          , "Run with [REDACTED] ?"
+          , "policy saw [REDACTED] in the call" )
+        ]
+        !listed;
+      check texts "the stream carried the same three texts" !listed
+        (drain events []
+         |> List.filter_map (function
+              | Events.Tool_approval_requested { args; question; because; _ } ->
+                  Some (args, question, because)
+              | _ -> None)))
+
 let test_a_synthetic_composition_asks_with_its_node_name () =
   (* A composition tool has no descriptor, so the policy falls to the plan
      index; its because is the only place the node that caused the ask is
@@ -253,5 +311,7 @@ let () =
             test_nobody_answering_does_not_admit_the_call
         ; test_case "the settled event is sent on every path" `Quick
             test_the_settled_event_is_sent_on_every_path
+        ; test_case "the listing shows what the stream showed" `Quick
+            test_the_listing_shows_what_the_stream_showed
         ] )
     ]

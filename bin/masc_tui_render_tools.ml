@@ -47,10 +47,9 @@ type piece =
 
 let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
 
-(* Rows another module wrote in the screen's language: the task document and
-   the storage and volume reports read [state.ui_language] themselves. They
-   move to Masc_tui_say in their own layers; until then the frame takes their
-   rows as they are. *)
+(* Rows another module wrote in the screen's language: the task document
+   reads [state.ui_language] itself. It moves to Masc_tui_say in its own
+   layer; until then the frame takes its rows as they are. *)
 let written_elsewhere lines = Laid_out (fun _ -> lines)
 
 let draw language pieces =
@@ -673,6 +672,11 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
 
 (* The catalog's volume child shows what the next press sends, the server's
    last periodic inventory report, and the last operator-request answer. *)
+let volume_tone = function
+  | Masc_tui_volume_gc.Plain -> ""
+  | Masc_tui_volume_gc.Dim -> Ansi.dim
+  | Masc_tui_volume_gc.Bad -> Theme.bad ()
+
 let volume_gc_lines (state : state) =
   let server_report =
     Option.map
@@ -682,17 +686,9 @@ let volume_gc_lines (state : state) =
            snapshot.Masc.Tui_decode_tools.ts_volume_gc_report)
       state.tools_inventory
   in
-  [ written_elsewhere
-      (List.map
-         (fun (tone, text) ->
-            let color =
-              match tone with
-              | Masc_tui_volume_gc.Plain -> ""
-              | Masc_tui_volume_gc.Dim -> Ansi.dim
-              | Masc_tui_volume_gc.Bad -> Theme.bad ()
-            in
-            color, " " ^ text)
-         (Masc_tui_volume_gc.lines ~server_report state.volume_gc)) ]
+  List.map
+    (fun (tone, text) -> Row (volume_tone tone, Say.code " " ++ text))
+    (Masc_tui_volume_gc.lines ~server_report state.volume_gc)
 ;;
 
 (* The storage pane: the host disk and the server's cleanup results from the
@@ -720,26 +716,20 @@ let storage_lines (state : state) =
              | Masc_tui_storage.Warn -> Theme.warn ()
              | Masc_tui_storage.Bad -> Theme.bad ()
            in
-           color, " " ^ text)
+           color, Say.code " " ++ text)
         (Masc_tui_storage.lines ~timestamp ~uptime snapshot.ts_storage)
     in
     let tone, report =
       Masc_tui_volume_gc.server_report_line ~timestamp snapshot.ts_volume_gc_report
     in
-    let color =
-      match tone with
-      | Masc_tui_volume_gc.Plain -> ""
-      | Masc_tui_volume_gc.Dim -> Ansi.dim
-      | Masc_tui_volume_gc.Bad -> Theme.bad ()
-    in
-    [ written_elsewhere reading
-    ; Row (Ansi.bold, Say.both ~ko:" 은퇴한 Keeper 의 볼륨" ~en:" Retired Keepers' volumes")
-    ; written_elsewhere [ color, "   " ^ report ]
-    ; Row (Ansi.dim,
+    rows
+      (reading
+       @ [ Ansi.bold, Say.both ~ko:" 은퇴한 Keeper 의 볼륨" ~en:" Retired Keepers' volumes"
+         ; volume_tone tone, Say.code "   " ++ report
+         ; Ansi.dim,
            Say.both ~ko:"   회수는 전체 도구 탭에서 " ~en:"   Reclaim them on the All tools tab with "
            ++ Say.code Masc_tui_volume_gc.key
-           ++ Say.both ~ko:" 로 합니다." ~en:".")
-    ]
+           ++ Say.both ~ko:" 로 합니다." ~en:"." ])
 ;;
 
 (* Through [tab_strip], the one drawing every in-screen strip shares. This one

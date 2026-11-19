@@ -1460,13 +1460,13 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc yojson))
+ (libraries masc masc_tui_say yojson))
 
 (library
  (name masc_tui_storage)
  (wrapped false)
  (modules masc_tui_storage)
- (libraries masc))
+ (libraries masc masc_tui_say))
 
 (library
  (name masc_tui_keeper_mark)

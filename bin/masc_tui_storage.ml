@@ -3,7 +3,12 @@ module Status_json = Masc.Keeper_cleanup_status_json
 module Step = Masc.Keeper_cleanup_step
 module Tools = Masc.Tui_decode_tools
 
+module Say = Masc_tui_say
+
 let single_line = Masc.Tui_terminal_text.sanitize_terminal_text
+let received text = Say.as_received (single_line text)
+let ( ++ ) = Say.( ++ )
+let dot = Say.code " · "
 
 type tone =
   | Heading
@@ -13,8 +18,8 @@ type tone =
   | Bad
 
 let step_label = function
-  | Step.Guest_builds -> "게스트 _build"
-  | Step.Remote_workspace -> "원격 작업 폴더"
+  | Step.Guest_builds -> Say.both ~ko:"게스트 _build" ~en:"guest _build"
+  | Step.Remote_workspace -> Say.both ~ko:"원격 작업 폴더" ~en:"remote workspace"
 ;;
 
 (* A step's place in the step list, which is the order steps run. *)
@@ -72,11 +77,16 @@ let bytes_text bytes = kib_text (bytes / bytes_per_kib)
 let change_text kib = (if kib > 0 then "+" else "") ^ kib_text kib
 
 let host_disk_line = function
-  | Tools.Host_disk_absent -> Dim, "호스트 디스크: 서버가 잰 값이 아직 없습니다."
+  | Tools.Host_disk_absent ->
+    Dim, Say.both ~ko:"호스트 디스크: 서버가 잰 값이 아직 없습니다."
+           ~en:"Host disk: the server has not measured it yet."
   | Tools.Host_disk_probe_failed detail ->
-    Bad, "호스트 디스크: 서버가 재지 못했습니다 · " ^ single_line detail
+    Bad, Say.both ~ko:"호스트 디스크: 서버가 재지 못했습니다 · " ~en:"Host disk: the server could not measure it · "
+         ++ received detail
   | Tools.Host_disk_unreadable reason ->
-    Bad, "호스트 디스크: 서버가 보낸 값을 읽지 못했습니다 · " ^ single_line reason
+    Bad, Say.both ~ko:"호스트 디스크: 서버가 보낸 값을 읽지 못했습니다 · "
+           ~en:"Host disk: the value the server sent could not be read · "
+         ++ received reason
   | Tools.Host_disk_measured { Tools.hd_mounted_on; hd_total_bytes; hd_available_bytes } ->
     let share =
       if hd_total_bytes > 0
@@ -86,56 +96,71 @@ let host_disk_line = function
           (Float.of_int hd_available_bytes /. Float.of_int hd_total_bytes *. 100.)
       else ""
     in
+    let available = bytes_text hd_available_bytes and total = bytes_text hd_total_bytes in
     ( Plain
-    , Printf.sprintf
-        "호스트 디스크 %s: 남은 공간 %s / 전체 %s%s"
-        (single_line hd_mounted_on)
-        (bytes_text hd_available_bytes)
-        (bytes_text hd_total_bytes)
-        share )
+    , Say.both ~ko:"호스트 디스크 " ~en:"Host disk " ++ received hd_mounted_on
+      ++ Say.per_language (function
+           | Say.Ko -> Printf.sprintf ": 남은 공간 %s / 전체 %s%s" available total share
+           | Say.En -> Printf.sprintf ": %s free of %s%s" available total share) )
 ;;
+
+let since_start =
+  Say.both ~ko:"아래 정리 결과는 서버가 뜬 뒤의 것입니다."
+    ~en:"The cleanup results below are from after the server started."
 
 let uptime_line = function
   | Some uptime ->
-    Dim, "서버 가동 " ^ single_line uptime ^ " · 아래 정리 결과는 서버가 뜬 뒤의 것입니다."
-  | None -> Dim, "아래 정리 결과는 서버가 뜬 뒤의 것입니다."
+    Dim, Say.both ~ko:"서버 가동 " ~en:"Server up " ++ received uptime ++ dot ++ since_start
+  | None -> Dim, since_start
 ;;
 
-let names_text names = String.concat ", " (List.map single_line names)
+let names_text names = Say.as_received (String.concat ", " (List.map single_line names))
 
 let pass_lines ~timestamp = function
-  | Error reason -> [ Bad, "정리 주기 요약을 읽지 못했습니다: " ^ single_line reason ]
-  | Ok None -> [ Dim, "정리 주기: 서버가 뜬 뒤 아직 돌지 않았습니다." ]
+  | Error reason ->
+    [ Bad, Say.both ~ko:"정리 주기 요약을 읽지 못했습니다: " ~en:"The cleanup pass summary could not be read: "
+           ++ received reason ]
+  | Ok None ->
+    [ Dim, Say.both ~ko:"정리 주기: 서버가 뜬 뒤 아직 돌지 않았습니다."
+             ~en:"Cleanup pass: it has not run since the server started." ]
   | Ok (Some (pass : Status.pass)) ->
     let steps =
       List.map
         (fun ({ step; enabled; selected } : Status.step_pass) ->
           if enabled
           then
-            Dim, Printf.sprintf "  %s: 켜짐 · 고른 Keeper %d" (step_label step) selected
-          else Warn, Printf.sprintf "  %s: 꺼짐" (step_label step))
+            ( Dim
+            , Say.code "  " ++ step_label step
+              ++ Say.per_language (function
+                   | Say.Ko -> Printf.sprintf ": 켜짐 · 고른 Keeper %d" selected
+                   | Say.En -> Printf.sprintf ": on · %d Keepers chosen" selected) )
+          else Warn, Say.code "  " ++ step_label step ++ Say.both ~ko:": 꺼짐" ~en:": off")
         pass.steps
     in
     let still_running =
       match pass.still_running with
       | [] -> []
-      | names -> [ Dim, "  앞 시도가 아직 안 끝난 Keeper: " ^ names_text names ]
+      | names ->
+        [ Dim, Say.both ~ko:"  앞 시도가 아직 안 끝난 Keeper: " ~en:"  Keepers whose last attempt is still running: "
+               ++ names_text names ]
     in
+    let started = timestamp pass.started_at in
     [ ( Plain
-      , Printf.sprintf
-          "정리 주기 %s · 간격 %.0f초 · 훑은 Keeper %d"
-          (timestamp pass.started_at)
-          pass.interval_sec
-          pass.owners )
+      , Say.per_language (function
+          | Say.Ko -> Printf.sprintf "정리 주기 %s · 간격 %.0f초 · 훑은 Keeper %d"
+              started pass.interval_sec pass.owners
+          | Say.En -> Printf.sprintf "Cleanup pass %s · every %.0fs · %d Keepers looked at"
+              started pass.interval_sec pass.owners) )
     ; ( Dim
-      , Printf.sprintf
-          "  예약 %d · 앞 시도가 안 끝남 %d · 맞는 단계 없음 %d · 꺼짐 %d · meta 없음 %d · 선언을 못 읽음 %d"
-          pass.scheduled
-          (List.length pass.still_running)
-          pass.no_step
-          pass.switched_off
-          pass.without_meta
-          (List.length pass.unreadable) )
+      , Say.per_language (function
+          | Say.Ko -> Printf.sprintf
+              "  예약 %d · 앞 시도가 안 끝남 %d · 맞는 단계 없음 %d · 꺼짐 %d · meta 없음 %d · 선언을 못 읽음 %d"
+              pass.scheduled (List.length pass.still_running) pass.no_step pass.switched_off
+              pass.without_meta (List.length pass.unreadable)
+          | Say.En -> Printf.sprintf
+              "  scheduled %d · still running %d · no step %d · off %d · no meta %d · unreadable %d"
+              pass.scheduled (List.length pass.still_running) pass.no_step pass.switched_off
+              pass.without_meta (List.length pass.unreadable)) )
     ]
     @ steps
     @ still_running
@@ -145,25 +170,26 @@ let pass_lines ~timestamp = function
    The words can run long, so the row puts them last. *)
 let outcome_text report_text = function
   | Status.Reclaimed report -> report_text report, None
-  | Status.Deferred reason -> "Keeper 가 바빠 넘김", Some reason
-  | Status.Not_running -> "붙을 대상이 떠 있지 않음", None
-  | Status.Failed reason -> "실패", Some reason
+  | Status.Deferred reason -> Say.both ~ko:"Keeper 가 바빠 넘김" ~en:"skipped, the Keeper was busy", Some reason
+  | Status.Not_running -> Say.both ~ko:"붙을 대상이 떠 있지 않음" ~en:"nothing running to attach to", None
+  | Status.Failed reason -> Say.both ~ko:"실패" ~en:"failed", Some reason
 ;;
 
 let builds_text ({ cleaned; failed } : Status.builds) =
-  Printf.sprintf "지움 %d · 못 지움 %d" cleaned failed
+  Say.per_language (function
+    | Say.Ko -> Printf.sprintf "지움 %d · 못 지움 %d" cleaned failed
+    | Say.En -> Printf.sprintf "removed %d · not removed %d" cleaned failed)
 ;;
 
 let workspace_text
       ({ removed; skipped; failed; freed_kib; available_kib } : Status.workspace)
   =
-  Printf.sprintf
-    "지움 %d · 남김 %d · 못 지움 %d · 여유 변화 %s · 남은 공간 %s"
-    removed
-    skipped
-    failed
-    (change_text freed_kib)
-    (kib_text available_kib)
+  let change = change_text freed_kib and available = kib_text available_kib in
+  Say.per_language (function
+    | Say.Ko -> Printf.sprintf "지움 %d · 남김 %d · 못 지움 %d · 여유 변화 %s · 남은 공간 %s"
+        removed skipped failed change available
+    | Say.En -> Printf.sprintf "removed %d · kept %d · not removed %d · free space change %s · %s free"
+        removed skipped failed change available)
 ;;
 
 let attempt_text = function
@@ -175,12 +201,13 @@ let attempt_text = function
 let last_success_text ~timestamp (row : Status.row) =
   match row.attempt with
   | Status.Guest_builds (Status.Reclaimed _) | Status.Remote_workspace (Status.Reclaimed _) ->
-    ""
+    Say.empty
   | Status.Guest_builds (Status.Deferred _ | Status.Not_running | Status.Failed _)
   | Status.Remote_workspace (Status.Deferred _ | Status.Not_running | Status.Failed _) ->
     (match row.reclaimed_at with
-     | Some at -> " · 마지막으로 끝까지 돈 때 " ^ timestamp at
-     | None -> " · 서버가 뜬 뒤 끝까지 돈 적 없음")
+     | Some at ->
+       Say.both ~ko:" · 마지막으로 끝까지 돈 때 " ~en:" · last ran to the end at " ++ Say.as_received (timestamp at)
+     | None -> Say.both ~ko:" · 서버가 뜬 뒤 끝까지 돈 적 없음" ~en:" · has not run to the end since the server started")
 ;;
 
 let row_tone (row : Status.row) =
@@ -199,35 +226,33 @@ let row_tone (row : Status.row) =
 let row_line ~timestamp (row : Status.row) =
   let happened, words = attempt_text row.attempt in
   ( row_tone row
-  , Printf.sprintf
-      "  %s · %s · %s · %s%s%s"
-      (single_line row.keeper)
-      (step_label (Status.step row.attempt))
-      happened
-      (timestamp row.finished_at)
-      (last_success_text ~timestamp row)
-      (match words with
-       | Some words -> " · " ^ single_line words
-       | None -> "") )
+  , Say.code "  " ++ received row.keeper
+    ++ dot ++ step_label (Status.step row.attempt)
+    ++ dot ++ happened
+    ++ dot ++ Say.as_received (timestamp row.finished_at)
+    ++ last_success_text ~timestamp row
+    ++ (match words with
+        | Some words -> dot ++ received words
+        | None -> Say.empty) )
 ;;
 
 let unreadable_line ({ keeper; reason } : Status.unreadable) =
   ( Bad
-  , Printf.sprintf
-      "  %s · 선언을 읽지 못해 정리하지 않음 · %s"
-      (single_line keeper)
-      (single_line reason) )
+  , Say.code "  " ++ received keeper
+    ++ Say.both ~ko:" · 선언을 읽지 못해 정리하지 않음 · " ~en:" · declaration unreadable, not cleaned · "
+    ++ received reason )
 ;;
 
 (* A block of the pane, set off from the one above by an empty line. *)
 let block = function
   | [] -> []
-  | lines -> (Plain, "") :: lines
+  | lines -> (Plain, Say.empty) :: lines
 ;;
 
 let section title = function
   | [] -> []
-  | rows -> block ((Heading, Printf.sprintf "%s %d" title (List.length rows)) :: rows)
+  | rows ->
+    block ((Heading, title ++ Say.code (Printf.sprintf " %d" (List.length rows))) :: rows)
 ;;
 
 let reading_lines ~timestamp (reading : Status_json.reading) =
@@ -241,31 +266,38 @@ let reading_lines ~timestamp (reading : Status_json.reading) =
     match reading.read_rows with
     | [] ->
       (match reading.read_pass with
-       | Ok (Some _) -> block [ Dim, "Keeper 별 결과: 아직 끝난 시도가 없습니다." ]
+       | Ok (Some _) ->
+         block [ Dim, Say.both ~ko:"Keeper 별 결과: 아직 끝난 시도가 없습니다."
+                        ~en:"Results by Keeper: no attempt has finished yet." ]
        | Ok None | Error _ -> [])
-    | _ :: _ -> section "Keeper 별 결과" (List.map (row_line ~timestamp) others)
+    | _ :: _ ->
+      section (Say.both ~ko:"Keeper 별 결과" ~en:"Results by Keeper") (List.map (row_line ~timestamp) others)
   in
   let unread =
     section
-      "읽지 못한 행"
-      (List.map (fun reason -> Bad, "  " ^ single_line reason) reading.unread_rows)
+      (Say.both ~ko:"읽지 못한 행" ~en:"Rows not read")
+      (List.map (fun reason -> Bad, Say.code "  " ++ received reason) reading.unread_rows)
   in
   let unknown =
     match reading.unknown_fields with
     | [] -> []
-    | names -> block [ Warn, "이 TUI 가 모르는 칸: " ^ names_text names ]
+    | names ->
+      block [ Warn, Say.both ~ko:"이 TUI 가 모르는 칸: " ~en:"Fields this TUI does not know: " ++ names_text names ]
   in
   pass_lines ~timestamp reading.read_pass
-  @ section "먼저 볼 것" (unreadable @ List.map (row_line ~timestamp) first)
+  @ section (Say.both ~ko:"먼저 볼 것" ~en:"Look at these first") (unreadable @ List.map (row_line ~timestamp) first)
   @ results
   @ unread
   @ unknown
 ;;
 
 let cleanup_lines ~timestamp = function
-  | Tools.Keeper_cleanup_absent -> [ Dim, "정리 결과: 이 서버는 정리 결과를 내지 않습니다." ]
+  | Tools.Keeper_cleanup_absent ->
+    [ Dim, Say.both ~ko:"정리 결과: 이 서버는 정리 결과를 내지 않습니다."
+             ~en:"Cleanup results: this server does not report them." ]
   | Tools.Keeper_cleanup_unreadable reason ->
-    [ Bad, "정리 결과를 읽지 못했습니다: " ^ single_line reason ]
+    [ Bad, Say.both ~ko:"정리 결과를 읽지 못했습니다: " ~en:"The cleanup results could not be read: "
+           ++ received reason ]
   | Tools.Keeper_cleanup_read reading -> reading_lines ~timestamp reading
 ;;
 

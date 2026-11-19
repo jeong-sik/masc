@@ -384,6 +384,119 @@ let test_schedules_report_the_rows_they_drew () =
     ; wl_cursor = (fun state -> state.schedule_cursor) }
     state
 
+(* Each notice is drawn at both sizes, so the list really shares the body
+   with it. *)
+let check_notices_drawn ~name render state notices =
+  List.iter
+    (fun size ->
+      with_size size (fun () ->
+        let lines, _ = draw render state in
+        List.iter
+          (fun notice ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%dx%d, %s: %S is drawn" (snd size) (fst size) name notice)
+              true (rows_naming notice lines > 0))
+          notices))
+    sizes
+
+(* The rows above and under a Work list take its share of the body: a read
+   that failed, a partial reading, a filter, an armed cancel, a refused
+   form. The list is drawn in what is left, so the report has to be the
+   entries drawn there and not the height the list has without them. *)
+let test_tasks_with_notices_report_the_entries_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Planning;
+  state.tasks <- List.init 40 task;
+  state.tasks_error <- Some "coverage read failed for one source";
+  state.goal_task_links <- Goal_links_read_failed "goal links unreadable";
+  let place state index =
+    state.task_focus <-
+      Masc_tui_overview_tasks.Task_focus
+        { selected = Option.map (fun (task : Tui_decode.task) -> task.id) (List.nth_opt state.tasks index) }
+  in
+  check_notices_drawn ~name:"Tasks" Masc_tui_render_work.render_work_tasks state
+    [ "coverage read failed"; "goal links unreadable" ];
+  check_work_list
+    { wl_name = "Task with notices"; wl_list = Task_entries; wl_marker = "tq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_work_tasks; wl_place = place
+    ; wl_cursor =
+        (fun state ->
+          Option.value ~default:0
+            (Masc_tui_overview_tasks.work_selected_index state.tasks
+               ~selected:(Masc_tui_overview_tasks.selection state.task_focus))) }
+    state
+
+let test_goals_with_notices_report_the_entries_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Planning;
+  let goals = List.init 40 goal in
+  state.planning <-
+    Some
+      { pl_goals = goals
+      ; pl_rollup =
+          { pr_active = 40; pr_verifying = 0; pr_awaiting_confirmation = 0; pr_done = 0
+          ; pr_dropped = 0; pr_paused = 0; pr_blocked = 0 }
+      ; pl_backlog =
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_awaiting_verification = 0
+          ; pb_done = 0; pb_cancelled = 0 }
+      ; pl_goal_history = []
+      ; pl_generated_at = "2026-11-19T00:00:00Z" };
+  (* A failed reload keeps the previous Goals and says so twice (scope and
+     error rows); a filter other than the default draws the modes row. *)
+  state.planning_error <- Some "goal reload failed";
+  state.planning_filter <- Planning_filter_all;
+  state.goal_task_links <- Goal_links_read_failed "goal links unreadable";
+  Alcotest.(check (list string)) "the visible Goals keep the fixture's order"
+    (List.map (fun (goal : planning_goal) -> goal.pg_id) goals)
+    (List.map (fun (goal : planning_goal) -> goal.pg_id)
+       (planning_visible_goals ~filter:state.planning_filter ~sort:state.planning_sort goals));
+  check_notices_drawn ~name:"Goals" Masc_tui_render_work.render_planning_list state
+    [ "goal reload failed"; "goal links unreadable" ];
+  check_work_list
+    { wl_name = "Goal with notices"; wl_list = Goal_entries; wl_marker = "gq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_planning_list
+    ; wl_place = (fun state index -> state.planning_cursor <- index)
+    ; wl_cursor = (fun state -> state.planning_cursor) }
+    state
+
+let test_schedules_with_notices_report_the_rows_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Schedules;
+  let rows = List.init 40 schedule in
+  state.schedules <-
+    Some
+      { scs_observed_at_iso = "2026-11-19T00:00:00Z"
+      ; scs_status = "ok"
+      ; scs_read_error = None
+      ; scs_request_count = Some 40
+      ; scs_truncated = false
+      ; scs_payload_target = None
+      ; scs_paging = Schedule_paging_unavailable
+      ; scs_next_due_iso = None
+      ; scs_counts = None
+      ; scs_rows = rows
+      ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok };
+  (* The source warning above the list, the armed cancel and the server's
+     refusal under it, and a refused form long enough to wrap: every row the
+     page spends outside the list. *)
+  state.schedules_error <- Some "schedule reload failed";
+  state.schedule_cancel_armed <- Some "schedule-03";
+  state.schedule_cancel_error <- Some ("schedule-04", Request_failed "cancel refused");
+  state.schedule_form_refusal <-
+    Some
+      { sfr_change = Schedule_create
+      ; sfr_reason = Schedule_form_request (Request_failed (String.concat " " (List.init 40 (fun _ -> "refused"))))
+      ; sfr_at = Unix.gettimeofday ()
+      ; sfr_workspace = None };
+  check_notices_drawn ~name:"Schedules" Masc_tui_render_work.render_schedules state
+    [ "schedule reload failed"; "schedule-03"; "cancel refused"; "refused refused" ];
+  check_work_list
+    { wl_name = "schedule with notices"; wl_list = Schedule_rows; wl_marker = "sq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_schedules
+    ; wl_place = (fun state index -> state.schedule_cursor <- index)
+    ; wl_cursor = (fun state -> state.schedule_cursor) }
+    state
+
 (* The Tools lists are rows of one scrolling page, and an entry can wrap, so
    a page counts the entries a window of the frame's height holds whole
    ({!Masc_tui_render_tools.drawn_page}). The frame draws the window from
@@ -678,6 +791,12 @@ let () =
             test_goals_report_the_entries_they_drew
         ; Alcotest.test_case "the schedule list reports the rows it drew" `Quick
             test_schedules_report_the_rows_they_drew
+        ; Alcotest.test_case "the Task list with notices reports the entries it drew" `Quick
+            test_tasks_with_notices_report_the_entries_they_drew
+        ; Alcotest.test_case "the Goal list with notices reports the entries it drew" `Quick
+            test_goals_with_notices_report_the_entries_they_drew
+        ; Alcotest.test_case "the schedule list with notices reports the rows it drew" `Quick
+            test_schedules_with_notices_report_the_rows_they_drew
         ; Alcotest.test_case "the Skill list pages by the entries a window holds" `Quick
             test_skills_page_by_the_entries_a_window_holds
         ; Alcotest.test_case "the request list pages by the entries a window holds" `Quick

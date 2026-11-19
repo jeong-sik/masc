@@ -1192,14 +1192,33 @@ let test_reads_are_counted_by_how_they_were_come_by () =
 
 (* --- every path, in a row and at once ---------------------------------- *)
 
+let day_file_count store =
+  let listed = function
+    | Ok paths -> paths
+    | Error error -> fail (D.read_error_to_string error)
+  in
+  List.fold_left
+    (fun total month -> total + List.length (listed (D.day_file_paths_newest_first_result month)))
+    0
+    (listed (D.month_dir_paths_newest_first_result store))
+;;
+
+type run =
+  { held : int
+  ; parsed_held : int
+  ; even_held : int
+  ; appends_that_removed_a_file : int
+  }
+
 (* A long run of every operation in an order drawn from a fixed seed. After
-   each one the fact is the strict read's answer. *)
-let test_the_fact_is_the_files_after_every_operation () =
-  with_eio
-  @@ fun () ->
+   each one the fact is the strict read's answer. With [max_bytes] the store
+   removes its oldest day files after an append that takes it past the
+   limit, as a Keeper's metrics store does. *)
+let run_of_every_operation ?max_bytes prefix =
   let random = Random.State.make [| 20261118 |] in
-  let location = temp_location "djkf_run" in
-  let store = D.open_store location in
+  let location = temp_location prefix in
+  let store = D.open_store ?max_bytes location in
+  let appends_that_removed_a_file = ref 0 in
   let number = ref 0 in
   let next () =
     incr number;
@@ -1210,7 +1229,12 @@ let test_the_fact_is_the_files_after_every_operation () =
   let even_held = ref 0 in
   for step = 1 to 400 do
     (match Random.State.int random 16 with
-     | 0 | 1 | 2 | 3 | 4 | 5 -> D.append store (next ())
+     | 0 | 1 | 2 | 3 | 4 | 5 ->
+       (* A plain append adds no file, so fewer files after it are files its
+          own prune removed. *)
+       let before = day_file_count store in
+       D.append store (next ());
+       if day_file_count store < before then incr appends_that_removed_a_file
      | 6 | 7 | 8 | 9 ->
        ignore
          (D.append_rotating store ~max_current_file_bytes:60 (next ()) : D.append_outcome)
@@ -1247,10 +1271,39 @@ let test_the_fact_is_the_files_after_every_operation () =
       store;
     check_the_window_is_the_files (Printf.sprintf "the window, after step %d" step) store
   done;
+  { held = !held
+  ; parsed_held = !parsed_held
+  ; even_held = !even_held
+  ; appends_that_removed_a_file = !appends_that_removed_a_file
+  }
+;;
+
+let test_the_fact_is_the_files_after_every_operation () =
+  with_eio
+  @@ fun () ->
+  let run = run_of_every_operation "djkf_run" in
   (* The run is not a run of file reads: most answers came from memory. *)
-  check bool "most answers were held" true (!held > 200);
-  check bool "most answers of the newest row that is JSON were held" true (!parsed_held > 200);
-  check bool "most answers of the newest even row were held" true (!even_held > 200)
+  check bool "most answers were held" true (run.held > 200);
+  check bool "most answers of the newest row that is JSON were held" true (run.parsed_held > 200);
+  check bool "most answers of the newest even row were held" true (run.even_held > 200);
+  check int "a store without a limit removes no file after an append" 0
+    run.appends_that_removed_a_file
+;;
+
+(* The same run in a store with a byte limit: an append that goes past it
+   removes the oldest day files, whichever fact is held, and the facts are
+   read again. The limit is under two rows, so every file but the current
+   one goes, and with it rows a window of three still held: a limit that
+   left the newest rows' files alone would remove nothing a fact here looks
+   at. *)
+let test_the_fact_is_the_files_with_a_byte_limit () =
+  with_eio
+  @@ fun () ->
+  let run = run_of_every_operation ~max_bytes:20 "djkf_run_limited" in
+  check bool "appends removed files in this run" true (run.appends_that_removed_a_file > 0);
+  (* A removal forgets, so fewer answers are held than without the limit;
+     the run is still not a run of file reads only. *)
+  check bool "some answers were held" true (run.held > 0 && run.even_held > 0)
 ;;
 
 (* One append and one reader of a forgotten fact, started together, many
@@ -1449,6 +1502,10 @@ let () =
             "the fact is the files after every operation"
             `Quick
             test_the_fact_is_the_files_after_every_operation
+        ; test_case
+            "the fact is the files in a store with a byte limit"
+            `Slow
+            test_the_fact_is_the_files_with_a_byte_limit
         ; test_case
             "an append and a reader together"
             `Quick

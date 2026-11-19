@@ -252,7 +252,11 @@ let test_producer_shaped_turn_rows_reach_the_summary () =
   Alcotest.(check int) "every row is sampled" 3 (summary_field "sample_points")
 ;;
 
-let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
+(* This executable never says [Fact_cell.keep_in_this_process]: it stands
+   for a process that does not write the stores, and every read below reads
+   the files. The kept audit is in [test_keeper_turn_tool_audit_kept], and
+   the purge's telling in [test_keeper_shutdown_official_client_purge]. *)
+let test_the_tool_audit_follows_the_rows_appended () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
@@ -288,7 +292,7 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
          = Ok None);
       Dated_jsonl.append store (heartbeat 2);
       Alcotest.(check bool)
-        "appended heartbeat preserves cached negative result"
+        "a second heartbeat is no turn either"
         true
         (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
            config
@@ -313,7 +317,7 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
       with
       | Ok (Some snapshot) ->
           Alcotest.(check (list string))
-            "new turn advances the incremental audit snapshot"
+            "the appended turn is the audit"
             [ "masc_status" ]
             snapshot.latest_tool_names
       | Ok None | Error _ ->
@@ -366,7 +370,7 @@ let test_tool_audit_observes_same_count_rotation_and_pruning () =
       Dated_jsonl.close store)
 ;;
 
-let test_tool_audit_cache_invalidation_for_recreated_keeper () =
+let test_a_recreated_keeper_is_read_from_its_own_files () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
@@ -893,19 +897,19 @@ let () =
             `Quick
             test_producer_shaped_turn_rows_reach_the_summary
         ] );
-      ( "tool audit cache",
+      ( "tool audit read from the files",
         [ Alcotest.test_case
-            "negative snapshot advances from appended rows"
+            "the audit follows the rows appended"
             `Quick
-            test_tool_audit_cache_advances_from_negative_by_appended_rows;
+            test_the_tool_audit_follows_the_rows_appended;
           Alcotest.test_case
             "same-count rotation observes the latest retained Turn"
             `Quick
             test_tool_audit_observes_same_count_rotation_and_pruning;
           Alcotest.test_case
-            "recreated Keeper does not inherit deleted audit"
+            "a recreated Keeper is read from its own files"
             `Quick
-            test_tool_audit_cache_invalidation_for_recreated_keeper
+            test_a_recreated_keeper_is_read_from_its_own_files
         ] );
       ( "profile default override provenance",
         [

@@ -69,6 +69,15 @@ let run_cmd cli_base_path =
   in
   Eio.Switch.on_release sw (fun () ->
     Server_startup_takeover.release_base_path_lease lease);
+  (* This process holds the workspace's writer lease until it exits and runs
+     the Keepers under it, so it keeps the facts of the stores only the lease
+     holder writes, as the HTTP server does. Without this every read of such
+     a fact reads the store's files. *)
+  (match Server_startup_takeover.keep_store_facts lease with
+   | Server_startup_takeover.Store_facts_kept -> ()
+   | Server_startup_takeover.Lease_not_held ->
+     Log.Server.warn
+       "store facts are read from the files each time: the BasePath lease just taken is not held");
   (* HIGH-RISK-UNREVIEWED: the stdio runtime opens a base path only after the
      same account mode judgment as the HTTP boot, right after the BasePath
      lease. MASC_ALLOW_ANONYMOUS_MUTATIONS configures the HTTP surface only;

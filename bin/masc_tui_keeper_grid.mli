@@ -66,8 +66,8 @@ val verdict : now:float -> Masc.Tui_decode.keeper_runtime option -> verdict
     hour. *)
 
 val mark : Masc_tui_keeper_list_model.view -> verdict -> string
-(** The row mark: [!] failing, [○] paused, [●] otherwise. The cause view marks
-    a recovered Keeper [✓]. *)
+(** The row mark: [✕] failing, [‖] paused, [●] otherwise. The cause view marks
+    a recovered Keeper [▲]. *)
 
 (** {1 Values} *)
 

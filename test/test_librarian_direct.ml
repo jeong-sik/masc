@@ -47,6 +47,7 @@ let outcome_text : Direct.t -> string = function
   | Refused Unknown_fact -> "refused: unknown fact"
   | Refused Supersedes_itself -> "refused: supersedes itself"
   | Refused Blank_claim -> "refused: blank claim"
+  | Refused Blank_trace -> "refused: blank trace"
   | Refused Malformed_derivation -> "refused: malformed derivation"
   | Refused (Premises_missing missing) -> "refused: premises missing " ^ String.concat "," missing
 ;;
@@ -262,6 +263,13 @@ let test_blank_claim () =
   check string "supersede" "refused: blank claim" (outcome (supersede port ""))
 ;;
 
+let test_blank_trace () =
+  let on_no_trace write = outcome_text (Direct.plan ~by:Effects.Keeper ~at ~trace_id:" " memory write) in
+  check string "remember" "refused: blank trace" (on_no_trace (remember "the probe runs every minute"));
+  check string "retract" "refused: blank trace"
+    (on_no_trace (Direct.Retract { id = id port; reason = "the port moved" }))
+;;
+
 let test_malformed_derivation () =
   check string "no derivation" "refused: malformed derivation"
     (outcome
@@ -302,7 +310,10 @@ let () =
             test_derived_claim_needs_its_premises
         ; test_case "a malformed derivation" `Quick test_malformed_derivation
         ] )
-    ; "claim", [ test_case "a blank claim" `Quick test_blank_claim ]
+    ; ( "what the snapshot cannot hold"
+      , [ test_case "a blank claim" `Quick test_blank_claim
+        ; test_case "a blank trace" `Quick test_blank_trace
+        ] )
     ; "repeat", [ test_case "the same write twice" `Quick test_same_write_twice ]
     ]
 ;;

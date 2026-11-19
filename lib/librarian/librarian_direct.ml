@@ -23,6 +23,7 @@ type refusal =
   | Unknown_fact
   | Supersedes_itself
   | Blank_claim
+  | Blank_trace
   | Malformed_derivation
   | Premises_missing of string list
 
@@ -40,6 +41,7 @@ let refusal_kind = function
   | Unknown_fact -> "unknown_fact"
   | Supersedes_itself -> "supersedes_itself"
   | Blank_claim -> "blank_claim"
+  | Blank_trace -> "blank_trace"
   | Malformed_derivation -> "malformed_derivation"
   | Premises_missing _ -> "premises_missing"
 ;;
@@ -110,7 +112,7 @@ let settle ~at ~facts ~states ~removed ~added ~touched =
     Writes { facts = Effects.apply ~at facts effects; effects }
 ;;
 
-let plan ~by ~at ~trace_id facts write =
+let plan_write ~by ~at ~trace_id facts write =
   match write with
   | Retract { id; reason } ->
     (match held id facts with
@@ -149,4 +151,12 @@ let plan ~by ~at ~trace_id facts write =
            settle ~at ~facts ~states:(Some id)
              ~removed:[ superseded, Effects.Superseded_by id ]
              ~added:[] ~touched:[ id ]))
+;;
+
+(* The snapshot names the trace of the write that made it, and its reader
+   refuses a snapshot that names none. *)
+let plan ~by ~at ~trace_id facts write =
+  if String.equal (String.trim trace_id) ""
+  then Refused Blank_trace
+  else plan_write ~by ~at ~trace_id facts write
 ;;

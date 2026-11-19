@@ -39,6 +39,14 @@ val sidebar_selection : Masc_tui_terminal_palette.t option -> string
     to reverse video without a usable colour palette. Indexed colours use
     xterm defaults for projection, not observed slot values. *)
 
+val selection_style : Masc_tui_terminal_palette.t option -> string
+(** A Truecolor accent-tinted selection band derived from the active palette
+    with a foreground verified to clear WCAG 4.5:1 over the tinted band, and
+    the band itself separated from the page ground. Falls back to a neutral
+    Truecolor step when the accent sits too close to the page, and to
+    {!selection} (reverse video) when colour is disabled, the palette is
+    absent, or stdout cannot emit direct 24-bit RGB. *)
+
 val recede : surface:surface -> Masc_tui_terminal_palette.t option -> string
 (** Secondary text is blended toward the palette background while the projected
     colour is estimated to retain 4.5:1 contrast against [surface]'s ground. For ANSI-256 the estimate
@@ -473,6 +481,15 @@ module For_testing : sig
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for {!val:recede}. *)
+
+  val selection_style
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:selection_style}. *)
 end
 
 val selection : string

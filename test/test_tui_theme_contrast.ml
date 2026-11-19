@@ -1020,6 +1020,90 @@ let test_contracts_cover_the_bundled_retro_presets () =
     retro_preset_names
 ;;
 
+let test_truecolor_selection_bar_clears_contrast_on_every_scheme () =
+  let parse_fg_bg drawn =
+    match String.index_opt drawn 'm' with
+    | None -> None
+    | Some split ->
+      let fg_part = String.sub drawn 0 (split + 1) in
+      let bg_part =
+        String.sub drawn (split + 1) (String.length drawn - split - 1)
+      in
+      (match
+         ( truecolor_rgb ~prefix:truecolor_prefix fg_part
+         , truecolor_rgb ~prefix:"\027[48;2;" bg_part )
+       with
+       | Some fg, Some bg -> Some (fg, bg)
+       | _ -> None)
+  in
+  List.iter
+    (fun scheme ->
+      let drawn =
+        Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+          ~project:truecolor (Some scheme.palette)
+      in
+      match parse_fg_bg drawn with
+      | None ->
+        Alcotest.failf "%s: expected Truecolor fg+bg selection bar, got %S"
+          scheme.name drawn
+      | Some (fg, bg) ->
+        let fg_ratio = Color.contrast_ratio fg bg in
+        let page_ratio = Color.contrast_ratio bg (background scheme) in
+        check bool
+          (Printf.sprintf "%s: selection fg reads at %.2f over band" scheme.name
+             fg_ratio)
+          true
+          (fg_ratio >= text_floor);
+        check bool
+          (Printf.sprintf "%s: selection band separates %.2f from page"
+             scheme.name page_ratio)
+          true
+          (page_ratio >= 1.15))
+    schemes
+;;
+
+let test_selection_bar_falls_back_to_reverse_without_truecolor () =
+  let sample = List.hd schemes in
+  let reverse = Masc_tui_theme.Sgr.reverse in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  check string "NO_COLOR keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:false
+       ~project:truecolor (Some sample.palette));
+  check string "missing palette keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:truecolor None);
+  check string "Ansi256 keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Ansi256) (Some sample.palette));
+  check string "Ansi16 keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Ansi16) (Some sample.palette));
+  check string "Unknown capability keeps reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:(project Palette.Unknown) (Some sample.palette));
+  (* Palette with no blue/cyan accent exercises the neutral Truecolor fallback. *)
+  let empty_slots = Array.make Palette.ansi_slot_count None in
+  let neutral_palette =
+    Palette.of_responses ~foreground:(Some (rgb 230 230 230))
+      ~background:(Some (rgb 24 24 32)) ~ansi:empty_slots
+  in
+  let neutral_drawn =
+    Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+      ~project:truecolor neutral_palette
+  in
+  check bool "missing accent slots use neutral Truecolor band" true
+    (String.starts_with ~prefix:truecolor_prefix neutral_drawn);
+  (* Unreadable low-contrast palette falls all the way back to reverse video. *)
+  let low_contrast_palette =
+    Palette.of_responses ~foreground:(Some (rgb 128 128 128))
+      ~background:(Some (rgb 120 120 120)) ~ansi:empty_slots
+  in
+  check string "unreadable palette falls back to reverse video" reverse
+    (Masc_tui_theme.For_testing.selection_style ~colors_enabled:true
+       ~project:truecolor low_contrast_palette)
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
@@ -1076,6 +1160,10 @@ let () =
             test_side_pane_recede_reads_on_every_scheme
         ; Alcotest.test_case "a declared-limit blend clears the floor on every scheme and surface"
             `Quick test_limit_blend_clears_floor_on_every_scheme_and_surface
+        ; Alcotest.test_case "truecolor selection bar clears contrast on every scheme"
+            `Quick test_truecolor_selection_bar_clears_contrast_on_every_scheme
+        ; Alcotest.test_case "selection bar falls back to reverse without truecolor"
+            `Quick test_selection_bar_falls_back_to_reverse_without_truecolor
 
         ] )
     ; ( "toml theme loading"

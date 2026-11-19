@@ -757,6 +757,96 @@ let panel_border paint role =
   | (Colors_256 | Truecolor), Panel_attention -> border_for Latency
 ;;
 
+let selection = Sgr.reverse
+
+(* Accent-tinted Truecolor selection band (lazygit style). Blending the page
+   ground toward the scheme's blue/cyan accent produces a calm highlight bar
+   instead of a stark reverse-video block, while holding a verified 4.5:1
+   foreground over the tinted ground and >= 1.15 separation from the page. *)
+let selection_bg_dark_ratio = 0.28
+let selection_bg_light_ratio = 0.22
+let selection_bg_min_contrast = 1.15
+let selection_neutral_max_ratio = 0.24
+
+let blend_rgb ~ratio base target =
+  let mix select =
+    blend_component ~toward:(select target) ~ratio (select base)
+  in
+  Terminal_palette.make_rgb
+    ~red:(mix Terminal_palette.red)
+    ~green:(mix Terminal_palette.green)
+    ~blue:(mix Terminal_palette.blue)
+;;
+
+let selection_accent_candidates palette =
+  List.filter_map
+    (fun slot -> Terminal_palette.ansi palette (ansi_color_index slot))
+    [ Bright_blue; Bright_cyan ]
+;;
+
+let try_selection_pair ~colors_enabled ~project ~foreground bg =
+  match project bg with
+  | Some bg_proj ->
+    (match Terminal_palette.direct_rgb bg_proj with
+     | Some bg_rgb ->
+       let fg_lifted =
+         Color.lift_for_contrast ~background:bg_rgb
+           ~floor:status_contrast_floor foreground
+       in
+       if Color.contrast_ratio fg_lifted bg_rgb >= status_contrast_floor then
+         (match project fg_lifted with
+          | Some fg_proj ->
+            (match Terminal_palette.direct_rgb fg_proj with
+             | Some fg_rgb
+               when Color.contrast_ratio fg_rgb bg_rgb >= status_contrast_floor ->
+               Some
+                 (projected_foreground ~colors_enabled (Some fg_proj)
+                  ^ projected_background ~colors_enabled (Some bg_proj))
+             | Some _ | None -> None)
+          | None -> None)
+       else None
+     | None -> None)
+  | None -> None
+;;
+
+let selection_style_for ~colors_enabled ~project palette =
+  if not colors_enabled then selection
+  else
+    match palette with
+    | None -> selection
+    | Some palette ->
+      let page = Terminal_palette.background palette in
+      let foreground = Terminal_palette.foreground palette in
+      let ratio =
+        if Color.is_light page then selection_bg_light_ratio
+        else selection_bg_dark_ratio
+      in
+      let try_bg bg =
+        if Color.contrast_ratio bg page >= selection_bg_min_contrast then
+          try_selection_pair ~colors_enabled ~project ~foreground bg
+        else None
+      in
+      let neutral () =
+        match
+          Color.recede_toward ~background:foreground
+            ~floor:status_contrast_floor ~max_ratio:selection_neutral_max_ratio
+            page
+        with
+        | Some bg -> try_bg bg
+        | None -> None
+      in
+      let accent_attempt =
+        List.find_map
+          (fun accent -> try_bg (blend_rgb ~ratio page accent))
+          (selection_accent_candidates palette)
+      in
+      (match accent_attempt with
+       | Some style -> style
+       | None ->
+         (match neutral () with
+          | Some style -> style
+          | None -> selection))
+;;
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
@@ -770,6 +860,7 @@ module For_testing = struct
   let status_text_readable = status_text_readable_for
   let meter_cell_readable = meter_cell_readable_for
   let ramp_style = ramp_style_for
+  let selection_style = selection_style_for
 end
 
 let ansi_readable ~surface palette color =
@@ -792,7 +883,10 @@ let meter_cell_readable paint cell =
     paint cell
 ;;
 
-let selection = Sgr.reverse
+let selection_style palette =
+  selection_style_for ~colors_enabled ~project:Terminal_palette.best_color
+    palette
+;;
 
 let sidebar_selection palette =
   if not colors_enabled then selection

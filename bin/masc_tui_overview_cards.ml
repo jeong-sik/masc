@@ -42,7 +42,7 @@ let row_lines ~cells label =
 (* The band covers the card's whole content width on every line of the row, so
    a row that wraps is still one selected thing. *)
 let band ~cells line =
-  Masc_tui_theme.selection ^ Layout.fit_width line cells ^ Ansi.reset
+  Theme.selection_style () ^ Layout.fit_width line cells ^ Ansi.reset
 
 let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in

@@ -319,7 +319,7 @@ let render_runtime_params (state : state) =
      let draft = Terminal_text.single_line edit.rpe_draft in
      let draft =
        if edit.rpe_replace_on_type && not picking
-       then Theme.selection ^ draft ^ Ansi.reset
+       then Theme.selection_style () ^ draft ^ Ansi.reset
        else draft
      in
      box_divider buf cols;
@@ -725,7 +725,7 @@ let render_prompt_registry (state : state) =
                 (max 1 (framed_inner_width cols - 3 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
+          box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
         else box_line buf cols (" " ^ label)
       end)
     prompt_rows;
@@ -803,7 +803,7 @@ let render_runtime_prompt_assets (state : state) =
          let line = mark ^ " "
              ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                  (Terminal_text.single_line asset.pra_path) in
-         if index = cursor then box_line buf cols (Theme.selection ^ " " ^ line ^ Ansi.reset)
+         if index = cursor then box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset)
          else box_line buf cols (" " ^ line)
        end)
     assets;
@@ -1163,7 +1163,7 @@ let render_presets (state : state) =
                       ~max_cells:(max 1 (framed_inner_width cols - 3)) manifest)
             ~tail:""
         in
-        if index = cursor then box_line buf cols (Theme.selection ^ label ^ Ansi.reset)
+        if index = cursor then box_line buf cols (Theme.selection_style () ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
         else box_line buf cols label
       end)
     presets;

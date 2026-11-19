@@ -67,6 +67,57 @@ let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
   let stats = persistence_utf8_repair_stats () in
   check int "repair was observed" 1 stats.repaired_reads
 
+(* The parse reads the text through a lexer that refills a small buffer, so
+   tokens that straddle a refill, comments, junk after the value and a cut
+   document must come out as [Yojson.Safe.from_string] has them. *)
+let test_parse_json_safe_reads_as_from_string () =
+  let long = String.make 3000 'x' in
+  let numbers = String.concat "," (List.init 700 (fun index -> string_of_int (index * 7919))) in
+  let documents =
+    [ {|{"foo": "bar", "n": [1, 2.5, -3e4, true, null]}|};
+      Printf.sprintf {|{"long": "%s", "numbers": [%s], "tail": "\u00e9\n"}|} long numbers;
+      "/* lead */ {\"a\": 1} // trail";
+      "/* only a comment */";
+      "{\"a\": 1} junk";
+      "{\"a\": [1, 2";
+      "[1, 2] [3]" ]
+  in
+  List.iter
+    (fun document ->
+      let expected =
+        match Yojson.Safe.from_string document with
+        | json -> Some json
+        | exception Yojson.Json_error _ -> None
+      in
+      let actual = Result.to_option (Safe_ops.parse_json_safe ~context:"lexer" document) in
+      check bool (Printf.sprintf "same reading for %S" (String.sub document 0 (Int.min 24 (String.length document))))
+        true (Option.equal Yojson.Safe.equal expected actual))
+    documents
+
+(* [Lexing.from_string] copies its whole input into the lexer's buffer. A
+   parse of a document made of small values allocates no block near the
+   document's size unless something copies it whole. Every allocation is
+   sampled. *)
+let test_parse_json_safe_does_not_copy_the_text () =
+  let document = "[" ^ String.concat "," (List.init 20_000 string_of_int) ^ "]" in
+  let largest = ref 0 in
+  let note (allocation : Gc.Memprof.allocation) =
+    largest := Int.max !largest allocation.size;
+    None
+  in
+  let profile =
+    Gc.Memprof.start ~sampling_rate:1.0 ~callstack_size:0
+      { Gc.Memprof.null_tracker with alloc_minor = note; alloc_major = note }
+  in
+  let parsed =
+    Fun.protect
+      ~finally:(fun () -> Gc.Memprof.stop (); Gc.Memprof.discard profile)
+      (fun () -> Safe_ops.parse_json_safe ~context:"copy" document)
+  in
+  check bool "the document parses" true (Result.is_ok parsed);
+  check bool "no block as large as the document" true
+    (!largest * (Sys.word_size / 8) < String.length document)
+
 let latest_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | (entry : Log.Ring.entry) :: _ -> entry.seq
@@ -589,6 +640,10 @@ let () =
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;
+      test_case "reads as Yojson from_string does" `Quick
+        test_parse_json_safe_reads_as_from_string;
+      test_case "does not copy the text whole" `Quick
+        test_parse_json_safe_does_not_copy_the_text;
     ];
     "read_file_safe", [
       test_case "not found" `Quick test_read_file_safe_not_found;

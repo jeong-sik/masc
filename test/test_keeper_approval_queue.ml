@@ -5611,11 +5611,7 @@ let check_pending_version_refused ~version =
                "gate_pending.version %d is unsupported (current 14); reset \
                 runtime state before restarting MASC"
                version)
-            reason
-        | Error error ->
-          Alcotest.failf
-            "unsupported version returned the wrong error: %s"
-            (Masc.Keeper_approval_queue_result.install_error_to_string error));
+            reason);
        let store_path = AQ.For_testing.pending_store_path ~base_path in
        Alcotest.(check bool) "original remains for operator reset" true
          (Sys.file_exists store_path);

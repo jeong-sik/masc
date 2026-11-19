@@ -21,6 +21,8 @@ type t
     file is empty: only holding it means anything. *)
 val lock_suffix : string
 
+val lock_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
 (** What a Keeper's request reads: how far the turn log is read, and what the
     Keeper was doing (§11.1). *)
 type view =

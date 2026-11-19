@@ -137,6 +137,8 @@ let test_world_shortcut_is_read_only_without_a_keeper () =
       let of_key = Story.action_of_key ~selection window in
       Alcotest.check (Alcotest.option action) "World opens without a Keeper target"
         (Some Story.Open_world) (of_key "W");
+      Alcotest.check (Alcotest.option action) "World opens via non-Shift 0 under Korean IME"
+        (Some Story.Open_world) (of_key "0");
       Alcotest.check (Alcotest.option action) "wake remains owned by the list"
         None (of_key "w"))
       (None :: List.map Option.some (Story.World :: Story.pages)))

@@ -3745,7 +3745,12 @@ let standalone_lane_answer ~ko (lane : standalone_lane) =
     { sla_output_meaning =
         t "Keeper 하나의 Memory 를 어떻게 바꿀지 제안. 반영은 그 Keeper 의 쓰는 쪽이 한다."
           "a proposal for how one Keeper's Memory changes; that Keeper's writer commits it."
-    ; sla_evidence = structured_output_without_ledger
+    ; sla_evidence =
+        (* [Lane_run_identity.keeps_run_records] is false for this lane. *)
+        t "구조화 출력 생성이며 MASC 도구 루프가 아닙니다. 이 lane 은 실행 기록을 \
+           남기지 않아서 입력·출력 원문을 열 곳이 없습니다."
+          "structured-output generation, not a MASC tool loop; this lane keeps \
+           no run records, so no exact Input/Output is retained to open."
     }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
@@ -3834,7 +3839,8 @@ let required_standalone_lane_field json field =
 let required_run_lane_field json field =
   let* id = required_string_field json field in
   match Lane_run_identity.of_id id with
-  | Some lane -> Ok lane
+  | Some lane when Lane_run_identity.keeps_run_records lane -> Ok lane
+  | Some _ -> Error (Printf.sprintf "%s: lane %s keeps no run records" field id)
   | None -> Error (Printf.sprintf "%s: unknown retained lane %s" field id)
 ;;
 

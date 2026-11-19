@@ -181,9 +181,12 @@ let standalone_lane_jev_summary ~ko (lane : Tui_decode.standalone_lane) =
 
 let hint key label = { Hint_lines.key; label }
 
-let exact_lane_overview_actions state =
-  [ hint "Enter" (ui_text state ~ko:"실행 기록" ~en:"runs")
-  ; hint "Space" (ui_text state ~ko:"켜기/끄기" ~en:"on/off")
+(* Enter opens the run history only of a lane that keeps one. *)
+let exact_lane_overview_actions state lane =
+  (if Lane_run_identity.keeps_run_records (Standalone_lane.run_identity lane)
+   then [ hint "Enter" (ui_text state ~ko:"실행 기록" ~en:"runs") ]
+   else [])
+  @ [ hint "Space" (ui_text state ~ko:"켜기/끄기" ~en:"on/off")
   ; hint "s / a" (ui_text state ~ko:"실행 후보 편집/추가" ~en:"edit/add candidates")
   ; hint "d" (ui_text state ~ko:"통계·후보·설정 근거" ~en:"statistics, candidates and evidence")
   ]
@@ -224,7 +227,7 @@ let standalone_lane_summary_lines state ~width ~standing
   feature_summary_lines state ~width ~label:lane.sl_label
     ~purpose:(standalone_lane_purpose ~ko:(state.ui_language = Lang_ko) lane)
     ~standing ~notices ~fields
-    ~actions:(exact_lane_overview_actions state)
+    ~actions:(exact_lane_overview_actions state lane.sl_lane)
 
 let inventory_row_summary_lines state ~width ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
@@ -242,10 +245,13 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
           | Disabled _ -> text "꺼짐" "Off", text "새 실행 중지" "New runs disabled", []
           | Unconfigured detail -> text "미설정" "Not configured", detail, []
           | Registry_unavailable detail -> text "미관측" "Not observed", detail, [] in
+        let actions = match row.selection with
+          | Exact lane -> exact_lane_overview_actions state lane
+          | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> [] in
         [field (text "모델 설정" "Model configuration") declared;
          field (text "실행 준비" "Admission") applied;
          field (text "실행 기록" "Run history") (text "미관측" "Not observed")],
-        errors, exact_lane_overview_actions state
+        errors, actions
     | Browser_clients reading ->
         let connection, notices = match reading with
           | Browser_observed count -> Printf.sprintf

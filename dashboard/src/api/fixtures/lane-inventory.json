@@ -420,7 +420,7 @@
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": "exact-output lane \"librarian_memory\" is not configured",
-        "status": "no_retained_observation",
+        "status": "unavailable",
         "retained_run_count": 0,
         "running_count": 0,
         "succeeded_count": 0,

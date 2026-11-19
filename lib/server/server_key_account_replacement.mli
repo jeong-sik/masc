@@ -69,10 +69,16 @@ val replace
     the server runs it, and so does the start of the preview.
 
     The records are read where the zone can be trusted ({!Authz_zone.read}),
-    and a zone that cannot be is not acted on: records that went back name
-    a generation before the one on disk, whose file is the key in use. Such
-    a zone stays so until a restart, so the first account that finds it so
-    is the last one asked about, and the log says it once.
+    as a decision made without a commit reads them, and a zone that cannot
+    be is not acted on. Such a zone stays so until a restart, so the first
+    account that finds it so is the last one asked about, and the log says
+    it once.
+
+    A log that went back alone stops the start before this runs. A log and
+    an external store that went back together are not told from ones that
+    did not: the files of a generation after the one their records say go
+    too. The file of the generation they say went at the replacement, so
+    the account reads no key until its key is sent again.
 
     The accounts are those the records hold when it starts: one registered
     after that has no file a stopped server left, and its replacements
@@ -87,6 +93,9 @@ val replace
     folder of their files (issue #53111). How many files of an account went
     goes to the log of the server, and so does a file that stays, an
     account that was not looked at, and an exception of one account, after
-    which the others are looked at. Cancellation and the exceptions of a
+    which the others are looked at. Of an account whose removal began and
+    whose owner has no membership nothing is said here: a removal that is
+    pending says it in its resume, and one that went through took the
+    files. Cancellation and the exceptions of a
     process that cannot go on are raised. *)
 val remove_left_keys : zone:Authz_zone.t -> base_path:string -> unit

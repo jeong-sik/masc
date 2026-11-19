@@ -162,8 +162,9 @@ type other_keys_swept =
     A folder of keys that is not there holds nothing, and neither does a
     runtime root that is not there. [Error] is a folder that was not looked
     at: what stands in its place is no folder, a link among them, and is
-    not read and is left, or its names could not be read. The detail is for
-    the log of the server too. The key file of [generation] is not looked
+    not read and is left, or its names could not be read, or the runtime
+    root could not be looked at, or no key file is spelled under it. The
+    detail is for the log of the server too. The key file of [generation] is not looked
     at, so this says nothing of whether the account has its key
     ({!key_state}).
 

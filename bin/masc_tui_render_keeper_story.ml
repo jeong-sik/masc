@@ -4,14 +4,14 @@ module Message_layout = Masc_tui_message_layout
 module Story = Masc_tui_keeper_story
 module Memory_reading = Masc_tui_keeper_memory_reading
 
-(* The window is a rule, a title and up to ten lines: the story page of a
-   Keeper whose feed holds its newest turns, its newest wakes and its last
-   digest is that long. A page with more lines gives the feed's oldest events
-   up first. The list keeps four rows whenever the window can keep its own four
-   beside them, which takes eight rows. On a shorter screen the window takes
-   every row and covers the list -- the overlay RFC-0515 section 2.5 gives a
-   screen too short for both -- rather than leave a list of one to three
-   rows. *)
+(* The window is a single embedded header rule and up to eleven body lines:
+   the story page of a Keeper whose feed holds its newest turns, its newest
+   wakes and its last digest fits cleanly inside that budget. A page with more
+   lines gives the feed's oldest events up first. The list keeps four rows
+   whenever the window can keep its own four beside them, which takes eight
+   rows. On a shorter screen the window takes every row and covers the list --
+   the overlay RFC-0515 section 2.5 gives a screen too short for both -- rather
+   than leave a list of one to three rows. *)
 let target_rows = 12
 let least_rows = 4
 let list_floor = 4
@@ -22,45 +22,64 @@ let rows ~budget =
   else min target_rows (budget - list_floor)
 ;;
 
-let dim text = Ansi.dim ^ text ^ Ansi.reset
+let dim text = Theme.recede () ^ text ^ Ansi.reset
 let warn text = Theme.warn () ^ text ^ Ansi.reset
 
-let tab ~current page =
-  let text = " " ^ Story.tab_label page ^ " " in
-  if page = current then Ansi.reverse ^ text ^ Ansi.reset else dim text
+let tab ~ko ~current page =
+  let hotkey, label = Story.tab_parts ~ko page in
+  if page = current then
+    let text =
+      match hotkey with
+      | Some key -> " " ^ key ^ " " ^ label ^ " "
+      | None -> " " ^ label ^ " "
+    in
+    Ansi.reverse ^ text ^ Ansi.reset
+  else
+    match hotkey with
+    | Some key ->
+        " " ^ Ansi.bold ^ key ^ Ansi.reset ^ " " ^ dim label ^ " "
+    | None -> dim (" " ^ label ^ " ")
 ;;
 
-(* Every tab when the title has room for them beside its lead, the current one
-   alone when it has not. *)
-let title ~inner ~lead ~current =
+(* btop-style embedded top rule: lead on the left, tabs on the right, filled
+   with receded horizontal rule cells so no separate divider row is spent. *)
+let header_rule ~ko ~inner ~lead ~current =
   let tabs = match current with
     | Story.World -> [Story.World]
     | Story.Story | Story.Schedule | Story.Memory -> Story.pages in
-  let all = String.concat " " (List.map (tab ~current) tabs) in
-  let tabs =
-    if Message_layout.display_width lead + 1 + Message_layout.display_width all <= inner
-    then all
-    else tab ~current current
+  let all = String.concat " " (List.map (tab ~ko ~current) tabs) in
+  let lead_cells = Message_layout.display_width lead in
+  let all_cells = Message_layout.display_width all in
+  let tabs_text, tabs_cells =
+    if lead_cells + 3 + all_cells <= inner then all, all_cells
+    else
+      let solo = tab ~ko ~current current in
+      solo, Message_layout.display_width solo
   in
-  let gap = max 1 (inner - Message_layout.display_width lead - Message_layout.display_width tabs) in
-  lead ^ String.make gap ' ' ^ tabs
+  let rule_count = inner - lead_cells - tabs_cells - 6 in
+  if rule_count >= 1 then
+    dim (draw_hline 1) ^ " " ^ lead ^ " "
+    ^ dim (draw_hline rule_count) ^ " " ^ tabs_text ^ " "
+    ^ dim (draw_hline 1)
+  else
+    let gap = max 1 (inner - lead_cells - tabs_cells) in
+    lead ^ String.make gap ' ' ^ tabs_text
 ;;
 
-(* The lines a window of [rows] rows holds: all but its rule and its title. *)
-let body_rows ~rows = max 0 (rows - 2)
+(* The lines a window of [rows] rows holds: all but its embedded header rule. *)
+let body_rows ~rows = max 0 (rows - 1)
 
-let draw buf ~cols ~rows ~lead ~current lines =
+let draw buf ~ko ~cols ~rows ~lead ~current lines =
   let inner = max 1 (framed_inner_width cols) in
   let body_rows = body_rows ~rows in
-  if rows >= 1 then box_divider buf cols;
-  if rows >= 2 then box_line buf cols (title ~inner ~lead ~current);
+  if rows >= 1 then box_line buf cols (header_rule ~ko ~inner ~lead ~current);
   let total = List.length lines in
   let shown =
     if total <= body_rows then lines
     else if body_rows = 0 then []
     else
       List.take (body_rows - 1) lines
-      @ [ dim (Printf.sprintf "  … %d more" (total - (body_rows - 1))) ]
+      @ [ dim ("  " ^ Masc_tui_value.Count.more ~ko (total - (body_rows - 1))) ]
   in
   List.iter (box_line buf cols) shown;
   for _ = 1 to body_rows - List.length shown do

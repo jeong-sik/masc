@@ -9,9 +9,11 @@
     ({!Server_setup_account_login.one_call_of}), as each verification and
     each turn on the account does, so none of them runs meanwhile.
 
-    + The last purge record of the account decides where the removal starts.
-      One that went through answers as an account that is not there, and one
-      that is pending goes on at the third step.
+    The last purge record of the account decides where the removal starts.
+    One that went through answers as an account that is not there, and one
+    that is pending goes on at the second step. The steps are those of the
+    RFC:
+
     + The owner writes [Purge_pending] ({!Authz_purge.start}). From this
       record on, no verification and no turn spends the account.
     + The folder of its keys and then its home are removed
@@ -36,7 +38,7 @@ type error =
   | Not_ended of Authz_purge.error
       (** The record of the end was not written. The removal stays pending:
           nothing spends the account, and the next removal of it, or the
-          next start of the server, goes on from the third step. *)
+          next start of the server, goes on from the second step. *)
   | Files_not_removed of Authz_purge_event.account_failed_stage
       (** [Purge_failed] was written with this stage. Nothing spends the
           account, and a removal by its owner starts again. *)

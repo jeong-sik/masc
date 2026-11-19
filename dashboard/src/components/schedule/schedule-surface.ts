@@ -359,7 +359,9 @@ export function ScheduleSurface() {
               onClick=${() => switchView('list')}
             >≡ 목록</button>
           </div>
-          <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
+          ${automation
+            ? html`<${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />`
+            : null}
           <${ActionButton}
             variant="danger"
             size="sm"
@@ -376,9 +378,14 @@ export function ScheduleSurface() {
           ? null
           : loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
-          : view === 'calendar'
+          // Without a projection nothing was read. A calendar drawn from no
+          // rows would call the coming days empty (as the cadence counts above
+          // would read zero), so that case goes to the panel, which says there
+          // is no projection.
+          : view === 'calendar' && automation
             ? html`<${ScheduleCalendar}
                 requests=${requests}
+                activeCount=${automation.fsm.active_count}
                 nowMs=${Date.now()}
                 cadenceFilter=${cadenceFilter}
                 onOpen=${selectSchedule}

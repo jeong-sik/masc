@@ -608,14 +608,22 @@ main(`11b1273e1b7de`)에서 센 값:
 값은 `Masc_tui_say.t` 하나다. 추상 타입이다.
 
 - `both ~ko ~en` 은 앱이 만든 글이다.
-- `per_language (function Lang_ko -> … | Lang_en -> …)` 는 수를 끼우는 글이다. 갈래 하나를
-  빠뜨리면 경고 8 이 빌드를 멈춘다(`dune` 의 `-warn-error +a`).
+- `per_language (function Ko -> … | En -> …)` 는 수를 끼우는 글이다. 갈래 하나를
+  빠뜨리면 경고 8 이 빌드를 멈춘다(`dune` 의 `-warn-error +a`). `Ko | En` 은 이 모듈의
+  variant 다. 이 모듈은 아무 모듈에도 기대지 않아 `Lang_ko | Lang_en` 을 쓰지 않는다.
 - `as_received` 는 원문 그대로 보이는 글이다. Keeper 이름, 사용자가 쓴 글, 모델 ID, 경로,
   설정 키, §6 값 모듈이 낸 수가 여기로 들어온다. 이 함수에 리터럴을 넘기지 않는다. 리뷰가
   본다. 이 RFC 는 세는 CI 검사를 두지 않는다(§12).
+- `code` 는 낱말이 없는 리터럴이다. `key=` 꼴의 필드 이름(`bytes=`, `tool use=`), 로그와 맞춰
+  읽는 코드, 한국어 화면도 영어로 쓰는 제품 이름(Skill, Keeper, Task, Composition, runtime,
+  snapshot), 기호가 여기로 들어온다. 그 밖의 낱말은 `both` 다.
+- `of_ko_flag` 는 아직 `~ko:bool` 을 받는 함수를 잇는 다리다. 마지막 층이 `~ko:bool` 과 함께
+  지운다. `map` 은 두 언어에 같은 변환(폭 맞추기, 자르기)을 한다.
 - 잇기는 `++` 와 `concat ~sep` 이다.
 - 언어는 그릴 때 한 번 고른다. `t` 를 `string` 으로 바꾸는 함수는 틀(`finish_surface`) 안의
-  `render` 하나다.
+  `render` 하나다. 줄 수가 언어마다 다른 화면(줄 바꿈, 표 맞춤)은 스크롤을 세기 전에 그려야
+  하므로, 그 화면이 줄을 넘기는 자리에서 한 번 고른다. 도구·스킬 화면은
+  `tools_display_lines` 의 `draw` 다(#53226).
 
 자리는 화면 본문이다. 지금 본문은 `surface_chrome ~body` 의 `chrome_body.push : string ->
 unit` 로 줄을 낸다. 옮긴 화면은 새 수집기로 줄을 낸다. 그 수집기에는 `string` 을 받는 함수가

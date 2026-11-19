@@ -545,6 +545,28 @@ let test_tools_readings_answer_no_list_move () =
   Alcotest.(check bool) "the source picker keeps the move keys" true
     (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
 
+(* The frame finds the selection where it is drawn now, so the follow runs
+   after the key moved it. A follow that ran first would hold the window on
+   the row the key left, and j on the window's last row would walk the
+   selection off screen. *)
+let test_tools_follow_sees_where_the_key_landed () =
+  let state = tools_surface 5 in
+  let seen = ref [] in
+  let note_skill _ = seen := state.tools_skill_cursor :: !seen in
+  press ~follow:note_skill state Move.Line_down;
+  press ~follow:note_skill state Move.To_end;
+  press ~follow:note_skill state (Move.Page_up 2);
+  Alcotest.(check (list int)) "each follow sees the Skill its key selected" [ 2; 4; 1 ]
+    !seen;
+  let state = tools_async [ "a"; "b"; "c" ] in
+  state.tools_async_selection <- Some (target "a");
+  let seen = ref [] in
+  let note_request _ = seen := selected_request state :: !seen in
+  press ~follow:note_request state Move.Line_down;
+  press ~follow:note_request state Move.To_end;
+  Alcotest.(check (list (option string))) "each follow sees the request its key selected"
+    [ Some "c"; Some "b" ] !seen
+
 let () =
   Alcotest.run "tui list moves"
     [ ( "keeper list"
@@ -574,6 +596,8 @@ let () =
             test_tools_async_list_walks_the_selection
         ; Alcotest.test_case "the readings answer no list move" `Quick
             test_tools_readings_answer_no_list_move
+        ; Alcotest.test_case "the follow sees where the key landed" `Quick
+            test_tools_follow_sees_where_the_key_landed
         ] )
     ; ( "detail height"
       , [ Alcotest.test_case "a detail keeps the tallest height" `Quick

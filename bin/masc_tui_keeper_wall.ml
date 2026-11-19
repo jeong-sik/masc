@@ -45,7 +45,7 @@ let dimensions cols =
 let prefix name_cells mark name =
   "▌ " ^ mark ^ " " ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
 
-let header ~cols ~now =
+let header ~ko ~cols ~now =
   let name, count = dimensions cols in
   let start = Masc.Keeper_turn_pulse.slot_start now - ((count - 1) * Masc.Keeper_turn_pulse.slot_seconds) in
   let ruler = Bytes.make count ' ' in
@@ -65,8 +65,15 @@ let header ~cols ~now =
       ticks (position + 12)
     end in
   ticks first_tick;
-  if count >= 3 then Bytes.blit_string "now" 0 ruler (count - 3) 3;
-  prefix name " " "keeper" ^ Bytes.to_string ruler ^ "┃ fail"
+  (* The ruler holds ASCII hour labels, one byte a cell; the now word is laid
+     after the cells it takes, so a Korean word keeps the ruler's width. *)
+  let now_word = if ko then "현재" else "now" in
+  let now_cells = Layout.display_width now_word in
+  let ruler = Bytes.to_string ruler in
+  let ruler =
+    if count >= now_cells then String.sub ruler 0 (count - now_cells) ^ now_word else ruler in
+  prefix name " " (Masc_tui_keeper_mark.grid_column_word ~ko Masc_tui_keeper_mark.Keeper_column)
+  ^ ruler ^ (if ko then "┃ 실패" else "┃ fail")
 
 let marks hours =
   String.concat "" (List.map (fun hour ->
@@ -99,11 +106,11 @@ let fleet ~ko ~cols ~now runtimes =
     Pulse.failure_count (List.map (fun hours ->
       match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
   let peak = Pulse.peak_failure_count counts in
-  prefix name_cells " " "fleet"
+  prefix name_cells " " (if ko then "전체" else "fleet")
   ^ band ~count all (fun () ->
       String.concat "" (List.map (function
         | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
         | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
         | (Pulse.Exact n | Pulse.At_least n) ->
             Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts))
-  ^ "┃ peak " ^ count_text peak
+  ^ (if ko then "┃ 최대 " else "┃ peak ") ^ count_text peak

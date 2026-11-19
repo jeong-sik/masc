@@ -538,7 +538,7 @@ named on its title row: `story`, `s schedules` and `m memory`.
   wake, the error the schedule recorded.
   A source the window has not read, cannot read, has cut, is reading again or
   whose read failed does not vanish from the feed: a line of its own after the
-  events says so, one line per source, for example `turns reading…`,
+  events says so, one line per source, for example `turns reading`,
   `wakes from the first page only` or `wakes (schedule read failed)`.
 - `s schedules` is the first page of the Keeper's own schedules, the page the
   Automation tab (`J`) draws first, led by the same `◷` cell the list draws and

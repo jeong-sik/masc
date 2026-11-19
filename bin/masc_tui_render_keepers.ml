@@ -777,7 +777,7 @@ let grid_wake_strip state (grid : Grid.t) ~now ~keeper_name =
     (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
        ~keeper_name)
 
-let grid_due ~now verdict next_run =
+let grid_due ~ko ~now verdict next_run =
   let style =
     match next_run, verdict with
     | (Masc_tui_keeper_next_run.Late_since _ | Masc_tui_keeper_next_run.Held_current _), _ ->
@@ -790,7 +790,7 @@ let grid_due ~now verdict next_run =
         Theme.recede ()
   in
   style
-  ^ fit_width (Grid.due_text ~now ~localtime:Unix.localtime next_run) Grid.due_cells
+  ^ fit_width (Grid.due_text ~ko ~now ~localtime:Unix.localtime next_run) Grid.due_cells
   ^ Ansi.reset
 
 (* The count sits on the right of its column, then a space and its level. *)
@@ -825,11 +825,11 @@ let grid_quiet text = { Masc_tui_keeper_axis_cell.text; tone = Masc_tui_keeper_a
 (* The memory view's ● cell: how the librarian's last pass ended. A row with
    no pass is one this server process has not seen a pass for yet, not a
    Keeper without a librarian, so it keeps the unmeasured mark. *)
-let grid_librarian memory =
+let grid_librarian ~ko memory =
   grid_fitted Grid.now_cells
     (match Memory_reading.pass_end memory with
      | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
-         grid_quiet Keeper_mark.grid_no_data_word
+         grid_quiet (Keeper_mark.grid_word ~ko Keeper_mark.No_data_word)
      | Memory_reading.Measured _ | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown
      | Memory_reading.Row_refused -> Memory_reading.pass_cell memory)
 
@@ -935,7 +935,7 @@ let grid_fact_ages (grid : Grid.t) memory =
       style_axis_cell { cell with text = Message_layout.pad_left cell.text grid.side_cells }
 
 (* The age view's ● cell: how long ago the memory snapshot was saved. *)
-let grid_saved ~now memory =
+let grid_saved ~ko ~now memory =
   match Memory_reading.updated_at memory with
   | Memory_reading.Measured at ->
       fit_width
@@ -943,7 +943,8 @@ let grid_saved ~now memory =
         Grid.now_cells
   | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
       grid_fitted Grid.now_cells
-        (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
+        (grid_quiet
+           (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_word ~ko Keeper_mark.No_snapshot_word))
   | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused ->
       grid_fitted Grid.now_cells (Memory_reading.updated_cell ~now memory)
 
@@ -993,14 +994,14 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          ; pulse = pulse ()
          ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) row
          ; strip = grid_wake_strip state grid ~now ~keeper_name
-         ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
+         ; due = grid_due ~ko:(state.ui_language = Lang_ko) ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
          }
      | Axis_row.Memory_columns ->
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = grid_librarian memory
+         ; now_cell = grid_librarian ~ko:(state.ui_language = Lang_ko) memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_digest ~now memory
          ; right = grid_gap grid memory
@@ -1009,7 +1010,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = grid_fact_ages grid memory
-         ; now_cell = grid_saved ~now memory
+         ; now_cell = grid_saved ~ko:(state.ui_language = Lang_ko) ~now memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_stale memory
          ; right = grid_facts grid ~peak_facts memory
@@ -1018,7 +1019,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
 (* The failure line under a failing Keeper of the state and cause views
    (§2.4.6). Under the name: when the failing phase began, or how long ago the
    last failure was when the server recorded no start. *)
-let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
+let grid_failure_since ~ko ~now ~room (runtime : keeper_runtime option) trail =
   let failing =
     match runtime with
     | None -> Masc_tui_keeper_pulse.Not_failing
@@ -1030,12 +1031,12 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
   match failing, trail with
   | Masc_tui_keeper_pulse.Failing_since at, (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ->
       let clock = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
-      let worded = Keeper_mark.grid_since_word ^ " " ^ clock in
+      let worded = Keeper_mark.grid_since_text ~ko clock in
       (* The word goes first, so a cut never leaves a minute that reads as data. *)
       if Message_layout.display_width worded <= room then worded else clock
   | Masc_tui_keeper_pulse.Failing_unrecorded, Keeper_trail.Trail_failed { ended_at = Some at; _ }
     when at <= now ->
-      Masc_tui_value.Ongoing.since ~now at ^ " " ^ Keeper_mark.grid_ago_word
+      Keeper_mark.grid_ago_text ~ko (Masc_tui_value.Ongoing.since ~now at)
   | ( (Masc_tui_keeper_pulse.Failing_unrecorded | Masc_tui_keeper_pulse.Not_failing)
     , (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ) -> ""
 
@@ -1079,7 +1080,7 @@ let grid_failure_chain (grid : Grid.t) runtime trail =
 
 (* From the strip column on: the runtime the next dispatch takes, or the one
    whose rest it waits out. *)
-let grid_next_dispatch (runtime : keeper_runtime option) =
+let grid_next_dispatch ~ko (runtime : keeper_runtime option) =
   match runtime with
   | Some runtime when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase -> (
       match runtime.Tui_decode.kr_runtime_path_rest with
@@ -1089,7 +1090,7 @@ let grid_next_dispatch (runtime : keeper_runtime option) =
       | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at = _; release_basis = _ })) ->
           Theme.recede ()
           ^ String.concat " "
-              [ Keeper_mark.grid_wait_glyph; Keeper_mark.grid_wait_word
+              [ Keeper_mark.grid_wait_glyph; Keeper_mark.grid_word ~ko Keeper_mark.Wait_word
               ; Terminal_text.single_line runtime_id ]
           ^ Ansi.reset
       | Ok None -> ""
@@ -1099,11 +1100,11 @@ let grid_next_dispatch (runtime : keeper_runtime option) =
 
 let grid_since_lead = Keeper_mark.failing_glyph ^ " "
 
-let grid_failure_line (grid : Grid.t) ~now (row : Keeper_list_model.row) =
+let grid_failure_line ~ko (grid : Grid.t) ~now (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let trail = Keeper_list_model.trail_of_row row in
   let since =
-    grid_failure_since ~now
+    grid_failure_since ~ko ~now
       ~room:(grid.name_cells - Message_layout.display_width grid_since_lead)
       runtime trail
   in
@@ -1117,7 +1118,7 @@ let grid_failure_line (grid : Grid.t) ~now (row : Keeper_list_model.row) =
     ; " "
     ; grid_band grid_blank_now
     ; " "
-    ; fit_width (grid_next_dispatch runtime) (grid_tail_cells grid)
+    ; fit_width (grid_next_dispatch ~ko runtime) (grid_tail_cells grid)
     ]
 
 (* Group sums use only members of this heading, including folded rows. *)
@@ -3216,7 +3217,7 @@ let render_keeper_axes (state : state) =
                    ~runtime:(keeper_row_runtime row)
                in
                emit (keeper_secondary_row_content ~ko ~now:now_unix ~inner ~cells row)
-           | Axis_row.Failure_chain -> emit (grid_failure_line grid ~now:now_unix row)))
+           | Axis_row.Failure_chain -> emit (grid_failure_line ~ko:(state.ui_language = Lang_ko) grid ~now:now_unix row)))
     entries_window;
 
   let note =

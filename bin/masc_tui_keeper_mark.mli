@@ -185,7 +185,8 @@ val grid_pulse_failed_and_ok_mark : string
     and an ok one. A half hour of failed turns only draws {!grid_full_mark}. *)
 
 val grid_wait_glyph : string
-(** [◌]: a next dispatch that waits out a rest, on the failure line. *)
+(** [○], the waiting mark: a next dispatch that waits out a rest, on the
+    failure line. *)
 
 val grid_full_mark : string
 (** [█]: a filled cell of the lag bar, and a pulse half hour of failed turns
@@ -242,6 +243,18 @@ type grid_column =
 val grid_column_word : ko:bool -> grid_column -> string
 (** A view's column header in the screen's language (RFC tui-one-screen-grammar
     7.1). In English it is the [grid_*_header] word the legend names. *)
+
+type grid_word = Late_word | Held_word | Wait_word | No_data_word | No_snapshot_word
+
+val grid_word : ko:bool -> grid_word -> string
+(** A word inside a view's cell in the screen's language; in English it is the
+    [grid_*_word] the legend names. *)
+
+val grid_since_text : ko:bool -> string -> string
+(** [since 15:43] / [15:43부터]. *)
+
+val grid_ago_text : ko:bool -> string -> string
+(** [5m ago] / [5m 전]. *)
 
 val grid_next_column_word : ko:bool -> window:string -> string
 (** {!grid_next_header} in the screen's language: [다음 ▹ 12h]. *)

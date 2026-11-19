@@ -92,7 +92,14 @@ let resolution_of_observation obligation = function
     {Semantic.obligation; decision=Semantic.Gate_denied detail}
 
 let validate_native ~base_path ~keeper_name checkpoint =
-  let* expected = Native.load ~base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
+  let* expected =
+    Native.load_for_runtime
+      ~base_path
+      ~keeper_name
+      ~client_kind:checkpoint.Semantic.client_kind
+      ~runtime_id:checkpoint.runtime_id
+    |> Result.map_error Native.read_error_to_string
+  in
   Native.validate_continuation ~checkpoint ~expected ~client_kind:checkpoint.Semantic.client_kind
     ~runtime_id:checkpoint.runtime_id ~tool_surface_sha256:checkpoint.tool_surface_sha256
 

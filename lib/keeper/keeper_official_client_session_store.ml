@@ -225,6 +225,8 @@ type claim_error =
 open Result.Syntax
 let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
+let retained_dirname = "runtimes"
+let bridge_cursors_filename = "bridge-cursors.json"
 let recovery_rng = Random.State.make_self_init ()
 let recovery_rng_mutex = Stdlib.Mutex.create ()
 
@@ -258,6 +260,30 @@ let path ~base_path ~keeper_name =
   Result.map
     (fun directory -> Filename.concat directory filename)
     (state_dir ~base_path ~keeper_name)
+;;
+
+let bridge_cursors_path ~base_path ~keeper_name =
+  Result.map
+    (fun directory -> Filename.concat directory bridge_cursors_filename)
+    (state_dir ~base_path ~keeper_name)
+;;
+
+let retained_dir ~state_dir = Filename.concat state_dir retained_dirname
+
+let retained_filename ~client_kind ~runtime_id =
+  let kind_str =
+    Keeper_semantic_execution.official_client_kind_to_string client_kind
+  in
+  let digest =
+    Agent_core_sha256.(digest_string (kind_str ^ "\000" ^ runtime_id) |> to_hex)
+  in
+  Printf.sprintf "%s_%s.json" kind_str digest
+;;
+
+let retained_path ~state_dir ~client_kind ~runtime_id =
+  Filename.concat
+    (retained_dir ~state_dir)
+    (retained_filename ~client_kind ~runtime_id)
 ;;
 
 let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
@@ -1154,25 +1180,144 @@ let load ~base_path ~keeper_name =
   load_path state_path
 ;;
 
-let save_path ~state_dir binding =
-  let* () = validate binding in
-  let state_path = Filename.concat state_dir filename in
+let load_retained_for_runtime ~state_dir ~client_kind ~runtime_id =
+  let rpath = retained_path ~state_dir ~client_kind ~runtime_id in
+  let* binding_opt = load_path rpath in
+  match binding_opt with
+  | None -> Ok None
+  | Some binding ->
+    if binding.client_kind = client_kind && String.equal binding.runtime_id runtime_id
+    then Ok (Some binding)
+    else
+      Error
+        (Not_current
+           { path = rpath
+           ; detail = "retained official-client session identity mismatch"
+           })
+;;
+
+let is_incomplete_phase = function
+  | Start _ | Active _ | Turn_inflight _ -> true
+  | Ready | Recovery_required _ | Settled _ -> false
+;;
+
+let load_for_runtime ~base_path ~keeper_name ~client_kind ~runtime_id =
+  let* directory =
+    state_dir ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Invalid_path detail)
+  in
+  let* primary = load_path (Filename.concat directory filename) in
+  match primary with
+  | Some binding
+    when binding.client_kind = client_kind
+         && String.equal binding.runtime_id runtime_id ->
+    Ok (Some binding)
+  | Some binding when is_incomplete_phase binding.phase ->
+    Ok (Some binding)
+  | Some _ | None ->
+    load_retained_for_runtime ~state_dir:directory ~client_kind ~runtime_id
+;;
+
+let retained_bindings ~base_path ~keeper_name =
+  let* directory =
+    state_dir ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Invalid_path detail)
+  in
+  let* primary = load_path (Filename.concat directory filename) in
+  let rdir = retained_dir ~state_dir:directory in
+  let* from_retained =
+    match Unix.lstat rdir with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | exception Unix.Unix_error (cause, _, _) ->
+      Error
+        (Unreadable
+           { path = rdir; detail = Unix.error_message cause })
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      (match Sys.readdir rdir with
+       | exception Sys_error detail -> Error (Unreadable { path = rdir; detail })
+       | entries ->
+         entries
+         |> Array.to_list
+         |> List.filter (fun name -> Filename.check_suffix name ".json")
+         |> List.sort String.compare
+         |> List.fold_left
+              (fun acc name ->
+                 let* acc = acc in
+                 let* loaded = load_path (Filename.concat rdir name) in
+                 Ok (match loaded with None -> acc | Some b -> b :: acc))
+              (Ok [])
+         |> Result.map List.rev)
+    | { Unix.st_kind = Unix.(S_REG | S_LNK | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+      Error
+        (Unreadable
+           { path = rdir; detail = "retained official-client runtimes path is not a directory" })
+  in
+  let merged =
+    match primary with
+    | None -> from_retained
+    | Some p ->
+      if
+        List.exists
+          (fun b ->
+             b.client_kind = p.client_kind && String.equal b.runtime_id p.runtime_id)
+          from_retained
+      then from_retained
+      else p :: from_retained
+  in
+  let compare_identity left right =
+    let c =
+      String.compare
+        (Keeper_semantic_execution.official_client_kind_to_string left.client_kind)
+        (Keeper_semantic_execution.official_client_kind_to_string right.client_kind)
+    in
+    if c <> 0 then c else String.compare left.runtime_id right.runtime_id
+  in
+  Ok (List.sort compare_identity merged)
+;;
+
+let save_verified_binding ~ownership_root ~target_path binding =
   let* () =
     match
       Keeper_fs.save_json_durable_atomic
-        ~ownership_root:state_dir
+        ~ownership_root
         ~pretty:false
-        state_path
+        target_path
         (to_yojson binding)
     with
     | Ok () -> Ok ()
     | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
   in
-  let* persisted = load_path state_path |> Result.map_error read_error_to_string in
+  let* persisted = load_path target_path |> Result.map_error read_error_to_string in
   match persisted with
   | Some persisted when equal persisted binding -> Ok ()
   | Some _ -> Error "official-client session changed after durable write"
   | None -> Error "official-client session missing after durable write"
+;;
+
+let save_retained_binding ~state_dir binding =
+  let rdir = retained_dir ~state_dir in
+  let* () =
+    try
+      let (_ : string) = Keeper_fs.ensure_dir rdir in
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  let rpath =
+    retained_path
+      ~state_dir
+      ~client_kind:binding.client_kind
+      ~runtime_id:binding.runtime_id
+  in
+  save_verified_binding ~ownership_root:state_dir ~target_path:rpath binding
+;;
+
+let save_path ~state_dir binding =
+  let* () = validate binding in
+  let state_path = Filename.concat state_dir filename in
+  let* () = save_verified_binding ~ownership_root:state_dir ~target_path:state_path binding in
+  save_retained_binding ~state_dir binding
 ;;
 
 let prepare_state_dir ~base_path ~keeper_name =
@@ -1365,6 +1510,39 @@ let move_aside ~base_path ~keeper_name ~rejected_path =
     value
 ;;
 
+let clear_retained_files ~directory =
+  let rdir = retained_dir ~state_dir:directory in
+  match Unix.lstat rdir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exception Unix.Unix_error (cause, _, _) ->
+    Error (Printf.sprintf "failed to inspect %s: %s" rdir (Unix.error_message cause))
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Sys.readdir rdir with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       let* () =
+         entries
+         |> Array.to_list
+         |> List.fold_left
+              (fun acc name ->
+                 let* () = acc in
+                 Keeper_fs.remove_file_durable
+                   ~ownership_root:directory
+                   (Filename.concat rdir name)
+                 |> Result.map_error Keeper_fs.durable_remove_error_to_string)
+              (Ok ())
+       in
+       (match Unix.rmdir rdir with
+        | () -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOTEMPTY, _, _) -> Ok ()
+        | exception Unix.Unix_error (cause, _, _) ->
+          Error (Printf.sprintf "failed to remove %s: %s" rdir (Unix.error_message cause))))
+  | { Unix.st_kind = Unix.(S_REG | S_LNK | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+    Keeper_fs.remove_file_durable ~ownership_root:directory rdir
+    |> Result.map_error Keeper_fs.durable_remove_error_to_string
+;;
+
 let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
   let* directory = state_dir ~base_path ~keeper_name in
   match inspect_store_directory directory with
@@ -1388,9 +1566,18 @@ let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
              ~keeper_name
              "official-client session binding could not be read before clear; removing it under the claim lock: %s"
              (read_error_to_string detail));
-        (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
-         | Ok () -> Ok (after_clear ())
-         | Error error -> Error (Keeper_fs.durable_remove_error_to_string error))
+        let* () =
+          Keeper_fs.remove_file_durable ~ownership_root:directory state_path
+          |> Result.map_error Keeper_fs.durable_remove_error_to_string
+        in
+        let* () = clear_retained_files ~directory in
+        let* () =
+          Keeper_fs.remove_file_durable
+            ~ownership_root:directory
+            (Filename.concat directory bridge_cursors_filename)
+          |> Result.map_error Keeper_fs.durable_remove_error_to_string
+        in
+        Ok (after_clear ())
     in
     (match with_lock ~lock_path:(store_lock_path directory) body with
      | File_lock_eio.Lock_not_acquired error ->
@@ -1709,6 +1896,59 @@ let gate_context_refusal = function
   | Canonical_context_changed ->
     Keeper_official_client_session_refusal.Gate_canonical_context_changed
 
+let transition_claim ~base_path ~keeper_name ~expected next =
+  let* () = validate next in
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let* current_primary =
+      load_path (Filename.concat directory filename)
+      |> Result.map_error read_error_to_string
+    in
+    let same_identity (binding : t) =
+      binding.client_kind = next.client_kind
+      && String.equal binding.runtime_id next.runtime_id
+    in
+    let cas_error () =
+      Error "official-client session changed before durable transition"
+    in
+    let* () =
+      match current_primary with
+      | Some { phase = Start _ | Active _ | Turn_inflight _; _ } -> cas_error ()
+      | Some ({ phase = Ready | Recovery_required _ | Settled _; _ } as cp) ->
+        if same_identity cp
+        then if Option.equal equal current_primary expected then Ok () else cas_error ()
+        else if Option.equal equal current_primary expected
+        then Ok ()
+        else
+          let* current_retained =
+            load_retained_for_runtime
+              ~state_dir:directory
+              ~client_kind:next.client_kind
+              ~runtime_id:next.runtime_id
+            |> Result.map_error read_error_to_string
+          in
+          if Option.equal equal current_retained expected then Ok () else cas_error ()
+      | None ->
+        if Option.equal equal None expected
+        then Ok ()
+        else
+          let* current_retained =
+            load_retained_for_runtime
+              ~state_dir:directory
+              ~client_kind:next.client_kind
+              ~runtime_id:next.runtime_id
+            |> Result.map_error read_error_to_string
+          in
+          if Option.equal equal current_retained expected then Ok () else cas_error ()
+    in
+    let* () =
+      match current_primary with
+      | Some prev when not (same_identity prev) ->
+        save_retained_binding ~state_dir:directory prev
+      | Some _ | None -> Ok ()
+    in
+    save_path ~state_dir:directory next |> Result.map (fun () -> next))
+;;
+
 let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
   let context_frontier = Option.map (fun frontier ->
@@ -1729,7 +1969,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     Option.bind expected (fun binding -> binding.last_recovery_resolution)
   in
   let* claimed =
-    transition
+    transition_claim
       ~base_path
       ~keeper_name
       ~expected
@@ -2168,6 +2408,48 @@ let reconcile_process_restart ~base_path ~keeper_name ~expected
            current_owner_epoch)
       ~required_at
     |> Result.map_error unrecorded
+;;
+
+let load_reconciled_for_runtime
+      ~base_path
+      ~keeper_name
+      ~client_kind
+      ~runtime_id
+      ~current_owner_epoch
+      ~required_at
+  =
+  let client_label =
+    Keeper_semantic_execution.official_client_kind_to_string client_kind
+  in
+  let map_load_error detail =
+    Agent_core.Error.Internal
+      (Printf.sprintf "%s session binding load failed: %s" client_label (read_error_to_string detail))
+  in
+  match load_for_runtime ~base_path ~keeper_name ~client_kind ~runtime_id with
+  | Error detail -> Error (map_load_error detail)
+  | Ok None -> Ok None
+  | Ok (Some ({ phase = Start _ | Active _ | Turn_inflight _; _ } as expected)) ->
+    (match
+       reconcile_process_restart
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~current_owner_epoch
+         ~required_at
+     with
+     | Error error -> Error (process_restart_error_to_core_error error)
+     | Ok reconciled ->
+       if
+         reconciled.client_kind = client_kind
+         && String.equal reconciled.runtime_id runtime_id
+       then Ok (Some reconciled)
+       else (
+         match load_for_runtime ~base_path ~keeper_name ~client_kind ~runtime_id with
+         | Ok session -> Ok session
+         | Error detail -> Error (map_load_error detail)))
+  | Ok
+      (Some { phase = Ready | Recovery_required _ | Settled _; _ } as stored_session) ->
+    Ok stored_session
 ;;
 
 let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution

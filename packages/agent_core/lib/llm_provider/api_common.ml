@@ -20,16 +20,53 @@ let max_response_body = 10 * 1024 * 1024
     within this process even when several OCaml 5 domains open streams at the
     same time.  The process id prevents a post-[fork] child from sharing the
     parent's namespace. *)
+let base36_alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+let encode_base36 ~min_width n =
+  let rec collect acc v =
+    let digit = base36_alphabet.[Int64.to_int (Int64.unsigned_rem v 36L)] in
+    let next = Int64.unsigned_div v 36L in
+    if next = 0L then digit :: acc else collect (digit :: acc) next
+  in
+  let digits = collect [] n in
+  let len = List.length digits in
+  let pad = Int.max 0 (min_width - len) in
+  let buf = Buffer.create (pad + len) in
+  for _ = 1 to pad do
+    Buffer.add_char buf '0'
+  done;
+  List.iter (Buffer.add_char buf) digits;
+  Buffer.contents buf
+;;
+
+(* 36^9 = 101_559_956_668_416 (~46.5 bits of process-scope entropy in 9 base36
+   chars) keeps "call_agent_core_<scope9>_<pid_b36>_<seq_b36>" comfortably
+   under OpenAI's 40-char tool_call id limit while preserving the existing
+   "call_agent_core_" prefix. *)
+let tool_use_id_scope_modulus = 101_559_956_668_416L
+
 let tool_use_id_process_scope =
   let state = Random.State.make_self_init () in
-  Printf.sprintf "%016Lx%016Lx" (Random.State.bits64 state) (Random.State.bits64 state)
+  let raw = Random.State.bits64 state in
+  encode_base36 ~min_width:9 (Int64.unsigned_rem raw tool_use_id_scope_modulus)
 ;;
 
 let tool_use_id_sequence = Atomic.make 0
 
 let fresh_tool_use_id () =
   let sequence = Atomic.fetch_and_add tool_use_id_sequence 1 in
-  Printf.sprintf "call_agent_core_%s_%x_%x" tool_use_id_process_scope (Unix.getpid ()) sequence
+  let pid_b36 = encode_base36 ~min_width:1 (Int64.of_int (Unix.getpid ())) in
+  let seq_b36 = encode_base36 ~min_width:1 (Int64.of_int sequence) in
+  let id =
+    Printf.sprintf
+      "call_agent_core_%s_%s_%s"
+      tool_use_id_process_scope
+      pid_b36
+      seq_b36
+  in
+  if String.length id <= Tool_call_id_wire.openai_max_length
+  then id
+  else Tool_call_id_wire.wire_id_for_openai id
 ;;
 
 let string_is_blank s = String.trim s = ""
@@ -339,6 +376,7 @@ type tool_result_content_style =
 
 (** Content block <-> JSON *)
 let rec content_block_to_json_with
+          ?(map_tool_id = Fun.id)
           ~(tool_result_content_style : tool_result_content_style)
   = function
   | Text s ->
@@ -381,13 +419,14 @@ let rec content_block_to_json_with
   | ToolUse { id; name; input } ->
     `Assoc
       [ "type", `String "tool_use"
-      ; "id", `String id
+      ; "id", `String (map_tool_id id)
       ; "name", `String name
       ; "input", input
       ]
   | ToolResult { tool_use_id; content; outcome; content_blocks; _ } ->
     `Assoc
       (tool_result_wire_fields_with
+         ~map_tool_id
          ~tool_result_content_style
          ~tool_use_id
          ~content
@@ -425,6 +464,7 @@ let rec content_block_to_json_with
       ]
 
 and tool_result_wire_fields_with
+      ?(map_tool_id = Fun.id)
       ~tool_result_content_style
       ~tool_use_id
       ~content
@@ -436,7 +476,8 @@ and tool_result_wire_fields_with
     | Some blocks ->
       (* Structured result: emit the blocks (text/image/...) as the
          tool_result content array. *)
-      `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
+      `List
+        (List.map (content_block_to_json_with ~map_tool_id ~tool_result_content_style) blocks)
     | None ->
       (match tool_result_content_style with
        | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
@@ -449,14 +490,14 @@ and tool_result_wire_fields_with
            ])
   in
   [ "type", `String "tool_result"
-  ; "tool_use_id", `String tool_use_id
+  ; "tool_use_id", `String (map_tool_id tool_use_id)
   ; "content", content_json
   ; "is_error", `Bool (tool_result_outcome_is_error outcome)
   ]
 ;;
 
-let content_block_to_json =
-  content_block_to_json_with ~tool_result_content_style:Tool_result_content_string
+let content_block_to_json block =
+  content_block_to_json_with ~tool_result_content_style:Tool_result_content_string block
 ;;
 
 let tool_result_wire_fields ~tool_use_id ~content ~outcome =
@@ -713,6 +754,7 @@ let kimi_message_to_json (msg : message) =
       , `List
           (List.map
              (content_block_to_json_with
+                ~map_tool_id:Tool_call_id_wire.wire_id_for_anthropic
                 ~tool_result_content_style:Tool_result_content_text_blocks)
              msg.content) )
     ]
@@ -859,4 +901,16 @@ let make_https_result ?tls_config () : (tls_peer -> _ -> _, https_init_error) re
         match peer with
         | Peer_host host -> Tls_eio.client_of_flow tls_config ~host flow
         | Peer_ip ip -> Tls_eio.client_of_flow tls_config ~ip flow)
+;;
+
+let%test "fresh_tool_use_id fits within 40-char OpenAI bound and stays unique" =
+  let a = fresh_tool_use_id () in
+  let b = fresh_tool_use_id () in
+  String.starts_with ~prefix:"call_agent_core_" a
+  && String.starts_with ~prefix:"call_agent_core_" b
+  && String.length a <= Tool_call_id_wire.openai_max_length
+  && String.length b <= Tool_call_id_wire.openai_max_length
+  && not (String.equal a b)
+  && String.equal (Tool_call_id_wire.wire_id_for_openai a) a
+  && String.equal (Tool_call_id_wire.wire_id_for_anthropic a) a
 ;;

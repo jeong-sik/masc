@@ -56,7 +56,7 @@ type t =
       }
   | Nothing_to_ask
   | No_answer of
-      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.t) list
+      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
       (** Every slot of the lane value the walk started with: the admitted
           HTTP slots, then the declared CLI slots, each in declared order.
           The writer reads only the slots the lane declares now; whether

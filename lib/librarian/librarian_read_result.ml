@@ -28,7 +28,7 @@ type t =
       }
   | Nothing_to_ask
   | No_answer of
-      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.t) list }
+      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list }
   | Nothing_readable of
       { reach : reach
       ; missing : Librarian_unit.missing_at list

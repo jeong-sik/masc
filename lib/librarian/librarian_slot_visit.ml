@@ -6,42 +6,44 @@ type http =
   | Rejected_before_dispatch of Exact.candidate_rejection_disposition
   | Execution_failed of Exact.execution_error_cause
   | Answer_rejected of Librarian_answer.rejection
-  | Answer_accepted
 
 type cli =
   | Cli_failed of Keeper_lane_cli_oneshot.failure
   | Cli_answer_rejected of Librarian_answer.rejection
-  | Cli_answer_accepted
 
-type t =
+type unanswered =
   | Not_visited
   | Http of http
   | Cli of cli
+
+type t =
+  | Answer_accepted
+  | Unanswered of unanswered
 
 (* One function per type of the slot-outcome table, each defined before the
    functions that call it. An arm that calls another of them is a
    "> file type" row of the table. *)
 
-let token_capacity (rejection : Exact.token_capacity_rejection) : Librarian_slot_outcome.t =
+let token_capacity (rejection : Exact.token_capacity_rejection) : Librarian_slot_outcome.unanswered =
   match rejection with
   | Capacity_input_rejected _ -> Refused (Sized Input_too_large)
   | Capacity_evidence_not_yet_valid _ | Capacity_evidence_expired _
   | Capacity_boundary_unknown _ -> Silent Unavailable
 
-let input_capacity (disposition : Exact.input_capacity_disposition) : Librarian_slot_outcome.t =
+let input_capacity (disposition : Exact.input_capacity_disposition) : Librarian_slot_outcome.unanswered =
   match disposition with
   | Context_window_exceeded _ -> Refused (Sized Input_too_large)
   | Token_capacity_rejected rejection -> token_capacity rejection
   | Token_measurement_required _ -> Silent Unavailable
 
-let rejected (disposition : Exact.candidate_rejection_disposition) : Librarian_slot_outcome.t =
+let rejected (disposition : Exact.candidate_rejection_disposition) : Librarian_slot_outcome.unanswered =
   match disposition with
   | Input_capacity disposition -> input_capacity disposition
   | Seats_full -> Silent Not_called
   | Runtime_slot_unavailable | Runtime_contract_rejected | Input_contract_rejected
   | Output_requirement_rejected | Request_preparation_failed -> Silent Unavailable
 
-let provider_refusal (refusal : Exact.provider_refusal) : Librarian_slot_outcome.t =
+let provider_refusal (refusal : Exact.provider_refusal) : Librarian_slot_outcome.unanswered =
   match refusal with
   | Request_body_refused | Context_overflow -> Refused (Sized Input_too_large)
   | Invalid_request -> Refused Unsized
@@ -50,13 +52,13 @@ let provider_refusal (refusal : Exact.provider_refusal) : Librarian_slot_outcome
   | Input_capacity -> Silent Unavailable
   | Refusal_body_not_received | Network_error | Connect_failed | Timeout -> Silent Lost
 
-let incomplete_stop (stop : Exact.incomplete_stop) : Librarian_slot_outcome.t =
+let incomplete_stop (stop : Exact.incomplete_stop) : Librarian_slot_outcome.unanswered =
   match stop with
   | Refusal | Content_filter -> Refused Unsized
   | End_turn | Tool_use | Stop_sequence | Repetition_truncation | Pause_turn | Compaction
   | Unmatched_tool_calls | Unknown_stop _ -> Silent (Unusable Empty_or_partial)
 
-let stop_reason (stop : Llm_provider.Types.stop_reason) : Librarian_slot_outcome.t =
+let stop_reason (stop : Llm_provider.Types.stop_reason) : Librarian_slot_outcome.unanswered =
   match stop with
   | MaxTokens -> Refused (Sized Output_over_reserve)
   | ContextWindowExceeded -> Refused (Sized Window_reached)
@@ -64,12 +66,12 @@ let stop_reason (stop : Llm_provider.Types.stop_reason) : Librarian_slot_outcome
   | EndTurn | StopToolUse | StopSequence | RepetitionTruncation | PauseTurn | Compaction
   | UnmatchedToolCalls | Unknown _ -> Silent (Unusable Empty_or_partial)
 
-let provider_terminal (kind : Http_client.provider_terminal_kind) : Librarian_slot_outcome.t =
+let provider_terminal (kind : Http_client.provider_terminal_kind) : Librarian_slot_outcome.unanswered =
   match kind with
   | Session_conflict -> Silent Unavailable
   | Other _ -> Silent Lost
 
-let provider_failure (kind : Http_client.provider_failure_kind) : Librarian_slot_outcome.t =
+let provider_failure (kind : Http_client.provider_failure_kind) : Librarian_slot_outcome.unanswered =
   match kind with
   | Context_overflow _ -> Refused (Sized Input_too_large)
   | Empty_completion { stop_reason = stop } -> stop_reason stop
@@ -79,14 +81,14 @@ let provider_failure (kind : Http_client.provider_failure_kind) : Librarian_slot
   | Response_body_too_large _ -> Silent (Unusable Empty_or_partial)
   | Provider_reported_error _ | Provider_interrupted | Unknown_provider_failure _ -> Silent Lost
 
-let http_error (error : Http_client.http_error) : Librarian_slot_outcome.t =
+let http_error (error : Http_client.http_error) : Librarian_slot_outcome.unanswered =
   match error with
   | ProviderTerminal { kind; _ } -> provider_terminal kind
   | ProviderFailure { kind; _ } -> provider_failure kind
   | AcceptRejected _ -> Silent Unavailable
   | HttpError _ | NetworkError _ | Connect_failed _ | TimeoutError _ -> Silent Lost
 
-let execution (cause : Exact.execution_error_cause) : Librarian_slot_outcome.t =
+let execution (cause : Exact.execution_error_cause) : Librarian_slot_outcome.unanswered =
   match cause with
   | Completion_failed { error; _ } -> http_error error
   | Provider_response_refused { refusal; _ } -> provider_refusal refusal
@@ -102,7 +104,7 @@ let execution (cause : Exact.execution_error_cause) : Librarian_slot_outcome.t =
     Silent (Unusable Not_json)
   | Response_body_deadline_exceeded -> Silent Lost
 
-let codex_info (info : Runtime_codex_app_server.Codex_error_info.t) : Librarian_slot_outcome.t =
+let codex_info (info : Runtime_codex_app_server.Codex_error_info.t) : Librarian_slot_outcome.unanswered =
   match info with
   | Cyber_policy | Misalignment_policy_violation | Bad_request -> Refused Unsized
   | Usage_limit_exceeded | Rate_limit_exceeded | Server_overloaded | Internal_server_error ->
@@ -116,7 +118,7 @@ let codex_info (info : Runtime_codex_app_server.Codex_error_info.t) : Librarian_
 (* A client's overflow is a refusal before generation only when it shows that
    nothing was generated: no tool ran, and for Claude no response came. *)
 
-let codex (error : Runtime_codex_app_server.error) : Librarian_slot_outcome.t =
+let codex (error : Runtime_codex_app_server.error) : Librarian_slot_outcome.unanswered =
   match error with
   | Context_window_exceeded { tool_effect_attempted = false; _ } -> Refused (Sized Input_too_large)
   | Context_window_exceeded { tool_effect_attempted = true; _ } -> Refused (Sized Window_reached)
@@ -128,7 +130,7 @@ let codex (error : Runtime_codex_app_server.error) : Librarian_slot_outcome.t =
   | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down | Process_exited _
   | Timeout _ -> Silent Lost
 
-let claude (error : Runtime_claude_code.error) : Librarian_slot_outcome.t =
+let claude (error : Runtime_claude_code.error) : Librarian_slot_outcome.unanswered =
   match error with
   | Context_window_exceeded { tool_effect_attempted; response_emitted; _ } ->
     (match tool_effect_attempted, response_emitted with
@@ -144,14 +146,14 @@ let claude (error : Runtime_claude_code.error) : Librarian_slot_outcome.t =
   | Turn_failed _ | Stopped_by_host _ | Process_exited _ | Unhandled_exception _ | Timeout _ ->
     Silent Lost
 
-let antigravity (error : Runtime_antigravity.error) : Librarian_slot_outcome.t =
+let antigravity (error : Runtime_antigravity.error) : Librarian_slot_outcome.unanswered =
   match error with
   | Spawn_capacity_busy _ -> Silent Not_called
   | Invalid_config _ | Spawn_refused _ | Child_fd_ceiling_exceeded _ -> Silent Unavailable
   | Protocol_error _ | State_callback_failed _ | Turn_failed _ | Result_not_completed _
   | Actions_denied _ | Process_exited _ | Unhandled_exception _ | Timeout _ -> Silent Lost
 
-let muse (error : Runtime_muse_serve.error) : Librarian_slot_outcome.t =
+let muse (error : Runtime_muse_serve.error) : Librarian_slot_outcome.unanswered =
   match error with
   | Turn_failed { quota = Some _; _ } -> Silent Busy
   | Turn_failed { quota = None; _ } -> Silent Lost
@@ -162,7 +164,7 @@ let muse (error : Runtime_muse_serve.error) : Librarian_slot_outcome.t =
   | Unsupported_server_request _ | Runtime_shutting_down | Process_exited _ | Timeout _ ->
     Silent Lost
 
-let client (failure : Fusion_official_client.failure) : Librarian_slot_outcome.t =
+let client (failure : Fusion_official_client.failure) : Librarian_slot_outcome.unanswered =
   match failure with
   | Codex_failure error -> codex error
   | Claude_failure error | Claude_admission_failure error -> claude error
@@ -173,7 +175,7 @@ let client (failure : Fusion_official_client.failure) : Librarian_slot_outcome.t
   (* The load check refuses a Vibe runtime as a lane slot, so no walk runs one. *)
   | Vibe_failure _ -> Silent Unavailable
 
-let cli_failure (failure : Keeper_lane_cli_oneshot.failure) : Librarian_slot_outcome.t =
+let cli_failure (failure : Keeper_lane_cli_oneshot.failure) : Librarian_slot_outcome.unanswered =
   match failure with
   | Execution_failed { cause; _ } -> client cause
   | Held _ -> Silent Not_called
@@ -183,11 +185,14 @@ let cli_failure (failure : Keeper_lane_cli_oneshot.failure) : Librarian_slot_out
      detail; the text is not read. *)
   | Invalid_domain_output _ -> Silent Lost
 
-let classify : t -> Librarian_slot_outcome.t = function
+let classify_unanswered : unanswered -> Librarian_slot_outcome.unanswered = function
   | Not_visited | Http Held -> Silent Not_called
   | Http (Rejected_before_dispatch disposition) -> rejected disposition
   | Http (Execution_failed cause) -> execution cause
   | Cli (Cli_failed failure) -> cli_failure failure
   | Http (Answer_rejected rejection) | Cli (Cli_answer_rejected rejection) ->
     Silent (Unusable rejection)
-  | Http Answer_accepted | Cli Cli_answer_accepted -> Slot_answered
+
+let classify : t -> Librarian_slot_outcome.t = function
+  | Answer_accepted -> Slot_answered
+  | Unanswered visit -> Unanswered (classify_unanswered visit)

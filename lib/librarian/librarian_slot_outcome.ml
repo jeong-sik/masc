@@ -14,7 +14,10 @@ type silence =
   | Lost
   | Unusable of Librarian_answer.rejection
 
-type t =
-  | Slot_answered
+type unanswered =
   | Refused of refusal
   | Silent of silence
+
+type t =
+  | Slot_answered
+  | Unanswered of unanswered

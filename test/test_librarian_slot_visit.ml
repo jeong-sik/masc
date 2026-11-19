@@ -64,18 +64,18 @@ let table () =
 (* An outcome as the table writes it. *)
 let outcome_text : Masc.Librarian_slot_outcome.t -> string = function
   | Slot_answered -> "Slot_answered"
-  | Refused (Sized Input_too_large) -> "Refused (Sized Input_too_large)"
-  | Refused (Sized Output_over_reserve) -> "Refused (Sized Output_over_reserve)"
-  | Refused (Sized Window_reached) -> "Refused (Sized Window_reached)"
-  | Refused Unsized -> "Refused Unsized"
-  | Silent Not_called -> "Silent Not_called"
-  | Silent Unavailable -> "Silent Unavailable"
-  | Silent Busy -> "Silent Busy"
-  | Silent Lost -> "Silent Lost"
-  | Silent (Unusable Not_json) -> "Silent (Unusable Not_json)"
-  | Silent (Unusable (Schema_violation _)) -> "Silent (Unusable Schema_violation)"
-  | Silent (Unusable Echo_mismatch) -> "Silent (Unusable Echo_mismatch)"
-  | Silent (Unusable Empty_or_partial) -> "Silent (Unusable Empty_or_partial)"
+  | Unanswered (Refused (Sized Input_too_large)) -> "Refused (Sized Input_too_large)"
+  | Unanswered (Refused (Sized Output_over_reserve)) -> "Refused (Sized Output_over_reserve)"
+  | Unanswered (Refused (Sized Window_reached)) -> "Refused (Sized Window_reached)"
+  | Unanswered (Refused Unsized) -> "Refused Unsized"
+  | Unanswered (Silent Not_called) -> "Silent Not_called"
+  | Unanswered (Silent Unavailable) -> "Silent Unavailable"
+  | Unanswered (Silent Busy) -> "Silent Busy"
+  | Unanswered (Silent Lost) -> "Silent Lost"
+  | Unanswered (Silent (Unusable Not_json)) -> "Silent (Unusable Not_json)"
+  | Unanswered (Silent (Unusable (Schema_violation _))) -> "Silent (Unusable Schema_violation)"
+  | Unanswered (Silent (Unusable Echo_mismatch)) -> "Silent (Unusable Echo_mismatch)"
+  | Unanswered (Silent (Unusable Empty_or_partial)) -> "Silent (Unusable Empty_or_partial)"
 
 (* A type of the table: the rows a value of it passes from a root type, and
    the visit that carries such a value. *)
@@ -112,7 +112,9 @@ let plain source value visit = { rows = [ Not_constructor { source; value } ]; v
 
 let exact = "exact_output.mli"
 let http = "http_client.mli"
-let rejection = root ~file:exact ~type_:"candidate_rejection_disposition" (fun d -> Visit.Http (Rejected_before_dispatch d))
+let rejection =
+  root ~file:exact ~type_:"candidate_rejection_disposition" (fun d ->
+    Visit.Unanswered (Http (Rejected_before_dispatch d)))
 
 (* Exact_output declares Input_capacity twice. The constraint names this one. *)
 let input_capacity =
@@ -123,7 +125,8 @@ let token_capacity =
   below input_capacity "Token_capacity_rejected" ~file:exact ~type_:"token_capacity_rejection"
     (fun r -> Exact.Token_capacity_rejected r)
 
-let cause = root ~file:exact ~type_:"execution_error_cause" (fun c -> Visit.Http (Execution_failed c))
+let cause =
+  root ~file:exact ~type_:"execution_error_cause" (fun c -> Visit.Unanswered (Http (Execution_failed c)))
 
 (* classify reads the refusal, not the status. *)
 let refusal =
@@ -150,7 +153,8 @@ let stop_reason =
   below failure_kind "Empty_completion" ~file:"types.mli" ~type_:"stop_reason" (fun stop_reason ->
     Http_client.Empty_completion { stop_reason })
 
-let cli = root ~file:"keeper_lane_cli_oneshot.mli" ~type_:"failure" (fun f -> Visit.Cli (Cli_failed f))
+let cli =
+  root ~file:"keeper_lane_cli_oneshot.mli" ~type_:"failure" (fun f -> Visit.Unanswered (Cli (Cli_failed f)))
 
 let client =
   below cli "Execution_failed" ~file:"fusion_official_client.mli" ~type_:"failure" (fun cause ->
@@ -422,18 +426,17 @@ let samples =
   ; at muse "Runtime_shutting_down" Muse.Runtime_shutting_down
   ; at muse "Process_exited" (Muse.Process_exited { status = None; detail = ""; turn_accepted = false })
   ; at muse "Timeout" (Muse.Timeout { seconds = 0.; turn_accepted = false })
-  ; plain "the ask's own fold" "a declared slot with no visit" Visit.Not_visited
-  ; plain "Runtime_exact_lane_backpressure.order" "a slot in held_http" (Visit.Http Held)
-  ; plain answer_check "Not_json" (Visit.Http (Answer_rejected Not_json))
-  ; plain answer_check "Not_json" (Visit.Cli (Cli_answer_rejected Not_json))
-  ; plain answer_check "Schema_violation" (Visit.Http (Answer_rejected schema_violation))
-  ; plain answer_check "Schema_violation" (Visit.Cli (Cli_answer_rejected schema_violation))
-  ; plain answer_check "Echo_mismatch" (Visit.Http (Answer_rejected Echo_mismatch))
-  ; plain answer_check "Echo_mismatch" (Visit.Cli (Cli_answer_rejected Echo_mismatch))
-  ; plain answer_check "Empty_or_partial" (Visit.Http (Answer_rejected Empty_or_partial))
-  ; plain answer_check "Empty_or_partial" (Visit.Cli (Cli_answer_rejected Empty_or_partial))
-  ; plain answer_check "accepted" (Visit.Http Answer_accepted)
-  ; plain answer_check "accepted" (Visit.Cli Cli_answer_accepted)
+  ; plain "the ask's own fold" "a declared slot with no visit" (Visit.Unanswered Not_visited)
+  ; plain "Runtime_exact_lane_backpressure.order" "a slot in held_http" (Visit.Unanswered (Http Held))
+  ; plain answer_check "Not_json" (Visit.Unanswered (Http (Answer_rejected Not_json)))
+  ; plain answer_check "Not_json" (Visit.Unanswered (Cli (Cli_answer_rejected Not_json)))
+  ; plain answer_check "Schema_violation" (Visit.Unanswered (Http (Answer_rejected schema_violation)))
+  ; plain answer_check "Schema_violation" (Visit.Unanswered (Cli (Cli_answer_rejected schema_violation)))
+  ; plain answer_check "Echo_mismatch" (Visit.Unanswered (Http (Answer_rejected Echo_mismatch)))
+  ; plain answer_check "Echo_mismatch" (Visit.Unanswered (Cli (Cli_answer_rejected Echo_mismatch)))
+  ; plain answer_check "Empty_or_partial" (Visit.Unanswered (Http (Answer_rejected Empty_or_partial)))
+  ; plain answer_check "Empty_or_partial" (Visit.Unanswered (Cli (Cli_answer_rejected Empty_or_partial)))
+  ; plain answer_check "accepted" Visit.Answer_accepted
   ]
 
 let every_row_gives_its_outcome () =

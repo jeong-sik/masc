@@ -597,7 +597,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 type ask_result =                        (* 코드는 Librarian_read_result.t *)
   | Answered of { question : question; answer : answer; slot : string }
   | Nothing_to_ask
-  | No_answer of { slots : (slot_key * slot_outcome) list }   (* 답한 slot 이 없다 *)
+  | No_answer of { slots : (slot_key * unanswered) list }     (* 답한 slot 이 없다. 그래서 답한 slot 을 담지 못한다 *)
   | Nothing_readable of { reach : reach; missing : missing_at list }
   | Span_unknown of { before : mark; reach : reach }          (* reach 는 그 reset 줄까지 Whole *)
   | Memory_diverged of { expected : Sha256.t; observed : Sha256.t }
@@ -623,7 +623,8 @@ type size_fact =
   | Window_reached         (* 입력과 출력이 창에 닿아 멈췄다. 내용이 있든 없든. 생성 하나를 썼다 *)
 type refusal = Sized of size_fact | Unsized      (* Unsized: provider 가 이 요청을 거절했고 크기를 말하지 않았다 *)
 type silence = Not_called | Unavailable | Busy | Lost | Unusable of rejection
-type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
+type unanswered = Refused of refusal | Silent of silence   (* No_answer 가 slot 마다 싣는다 *)
+type slot_outcome = Slot_answered | Unanswered of unanswered
 ```
 
 - 분류는 함수 하나다. `classify : slot_visit -> slot_outcome` 이고 결과 타입마다 와일드카드 없는 `match` 다.

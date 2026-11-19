@@ -1,20 +1,12 @@
 module Turn_log = Keeper_turn_log
 module Store = Keeper_turn_log_store
-module Head = Keeper_turn_log_head
 module Writer = Keeper_turn_log_writer
 module Recorder = Keeper_turn_log_recorder
-module Checkpoint = Keeper_checkpoint_store
-
-type not_closed =
-  | Head_unread of Keeper_checkpoint_store_decode.checkpoint_load_error
-  | History_unread of Checkpoint.Saved_history.ref_error
-  | Save_not_installed of Checkpoint.checkpoint_cas_error
+module Closing = Keeper_turn_log_closing
 
 type closing =
   | No_open_turn
-  | Nothing_open
-  | Closed_open of { messages : int }
-  | Not_closed of not_closed
+  | Closing of Keeper_turn_log_closing.t
 
 type outcome =
   | No_metadata
@@ -33,38 +25,6 @@ type report =
   ; outcomes : (string * outcome) list
   }
 
-(* The same save a turn's end makes: the messages are the ones the head
-   already holds, and [Turn_closes] writes the open ones as one bundle. The
-   head is read first because it is small. The whole history is read only
-   for a Keeper whose turn left open messages. *)
-let close_open (place : Recorder.place) =
-  match Head.read ~session_dir:place.session_dir ~session_id:place.session_id with
-  | Error error -> Not_closed (Head_unread error)
-  | Ok { open_messages = 0; closed_messages = (_ : int); covered = (_ : Keeper_turn_log_marks.covered) }
-    -> Nothing_open
-  | Ok { open_messages; closed_messages = (_ : int); covered = (_ : Keeper_turn_log_marks.covered) }
-    ->
-    (match
-       Checkpoint.saved_history_of_ref
-         (Checkpoint.load_agent_core_with_ref ~session_dir:place.session_dir
-            ~session_id:place.session_id)
-     with
-     | Error error -> Not_closed (History_unread error)
-     (* The next turn starts fresh and does not replay this history, so no
-        message of it is open for that turn. *)
-     | Ok (Checkpoint.Saved_history.Superseded { expected = (_ : int); got = (_ : int) }) ->
-       Nothing_open
-     | Ok (Checkpoint.Saved_history.Read (checkpoint, expected_source_ref)) ->
-       (match
-          Checkpoint.save_agent_core_if_source ~session_dir:place.session_dir
-            ~expected_source_ref ~boundary:Agent_core.Checkpoint_objects.Turn_closes checkpoint
-        with
-        | Checkpoint.Installed (_ : Checkpoint.installed_checkpoint) ->
-          Closed_open { messages = open_messages }
-        | Checkpoint.Not_installed { cause; auxiliary = (_ : Checkpoint.checkpoint_installation_auxiliary list) }
-          -> Not_closed (Save_not_installed cause)))
-;;
-
 let step ~at ~new_log_id (place : Recorder.place) =
   let path =
     Store.path_for_keepers_dir ~keepers_dir:place.keepers_dir ~keeper_id:place.keeper_name
@@ -75,7 +35,7 @@ let step ~at ~new_log_id (place : Recorder.place) =
     let closing =
       match tail with
       | Store.Nothing_written | Written { open_turn = None; _ } -> No_open_turn
-      | Written { open_turn = Some (_ : Store.open_turn); _ } -> close_open place
+      | Written { open_turn = Some (_ : Store.open_turn); _ } -> Closing (Closing.close_open place)
     in
     Stepped { closing; line = Recorder.record ~at ~new_log_id place Writer.Process_start }
 ;;
@@ -103,12 +63,6 @@ let keeper config name =
      | exception exn -> Raised (Printexc.to_string exn))
 ;;
 
-let not_closed_to_string = function
-  | Head_unread error -> Keeper_checkpoint_store_session.checkpoint_load_error_to_string error
-  | History_unread error -> Checkpoint.saved_history_ref_error_to_string error
-  | Save_not_installed (_ : Checkpoint.checkpoint_cas_error) -> "the closing save was not installed"
-;;
-
 let line_site = "process_start"
 
 let line_not_written ~keeper_name detail =
@@ -134,17 +88,17 @@ let report_outcome keeper_name = function
   | Stepped { closing; line } ->
     let not_closed =
       match closing with
-      | No_open_turn | Nothing_open -> false
-      | Closed_open { messages } ->
+      | No_open_turn | Closing Nothing_open -> false
+      | Closing (Closed_open { messages }) ->
         Log.Keeper.warn ~keeper_name
           "turn log process start: closed %d open messages of the turn the process left open"
           messages;
         false
-      | Not_closed error ->
+      | Closing (Not_closed error) ->
         Log.Keeper.error ~keeper_name
           "turn log process start: open messages of the turn the process left open were not \
            closed: %s"
-          (not_closed_to_string error);
+          (Closing.not_closed_to_string error);
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TurnLogOpenCloseFailures)
           ~labels:[ "keeper", keeper_name ]
@@ -170,9 +124,9 @@ let run config =
          { examined = report.examined + 1
          ; closed_open =
              (match outcome with
-              | Stepped { closing = Closed_open { messages = (_ : int) }; _ } ->
+              | Stepped { closing = Closing (Closed_open { messages = (_ : int) }); _ } ->
                 report.closed_open + 1
-              | Stepped { closing = No_open_turn | Nothing_open | Not_closed _; _ }
+              | Stepped { closing = No_open_turn | Closing (Nothing_open | Not_closed _); _ }
               | No_metadata | Metadata_unread _ | Log_unread _ | Raised _ -> report.closed_open)
          ; failed = (if failed then report.failed + 1 else report.failed)
          ; outcomes = (name, outcome) :: report.outcomes

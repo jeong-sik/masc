@@ -22,17 +22,12 @@
 
 module Recorder := Keeper_turn_log_recorder
 
-type not_closed =
-  | Head_unread of Keeper_checkpoint_store_decode.checkpoint_load_error
-  | History_unread of Keeper_checkpoint_store.Saved_history.ref_error
-  | Save_not_installed of Keeper_checkpoint_store.checkpoint_cas_error
-
 (** What was done about the head's open messages. *)
 type closing =
   | No_open_turn (** The log's last [Opened] is closed, or the log has none. *)
-  | Nothing_open (** The open turn left no open message in the head. *)
-  | Closed_open of { messages : int }
-  | Not_closed of not_closed
+  | Closing of Keeper_turn_log_closing.t
+  (** The log's last [Opened] is open: the closing save
+      ({!Keeper_turn_log_closing.close_open}) ran. *)
 
 type outcome =
   | No_metadata (** No durable metadata that this build reads. *)
@@ -49,8 +44,8 @@ type report =
   { examined : int
   ; closed_open : int (** Keepers whose open messages the step closed. *)
   ; failed : int
-  (** Keepers with [Metadata_unread], [Log_unread], [Raised], [Not_closed],
-      or a line that was not written. *)
+  (** Keepers with [Metadata_unread], [Log_unread], [Raised], a closing save
+      that was [Not_closed], or a line that was not written. *)
   ; outcomes : (string * outcome) list (** In enumeration order. *)
   }
 

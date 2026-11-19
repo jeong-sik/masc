@@ -4020,11 +4020,9 @@ let fusion_run_progress_text = function
   | Fusion_stage_failed -> "failed"
 
 
+(* A run's start in a list of runs: a column moment. *)
 let fusion_run_clock run =
-  let tm = Unix.localtime run.fur_started_at in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min
+  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) run.fur_started_at
 
 
 

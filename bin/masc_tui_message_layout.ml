@@ -89,13 +89,7 @@ type markdown_source =
     }
   | Markdown_streaming
 
-type timeline_bucket = {
-  tb_year : int;
-  tb_month : int;
-  tb_day : int;
-  tb_hour : int;
-  tb_is_dst : bool;
-}
+type timeline_bucket = Masc_tui_value.Local_hour.t
 
 type journal_sign = Journal_added | Journal_removed
 
@@ -445,9 +439,16 @@ let drop_cells text cells =
    forward or it never ends: it takes one piece even when [max_cells] is zero.
    Read as a prefix that invents a cell, which is how a row with no mark to
    colour drew its first character twice. *)
+type head =
+  | Whole of string
+  | Cut of string
+
 let take_cells text cells =
-  let prefix, _, _ = cell_prefix text (Int.max 0 cells) in
-  prefix
+  let cells = Int.max 0 cells in
+  if fits_within_cells ~max_cells:cells text then Whole text
+  else
+    let prefix, _, _ = cell_prefix text cells in
+    Cut prefix
 
 (* The longest prefix that fits in [cells] without cutting a grapheme, and
    what is left of the text. Where {!take_cells} cuts by cells and gives up a
@@ -544,7 +545,20 @@ let cut_mark_cells = display_width cut_mark
 let fitted_source_bytes text width =
   if width <= 0 then 0
   else if display_width text <= width then String.length text
-  else String.length (take_cells text (Int.max 0 (width - cut_mark_cells)))
+  else
+    let prefix, _, _ = cell_prefix text (Int.max 0 (width - cut_mark_cells)) in
+    String.length prefix
+
+let truncate_end max_cells text =
+  if max_cells <= 0 then ""
+  else
+    match take_cells text max_cells with
+    | Whole text -> text
+    | Cut _ ->
+        let prefix, _, saw_ansi =
+          cell_prefix text (Int.max 0 (max_cells - cut_mark_cells))
+        in
+        prefix ^ (if saw_ansi then "\x1B[0m" else "") ^ cut_mark
 
 let fit_width text width =
   if width <= 0 then ""
@@ -1779,29 +1793,18 @@ let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry)
       ; action = Action_none
       }
 
-let same_timeline_bucket left right =
-  Int.equal left.tb_year right.tb_year
-  && Int.equal left.tb_month right.tb_month
-  && Int.equal left.tb_day right.tb_day
-  && Int.equal left.tb_hour right.tb_hour
-  && Bool.equal left.tb_is_dst right.tb_is_dst
-
 let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
   match entry.timeline_bucket with
   | None -> None
   | Some bucket
     when Option.exists
            (fun (previous : entry) ->
-             Option.exists (same_timeline_bucket bucket)
+             Option.exists (Masc_tui_value.Local_hour.equal bucket)
                previous.timeline_bucket)
            previous ->
       None
   | Some bucket ->
-      let label =
-        Printf.sprintf "%04d-%02d-%02d \xc2\xb7 %02d:00" bucket.tb_year
-          bucket.tb_month bucket.tb_day bucket.tb_hour
-        ^ (if bucket.tb_is_dst then " DST" else "")
-      in
+      let label = Masc_tui_value.Local_hour.heading bucket in
       (* Triple-dash (U+2504), not the solid line: the origin heading under
          [Origin_row] now ends in a solid rule to its clock, and two solid
          rules a row apart read as one kind of break. This pane already

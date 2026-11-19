@@ -29,7 +29,7 @@ let get_text = function
 
 let start_ms = 1_700_000_000_000
 let workspace = get (Workspace_id.of_string "workspace-1")
-let the_key = "sk-test-the-key-of-alice"
+let the_key = "made-up-key-of-alice"
 
 (* A provider of the client whose key is taken, one of another client, and
    one that is called over HTTP. The commands name no file. *)
@@ -126,8 +126,14 @@ let lines_since since_seq =
     (Log.Ring.recent ~limit:ring_lines_limit ~since_seq ())
 ;;
 
-(* Every key of this file begins with these characters. *)
-let key_prefix = "sk-test"
+(* Every key of this file begins with these characters. They are no shape
+   the log masks ([Secret_patterns.redact_text]): a key of a masked shape
+   that was written to the log is read back as its mask, and the reading of
+   the log below would find no key in it. *)
+let key_prefix = "made-up-key"
+
+(* What the log writes in place of what it masked. *)
+let masked = "[REDACTED]"
 
 let with_zone work () =
   Eio_main.run (fun _env ->
@@ -167,7 +173,11 @@ let with_zone work () =
           List.iter
             (fun line ->
               if String_util.contains_substring line key_prefix
-              then Alcotest.failf "a log line of the case holds a key: %d bytes" (String.length line))
+              then Alcotest.failf "a log line of the case holds a key: %d bytes" (String.length line);
+              (* A line the log masked wrote something it took for a secret:
+                 a key under a name the log masks by, among them. *)
+              if String_util.contains_substring line masked
+              then Alcotest.failf "a log line of the case holds what the log masked: %d bytes" (String.length line))
             (lines_since before)
         | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)))
 ;;
@@ -431,7 +441,7 @@ let test_refused =
       ~status:400
       ~code:"invalid_request";
     refused "an empty key" (key_body " \n ") ~status:400 ~code:"not_a_key";
-    refused "a key with a control character" (key_body "sk-test\tthe-key") ~status:400 ~code:"not_a_key";
+    refused "a key with a control character" (key_body "made-up-key\tof-alice") ~status:400 ~code:"not_a_key";
     refused
       "a credential document as the key"
       (key_body (body [ "api_key", `String the_key ]))

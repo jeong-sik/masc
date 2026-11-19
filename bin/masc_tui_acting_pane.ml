@@ -593,19 +593,11 @@ let wide_tool_extra_cells = wide_extra_cols - wide_name_extra_cells
 
 (* Figures read down a column when their last digits line up, so counts and
    tokens are right-aligned; names read from their first letter. *)
-(* Text cut to [room] cells, the cut shown: a preview that ends mid-word
-   with no mark reads as the whole. *)
-let clip_cells text room =
-  if Layout.display_width text <= room then text
-  else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
+(* A cut is shown: a preview that ends mid-word with no mark reads as the
+   whole (RFC tui-one-screen-grammar §6.6). *)
+let pad_right width text = Layout.fit_width text width
 
-let pad_right width text =
-  let text = clip_cells text width in
-  text ^ String.make (max 0 (width - Layout.display_width text)) ' '
-
-let pad_left width text =
-  let text = Layout.take_cells text width in
-  String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
+let pad_left width text = Layout.pad_left text width
 
 (* The state word, then the newest tool and the count, or the count and
    the tokens once done. No clock here: the age
@@ -670,29 +662,77 @@ let rec first_fitting ~room = function
   | candidate :: rest ->
       if spans_width candidate <= room then candidate else first_fitting ~room rest
 
-(* Exactly [cols] cells: cut the spans that overflow, pad what falls short.
-   Retained spans keep their measured cells; only a clipped span is remeasured. *)
-let fit_line ~cols spans =
-  let rec cut used acc = function
-    | [] -> List.rev acc, used
+let is_blank span = String.for_all (Char.equal ' ') span.text
+
+(* The spans that fit whole in [budget] cells, the head of the first that
+   does not, and the cut mark in that span's tone. Spans that all fit come
+   back as they are: nothing was cut, so nothing is marked. *)
+let cut_with_mark ~budget spans =
+  let rec walk used acc = function
+    | [] -> (List.rev acc, used)
     | span :: rest ->
         let cells = Layout.display_width span.text in
-        if used + cells <= cols then cut (used + cells) (span :: acc) rest
+        if used + cells <= budget then walk (used + cells) (span :: acc) rest
         else
-          let room = cols - used in
-          if room <= 0 then List.rev acc, used
-          else
-            let text = Layout.take_cells span.text room in
-            List.rev ({ span with text } :: acc), used + Layout.display_width text
+          (* The mark is drawn right after the head, so the head is not
+             marked again. *)
+          let head =
+            match Layout.take_cells span.text (budget - used) with
+            | Layout.Whole text | Layout.Cut text -> text
+          in
+          ( List.rev ({ text = Layout.cut_mark; tone = span.tone } :: { span with text = head } :: acc)
+          , used + Layout.display_width head + Layout.cut_mark_cells )
   in
-  let spans, used = cut 0 [] spans in
-  let short = cols - used in
-  if short > 0 then spans @ [ { text = String.make short ' '; tone = Plain } ]
-  else spans
+  walk 0 [] spans
+
+(* Exactly [cols] cells. A row that fits is padded. A row that does not ends
+   in the cut mark wherever the edge falls -- inside a span or right after
+   one -- so a row cut at the edge does not read as whole (RFC
+   tui-one-screen-grammar §6.6). A border and a name that filled the row
+   used to leave no room to cut the next span, and the state after them
+   vanished with no mark. Blank cells past the edge are padding: losing them
+   cuts nothing. *)
+let fit_line ~cols spans =
+  let padded (spans, used) =
+    let short = cols - used in
+    if short > 0 then spans @ [ { text = String.make short ' '; tone = Plain } ] else spans
+  in
+  let rec whole used acc = function
+    | [] -> padded (List.rev acc, used)
+    | span :: rest ->
+        let cells = Layout.display_width span.text in
+        if used + cells <= cols then whole (used + cells) (span :: acc) rest
+        else if List.for_all is_blank (span :: rest) then padded (List.rev acc, used)
+        else if cols < Layout.cut_mark_cells then padded ([], 0)
+        else padded (cut_with_mark ~budget:(cols - Layout.cut_mark_cells) spans)
+  in
+  whole 0 [] spans
 
 let blank_line ~cols = fit_line ~cols []
 let border = { text = "\xe2\x94\x82"; tone = Dim }
 let with_border spans = border :: spans
+
+(* The narrowest a name is drawn: its first character and the cut mark. *)
+let shortest_name_cells = 2 + Layout.cut_mark_cells
+
+(* A bordered row that names a keeper and then says something about it. The
+   name gives way first and the words after it stay whole (RFC
+   tui-one-screen-grammar §6.6): a long name cut at the edge took the state
+   with it, and the empty-feed sentence lost its negation. [wordings] go
+   longest first. The row takes the first that fits beside the whole name,
+   else the first that fits beside the shortest name, with the name
+   shortened to the room left; when none fits even that, the last, cut at
+   the edge with the mark. *)
+let named_line ~cols ~name wordings =
+  let beside_whole_name = cols - border_cells - Layout.display_width name in
+  let words =
+    match List.find_opt (fun words -> spans_width words <= beside_whole_name) wordings with
+    | Some words -> words
+    | None -> first_fitting ~room:(cols - border_cells - shortest_name_cells) wordings
+  in
+  let name_room = cols - border_cells - spans_width words in
+  fit_line ~cols
+    (with_border ({ text = Layout.truncate_end name_room name; tone = Accent } :: words))
 
 let rule_line ~cols =
   let cells = max 0 (cols - border_cells) in
@@ -1062,7 +1102,7 @@ let call_detail_line ~ko ~cols ~now (tool : Acting.chunk_tool) part =
     let body =
       match preview with
       | Some text ->
-          { text = clip_cells (Masc.Tui_terminal_text.preview_line text) (max 0 (room - label_cells))
+          { text = Layout.truncate_end (max 0 (room - label_cells)) (Masc.Tui_terminal_text.preview_line text)
           ; tone = Plain
           }
       | None -> { text = say ko "실려 오지 않음" "not carried"; tone = Dim }
@@ -1239,19 +1279,12 @@ let focus_header_line ~ko ~cols ~now ~health name current =
             in
             named @ [ [ now_span ] ]
       in
-      let with_clock words = with_border (({ text = name; tone = Accent } :: words) @ [ clock ]) in
-      fit_line ~cols
-        (first_fitting ~room:cols
-           (List.map (fun words -> with_border ({ text = name; tone = Accent } :: words)) now_rows
-            @ List.map with_clock states))
+      named_line ~cols ~name (now_rows @ List.map (fun words -> words @ [ clock ]) states)
   | None ->
-      fit_line ~cols
-        (with_border
-           [ { text = name; tone = Accent }
-           ; { text = middle_dot ^ say ko "이 피드에 아직 이벤트 없음" "no events on this feed yet"
-             ; tone = Dim
-             }
-           ])
+      named_line ~cols ~name
+        [ [ { text = middle_dot ^ say ko "이 피드에 아직 이벤트 없음" "no events on this feed yet"
+            ; tone = Dim
+            } ] ]
 
 let approval_line ~ko ~cols tool =
   fit_line ~cols
@@ -1660,7 +1693,7 @@ let file_line ~ko ~cols ~now index file =
 
 let changes_status_lines ~cols input =
   let one spans = [ (fit_line ~cols (with_border spans), Target_none) ] in
-  let named name spans = one ({ text = name; tone = Accent } :: spans) in
+  let named name spans = [ (named_line ~cols ~name [ spans ], Target_none) ] in
   match input.selected, input.changes with
   | None, _ -> one [ { text = say input.ko "고른 키퍼 없음" "no keeper selected"; tone = Dim } ]
   | Some name, Changes_absent ->

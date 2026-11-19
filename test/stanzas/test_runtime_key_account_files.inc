@@ -10,4 +10,4 @@
 (test
  (name test_runtime_key_account_files)
  (modules test_runtime_key_account_files)
- (libraries alcotest eio_main masc.auth masc.runtime unix))
+ (libraries alcotest eio eio_main eio.unix masc.auth masc.runtime unix))

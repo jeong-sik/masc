@@ -19,6 +19,12 @@
 \* K changes with every row. T changes only with a turn row, so a write can
 \* leave its value as it was; that case has rules of its own (g).
 \*
+\* The cells are in one process, and every writer and remover here is in
+\* that process: a fact is kept only by the process that holds the
+\* workspace's writer lease, and only for a store whose files that process
+\* alone changes (Fact_cell.keep_in_this_process, Store.facts). A row from
+\* another process has rules of its own (n).
+\*
 \* The cells are made by the first reader. Writers and the remover go over
 \* the cells that are there and make none. A writer that finds cells after
 \* its row which were not there before it cannot have seen them, and forgets
@@ -61,9 +67,12 @@
 \*   l  failed-read-kept                  the filler puts the value of a read that failed
 \*   m  cell-made-during-a-write-kept     a writer leaves cells made during its write as they
 \*                                        were
+\*   n  another-process-writes            the cells are in a process that is not the store's
+\*                                        only writer: another process's row reaches the file
+\*                                        and nobody goes over the cells
 \*
 \* Out of model: which registry entry a spelling of a directory gets
-\* (Store.directory_name), a clock that goes back (after_row's check of the
+\* (File_system_named.name), a clock that goes back (after_row's check of the
 \* newest file, covered by test_dated_jsonl_kept_facts), and progress.
 
 EXTENDS Naturals, Sequences, FiniteSets
@@ -75,9 +84,9 @@ CONSTANTS
     MaxFragments,   \* failed writes that leave a fragment
     MaxRotations,   \* times the current file is rotated out
     K,              \* lines the list fact holds
-    Bug             \* "none", or one of "a" .. "m"
+    Bug             \* "none", or one of "a" .. "n"
 
-ASSUME Bug \in {"none", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"}
+ASSUME Bug \in {"none", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"}
 
 Remover == "remover"
 Current == 0                        \* the file being written
@@ -335,6 +344,19 @@ LateBytes ==
     /\ late' = TRUE
     /\ UNCHANGED <<names, open, fragments, rotations, cells, wvars, fvars, rvars, nextId, lock>>
 
+\* ---- a row from another process (bug n) --------------------------------------------
+
+\* A whole row at a line start, as a writer's is. The process that wrote it
+\* has no way to these cells: it sees none, settles none and forgets none.
+OtherProcessRow ==
+    /\ Bug = "n"
+    /\ nextId <= MaxLines
+    /\ \E kind \in {"turn", "other"} :
+         content' = WithLine([kind |-> kind, id |-> nextId])
+    /\ open' = FALSE
+    /\ nextId' = nextId + 1
+    /\ UNCHANGED <<names, fragments, rotations, late, cells, wvars, fvars, rvars, lock>>
+
 \* ---- the specification -------------------------------------------------------------
 
 Init ==
@@ -372,6 +394,7 @@ Next ==
     \/ FSee \/ FList \/ FRead \/ FKeep
     \/ RBegin \/ RRemove \/ RStop \/ RForget
     \/ LateBytes
+    \/ OtherProcessRow
 
 Spec == Init /\ [][Next]_vars
 

@@ -248,6 +248,13 @@ let test_readers_writers_and_removers_together () =
   done
 ;;
 
+(* Nothing in this executable says it before this test. *)
+let test_a_process_keeps_facts_once_it_says_so () =
+  check bool "not before it is said" false (Fact_cell.kept_in_this_process ());
+  Fact_cell.keep_in_this_process ();
+  check bool "once it is said" true (Fact_cell.kept_in_this_process ())
+;;
+
 let () =
   run
     "fact_cell"
@@ -290,6 +297,12 @@ let () =
             "readers, writers and removers together"
             `Quick
             test_readers_writers_and_removers_together
+        ] )
+    ; ( "the process that keeps facts"
+      , [ test_case
+            "a process keeps facts once it says so"
+            `Quick
+            test_a_process_keeps_facts_once_it_says_so
         ] )
     ]
 ;;

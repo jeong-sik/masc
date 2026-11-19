@@ -444,14 +444,25 @@ let read_file path =
          path
          msg)
 
+(* How many workspaces this process has made. *)
+let test_workspaces_made = Atomic.make 0
+
 (** Create an isolated temporary workspace for tests that need credentials.
     The directory and its [.masc/] subtree are removed by
-    {!cleanup_test_workspace}. *)
+    {!cleanup_test_workspace}.
+
+    No two workspaces of a process have one name, also when the earlier one
+    was removed. The process remembers things by path: the directories it
+    made ([Fs_compat.mkdir_p_memoized]), the writers it holds open, the facts
+    it keeps beside files. Under a name used before, those would be taken for
+    the new workspace's. The pid and the clock alone do not give that: two
+    tests of one executable start within the same millisecond. *)
 let setup_test_workspace () =
   let unique_id =
-    Printf.sprintf "masc-sse-test-%d-%d"
+    Printf.sprintf "masc-sse-test-%d-%d-%d"
       (Unix.getpid ())
       (int_of_float (Unix.gettimeofday () *. 1000.))
+      (Atomic.fetch_and_add test_workspaces_made 1)
   in
   let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
   Unix.mkdir tmp 0o755;

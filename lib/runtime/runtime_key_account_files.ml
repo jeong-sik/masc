@@ -55,11 +55,14 @@ let removed path =
     Fs_compat.remove_tree path;
     Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
       match Unix.lstat path with
-      (* As [named] reads it: a path through something that is no folder
-         names nothing. *)
-      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
         sync_parent path;
         Ok ()
+      (* As [named] reads it: a path through something that is no folder
+         names nothing. Nothing of it was removed, so there is no folder to
+         sync, and what stands in the place of the folder is not opened:
+         the open of a FIFO waits for a writer that never comes. *)
+      | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> Ok ()
       | (_ : Unix.stats) -> Error (path ^ ": it is still there"))
   with
   | result -> result

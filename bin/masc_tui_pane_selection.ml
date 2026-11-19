@@ -139,10 +139,14 @@ let snap plain ~first_column ~last_column =
   in
   (first, last)
 
+(* A slice of a row, not a cut at its edge: the cells before and after it
+   are drawn around it, so the head carries no mark. *)
+let head_cells text cells =
+  match Message_layout.take_cells text cells with
+  | Message_layout.Whole head | Message_layout.Cut head -> head
+
 let cells_between text ~first ~last =
-  Message_layout.take_cells
-    (Message_layout.drop_cells text (first - 1))
-    (last - first + 1)
+  head_cells (Message_layout.drop_cells text (first - 1)) (last - first + 1)
 
 let trim_trailing_spaces text =
   let rec stop index =
@@ -169,7 +173,7 @@ let highlight_row line { first_column; last_column; span_row = _ } =
     if drawn >= last then line
     else line ^ Theme.Sgr.reset ^ String.make (last - drawn) ' '
   in
-  Message_layout.take_cells line (first - 1)
+  head_cells line (first - 1)
   ^ Theme.Sgr.reset ^ Theme.selection
   ^ Theme.strip_sgr (cells_between line ~first ~last)
   ^ Theme.Sgr.reset

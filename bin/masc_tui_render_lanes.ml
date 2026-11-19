@@ -780,15 +780,16 @@ let render_lanes_overview (state : state) =
   let observed_heading = match state.lane_inventory with
     | None -> ui_text state ~ko:"기능 상태 미관측 · r:조회" ~en:"Feature states not observed · r:read"
     | Some snapshot ->
-        let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
+        let observed =
+          Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+            ~now:(Unix.gettimeofday ()) snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.count_items ~korean
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot) snapshot.rows) in
         Message_layout.join_fitting ~sep:" · " ~cells:inner
           ((match state.standalone_lanes_error with
             | None -> ui_text state ~ko:"기능 목록 관측" ~en:"Feature inventory observed"
             | Some _ -> ui_text state ~ko:"보존한 기능 목록 관측" ~en:"Retained inventory observation")
-           :: Printf.sprintf "%02d:%02d:%02d"
-                observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+           :: observed
            :: standings) in
   if projection.lop_observation then
     box_line_styled buf cols ~style:(Theme.recede ()) observed_heading;

@@ -82,7 +82,7 @@ type workspace_activity_column = Activity_date | Activity_keeper | Activity_task
 
 let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
-    | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
+    | Activity_date -> Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute | Activity_keeper -> 18 | Activity_task -> 16
     | Activity_result -> Message_layout.display_width (if ko then "결과" else "RESULT")
     | Activity_path -> 8 in
   let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -159,9 +159,8 @@ let render_workspace_activity (state : state) repo_id =
             match Rows.at rows_window (first + i) with
             | None -> if i = 0 && rows = [] then c.push (if ko then "  이 기간에 기록된 clone 쓰기 없음" else "  No recorded clone writes in this window") else c.push_empty ()
             | Some (change, path) ->
-                let tm = Unix.localtime change.Tui_decode.fc_at in
-                let date = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min in
+                let date =
+                  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
                 let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
                 let line = "  " ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
@@ -208,8 +207,17 @@ let render_workspace_activity (state : state) repo_id =
              ^ Terminal_text.single_line message);
           show ~budget:(max 1 (budget - 1)) reading)
 
+(* What the Workspace preview holds of one repository's Git state: a
+   reading, or the mark that says why there is none (RFC
+   tui-one-screen-grammar §6.4). *)
+type git_observation =
+  | Git_reading of string
+  | Git_absent of Masc_tui_value.Unknown.t
+
 (* The inventory names registered paths, not a fresh Git observation. Never
-   substitute [rp_default_branch] for the branch checked out at that path. *)
+   substitute [rp_default_branch] for the branch checked out at that path.
+   A read of this repository that failed before any snapshot arrived is a
+   failed read, not one still to come. *)
 let repository_git_observation (state : state) (repo : Tui_decode.repository) =
   match state.repository_changes_scope, state.repository_changes with
   | Some (Tui_decode.Repository_change_repository requested), Some snapshot ->
@@ -222,20 +230,26 @@ let repository_git_observation (state : state) (repo : Tui_decode.repository) =
                  Terminal_text.single_line name in
            let reading = Printf.sprintf "%s · %s %d"
                branch (ui_text state ~ko:"변경" ~en:"changes") snapshot.rcs_total in
-           Some (match state.repository_changes_error with
+           Git_reading (match state.repository_changes_error with
              | Some _ -> ui_text state ~ko:"이전 관측 · 갱신 실패 · " ~en:"Last read · refresh failed · " ^ reading
              | None -> ui_text state ~ko:"마지막 조회 · " ~en:"Last read · " ^ reading)
        | Tui_decode.Repository_change_project
-       | Tui_decode.Repository_change_repository _ -> None)
+       | Tui_decode.Repository_change_repository _ -> Git_absent Masc_tui_value.Unknown.Unread)
+  | Some (Tui_decode.Repository_change_repository requested), None
+    when String.equal requested repo.rp_id && Option.is_some state.repository_changes_error ->
+      Git_absent Masc_tui_value.Unknown.Read_failed
   | (Some Tui_decode.Repository_change_project | None), _
-  | Some (Tui_decode.Repository_change_repository _), None -> None
+  | Some (Tui_decode.Repository_change_repository _), None ->
+      Git_absent Masc_tui_value.Unknown.Unread
 
 let repository_preview_lines state ~width (repo : Tui_decode.repository) =
   let fields =
     [ ui_text state ~ko:"Git 관측" ~en:"Git observation",
         (match repository_git_observation state repo with
-         | Some reading -> reading
-         | None -> ui_text state ~ko:"미관측 · d:조회" ~en:"Not observed · d:read")
+         | Git_reading reading -> reading
+         (* No reading: the mark goes where the value goes (RFC
+            tui-one-screen-grammar §6.4), and the read key is zone 5's. *)
+         | Git_absent why -> Masc_tui_value.Unknown.glyph why)
     ; ui_text state ~ko:"키퍼" ~en:"Keeper", (match repo.rp_keepers with
         | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
         | names -> String.concat ", " names)

@@ -955,12 +955,7 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let now = Unix.gettimeofday () in
-  let tm = Unix.localtime run.fur_started_at in
-  let date_time =
-    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
+  let date_time = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now run.fur_started_at in
   let age = fusion_run_age ~now run in
   let started_text = Printf.sprintf "%s (%s ago)" date_time age in
   let pipeline = fusion_pipeline_diagram run in

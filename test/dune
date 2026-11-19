@@ -3040,6 +3040,9 @@
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 (include stanzas/test_dated_jsonl_kept_facts.inc)
 (include stanzas/test_fact_cell.inc)
+(include stanzas/test_file_system_named.inc)
+(include stanzas/test_keeper_decision_row_kept.inc)
+(include stanzas/test_masc_test_workspace_names.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -3317,6 +3320,8 @@
 (include stanzas/test_turn_record.inc)
 
 (include stanzas/test_keeper_context_observation_projection.inc)
+(include stanzas/test_keeper_execution_receipt_kept.inc)
+(include stanzas/test_keeper_tool_call_log_kept.inc)
 
 (include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
@@ -3360,6 +3365,7 @@
 
 (include stanzas/test_runtime_resolved_fleet.inc)
 
+(include stanzas/test_tui_overview_cards.inc)
 (include stanzas/test_tui_overview_providers.inc)
 (include stanzas/test_tui_kept_reads.inc)
 (include stanzas/test_tui_io_domain.inc)
@@ -4407,7 +4413,8 @@
   agent_core
   masc_tui_acting
   masc_tui_message_layout
-  masc_tui_observer))
+  masc_tui_observer
+  masc_tui_value))
 
 (test
  (name test_tui_observer)
@@ -4555,7 +4562,8 @@
 (test
  (name test_tui_context_state)
  (modules test_tui_context_state)
- (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc))
+ (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc
+  masc_test_deps))
 
 (test
  (name test_tui_context_inspector)
@@ -5471,9 +5479,11 @@
 (include stanzas/test_tui_file_icon.inc)
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
+(include stanzas/test_tui_health_section.inc)
 (include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_value.inc)
 (include stanzas/test_tui_position_source.inc)
+(include stanzas/test_tui_value_forms_source.inc)
 (include stanzas/test_tui_say.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)

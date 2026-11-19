@@ -1701,7 +1701,12 @@ let columns ~inner_width measures =
   let actor_budget = available / 3 in
   let keeper_needed = max (drawn_cells "ACTOR") (widest (fun m -> m.measured_keeper)) in
   let keeper_cells = min keeper_needed actor_budget in
-  let clock_cells = drawn_cells "00:00:00" + 1 in
+  (* A row draws its receipt time as a column moment to the second
+     ([Terminal_text.clock_timestamp]), which carries its date once the day
+     differs; the column is as wide as that form. *)
+  let clock_cells =
+    Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_second + 1
+  in
   let content_floor = max (available - actor_budget) (widest (fun m -> m.measured_label)) in
   let show_clock = available - keeper_cells - clock_cells >= content_floor in
   let content_cells = available - keeper_cells - (if show_clock then clock_cells else 0) in

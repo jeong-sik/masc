@@ -520,8 +520,12 @@ let key_code account = function
     "not_looked_at"
 ;;
 
+(* The code of a start that wrote its intent and no record, of a removal
+   and of a replacement of a key alike: the member it is under says which. *)
+let start_given_up = "start_given_up"
+
 let removal_code = function
-  | Authz_provider_account.Start_given_up -> "start_given_up"
+  | Authz_provider_account.Start_given_up -> start_given_up
   | Authz_provider_account.Stayed Authz_purge_event.Key_not_removed -> "key_not_removed"
   | Authz_provider_account.Stayed Authz_purge_event.Home_not_removed -> "home_not_removed"
 ;;
@@ -533,7 +537,7 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
      account, and the record of a key account. *)
   let accounts =
     List.map
-      (fun ({ provider_account_id = account; kind; removal } : Authz_provider_account.shown) ->
+      (fun ({ provider_account_id = account; kind; blocked } : Authz_provider_account.shown) ->
         let integration, of_kind =
           match kind with
           | Authz_provider_account_state.Login ->
@@ -549,19 +553,21 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
                 )
               ] )
         in
-        let of_removal =
-          match removal with
+        let of_blocked =
+          match blocked with
           | None -> []
-          | Some removal -> [ "removal", `String (removal_code removal) ]
+          | Some (Authz_provider_account.Removal removal) -> [ "removal", `String (removal_code removal) ]
+          | Some Authz_provider_account.Replacement_start_given_up ->
+            [ "replacement", `String start_given_up ]
         in
-        account, integration, Option.is_none removal, of_kind @ of_removal)
+        account, integration, Option.is_none blocked, of_kind @ of_blocked)
       (Authz_provider_account.shown state user_id)
   in
   (* A Runtime is made only on an account its maker owns (the log refuses
      [Account_not_theirs]). One whose account is not shown, because its
      removal is pending or went through, is not shown either, and neither is
-     one on an account a removal was left on: its record stays, and every
-     turn of it is refused. *)
+     one on an account a removal or the start of a replacement of its key
+     stopped on: its record stays, and every turn of it is refused. *)
   let runtimes =
     List.filter_map
       (fun (id, (runtime : Authz_runtime_state.runtime)) ->

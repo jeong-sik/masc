@@ -170,7 +170,7 @@ let pass_lines ~timestamp = function
    The words can run long, so the row puts them last. *)
 let outcome_text report_text = function
   | Status.Reclaimed report -> report_text report, None
-  | Status.Deferred reason -> Say.both ~ko:"Keeper 가 바빠 넘김" ~en:"skipped, the Keeper was busy", Some reason
+  | Status.Deferred reason -> Say.both ~ko:"Keeper 가 바빠 미룸" ~en:"deferred, the Keeper was busy", Some reason
   | Status.Not_running -> Say.both ~ko:"붙을 대상이 떠 있지 않음" ~en:"nothing running to attach to", None
   | Status.Failed reason -> Say.both ~ko:"실패" ~en:"failed", Some reason
 ;;

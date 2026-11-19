@@ -1297,7 +1297,7 @@ let provider_history_lines ~cols ~rows (state : state) =
       (Printf.sprintf
          " Quota scope trend (%d UTC days) · latest report per day · as of %s"
          days (runtime_moment_text trend.generated_at))
-      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
+      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use · C = Credit without a meter"
            (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
       :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with

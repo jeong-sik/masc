@@ -533,6 +533,28 @@ let test_empty_history_report_reaches_trend () =
     (match Masc_tui_usage_trend.latest uncapped_row with
      | Some {report = Masc_tui_usage_trend.Measured (Decode.Utilization_usd {used; limit=None}, None); _} -> used = 12.3456
      | Some _ | None -> false);
+  let credit_history = { history with
+    puh_points =
+      [ { puhp_scope_id = "codex-finite"; puhp_kind = "credit balance"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_credit_balance
+            { currency = "credits"; total = None; remaining = 2500.75 }
+        ; puhp_observed_at = now }
+      ; { puhp_scope_id = "codex-unlimited"; puhp_kind = "credit balance"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_credit_unlimited; puhp_observed_at = now }
+      ]
+  ; puh_reported_no_windows = [] }
+  in
+  let credit_trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full credit_history in
+  List.iter
+    (fun (row : Masc_tui_usage_trend.row) ->
+      check string "Credit without a meter uses the neutral marker"
+        (String.concat "" (List.init 6 (fun _ -> none)) ^ "C") row.marks;
+      let plot = Masc_tui_usage_trend.plot ~width:80 credit_trend row in
+      check bool "the Credit marker reaches the plot" true
+        (List.exists (contains ~affix:"C") plot);
+      check bool "Credit is not rendered as uncapped USD" false
+        (List.exists (contains ~affix:"$") plot))
+    credit_trend.rows;
   let fields = match payload with `Assoc fields -> fields | _ -> assert false in
   List.iter (fun fields -> check bool "missing or malformed daily empty state is a failed read" true
     (Result.is_error (Decode.decode_provider_usage_history (`Assoc fields))))

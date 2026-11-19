@@ -60,6 +60,15 @@ end
 module Key_map = Map.Make (Key)
 module Day_map = Map.Make (Int)
 
+let no_share_mark = function
+  | Masc.Tui_decode_usage.Utilization_credit_balance _
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> "C"
+  | Masc.Tui_decode_usage.Utilization_usd _
+  | Masc.Tui_decode_usage.Utilization_fraction _
+  | Masc.Tui_decode_usage.Utilization_percent _ -> "$"
+;;
+
 let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
   let last_day = utc_day history.puh_generated_at in
   let first_day = last_day - history.puh_days + 1 in
@@ -95,7 +104,7 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
            let marks = List.map (function
              | None -> no_report_mark
              | Some { report = Reported_no_windows; _ } -> empty_report_mark
-             | Some { report = Measured (_, None); _ } -> "$"
+             | Some { report = Measured (value, None); _ } -> no_share_mark value
              | Some { report = Measured (value, Some share); _ } -> mark value share) samples |> String.concat "" in
            { scope_id; kind; limit_id; marks; samples;
              reported_days = Day_map.cardinal reported })
@@ -163,7 +172,7 @@ let plot ~width trend row =
     let marks = List.map (function
       | None -> no_report_mark
       | Some {report = Measured (value, Some share); _} -> mark value share
-      | Some {report = Measured (_, None); _} -> "$"
+      | Some {report = Measured (value, None); _} -> no_share_mark value
       | Some {report = Reported_no_windows; _} -> empty_report_mark) row.samples |> String.concat "" in
     Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ " (daily levels; · no report)")
   else
@@ -283,7 +292,7 @@ let plot ~width trend row =
       | None -> pad no_report_mark
       | Some {report = Measured (_, Some share); _} when share < 0.0 -> pad "↓"
       | Some {report = Measured (value, Some _); _} when reported_zero value -> pad "0"
-      | Some {report = Measured (_, None); _} -> pad "$"
+      | Some {report = Measured (value, None); _} -> pad (no_share_mark value)
       | Some {report = Reported_no_windows; _} -> pad empty_report_mark
       | Some {report = Measured (_, Some _); _} -> pad "─") row.samples |> String.concat "") in
     let dates = List.map (fun (day, _) ->

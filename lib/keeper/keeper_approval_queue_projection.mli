@@ -13,11 +13,21 @@ val append_chat_projection :
   base_path:string -> keeper_name:string -> Keeper_chat_store.approval_lifecycle ->
   (unit, string) result
 
+val record_resolution_row :
+  attempt:Keeper_approval.Audit.resolved_attempt -> base_path:string ->
+  resolved_at:float -> pending_approval -> source:decision_source ->
+  ?actor:string -> decision -> Keeper_approval.Audit.resolved_receipt
+(** The decision's [Resolved] audit row stamped [resolved_at], with no SSE or
+    Gate broadcast. A [Retry_unconfirmed_resolved_append] writes it only when
+    the row's day file does not already hold it (#38541). *)
+
 val resolve_entry :
-  ?before_terminal_publish:(unit -> unit) -> base_path:string -> pending_approval ->
-  source:decision_source -> ?actor:string -> decision -> Keeper_approval.Audit.receipt
-(** Records the resolution audit, calls the supplied publication hook, then
-    broadcasts the resolution. The caller has already selected the resolution. *)
+  ?before_terminal_publish:(unit -> unit) -> base_path:string -> resolved_at:float ->
+  pending_approval -> source:decision_source -> ?actor:string -> decision ->
+  Keeper_approval.Audit.resolved_receipt
+(** Records the resolution audit as a first append, calls the supplied
+    publication hook, then broadcasts the resolution. The caller has already
+    selected the resolution. *)
 
 val ensure_resolution_chat_projection :
   base_path:string -> keeper_name:string -> approval_id:string ->

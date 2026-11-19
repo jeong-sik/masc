@@ -48,6 +48,9 @@ val failed_write_notifications : unit -> int
 
 type write_stage =
   | Store_create
+  | Presence_read
+      (** A retry could not read the day file that may already hold its row,
+          so it did not append. *)
   | Append
   | Append_cleanup
 
@@ -96,6 +99,48 @@ val record :
   ?extra_fields:(string * Yojson.Safe.t) list ->
   unit ->
   receipt
+
+(** Whether a [Resolved] append is the first for its decision or a retry after
+    an attempt whose success was never confirmed (#38541). *)
+type resolved_attempt =
+  | First_resolved_append
+  | Retry_unconfirmed_resolved_append
+
+type resolved_receipt =
+  | Resolved_append_attempted of receipt
+  | Resolved_row_already_present
+      (** A retry found the decision's [Resolved] row and wrote nothing. *)
+
+val resolved_receipt_to_yojson : resolved_receipt -> Yojson.Safe.t
+(** A found row serializes as a successful append: both say the row is on
+    the ledger. *)
+
+(** The [Resolved] row of one approval decision. The row is stamped
+    [resolved_at] and is filed in the day file of [resolved_at], not of the
+    append, so every attempt for the same decision targets the same file. A
+    [Retry_unconfirmed_resolved_append] reads that file under the audit lock
+    and appends only when no [Resolved] row with this [id] is there; a line
+    that is not a JSON object is not a row. A [First_resolved_append] appends
+    without reading. Store, read and append failures come back in the
+    receipt, as for {!record}. *)
+val record_resolved :
+  base_path:string ->
+  attempt:resolved_attempt ->
+  resolved_at:float ->
+  id:string ->
+  keeper_name:string ->
+  tool_name:string ->
+  ?turn_id:int ->
+  ?task_id:string ->
+  ?goal_id:string ->
+  ?actor:string ->
+  decision_source:decision_source ->
+  decision:decision ->
+  summary_status:summary_status ->
+  exact_attempt:exact_attempt_state ->
+  extra_fields:(string * Yojson.Safe.t) list ->
+  unit ->
+  resolved_receipt
 
 val record_rule_created : base_path:string -> approval_rule -> receipt
 (** [Rule_created] row. Its actor is the rule's own [created_by]: the

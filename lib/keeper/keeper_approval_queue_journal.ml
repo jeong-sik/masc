@@ -122,6 +122,11 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
         ; created_by
         ; grant_consumed = false
         ; replay_outcome = None
+          (* NDT-OK: the journal owns the decision time; the [Resolved] row
+             is stamped with it so a retry finds that row's day file. *)
+        ; resolved_at = Unix.gettimeofday ()
+          (* Durable before the append is tried, in this same write. *)
+        ; ledger = Ledger_append_pending
         }
       in
       let updated_pending = SMap.remove id (Atomic.get pending) in

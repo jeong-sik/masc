@@ -3,8 +3,18 @@ open Keeper_approval_queue_result
 
 module SMap = Set_util.StringMap
 
-let pending_store_version = 13
+let pending_store_version = 14
 let replay_results_store_version = 1
+
+(* Whether the decision's [Resolved] row is known to be on the audit ledger
+   (#38541). The delivery is journaled as [Ledger_append_pending] in the same
+   write that removes the pending entry, so it is durable before the append
+   is tried; it becomes [Ledger_recorded] only after an append or a retry's
+   read confirms the row. Until then the delivery is the decision's only
+   durable copy and is never removed. *)
+type resolution_ledger =
+  | Ledger_append_pending
+  | Ledger_recorded
 
 type persisted_delivery =
   { entry : pending_approval
@@ -16,6 +26,10 @@ type persisted_delivery =
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
+  ; resolved_at : float
+      (* The [Resolved] row's own timestamp; it also names the day file that
+         row is filed under, so a retry reads that one file. *)
+  ; ledger : resolution_ledger
   }
 let exact_request_context_version = 1
 
@@ -98,6 +112,17 @@ let resolution_replay_outcome_to_yojson outcome =
    Dropping it on the delivery wire shape stays decode-compatible: the reader
    treats [request_context] as optional and keys the version field off its
    presence, so existing snapshots still load and re-save smaller. *)
+let resolution_ledger_to_string = function
+  | Ledger_append_pending -> "append_pending"
+  | Ledger_recorded -> "recorded"
+;;
+
+let resolution_ledger_of_string = function
+  | "append_pending" -> Some Ledger_append_pending
+  | "recorded" -> Some Ledger_recorded
+  | _ -> None
+;;
+
 let persisted_delivery_to_yojson delivery =
   `Assoc
     [ "entry", pending_entry_to_yojson ~include_request_context:false delivery.entry
@@ -108,6 +133,8 @@ let persisted_delivery_to_yojson delivery =
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
+    ; "resolved_at", `Float delivery.resolved_at
+    ; "ledger", `String (resolution_ledger_to_string delivery.ledger)
     ]
 ;;
 
@@ -576,6 +603,8 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "rule_expires_at"
           ; "created_by"
           ; "grant_consumed"
+          ; "resolved_at"
+          ; "ledger"
           ]
         fields
     in
@@ -615,6 +644,17 @@ let persisted_delivery_of_yojson ~base_path json =
       | Decision.Reject _, true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
+    let* resolved_at = required_float ~surface "resolved_at" fields in
+    let* () =
+      if Float.is_finite resolved_at then Ok ()
+      else Error (surface ^ ".resolved_at must be finite")
+    in
+    let* ledger_raw = required_string ~surface "ledger" fields in
+    let* ledger =
+      match resolution_ledger_of_string ledger_raw with
+      | Some ledger -> Ok ledger
+      | None -> Error (Printf.sprintf "%s.ledger %S is unknown" surface ledger_raw)
+    in
     Ok
       { entry
       ; resolution_sequence
@@ -625,6 +665,8 @@ let persisted_delivery_of_yojson ~base_path json =
       ; created_by
       ; grant_consumed
       ; replay_outcome = None
+      ; resolved_at
+      ; ledger
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;

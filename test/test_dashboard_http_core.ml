@@ -2260,52 +2260,6 @@ let test_agent_activity_keys_on_its_window () =
       check (float 0.001) "the computed window is the one asked for" 1.0
         (other |> member "hours" |> to_float))
 
-let test_dashboard_proof_http_json_surfaces_submission_index () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let module V = Lib.Verification in
-  let output =
-    `Assoc
-      [
-        ("evidence_refs", `List [ `String "artifact://proof-route" ]);
-        ("task_title", `String "Proof route fixture");
-      ]
-  in
-  (match
-     V.create_request
-       ~base_path:config.base_path
-       ~task_id:"task-proof-route"
-       ~output
-       ~criteria:[ "proof route must expose verification evidence" ]
-       ~worker:"keeper-proof"
-       ()
-   with
-   | Ok _ -> ()
-   | Error message -> fail message);
-  let json =
-    Server_dashboard_http.dashboard_proof_http_json
-      ~config
-      (request "/api/v1/dashboard/proof?limit=5")
-  in
-  let open Yojson.Safe.Util in
-  check int "verification total" 1
-    (json |> member "summary" |> member "verification_total" |> to_int);
-  check bool "request status is not synthesized from immutable submissions" true
-    (json |> member "summary" |> member "verification_pending" = `Null);
-  check bool "rejection status is not synthesized from immutable submissions" true
-    (json |> member "summary" |> member "verification_rejected" = `Null);
-  check bool "verification requests exposed" true
-    (match json |> member "verification" |> member "requests" |> member "requests" with
-     | `List [ _ ] -> true
-     | _ -> false);
-  check bool "proof sources include execution trust route" true
-    (json
-     |> member "proof_sources"
-     |> to_list
-     |> List.exists (fun source ->
-       String.equal
-         (source |> member "route" |> to_string)
-         "/api/v1/dashboard/execution-trust"))
-
 let config_sync_runtime_toml =
   {|[runtime]
 default = "test_provider.test_model"
@@ -3146,8 +3100,6 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
         (Some "codex") actor
 
 let with_execution_payload_env f =
-  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "true" @@ fun () ->
-  with_env "MASC_DASHBOARD_FIXTURE" "execution_smoke" @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   Dashboard_cache.invalidate_prefix "execution:";
   Eio_guard.protect
@@ -3180,7 +3132,7 @@ let test_execution_request_resolves_actor_once () =
      an observation of resolution, not a mocked call counter. HTTP admission
      remains outside these surface helpers and is covered by wire/auth tests. *)
   let req = request_with_headers
-      "/api/v1/dashboard/execution?fixture=execution_smoke&full=1"
+      "/api/v1/dashboard/execution?full=1"
       [ "authorization", "Basic invalid" ] in
   let before = count () in
   let context = Surface.execution_http_request ~state req in
@@ -3190,7 +3142,7 @@ let test_execution_request_resolves_actor_once () =
   let payload = match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env) context with
     | Surface.Execution_payload payload -> payload
-    | Surface.Execution_json _ -> fail "expected parameterized fixture payload"
+    | Surface.Execution_json _ -> fail "expected parameterized payload"
   in
   check (float 0.0) "fallback reuses resolved identity" (before +. 1.0) (count ());
   let next_context = Surface.execution_http_request ~state req in
@@ -3200,14 +3152,13 @@ let test_execution_request_resolves_actor_once () =
   | Surface.Execution_payload next ->
     check bool "same query retains prepared cache bytes" true
       (payload.raw_json == next.raw_json)
-  | Surface.Execution_json _ -> fail "expected warm parameterized fixture payload"
+  | Surface.Execution_json _ -> fail "expected warm parameterized payload"
 
 let execution_payload_key (payload : Dashboard_cache.cached_payload) =
   Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
 
 let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
-  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   with_cached_surface_success
     (Server_dashboard_http_execution_surfaces.execution_cache ~state)
     (`Assoc [ "default_marker", `String "last-success";
@@ -3258,33 +3209,8 @@ let test_execution_default_response_reuses_prepared_bytes () =
        check bool "identity bytes are reused without serialization" true
          (payload.raw_json == warm))
 
-let test_execution_fixture_selection_isolates_prepared_live_bytes () =
-  with_execution_payload_env @@ fun ~env ~sw ~state ->
-  let module Surface = Server_dashboard_http_execution_surfaces in
-  with_cached_surface_success (Surface.execution_cache ~state)
-    (`Assoc [ "live_marker", `Bool true;
-              "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
-  let context query = Surface.execution_http_request ~state
-      (request_with_headers ("/api/v1/dashboard/execution" ^ query) []) in
-  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
-    ignore (Surface.dashboard_execution_http_response
-      ~sw ~clock:(Eio.Stdenv.clock env) (context "")));
-  List.iter (fun query ->
-    check bool ("fixture does not reuse prepared live bytes: " ^ query) true
-      (Option.is_none (Surface.dashboard_execution_cached_http_response
-        (context query))))
-    [ ""; "?fixture="; "?fixture=execution_smoke" ];
-  check bool "explicit unknown uses its own parameterized response" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_response
-      (context "?fixture=unknown")));
-  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
-    check bool "disabled explicit fixture uses its own parameterized response" true
-      (Option.is_none (Surface.dashboard_execution_cached_http_response
-        (context "?fixture=execution_smoke"))))
-
 let test_execution_first_compute_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
-  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
@@ -3320,7 +3246,6 @@ let test_execution_first_compute_reuses_prepared_bytes () =
 
 let test_warm_dashboard_responses_follow_equipment_authority () =
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
-  Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   let module Surface = Server_dashboard_http_execution_surfaces in
   let module Mission = Server_dashboard_mission_observation in
@@ -3707,19 +3632,6 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   check string "ETag identifies the exact response bytes"
     (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
   let open Yojson.Safe.Util in
-  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
-  let keeper_money json field =
-    json |> member field |> to_list |> List.map (fun row ->
-      `List (List.map (fun key -> member key row)
-        ["name"; "portrait"; "candle_balance_milli"; "candle_account_revision"])) in
-  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
-    check bool "HTTP fill and warm read preserve the fixture Candle summary" true
-      (member "candle" payload.json = member "candle" expected);
-    List.iter (fun field ->
-      check bool ("HTTP fixture preserves money and portraits in " ^ field) true
-        (keeper_money payload.json field = keeper_money expected field))
-      ["keepers"; "continuity_briefs"])
-    [first; second];
   check string "actor metadata is part of cached body" "alice"
     (first.json |> member "query" |> member "actor" |> to_string);
   check string "workspace metadata is part of cached body" config.workspace_path
@@ -3731,45 +3643,14 @@ let test_execution_parameterized_payload_reuses_decorated_bytes () =
   check bool "JSON accessor shares the same decorated snapshot" true
     (json == first.json)
 
-let test_execution_fixture_broadcast_and_unknown_override () =
-  with_execution_payload_env @@ fun ~env ~sw ~state ->
-  let module Surface = Server_dashboard_http_execution_surfaces in
-  let config = Lib.Mcp_server.workspace_config state in
-  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
-  Surface.invalidate_execution_cache ();
-  Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
-  let seeded = match expected with `Assoc fields ->
-    `Assoc (("cache_marker",`String "synthetic-seed") :: fields) | _ -> expected in
-  with_cached_surface_success (Surface.execution_cache ~state) seeded @@ fun () ->
-  Surface.patch_keeper_dependent_caches ~keeper_name:"dm-keeper"
-    ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
-  check bool "live lifecycle event preserves the fixture cache" true
-    ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = seeded);
-  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast
-      ~owner:(Surface.For_testing.owner_for_state ~state) ~config () in
-  List.iter (fun field ->
-    check bool ("broadcast preserves fixture " ^ field) true
-      (Yojson.Safe.Util.member field broadcast = Yojson.Safe.Util.member field expected))
-    ["candle";"keepers";"continuity_briefs"];
-  let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
-  check bool "explicit unknown cannot take prepared default bytes" true
-    (Option.is_none (Surface.For_testing.cached_response ~owner:(Surface.For_testing.owner_for_state ~state) ~config unknown_request));
-  let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
-    unknown_request in
-  check bool "explicit unknown does not reuse the fixture-seeded cache" true
-    (Yojson.Safe.Util.member "cache_marker" actual = `Null)
-
 let test_execution_parameterized_payload_separates_request_queries () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let clock = Eio.Stdenv.clock env in
-  let absent = execution_payload ~state ~sw ~clock
+  let full = execution_payload ~state ~sw ~clock
       (request "/api/v1/dashboard/execution?full=1") in
-  let empty = execution_payload ~state ~sw ~clock
-      (request "/api/v1/dashboard/execution?full=1&fixture=") in
-  let explicit = execution_payload ~state ~sw ~clock
-      (request "/api/v1/dashboard/execution?full=1&fixture=execution_smoke") in
   let light = execution_payload ~state ~sw ~clock
-      (request "/api/v1/dashboard/execution?fixture=execution_smoke") in
+      (request_with_headers "/api/v1/dashboard/execution"
+        [ "x-masc-agent", "carol" ]) in
   let forced = execution_payload ~state ~sw ~clock
       (request "/api/v1/dashboard/execution?full=1&force=1") in
   let alice = execution_payload ~state ~sw ~clock
@@ -3778,7 +3659,7 @@ let test_execution_parameterized_payload_separates_request_queries () =
   let bob = execution_payload ~state ~sw ~clock
       (request_with_headers "/api/v1/dashboard/execution?full=1"
         [ "x-masc-agent", "bob" ]) in
-  let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  let payloads = [ full; light; forced; alice; bob ] in
   List.iter (fun (payload : Dashboard_cache.cached_payload) ->
     let encoded = match payload.encoded with Some value -> value
       | None -> fail "parameterized execution lacks prepared encodings" in
@@ -3786,18 +3667,10 @@ let test_execution_parameterized_payload_separates_request_queries () =
       (encoded.identity == payload.raw_json)) payloads;
   let keys = List.map execution_payload_key payloads in
   check int "distinct resolved queries own separate response bytes"
-    (List.length payloads - 2) (List.length (List.sort_uniq String.compare keys));
-  List.iter (fun payload ->
-    check string "equivalent fixture selections share their cache key"
-      (execution_payload_key explicit) (execution_payload_key payload))
-    [ absent; empty ];
+    (List.length payloads) (List.length (List.sort_uniq String.compare keys));
   let open Yojson.Safe.Util in
-  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
-    check string "query records the selected environment fixture" "execution_smoke"
-      (payload.json |> member "query" |> member "fixture" |> to_string))
-    [ absent; empty; explicit ];
   check bool "full query preserved" true
-    (explicit.json |> member "query" |> member "full" |> to_bool);
+    (full.json |> member "query" |> member "full" |> to_bool);
   check bool "light query preserved" true
     (light.json |> member "query" |> member "light" |> to_bool);
   check bool "parameterized force query preserved" true
@@ -4914,7 +4787,6 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
       ; "/api/v1/dashboard/goals/detail?goal_id=goal-absent"
       ; "/api/v1/dashboard/briefing/sections"
       ; "/api/v1/dashboard/tool-quality?window_hours=1"
-      ; "/api/v1/dashboard/eval-feed"
       ; "/api/v1/keepers/fixture-keeper/tool-stats"
       ; "/api/v1/workspace/tree"
       ; "/api/v1/workspace/children?path=fixture-dir"
@@ -4949,7 +4821,7 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
 
 (* Exact parsed queries must own distinct cached responses. Exercise the real
    router and response cache, including the echoed query and retained rows. *)
-let with_exact_query_router ?(prepare = fun _ -> ()) ?(cleanup = fun _ -> ()) f =
+let with_exact_query_router f =
   with_test_env @@ fun ~env ~sw ~config ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -4966,8 +4838,6 @@ let with_exact_query_router ?(prepare = fun _ -> ()) ?(cleanup = fun _ -> ()) f 
     let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
       | Ok (token, _) -> token
       | Error error -> fail (Types.masc_error_to_string error) in
-    Fun.protect ~finally:(fun () -> cleanup config) (fun () ->
-    prepare config;
     Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
     let store = match Masc.Keeper_tool_call_log.store () with
       | Some store -> store | None -> fail "tool-call fixture unavailable" in
@@ -4984,120 +4854,7 @@ let with_exact_query_router ?(prepare = fun _ -> ()) ?(cleanup = fun _ -> ()) f 
         ~headers:["authorization", "Bearer " ^ token; "accept-encoding", "identity"] target in
       check int (target ^ " status") 200 status;
       headers, Yojson.Safe.from_string body in
-    f read)))
-
-let prepare_eval_feed_rows (config : Workspace.config) =
-  List.iter (fun name ->
-    let dir = Filename.concat (Filename.concat (Filename.concat config.base_path ".agent_core") "eval") name in
-    Fs_compat.mkdir_p dir;
-    List.iter (fun index ->
-      let snapshot : Dashboard_eval_feed.eval_snapshot = {
-        agent_name = name; session_id = None;
-        worker_run_id = name ^ "-run-" ^ string_of_int index;
-        timestamp = float_of_int index; baseline_status = None;
-        verdict = { schema_version = 1; all_passed = true; coverage = 1.; layer_results = [] };
-      } in
-      Yojson.Safe.to_file (Filename.concat dir (string_of_int index ^ ".json"))
-        (Dashboard_eval_feed.snapshot_to_json snapshot)) [1; 2]) ["-"; "eval-other"]
-
-let check_eval_fleet json =
-  let open Yojson.Safe.Util in
-  check (option int) "both retained agents remain visible" (Some 2)
-    (Safe_ops.json_int_opt "agent_count" json);
-  check bool "fleet has no per-agent selector" true (member "agent_name" json = `Null);
-  let agents = json |> member "agents" |> to_list in
-  check (list string) "fleet preserves sorted agents" ["-"; "eval-other"]
-    (List.map (fun row -> row |> member "agent_name" |> to_string) agents);
-  List.iter (fun row ->
-    let name = row |> member "agent_name" |> to_string in
-    check string "fleet keeps the latest retained snapshot" (name ^ "-run-2")
-      (row |> member "latest" |> member "worker_run_id" |> to_string)) agents
-
-let check_eval_agent ~name ~count:expected json =
-  let open Yojson.Safe.Util in
-  check (option string) "exact agent selector survives cache" (Some name)
-    (Safe_ops.json_string_opt "agent_name" json);
-  check int "count follows the effective limit" expected (json |> member "count" |> to_int);
-  check bool "agent result has no fleet rows" true (member "agents" json = `Null);
-  let snapshots = json |> member "snapshots" |> to_list in
-  check (list string) "requested snapshots retain their original order"
-    (if expected = 1 then [name ^ "-run-2"] else [name ^ "-run-2"; name ^ "-run-1"])
-    (List.map (fun row -> row |> member "worker_run_id" |> to_string) snapshots)
-
-let test_eval_feed_separates_fleet_from_dash_agent () =
-  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
-  List.iter (fun agent_first ->
-    Dashboard_cache.invalidate_all ();
-    let fleet () = let _, json = read "/api/v1/dashboard/eval-feed?limit=1" in check_eval_fleet json in
-    let agent () = let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
-      check_eval_agent ~name:"-" ~count:1 json in
-    if agent_first then (agent (); fleet (); agent ()) else (fleet (); agent (); fleet ())) [false; true]
-
-let test_eval_feed_fleet_reuses_effective_selection () =
-  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
-  let prepared = ref 0 in
-  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
-    List.iter (fun query -> let _, json = read ("/api/v1/dashboard/eval-feed" ^ query) in
-      check_eval_fleet json)
-      [""; "?limit=1"; "?limit=100"; "?agent_name=&limit=2"; "?agent_name=%20%20&limit=100"]);
-  check int "unused limit and empty selector share one fleet preparation" 1 !prepared
-
-let test_eval_feed_agent_limits_remain_distinct () =
-  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
-  let prepared = ref 0 in
-  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
-    List.iter (fun (query, name, count) ->
-      let _, json = read ("/api/v1/dashboard/eval-feed?" ^ query) in
-      check_eval_agent ~name ~count json)
-      ["agent_name=-&limit=1", "-", 1;
-       "agent_name=-&limit=2", "-", 2;
-       "agent_name=%20-%20&limit=2", "-", 2;
-       "agent_name=eval-other&limit=1", "eval-other", 1;
-       "agent_name=-&limit=0", "-", 1;
-       "agent_name=-", "-", 2;
-       "agent_name=-&limit=invalid", "-", 2]);
-  check int "different effective selectors and limits stay distinct" 4 !prepared
-
-let prepare_eval_boundary_rows (config : Workspace.config) =
-  prepare_eval_feed_rows config;
-  let core = Filename.concat config.base_path ".agent_core" in
-  let root = Filename.concat core "eval" in
-  let outside = Filename.concat core "outside" in
-  Fs_compat.mkdir_p outside;
-  let foreign = Filename.concat outside "999.json" in
-  Yojson.Safe.to_file foreign
-    (Yojson.Safe.from_file (Filename.concat (Filename.concat root "-") "1.json"));
-  Unix.symlink outside (Filename.concat root "linked");
-  Unix.symlink foreign (Filename.concat (Filename.concat root "-") "999.json")
-
-let with_eval_boundary_router f =
-  with_exact_query_router ~prepare:prepare_eval_boundary_rows
-    ~cleanup:(fun (config : Workspace.config) ->
-      Fs_compat.remove_tree (Filename.concat config.base_path ".agent_core")) f
-
-let test_eval_http_rejects_parent_agent () =
-  with_eval_boundary_router @@ fun read ->
-  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=..%2Foutside" in
-  check int "parent selector cannot read sibling snapshots" 0
-    Yojson.Safe.Util.(json |> member "count" |> to_int)
-
-let test_eval_http_excludes_linked_agent () =
-  with_eval_boundary_router @@ fun read ->
-  let _, fleet = read "/api/v1/dashboard/eval-feed" in check_eval_fleet fleet;
-  let _, exact = read "/api/v1/dashboard/eval-feed?agent_name=linked" in
-  check int "linked agent cannot return foreign rows" 0
-    Yojson.Safe.Util.(exact |> member "count" |> to_int)
-
-let test_eval_http_ignores_linked_json () =
-  with_eval_boundary_router @@ fun read ->
-  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
-  check_eval_agent ~name:"-" ~count:1 json
-
-let test_eval_http_ignores_nul_agent () =
-  with_eval_boundary_router @@ fun read ->
-  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-%00suffix" in
-  check int "invalid filesystem spelling cannot select an existing agent" 0
-    Yojson.Safe.Util.(json |> member "count" |> to_int)
+    f read))
 
 let test_keeper_cached_windows_keep_exact_query () =
   with_exact_query_router @@ fun read ->
@@ -6450,64 +6207,6 @@ let expect_http_status label status raw =
   let prefix = Printf.sprintf "HTTP/1.1 %d" status in
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
-
-let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
-  Lib.Board.reset_global_for_test ();
-  Lib.Board_dispatch.reset_for_test ();
-  Result.get_ok (Lib.Board_dispatch.init_jsonl
-    ~base_path:(Env_config_core.base_path ())
-    ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
-  Fun.protect
-    ~finally:(fun () ->
-      Lib.Board.reset_global_for_test ();
-      Lib.Board_dispatch.reset_for_test ())
-    (fun () ->
-      let create content =
-        match Lib.Board_dispatch.create_post
-                ~author:"close-route-test" ~content
-                ~post_kind:Lib.Board.Human_post () with
-        | Ok post -> Lib.Board.Post_id.to_string post.id
-        | Error error -> fail (Lib.Board.Post_publication_failure.to_string error)
-      in
-      let post_id = create "thread" in
-      let successor_id = create "successor" in
-      let check_open label =
-        match Lib.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
-        | Ok post -> check bool (label ^ " leaves post open") true
-                       (Option.is_none post.closed)
-        | Error error -> fail (Lib.Board.show_board_error error)
-      in
-      let attempt label decision_fields bad_field =
-        let body = Yojson.Safe.to_string
-            (`Assoc
-               (("post_id", `String post_id)
-                :: ("summary", `String "done") :: decision_fields))
-        in
-        let raw, json =
-          post_to_handler ~target:"/api/v1/dashboard/board/close"
-            (fun request reqd body ->
-              Server_dashboard_http_delete_actions.For_testing.handle_board_close_post
-                ~agent_name:"operator" request reqd body)
-            body
-        in
-        expect_http_status label 400 raw;
-        let error = Safe_ops.json_string_opt "error" json in
-        check bool (label ^ " names malformed field") true
-          (match error with
-           | Some error -> String_util.contains_substring error bad_field
-           | None -> false);
-        check_open label
-      in
-      attempt "wrong successor_id"
-        ["successor_id", `Int 123; "no_successor", `Bool true]
-        "successor_id";
-      attempt "wrong no_successor"
-        ["successor_id", `String successor_id;
-         "no_successor", `String "true"]
-        "no_successor")
-;;
 
 (* The Board search box asks this payload for the whole Board (#52957). [q]
    narrows the posts, and it is part of the cache key: a payload kept for one
@@ -8301,17 +8000,6 @@ let test_skill_evidence_joins_activation_and_composition () =
 let () =
   run "dashboard_http_core"
     [
-      ("eval_feed_owned_boundary", [
-        test_case "parent agent cannot read outside eval root" `Quick test_eval_http_rejects_parent_agent;
-        test_case "linked agent is excluded from fleet and exact reads" `Quick test_eval_http_excludes_linked_agent;
-        test_case "linked JSON cannot replace the latest snapshot" `Quick test_eval_http_ignores_linked_json;
-        test_case "NUL selector cannot alias a real directory" `Quick test_eval_http_ignores_nul_agent;
-      ]);
-      ("eval_feed_cache_selection", [
-        test_case "fleet and literal dash agent keep distinct results" `Quick test_eval_feed_separates_fleet_from_dash_agent;
-        test_case "fleet ignores limit and normalizes empty selectors" `Quick test_eval_feed_fleet_reuses_effective_selection;
-        test_case "agent counts, limits and aliases keep their meaning" `Quick test_eval_feed_agent_limits_remain_distinct;
-      ]);
       ("effective_tool_quality_sampling", [
         test_case "window ignores the recent-count option" `Quick test_tool_quality_window_reuses_irrelevant_limit;
         test_case "recent counts remain separate" `Quick test_tool_quality_recent_limits_remain_distinct;
@@ -8401,8 +8089,6 @@ let () =
             test_execution_request_resolves_actor_once;
           test_case "execution default response reuses prepared bytes" `Quick
             test_execution_default_response_reuses_prepared_bytes;
-          test_case "execution fixture selection isolates prepared live bytes" `Quick
-            test_execution_fixture_selection_isolates_prepared_live_bytes;
           test_case "execution first compute reuses prepared bytes" `Quick
             test_execution_first_compute_reuses_prepared_bytes;
           test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
@@ -8411,8 +8097,6 @@ let () =
             test_board_address_overlay_follows_effective_config_after_cache;
           test_case "Item account revision follows free purchase and price edit" `Quick
             test_candle_account_revision_tracks_free_purchase_and_price_edit;
-          test_case "execution fixture broadcast and unknown override" `Quick
-            test_execution_fixture_broadcast_and_unknown_override;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick
@@ -8503,9 +8187,7 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "board close route rejects wrong typed decisions" `Quick
-            test_board_close_route_rejects_wrong_typed_decisions_without_closing;
-          test_case "dashboard board payload narrows to the query" `Quick
+        [ test_case "dashboard board payload narrows to the query" `Quick
             test_dashboard_board_payload_narrows_to_the_query;
           test_case "Keeper metrics reads only the selected strict window" `Quick
             test_keeper_metrics_reads_selected_strict_window;
@@ -8523,8 +8205,6 @@ let () =
             test_operator_snapshot_http_rejects_stale_success_after_store_error;
           test_case "parameterized operator snapshot attests its workspace" `Quick
             test_operator_parameterized_snapshot_attests_workspace;
-          test_case "proof payload exposes submission index" `Quick
-            test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
           test_case "active-only scheduled-automation reads its own cache key" `Quick

@@ -15,7 +15,6 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
 ;;
 
 let agent_json ~session_bound_at ~last_seen (agent : Masc_domain.agent) =
-  let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
   `Assoc
     [ "name", `String agent.name
@@ -28,8 +27,8 @@ let agent_json ~session_bound_at ~last_seen (agent : Masc_domain.agent) =
     ; "session_bound_at", session_bound_at
     ; "last_seen", last_seen
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
-    ; "emoji", `String profile.emoji
-    ; "koreanName", `String profile.korean_name
+    ; "emoji", `String Dashboard_execution_helpers.agent_emoji
+    ; "koreanName", `String agent.name
     ]
 ;;
 

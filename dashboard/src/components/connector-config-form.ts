@@ -27,7 +27,7 @@ const IN_PROCESS_CONFIG_GUIDES: Record<string, InProcessConfigGuide> = {
     supportsRuntimeToml: false,
     displayName: 'Slack',
     envVars: ['SLACK_APP_TOKEN', 'SLACK_BOT_TOKEN'],
-    docsRef: 'docs/rfc/RFC-0317-slack-builtin-gateway.md',
+    docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md',
   },
 }
 

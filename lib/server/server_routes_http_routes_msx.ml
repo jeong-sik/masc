@@ -286,19 +286,6 @@ let restore_names_no_slot ~restore = function
   | `Assoc fields -> restore && not (List.mem_assoc "slot" fields)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
-let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
-  match decode_write_body ~config ~body with
-  | Error refusal -> refusal
-  | Ok (`Assoc fields)
-    when List.length fields <> List.length (List.sort_uniq String.compare (List.map fst fields)) ->
-      `Bad_request, load_result_json ~ok:false ~message:"checkpoint has duplicate fields"
-  | Ok arguments when restore_names_no_slot ~restore arguments ->
-      `Bad_request, load_result_json ~ok:false ~message:"restore requires a slot"
-  | Ok arguments ->
-      let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
-      let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
-      result.status, answer_json result
-;;
 ;;
 
 module Checkpoint_receipt = Server_msx_checkpoint_receipt
@@ -398,7 +385,7 @@ let settle_checkpoint_effect ~restore ~persist ~notify settled =
       let message = "MSX restore observer notification failed: " ^ Printexc.to_string exn in
       Error (match persisted with Ok () -> message | Error cause -> cause ^ "; " ^ message)
 
-let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
+let checkpoint_response ~(config : Workspace.config) ~restore ~body =
   let refused binding message =
     `Service_unavailable, `Assoc (receipt_json ~config
       {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=Refused message}) in
@@ -501,12 +488,6 @@ let checkpoint_status_response ~(config : Workspace.config) ~body =
                  | Error failure -> `Service_unavailable,write_error_json (Executor_pool_ref.strict_submit_error_to_string failure)))
        | _ -> `Bad_request,write_error_json "checkpoint must name save or restore")
   | Ok _ -> `Bad_request,write_error_json "checkpoint status request must be an object"
-
-let checkpoint_response ~config ~restore ~body =
-  match Yojson.Safe.from_string body with
-  | `Assoc fields when List.mem_assoc "operation_id" fields -> checkpoint_operation_response ~config ~restore ~body
-  | _ | exception Yojson.Json_error _ -> checkpoint_legacy_response ~config ~restore ~body
-;;
 
 let change_disk_response ~(config : Workspace.config) ~body =
   match decode_write_body ~config ~body with

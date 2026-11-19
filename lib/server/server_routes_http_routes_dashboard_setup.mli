@@ -2,10 +2,6 @@
 
 module Http = Http_server_eio
 
-val trimmed_query_param : Httpun.Request.t -> string -> string option
-val agent_core_telemetry_limit_param : Httpun.Request.t -> int
-val agent_core_telemetry_provider_param : Httpun.Request.t -> string option
-
 (** Effective entry limit for /api/v1/dashboard/telemetry. Absent or
     unparseable [n_param] -> bounded default (windowed vs not). Returns a
     {!Telemetry_unified.read_limit}, so no caller can express an unbounded

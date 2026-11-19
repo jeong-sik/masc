@@ -2656,7 +2656,7 @@ let test_request_path_uses_current_store () =
 
    The earlier contract failed the whole scan here. That kept the failure loud
    but made it total: 171 records written by a producer removed on 2026-08-07
-   were enough to answer /api/v1/dashboard/proof with 500 for five days, naming
+   were enough to answer the verification projection with 500 for five days, naming
    one path while saying nothing about the other 170 or the 122 that read fine. *)
 let test_scan_isolates_bad_entry_with_metric () =
   with_temp_dir (fun base_path ->

@@ -240,75 +240,6 @@ let test_sample_json_preserves_signal_fields () =
   Alcotest.(check int) "retry" 2 (json |> Json.member "retry_count" |> Json.to_int)
 ;;
 
-let test_recent_json_provider_filter_is_runtime_alias () =
-  setup ();
-  DOB.record (make_sample ~provider:"anthropic" ());
-  DOB.record (make_sample ~provider:"ollama" ~model:"qwen3" ());
-  let json = DOB.recent_json ~provider:"ollama" ~limit:5 () in
-  Alcotest.(check bool)
-    "generated_at present"
-    true
-    (json |> Json.member "generated_at" |> Json.to_string |> String.length > 0);
-  Alcotest.(check string)
-    "dashboard surface"
-    "/api/v1/dashboard/agent_core/telemetry/recent"
-    (json |> Json.member "dashboard_surface" |> Json.to_string);
-  Alcotest.(check string)
-    "source"
-    "agent_core_runtime_bridge"
-    (json |> Json.member "source" |> Json.to_string);
-  Alcotest.(check string)
-    "durable replay surface"
-    "/api/v1/dashboard/telemetry?source=agent_core_event"
-    (json
-     |> Json.member "retention"
-     |> Json.member "durable_replay_surface"
-     |> Json.to_string);
-  Alcotest.(check string)
-    "provider redacted"
-    "runtime"
-    (json |> Json.member "provider" |> Json.to_string);
-  Alcotest.(check int) "limit" 5 (json |> Json.member "limit" |> Json.to_int);
-  Alcotest.(check int) "count" 2 (json |> Json.member "count" |> Json.to_int);
-  match json |> Json.member "samples" |> Json.to_list with
-  | samples ->
-    List.iter
-      (fun entry ->
-         Alcotest.(check string)
-           "sample provider redacted"
-           "runtime"
-           (entry |> Json.member "sample" |> Json.member "provider_id" |> Json.to_string))
-      samples
-;;
-
-let test_summary_json_contains_aggregate () =
-  setup ();
-  DOB.record (make_sample ~cache:true ~status:DOB.Success ());
-  DOB.record (make_sample ~cache:false ~status:(DOB.Error { transient = false }) ());
-  let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
-  Alcotest.(check string)
-    "dashboard surface"
-    "/api/v1/dashboard/agent_core/telemetry/summary"
-    (json |> Json.member "dashboard_surface" |> Json.to_string);
-  Alcotest.(check int)
-    "retention cap"
-    200
-    (json |> Json.member "retention" |> Json.member "per_provider_cap" |> Json.to_int);
-  let summary = json |> Json.member "summary" in
-  Alcotest.(check int)
-    "sample_count"
-    2
-    (summary |> Json.member "sample_count" |> Json.to_int);
-  Alcotest.(check (float 1e-9))
-    "cache_hit_ratio"
-    0.5
-    (summary |> Json.member "cache_hit_ratio" |> Json.to_float);
-  Alcotest.(check (float 1e-9))
-    "error_ratio"
-    0.5
-    (summary |> Json.member "error_ratio" |> Json.to_float)
-;;
-
 (* --- clear --- *)
 
 let test_clear_provider () =
@@ -630,14 +561,6 @@ let () =
             "sample fields"
             `Quick
             test_sample_json_preserves_signal_fields
-        ; Alcotest.test_case
-            "recent provider filter alias"
-            `Quick
-            test_recent_json_provider_filter_is_runtime_alias
-        ; Alcotest.test_case
-            "summary aggregate"
-            `Quick
-            test_summary_json_contains_aggregate
         ] )
     ; ( "clear"
       , [ Alcotest.test_case "clear provider" `Quick test_clear_provider

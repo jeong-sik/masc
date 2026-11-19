@@ -145,8 +145,7 @@ let author_is_the_person (author : Author.t) user_id =
   | Author.Authenticated (Principal.Service _)
   | Author.Local_operator
   | Author.System_cron
-  | Author.System_maintenance
-  | Author.System_migration -> false
+  | Author.System_maintenance -> false
 ;;
 
 let admit
@@ -217,8 +216,7 @@ let author_is_an_admin ~held t (author : Author.t) =
   | Author.Authenticated (Principal.Service _)
   | Author.Local_operator
   | Author.System_cron
-  | Author.System_maintenance
-  | Author.System_migration -> false
+  | Author.System_maintenance -> false
 ;;
 
 let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _ }) =

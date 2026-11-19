@@ -606,7 +606,7 @@ let string_field name j =
 
    This is the shape that reached production: a producer removed on 2026-08-07
    left 171 records whose [criteria] entries are objects rather than strings,
-   and the projection raised on the first of them, so /api/v1/dashboard/proof
+   and the projection raised on the first of them, so the dashboard read
    answered 500 for five days while 122 readable records sat beside them. The
    fixture writes that exact shape rather than truncated JSON, so the case
    fails if the projection ever goes back to reading the store all-or-nothing. *)

@@ -169,7 +169,6 @@ let worker_state_of_agent
         else
           Option.value ~default:"Idle / waiting for assignment" recent_output_preview
   in
-  let profile = get_agent_profile agent.name in
   {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
@@ -195,8 +194,8 @@ let worker_state_of_agent
           ("signal_truth", `String signal_truth);
           ("evidence_source", `String evidence_source);
           ("active_task_count", `Int active_task_count);
-          ("emoji", `String profile.emoji);
-          ("koreanName", `String profile.korean_name);
+          ("emoji", `String agent_emoji);
+          ("koreanName", `String agent.name);
           ("model", `Null);
           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
         ];
@@ -310,7 +309,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
   let latest_action_source =
     String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
-  let profile = get_agent_profile name in
   Ok {
     tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
@@ -345,8 +343,8 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
               Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" (member_assoc "runtime_trust" keeper))) );
-            ("emoji", `String profile.emoji);
-            ("koreanName", `String profile.korean_name);
+            ("emoji", `String agent_emoji);
+            ("koreanName", `String name);
           ]);
   }
 

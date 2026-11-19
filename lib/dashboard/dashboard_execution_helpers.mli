@@ -1,16 +1,14 @@
 (** Dashboard_execution_helpers — JSON envelope helpers,
-    per-entity context records, agent-profile resolver,
+    per-entity context records, the agent identity emoji,
     and tone/severity utilities for the execution
     dashboard pipeline.
 
-    {b Runtime chain}: 3 sister modules
-    ({!Dashboard_execution_fixture}, {!Dashboard_execution}) do
+    {b Runtime chain}: sister modules
+    ({!Dashboard_execution_builders}, {!Dashboard_execution}) do
     [include Dashboard_execution_helpers] in their .ml +
     .mli, so this boundary's surface flows through to
     every dashboard execution consumer.  Plus dotted
-    callers ({!get_agent_profile} from
-    [server_dashboard_http_core] +
-    [server_routes_http_routes_workspace]).
+    callers ({!agent_emoji} from [server_dashboard_http_core_entities]).
 
     External surface is limited to the records and helpers consumed by the
     current execution projection.
@@ -63,15 +61,10 @@ type continuity_context = {
   json : Yojson.Safe.t;
 }
 
-(** {1 Agent profile} *)
+(** {1 Agent identity} *)
 
-type agent_profile = {
-  emoji : string;
-  korean_name : string;
-}
-
-val get_agent_profile : string -> agent_profile
-(** Resolves the agent's profile representation for dashboard surfaces. *)
+val agent_emoji : string
+(** The identity emoji every agent shows on dashboard surfaces. *)
 
 (** {1 JSON envelope helpers} *)
 
@@ -85,8 +78,6 @@ val option_or_else : (unit -> 'a option) -> 'a option -> 'a option
 val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
-val dashboard_fixture_name : ?fixture:string -> unit -> string option
-val execution_fixture_name : ?fixture:string -> unit -> string option
 val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Handoff envelope} *)

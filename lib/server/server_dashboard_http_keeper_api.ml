@@ -60,8 +60,9 @@ let keeper_metrics_response ~config ~keeper_name req =
       |> List.filter (fun (name, _) -> String.equal name "limit")
     in
     (* Preserve the existing Dashboard's fixed read window. A query cannot
-       turn one selected chart into an unbounded ledger scan. *)
-    let limit = 120 in
+       turn one selected chart into an unbounded ledger scan. The window is
+       the rows the metrics store keeps as text, decoded in the job. *)
+    let limit = Keeper_status_metrics.recent_metrics_row_count in
     if limit_parameters <> [] then
       error `Bad_request "invalid_metrics_limit" "the metrics window is fixed at 120 rows"
     else
@@ -69,8 +70,12 @@ let keeper_metrics_response ~config ~keeper_name req =
         Eio_guard.with_named_switch "keeper-metrics-tail" (fun () ->
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             try
-              let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-              Dated_jsonl.read_recent_result store limit
+              Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name
+              |> Result.map (fun lines ->
+                List.length lines
+                , List.filter_map
+                    (fun line -> Result.to_option (Dated_jsonl.parse_line line))
+                    lines)
               |> Result.map_error Dated_jsonl.read_error_to_string
             with
             | Sys_error detail -> Error detail
@@ -79,11 +84,7 @@ let keeper_metrics_response ~config ~keeper_name req =
       in
       match reading with
       | Error detail -> error `Service_unavailable "metrics_store_unavailable" detail
-      | Ok entries ->
-        let scanned_rows = List.length entries in
-        let parsed_metrics = List.filter_map (function
-          | Dated_jsonl.Parsed row -> Some row
-          | Dated_jsonl.Malformed_json _ -> None) entries in
+      | Ok (scanned_rows, parsed_metrics) ->
         let series, window_summary =
           Dashboard_http_keeper_detail.compute_metrics_window
             ~parsed_metrics ~series_points:limit

@@ -201,6 +201,37 @@ let check_the_window_is_the_files label store =
   check (result (list (option json)) string) label (newest_three_in_the_files store) kept
 ;;
 
+(* The same window with each row left as its text. *)
+let last_three_lines = D.last_lines ~name:"last_three_lines" ~count:3
+
+let lines_window store =
+  match D.read_fact store last_three_lines with
+  | Fact_cell.Held lines -> "held", lines
+  | Fact_cell.Read_and_kept lines -> "read and kept", lines
+  | Fact_cell.Read_not_kept lines -> "read, not kept", lines
+  | Fact_cell.Read_failed error -> "failed: " ^ D.read_error_to_string error, []
+;;
+
+let lines_answer = pair string (list string)
+let texts numbers = List.map (fun number -> Yojson.Safe.to_string (row number)) numbers
+
+(* The strict raw read a window of three lines stands for. *)
+let check_the_lines_are_the_files label store =
+  let kept =
+    match D.read_fact store last_three_lines with
+    | Fact_cell.Held lines | Fact_cell.Read_and_kept lines | Fact_cell.Read_not_kept lines ->
+      Ok lines
+    | Fact_cell.Read_failed error -> Error (D.read_error_to_string error)
+  in
+  check
+    (result (list string) string)
+    label
+    (D.read_recent_lines_result store 3
+     |> Result.map (List.map snd)
+     |> Result.map_error D.read_error_to_string)
+    kept
+;;
+
 (* Text put into the day file of [ts] behind the store's back. *)
 let write_behind_the_store location ~ts text =
   let dated = D.Store.dated_path location ~ts in
@@ -965,6 +996,101 @@ let test_what_a_row_makes_of_the_window () =
     ]
 ;;
 
+(* --- 8b. the same window as text ---------------------------------------- *)
+
+(* An append adds the text it wrote, without the newline it ends the row
+   with: the strict raw read cuts the same bytes out of the file. A newline
+   inside a string is escaped by the writer and is no row end. *)
+let test_the_lines_are_the_rows_as_they_were_written () =
+  let store = D.open_store (temp_location "djkf_lines") in
+  check lines_answer "a store without rows" ("read and kept", []) (lines_window store);
+  let spoken = `Assoc [ "said", `String "two\nlines, \"quoted\", \xc3\xa9" ] in
+  D.append store (row 1);
+  D.append store spoken;
+  check
+    lines_answer
+    "a row is added at the end as its text"
+    ("held", texts [ 1 ] @ [ Yojson.Safe.to_string spoken ])
+    (lines_window store);
+  check_the_lines_are_the_files "as the strict raw read says" store;
+  D.append store (row 3);
+  D.append store (row 4);
+  check
+    lines_answer
+    "the oldest line falls out"
+    ("held", [ Yojson.Safe.to_string spoken ] @ texts [ 3; 4 ])
+    (lines_window store);
+  check_the_lines_are_the_files "as the strict raw read says, with the window full" store
+;;
+
+(* A row that is not JSON is a line like any other, with the bytes it has in
+   the file. A size rotation leaves the lines held. *)
+let test_the_lines_keep_a_row_that_is_not_json () =
+  let location = temp_location "djkf_lines_cut" in
+  let store = D.open_store location in
+  D.append store (row 1);
+  ignore (write_behind_the_store location ~ts:(now ()) "  not json \n" : string);
+  check
+    lines_answer
+    "the foreign row has the bytes it has in the file"
+    ("read and kept", texts [ 1 ] @ [ "  not json " ])
+    (lines_window store);
+  (match D.append_rotating store ~max_current_file_bytes:1 (row 2) with
+   | D.Appended_after_rotation _ -> ()
+   | D.Appended_to_current | D.Skipped_rotation_exhausted _ | D.Skipped_by_append_guard ->
+     fail "the append did not rotate the file");
+  check
+    lines_answer
+    "held across the rotation"
+    ("held", texts [ 1 ] @ [ "  not json " ] @ texts [ 2 ])
+    (lines_window store);
+  check_the_lines_are_the_files "as the strict raw read says" store
+;;
+
+(* What an append makes of kept lines, with no file and no clock. The line is
+   the text of the row; the row itself is not looked at. *)
+let test_what_a_row_makes_of_the_lines () =
+  let today = "2026-11", "18.jsonl" in
+  let answer = option (pair (list string) (option (pair string string))) in
+  List.iter
+    (fun (label, value, newest, line, written, expected) ->
+       check
+         answer
+         label
+         expected
+         (D.For_testing.after_row
+            last_three_lines
+            ~line
+            ~value
+            ~newest
+            ~row:(D.Parsed (row 0))
+            ~written))
+    [ "the first line of a store", [], None, "one", today, Some ([ "one" ], Some today)
+    ; ( "a line into a window that is not full"
+      , [ "one"; "two" ]
+      , Some today
+      , "three"
+      , today
+      , Some ([ "one"; "two"; "three" ], Some today) )
+    ; ( "a line into a full window"
+      , [ "one"; "two"; "three" ]
+      , Some today
+      , "four"
+      , today
+      , Some ([ "two"; "three"; "four" ], Some today) )
+    ; ( "a line in a file before the newest line's"
+      , [ "one"; "two"; "three" ]
+      , Some today
+      , "four"
+      , ("2026-11", "17.jsonl")
+      , None )
+    ];
+  check_raises
+    "a window of no lines is not a fact"
+    (Invalid_argument "Dated_jsonl.last_lines: count 0")
+    (fun () -> ignore (D.last_lines ~name:"none" ~count:0 : string list D.fact))
+;;
+
 (* Two facts made with one count are two facts: each has its own value in a
    store. And a window holds at least one row. *)
 let test_each_call_makes_a_fact_of_its_own () =
@@ -1207,6 +1333,7 @@ type run =
   { held : int
   ; parsed_held : int
   ; even_held : int
+  ; lines_held : int
   ; appends_that_removed_a_file : int
   }
 
@@ -1227,6 +1354,7 @@ let run_of_every_operation ?max_bytes prefix =
   let held = ref 0 in
   let parsed_held = ref 0 in
   let even_held = ref 0 in
+  let lines_held = ref 0 in
   for step = 1 to 400 do
     (match Random.State.int random 16 with
      | 0 | 1 | 2 | 3 | 4 | 5 ->
@@ -1269,11 +1397,16 @@ let run_of_every_operation ?max_bytes prefix =
     check_the_newest_even_is_the_files
       (Printf.sprintf "the newest even row, after step %d" step)
       store;
-    check_the_window_is_the_files (Printf.sprintf "the window, after step %d" step) store
+    check_the_window_is_the_files (Printf.sprintf "the window, after step %d" step) store;
+    (match lines_window store with
+     | "held", _ -> incr lines_held
+     | _ -> ());
+    check_the_lines_are_the_files (Printf.sprintf "the lines, after step %d" step) store
   done;
   { held = !held
   ; parsed_held = !parsed_held
   ; even_held = !even_held
+  ; lines_held = !lines_held
   ; appends_that_removed_a_file = !appends_that_removed_a_file
   }
 ;;
@@ -1286,6 +1419,7 @@ let test_the_fact_is_the_files_after_every_operation () =
   check bool "most answers were held" true (run.held > 200);
   check bool "most answers of the newest row that is JSON were held" true (run.parsed_held > 200);
   check bool "most answers of the newest even row were held" true (run.even_held > 200);
+  check bool "most answers of the lines were held" true (run.lines_held > 200);
   check int "a store without a limit removes no file after an append" 0
     run.appends_that_removed_a_file
 ;;
@@ -1488,6 +1622,17 @@ let () =
             "each call makes a fact of its own"
             `Quick
             test_each_call_makes_a_fact_of_its_own
+        ] )
+    ; ( "the same window as text"
+      , [ test_case
+            "the lines are the rows as they were written"
+            `Quick
+            test_the_lines_are_the_rows_as_they_were_written
+        ; test_case
+            "a row that is not JSON keeps its bytes"
+            `Quick
+            test_the_lines_keep_a_row_that_is_not_json
+        ; test_case "what a row makes of them" `Quick test_what_a_row_makes_of_the_lines
         ] )
     ; ( "a store another process writes"
       , [ test_case

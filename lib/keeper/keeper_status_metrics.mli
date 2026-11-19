@@ -60,3 +60,24 @@ val latest_tool_audit_snapshot_from_files :
     files each time. Code that removes the store's files without going through
     [Dated_jsonl] tells it with {!Dated_jsonl.directories_removed}, as the
     Keeper's purge does. *)
+
+val recent_metrics_row_count : int
+(** How many of a Keeper's newest metrics rows the Keeper list's recent tools
+    and the metrics chart look at. *)
+
+val newest_metrics_lines_result :
+  Workspace.config -> keeper_name:string -> (string list, Dated_jsonl.read_error) result
+(** The text of the Keeper's newest {!recent_metrics_row_count} metrics rows,
+    oldest first, as [Dated_jsonl.read_recent_lines_result] reads them: a row
+    that is not JSON keeps its place. Decode a row with
+    {!Dated_jsonl.parse_line}.
+
+    A fact of the Keeper's metrics store ({!Dated_jsonl.last_lines}), kept and
+    forgotten as {!latest_tool_audit_snapshot_from_files} is. *)
+
+val newest_metrics_lines_passing_over_what_is_not_the_stores :
+  Workspace.config -> keeper_name:string -> string list
+(** {!newest_metrics_lines_result} for a reader that shows the rows it can.
+    When the strict read refuses the store, the rows are read with
+    [Dated_jsonl.read_recent_lines], which passes over a directory entry that
+    is not the store's and answers no row for a directory it cannot list. *)

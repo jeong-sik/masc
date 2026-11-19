@@ -10,14 +10,12 @@ type read =
   | Timed_out
   | Unreadable of string
 
-(* Physical metrics rows the recent-tool walk may look at, newest last. *)
-let recent_window_rows = 120
-
+(* The recent-tool walk looks at the newest metrics rows the store keeps as
+   text ([Keeper_status_metrics.newest_metrics_lines_result]). *)
 let read_from_files config (meta : Keeper_meta_contract.keeper_meta) =
-  let store = Keeper_types_support.keeper_metrics_store config meta.name in
-  match Dated_jsonl.read_recent_lines_result store recent_window_rows with
+  match Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name:meta.name with
   | Error error -> Error (Dated_jsonl.read_error_to_string error)
-  | Ok rows ->
+  | Ok lines ->
     (match
        Keeper_status_metrics.latest_tool_audit_snapshot_from_files
          config
@@ -26,8 +24,7 @@ let read_from_files config (meta : Keeper_meta_contract.keeper_meta) =
      | Error error -> Error (Dated_jsonl.read_error_to_string error)
      | Ok latest ->
        let recent_tool_names =
-         Operator_control_snapshot_tool_names.collect_recent_tool_names
-           (List.map (fun (_path, line) -> line) rows)
+         Operator_control_snapshot_tool_names.collect_recent_tool_names lines
        in
        let latest =
          match latest with

@@ -200,8 +200,8 @@ let render_runtime_params (state : state) =
           and the edit target read it — so the window is positioned by where
           that row lands in the display list. *)
        let unfiled_description =
-         ui_text state ~ko:"그룹 없음 — 등록부에 소속 그룹이 없습니다"
-           ~en:"Unfiled — no group assigned in the registry"
+         ui_text state ~ko:"그룹 없음 · 등록부에 소속 그룹이 없습니다"
+           ~en:"Unfiled · no group assigned in the registry"
        in
        let surface_of (row : Tui_decode.runtime_param_row) =
          match row.Tui_decode.rpr_surface with
@@ -252,7 +252,8 @@ let render_runtime_params (state : state) =
            let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
            let key_width = max 1 (framed_inner_width cols - 7 - value_width) in
            let line =
-             Printf.sprintf "    %s %s %s"
+             Printf.sprintf "%s  %s %s %s"
+               (if row_index = cursor then "\xe2\x80\xba " else "  ")
                (Masc_tui_config_mark.param_glyph
                   ~has_override:row.rpr_has_override)
                (Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
@@ -356,10 +357,10 @@ let render_runtime_params (state : state) =
             when edit.rpe_mode = Friendly_value
                  && List.mem (runtime_param_type_name edit.rpe_value_type)
                       [ "bool"; "boolean" ] ->
-            ui_text state ~ko:"Left/Right/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+            ui_text state ~ko:"←/→/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
           | Some edit
             when edit.rpe_mode = Friendly_value && edit.rpe_choices <> [] ->
-            ui_text state ~ko:"Left/Right/Space:선택  Enter:적용  Esc:취소" ~en:"Left/Right/Space:cycle  Enter:apply  Esc:cancel"
+            ui_text state ~ko:"←/→/Space:선택  Enter:적용  Esc:취소" ~en:"Left/Right/Space:cycle  Enter:apply  Esc:cancel"
           | Some { rpe_mode = Friendly_value; _ } ->
             ui_text state ~ko:"입력:값  Enter:적용  Ctrl-U:지우기  Esc:취소" ~en:"type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | Some { rpe_mode = Advanced_json; _ } ->
@@ -385,7 +386,7 @@ let prompt_catalog_status_row state prompts =
   | Masc_tui_fetched.Stale (_, detail) ->
     Some
       ( Theme.bad ()
-      , ui_text state ~ko:"새로고침 실패 · 마지막으로 읽은 목록 — " ~en:"Refresh failed · last read catalog — " ^ Terminal_text.single_line detail )
+      , ui_text state ~ko:"새로고침 실패 · 마지막으로 읽은 목록 · " ~en:"Refresh failed · last read catalog · " ^ Terminal_text.single_line detail )
   | Masc_tui_fetched.Failed detail -> Some (Theme.bad (), Terminal_text.single_line detail)
 ;;
 
@@ -733,11 +734,11 @@ let render_prompt_registry (state : state) =
         let label = mark ^ " "
             ^ authoring_mark
             ^ Message_layout.fit_middle
-                (max 1 (framed_inner_width cols - 3 - authoring_cells))
+                (max 1 (framed_inner_width cols - 4 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr label)
-        else box_line buf cols (" " ^ label)
+          box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr label)
+        else box_line buf cols ("  " ^ label)
       end)
     prompt_rows;
   for _ = 1 to list_height - !drawn do
@@ -1066,7 +1067,7 @@ let preset_detail_lines (state : state) ~cols ~selected =
               ~request:Kept_request.Preset_list_read refusal)])
       @ List.map (fun (name, reason) ->
           P.failure (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
-                     ^ " " ^ name ^ " — " ^ reason)) rows
+                     ^ " " ^ name ^ " · " ^ reason)) rows
   in
   let remaining =
     preset_folded_rows ~cols
@@ -1176,9 +1177,9 @@ let render_presets (state : state) =
           | Some (Restore_armed _ | Delete_armed _ | Save_armed _ | Save_workspace_armed _) | None -> " "
         in
         let label =
-          row_with_field ~cols ~lead:(" " ^ mark ^ " ")
+          row_with_field ~cols ~lead:((if index = cursor then "\xe2\x80\xba " else "  ") ^ mark ^ " ")
             ~field:(Masc_tui_preset_text.pane_row ~ko:(state.ui_language = Lang_ko)
-                      ~max_cells:(max 1 (framed_inner_width cols - 3)) manifest)
+                      ~max_cells:(max 1 (framed_inner_width cols - 4)) manifest)
             ~tail:""
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr label)
@@ -1287,8 +1288,8 @@ let render_themes (state : state) =
         if entry.lifted = 0 then count + 1 else count)
       0 entries
   in
-  let show_sample = rows >= 20 in
-  let chrome_rows = if show_sample then 10 else 7 in
+  let show_sample = rows >= 21 in
+  let chrome_rows = if show_sample then 11 else 8 in
   let content_height = max 1 (rows - chrome_rows) in
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
@@ -1307,16 +1308,10 @@ let render_themes (state : state) =
          (if entries = [] then None
           else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:(List.length entries))));
   box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
-     ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
-     ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
-     ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12)
-  ;
   (* The key the way the footer spells it, then the three filters as the
-     product's tab strip draws a choice: the one in force marked. It read
-     "Filter: [f] [All 53] · Dark 40 · Light 13", where the brackets meant a
-     key once and the chosen filter once, on the same row. *)
+     product's tab strip draws a choice: the one in force marked. Placed above
+     the column headers so the table header sits directly on top of the rows
+     it labels. *)
   let explanation =
     if cols >= 92 then
       "  ·  "
@@ -1338,7 +1333,15 @@ let render_themes (state : state) =
         ]
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("    " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") name_width ^ " "
+     ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
+     ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
+     ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12);
+  box_divider buf cols;
   let chosen = state.theme_choice in
+  let sel = Theme.selection_style () in
+  let inner = framed_inner_width cols in
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin
@@ -1348,11 +1351,15 @@ let render_themes (state : state) =
           | None -> false
         in
         let swatch = Theme_choice.swatch_cells entry in
-        let row =
-          Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
+        let is_selected = index = cursor in
+        let prefix =
+          Printf.sprintf "%s%s %s "
+            (if is_selected then "\xe2\x80\xba " else "  ")
+            (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)
-          ^ swatch
-          ^ "  "
+        in
+        let suffix =
+          "  "
           ^ fit_width (if entry.light then ui_text state ~ko:"밝음" ~en:"light"
                        else ui_text state ~ko:"어두움" ~en:"dark") 9
           ^ " "
@@ -1361,8 +1368,38 @@ let render_themes (state : state) =
                else if entry.lifted = 0 then Printf.sprintf "원래 %d/%d" entry.measured entry.measured
                else Printf.sprintf "부족 %d/%d" entry.lifted entry.measured) 12
         in
-        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-        else box_line buf cols row
+        if is_selected then begin
+          if String.equal (Theme.ok ()) "" then
+            (* Under NO_COLOR / monochrome terminals, palette swatches carry no
+               colour escapes, so keep an unbroken reverse selection band. *)
+            box_line_selected buf cols (prefix ^ Masc_tui_theme.strip_sgr swatch ^ suffix)
+          else
+            (* Preserve swatch background SGRs inside the full-width selection
+               band so the chosen theme keeps its 8-colour preview visible. *)
+            let used =
+              Message_layout.display_width prefix
+              + Message_layout.display_width swatch
+              + Message_layout.display_width suffix
+            in
+            let body =
+              if inner <= 0 then ""
+              else if used <= inner then
+                let trail = String.make (inner - used) ' ' in
+                sel ^ prefix ^ Ansi.reset ^ swatch ^ sel ^ suffix ^ trail ^ Ansi.reset
+              else
+                let raw = sel ^ prefix ^ Ansi.reset ^ swatch ^ sel ^ suffix ^ Ansi.reset in
+                let room = max 0 (inner - Message_layout.cut_mark_cells) in
+                let kept =
+                  match Message_layout.take_cells raw room with
+                  | Message_layout.Whole s | Message_layout.Cut s -> s
+                in
+                let pad = String.make (max 0 (room - Message_layout.display_width kept)) ' ' in
+                kept ^ Ansi.reset ^ sel ^ Message_layout.cut_mark ^ pad ^ Ansi.reset
+            in
+            add_row buf
+              [ sel; frame_margin; Ansi.reset; body; Ansi.reset; sel; frame_margin; Ansi.reset ]
+        end else
+          box_line buf cols (prefix ^ swatch ^ suffix)
       end)
     entries;
   let drawn = min content_height (List.length entries) in
@@ -1381,7 +1418,11 @@ let render_themes (state : state) =
          (Theme.keeper_origin ()) Ansi.reset
          (Theme.tool_origin ()) Ansi.reset);
     box_line buf cols
-      (Printf.sprintf "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s"
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then
+            "  구문: %slet%s x = %s\"val\"%s in %s123%s  %s(+증가)%s  %s(-감소)%s"
+          else
+            "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s")
          (Theme.Syntax.keyword ()) Ansi.reset
          (Theme.Syntax.string ()) Ansi.reset
          (Theme.Syntax.code_number ()) Ansi.reset
@@ -1453,8 +1494,9 @@ let config_models_drawn_rows (state : state) =
    missing on 2026-10-08, when fourteen were moved onto one account. Only a
    complete roster is counted: a partial one would read as fewer Keepers. *)
 let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let ko = state.ui_language = Lang_ko in
   let account_email, account_notes =
-    models_source_account_reading ~provider:row.provider state.runtime_config_view in
+    models_source_account_reading ~ko ~provider:row.provider state.runtime_config_view in
   let keepers =
     match Masc_tui_keeper_control.roster_view state.keeper_roster with
     | Masc_tui_keeper_control.Roster_complete rows ->
@@ -1471,7 +1513,7 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
     | Masc_tui_keeper_control.Roster_partial _
     | Masc_tui_keeper_control.Roster_invalid _ -> None
   in
-  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ~ko ?account_email ?keepers row
 
 let selected_model_reading (state : state) =
   Option.bind (List.nth_opt state.config_models_rows state.config_models_cursor)
@@ -1480,7 +1522,10 @@ let selected_model_reading (state : state) =
         (match state.runtime_config_view_error with
          | None -> []
          | Some (Request_failed reason) ->
-             [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}]
+             [{Masc_tui_detail_reading.heading=
+                 ui_text state ~ko:"새로고침 실패 · 이전 관측 유지"
+                   ~en:"Refresh failed · retained reading";
+               body=reason}]
          | Some (Request_withdrawn refusal) ->
              [{Masc_tui_detail_reading.heading=
                  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -1498,7 +1543,8 @@ let selected_model_reading (state : state) =
                     ~en:"Account / Model & Keepers");
              body=String.concat "\n" (config_models_detail state row)}]) in
       Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
-        ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
+        ~title:(ui_text state ~ko:"시스템 › 모델 › " ~en:"System › Models › "
+                ^ row.provider ^ " / " ^ row.model) sections))
 
 type model_scope_line = Model_identity of string | Model_observation of string
 
@@ -1517,12 +1563,13 @@ type models_projection = {
    retain their exact provider on every list row. Full provenance stays in
    [v]. *)
 let config_models_projection state ~terminal_rows ~cols =
+  let ko = state.ui_language = Lang_ko in
   let pane = max 1 (framed_inner_width cols - 2 - 2) in
   let rows = config_models_drawn_rows state in
   let content_height = max 1 (surface_body_rows state ~terminal_rows - 4) in
   let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
   let account (row : Masc_tui_model_runtime_table.row) =
-    let email, notes = models_source_account_reading
+    let email, notes = models_source_account_reading ~ko
         ~provider:row.provider state.runtime_config_view in
     let identity =
       ui_text state ~ko:"선택 · " ~en:"Selected · " ^ row.provider
@@ -1557,9 +1604,9 @@ let config_models_projection state ~terminal_rows ~cols =
                       (ui_text state ~ko:"… v:전체 안내·계정" ~en:"… v:all notices/account")))
       ~blank:(Model_identity "") prefix
   in
-  let table = Masc_tui_model_runtime_table.fits ~width:pane rows in
-  { model_document = Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows;
-    model_starts = if table then [] else Masc_tui_model_runtime_table.stacked_item_starts ~pane rows;
+  let table = Masc_tui_model_runtime_table.fits ~ko ~width:pane rows in
+  { model_document = Masc_tui_model_runtime_table.render ~ko ~width:(max 40 pane) ~pane rows;
+    model_starts = if table then [] else Masc_tui_model_runtime_table.stacked_item_starts ~ko ~pane rows;
     model_table = table; model_prefix = prefix;
     model_height = max 1 (content_height - List.length prefix);
     model_reading_hint = reading_hint }
@@ -1613,7 +1660,12 @@ let render_config_models (state : state) =
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
-       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings · Esc cancels" ^ Ansi.reset);
+       box_line buf cols
+         (Ansi.dim
+          ^ ui_text state
+              ~ko:"  선택한 계정·모델 설정을 읽는 중 · Esc:취소"
+              ~en:"  Loading selected account/model settings · Esc cancels"
+          ^ Ansi.reset);
        for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
@@ -1623,7 +1675,8 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, None ->
-       box_line buf cols (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset);
+       box_line buf cols
+         (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset);
        for _ = 2 to content_height do
          box_empty buf cols
        done
@@ -1679,7 +1732,7 @@ let render_config_models (state : state) =
              if table_mode && index = 0 then
                box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
              else if index = marked_line then
-               box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+               box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
              else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);
@@ -2386,7 +2439,9 @@ let render_config (state : state) =
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
        | Some _ when runtime_form_input_locked state ->
-         "Esc back · input retained · Ctrl-X closes recovery after receipt"
+         ui_text state
+           ~ko:"Esc:뒤로 · 입력 보존됨 · Ctrl-X:영수증 확인 후 복구 닫기"
+           ~en:"Esc back · input retained · Ctrl-X closes recovery after receipt"
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
@@ -2450,7 +2505,7 @@ let render_config (state : state) =
       match state.runtime_config_view with
       | None ->
           if Option.is_none state.runtime_config_view_error then
-            c.push (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset)
+            c.push (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset)
       | Some _ ->
           let rows = runtime_config_active_rows state in
           let total = List.length rows in
@@ -2468,11 +2523,13 @@ let render_config (state : state) =
                    reads. The runtime config is TOML and the lexer already
                    answers for it; what was missing was anyone asking. *)
                 let line = String.concat "" (List.map lexed_span segments) in
+                let is_selected = scroll + i = state.runtime_config_cursor in
                 let line =
-                  Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
-                    Ansi.reset line
+                  Printf.sprintf "%s%s%4d%s  %s"
+                    (if is_selected then "\xe2\x80\xba " else "  ")
+                    Ansi.dim (scroll + i + 1) Ansi.reset line
                 in
-                if scroll + i = state.runtime_config_cursor then
+                if is_selected then
                   c.push_selected (Masc_tui_theme.strip_sgr line)
                 else c.push line
             | None -> ()

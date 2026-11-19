@@ -94,7 +94,7 @@ let lines ~height ~render t =
       | Catalog.Folder path -> "Folder  " ^ Filename.basename path
       | Package package -> "Package " ^ package.metadata.title ^ " · " ^ package.metadata.revision
       | Issue issue -> "Issue   " ^ Filename.basename (Filename.dirname issue.path) ^ "/" ^ Filename.basename issue.path in
-    (index, heading, compact ((if index=t.cursor then "> " else "  ") ^ label))) in
+    (index, heading, compact ((if index=t.cursor then "› " else "  ") ^ label))) in
   let all_lines = List.concat_map (fun (index, heading, line) ->
     (match heading with Some h -> [(index, Some h, h)] | None -> []) @ [(index, None, line)]) drawn in
   let total = List.length all_lines in

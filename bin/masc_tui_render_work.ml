@@ -223,11 +223,6 @@ let work_tasks_projection (state : state) ~cols ~budget =
   let window = work_list_window ~rows:geometry.list_rows ~count ~selected in
   context, geometry, window
 
-let work_tasks_page_rows state ~terminal_rows ~cols =
-  let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
-  let _, _, window = work_tasks_projection state ~cols ~budget in
-  max 1 window.capacity
-
 let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
   if rows <= 0 then [] else
   let text ko en = ui_text state ~ko ~en in
@@ -330,7 +325,7 @@ let task_detail_viewport (state : state) =
 
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let header = screen_title (ui_text state ~ko:" 작업" ~en:" Task")
-    ^ "  " ^ connection_badge state in
+    ^ quiet_connection_tail state in
   let lines = task_detail_lines state ~cols task in
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
@@ -394,7 +389,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[]
-       ~hints:(ui_text state ~ko:"j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  x:취소  Left / Esc:뒤로  r:새로고침"
+       ~hints:(ui_text state ~ko:"j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  x:취소  ←/Esc:뒤로  r:새로고침"
          ~en:"j/k:scroll  PgUp/PgDn:page  Home/End:top/end  x:cancel  Left / Esc:back  r:refresh"));
 
   let offset =
@@ -415,6 +410,7 @@ let render_work_tasks (state : state) =
     ~hints:(Masc_tui_keys.footer_hints_work_tasks ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let context, geometry, window = work_tasks_projection state ~cols ~budget in
+      report_drawn_list Task_entries ~height:window.capacity;
       List.iter c.push context;
       let count = List.length rows in
       let list_lines =
@@ -791,7 +787,6 @@ let render_planning_list (state : state) =
   let now = Ptime_clock.now () in
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
-  let list_page_rows = ref 1 in
   let goals = match state.planning with
     | None -> []
     | Some snapshot -> planning_visible_goals ~filter:state.planning_filter
@@ -809,10 +804,10 @@ let render_planning_list (state : state) =
       (planning_sort_label state.planning_sort) (planning_filter_label state.planning_filter) in
   let show_modes = state.planning_sort <> Planning_sort_phase_priority
     || state.planning_filter <> Planning_filter_active in
-  let badge = "  " ^ connection_badge state in
+  let badge = quiet_connection_tail state in
   let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
   surface_chrome_keys
-    ~overflow:(Self_scrolled (fun () -> Planning_list_page_rows !list_page_rows))
+    ~overflow:Paged_by_cursor
     state ~terminal_rows ~cols ~surface_key:"planning-list" ~title
     ~keys:(Masc_tui_keys.footer_row_planning_goal_list ~lang:state.ui_language ~has_rows:(count > 0))
     ~body:(fun ~budget c ->
@@ -858,7 +853,7 @@ let render_planning_list (state : state) =
            let geometry = work_panels ~inner:(framed_inner_width cols) ~rows:(budget - !used) in
            let window = work_list_window ~rows:geometry.list_rows ~count
                ~selected:(Some state.planning_cursor) in
-           list_page_rows := max 1 window.capacity;
+           report_drawn_list Goal_entries ~height:window.capacity;
            let list_lines =
              (if count = 0 then
                 [text (if snapshot.pl_goals = [] then "아직 Goal 없음" else "필터에 맞는 Goal 없음 · f:필터")
@@ -1154,11 +1149,11 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let proof_width = planning_proof_width ~width in
   let confirmation_rows =
     (match confirmation with
-       | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation...")}]
+       | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation")}]
        | `Inspect (Masc_tui_fetched.Ready value) ->
            Planning_detail.confirmation_lines ~width:proof_width
              ~ko:(state.ui_language = Lang_ko) value
-       | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm...")}]
+       | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm")}]
        | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
        | `Inspect Masc_tui_fetched.Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
@@ -1309,13 +1304,15 @@ let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
     ~after:phase ^ phase in
   header :: planning_stale_notice_rows state ~cols
 
+let planning_detail_chrome_rows = max 0 (framed_chrome_rows - 2)
+
 let planning_detail_height ~rows ~header_rows ~action_rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)
+  Masc_tui_scroll.content_height ~rows ~chrome:(planning_detail_chrome_rows + max 0 (header_rows - 1) + action_rows)
     ~count ~preview_keep:None
 
 let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
   let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
-  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
+  planning_detail_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
 
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1324,7 +1321,7 @@ let planning_detail_viewport (state : state) =
   match state.planning_mode, state.planning with
   | Planning_detail goal_id, Some snapshot ->
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
-       | None -> 0, max 1 (rows - framed_chrome_rows)
+       | None -> 0, max 1 (rows - planning_detail_chrome_rows)
        | Some goal ->
            let action_rows = List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed:(goal_action_armed_for state goal_id)
              ~drop_reason:(goal_drop_reason_for state goal_id) goal) in
@@ -1334,7 +1331,7 @@ let planning_detail_viewport (state : state) =
            if planning_detail_fits ~rows ~header_rows ~action_rows ~count
            then count, planning_detail_height ~rows ~header_rows ~action_rows ~count
            else 0, 1)
-  | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
+  | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - planning_detail_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
   let headers = planning_detail_header_rows state ~cols goal in
@@ -1348,7 +1345,6 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | Planning_scroll_offset value -> value
     | Planning_scroll_candle _ -> candle_scroll in
   let scroll = Masc_tui_scroll.normalize ~count ~height requested_scroll in
-  box_top buf cols;
   (match headers with
    | [] -> ()
    | title :: rest ->
@@ -1364,7 +1360,6 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | None -> box_empty buf cols
     | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
   done;
-  box_bottom buf cols;
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
@@ -1420,7 +1415,7 @@ let render_planning_detail (state : state)
       in
       (* The goal filter narrows to a phase; the goals it leaves out are on
          the other side of a filter, not behind a page boundary. *)
-      write_list_sidebar_selection left_buf ~rows ~cols:left_cols
+      write_list_sidebar_selection ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"목표" ~en:"Goals")
         ~holding:None
         ~focused:false
@@ -1942,8 +1937,8 @@ let render_schedule_list (state : state) =
                    ~en:"  (no schedules on this page; refresh to read again)"
              | (Some _ | None), (_ :: _ | []) ->
                  ui_text state
-                   ~ko:"  (자동 일정 없음 \xe2\x80\x94 n 으로 만들기)"
-                   ~en:"  (no scheduled automation \xe2\x80\x94 press n to create one)"
+                   ~ko:"  (자동 일정 없음 · n 으로 만들기)"
+                   ~en:"  (no scheduled automation · press n to create one)"
            in
            c.push (Ansi.dim ^ empty ^ Ansi.reset)
          end else begin
@@ -2000,6 +1995,7 @@ let render_schedule_list (state : state) =
              else 0
            in
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
+           report_drawn_list Schedule_rows ~height:content_height;
            c.position (Masc_tui_value.Position.row ~selected:(Some state.schedule_cursor) ~total:(List.length snapshot.scs_rows));
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
@@ -2060,7 +2056,7 @@ let render_schedule_list (state : state) =
                    }
                in
                if is_selected then
-                 c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+                 c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
                else
                  c.push ("  " ^ line)
              end
@@ -2262,7 +2258,7 @@ let schedule_wake_lines ~ko
   | Render_schedule.Wake_last_only ->
       last_wake
       :: last_wake_fields
-      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중\xe2\x80\xa6)" "  (loading the rest of this schedule's wakes\xe2\x80\xa6)") ]
+      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중)" "  (loading the rest of this schedule's wakes)") ]
   | Render_schedule.Wake_never ->
       [ Ansi.bold, t "  실행" "  WAKES"
       ; (Ansi.dim, t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]
@@ -2565,7 +2561,8 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"예약" ~en:"Schedules")
         ~focused:false
         ~holding:
           (Option.bind state.schedules (fun snapshot ->

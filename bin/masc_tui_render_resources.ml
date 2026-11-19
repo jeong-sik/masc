@@ -46,12 +46,13 @@ let detail_text = function
       let metadata = Catalog.metadata resource in
       Option.value metadata.description ~default:metadata.uri
 
-let meta_text = function
+let meta_text ~ko = function
   | Catalog.Report report ->
-      Printf.sprintf "%s · %s · %d bytes" report.revision.author
-        report.revision.created_at report.revision.body.bytes
+      Printf.sprintf (if ko then "%s · %s · %d바이트" else "%s · %s · %d bytes")
+        report.revision.author report.revision.created_at report.revision.body.bytes
   | Mcp _ as resource ->
-      Option.value (Catalog.metadata resource).mime_type ~default:"type unknown"
+      Option.value (Catalog.metadata resource).mime_type
+        ~default:(if ko then "유형 미상" else "type unknown")
 
 (* One resource is one row: its type, its name, then, for a published report,
    the revision check and the "today" marker, then what it says about itself
@@ -126,7 +127,7 @@ let list_layout ~ko resources ~today ~inner_width =
   let name_cells = min name_cap_cells
     (widest_cells ~name:(list_head ~ko Col_name) (List.map name_text resources)) in
   let meta_cells = min meta_cap_cells
-    (widest_cells ~name:(list_head ~ko Col_meta) (List.map meta_text resources)) in
+    (widest_cells ~name:(list_head ~ko Col_meta) (List.map (meta_text ~ko) resources)) in
   let check_cells = max check_cells (head_cells Col_check) in
   let day_cells =
     max (Masc_tui_message_layout.display_width (day_marker ~ko)) (head_cells Col_day) in
@@ -174,8 +175,8 @@ let list_cells ~ko ({ layout; flex; width; _ } : list_layout) reading =
     Masc_tui_table.cell ~header ~fold ~style ~width:cell_width
       (Terminal_text.single_line value)) layout.shown
 
-let selected_marker = " \xe2\x96\xb8 "
-let unselected_marker = "   "
+let selected_marker = "\xe2\x80\xba "
+let unselected_marker = "  "
 let marker_cells = String.length unselected_marker
 
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
@@ -296,7 +297,7 @@ let render_resources (state : state) =
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Catalog.scope_label ~ko:(state.ui_language = Lang_ko) state.resource_scope
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
@@ -312,7 +313,7 @@ let render_resources (state : state) =
          framed_line pane_buf pane_cols
            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
      | List_unread -> status_note (String.trim (page_unread_note ~ko))
-     | List_loading -> status_note (if ko then "(읽는 중\xe2\x80\xa6)" else "(loading\xe2\x80\xa6)")
+     | List_loading -> status_note (if ko then "(읽는 중)" else "(loading)")
      | List_empty None -> status_note (no_resources ~ko)
      | Rows_ready None -> ());
 
@@ -365,12 +366,12 @@ let render_resources (state : state) =
             | Col_name -> name_text resource, Ansi.bold
             | Col_check ->
                 (match check with
-                 | Some status -> Masc_tui_artifact_checks.label status, check_style status
+                 | Some status -> Masc_tui_artifact_checks.label ~ko status, check_style status
                  | None -> "", "")
             | Col_day ->
                 (if Catalog.on_day today resource then day_marker ~ko else ""), Theme.recede ()
             | Col_detail -> detail_text resource, Theme.recede ()
-            | Col_meta -> meta_text resource, Theme.recede () in
+            | Col_meta -> meta_text ~ko resource, Theme.recede () in
           let line =
             (if selected then selected_marker else unselected_marker)
             ^ Masc_tui_table.row (list_cells ~ko table (Some read)) in
@@ -393,17 +394,20 @@ let render_resources (state : state) =
       | Some resource ->
           let share_badge =
             match resource, Option.bind reading (fun r -> r.Masc_tui_resource_reading.shared) with
-            | Catalog.Report _, Some true -> " · [마지막 확인: 외부 공유]"
-            | Catalog.Report _, Some false -> " · [마지막 확인: 비공개]"
+            | Catalog.Report _, Some true ->
+                ui_text state ~ko:" · [마지막 확인: 외부 공유]" ~en:" · [last observed: shared]"
+            | Catalog.Report _, Some false ->
+                ui_text state ~ko:" · [마지막 확인: 비공개]" ~en:" · [last observed: private]"
             | Catalog.Report _, None | Catalog.Mcp _, _ -> ""
           in
-          "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
-      | None -> "Resource detail"
+          ui_text state ~ko:"리소스 · " ~en:"Resource · "
+          ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
+      | None -> ui_text state ~ko:"리소스 상세" ~en:"Resource detail"
     in
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else "   ")
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
@@ -434,7 +438,7 @@ let render_resources (state : state) =
            | Some (line, mark) ->
                (match mark with
                 | Masc_tui_detail_reading.Current_match ->
-                    box_line_selected pane_buf pane_cols ("> " ^ Masc_tui_theme.strip_sgr line)
+                    box_line_selected pane_buf pane_cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
                 | Match -> box_line_styled pane_buf pane_cols ~style:Ansi.underline
                     ("* " ^ Masc_tui_theme.strip_sgr line)
                 | No_match -> box_line pane_buf pane_cols ("  " ^ line))

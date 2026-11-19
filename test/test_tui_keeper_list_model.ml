@@ -294,15 +294,20 @@ let test_cause_verdict_and_first_folds () =
       [ Model.Cause_paused; Model.Cause_recovered; Model.Cause_recovered; Model.Not_failing ]);
   Alcotest.(check (list string)) "runtime matrix omits paused failing Keeper" []
     (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now rows));
+  let failing = Model.Group_cause Model.Cause_unnamed in
   let recovered = Model.Group_cause Model.Cause_recovered in
   let sound = Model.Group_cause Model.Not_failing in
-  let groups = Some recovered :: List.init 5 (fun _ -> Some sound) in
+  let groups = Some failing :: Some recovered :: List.init 5 (fun _ -> Some sound) in
   let seen, folded = Model.first_folds ~seen:[] ~folded:[] groups in
-  Alcotest.(check bool) "recovery and more than four sound Keepers initially fold" true
-    (List.mem recovered folded && List.mem sound folded);
+  Alcotest.(check bool) "recovery and more than four sound Keepers fold behind active failures" true
+    (not (List.mem failing folded) && List.mem recovered folded && List.mem sound folded);
   let folded = Model.refold Model.Unfold recovered folded in
   let _, refreshed = Model.first_folds ~seen ~folded groups in
-  Alcotest.(check bool) "refresh preserves explicit unfold" false (List.mem recovered refreshed)
+  Alcotest.(check bool) "refresh preserves explicit unfold" false (List.mem recovered refreshed);
+  let no_failure_groups = Some recovered :: List.init 5 (fun _ -> Some sound) in
+  let _, non_empty_folded = Model.first_folds ~seen:[] ~folded:[] no_failure_groups in
+  Alcotest.(check bool) "without active failures, primary group stays expanded" true
+    (not (List.mem recovered non_empty_folded) && List.mem sound non_empty_folded)
 
 let reading_by_name readings ~keeper_name =
   match List.assoc_opt keeper_name readings with

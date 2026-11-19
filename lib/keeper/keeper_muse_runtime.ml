@@ -980,23 +980,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
-      Session_store.load ~base_path ~keeper_name
-      |> Result.map_error (fun detail ->
-        internal_error ("Muse Code session binding load failed: " ^ Session_store.read_error_to_string detail))
-    in
-    let* stored_session =
-      match stored_session with
-      | Some ({ phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
-        Session_store.reconcile_process_restart
-          ~base_path
-          ~keeper_name
-          ~expected
-          ~current_owner_epoch:owner_epoch
-          ~required_at:(Time_compat.now ())
-        |> Result.map Option.some
-        |> Result.map_error Session_store.process_restart_error_to_core_error
-      | None | Some { phase = Ready | Recovery_required _ | Settled _; _ } ->
-        Ok stored_session
+      Session_store.load_reconciled_for_runtime
+        ~base_path
+        ~keeper_name
+        ~client_kind:Muse
+        ~runtime_id
+        ~current_owner_epoch:owner_epoch
+        ~required_at:(Time_compat.now ())
     in
     let* claim_plan =
       Session_store.plan_claim ~expected:stored_session ~client_kind:Muse ~runtime_id

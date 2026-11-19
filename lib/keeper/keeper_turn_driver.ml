@@ -3703,11 +3703,6 @@ let run_named
               pending_result_receipts=None;settled_session=None;
               effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
           | Ok account ->
-          match on_guidance_prepared () with
-          | Error error -> {Keeper_claude_code_runtime.result=Error error;
-              pending_result_receipts=None;settled_session=None;
-              effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
-          | Ok () ->
           reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
@@ -3719,7 +3714,7 @@ let run_named
           in
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
-          Keeper_claude_code_runtime.run ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
+          Keeper_claude_code_runtime.run ~on_guidance_prepared ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
@@ -3842,10 +3837,11 @@ let run_named
           ~pending_result_receipts:claude_attempt.pending_result_receipts claude_result in
         let claude_result = observe_official_result
           ~execution_result:claude_attempt.result claude_result in
+        let claude_result = guidance_result claude_result in
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform claude_attempt.result )
+        , official_client_dispatch ~provider_config_transform claude_result )
       | Runtime_execution.Agent_core sealed ->
        (* Held to this candidate's own rendering of the history, for the
           reason [official_client_librarian_front] states. *)

@@ -23,7 +23,7 @@ let fusion_step = "Fusion"
    and beside the roster pane they pushed the part that is this run's --
    its progress, its failure, or that its evidence is retained -- off the
    row. Enter is the footer's to name. *)
-let fusion_run_summary run =
+let fusion_run_summary ~ko run =
   match run.fur_status with
   | Fusion_running ->
       ((Theme.accent ()), fusion_run_progress_text run.fur_stage)
@@ -33,10 +33,11 @@ let fusion_run_summary run =
            ( (Theme.ok ())
            , Terminal_text.single_line decision ^ " \xc2\xb7 "
              ^ Terminal_text.single_line summary )
-       | (Some _ | None), (Some _ | None) -> ((Theme.ok ()), "evidence retained"))
+       | (Some _ | None), (Some _ | None) ->
+           ((Theme.ok ()), if ko then "근거 보존됨" else "evidence retained"))
   | Fusion_failed failure ->
       ( (Theme.bad ())
-      , Printf.sprintf "failed [%s]: %s"
+      , Printf.sprintf (if ko then "실패 [%s]: %s" else "failed [%s]: %s")
           (Terminal_text.single_line failure.frs_failure_code)
           (Terminal_text.single_line failure.frs_error) )
 
@@ -127,7 +128,10 @@ let render_fusion_list (state : state) =
                  state_count (Theme.bad ()) ~ko:"실패" ~en:"failed" failed_count
                else "")
             ; (if history_count = 0 then ""
-               else Printf.sprintf "%d Board evidence" history_count) ]
+               else
+                 Printf.sprintf
+                   (if state.ui_language = Lang_ko then "게시판 근거 %d건" else "%d Board evidence")
+                   history_count) ]
           ~position:
             (if shown = 0 then None
              else
@@ -176,6 +180,7 @@ let render_fusion_list (state : state) =
      its height. [listing_note_rows] hands it only the rows the list leaves
      blank, so every run still says where it is in the four-stage flow and no
      entry loses its row. *)
+  let ko = state.ui_language = Lang_ko in
   let summary_indent = "  " in
   let summary_clauses =
     match List.nth_opt entries state.fusion_cursor with
@@ -183,10 +188,12 @@ let render_fusion_list (state : state) =
     | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) ->
         Some
           ( Theme.warn ()
-          , [ "Historical Board evidence; run lifecycle unavailable"
-            ; "Enter:read original result" ] )
+          , [ ui_text state
+                ~ko:"과거 보드 근거 · 실행 상태 기록 없음"
+                ~en:"Historical Board evidence; run lifecycle unavailable"
+            ; ui_text state ~ko:"Enter:원본 결과 읽기" ~en:"Enter:read original result" ] )
     | Some (Masc.Tui_decode_fusion.Fusion_retained_run selected) ->
-        let style, summary = fusion_run_summary selected in
+        let style, summary = fusion_run_summary ~ko selected in
         Some (style, [ fusion_run_duration ~now:now_epoch selected; summary ])
   in
   let packed_summary =
@@ -237,10 +244,13 @@ let render_fusion_list (state : state) =
       match Rows.at entries_window row_index with
       | None -> box_empty buf cols
       | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
-          let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
-              ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
+          let line =
+            ui_text state ~ko:"보드 근거 · " ~en:"Board evidence · "
+            ^ Terminal_text.single_line evidence.fhe_title
+            ^ " · " ^ Link.reference Board_post evidence.fhe_post_id
+          in
           if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
       | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
@@ -258,7 +268,7 @@ let render_fusion_list (state : state) =
               }
           in
           if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
     done;
   (match summary_clauses with
@@ -591,24 +601,28 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
   in
   [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows
 
-let fusion_tool_event_lines ~width ~frame_width = function
+let fusion_tool_event_lines ~ko ~width ~frame_width = function
   | Fusion_tool_called event ->
       [ ( (Theme.accent ())
-        , Printf.sprintf "  [called] %s%s  %s  turn %d/%d  id=%s"
+        , Printf.sprintf
+            (if ko then "  [호출] %s%s  %s  턴 %d/%d  id=%s"
+             else "  [called] %s%s  %s  turn %d/%d  id=%s")
             (fusion_tool_actor_text event.fte_actor)
             (fusion_tool_agent_suffix event.fte_actor event.fte_agent_name)
             (Terminal_text.single_line event.fte_tool_name)
             event.fte_turn event.fte_planned_index
             (Terminal_text.single_line event.fte_tool_use_id) )
       ]
-      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Input" event.fte_input
+      @ fusion_tool_preview_lines ~width ~frame_width
+          ~label:(if ko then "입력" else "Input") event.fte_input
   | Fusion_tool_completed event ->
       let status, style, output, failure_suffix =
         match event.fte_completion with
-        | Fusion_tool_succeeded output -> ("succeeded", Theme.ok (), output, "")
+        | Fusion_tool_succeeded output ->
+            ((if ko then "성공" else "succeeded"), Theme.ok (), output, "")
         | Fusion_tool_failed { ftc_output; ftc_recoverable; ftc_error_class }
           ->
-          ( "failed"
+          ( (if ko then "실패" else "failed")
           , Theme.bad ()
           , ftc_output
           , Printf.sprintf "  recoverable=%b%s" ftc_recoverable
@@ -617,7 +631,10 @@ let fusion_tool_event_lines ~width ~frame_width = function
                | None -> " class=unavailable") )
       in
       [ ( style
-        , Printf.sprintf "  [%s] %s%s  %s  turn %d/%d  id=%s%s" status
+        , Printf.sprintf
+            (if ko then "  [%s] %s%s  %s  턴 %d/%d  id=%s%s"
+             else "  [%s] %s%s  %s  turn %d/%d  id=%s%s")
+            status
             (fusion_tool_actor_text event.fte_actor)
             (fusion_tool_agent_suffix event.fte_actor event.fte_agent_name)
             (Terminal_text.single_line event.fte_tool_name)
@@ -625,35 +642,41 @@ let fusion_tool_event_lines ~width ~frame_width = function
             (Terminal_text.single_line event.fte_tool_use_id)
             failure_suffix )
       ]
-      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Output" output
+      @ fusion_tool_preview_lines ~width ~frame_width
+          ~label:(if ko then "출력" else "Output") output
 
-let fusion_tool_trace_uncached ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
+let fusion_tool_trace_uncached ~ko ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then
           ( Theme.ok ()
-          , Printf.sprintf "  Coverage: complete across %d AGENT_CORE actor(s)"
+          , Printf.sprintf
+              (if ko then "  추적 범위: AGENT_CORE 참여자 %d명 전체 수집 완료"
+               else "  Coverage: complete across %d AGENT_CORE actor(s)")
               (List.length trace.ftt_observed_actors) )
         else
           ( Theme.warn ()
           , Printf.sprintf
-              "  Coverage: partial across %d actor(s) (%d dropped event(s), %d gap(s))"
+              (if ko then "  추적 범위: 참여자 %d명 부분 수집 (누락 이벤트 %d건, 공백 %d건)"
+               else "  Coverage: partial across %d actor(s) (%d dropped event(s), %d gap(s))")
               (List.length trace.ftt_observed_actors)
               trace.ftt_dropped_events (List.length trace.ftt_gaps) )
       in
       let observed =
         match trace.ftt_observed_actors with
-        | [] -> [ Ansi.dim, "  Observed actors: (none)" ]
+        | [] ->
+            [ Ansi.dim, if ko then "  관측된 참여자: (없음)" else "  Observed actors: (none)" ]
         | actors ->
             fusion_wrapped_block ~width ~indent:"  "
-              ("Observed actors: "
+              ((if ko then "관측된 참여자: " else "Observed actors: ")
                ^ String.concat ", " (List.map fusion_tool_actor_text actors))
       in
       let gaps =
         List.map
           (fun gap ->
              ( Theme.warn ()
-             , Printf.sprintf "  Gap: %s [%s]"
+             , Printf.sprintf
+                 (if ko then "  누락 구간: %s [%s]" else "  Gap: %s [%s]")
                  (fusion_tool_actor_text gap.ftg_actor)
                  (Terminal_text.single_line gap.ftg_reason) ))
           trace.ftt_gaps
@@ -661,12 +684,17 @@ let fusion_tool_trace_uncached ~width ~frame_width (trace : Masc.Tui_decode_fusi
       let events =
         match trace.ftt_events with
         | [] when trace.ftt_complete ->
-            [ Ansi.dim, "  No Tool calls were observed for instrumented actors" ]
-        | [] -> [ Ansi.dim, "  No Tool events retained in this partial ledger" ]
+            [ Ansi.dim
+            , if ko then "  계측 대상 참여자에서 관측된 도구 호출이 없습니다"
+              else "  No Tool calls were observed for instrumented actors" ]
+        | [] ->
+            [ Ansi.dim
+            , if ko then "  이 부분 기록에 보존된 도구 이벤트가 없습니다"
+              else "  No Tool events retained in this partial ledger" ]
         | events ->
             events
             |> List.concat_map (fun event ->
-                   (Ansi.dim, "") :: fusion_tool_event_lines ~width ~frame_width event)
+                   (Ansi.dim, "") :: fusion_tool_event_lines ~ko ~width ~frame_width event)
       in
       (coverage :: observed) @ gaps @ events
 
@@ -674,6 +702,7 @@ let fusion_tool_trace_uncached ~width ~frame_width (trace : Masc.Tui_decode_fusi
    retained projection when its full contents and display inputs match. *)
 type fusion_trace_projection =
   { trace : Masc.Tui_decode_fusion.fusion_tool_trace
+  ; ko : bool
   ; width : int
   ; frame_width : int
   ; palette_generation : int
@@ -685,12 +714,13 @@ let fusion_trace_projection = ref None
 
 let clear_fusion_trace_projection () = fusion_trace_projection := None
 
-let fusion_tool_trace_lines ~width ~frame_width trace =
+let fusion_tool_trace_lines ~ko ~width ~frame_width trace =
   let palette_generation =
     Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   match !fusion_trace_projection with
   | Some cached
-    when cached.width = width
+    when cached.ko = ko
+         && cached.width = width
          && cached.frame_width = frame_width
          && cached.palette_generation = palette_generation
          && cached.table_frame = !table_frame_enabled
@@ -699,9 +729,9 @@ let fusion_tool_trace_lines ~width ~frame_width trace =
         fusion_trace_projection := Some { cached with trace };
       cached.lines
   | Some _ | None ->
-    let lines = fusion_tool_trace_uncached ~width ~frame_width trace in
+    let lines = fusion_tool_trace_uncached ~ko ~width ~frame_width trace in
     fusion_trace_projection := Some
-      { trace; width; frame_width; palette_generation; table_frame = !table_frame_enabled; lines };
+      { trace; ko; width; frame_width; palette_generation; table_frame = !table_frame_enabled; lines };
     lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
@@ -800,16 +830,16 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
     match evidence.fe_judge with
     | Fusion_judge_synthesized judge ->
         [ ( (Theme.info ())
-          , "  Judge [synthesized] "
+          , t "  판정 [종합] " "  Judge [synthesized] "
             ^ Terminal_text.single_line judge.fj_decision )
         ]
-        @ fusion_labeled_markdown ~width ~label:"Resolved"
+        @ fusion_labeled_markdown ~width ~label:(t "최종 답변" "Resolved")
             judge.fj_resolved_answer
         @ [ Ansi.dim, "" ]
-        @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
+        @ fusion_labeled_markdown ~width ~label:(t "판정 근거" "Reason") judge.fj_reason
     | Fusion_judge_failed failure ->
         [ ( (Theme.bad ())
-          , "  Judge [failed] ["
+          , t "  판정 [실패] [" "  Judge [failed] ["
             ^ Terminal_text.single_line failure.fj_failure_code
             ^ "]" )
         ]
@@ -910,7 +940,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
         :: first_cards
   in
   let tool_lines =
-    fusion_tool_trace_lines ~width ~frame_width evidence.fe_tool_trace
+    fusion_tool_trace_lines ~ko ~width ~frame_width evidence.fe_tool_trace
   in
   (* One line per seat: the route it was given and who answered, each
      failed candidate under it. *)
@@ -942,7 +972,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
             List.map (fun row -> Ansi.reset, "  " ^ row) wrapped)
           (Masc_tui_fusion_seat_routes.lines routes)
   in
-  [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
+  [ Ansi.bold, t "  제목: " "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
   @ detail_section_heading ~width
       (t "1. 질문 · 최종 판정" "1. Question & Judge Synthesis")
   @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
@@ -953,14 +983,19 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
       (t "2. 패널 응답 · 토큰 분포" "2. Panel Responses & Tokens")
   @ [ ( Ansi.dim
       , let usage =
-          if answered = 0 then "panel token usage: not recorded"
+          if answered = 0 then t "패널 토큰 사용량: 기록 없음" "panel token usage: not recorded"
           else if failed = 0 then
-            Printf.sprintf "%d input / %d output tokens" input_tokens output_tokens
+            Printf.sprintf
+              (if ko then "입력 %d / 출력 %d 토큰" else "%d input / %d output tokens")
+              input_tokens output_tokens
           else
-            Printf.sprintf "measured %d/%d panels: %d input / %d output tokens"
+            Printf.sprintf
+              (if ko then "측정 %d/%d 패널: 입력 %d / 출력 %d 토큰"
+               else "measured %d/%d panels: %d input / %d output tokens")
               answered (answered + failed) input_tokens output_tokens
         in
-        Printf.sprintf "  %d answered / %d failed  \xc2\xb7  %s"
+        Printf.sprintf
+          (if ko then "  응답 %d / 실패 %d  \xc2\xb7  %s" else "  %d answered / %d failed  \xc2\xb7  %s")
           answered failed usage )
     ]
   @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Ansi.dim, "" ])
@@ -974,7 +1009,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
   @ seat_route_lines
   @ (if seat_route_lines = [] then [] else [ Ansi.dim, "" ])
   @ [ ( Ansi.dim
-      , "  Board link: "
+      , t "  보드 링크: " "  Board link: "
         ^ Link.reference Board_post
             (Terminal_text.single_line evidence.fe_post_id) )
     ]
@@ -985,7 +1020,9 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
   let now = Unix.gettimeofday () in
   let date_time = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now run.fur_started_at in
   let age = fusion_run_age ~now run in
-  let started_text = Printf.sprintf "%s (%s ago)" date_time age in
+  let started_text =
+    Printf.sprintf (if ko then "%s (%s 전)" else "%s (%s ago)") date_time age
+  in
   let pipeline = fusion_pipeline_diagram run in
   (* The pipeline row names the four stops and marks the one the run is on;
      a Flow row above it named the same four stops again with no state, and a
@@ -993,25 +1030,28 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
      finished run the three read "completed / completed / completed". The
      stops are the pipeline's to draw; the status says whether the run ended,
      and Progress says what it is doing about the stop it is on. *)
+  let say korean english = if ko then korean else english in
   let run_lines =
-    [ Ansi.bold, "  RUN"
-    ; Ansi.reset, "  Pipeline: " ^ pipeline
+    [ Ansi.bold, say "  실행" "  RUN"
+    ; Ansi.reset, say "  단계: " "  Pipeline: " ^ pipeline
       (* No Actions row: every key it named is on the footer, drawn from the
          key table, and this row spelled them three ways ("K Keeper",
          "[Y] Copy Link", "[PgUp/PgDn] Page"). *)
     ; ( Ansi.dim
-      , "  Link: "
+      , say "  링크: " "  Link: "
         ^ Link.reference Fusion_run
             (Terminal_text.single_line run.fur_run_id) )
     ; ( Ansi.reset
-      , Printf.sprintf "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s"
+      , Printf.sprintf
+          (if ko then "  호출자: %s@%s%s %s[키퍼]%s  \xc2\xb7  %s"
+           else "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s")
           (Theme.accent ())
           (Terminal_text.single_line run.fur_keeper)
           Ansi.reset
           (Theme.warn ())
           Ansi.reset
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
-    ; fusion_run_status_color run.fur_status, "  Status: " ^ status
+    ; fusion_run_status_color run.fur_status, say "  상태: " "  Status: " ^ status
     ]
     (* Progress narrates a stop the run is still on. Once it has ended the
        stage is terminal and the row would repeat the status word. *)
@@ -1019,30 +1059,34 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
        | Fusion_stage_completed | Fusion_stage_failed -> []
        | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
        | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
-           [ Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
+           [ Ansi.dim, say "  진행: " "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
     @ [ ( Ansi.reset
-    , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
+    , say "  구성: " "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ started_text
-    ; Ansi.reset, "  Duration: " ^ fusion_run_duration ~now run
+    ; Ansi.dim, say "  시작: " "  Started: " ^ started_text
+    ; Ansi.reset, say "  소요: " "  Duration: " ^ fusion_run_duration ~now run
     ]
     @ (match detail.fud_evidence with
-       | None -> [Ansi.dim, "  Original question and Board link: awaiting evidence"]
+       | None ->
+           [ Ansi.dim
+           , say "  원본 질문·보드 링크: 근거 대기 중"
+               "  Original question and Board link: awaiting evidence" ]
        | Some evidence ->
-           [ Theme.info (), "  Board: " ^ Link.reference Board_post evidence.fe_post_id
-           ; Ansi.bold, "  Original question: " ^ Terminal_text.single_line evidence.fe_question ])
+           [ Theme.info (), say "  보드: " "  Board: " ^ Link.reference Board_post evidence.fe_post_id
+           ; Ansi.bold, say "  원본 질문: " "  Original question: " ^ Terminal_text.single_line evidence.fe_question ])
     @
     match run.fur_status with
     | Fusion_running -> []
     | Fusion_completed ->
         (match run.fur_decision, run.fur_summary with
          | Some decision, Some summary ->
-             [ (Theme.ok ()), "  Outcome: " ^ Terminal_text.single_line decision ]
-             @ fusion_labeled_markdown ~width ~label:"Outcome summary" summary
+             [ (Theme.ok ()), say "  결과: " "  Outcome: " ^ Terminal_text.single_line decision ]
+             @ fusion_labeled_markdown ~width ~label:(say "결과 요약" "Outcome summary") summary
          | (Some _ | None), (Some _ | None) -> [])
     | Fusion_failed failure ->
         [ (Theme.bad ())
-        , Printf.sprintf "  Registry failure [%s]: %s"
+        , Printf.sprintf
+            (if ko then "  레지스트리 실패 [%s]: %s" else "  Registry failure [%s]: %s")
             (Terminal_text.single_line failure.frs_failure_code)
             (Terminal_text.single_line failure.frs_error)
         ]
@@ -1051,11 +1095,13 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
     match detail.fud_evidence_status, detail.fud_evidence with
     | Fusion_evidence_pending, None ->
         clear_fusion_trace_projection ();
-        [ (Theme.warn ()), "  Evidence: pending (run is still running)" ]
+        [ (Theme.warn ())
+        , say "  근거: 대기 중 (실행 진행 중)" "  Evidence: pending (run is still running)" ]
     | Fusion_evidence_absent, None ->
         clear_fusion_trace_projection ();
         [ (Theme.warn ())
-        , "  Evidence: absent (no current Board projection for this retained run)"
+        , say "  근거: 없음 (보존된 실행에 연결된 보드 게시물 없음)"
+            "  Evidence: absent (no current Board projection for this retained run)"
         ]
     | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
     | Fusion_evidence_recorded, None
@@ -1065,7 +1111,8 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
            explicit protects locally-constructed test state from looking like
            a legitimate empty reading. *)
         clear_fusion_trace_projection ();
-        [ (Theme.bad ()), "  Fusion evidence invariant violated" ]
+        [ (Theme.bad ())
+        , say "  퓨전 근거 불변성 위반" "  Fusion evidence invariant violated" ]
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
@@ -1187,11 +1234,12 @@ let render_fusion_detail (state : state) run_id =
     else begin
       let left_cols = keeper_roster_pane_cols in
       let format_sidebar_fusion (row : Masc.Tui_decode_fusion.fusion_run) =
+        let ko = state.ui_language = Lang_ko in
         let status =
           match row.fur_status with
-          | Masc.Tui_decode_fusion.Fusion_running -> "run "
-          | Masc.Tui_decode_fusion.Fusion_completed -> "done"
-          | Masc.Tui_decode_fusion.Fusion_failed _ -> "fail"
+          | Masc.Tui_decode_fusion.Fusion_running -> if ko then "실행" else "run "
+          | Masc.Tui_decode_fusion.Fusion_completed -> if ko then "완료" else "done"
+          | Masc.Tui_decode_fusion.Fusion_failed _ -> if ko then "실패" else "fail"
         in
         let time = fusion_run_clock row in
         let keeper = Terminal_text.single_line row.fur_keeper in
@@ -1203,7 +1251,8 @@ let render_fusion_detail (state : state) run_id =
         |> List.map (function
             | Fusion_retained_run run -> format_sidebar_fusion run
             | Fusion_historical_evidence reference ->
-                "history " ^ Terminal_text.single_line reference.fhe_title)
+                ui_text state ~ko:"이력 " ~en:"history "
+                ^ Terminal_text.single_line reference.fhe_title)
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
@@ -1212,7 +1261,8 @@ let render_fusion_detail (state : state) run_id =
          no matching row; the domain selection stays optional. *)
       let selected = Option.value (Masc_tui_fusion_model.fusion_detail_entry_index state) ~default:(-1) in
       (* The retained inventory is the whole list; nothing is held back. *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"퓨전" ~en:"Fusion")
         ~focused:false ~holding:None ~labels ~selected;
       let answer =
         fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
@@ -1238,7 +1288,11 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
   let width = framed_inner_width cols in
   let text, hints =
     match form with
-    | None -> [ "Reading the Fusion presets from runtime.toml..." ], "Esc:cancel"
+    | None ->
+        [ ui_text state
+            ~ko:"runtime.toml에서 퓨전 프리셋을 불러오는 중"
+            ~en:"Reading the Fusion presets from runtime.toml" ]
+      , ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel"
     | Some form -> Masc_tui_fusion_launch.lines form, Masc_tui_fusion_launch.hints
   in
   let lines =

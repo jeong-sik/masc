@@ -16,9 +16,23 @@ val default_failure_ttl_sec : float
     permanently failing id (e.g. missing [users:read] scope) from refetching
     on every inbound message, while still picking a fix up promptly. *)
 
+type cache_capacity =
+  | Unbounded
+  | Max_entries of int
+(** Declared cache capacity bound. [Max_entries n] requires [n > 0] (invalid
+    values raise [Invalid_argument]). Expired entries are always pruned before
+    evicting the least-recently-used live entry. *)
+
+type config =
+  { success_ttl_sec : float
+  ; failure_ttl_sec : float
+  ; capacity : cache_capacity
+  }
+
 val create :
   ?success_ttl_sec:float ->
   ?failure_ttl_sec:float ->
+  ?capacity:cache_capacity ->
   fetch:
     (user_id:string ->
      (Slack_rest_client.user_info_ok, Slack_rest_client.error) result) ->
@@ -28,6 +42,22 @@ val create :
 (** [fetch] and [now] are injected so cache behavior is deterministic under
     test; production passes {!Slack_rest_client.users_info} and
     [Unix.gettimeofday]. *)
+
+val create_with_config :
+  config:config ->
+  fetch:
+    (user_id:string ->
+     (Slack_rest_client.user_info_ok, Slack_rest_client.error) result) ->
+  now:(unit -> float) ->
+  unit ->
+  t
+(** Same as {!create} configured from an explicit {!config} record. *)
+
+val config : t -> config
+(** Resolved cache configuration. *)
+
+val cache_size : t -> int
+(** Current number of entries retained in the directory cache. *)
 
 val display_label : t -> user_id:string -> string option
 (** The user's display label by Slack's documented precedence

@@ -42,8 +42,9 @@ let dimensions cols =
   let count = max 0 (min day_slots (cols - Grid.gutter_cells - name - 1 - 12)) in
   name, count
 
-let prefix name_cells mark name =
-  "  " ^ mark ^ " " ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
+let prefix ?(selected = false) name_cells mark name =
+  (if selected then "› " else "  ") ^ mark ^ " "
+  ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
 
 let header ~ko ~cols ~now =
   let name, count = dimensions cols in
@@ -85,7 +86,11 @@ let marks hours =
     let tone = match hour with
       | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok -> Theme.warn ()
       | Pulse.Half_hour_ok | Pulse.Half_hour_quiet | Pulse.Half_hour_unknown -> Theme.recede () in
-    tone ^ Pulse.half_hour_mark hour ^ Ansi.reset) hours)
+    let glyph = match hour with
+      | Pulse.Half_hour_unknown -> Masc_tui_keeper_mark.grid_unknown_range_mark
+      | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok
+      | Pulse.Half_hour_ok | Pulse.Half_hour_quiet -> Pulse.half_hour_mark hour in
+    tone ^ glyph ^ Ansi.reset) hours)
 
 (* A band nothing was read for says so once in the band's width, as the roster's
    history column does; a partly read band keeps one mark per half hour. *)
@@ -93,14 +98,14 @@ let band ~count readings marks_of =
   if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~cells:count
   else marks_of ()
 
-let row ~ko:_ ~cols ~now ~name runtime =
+let row ?(selected = false) ~ko:_ ~cols ~now ~name runtime =
   let name_cells, count = dimensions cols in
   let hours = slots ~now ~count runtime in
   (* The row mark every view draws for this verdict (RFC
      tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
   let mark =
     Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime) in
-  prefix name_cells mark name ^ band ~count [ hours ] (fun () -> marks hours)
+  prefix ~selected name_cells mark name ^ band ~count [ hours ] (fun () -> marks hours)
   ^ Theme.recede () ^ " │ " ^ Ansi.reset
   ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 
@@ -114,8 +119,10 @@ let fleet ~ko ~cols ~now runtimes =
   prefix name_cells " " (if ko then "전체" else "fleet")
   ^ band ~count all (fun () ->
       String.concat "" (List.map (function
-        | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
-        | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
+        | Pulse.Count_unknown ->
+            Theme.recede () ^ Masc_tui_keeper_mark.grid_unknown_range_mark ^ Ansi.reset
+        | Pulse.Exact 0 ->
+            Theme.recede () ^ Pulse.half_hour_mark Pulse.Half_hour_quiet ^ Ansi.reset
         | (Pulse.Exact n | Pulse.At_least n) ->
-            Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts))
+            Theme.warn () ^ Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n ^ Ansi.reset) counts))
   ^ Theme.recede () ^ (if ko then " │ 최대 " else " │ peak ") ^ Ansi.reset ^ count_text peak

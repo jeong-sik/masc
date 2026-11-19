@@ -285,7 +285,7 @@ let prepare_code_history_rows (state : state) ~cols =
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
       wrap None (field (say "이력을 읽지 못함" "History unavailable") detail)
-  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중…)" "(loading history)")
+  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중)" "(loading history)")
   | Some (_, Masc_tui_fetched.Absent) | None -> []
   | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
       let git_failure = match listing.chl_git_error with
@@ -437,7 +437,7 @@ let code_tree_status (state : state) =
       Some ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
   | Masc_tui_fetched.Loading ->
       Some
-        (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
+        (Ansi.dim ^ ui_text state ~ko:" (읽는 중)" ~en:" (loading)"
          ^ Ansi.reset)
   | Masc_tui_fetched.Absent ->
       Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
@@ -475,6 +475,7 @@ let render_code (state : state) =
     let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
+    let styled_line = if framed then framed_line_styled else box_line_styled in
     let framed_empty = if framed then framed_empty else box_empty in
     let framed_bottom = if framed then framed_bottom else box_bottom in
     framed_top pane_buf pane_cols;
@@ -491,7 +492,7 @@ let render_code (state : state) =
     in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Terminal_text.single_line where
        ^ workspace_entries_count_label total
        ^ Ansi.reset);
@@ -581,19 +582,12 @@ let render_code (state : state) =
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
           in
-          let line =
-            if selected then
-              let plain_marker = Masc_tui_theme.strip_sgr marker in
-              Theme.selection_style () ^ " " ^ plain_marker ^ name
-              ^ String.make
-                  (max 0
-                     (framed_inner_width pane_cols - 3
-                      - Message_layout.display_width (plain_marker ^ name)))
-                  ' '
-              ^ Ansi.reset
-            else " " ^ marker ^ name
-          in
-          framed_line pane_buf pane_cols line
+          if selected then
+            let plain_marker = Masc_tui_theme.strip_sgr marker in
+            styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())
+              ("\xe2\x80\xba " ^ plain_marker ^ Masc_tui_theme.strip_sgr name)
+          else
+            framed_line pane_buf pane_cols ("  " ^ marker ^ name)
       | None -> framed_empty pane_buf pane_cols
     done;
     framed_bottom pane_buf pane_cols
@@ -746,7 +740,7 @@ let render_code (state : state) =
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else "   ")
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
@@ -812,7 +806,7 @@ let render_code (state : state) =
            done
        | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중…)" ~en:"  (reading the tree)" ^ Ansi.reset);
+             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중)" ~en:"  (reading the tree)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
@@ -1028,10 +1022,11 @@ let render_code (state : state) =
                  let body = Message_layout.drop_cells body hscroll in
                  let row_index = scroll + i in
                  let gutter_style =
-                   (* The cursor line carries the gutter in reverse video:
-                      a full-row band would sit on top of the lexer's own
-                      colours, and the gutter is the row's stable margin. *)
-                   if row_index = state.code_file_cursor then Ansi.reverse
+                   (* The cursor line carries the gutter in the adaptive
+                      selection band: a full-row band would sit on top of the
+                      lexer's own colours, and the gutter is the row's stable
+                      margin. *)
+                   if row_index = state.code_file_cursor then Theme.selection_style ()
                    else Ansi.dim
                  in
                  let mark =

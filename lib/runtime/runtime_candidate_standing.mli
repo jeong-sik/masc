@@ -26,7 +26,40 @@ val order :
   candidate_backpressure_of:('a -> Runtime_candidate_backpressure.candidate option) ->
   'a list -> 'a list
 (** Resolve both projections from the same frozen row. Missing projections
-    contribute no evidence and never remove an unresolved declared identity. *)
+    contribute no evidence and never remove an unresolved declared identity.
+
+    Failures classified as {!Runtime_candidate_backpressure_state.Keeper_scoped}
+    only demote walks owned by the matching [recorded_by] Keeper, so one
+    Keeper stalling on a candidate never blocks peer Keepers. *)
+
+val order_for_scoped :
+  now:float -> policy:policy ->
+  quota_scope_of:('a -> Runtime_quota_window.scope option) ->
+  scoped_backpressure_of:('a -> Runtime_candidate_backpressure_state.scoped_state option) ->
+  'a list -> 'a list
+(** Variant of {!order} reading per-Keeper isolated
+    {!Runtime_candidate_backpressure_state.scoped_state} rows directly. *)
+
+val is_available :
+  now:float ->
+  ?keeper_name:string ->
+  ?rest_sec:(retry_after:float option -> float) ->
+  quota_scope:Runtime_quota_window.scope option ->
+  candidate_backpressure:Runtime_candidate_backpressure.candidate option ->
+  unit -> bool
+(** [true] when the candidate is not demoted at [now] for [keeper_name].
+    When [?keeper_name] is omitted, [Keeper_scoped] marks do not block
+    availability while [Provider_wide] marks do. *)
+
+val is_available_for_scoped :
+  now:float ->
+  ?keeper_name:string ->
+  ?rest_sec:(retry_after:float option -> float) ->
+  quota_scope:Runtime_quota_window.scope option ->
+  scoped_backpressure:Runtime_candidate_backpressure_state.scoped_state option ->
+  unit -> bool
+(** Variant of {!is_available} over
+    {!Runtime_candidate_backpressure_state.scoped_state}. *)
 
 type 'a exact_order =
   { walk : 'a list
@@ -81,3 +114,16 @@ val observe_http_error :
 (** HTTP 402 / typed Hard_quota record account facts; 429 records candidate-only
     rate facts using the existing body/header parser. Other refusals, local
     admission, capacity and network failures create no ownerless Fleet mark. *)
+
+val observe_scoped :
+  ?keeper_name:string ->
+  now:float ->
+  observation ->
+  Runtime_candidate_backpressure_state.scoped_state ->
+  Runtime_candidate_backpressure_state.scoped_state
+(** Pure state transition for {!Runtime_candidate_backpressure_state.scoped_state}:
+    - [Answered] clears [shared] and, when [keeper_name] is provided, clears
+      that Keeper's [Keeper_scoped] failure via
+      {!Runtime_candidate_backpressure_state.clear_scoped_keeper_failure}.
+    - [Rate_limited] notes the rate limit on [shared].
+    - [Hard_quota] / [Credential_refused] leave [scoped_state] unchanged. *)

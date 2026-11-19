@@ -81,7 +81,7 @@ let decision_rows_of_state (state : state) =
     else []
   in
   let source_notes =
-    approval_row_lists reading @ ["questions", reading.questions]
+    approval_row_lists ~ko reading @ [text "질문" "questions", reading.questions]
     |> List.filter_map (fun (name, status) -> match status with
         | List_read -> None
         | List_not_read _ -> Some name)
@@ -316,7 +316,7 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
               (Masc.Keeper_librarian_pending.admission_pending admission))
           |> List.map (memory_admission_text ~ko) in
       let causes = durable @ admission in
-      "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
+      text "기억 · " "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
       ^ text " · Enter:상세" " · Enter:details"
   | Shutdown_fenced_backlog {count; keepers=Some [(keeper,_)]; complete=true} ->
       text "대기 목록 · " "Queue · " ^ clean keeper

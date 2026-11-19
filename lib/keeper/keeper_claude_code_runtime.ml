@@ -721,7 +721,7 @@ end
    authorized to shrink-retry, see [context_overflow_retry_safe]. *)
 let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
   =
-  match Session_store.load ~base_path ~keeper_name with
+  match Session_store.load_for_runtime ~base_path ~keeper_name ~client_kind:Claude_code ~runtime_id with
   | Error _ -> ()
   | Ok
       ( Some
@@ -851,7 +851,7 @@ let observe_stream_effect ~built_ins ~effect_disposition
   | Runtime_claude_code.Turn_finished _ -> ()
 ;;
 
-let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -894,26 +894,13 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
-      match Session_store.load ~base_path ~keeper_name with
-      | Ok session -> Ok session
-      | Error detail ->
-        Error (internal_error ("Claude Code session binding load failed: " ^ Session_store.read_error_to_string detail))
-    in
-    let* stored_session =
-      match stored_session with
-      | Some ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
-        (match
-           Session_store.reconcile_process_restart
-             ~base_path
-             ~keeper_name
-             ~expected
-             ~current_owner_epoch:owner_epoch
-             ~required_at:(Time_compat.now ())
-         with
-         | Ok reconciled -> Ok (Some reconciled)
-         | Error error -> Error (Session_store.process_restart_error_to_core_error error))
-      | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
-        Ok stored_session
+      Session_store.load_reconciled_for_runtime
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id
+        ~current_owner_epoch:owner_epoch
+        ~required_at:(Time_compat.now ())
     in
     let* claim_plan =
       match
@@ -935,6 +922,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
         ~default:Runtime_native_tools.claude_code_default
         ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
     in
+    let* () = on_guidance_prepared () in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
@@ -1027,7 +1015,17 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
           |> Keeper_context_submission_link.text
         , Host.start_held_context ~turn_observation:prepared.turn_observation
             ?composed_context prepared.messages )
-      | Runtime_claude_code.Resume _ ->
+      | Runtime_claude_code.Resume { session_id } ->
+        let goal =
+          Keeper_turn_bridge.prepend_resume_handoff
+            ~input_source
+            ~base_path
+            ~keeper_name
+            ~client_kind:Keeper_semantic_execution.Claude_code
+            ~runtime_id
+            ~session_id
+            ~goal
+        in
         let delivery =
           Host.resume_prompt
             ~goal
@@ -1783,7 +1781,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                   recovery_detail))))
 ;;
 
-let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1871,7 +1869,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation
+          run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation
             ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
             ~runtime_id

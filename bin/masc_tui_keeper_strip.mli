@@ -40,15 +40,17 @@ val history_unknown_label : cells:int -> string
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
 val fleet_cells :
-  ko:bool -> now:float -> grid:Masc_tui_keeper_grid.t ->
+  ?summarize_wakes:bool -> ko:bool -> now:float -> grid:Masc_tui_keeper_grid.t ->
   wakes:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_next_run.wake_slot list) ->
   Masc_tui_keeper_list_model.row list -> fleet_cells option
 (** Half-hour failed-Keeper counts, not failed-turn counts; rested counts as
-    failure. Missing pulse readings remain [?] per half hour; when no Keeper
-    has any reading the pulse is {!history_unknown_label}. The wake strip uses
-    {!wake_strip}; an unknown maximum remains [?]. Paused Keepers do not
-    contribute wakes. Draw these fields on the shared grid. [None] when the
-    grid has no band: the two maxima would scale cells that are not drawn. *)
+    failure. Missing pulse readings draw the receded unknown strip mark; when
+    no Keeper has any reading the pulse is {!history_unknown_label}. The wake
+    strip uses {!wake_strip} (or a concise total count when
+    [summarize_wakes] is [true]); an unknown maximum remains receded. Paused
+    Keepers do not contribute wakes. Draw these fields on the shared grid.
+    [None] when the grid has no band: the two maxima would scale cells that are
+    not drawn. *)
 
 val selected_summary :
   ko:bool -> now:float -> activity_cell:string ->

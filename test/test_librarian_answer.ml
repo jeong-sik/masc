@@ -37,6 +37,7 @@ let every_op : Answer.op list =
   ; Drop { ref_ = "m2"; reason = "the build moved" }
   ; Merge { refs = [ "m1"; "m3" ]; into = new_fact "one sentence for both" }
   ; Revise { ref_ = "m4"; into = new_fact ~from_units:[ "u2" ] "the port is 8936" }
+  ; Seen { ref_ = "m5"; from_units = [ "u1"; "u2" ] }
   ]
 ;;
 
@@ -66,7 +67,8 @@ let golden =
 {"op":"add","claim":"a comment said so","category":"validated_approach","basis":{"kind":"observed","board":{"post_id":"%s","comment_id":"%s"}},"from":[]},
 {"op":"drop","ref":"m2","reason":"the build moved"},
 {"op":"merge","refs":["m1","m3"],"claim":"one sentence for both","category":"release_notes","basis":{"kind":"observed"},"from":[]},
-{"op":"revise","ref":"m4","claim":"the port is 8936","category":"fact","basis":{"kind":"observed"},"from":["u2"]}]}|}
+{"op":"revise","ref":"m4","claim":"the port is 8936","category":"fact","basis":{"kind":"observed"},"from":["u2"]},
+{"op":"seen","ref":"m5","from":["u1"]}]}|}
     front back post comment
 ;;
 
@@ -76,7 +78,7 @@ let test_golden () =
    | Set text -> check string "working state" "next: rerun the probe" text
    | Keep -> fail "working state was read as Keep");
   match answer.ops with
-  | [ Add first; Add second; Drop dropped; Merge merged; Revise revised ] ->
+  | [ Add first; Add second; Drop dropped; Merge merged; Revise revised; Seen seen ] ->
     check string "add claim" "the port is 8935" first.claim;
     check (list string) "add units" [ "u1" ] first.from_units;
     check bool "add is read from the transcript" true (first.observation = Types.Transcript);
@@ -89,8 +91,10 @@ let test_golden () =
     check string "newly named category" "release_notes"
       (Types.category_to_string merged.into.category);
     check string "revise ref" "m4" revised.ref_;
-    check string "revise claim" "the port is 8936" revised.into.claim
-  | ops -> failf "expected five ops in order, got %d" (List.length ops)
+    check string "revise claim" "the port is 8936" revised.into.claim;
+    check string "seen ref" "m5" seen.ref_;
+    check (list string) "seen units" [ "u1" ] seen.from_units
+  | ops -> failf "expected six ops in order, got %d" (List.length ops)
 ;;
 
 let document ?(question = front) ?(question_end = back) ops =
@@ -206,6 +210,13 @@ let test_op_rejections () =
     ~reason:(Duplicate_entry "m1")
     (document
        {|{"op":"merge","refs":["m1","m2","m1"],"claim":"c","category":"fact","basis":{"kind":"observed"},"from":[]}|});
+  (* Seen again says where: a seen that names no unit is the question's own
+     Memory read back. *)
+  expect_schema "seen of no unit" ~path:(at_op 0 [ Wire_field "from" ]) ~reason:Empty_list
+    (document {|{"op":"seen","ref":"m5","from":[]}|});
+  expect_schema "seen does not copy the claim" ~path:(at_op 0 [])
+    ~reason:(Field_set_mismatch { missing = []; unexpected = [ "claim" ] })
+    (document {|{"op":"seen","ref":"m5","from":["u1"],"claim":"the port is 8935"}|});
   expect_schema "revise carries add's fields only" ~path:(at_op 0 [])
     ~reason:(Field_set_mismatch { missing = [ "ref" ]; unexpected = [ "refs" ] })
     (document

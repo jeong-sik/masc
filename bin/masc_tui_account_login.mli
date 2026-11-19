@@ -204,7 +204,7 @@ type row =
   | Terminal of Masc_tui_sgr_text.line
       (** What the official client printed during login, with the colours it
           chose. *)
-val lines : t -> row list
+val lines : ?ko:bool -> t -> row list
 val row_text : row -> string
 (** The row's characters without colour, and the address of each link of
     the client's output that closed on it. *)
@@ -212,10 +212,10 @@ val row_text : row -> string
     retain a separate scroll position. Rendering clamps it to the current
     viewport. *)
 val visible_lines :
-  height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
+  ?ko:bool -> height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
 (** The rows that fit [height], the notice wrapped at [width] cells so a
     server's reason is read whole, and where the reader stands for the title
     row: the selected row of a provider or model list, or the window over
     any other phase's rows when it hides some. *)
-val hints : t -> string
+val hints : ?ko:bool -> t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

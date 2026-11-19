@@ -478,7 +478,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let alert_lines =
     List.map
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
-        Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
+        Printf.sprintf "[%s] %s · %s"
           ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
             then "history " else "")
            ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
@@ -597,7 +597,7 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_row_line ?(selected = false) ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
@@ -619,7 +619,7 @@ let memory_row_line ~unit columns (k : Masc.Tui_decode_memory_health.memory_keep
   let state_style = deviation in
   let size_style = if k.mkh_snapshot_present then "" else deviation in
   let delta_style = if k.mkh_removed > 0 then Theme.warn () else "" in
-  "  "
+  (if selected then "\xe2\x80\xba " else "  ")
   ^ Render_schedule.memory_row ~state_style ~size_style ~delta_style columns
       { Render_schedule.mrow_state = memory_state_cell (memory_state k)
       ; mrow_name = k.mkh_keeper_id
@@ -1024,7 +1024,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
    roster. If their wrapped rows do not fit, show both ends when there is room
    and say how many rows are hidden. A one-row slot shows only that omission,
    rather than pretending that a clipped alert is complete. *)
-let fold_memory_rows ~subject ~max_rows rows =
+let fold_memory_rows ~ko ~subject ~max_rows rows =
   let count = List.length rows in
   if count <= max_rows then rows
   else if max_rows <= 0 then []
@@ -1033,7 +1033,8 @@ let fold_memory_rows ~subject ~max_rows rows =
     let trailing = max_rows - 1 - leading in
     let hidden = count - leading - trailing in
     let note =
-      Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+      if ko then Printf.sprintf "  … %s %d행 생략됨 · 창을 늘려 주세요" subject hidden
+      else Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
     in
     List.filteri (fun index _ -> index < leading) rows
     @ [ note ]
@@ -1254,7 +1255,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
             let severity = match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
               | `Warn -> if ko then "경고" else "warning"
               | `Error -> if ko then "오류" else "error" in
-            Printf.sprintf "%s · %s%s · %s — %s"
+            Printf.sprintf "%s · %s%s · %s · %s"
               (Terminal_text.single_line keeper.mkh_keeper_id) history severity
               (Terminal_text.single_line alert.ma_label) (Terminal_text.single_line alert.ma_message))
             keeper.mkh_alerts) snapshot.mhs_keepers
@@ -1474,7 +1475,7 @@ let memory_overview_rows ~cols ~budget (state : state) =
     then max 1 desired else desired
   in
   let refused =
-    fold_memory_rows ~subject:"rejected Keeper"
+    fold_memory_rows ~ko ~subject:(if ko then "거절된 키퍼" else "rejected Keeper")
       ~max_rows:(if refused_available > 1 then refused_available - 1 else refused_available)
       all_refused
   in
@@ -1520,7 +1521,7 @@ let memory_overview_scrolled ~cols ~budget (state : state) =
    word. A reading that is off wears its colour on the mark and the word, so a
    stopped Librarian reads as a warning from across the screen; an ordinary
    one wears it on the mark alone. Both were the plain text colour. *)
-let memory_selector_line ~cols (state : state) keeper =
+let memory_selector_line ?(selected = false) ~cols (state : state) keeper =
   let width = max 1 (framed_inner_width cols - 2) in
   let name_cells = max 1 (width / 2) in
   let status_cells = max 1 (width - name_cells - 3) in
@@ -1530,7 +1531,8 @@ let memory_selector_line ~cols (state : state) keeper =
     | None -> Theme.ok (), ""
   in
   let word = Message_layout.fit_width (memory_operator_state state keeper) status_cells in
-  "  " ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
+  (if selected then "\xe2\x80\xba " else "  ")
+  ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
   ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
   ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
@@ -1646,7 +1648,7 @@ let render_memory_body ~cols ~budget (state : state)
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
         Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
-          else "  (no keepers matching \"%s\" — Esc clears filter)")
+          else "  (no keepers matching \"%s\" · Esc clears filter)")
           (Terminal_text.single_line query)
       | Page_empty -> if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
           else "  (no keepers with a memory config or snapshot)"
@@ -1662,10 +1664,12 @@ let render_memory_body ~cols ~budget (state : state)
       match Rows.at keepers_window idx with
       | None -> push_empty ()
       | Some k ->
+          let is_selected = idx = cursor in
           let line =
-            if state.memory_overview_detail then memory_row_line ~unit:state.memory_unit columns k
-            else memory_selector_line ~cols state k in
-          if idx = cursor then
+            if state.memory_overview_detail then
+              memory_row_line ~selected:is_selected ~unit:state.memory_unit columns k
+            else memory_selector_line ~selected:is_selected ~cols state k in
+          if is_selected then
             push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
@@ -1816,7 +1820,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      this row looked only at whether facts were held. *)
   let stats_line, pills_line =
     match memory_facts_view state with
-    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts…)", "")
+    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts)", "")
     | Masc_tui_fetched.Absent -> ("  " ^ here_missing_reading state ~error:None, "")
     | Masc_tui_fetched.Failed failure ->
         ("  " ^ here_missing_reading state ~error:(Some failure), "")
@@ -1901,7 +1905,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
               a filter being typed matched nothing. *)
            let filter = memory_search_query state in
            if String.trim filter <> "" then
-             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" — Esc clears filter)")
+             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" · Esc clears filter)")
                (Terminal_text.single_line filter)
            else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
              memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
@@ -1922,7 +1926,14 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       | None -> push_empty ()
       | Some row ->
           let line = memory_fact_row_line ~ko ~is_fleet ~sort:state.memory_facts_sort ~cols row in
-          if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
+          if idx = cursor then
+            let plain = Masc_tui_theme.strip_sgr line in
+            let marked =
+              if String.length plain >= 2 && plain.[0] = ' ' && plain.[1] = ' ' then
+                "\xe2\x80\xba " ^ String.sub plain 2 (String.length plain - 2)
+              else "\xe2\x80\xba " ^ plain
+            in
+            push_selected marked
           else push line
     done;
     hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
@@ -1985,10 +1996,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Message_layout.truncate_end room name
         in
         Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
-        |> List.map (fun text -> category, text)) in
+        |> List.mapi (fun line_index text -> category, line_index = 0, text)) in
     let selected_indices =
       entries
-      |> List.mapi (fun index (category, _) -> index, category)
+      |> List.mapi (fun index (category, _, _) -> index, category)
       |> List.filter (fun (_, category) -> category = state.memory_facts_category)
       |> List.map fst in
     let start_row, end_row = match selected_indices with
@@ -2004,9 +2015,11 @@ let render_memory_facts_body ~cols ~budget (state : state)
     in
     let rail = header @
       (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
-       |> List.map (fun (category, text) ->
-           let text = fit_width ("  " ^ text) width in
-           let style = if category = state.memory_facts_category then Theme.selection_style () else Theme.recede () in
+       |> List.map (fun (category, is_first, text) ->
+           let is_selected = category = state.memory_facts_category in
+           let lead = if is_selected && is_first then "\xe2\x80\xba " else "  " in
+           let text = fit_width (lead ^ text) width in
+           let style = if is_selected then Theme.selection_style () else Theme.recede () in
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in

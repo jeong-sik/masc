@@ -1803,6 +1803,7 @@ let test_official_client_declarations_load () =
       ; "antigravity_subscription.antigravity-gemini-4-argon-high"
       ; "antigravity_subscription.antigravity-gemini-4-carbon-high"
       ; "antigravity_subscription.antigravity-gemini-4-hydrogen-xhigh"
+      ; "antigravity_subscription.antigravity-gemini-4-neon-xhigh"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
       ]
 ;;
@@ -7845,6 +7846,252 @@ default = "selection-provider.selected"
           (if initially_known then Some 1.0 else None) (input_price selected);
         check (option (float 1e-9)) "new runtime sees replacement rates" (Some 10.0) (input_price fresh))
 
+let detect_seat_overlaps_for_toml toml_text =
+  let schema =
+    match Runtime_toml.parse_string toml_text with
+    | Ok cfg -> cfg
+    | Error errs ->
+      failf
+        "seat overlap fixture TOML should parse: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  in
+  with_temp_runtime_toml toml_text (fun path ->
+    match load_list_text ~config_path:path with
+    | Error detail -> failf "seat overlap fixture should load: %s" detail
+    | Ok (runtimes, default_runtime, keeper_assignments, _media_failover, lanes) ->
+      let default_route = Option.value schema.default_runtime_id ~default:default_runtime.id in
+      Runtime.detect_librarian_keeper_seat_overlaps
+        ~runtimes
+        ~default_runtime
+        ~default_route
+        ~keeper_assignments
+        ~lanes
+        ~exact_output_lane_decls:schema.exact_output_lane_decls)
+;;
+
+let test_seat_overlap_detects_identical_runtime_and_shared_http_account () =
+  let toml_text =
+    "[providers.keeper_http]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1/v1\"\n\
+     credentials = { type = \"inline\", value = \"shared-account-token\" }\n\
+     \n\
+     [providers.lib_http]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:80/v1/\"\n\
+     credentials = { type = \"inline\", value = \"shared-account-token\" }\n\
+     \n\
+     [models.m]\n\
+     api-name = \"fixture-model\"\n\
+     max-context = 8192\n\
+     \n\
+     [keeper_http.m]\n\
+     [lib_http.m]\n\
+     \n\
+     [runtime]\n\
+     default = \"keeper_http.m\"\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     slots = [\"keeper_http.m\"]\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_memory]\n\
+     max_output_tokens = 2048\n\
+     slots = [\"lib_http.m\"]\n"
+  in
+  let overlaps = detect_seat_overlaps_for_toml toml_text in
+  check int "two overlaps across librarian lanes" 2 (List.length overlaps);
+  match overlaps with
+  | [ first; second ] ->
+    check bool "first is librarian_exact same runtime id" true
+      (first.Runtime.librarian_lane = Runtime.Librarian_exact
+       && first.slot_channel = Runtime.Http_slot
+       && String.equal first.librarian_runtime_id "keeper_http.m"
+       && String.equal first.keeper_runtime_id "keeper_http.m"
+       && first.mechanism = Runtime.Same_runtime_id "keeper_http.m");
+    check bool "second is librarian_memory shared normalized http account" true
+      (second.Runtime.librarian_lane = Runtime.Librarian_memory
+       && second.slot_channel = Runtime.Http_slot
+       && String.equal second.librarian_runtime_id "lib_http.m"
+       && String.equal second.keeper_runtime_id "keeper_http.m"
+       && second.mechanism
+          = Runtime.Shared_http_account
+              { provider_kind = "openai_compat"
+              ; canonical_base_url = "http://127.0.0.1:80/v1"
+              ; shared_credential = true
+              });
+    check bool "human summary names overlapping runtimes" true
+      (String_util.contains_substring
+         (Runtime.librarian_keeper_seat_overlap_to_string second)
+         "lib_http.m")
+  | _ -> fail "expected exactly two HTTP overlaps"
+;;
+
+let test_seat_overlap_allows_distinct_credentials_on_same_endpoint () =
+  let toml_text =
+    "[providers.keeper_http]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1/v1\"\n\
+     credentials = { type = \"inline\", value = \"keeper-seat-key\" }\n\
+     \n\
+     [providers.lib_http]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1/v1\"\n\
+     credentials = { type = \"inline\", value = \"librarian-seat-key\" }\n\
+     \n\
+     [models.m]\n\
+     api-name = \"fixture-model\"\n\
+     max-context = 8192\n\
+     \n\
+     [keeper_http.m]\n\
+     [lib_http.m]\n\
+     \n\
+     [runtime]\n\
+     default = \"keeper_http.m\"\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     slots = [\"lib_http.m\"]\n"
+  in
+  check (list string) "distinct inline credentials do not overlap" []
+    (List.map Runtime.librarian_keeper_seat_overlap_to_string
+       (detect_seat_overlaps_for_toml toml_text))
+;;
+
+let test_seat_overlap_detects_shared_cli_account_and_allows_isolated_cli_home () =
+  let shared_toml =
+    "[providers.codex_keeper]\n\
+     protocol = \"codex-app-server\"\n\
+     is-non-interactive = true\n\
+     command = \"codex\"\n\
+     account-home = \"/tmp/masc-shared-cli-seat\"\n\
+     \n\
+     [providers.codex_lib]\n\
+     protocol = \"codex-app-server\"\n\
+     is-non-interactive = true\n\
+     command = \"codex\"\n\
+     account-home = \"/tmp/masc-shared-cli-seat\"\n\
+     \n\
+     [models.codex]\n\
+     api-name = \"gpt-5.6-sol\"\n\
+     max-context = 400000\n\
+     \n\
+     [codex_keeper.codex]\n\
+     [codex_lib.codex]\n\
+     max-concurrent = 1\n\
+     \n\
+     [runtime]\n\
+     default = \"codex_keeper.codex\"\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     slots = []\n\
+     cli_slots = [\"codex_lib.codex\"]\n"
+  in
+  let isolated_toml =
+    "[providers.codex_keeper]\n\
+     protocol = \"codex-app-server\"\n\
+     is-non-interactive = true\n\
+     command = \"codex\"\n\
+     account-home = \"/tmp/masc-keeper-cli-seat\"\n\
+     \n\
+     [providers.codex_lib]\n\
+     protocol = \"codex-app-server\"\n\
+     is-non-interactive = true\n\
+     command = \"codex\"\n\
+     account-home = \"/tmp/masc-librarian-cli-seat\"\n\
+     \n\
+     [models.codex]\n\
+     api-name = \"gpt-5.6-sol\"\n\
+     max-context = 400000\n\
+     \n\
+     [codex_keeper.codex]\n\
+     [codex_lib.codex]\n\
+     max-concurrent = 1\n\
+     \n\
+     [runtime]\n\
+     default = \"codex_keeper.codex\"\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     slots = []\n\
+     cli_slots = [\"codex_lib.codex\"]\n"
+  in
+  without_an_installed_client @@ fun () ->
+  let overlaps = detect_seat_overlaps_for_toml shared_toml in
+  (match overlaps with
+   | [ overlap ] ->
+     check bool "CLI slot overlap flags Shared_cli_account" true
+       (overlap.Runtime.librarian_lane = Runtime.Librarian_exact
+        && overlap.slot_channel = Runtime.Cli_slot
+        && String.equal overlap.librarian_runtime_id "codex_lib.codex"
+        && String.equal overlap.keeper_runtime_id "codex_keeper.codex"
+        && overlap.mechanism = Runtime.Shared_cli_account { client_label = "codex_app_server" })
+   | _ -> fail "expected one shared CLI seat overlap");
+  check (list string) "distinct CLI account-home is clean" []
+    (List.map Runtime.librarian_keeper_seat_overlap_to_string
+       (detect_seat_overlaps_for_toml isolated_toml))
+;;
+
+let test_seat_overlap_ignores_disabled_librarian_lanes_and_follows_keeper_lanes () =
+  let disabled_toml =
+    "[providers.shared]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1/v1\"\n\
+     credentials = { type = \"inline\", value = \"k\" }\n\
+     \n\
+     [models.m]\n\
+     api-name = \"fixture-model\"\n\
+     max-context = 8192\n\
+     \n\
+     [shared.m]\n\
+     \n\
+     [runtime]\n\
+     default = \"shared.m\"\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     enabled = false\n\
+     slots = [\"shared.m\"]\n"
+  in
+  let assigned_lane_toml =
+    "[providers.keeper_default]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:18080/v1\"\n\
+     credentials = { type = \"inline\", value = \"default-k\" }\n\
+     \n\
+     [providers.assigned]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:18081/v1\"\n\
+     credentials = { type = \"inline\", value = \"shared-k\" }\n\
+     \n\
+     [models.m]\n\
+     api-name = \"fixture-model\"\n\
+     max-context = 8192\n\
+     \n\
+     [keeper_default.m]\n\
+     [assigned.m]\n\
+     \n\
+     [runtime]\n\
+     default = \"keeper_default.m\"\n\
+     \n\
+     [runtime.assignments]\n\
+     alice = \"primary\"\n\
+     \n\
+     [runtime.lanes.primary]\n\
+     candidates = [\"assigned.m\"]\n\
+     \n\
+     [runtime.exact_output_lanes.librarian_exact]\n\
+     slots = [\"assigned.m\"]\n"
+  in
+  check (list string) "disabled librarian lane reports zero overlaps" []
+    (List.map Runtime.librarian_keeper_seat_overlap_to_string
+       (detect_seat_overlaps_for_toml disabled_toml));
+  match detect_seat_overlaps_for_toml assigned_lane_toml with
+  | [ overlap ] ->
+    check bool "keeper lane failover candidate overlap is caught" true
+      (overlap.Runtime.librarian_lane = Runtime.Librarian_exact
+       && String.equal overlap.librarian_runtime_id "assigned.m"
+       && String.equal overlap.keeper_runtime_id "assigned.m")
+  | _ -> fail "expected overlap through keeper assigned lane candidate"
+;;
+
 ;;
 
 let () =
@@ -8277,5 +8524,23 @@ let () =
             test_typesafeai_refuses_a_confidence_floor_outside_0_to_1
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing
+        ] )
+    ; ( "librarian keeper seat overlap"
+      , [ test_case
+            "detects identical runtime and normalized shared http account across librarian lanes"
+            `Quick
+            test_seat_overlap_detects_identical_runtime_and_shared_http_account
+        ; test_case
+            "allows distinct inline credentials on the same http endpoint"
+            `Quick
+            test_seat_overlap_allows_distinct_credentials_on_same_endpoint
+        ; test_case
+            "detects shared cli account and allows isolated cli account-home"
+            `Quick
+            test_seat_overlap_detects_shared_cli_account_and_allows_isolated_cli_home
+        ; test_case
+            "ignores disabled librarian lanes and catches keeper lane failover candidates"
+            `Quick
+            test_seat_overlap_ignores_disabled_librarian_lanes_and_follows_keeper_lanes
         ] )
     ]

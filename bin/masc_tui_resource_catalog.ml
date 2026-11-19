@@ -95,8 +95,8 @@ let display_name = function
       report.revision.title report.revision.revision
 
 let origin = function
-  | Mcp _ -> "MCP resource — read-only data exposed by this server."
-  | Report _ -> "Published report — exact revision from this workspace. v: document/source."
+  | Mcp _ -> "MCP resource · read-only data exposed by this server."
+  | Report _ -> "Published report · exact revision from this workspace. v: document/source."
 
 let object_fields = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

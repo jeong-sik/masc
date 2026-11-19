@@ -279,6 +279,7 @@ let with_lock store f =
 let with_persist_lock_internal ~defer_settlement store f =
   let observe f =
     try f (); Ok () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (exn, Printexc.get_raw_backtrace ())
   in
   let started = Time_compat.now () in

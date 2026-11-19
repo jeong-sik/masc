@@ -677,8 +677,8 @@ type connection_status =
 let connection_status_label = function
   | Connected -> "connected"
   | Degraded -> "degraded"
-  | Connecting -> "connecting..."
-  | Booting -> "server booting..."
+  | Connecting -> "connecting"
+  | Booting -> "server booting"
   | Account_server _ -> "account server"
   | Disconnected -> "disconnected"
 ;;
@@ -1661,9 +1661,24 @@ let librarian_failing entries =
 (* The header item: the run first, so a narrow row cut from the right still
    says that the Librarian is failing and since when; the server's word for
    how comes last. *)
-let librarian_failing_text ~since failing =
-  Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
-    failing.lf_count since failing.lf_kind
+let librarian_failing_kind_word ~ko kind =
+  if not ko then kind
+  else
+    match kind with
+    | "lane_cancelled" -> "레인 취소됨"
+    | "timeout" -> "시간 초과"
+    | "rate_limited" -> "호출 한도 초과"
+    | "provider_unavailable" -> "공급자 응답 없음"
+    | _ -> kind
+
+let librarian_failing_text ?(ko = false) ~since failing =
+  let kind = librarian_failing_kind_word ~ko failing.lf_kind in
+  if ko then
+    Printf.sprintf "기억 정리 실패 \xc3\x97%d (%s~ \xc2\xb7 %s)"
+      failing.lf_count since kind
+  else
+    Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
+      failing.lf_count since kind
 
 (* Compact folds only a successfully settled approval. Its durable identity
    survives the continuation's new request id, so prose or a tool block between
@@ -3054,13 +3069,14 @@ let schedule_payload_body = function
     Live and closed are split by [Schedule_domain.is_terminal], the same rule
     the store itself uses, and a count of zero is left out -- a disposition
     nothing is in is not a fact about this Keeper. *)
-let schedule_counts_line counts =
+let schedule_counts_line ?(ko = false) counts =
   let spell statuses =
     counts
     |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
     |> List.map (fun (status, count) ->
-           Printf.sprintf "%d %s" count
-             (Schedule_domain.schedule_status_to_string status))
+           let label = Schedule_domain.schedule_status_to_string status in
+           if ko then Printf.sprintf "%s %d" label count
+           else Printf.sprintf "%d %s" count label)
   in
   let live, closed =
     List.partition
@@ -3069,7 +3085,7 @@ let schedule_counts_line counts =
   in
   let live_text =
     match spell live with
-    | [] -> "nothing live"
+    | [] -> if ko then "활성 일정 없음" else "nothing live"
     | parts -> String.concat ", " parts
   in
   let closed_total =
@@ -3080,8 +3096,12 @@ let schedule_counts_line counts =
   match spell closed with
   | [] -> live_text
   | parts ->
-      Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
-        (string_of_int closed_total) (String.concat ", " parts)
+      if ko then
+        Printf.sprintf "%s \xc2\xb7 종료 %s (%s)" live_text
+          (string_of_int closed_total) (String.concat ", " parts)
+      else
+        Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
+          (string_of_int closed_total) (String.concat ", " parts)
 
 (* Why the modify editor does not open on a row: the store refuses rows in
    that status (as last read), or this build cannot read the recurrence or the
@@ -5853,10 +5873,10 @@ type scrolled = {
    page key reads that height back ([lists_drawn]) rather than working one
    out per surface in the key handler: the Memory list shares its body with
    the selected Keeper's detail, and the handler's guess paged thirteen rows
-   while three were on screen. [Masc_tui_render_work] draws three lists and
-   reports none of them yet: the Task and Goal lists page by the height read
-   from the projection they are drawn with ([Masc_tui_list_moves.Projected]),
-   and [Schedule_rows] has no report, so its page key moves one row. *)
+   while three were on screen. A list whose entries take more than one row
+   reports the entries it drew, because its cursor counts entries: the Task
+   and Goal lists draw two rows an entry, and a Skill or an async request
+   wraps over as many rows as its words need. *)
 type paged_list =
   | Context_inspector_items
   | Repository_change_rows
@@ -5877,7 +5897,11 @@ type paged_list =
   | Code_tree_entries
   | Board_post_rows
   | Approval_items
+  | Task_entries
+  | Goal_entries
   | Schedule_rows
+  | Skill_entries
+  | Async_request_entries
   | Fusion_entries
   | Resource_entries
   | Activity_events
@@ -11151,7 +11175,6 @@ type state = {
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: planning_scroll;
-  mutable planning_list_page_rows: int;
   (* The lists the last built frame drew and the rows it drew each in. A
      page key moves its list by that height less one row; a list the frame
      did not draw has no page and moves a row. *)
@@ -14871,7 +14894,7 @@ let connectors_read_notice state =
                  else "Reading connectors; recheck queued"
            in
            Some (activity ^ (match state.connectors with
-             | None -> "…"
+             | None -> ""
              | Some _ -> if ko then " · 마지막 관측" else " · last observation")))
   | Waiting_after_write ->
       Some (if server_authority_ready state
@@ -18572,7 +18595,7 @@ let pending_seconds_floor = 2.
 let loading_notice ?elapsed what =
   match elapsed with
   | Some seconds when seconds >= pending_seconds_floor ->
-      Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
+      Printf.sprintf "(%s %s)" what
         (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) seconds)
   | Some seconds ->
       (* The seconds appear when the read reaches the floor, with no new
@@ -18580,8 +18603,8 @@ let loading_notice ?elapsed what =
          tui-one-screen-grammar §8). *)
       Masc_tui_value.Redraw.note_change_at
         (Unix.gettimeofday () +. (pending_seconds_floor -. seconds));
-      Printf.sprintf "(%s\xe2\x80\xa6)" what
-  | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+      Printf.sprintf "(%s)" what
+  | None -> Printf.sprintf "(%s)" what
 
 (* The /about candle steps once this often. It is the one thing on a masc
    screen that moves without new data, and it arrives at a still final frame,
@@ -20627,7 +20650,7 @@ let begin_keeper_peer_reading (state : state) ~keeper_name =
   let token = ref () in
   let reading =
     (Masc_tui_detail_reading.create_observation ~title:("Keeper relationships · " ^ keeper_name)
-      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]) in
+      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests" }]) in
   open_detail_reading state reading;
   state.keeper_peer_reading <- Some {
     kpr_keeper = keeper_name; kpr_authority = state.workspace_read_authority;
@@ -21047,7 +21070,7 @@ let complete_goal_timeline_read (state : state) request result =
     | Ok (Tui_decode.Goal_timeline_ready events) -> Ok events
     | Ok (Tui_decode.Goal_timeline_unavailable failure) ->
       Error (Masc_tui_planning_detail.Timeline_failed
-        (Masc_tui_planning_detail.timeline_unavailability_detail failure))
+        (Masc_tui_planning_detail.timeline_unavailability_detail ~ko:(state.ui_language = Lang_ko) failure))
     | Error (Request_failed detail) -> Error (Masc_tui_planning_detail.Timeline_failed detail)
     | Error (Request_withdrawn refusal) ->
       Error (Masc_tui_planning_detail.Timeline_kept_back
@@ -21843,7 +21866,6 @@ let create_state
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = Planning_scroll_offset 0;
-  planning_list_page_rows = 1;
   lists_drawn = [];
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
@@ -22306,14 +22328,14 @@ let visible_system_log_entries (state : state) = System_logs_view.visible (syste
    reader on the others learned there was nothing to learn. *)
 let page_unread_note ~ko =
   if ko then "  (미조회 · r:다시 읽기)"
-  else "  (not loaded yet \xe2\x80\x94 press r)"
+  else "  (not loaded yet \xc2\xb7 press r)"
 
 (* The same row once the first read has been asked and has not answered. [r]
    asks for what is already being asked, so the row stops sending the reader
    to it. Each surface keeps its own record of a read on the wire, so the
    caller passes that fact. *)
 let page_reading_note ~ko =
-  if ko then "  (조회 중)" else "  (reading\xe2\x80\xa6)"
+  if ko then "  (조회 중)" else "  (reading)"
 
 let page_unread_note_while ~ko ~reading =
   if reading then page_reading_note ~ko else page_unread_note ~ko
@@ -22357,8 +22379,8 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
   | Some (_ :: _), _ -> None
   | (None | Some []), Loading _ ->
       Some
-        (if ko then "  활성 연결을 기다리는 중\xe2\x80\xa6"
-         else "  Waiting for active connections\xe2\x80\xa6")
+        (if ko then "  활성 연결을 기다리는 중"
+         else "  Waiting for active connections")
   | Some [], (Idle | No_browser | Failed _) ->
       Some
         (if ko then "  활성 native browser 연결 없음"
@@ -23294,7 +23316,6 @@ type clamped_scroll =
   | System_log_detail_scroll of int
   | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
-  | Planning_list_page_rows of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
@@ -23354,7 +23375,7 @@ type clamped_scroll =
 
 let approval_detail_viewport_of_reader = function
   | Some (Approval_detail_scroll (_, viewport)) -> viewport
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23369,7 +23390,7 @@ let approval_detail_viewport_of_reader = function
 
 let task_detail_of_reader = function
   | Some (Task_detail (offset, viewport)) -> Some (offset, viewport)
-  | Some (Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23384,7 +23405,7 @@ let task_detail_of_reader = function
 
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23400,7 +23421,7 @@ let play_card_of_reader = function
 
 let queue_owner_of_reader = function
   | Some (Queue_panel_presented owner) -> Some owner
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23415,7 +23436,7 @@ let queue_owner_of_reader = function
 
 let help_is_presented = function
   | Some Help_presented -> true
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23448,7 +23469,7 @@ let resource_scroll_position = function
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
   | Approval_detail_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
   | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
-  | Context_inspector_response_scroll _ | Planning_list_page_rows _ | Queue_panel_presented _
+  | Context_inspector_response_scroll _ | Queue_panel_presented _
   | Help_presented -> None
 
 let clamped_scroll_end = max_int
@@ -23503,7 +23524,6 @@ let apply_clamped_scroll (state : state) = function
       state.planning_scroll <- (match state.planning_scroll with
         | Planning_scroll_offset _ -> Planning_scroll_offset value
         | Planning_scroll_candle _ -> Planning_scroll_candle value)
-  | Planning_list_page_rows value -> state.planning_list_page_rows <- max 1 value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
       state.lane_run_detail_content_height <- content_height
@@ -24167,7 +24187,7 @@ let keeper_log_diagnostics state =
     state.keeper_log_read in
   match keeper_logs_view state with
   | Masc_tui_fetched.Absent -> [Keeper_log_notice, "Keeper metrics have not been read."]
-  | Loading -> [Keeper_log_notice, "Reading Keeper metrics…"]
+  | Loading -> [Keeper_log_notice, "Reading Keeper metrics"]
   | Failed detail ->
       let tone = match state.workspace_identity with
         | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
@@ -24227,7 +24247,7 @@ let keeper_log_rows (state : state) ~cols =
           line.kel_seq id stream task line.kel_text)) lines in
     match keeper_execute_view state with
     | Masc_tui_fetched.Absent -> text_rows Keeper_log_notice "Execute output has not been read."
-    | Loading -> text_rows Keeper_log_notice "Reading Execute output…"
+    | Loading -> text_rows Keeper_log_notice "Reading Execute output"
     | Failed detail -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ keeper_execute_failure_detail detail)
     | Ready (reading, at) -> render_reading reading at
     | Stale ((reading, at), detail) ->
@@ -25601,7 +25621,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
                    | Pick_refused refusal ->
                        "[" ^ runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal
                        ^ "] " in
-                 "> " ^ refusal ^ runtime_model_picker_title runtime
+                 "› " ^ refusal ^ runtime_model_picker_title runtime
              | Some (Lane_choice _) | None ->
                  runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) picker in
           [ui_text state ~ko:"후보 추가 · " ~en:"Add candidate · " ^ choice
@@ -26088,7 +26108,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
             |> List.mapi (fun offset row ->
               let index = first + offset in
               let lead = Printf.sprintf "%s %d%s "
-                  (if Some index = selected then ">" else " ") (index + 1)
+                  (if Some index = selected then "›" else " ") (index + 1)
                   (if row.sr_admitted then "" else " !") in
               let line = lead ^ Masc_tui_message_layout.fit_middle
                   (max 1 (width - Masc_tui_message_layout.display_width lead)) (clean row.sr_slot) in
@@ -26670,8 +26690,8 @@ let keeper_runtime_picker_summary ~ko view =
   | Some _ ->
       Masc_tui_pick_list.summary ~ko view
       ^ (if ko then
-           " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 이동, Enter 선택, Esc 필터 지우기"
-         else " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter")
+           " \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 이동, Enter 선택, Esc 필터 지우기"
+         else " \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter")
 
 (* The row in place of the column header when there are no rows; [None]
    while there are. An unread catalogue is waited for and an empty match is
@@ -26682,7 +26702,7 @@ let keeper_runtime_picker_empty_note ~ko ~reading view =
     Some (match reading with
       | Runtime_catalog_read -> say "  (런타임 목록이 비어 있음)" "  (runtime catalogue is empty)"
       | Runtime_catalog_unread -> say "  (런타임 목록 미조회)" "  (runtime catalogue not read yet)"
-      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중…)" "  (reading runtime catalogue…)"
+      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중)" "  (reading runtime catalogue)"
       | Runtime_catalog_refreshing _ ->
           say "  (비어 있던 이전 런타임 목록을 다시 조회 중)"
             "  (refreshing the last empty runtime catalogue)"
@@ -26914,8 +26934,8 @@ let runtime_default_route_lines ~cols state =
              Printf.sprintf (if ko then "[runtime].default  %s · f:변경" else "[runtime].default  %s · f replaces") route
          | Some route, Some runtime_id ->
              Printf.sprintf (if ko then "[runtime].default  %s (시작 %s) · f:변경" else "[runtime].default  %s (enters %s) · f replaces") route runtime_id
-         | None, None -> if ko then "[runtime].default  없음 — 키퍼마다 배정 필요 · f:선택"
-             else "[runtime].default  none — every keeper needs an assignment · f chooses"
+         | None, None -> if ko then "[runtime].default  없음 · 키퍼마다 배정 필요 · f:선택"
+             else "[runtime].default  none · every keeper needs an assignment · f chooses"
          | Some _, None | None, Some _ -> if ko then "[runtime].default  관측 불일치"
              else "[runtime].default  inconsistent reading")
   in
@@ -28243,7 +28263,7 @@ let keeper_message_inflight_rows (state : state) ~now =
     (keeper_message_inflight_drawn state)
   @ if keeper_message_history_loading state then
       [ false
-      , ui_text state ~ko:"  대화 기록 조회 중…" ~en:"  Loading conversation history…" ]
+      , ui_text state ~ko:"  대화 기록 조회 중" ~en:"  Loading conversation history" ]
     else []
 
 (* One drawn row of the chat's schedule block: what leads it and the facts it
@@ -28265,13 +28285,15 @@ let chat_schedule_open_entries = 3
 let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
   if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else
   let module Facts = Masc_tui_chat_facts in
+  let ko = state.ui_language = Lang_ko in
+  let say k e = if ko then k else e in
   let plain = Masc_tui_keeper_chat_projection.terminal_safe_text in
   let fact = Facts.fact in
   let lines ~lead ~rows_left facts =
     let lead_cells = Masc_tui_message_layout.display_width lead in
     let layout =
       Facts.layout ~max_cells:(max 1 (max_cells - lead_cells)) ~max_rows:rows_left
-        ~more:(Printf.sprintf "외 %d") facts in
+        ~more:(if ko then Printf.sprintf "외 %d" else Printf.sprintf "+%d more") facts in
     List.mapi
       (fun index pieces ->
         { csl_lead = (if index = 0 then lead else String.make lead_cells ' ')
@@ -28280,7 +28302,9 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
       layout.Facts.rows in
   let notice facts =
     lines ~lead:"  " ~rows_left:max_rows
-      (fact Facts.Plain "예약 Job" :: facts @ [fact Facts.Plain chat_schedule_toggle_label]) in
+      (fact (Facts.Reading Schedule_settled) (say "예약 작업" "Schedule")
+       :: facts
+       @ [fact (Facts.Reading Schedule_settled) chat_schedule_toggle_label]) in
   let unread text = notice [fact (Facts.Reading Schedule_unknown) text] in
   match state.msg_target_keeper_name with
   | None -> []
@@ -28296,9 +28320,14 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
         | None -> false in
       let reading = detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name in
       match snapshot with
-      | None -> unread (if failed then "조회 실패" else if reading then "조회 중" else "미조회")
+      | None ->
+          unread
+            (if failed then say "조회 실패" "read failed"
+             else if reading then say "조회 중" "reading"
+             else say "미조회" "unread")
       | Some snapshot when Option.is_some snapshot.scs_read_error
-                           || Option.is_none snapshot.scs_request_count -> unread "저장소 조회 불가"
+                           || Option.is_none snapshot.scs_request_count ->
+          unread (say "저장소 조회 불가" "store unavailable")
       | Some snapshot ->
           let entries = chat_schedule_entries ~keeper_name snapshot in
           let kept = failed || reading in
@@ -28310,15 +28339,21 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let observed = local_minute snapshot.scs_observed_at_iso in
           let freshness =
             if kept
-            then [fact ~label:"이전 관측 " Facts.Plain
-                    (observed ^ if failed then "/갱신 실패" else "/갱신 중")]
+            then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain
+                    (observed
+                     ^ if failed then say "/갱신 실패" "/refresh failed"
+                       else say "/갱신 중" "/refreshing")]
             else [] in
-          let partial = if snapshot.scs_truncated then [fact Facts.Plain "일부 목록"] else [] in
+          let partial =
+            if snapshot.scs_truncated then [fact Facts.Plain (say "일부 목록" "partial list")]
+            else [] in
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
-              | None -> "예정 시각 보고 안 됨"
-              | Some due -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due ^ " 예정" in
+              | None -> say "예정 시각 미보고" "due time unreported"
+              | Some due ->
+                  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due
+                  ^ say " 예정" " due" in
             let reason label = function
               | None -> [label]
               | Some reason -> [label ^ ": " ^ plain reason] in
@@ -28327,51 +28362,52 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             let tone, occurrence = match stage with
               | No_occurrence ->
                   (match Schedule_domain.schedule_status_of_string row.sch_status with
-                   | Ok Running -> Schedule_pending, ["예약 전달 중"]
-                   | Ok Failed -> Schedule_failed, ["예약 전달 실패"]
+                   | Ok Running -> Schedule_pending, [say "전달 중" "dispatching"]
+                   | Ok Failed -> Schedule_failed, [say "전달 실패" "dispatch failed"]
                    | Ok (Scheduled | Due) ->
                        (match proximity with
-                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "최근 회차 기록 없음"]
-                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, ["예약 대기"]
-                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, ["예약 대기"])
-                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["최근 회차 기록 없음"])
-              | Dispatching -> Schedule_pending, ["예약 전달 중"]
-              | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
-              | Queued -> Schedule_pending, ["예약 도착"; "처리 대기"]
-              | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
-              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 기록 없음"]
-              | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
+                        | Schedule_elapsed -> Schedule_pending, [say "예정 시각 지남" "overdue"; say "기록 없음" "no record"]
+                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, [say "대기 중" "scheduled"]
+                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, [say "대기 중" "scheduled"])
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, [say "기록 없음" "no record"])
+              | Dispatching -> Schedule_pending, [say "전달 중" "dispatching"]
+              | Dispatch_failed error -> Schedule_failed, reason (say "전달 실패" "dispatch failed") error
+              | Queued -> Schedule_pending, [say "도착 · 처리 대기" "queued"]
+              | Queued_at owner -> Schedule_pending, [say "인계됨" "handed off"; plain owner ^ say " 처리 대기" " queued"]
+              | Missing -> Schedule_pending, [say "큐 누락" "queue missing"; say "실행 기록 없음" "no run recorded"]
+              | Turn_started -> Schedule_running, [say "실행 중" "running"]
               | Turn_ended disposition ->
                 Schedule_pending,
-                [ "최근 회차 턴 종료: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
-                ; "결과 확인 중" ]
-              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 보고 안 됨"]
-              | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
-              | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
-              | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
-              | Settling _ -> Schedule_pending, ["최근 회차 결과 기록 중"]
-              | Transferring _ -> Schedule_pending, ["최근 회차 인계 기록 중"]
+                [ say "턴 종료: " "turn ended: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
+                ; say "결과 확인 중" "confirming result" ]
+              | Consumed -> Schedule_pending, [say "소비됨" "consumed"; say "결과 미보고" "result unreported"]
+              | Completed -> Schedule_settled, [say "최근 완료" "completed"]
+              | Receipt_is_the_record -> Schedule_settled, [say "전달 완료" "delivered"]
+              | Cancelled why -> Schedule_settled, reason (say "취소됨" "cancelled") why
+              | Settling _ -> Schedule_pending, [say "결과 기록 중" "settling"]
+              | Transferring _ -> Schedule_pending, [say "인계 기록 중" "transferring"]
               | Unknown why -> Schedule_pending, [plain why] in
             let hold = match row.sch_runner_hold with
               | None -> []
               | Some hold ->
                   let wording = match hold.Tui_decode.srh_reason with
-                    | Hold_previous_wake_untaken -> "이전 예약 미소비"
-                    | Hold_target_shutdown_fenced _ -> "Keeper 종료 처리 중" in
+                    | Hold_previous_wake_untaken -> say "이전 예약 미소비" "previous wake untaken"
+                    | Hold_target_shutdown_fenced _ -> say "Keeper 종료 처리 중" "Keeper shutting down" in
                   let freshness = if kept then Tui_decode.List_kept else Tui_decode.List_latest in
                   let as_of = match Tui_decode.schedule_hold_reading
                       ~freshness ~runner:snapshot.scs_runner_status hold with
                     | Hold_current -> ""
                     | Hold_as_of checked ->
-                        Printf.sprintf " (%s 관측)" (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now checked) in
-                  [fact ~label:"다음 회차 보류: " (Facts.Reading Schedule_pending) (wording ^ as_of)] in
+                        Printf.sprintf (if ko then " (%s 관측)" else " (observed %s)")
+                          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now checked) in
+                  [fact ~label:(say "다음 회차 보류: " "next run held: ") (Facts.Reading Schedule_pending) (wording ^ as_of)] in
             let title = match row.sch_payload_summary with
               | Some value -> value | None -> row.sch_schedule_id in
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                          | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) ->
-                  [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
+                  [fact ~label:(say "다음 " "next ") (Facts.Reading Schedule_settled) (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                       | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) -> [] in
@@ -28379,17 +28415,19 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             @ hold
             @ [fact Facts.Plain (plain title); fact (Facts.Reading proximity) clock]
             @ next in
-          let toggle = fact Facts.Plain
-              (chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기")) in
+          let toggle = fact (Facts.Reading Schedule_settled)
+              (chat_schedule_toggle_label
+               ^ (if state.msg_schedules_expanded then say " 접기" " collapse" else say " 펼치기" " expand")) in
           match entries with
-          | [] -> notice (freshness @ [fact (Facts.Reading Schedule_unknown) "관측된 예약 없음"] @ partial)
+          | [] -> notice (freshness @ [fact (Facts.Reading Schedule_unknown) (say "관측된 예약 없음" "no scheduled runs")] @ partial)
           | first :: _ ->
               let headed subject = lines ~lead:"  " ~rows_left:max_rows
                   (freshness @ subject @ partial @ [toggle]) in
-              let closed () = headed (fact Facts.Plain "예약 Job" :: describe first) in
+              let closed () = headed (fact (Facts.Reading Schedule_settled) (say "예약 작업" "Schedule") :: describe first) in
               if not state.msg_schedules_expanded then closed () else
               let header = headed
-                  [fact ~label:"예약 Job " Facts.Amount (Printf.sprintf "%d개" (List.length entries))] in
+                  [fact ~label:(say "예약 작업 " "Schedules ") Facts.Amount
+                     (if ko then Printf.sprintf "%d개" (List.length entries) else string_of_int (List.length entries))] in
               (* An open block whose heading leaves no row for a job would list
                  none. The closed row describes the next job in the same rows. *)
               if max_rows - List.length header <= 0 then closed () else
@@ -28405,8 +28443,10 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               let remaining = List.length entries - shown in
               if remaining > 0 && rows_left > 0
               then rows @ lines ~lead:"    " ~rows_left
-                  [ fact Facts.Plain (Printf.sprintf "외 %d개" remaining)
-                  ; fact Facts.Plain "Keeper Automation에서 전체 확인" ]
+                  [ fact (Facts.Reading Schedule_settled)
+                      (if ko then Printf.sprintf "외 %d개" remaining else Printf.sprintf "+%d more" remaining)
+                  ; fact Facts.Plain
+                      (say "작업 › 일정에서 전체 확인" "see Work › Schedules for all") ]
               else rows
 
 (* What the height of the fact blocks around the composer is held against

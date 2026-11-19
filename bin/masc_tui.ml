@@ -8308,7 +8308,7 @@ type row_list = Masc_tui_list_moves.row_list = {
    drawn height the frame reports and a page key moves by (RFC
    tui-one-screen-grammar §3.1). *)
 type on_screen = Masc_tui_list_moves.on_screen = {
-  os_page : Masc_tui_list_moves.page_height;
+  os_list : paged_list;
   os_rows : row_list option;
 }
 
@@ -8356,19 +8356,11 @@ let list_on_screen (state : state) : on_screen option =
         let height = surface_body_height_at state ~cursor scrolled in
         set_scroll (Masc_tui_scroll.ensure_visible_with_lead ~cursor ~lead ~height scroll)
   in
-  let listed list rows = Some { os_page = Masc_tui_list_moves.Drawn list; os_rows = Some rows } in
+  let listed list rows = Some { os_list = list; os_rows = Some rows } in
   (* A list whose rows the drawing windows around the cursor: nothing to
      scroll, so the landing is on screen as soon as the cursor names it. *)
   let windowed list ~count ~cursor place =
     listed list { rl_count = count; rl_cursor = cursor; rl_place = place }
-  in
-  (* The Task and Goal lists: [Masc_tui_render_work] draws them and does not
-     report them as drawn lists yet, so their height is the one the
-     projection they are drawn with gives. *)
-  let projected ~height ~count ~cursor place =
-    Some
-      { os_page = Masc_tui_list_moves.Projected height
-      ; os_rows = Some { rl_count = count; rl_cursor = cursor; rl_place = place } }
   in
   (* A list with a scroll of its own, which follows the cursor. Its count is
      the one the keypress bound already uses, so a jump cannot land on a row
@@ -8543,8 +8535,7 @@ let list_on_screen (state : state) : on_screen option =
                  (Masc_tui_overview_tasks.work_selected_index state.tasks
                     ~selected:(Masc_tui_overview_tasks.selection state.task_focus))
              in
-             projected ~count:(List.length rows) ~cursor
-               ~height:(Masc_tui_render_work.work_tasks_page_rows state ~terminal_rows ~cols)
+             windowed Task_entries ~count:(List.length rows) ~cursor
                (fun index ->
                task_list_user_focus state
                  (Masc_tui_overview_tasks.Task_focus
@@ -8560,10 +8551,7 @@ let list_on_screen (state : state) : on_screen option =
                    (planning_visible_goals ~filter:state.planning_filter
                       ~sort:state.planning_sort snapshot.pl_goals)
            in
-           (* The Goal list's window as the last frame cut it, which
-              [Masc_tui_render_work] reports through its clamped value
-              ([Planning_list_page_rows]). *)
-           projected ~count ~cursor:state.planning_cursor ~height:state.planning_list_page_rows
+           windowed Goal_entries ~count ~cursor:state.planning_cursor
              (fun index -> state.planning_cursor <- index))
   (* Three lists that carry no row search yet (#35306). Home, End and the
      page keys reach them through here, which is what makes these arms live
@@ -8643,14 +8631,14 @@ let list_on_screen (state : state) : on_screen option =
            (fun index -> state.identity_cursor <- index))
   (* Overview's move keys select a destination ([Masc_tui_home.home_move])
      rather than move a cursor, so it hands over only the list it is. *)
-  | Overview -> Some { os_page = Masc_tui_list_moves.Drawn Overview_destinations; os_rows = None }
+  | Overview -> Some { os_list = Overview_destinations; os_rows = None }
   (* The models table is read by a cursor [e] acts on. The stored scroll is
      the window the cursor settled, so a key inside the window moves only
      the mark, and the column names stay on screen until the selection
      passes the first window. *)
   | Config when state.config_pane = Config_models ->
       Option.map (fun (list : Masc_tui_render_config.models_list) ->
-        { os_page = Masc_tui_list_moves.Drawn Model_bindings
+        { os_list = Model_bindings
         ; os_rows =
             Some
               { rl_count = list.ml_count
@@ -8665,14 +8653,9 @@ let list_on_screen (state : state) : on_screen option =
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
      reading. *)
-  (* The Skill list and the async request list, while the move keys walk
-     one ([Masc_tui_list_moves.tools_list]). [Masc_tui_render_tools] does not
-     report them as drawn lists, and an entry can wrap, so a page is the
-     Tools window's rows counted in entries, as before. The keys walk the
-     selection themselves ([Masc_tui_list_moves.moves]). *)
-  | Tools when Option.is_some (Masc_tui_list_moves.tools_list state) ->
-      let _, height = tools_scroll_viewport state in
-      Some { os_page = Masc_tui_list_moves.Projected height; os_rows = None }
+  (* The Skill list and the async request list walk their selection rather
+     than a row, and read their page where they walk it
+     ([Masc_tui_list_moves.moves]). *)
   | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Config | Tools ->
@@ -14162,13 +14145,14 @@ let msx_surface_current () =
 let render_spectator (state : Masc_tui_types.state) =
   (* Layout is pure; publish its navigation bounds only after the complete
      spectator frame is written. A hidden room has no scrollable rows. *)
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let next_room = ref (Option.map (fun room ->
-    fst (Masc_tui_play_room.layout room ~width:0 ~height:0)) state.play_room) in
+    fst (Masc_tui_play_room.layout ~ko room ~width:0 ~height:0)) state.play_room) in
   let room = Option.map (fun room ~width ~height ->
-    let next, lines = Masc_tui_play_room.layout room ~width ~height in
+    let next, lines = Masc_tui_play_room.layout ~ko room ~width ~height in
     next_room := Some next;
     lines) state.play_room in
-  let room_footer = Option.map Masc_tui_play_room.footer state.play_room in
+  let room_footer = Option.map (Masc_tui_play_room.footer ~ko) state.play_room in
   (match state.machine_source with
   | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
@@ -28089,23 +28073,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Play_invite_list_read refusal)
        | Ok { Tui_decode.pis_rows = []; pis_controller } ->
+           let ko = state.ui_language = Lang_ko in
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
-                ("No shared DOS play invites" :: Masc_tui_collab.controller_summary pis_controller))
+                ((if ko then "공유 DOS 플레이 초대가 없습니다" else "No shared DOS play invites")
+                 :: Masc_tui_collab.controller_summary ~ko pis_controller))
        | Ok { Tui_decode.pis_rows = invites; pis_controller } ->
+           let ko = state.ui_language = Lang_ko in
            let row invite =
              let expires_at =
                match invite.Tui_decode.pi_expires_at with
                | Some value -> value
-               | None -> "not recorded"
+               | None -> if ko then "미기록" else "not recorded"
              in
-             invite.pi_name ^ " · expires " ^ expires_at
-             ^ (if invite.pi_expired then " · expired" else "")
-             ^ Masc_tui_collab.controller_note pis_controller invite.pi_name
+             invite.pi_name
+             ^ (if ko then " · 만료 " else " · expires ") ^ expires_at
+             ^ (if invite.pi_expired then (if ko then " · 만료됨" else " · expired") else "")
+             ^ Masc_tui_collab.controller_note ~ko pis_controller invite.pi_name
            in
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
-                (("Shared DOS play invites:" :: Masc_tui_collab.controller_summary pis_controller)
+                (((if ko then "공유 DOS 플레이 초대:" else "Shared DOS play invites:")
+                  :: Masc_tui_collab.controller_summary ~ko pis_controller)
                  @ List.map row invites))));
       Drawn_changed
   | Play_msg (Play_invite_issued (request, target, result)) ->
@@ -32910,7 +32899,7 @@ let main
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll { confirmation = Some confirmation; _ }) ->
         preset_confirmation_needs_present state confirmation
-      | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
+      | None | Some (Task_detail _ | Board_read _ | Message_scroll _
         | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
         | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -33024,7 +33013,7 @@ let main
          | Some (Harness_detail_scroll _) | Some (Fusion_detail_scroll _)
          | Some (Runtime_detail_scroll _) | Some (Runtime_params_scroll _)
          | Some (System_log_detail_scroll _) | Some (Planning_confirmation_scroll (_, _))
-         | Some (Planning_detail_scroll _) | Some (Planning_list_page_rows _) | Some (Lane_run_detail_scroll _)
+         | Some (Planning_detail_scroll _) | Some (Lane_run_detail_scroll _)
          | Some (Changes_diff_scroll _) | Some (Repository_changes_diff_scroll _)
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Link_modal_scroll _)
@@ -36313,7 +36302,7 @@ Use relative paths for resources already held in the package. -->
       in
       let preset_confirmation_wheel = match wheel_reader with
         | Some (Preset_detail_scroll _) -> true
-        | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
+        | None | Some (Task_detail _ | Board_read _ | Message_scroll _
           | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
           | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _

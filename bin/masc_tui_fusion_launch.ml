@@ -198,7 +198,7 @@ let lines launch =
    | Some (Server_refused detail) -> [ "Refused: " ^ detail ]
    | Some (Launch_kept_back notice) -> [ notice ])
   @ (match launch.waiting with
-     | Some request -> [ "Starting the run for " ^ request.keeper ^ "..." ]
+     | Some request -> [ "Starting the run for " ^ request.keeper ]
      | None -> [])
   @ Form.lines launch.form
 

@@ -18,14 +18,14 @@ let row_category (row : row) = match row.selection with
              (fun item -> item.ui_category)
        | Package_state {declaration=Some _;_}
        | Exact_state _ | Browser_clients _ | Machine_state _ -> None)
-let category_label = function
-  | Some Category.Memory_and_judgment -> "기억 · 판단"
-  | Some Category.Browser -> "브라우저"
-  | Some Category.External_communications -> "외부 소통"
-  | Some Category.Voice_and_media -> "음성 · 미디어"
-  | Some Category.Execution_environment -> "실행 환경"
-  | Some Category.Analysis -> "분석"
-  | None -> "미분류"
+let category_label ?(ko = true) = function
+  | Some Category.Memory_and_judgment -> if ko then "기억 · 판단" else "Memory · Judgment"
+  | Some Category.Browser -> if ko then "브라우저" else "Browser"
+  | Some Category.External_communications -> if ko then "외부 소통" else "External Comms"
+  | Some Category.Voice_and_media -> if ko then "음성 · 미디어" else "Voice · Media"
+  | Some Category.Execution_environment -> if ko then "실행 환경" else "Execution Env"
+  | Some Category.Analysis -> if ko then "분석" else "Analysis"
+  | None -> if ko then "미분류" else "Unclassified"
 type overview_entry = Category_header of Category.t option | Lane_row of row
 let overview_entries rows =
   [Some Category.Memory_and_judgment;Some Category.Browser;

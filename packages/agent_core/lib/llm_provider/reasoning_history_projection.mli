@@ -64,8 +64,9 @@ type error =
       }
   (** Under [Exclude_unselected] at dispatch: the target's declared
       {!Reasoning_replay_contract.replay_obligation} requires this foreign
-      reasoning back and the target cannot read it. This binding cannot send
-      the history; the producing source can. *)
+      reasoning back inside the active exchange (or when no caller query
+      boundary survives) and the target cannot read it. This binding cannot
+      send the history; the producing source can. *)
   | Invalid_reasoning_artifact_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
@@ -80,10 +81,11 @@ type source_change_policy =
   | Reject_incompatible
   | Exclude_unselected
 (** Caller-owned admission policy. [Exclude_unselected] admits foreign
-    reasoning outside the target's declared replay obligation: reasoning the
-    target does not select, and, on an [Open_exchange_messages] wire, selected
-    reasoning before the latest caller query. Missing/corrupt provenance is
-    never admitted by this policy. *)
+    reasoning outside the target's active replay obligation: reasoning the
+    target does not select, and selected reasoning on closed prior turns
+    (strictly before the latest caller query). Missing/corrupt provenance and
+    foreign reasoning inside the active open exchange when required by the
+    target are never admitted by this policy. *)
 
 type continuity_boundary =
   | Checkpoint_restore
@@ -139,8 +141,10 @@ val validate_replay_continuity_for_provider_config
     target that cannot replay the old source is rejected by default.
     [Exclude_unselected] returns the incompatible indices/producers in the
     disposition. At [Checkpoint_restore] this is provisional admission only;
-    at [Provider_dispatch] each must be outside the target's replay
-    obligation, and one inside it is [Required_reasoning_unreadable].
+    at [Provider_dispatch] closed prior turns (strictly before the latest caller
+    query) and unselected messages are admissible to exclude, while foreign
+    reasoning inside the active open exchange that falls inside the target's
+    replay obligation is [Required_reasoning_unreadable].
     The dispatch tools fact must match the actual request, including hook edits
     and temporary tool suppression. It is not inferred from the model catalog.
     When no caller query survives projection, latest-turn tool exchanges are

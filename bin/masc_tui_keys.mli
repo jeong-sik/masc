@@ -287,6 +287,7 @@ val footer_hints_approvals :
     [Enter] and [Esc] are its save and cancel and are named. *)
 
 val approval_answer_hint : string
+val approval_answer_hint_for : lang:Masc_tui_types.ui_language -> string
 (** The footer's words for the key that opens the selected question. The
     Questions heading prints this one string, so the two cannot name the key
     differently. *)
@@ -568,6 +569,10 @@ val keeper_detail_tab_hint : ko:bool -> Masc_tui_types.keeper_detail_tab -> stri
 
 val here_marker : string
 (** Marker appended to the current surface section title in {!help_sections}. *)
+
+val here_marker_for : Masc_tui_types.ui_language -> string
+(** Localized marker appended to the current surface section title in
+    {!help_sections} and {!help_sections_for_state}. *)
 
 val help_surfaces : (string * Masc_tui_types.surface) list
 (** One sheet section per surface family, and the surface it answers for. Read

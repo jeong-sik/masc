@@ -409,7 +409,7 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
-    let (_ : boundary_recording) = record_turn_boundary
+    let boundary_recorded = record_turn_boundary
       ~task_context
       ~config
       ~meta
@@ -423,6 +423,41 @@ let finalize
       ~history_at_start
       ~restart_notice_pending
       saved_checkpoint in
+    (match boundary_recorded, checkpoint_owner, official_client_settlement with
+     | Recorded, Runtime_execution.Official_client,
+       Some
+         { Keeper_official_client_session_store.client_kind
+         ; runtime_id
+         ; phase = Keeper_official_client_session_store.Settled { session_id; _ }
+         ; updated_at
+         ; _
+         } ->
+       (match
+          Keeper_turn_bridge.record_official_client_settlement
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            ~turn_ref
+            ~client_kind
+            ~runtime_id
+            ~session_id
+            ~updated_at
+        with
+        | Ok () -> ()
+        | Error detail ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "official-client bridge cursor update skipped turn=%d: %s"
+            (Ids.Turn_ref.absolute_turn turn_ref)
+            detail)
+     | (Recorded | Not_recorded), Runtime_execution.Official_client,
+       ( None
+       | Some
+           { Keeper_official_client_session_store.phase =
+               ( Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ )
+           ; _
+           } )
+     | Not_recorded, Runtime_execution.Official_client, Some { phase = Settled _; _ }
+     | (Recorded | Not_recorded), Runtime_execution.Masc_agent_core, _ -> ());
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)

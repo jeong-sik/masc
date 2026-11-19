@@ -196,7 +196,7 @@ end
    that hold identifiers worth reading whole -- the keeper's name first, then
    the runtime it is on -- before it goes to the task id and secondary badges. *)
 
-let keeper_marker_width = 3
+let keeper_marker_width = 2
 let keeper_status_width = 12
 
 (* The flag cell is two one-cell letters: an activation letter under "Mode" and

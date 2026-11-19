@@ -140,7 +140,7 @@ let context_facts ~ko ~inspect_key observation =
   let tok = say "토큰" "tok" in
   let key =
     fact Masc_tui_chat_facts.Plain
-      (inspect_key ^ say ":컨텍스트 내역" ":context breakdown")
+      (inspect_key ^ say ":컨텍스트" ":context")
   in
   match context_summary observation with
   | Context_measured { ratio; tokens; maximum; _ } ->
@@ -158,4 +158,4 @@ let context_facts ~ko ~inspect_key observation =
              (say "한도" "limit"))
       ]
   | Context_unavailable _ ->
-      [ fact Masc_tui_chat_facts.Plain (say "컨텍스트 측정 없음" "Context unavailable"); key ]
+      [ fact ~label:context Masc_tui_chat_facts.Plain (say "미측정" "unmeasured"); key ]

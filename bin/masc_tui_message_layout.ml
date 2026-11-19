@@ -3105,19 +3105,22 @@ let thought_preview ~max_cells body =
     | None -> ""
     | Some text -> truncate_end max_cells text
 
-let folded_thought_summary ~mark ~width ~line_count ~body =
-  let unit_word = if line_count = 1 then "line" else "lines" in
-  let compact =
-    Printf.sprintf "%s Thought \xc2\xb7 %d %s \xc2\xb7 Ctrl-R"
-      mark line_count unit_word
+let folded_thought_summary_localized ~ko ~mark ~width ~line_count ~body =
+  let head =
+    if ko then Printf.sprintf "%s 추론 \xc2\xb7 %d줄" mark line_count
+    else
+      let unit_word = if line_count = 1 then "line" else "lines" in
+      Printf.sprintf "%s Thought \xc2\xb7 %d %s" mark line_count unit_word
   in
-  let sep = " \xe2\x80\x94 " in
+  let compact = head ^ " \xc2\xb7 Ctrl-R" in
+  let sep = " \xc2\xb7 " in
   let overhead = display_width compact + display_width sep in
   let preview_budget = min 64 (width - overhead) in
   if preview_budget < 12 then compact
   else
     let preview = thought_preview ~max_cells:preview_budget body in
     if String.equal preview "" then compact
-    else
-      Printf.sprintf "%s Thought \xc2\xb7 %d %s%s%s \xc2\xb7 Ctrl-R"
-        mark line_count unit_word sep preview
+    else head ^ sep ^ preview ^ " \xc2\xb7 Ctrl-R"
+
+let folded_thought_summary ~mark ~width ~line_count ~body =
+  folded_thought_summary_localized ~ko:false ~mark ~width ~line_count ~body

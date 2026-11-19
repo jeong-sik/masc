@@ -248,7 +248,7 @@ let fits ?(field_value = "") width form =
   List.iter
     (fun row ->
       let focused_field =
-        field_value <> "" && String.starts_with ~prefix:"  > " row
+        field_value <> "" && String.starts_with ~prefix:"  › " row
         && String.ends_with ~suffix:field_value row
       in
       if (not focused_field) && Masc_tui_message_layout.display_width row > width then

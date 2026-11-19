@@ -276,10 +276,10 @@ let list_is_read = function
 (* The three lists that hold approval rows, by the name the title and the
    empty queue give each. The questions are drawn in their own block, which
    says for itself when they were not read. *)
-let approval_row_lists (reading : approvals_reading) =
-  [ ("confirm queue", reading.confirm_queue)
-  ; ("held calls", reading.held_calls)
-  ; ("Gate queue", reading.gate_queue)
+let approval_row_lists ?(ko = false) (reading : approvals_reading) =
+  [ ((if ko then "운영자 승인" else "confirm queue"), reading.confirm_queue)
+  ; ((if ko then "보류 도구" else "held calls"), reading.held_calls)
+  ; ((if ko then "도구 심사" else "Gate queue"), reading.gate_queue)
   ]
 
 (* Everything on the Approvals surface waiting on the operator: the three
@@ -301,13 +301,14 @@ let approvals_reading_current (state : state) =
 (* One title clause per list that was not read, in the order the lists are
    drawn. A list with nothing read and nothing kept is "unread" whether or not
    a poll failed; the rows of a list read before and not since are "stale". *)
-let approval_list_note ~name = function
+let approval_list_note ?(ko = false) ~name = function
   | List_read -> ""
   | List_not_read (Approval_unread | Approval_failed _ | Approval_kept_back _) ->
-      Printf.sprintf ", %s unread" name
-  | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
+      Printf.sprintf (if ko then ", %s 미조회" else ", %s unread") name
+  | List_not_read (Approval_stale _) ->
+      Printf.sprintf (if ko then ", %s 이전 조회" else ", %s stale") name
   | List_not_read (Approval_unavailable _) ->
-      Printf.sprintf ", %s unavailable" name
+      Printf.sprintf (if ko then ", %s 조회 불가" else ", %s unavailable") name
 
 (* What the queue says when it has no approval row to draw. "No pending
    approvals" is a reading of all three row lists, so it is said only when
@@ -317,14 +318,14 @@ type approvals_empty_queue =
   | Nothing_pending
   | Lists_not_read of (string * approval_not_read) list
 
-let approvals_empty_queue (reading : approvals_reading) =
+let approvals_empty_queue ?(ko = false) (reading : approvals_reading) =
   match
     List.filter_map
       (fun (name, list_reading) ->
         match list_reading with
         | List_read -> None
         | List_not_read not_read -> Some (name, not_read))
-      (approval_row_lists reading)
+      (approval_row_lists ~ko reading)
   with
   | [] -> Nothing_pending
   | not_read -> Lists_not_read not_read

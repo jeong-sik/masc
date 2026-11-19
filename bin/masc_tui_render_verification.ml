@@ -46,8 +46,9 @@ let judgement_list_columns state ~cols ~status_header ~statuses =
       (Message_layout.display_width status_header) statuses
     |> min (max 1 (inner_width - 3)) in
   let title_width = max 1 (inner_width - status_width - 2) in
-  let row title status =
-    "  " ^ fit_width (Terminal_text.single_line title) title_width
+  let row ?(selected = false) title status =
+    (if selected then "\xe2\x80\xba " else "  ")
+    ^ fit_width (Terminal_text.single_line title) title_width
     ^ "  " ^ fit_width status status_width in
   row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
 
@@ -139,7 +140,8 @@ let render_verification_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
+          (if reading_note = "" then "" else "  " ^ reading_note)
+          ^ quiet_connection_tail state
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
@@ -158,12 +160,14 @@ let render_verification_list (state : state) =
         let total = snapshot.Masc.Tui_decode.vs_total in
         let window =
           if shown > 0 then ""
-          else Printf.sprintf " (0 of %s)" (Masc_tui_value.Count.grouped total)
+          else
+            Printf.sprintf
+              (if state.ui_language = Lang_ko then " (전체 %s 중 0)" else " (0 of %s)")
+              (Masc_tui_value.Count.grouped total)
         in
-        Printf.sprintf "%s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
-             ~after:("  " ^ connection_badge state))
-          (connection_badge state)
+        let badge = quiet_connection_tail state in
+        planning_workspace_title state ~cols ~tab:Planning_task_review ~window ~after:badge
+        ^ badge
   in
   (* The selected row, and how much of the server's list is loaded when the
      page holds less than all of it. *)
@@ -219,7 +223,9 @@ let render_verification_list (state : state) =
       with
       | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.verification_inflight
-      | Page_empty -> "  (nothing waiting on a verdict)"
+      | Page_empty ->
+          ui_text state ~ko:"  (판정 대기 중인 항목 없음)"
+            ~en:"  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -233,13 +239,14 @@ let render_verification_list (state : state) =
       | None -> box_empty buf cols
       | Some r ->
           let open Masc.Tui_decode in
-          let line = request_row r.vr_task_title (verification_status state r) in
+          let is_selected = idx = state.verification_cursor in
+          let line = request_row ~selected:is_selected r.vr_task_title (verification_status state r) in
           let style =
             match r.vr_evidence_error with
             | Some _ -> (Theme.bad ())
             | None -> Ansi.reset
           in
-          if idx = state.verification_cursor then box_line_selected buf cols line
+          if is_selected then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
   (* Which list this is, and where in it -- drawn on every read rather than
@@ -254,18 +261,22 @@ let render_verification_list (state : state) =
        let place =
          match snapshot.Masc.Tui_decode.vs_view with
          | Masc.Tui_decode.Awaiting_queue ->
-             Printf.sprintf "awaiting %s" (Masc_tui_value.Count.grouped total)
+             Printf.sprintf
+               (if state.ui_language = Lang_ko then "대기 %s건" else "awaiting %s")
+               (Masc_tui_value.Count.grouped total)
          | Masc.Tui_decode.Full_history ->
-             if offset = 0 then "history"
+             if offset = 0 then ui_text state ~ko:"전체 이력" ~en:"history"
              else
-               Printf.sprintf "history from %s"
+               Printf.sprintf
+                 (if state.ui_language = Lang_ko then "이력 %s번부터" else "history from %s")
                  (Masc_tui_value.Count.grouped (offset + 1))
        in
        (* Named because the key is not on the footer of a narrow terminal, and
           a page with more behind it that says so is the difference between
           "that is all" and "there is more". *)
        let more =
-         if snapshot.Masc.Tui_decode.vs_truncated then " \xc2\xb7 > next page"
+         if snapshot.Masc.Tui_decode.vs_truncated then
+           ui_text state ~ko:" \xc2\xb7 > 다음 페이지" ~en:" \xc2\xb7 > next page"
          else ""
        in
        box_line_styled buf cols ~style:(Theme.recede ())
@@ -274,7 +285,9 @@ let render_verification_list (state : state) =
        (match snapshot.Masc.Tui_decode.vs_backlog_error with
         | Some detail ->
             box_line_styled buf cols ~style:(Theme.bad ())
-              (Printf.sprintf "  the queue could not be read: %s"
+              (Printf.sprintf
+                 (if state.ui_language = Lang_ko then "  대기열을 읽지 못함: %s"
+                  else "  the queue could not be read: %s")
                  (Terminal_text.single_line detail))
         | None -> ());
        (* A queue built from a recovery snapshot is a queue of real rows that
@@ -284,7 +297,9 @@ let render_verification_list (state : state) =
        (match snapshot.Masc.Tui_decode.vs_backlog_recovery with
         | Some detail ->
             box_line_styled buf cols ~style:(Theme.warn ())
-              (Printf.sprintf "  this queue is as old as the snapshot it came from: %s"
+              (Printf.sprintf
+                 (if state.ui_language = Lang_ko then "  복구 스냅샷 시점의 이전 대기열: %s"
+                  else "  this queue is as old as the snapshot it came from: %s")
                  (Terminal_text.single_line detail))
         | None -> ());
        (* A task waiting on a record the store does not hold cannot be moved
@@ -299,7 +314,9 @@ let render_verification_list (state : state) =
               - List.length named
             in
             box_line_styled buf cols ~style:(Theme.warn ())
-              (Printf.sprintf "  waiting on a record this store does not hold: %s%s"
+              (Printf.sprintf
+                 (if state.ui_language = Lang_ko then "  저장소에 없는 기록을 기다리는 중: %s%s"
+                  else "  waiting on a record this store does not hold: %s%s")
                  (String.concat ", " named)
                  (if rest > 0 then Printf.sprintf " (+%d)" rest else ""))));
   (* The arm and the server's last refusal sit under the list, the same rows
@@ -311,7 +328,9 @@ let render_verification_list (state : state) =
           tail is the half that instructs. *)
        box_line buf cols
          ((Theme.warn ())
-         ^ Printf.sprintf "  armed: approve %s -- same key again to send [%s]"
+         ^ Printf.sprintf
+             (if state.ui_language = Lang_ko then "  승인 대기: %s · 같은 키를 한 번 더 누르면 전송 [%s]"
+              else "  armed: approve %s -- same key again to send [%s]")
              (Terminal_text.single_line task_id)
              (Terminal_text.single_line request_id)
          ^ Ansi.reset)
@@ -409,7 +428,7 @@ let verification_evidence_index state request ~width observation =
     let index = max 0 (min (count - 1) state.verification_evidence_cursor) in
     let rows = List.mapi (fun i item ->
       (if i = index then Theme.category Theme.Slot_1 else Theme.recede ()),
-      Printf.sprintf "  %s %d. %s" (if i = index then "▸" else " ") (i + 1)
+      Printf.sprintf "  %s %d. %s" (if i = index then "\xe2\x80\xba" else " ") (i + 1)
         (fit_width (Terminal_text.single_line (evidence_name ~ko:(state.ui_language = Lang_ko) item))
            (max 1 (width - 9)))) items in
     let rows = if state.verification_evidence_index_open then rows
@@ -505,20 +524,8 @@ let verification_detail_pane (state : state) ~rows ~cols
       ~in_flight ~workspace_confirmed:(server_authority_ready state) ~width ~content_height
       ~display:(Masc_tui_portrait_view.current_display ())
   in
-  let after =
-    ((match armed_note with None -> [] | Some note -> [Theme.warn (), note])
-     @ (match state.verification_verdict_error with
-        | None -> []
-        | Some (Request_failed detail) ->
-          [Theme.bad (), say "  판정 실패: " "  Verdict action failed: " ^ Terminal_text.single_line detail]
-        | Some (Request_withdrawn _ as failure) ->
-          (* Not sent: the kept-back notice alone, without the failure
-             prefix (RFC §2). *)
-          [Theme.bad (), "  " ^ Terminal_text.single_line (verdict_failure_text state failure)]))
-    |> judgement_detail_rows ~width
-  in
   let evidence_first = List.length before in
-  let lines = before @ evidence @ verification_contract_lines state ~width request @ after in
+  let lines = before @ evidence @ verification_contract_lines state ~width request in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let pane_start = Buffer.length buf in
@@ -529,12 +536,13 @@ let verification_detail_pane (state : state) ~rows ~cols
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
             ~total:(List.length lines))
        ~title:(fun ~cols ->
+         let details_step = ui_text state ~ko:"상세" ~en:"details" in
          Printf.sprintf "%s  %s"
            (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
               ~after:
-                (Printf.sprintf " \xe2\x96\xb8 details  %s"
+                (Printf.sprintf " \xe2\x96\xb8 %s  %s" details_step
                    (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
-            ^ " \xe2\x96\xb8 details")
+            ^ " \xe2\x96\xb8 " ^ details_step)
            (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id)));
   box_divider buf cols;
   (* The frame cell of the first content row, counted from what was drawn
@@ -597,8 +605,13 @@ let render_verification_detail (state : state) request =
                  replaced rounded two requests six minutes apart to the same
                  "1d12h", and spelled seconds under an hour, so an index row
                  changed while the reader was looking at it. *)
+              let label =
+                match String.trim row.Tui_decode.vr_task_title with
+                | "" -> row.Tui_decode.vr_task_id
+                | title -> title
+              in
               Render_schedule.task_history_sidebar_label
-                ~task_id:row.Tui_decode.vr_task_id
+                ~task_id:label
                 ~apart:(Some row.Tui_decode.vr_request_id))
             snapshot.Tui_decode.vs_requests
       in
@@ -606,7 +619,8 @@ let render_verification_detail (state : state) request =
       let right_buf = Buffer.create 4096 in
       (* One server page: the list screen next door draws "history 1-50 of
          664" off the same snapshot, and this index drew "(50)". *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"태스크 검증" ~en:"Task Review")
         ~focused:false
         ~holding:
           (Option.map
@@ -645,7 +659,7 @@ let render_verification (state : state) =
 (* Workspace-wide calibration is separate from the recent verdict page and
    the selected Task. Preserve its original denominator and unknown labels
    in the selected detail document. *)
-let harness_ledger_lines ~cols snapshot =
+let harness_ledger_lines ?(ko = false) ~cols snapshot =
   match snapshot with
   | None -> []
   | Some snapshot -> (
@@ -672,27 +686,37 @@ let harness_ledger_lines ~cols snapshot =
             let remaining = max 0 (List.length calibration.hcal_gates - 4) in
             let gates =
               if remaining = 0 then gates
-              else Printf.sprintf "%s  \xc2\xb7  +%d more" gates remaining
+              else
+                Printf.sprintf
+                  (if ko then "%s  \xc2\xb7  외 %d건" else "%s  \xc2\xb7  +%d more")
+                  gates remaining
             in
             let evaluator =
               match snapshot.hs_overview with
               | None -> ""
               | Some overview ->
-                  Printf.sprintf "  \xc2\xb7  evaluator %s"
+                  Printf.sprintf
+                    (if ko then "  \xc2\xb7  평가자 %s" else "  \xc2\xb7  evaluator %s")
                     (Terminal_text.single_line overview.hov_evaluator_status)
             in
-            [ Printf.sprintf "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s"
+            [ Printf.sprintf
+                (if ko then "  %s누적%s    %d건 판정  \xc2\xb7  승인 %d  \xc2\xb7  거절 %d%s"
+                 else "  %sledger%s  %d ruled  \xc2\xb7  approve %d  \xc2\xb7  reject %d%s")
                 Ansi.dim Ansi.reset calibration.hcal_total
                 calibration.hcal_approve calibration.hcal_reject evaluator
             ; row_with_field ~cols
-                ~lead:(Printf.sprintf "  %sgate%s    " Ansi.dim Ansi.reset)
+                ~lead:(Printf.sprintf
+                         (if ko then "  %s게이트%s  " else "  %sgate%s    ")
+                         Ansi.dim Ansi.reset)
                 ~field:gates ~tail:""
             ; (if calibration.hcal_labeled > 0 then
-                 Printf.sprintf "  %slabelled%s %d" Ansi.dim Ansi.reset
-                   calibration.hcal_labeled
+                 Printf.sprintf
+                   (if ko then "  %s라벨%s    %d건" else "  %slabelled%s %d")
+                   Ansi.dim Ansi.reset calibration.hcal_labeled
                else
                  Printf.sprintf
-                   "  %slabelled%s none \xe2\x80\x94 agreement and the error counts have no ground truth"
+                   (if ko then "  %s라벨%s    없음 · 일치율·오류 집계용 정답 기준 없음"
+                    else "  %slabelled%s none · agreement and the error counts have no ground truth")
                    Ansi.dim Ansi.reset)
             ])
 
@@ -722,7 +746,8 @@ let render_harness_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
+          (if reading_note = "" then "" else "  " ^ reading_note)
+          ^ quiet_connection_tail state
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
@@ -734,20 +759,23 @@ let render_harness_list (state : state) =
         let of_total =
           match snapshot.Masc.Tui_decode.hs_calibration with
           | Some calibration when calibration.Masc.Tui_decode.hcal_total > 0 ->
-              Printf.sprintf " of %d"
+              Printf.sprintf
+                (if state.ui_language = Lang_ko then " / 전체 %d" else " of %d")
                 calibration.Masc.Tui_decode.hcal_total
           | Some _ | None -> ""
         in
         let by_fallback =
-          if fallbacks > 0 then Printf.sprintf ", %d by fallback" fallbacks
+          if fallbacks > 0 then
+            Printf.sprintf
+              (if state.ui_language = Lang_ko then ", 대체 %d건" else ", %d by fallback")
+              fallbacks
           else ""
         in
-        Printf.sprintf "%s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_verdicts
-             ~window:
-               (Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
-             ~after:("  " ^ connection_badge state))
-          (connection_badge state)
+        let badge = quiet_connection_tail state in
+        planning_workspace_title state ~cols ~tab:Planning_verdicts
+          ~window:(Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
+          ~after:badge
+        ^ badge
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:header
@@ -838,13 +866,14 @@ let render_harness_list (state : state) =
       | None -> box_empty buf cols
       | Some v ->
           let open Masc.Tui_decode in
-          let line = verdict_row v.hv_task_title (verdict_status v) in
+          let is_selected = idx = state.harness_cursor in
+          let line = verdict_row ~selected:is_selected v.hv_task_title (verdict_status v) in
           let style =
             match v.hv_fallback_reason with
             | Some _ -> (Theme.warn ())
             | None -> Ansi.reset
           in
-          if idx = state.harness_cursor then box_line_selected buf cols line
+          if is_selected then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
   Buffer.add_buffer buf tail;
@@ -991,7 +1020,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | lines ->
            detail_section_heading ~width (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
            @ lines)
-    @ (match harness_ledger_lines ~cols state.harness with
+    @ (match harness_ledger_lines ~ko:(state.ui_language = Lang_ko) ~cols state.harness with
        | [] -> []
        | lines ->
            detail_section_heading ~width
@@ -1009,7 +1038,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        ~title:
          (harness_detail_heading state
             ~task_id:verdict.Masc.Tui_decode.hv_task_id
-            ~tail:(connection_badge state))
+            ~tail:(Option.value ~default:"" (reading_connection_notice state)))
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
             ~total:(List.length lines)));
@@ -1046,7 +1075,12 @@ let render_harness_detail (state : state) verdict =
              can name several verdicts recorded in the same second. *)
           snapshot.Tui_decode.hs_verdicts
           |> List.map (fun (row : Tui_decode.harness_verdict) ->
-               row.hv_task_id, row.hv_at)
+               let label =
+                 match String.trim row.hv_task_title with
+                 | "" -> row.hv_task_id
+                 | title -> title
+               in
+               label, row.hv_at)
           |> Render_schedule.verdict_sidebar_labels
                ~now:(Unix.gettimeofday ())
       in
@@ -1054,7 +1088,8 @@ let render_harness_detail (state : state) verdict =
       let right_buf = Buffer.create 4096 in
       (* The harness snapshot carries its verdicts whole; there is no page
          behind them. *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verdicts"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"판정" ~en:"Verdicts")
         ~focused:false ~holding:None ~labels ~selected:state.harness_cursor;
       let answer =
         harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict

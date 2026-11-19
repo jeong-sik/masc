@@ -405,7 +405,7 @@ let hints_in ~width ~room hints =
 let filling_rows ~width ~height t =
   let height = max 0 height in
   if height = 0 then [] else
-  let mark field = if t.field = field then ">" else " " in
+  let mark field = if t.field = field then "›" else " " in
   let line field label value =
     let lead = if height = 1 && field = t.field && Option.is_some t.error then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " else "  " in
     Printf.sprintf "%s%s %s %s" lead (mark field)

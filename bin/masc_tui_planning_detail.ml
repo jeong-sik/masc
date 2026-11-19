@@ -540,8 +540,8 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
            then "저장된 확인과 증거를 끝까지 읽고 [a]를 눌러 완료 처리를 재개합니다. Esc는 취소합니다."
            else "Read the recorded confirmation and evidence, then [a] to resume completion; Esc cancels."
          | None -> if ko
-           then "이 증명을 확인합니다 — 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
-           else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
+           then "이 증명을 확인합니다 · 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
+           else "CONFIRM THIS PROOF · read through evidence, then [a]; Esc cancels")
   in
   let promise =
     labelled ~tone:Plain (text "제목" "Title") criterion.title
@@ -779,13 +779,16 @@ let headline ~subject ~title summary =
 (* The goal's merged event timeline, appended after [body] so it rides the
    same scroll. Loaded lazily on detail entry; every non-ready state says
    what it is instead of rendering as an empty history. *)
-let timeline_unavailability_detail = function
+let timeline_unavailability_detail ?(ko = false) = function
   | Tui_decode.Goal_source_failure (Goal_store_unavailable view) ->
-      "Cause: " ^ Tui_decode.goal_store_unavailable_view_to_string view
+      (if ko then "원인: " else "Cause: ")
+      ^ Tui_decode.goal_store_unavailable_view_to_string view
   | Tui_decode.Goal_source_failure (Goal_task_links_unavailable detail) ->
-      "Linked tasks unavailable · Cause: " ^ detail
+      (if ko then "연결된 작업 조회 불가 · 원인: " else "Linked tasks unavailable · Cause: ")
+      ^ detail
   | Tui_decode.Approval_queue_failure detail ->
-      "Approval queue unavailable · Cause: " ^ detail
+      (if ko then "승인 대기열 조회 불가 · 원인: " else "Approval queue unavailable · Cause: ")
+      ^ detail
 
 type timeline_failure =
   | Timeline_failed of string
@@ -854,7 +857,7 @@ let timeline ~ko ~now ~width ~goal_id
     | Masc_tui_fetched.Failed (Timeline_kept_back notice) -> wrapped ~width Unreadable
         ("  " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = (text "  기록 미조회" "  timeline not requested") } ]
-    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading...") } ]
+    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading") } ]
   in
   let pending =
     if not (Masc_tui_fetched.in_flight loaded) then []

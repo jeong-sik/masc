@@ -23,20 +23,11 @@ type row_list = {
     window to the row needs the frame's geometry, which only the executable
     has. *)
 
-type page_height =
-  | Drawn of Masc_tui_types.paged_list
-      (** the rows the last built frame drew the list in, as its renderer
-          reported them ({!Masc_tui_types.lists_drawn}) *)
-  | Projected of int
-      (** rows the list's renderer works out from the projection it draws
-          with, read before the frame. Only the lists whose renderers do not
-          report them yet use it: the Task and Goal lists
-          ([Masc_tui_render_work]) and the Tools Skill and request lists
-          ([Masc_tui_render_tools]). *)
-(** Where the height a page key moves by comes from. *)
-
 type on_screen = {
-  os_page : page_height;
+  os_list : Masc_tui_types.paged_list;
+      (** which list it is, so a page key reads the rows the last built
+          frame drew it in, as its renderer reported them
+          ({!Masc_tui_types.lists_drawn}) *)
   os_rows : row_list option;
       (** its row cursor; [None] on Overview, whose move keys select a
           destination rather than move a cursor *)
@@ -45,7 +36,7 @@ type on_screen = {
     the list rather than to the key, so a list cannot be paged by a height it
     was not drawn in. *)
 
-val page_height : Masc_tui_types.state -> page_height -> int option
+val page_height : Masc_tui_types.state -> Masc_tui_types.paged_list -> int option
 (** The rows the list was drawn in; [None] when the last frame did not draw
     it. *)
 
@@ -105,6 +96,9 @@ val moves :
     chosen by position opens its group and Overview has no row cursor. Tools
     walks the selection of its {!tools_list} and then calls [follow] with
     that list, because where the selection is drawn on the page is the
-    frame's to say; the key itself never scrolls the page. Every other
-    surface moves its rows, and only an empty list ignores the key.
-    Every page is {!cursor_move} of the list's {!page_height}. *)
+    frame's to say; the key itself never scrolls the page. Its page is the
+    height the frame reported for that list ({!Masc_tui_types.Skill_entries},
+    {!Masc_tui_types.Async_request_entries}), so [on_screen] is not read
+    there. Every other surface moves its rows, and only an empty list
+    ignores the key. Every page is {!cursor_move} of the list's
+    {!page_height}. *)

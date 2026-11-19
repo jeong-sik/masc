@@ -401,7 +401,7 @@ let wrap_tokens ?on_row palette ~width tokens =
   in
   (* Group contiguous tokens where subsequent tokens have [space_before = false]
      into one word cluster so Korean postpositions (`file`에서) and closing
-     punctuation (**완료**., [link](u):) stay attached to their inline span. *)
+     punctuation (`**완료**.`, `[link](u):`) stay attached to their inline span. *)
   let clusters =
     let rec group acc current = function
       | [] ->

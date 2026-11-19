@@ -128,6 +128,48 @@ let test_the_selection_never_switches_the_layout () =
     ; ([], [], [])
     ]
 
+let test_narrow_width_keeps_one_column_cards () =
+  let decisions = entries "d" 2 in
+  let continuation = entries "c" 2 in
+  let actions = entries "a" 1 in
+  let draw_at ~inner ~rows ~selected =
+    Cards.draw ~ko:true ~edges ~inner ~rows
+      ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
+      ~decisions ~decisions_whole:true ~continuation
+      ~status:(fun ~cells:_ -> [ "running" ])
+      ~actions
+  in
+  check bool "43 inner cells falls back to plain list" true
+    (Option.is_none (draw_at ~inner:43 ~rows:24 ~selected:None));
+  List.iter
+    (fun width ->
+       match draw_at ~inner:width ~rows:24 ~selected:(Some "d1") with
+       | None -> fail (Printf.sprintf "expected cards at inner=%d" width)
+       | Some lines ->
+           check bool (Printf.sprintf "height <= 24 at inner=%d" width) true
+             (List.length lines <= 24);
+           check bool (Printf.sprintf "every line matches inner=%d" width) true
+             (List.for_all (fun line -> Layout.display_width line = width) lines))
+    [ 44; 60; 89; 90 ];
+  for rows = 0 to 24 do
+    let at = Printf.sprintf "1-col at %d rows" rows in
+    let answers =
+      List.map
+        (fun selected -> draw_at ~inner:60 ~rows ~selected)
+        (selections ~decisions ~continuation ~actions)
+    in
+    check bool (at ^ ": the same layout for every selection") true
+      (List.for_all Option.is_some answers || List.for_all Option.is_none answers);
+    List.iter
+      (function
+        | None -> ()
+        | Some lines ->
+            check bool (at ^ ": within the rows") true (List.length lines <= rows);
+            check bool (at ^ ": every line is 60 cells") true
+              (List.for_all (fun line -> Layout.display_width line = 60) lines))
+      answers
+  done
+
 let () =
   run "tui overview cards"
     [ ( "selection"
@@ -140,5 +182,7 @@ let () =
             test_the_continue_card_must_fit_full
         ; test_case "the selection never switches the layout" `Quick
             test_the_selection_never_switches_the_layout
+        ; test_case "narrow widths step down to 1-column cards" `Quick
+            test_narrow_width_keeps_one_column_cards
         ] )
     ]

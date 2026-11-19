@@ -212,7 +212,7 @@ let standalone_lane_summary_lines state ~width ~standing
     | Lane_ready | Lane_slotless -> text "켜짐" "On"
     | Lane_off -> text "꺼짐" "Off"
     | Lane_unconfigured -> text "실행 후보 미설정" "No candidates configured"
-    | Lane_registry_unavailable -> text "레지스트리 미관측" "Registry not observed" in
+    | Lane_registry_unavailable -> text "레지스트리 조회 실패" "Registry unreadable" in
   let current = if lane.sl_running_count = 0 then text "보고된 실행 없음" "No runs reported"
     else Printf.sprintf (if state.ui_language = Lang_ko then "%d건 실행 관측" else "%d runs observed") lane.sl_running_count in
   let notices = Option.to_list (Option.map (fun error -> Theme.bad (),
@@ -244,13 +244,13 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
               Option.to_list (Option.map (fun error -> Theme.bad (), error) c.admission_error)
           | Disabled _ -> text "꺼짐" "Off", text "새 실행 중지" "New runs disabled", []
           | Unconfigured detail -> text "미설정" "Not configured", detail, []
-          | Registry_unavailable detail -> text "미관측" "Not observed", detail, [] in
+          | Registry_unavailable detail -> text "조회 실패" "Read failed", detail, [] in
         let actions = match row.selection with
           | Exact lane -> exact_lane_overview_actions state lane
           | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> [] in
         [field (text "모델 설정" "Model configuration") declared;
          field (text "실행 준비" "Admission") applied;
-         field (text "실행 기록" "Run history") (text "미관측" "Not observed")],
+         field (text "실행 기록" "Run history") (text "미조회" "Not read")],
         errors, actions
     | Browser_clients reading ->
         let connection, notices = match reading with
@@ -267,7 +267,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
         let declared = match activity with
           | Machine_enabled -> text "켜짐" "On"
           | Machine_disabled -> text "꺼짐 · 머신 상태 보존" "Off; machine state retained"
-          | Machine_unobserved -> text "미관측" "Not observed" in
+          | Machine_unobserved -> text "보고 안 됨" "Not reported" in
         let publication = match publication with
           | No_screen -> text "게시된 화면 없음" "No screen published"
           | Stable -> text "보존된 화면 안정 상태" "Published screen stable"
@@ -279,9 +279,9 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
     | Package_state {declaration; instances} ->
         let declared, application, errors = match declaration with
           | None -> text "수동 연결 · 선언 파일 없음" "Manual attachment; no declaration file", text "선언 적용 대상 아님" "No declaration application", []
-          | Some Absent -> text "선언 파일 없음" "Declaration absent", text "미관측" "Not observed", []
-          | Some Unobserved -> text "디렉터리 읽기 미완료" "Directory not fully observed", text "미관측" "Not observed", []
-          | Some (Invalid messages) -> text "선언 오류" "Invalid declaration", text "미확인" "Unconfirmed",
+          | Some Absent -> text "선언 파일 없음" "Declaration absent", text "적용할 선언 없음" "No declaration to apply", []
+          | Some Unobserved -> text "디렉터리 읽기 미완료" "Directory not fully observed", text "보고 안 됨" "Not reported", []
+          | Some (Invalid messages) -> text "선언 오류" "Invalid declaration", text "보고 안 됨" "Not reported",
               List.map (fun message -> Theme.bad (), message) messages
           | Some (Valid value) ->
               let application, errors = match value.application with
@@ -290,7 +290,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
                 | Cleaning_workers -> text "이전 워커 정리 중" "Previous workers being cleaned", []
                 | Inactive -> text "워커 정리 확인" "Worker cleanup confirmed", []
                 | Failed messages -> text "적용 실패" "Application failed", List.map (fun message -> Theme.bad (), message) messages
-                | Unknown messages -> text "적용 미확인" "Application unconfirmed", List.map (fun message -> Theme.warn (), message) messages in
+                | Unknown messages -> text "적용 일부 관측" "Application partly read", List.map (fun message -> Theme.warn (), message) messages in
               (if value.enabled then text "켜짐" "On" else text "꺼짐" "Off"), application, errors in
         let live = List.filter (fun (item : instance) -> match item.presence with Live -> true | Retained -> false) instances in
         let phase_label = function
@@ -355,7 +355,7 @@ let standalone_lane_without_slot_rows ~ko (lane : Tui_decode.standalone_lane) =
     without.slws_vendor_system_one
   @ counted (t "서버 재시작으로 중단" "stopped by a server restart")
       without.slws_server_restarted
-  @ counted (t "슬롯 미기록" "no slot recorded") without.slws_no_slot
+  @ counted (t "슬롯 기록 없음" "no slot recorded") without.slws_no_slot
   @ gap
 
 (* A candidate list is a numbered list; none is the word for none, receded. *)
@@ -784,7 +784,7 @@ let render_lanes_overview (state : state) =
          | None -> label) |> String.concat " · " in
        box_line_styled buf cols ~style:(Theme.info ()) line);
   let observed_heading = match state.lane_inventory with
-    | None -> ui_text state ~ko:"기능 상태 미관측 · r:조회" ~en:"Feature states not observed · r:read"
+    | None -> ui_text state ~ko:"기능 상태 미조회 · r:조회" ~en:"Feature states not read · r:read"
     | Some snapshot ->
         let observed =
           Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
@@ -831,7 +831,7 @@ let render_lanes_overview (state : state) =
     let index = scroll + offset in
     match Rows.at window index with
     | None when offset = 0 && Option.is_none state.lane_inventory ->
-        Theme.recede () ^ ui_text state ~ko:"기능 목록 미관측 · r:조회" ~en:"Inventory not observed · r:read" ^ Ansi.reset
+        Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
         Theme.info () ^ Masc_tui_lane_inventory.category_label category ^ Ansi.reset

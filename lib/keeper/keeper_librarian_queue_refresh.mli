@@ -185,28 +185,4 @@ module For_testing : sig
     -> pass_end
   (** The production durable reader with a controlled Memory commit edge.
       Returns its actual phase result; measurements remain observation only. *)
-
-  val queue_input
-    :  config:Workspace.config
-    -> keeper_id:Keeper_identity.Keeper_id.t
-    -> meta:Keeper_meta_contract.keeper_meta
-    -> working_context:Keeper_librarian_context.input
-    -> Keeper_librarian.input
-  (** The input the queue pass hands the Librarian. Reads the Goal store and
-      goal-task links for [meta.current_task_id] through the IO pool. *)
-
-  val context_pass_needed
-    :  keepers_dir:string
-    -> keeper_name:string
-    -> Keeper_librarian_context.input
-    -> bool
-  (** Whether the queue pass calls the model for this capture. *)
-
-  val remember_context_pass
-    :  keepers_dir:string
-    -> keeper_name:string
-    -> Keeper_librarian_context.input
-    -> Keeper_librarian_context.version
-    -> unit
-  (** Record that a queue pass shown this capture wrote that version. *)
 end

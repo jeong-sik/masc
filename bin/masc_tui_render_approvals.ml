@@ -1136,8 +1136,8 @@ let render_approvals (state : state) =
               match not_read with
               | Masc_tui_approvals_model.Approval_unread ->
                   Ansi.dim ^ "  (" ^ name
-                  ^ ui_text state ~ko:" 미조회 \xe2\x80\x94 r로 새로고침)"
-                      ~en:" not read yet \xe2\x80\x94 press 'r' to refresh)"
+                  ^ ui_text state ~ko:" 미조회 · r로 새로고침)"
+                      ~en:" not read yet · press 'r' to refresh)"
                   ^ Ansi.reset
               (* The loader's message already names what failed ("... load
                  failed: ..."), so the row carries it as it came. *)

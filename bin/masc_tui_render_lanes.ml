@@ -87,13 +87,13 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
   let last_run = standalone_lane_last_run ~ko ~now lane in
   match lane.sl_configuration_state, lane.sl_status with
   | Tui_decode.Lane_registry_unavailable, _ ->
-    t "오류 — 런타임 레지스트리를 읽을 수 없음"
-      "Error — the runtime registry could not be read"
+    t "오류 · 런타임 레지스트리를 읽을 수 없음"
+      "Error · the runtime registry could not be read"
   | Tui_decode.Lane_unconfigured, _ ->
-    t "미설정 — 지정된 모델 후보가 없음" "Not configured — no model candidate is named"
+    t "미설정 · 지정된 모델 후보가 없음" "Not configured · no model candidate is named"
   | Tui_decode.Lane_slotless, _ ->
-    t "실행 불가 — 설정된 후보 중 사용 가능한 모델이 없음"
-      "Cannot run — no configured candidate is usable"
+    t "실행 불가 · 설정된 후보 중 사용 가능한 모델이 없음"
+      "Cannot run · no configured candidate is usable"
   | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off ->
     if lane.sl_running_count > 0 then
       Printf.sprintf
@@ -522,11 +522,11 @@ let render_exact_lane_provider_editor (state : state) editor =
   (match state.runtime_lane_write with
    | Masc_tui_types.Lane_write_posting ->
      box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  후보 순서 저장 중…" ~en:"  Saving candidate order...")
+       (ui_text state ~ko:"  후보 순서 저장 중" ~en:"  Saving candidate order")
    | Masc_tui_types.Lane_write_rereading _ ->
      box_line_styled buf cols ~style:(Theme.info ())
-       (ui_text state ~ko:"  현재 후보 순서 조회 중…"
-          ~en:"  Reading current candidate order...")
+       (ui_text state ~ko:"  현재 후보 순서 조회 중"
+          ~en:"  Reading current candidate order")
    | Masc_tui_types.Lane_write_idle -> ());
   let picker =
     Masc_tui_types.runtime_picker_projection

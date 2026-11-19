@@ -200,8 +200,8 @@ let render_runtime_params (state : state) =
           and the edit target read it — so the window is positioned by where
           that row lands in the display list. *)
        let unfiled_description =
-         ui_text state ~ko:"그룹 없음 — 등록부에 소속 그룹이 없습니다"
-           ~en:"Unfiled — no group assigned in the registry"
+         ui_text state ~ko:"그룹 없음 · 등록부에 소속 그룹이 없습니다"
+           ~en:"Unfiled · no group assigned in the registry"
        in
        let surface_of (row : Tui_decode.runtime_param_row) =
          match row.Tui_decode.rpr_surface with
@@ -386,7 +386,7 @@ let prompt_catalog_status_row state prompts =
   | Masc_tui_fetched.Stale (_, detail) ->
     Some
       ( Theme.bad ()
-      , ui_text state ~ko:"새로고침 실패 · 마지막으로 읽은 목록 — " ~en:"Refresh failed · last read catalog — " ^ Terminal_text.single_line detail )
+      , ui_text state ~ko:"새로고침 실패 · 마지막으로 읽은 목록 · " ~en:"Refresh failed · last read catalog · " ^ Terminal_text.single_line detail )
   | Masc_tui_fetched.Failed detail -> Some (Theme.bad (), Terminal_text.single_line detail)
 ;;
 
@@ -1067,7 +1067,7 @@ let preset_detail_lines (state : state) ~cols ~selected =
               ~request:Kept_request.Preset_list_read refusal)])
       @ List.map (fun (name, reason) ->
           P.failure (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
-                     ^ " " ^ name ^ " — " ^ reason)) rows
+                     ^ " " ^ name ^ " · " ^ reason)) rows
   in
   let remaining =
     preset_folded_rows ~cols

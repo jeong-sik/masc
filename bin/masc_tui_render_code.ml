@@ -285,7 +285,7 @@ let prepare_code_history_rows (state : state) ~cols =
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
       wrap None (field (say "이력을 읽지 못함" "History unavailable") detail)
-  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중…)" "(loading history)")
+  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중)" "(loading history)")
   | Some (_, Masc_tui_fetched.Absent) | None -> []
   | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
       let git_failure = match listing.chl_git_error with
@@ -437,7 +437,7 @@ let code_tree_status (state : state) =
       Some ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
   | Masc_tui_fetched.Loading ->
       Some
-        (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
+        (Ansi.dim ^ ui_text state ~ko:" (읽는 중)" ~en:" (loading)"
          ^ Ansi.reset)
   | Masc_tui_fetched.Absent ->
       Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
@@ -806,7 +806,7 @@ let render_code (state : state) =
            done
        | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중…)" ~en:"  (reading the tree)" ^ Ansi.reset);
+             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중)" ~en:"  (reading the tree)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done

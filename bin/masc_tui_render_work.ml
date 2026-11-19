@@ -1149,11 +1149,11 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let proof_width = planning_proof_width ~width in
   let confirmation_rows =
     (match confirmation with
-       | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation...")}]
+       | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation")}]
        | `Inspect (Masc_tui_fetched.Ready value) ->
            Planning_detail.confirmation_lines ~width:proof_width
              ~ko:(state.ui_language = Lang_ko) value
-       | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm...")}]
+       | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm")}]
        | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
        | `Inspect Masc_tui_fetched.Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
@@ -1937,8 +1937,8 @@ let render_schedule_list (state : state) =
                    ~en:"  (no schedules on this page; refresh to read again)"
              | (Some _ | None), (_ :: _ | []) ->
                  ui_text state
-                   ~ko:"  (자동 일정 없음 \xe2\x80\x94 n 으로 만들기)"
-                   ~en:"  (no scheduled automation \xe2\x80\x94 press n to create one)"
+                   ~ko:"  (자동 일정 없음 · n 으로 만들기)"
+                   ~en:"  (no scheduled automation · press n to create one)"
            in
            c.push (Ansi.dim ^ empty ^ Ansi.reset)
          end else begin
@@ -2258,7 +2258,7 @@ let schedule_wake_lines ~ko
   | Render_schedule.Wake_last_only ->
       last_wake
       :: last_wake_fields
-      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중\xe2\x80\xa6)" "  (loading the rest of this schedule's wakes\xe2\x80\xa6)") ]
+      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중)" "  (loading the rest of this schedule's wakes)") ]
   | Render_schedule.Wake_never ->
       [ Ansi.bold, t "  실행" "  WAKES"
       ; (Ansi.dim, t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]

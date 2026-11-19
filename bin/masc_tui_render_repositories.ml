@@ -161,7 +161,18 @@ let render_workspace_activity (state : state) repo_id =
             | Some (change, path) ->
                 let date =
                   Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
-                let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
+                let task =
+                  match change.fc_task_id with
+                  | None -> if ko then "연결 없음" else "unlinked"
+                  | Some id ->
+                      (match
+                         List.find_opt
+                           (fun (t : Tui_decode.task) -> String.equal t.id id)
+                           state.tasks
+                       with
+                       | Some t when not (String.equal (String.trim t.title) "") -> t.title
+                       | Some _ | None -> id)
+                in
                 let is_selected = first + i = cursor in
                 let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
@@ -196,7 +207,7 @@ let render_workspace_activity (state : state) repo_id =
       match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
           c.push
-            (ui_text state ~ko:"  기록된 파일 변경 조회 중…" ~en:"  Reading recorded file changes...")
+            (ui_text state ~ko:"  기록된 파일 변경 조회 중" ~en:"  Reading recorded file changes")
       | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
       | Masc_tui_fetched.Ready reading -> show ~budget reading
       (* The changes already read stay, with the failed refresh above them so
@@ -719,8 +730,17 @@ let render_repository_changes (state : state) =
                          | Some fc ->
                              let t =
                                match fc.fc_task_id with
-                               | Some tid -> tid
-                               | None -> fc.fc_keeper
+                               | Some tid ->
+                                   (match
+                                      List.find_opt
+                                        (fun (t : Tui_decode.task) -> String.equal t.id tid)
+                                        state.tasks
+                                    with
+                                    | Some task when not (String.equal (String.trim task.title) "") ->
+                                        Message_layout.truncate_end 20
+                                          (Terminal_text.single_line task.title)
+                                    | Some _ | None -> Terminal_text.single_line tid)
+                               | None -> Terminal_text.single_line fc.fc_keeper
                              in
                              " [record:" ^ t ^ "]"
                          | None -> "")

@@ -453,7 +453,15 @@ let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_ent
       match k.k_activity with
       | Some act ->
           (match act.k_current_task_id with
-           | Some tid when not (String.equal tid "") -> Terminal_text.single_line tid
+           | Some tid when not (String.equal tid "") ->
+               (match
+                  List.find_opt
+                    (fun (t : Tui_decode.task) -> String.equal t.id tid)
+                    state.tasks
+                with
+                | Some task when not (String.equal (String.trim task.title) "") ->
+                    Terminal_text.single_line task.title
+                | Some _ | None -> Terminal_text.single_line tid)
            | Some _ | None -> "")
       | None -> ""
     in
@@ -532,7 +540,7 @@ let render_overview (state : state) home =
       if body.hb_help then
         c.push (" " ^ Theme.recede ()
           ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
-          ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
+          ^ ui_text state ~ko:" · 화면별 조작" ~en:" · every screen's keys" ^ Ansi.reset);
       if body.hb_shortcuts then begin
         let shortcut key label =
           Ansi.bold ^ Theme.accent () ^ key ^ Ansi.reset
@@ -950,7 +958,7 @@ let render_surface ~home (state : state) =
                             c.push_styled ~style:(Theme.bad ())
                               ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push (ui_text state ~ko:"  글을 아직 읽지 못했습니다. r로 다시 읽습니다." ~en:"  Board post has not been loaded. Press r to retry.")
-                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중…" ~en:"  Loading Board post…")
+                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중" ~en:"  Loading Board post")
                         | Board_detail.Ready _ -> ())))
   | Planning -> Masc_tui_render_work.render_planning state
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->

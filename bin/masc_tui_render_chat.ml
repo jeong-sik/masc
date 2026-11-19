@@ -5140,8 +5140,8 @@ let render_keeper_message (state : state) =
        and a failed page load was silent -- the one thing it must not be. *)
     (if state.msg_older_loading then
        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-         (ui_text state ~ko:"  (이전 메시지 조회 중\xe2\x80\xa6)"
-            ~en:"  (loading older messages\xe2\x80\xa6)")
+         (ui_text state ~ko:"  (이전 메시지 조회 중)"
+            ~en:"  (loading older messages)")
      else
        match state.msg_older_error with
        | Some (Request_failed _) ->
@@ -5583,7 +5583,7 @@ let render_keeper_message (state : state) =
       | None when state.voice_continuous <> None ->
         Printf.sprintf
           "%s · %s %s"
-          (say "대기 중 — 말하면 잡습니다" "waiting — speech starts a capture")
+          (say "대기 중 · 말하면 잡습니다" "waiting · speech starts a capture")
           Masc_tui_keys.voice_listen_key
           (say "멈춤" "to stop")
       | None ->

@@ -649,7 +649,7 @@ let render_keeper_calls (state : state) =
   if shown = 0 then begin
     let empty =
       if state.keeper_calls_loading && Option.is_none state.keeper_calls then
-        ui_text state ~ko:"  (호출 기록 조회 중…)" ~en:"  (loading exact call records...)"
+        ui_text state ~ko:"  (호출 기록 조회 중)" ~en:"  (loading exact call records)"
       else
       match (state.keeper_calls, state.keeper_calls_error) with
       | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)

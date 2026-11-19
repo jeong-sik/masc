@@ -1643,7 +1643,7 @@ let keeper_operations_fields (state : state) ~keeper_name =
   if reading_now then
     (execution, Theme.recede ()
       ^ (match reading with
-         | None -> t "실행 상태 읽는 중…" "reading execution snapshot…"
+         | None -> t "실행 상태 읽는 중" "reading execution snapshot"
          | Some _ ->
              t "실행 상태 갱신 중 · 마지막 관측" "refreshing execution snapshot · last observation")
       ^ Ansi.reset) :: fields
@@ -3550,7 +3550,7 @@ let terminal_drawing (state : state) ~width =
   let rows = match observation with
     | Masc_tui_fetched.Absent ->
         note (text ~ko:"Execute 출력을 아직 읽지 않음" ~en:"Execute output has not been read.")
-    | Loading -> note (text ~ko:"Execute 출력 읽는 중\xe2\x80\xa6" ~en:"Reading Execute output\xe2\x80\xa6")
+    | Loading -> note (text ~ko:"Execute 출력 읽는 중" ~en:"Reading Execute output")
     | Failed detail ->
         wrapped (Theme.bad () ^ sanitize
           (text ~ko:"Execute 출력 없음: " ~en:"Execute output unavailable: "

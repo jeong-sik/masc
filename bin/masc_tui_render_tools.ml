@@ -291,19 +291,19 @@ let skill_action_lines actions =
 let async_request_inventory_lines (state : state) =
   let errors = Option.to_list (Option.map (function
     | Request_failed detail -> Theme.bad (),
-        Say.both ~ko:" Async broker — 재확인 실패 · 이전 목록 유지: "
-          ~en:" Async broker — recheck failed · previous list kept: "
+        Say.both ~ko:" Async broker · 재확인 실패 · 이전 목록 유지: "
+          ~en:" Async broker · recheck failed · previous list kept: "
         ++ Say.as_received (Terminal_text.single_line detail)
     | Request_withdrawn refusal -> Theme.bad (),
         Say.code " " ++ refusal_text ~request:Kept_request.Async_requests_read refusal)
     state.tools_async_observation_error) in
   rows errors @ (match state.tools_async_observation with
   | None ->
-    if errors=[] then rows [ Theme.warn (), Say.both ~ko:" Async broker — 미조회" ~en:" Async broker — not loaded" ]
+    if errors=[] then rows [ Theme.warn (), Say.both ~ko:" Async broker · 미조회" ~en:" Async broker · not loaded" ]
     else []
   | Some (Async_unavailable { kind; reason }) ->
     rows [ Theme.bad (),
-      Say.both ~ko:" Async broker — 영속 목록 조회 불가: " ~en:" Async broker — durable inventory unavailable: "
+      Say.both ~ko:" Async broker · 영속 목록 조회 불가: " ~en:" Async broker · durable inventory unavailable: "
       ++ Say.as_received (Terminal_text.single_line kind)
       ++ Option.fold ~none:Say.empty
            ~some:(fun value -> Say.code ": " ++ Say.as_received (Terminal_text.single_line value)) reason ]
@@ -312,11 +312,11 @@ let async_request_inventory_lines (state : state) =
       [ Ansi.bold,
         Say.per_language (function
           | Say.Ko -> Printf.sprintf
-              " Async broker — 진행 %d · runtime 소유 %d · 소유 미확인 %d · 기록 오류 %d"
+              " Async broker · 진행 %d · runtime 소유 %d · 소유 미확인 %d · 기록 오류 %d"
               summary.ars_active summary.ars_runtime_owned
               summary.ars_ownership_unknown summary.ars_record_errors
           | Say.En -> Printf.sprintf
-              " Async broker — active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
+              " Async broker · active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
               summary.ars_active summary.ars_runtime_owned
               summary.ars_ownership_unknown summary.ars_record_errors) ]
     in
@@ -392,7 +392,7 @@ let async_logical_lines value =
         [Theme.warn (), Say.both ~ko:" 논리: 명시적 종결 없음 · 실행 허가는 별도"
                           ~en:" Logical: no explicit resolution · permission to run is separate"]
       | Some resolution ->
-        [Theme.warn (), Say.both ~ko:" 논리: 재개 종결 — " ~en:" Logical: resumption resolved — "
+        [Theme.warn (), Say.both ~ko:" 논리: 재개 종결 · " ~en:" Logical: resumption resolved · "
            ++ (match resolution.decision with
                | Detail.Rejected -> Say.both ~ko:"거절" ~en:"rejected"
                | Cancelled_continuation -> Say.both ~ko:"취소" ~en:"cancelled");
@@ -610,9 +610,9 @@ let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config optio
        screen changes when the operator's section stops parsing. *)
     ( Theme.warn ()
     , Say.per_language (function
-        | Say.Ko -> Printf.sprintf "   runtime.toml Skill 설정 거부됨 (rev %s) \xe2\x80\x94 기본값 사용"
+        | Say.Ko -> Printf.sprintf "   runtime.toml Skill 설정 거부됨 (rev %s) · 기본값 사용"
             (Terminal_text.single_line source_revision)
-        | Say.En -> Printf.sprintf "   runtime.toml Skill config rejected (rev %s) \xe2\x80\x94 defaults in use"
+        | Say.En -> Printf.sprintf "   runtime.toml Skill config rejected (rev %s) · defaults in use"
             (Terminal_text.single_line source_revision)) )
     :: List.map
          (fun diagnostic ->
@@ -620,8 +620,8 @@ let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config optio
          diagnostics
   | Some Masc.Tui_decode_tools.Skill_config_unreadable ->
     [ ( Theme.warn ()
-      , Say.both ~ko:"   runtime.toml Skill 설정을 읽을 수 없음 \xe2\x80\x94 기본값 사용"
-          ~en:"   runtime.toml Skill config unreadable \xe2\x80\x94 defaults in use" )
+      , Say.both ~ko:"   runtime.toml Skill 설정을 읽을 수 없음 · 기본값 사용"
+          ~en:"   runtime.toml Skill config unreadable · defaults in use" )
     ]
 ;;
 
@@ -711,8 +711,8 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
   let heading =
     ( Ansi.bold
     , Say.per_language (function
-        | Say.Ko -> Printf.sprintf " Skill 출처 \xe2\x80\x94 루트 %d개 중 %d개에 Skill 있음" total ready
-        | Say.En -> Printf.sprintf " Skill Sources \xe2\x80\x94 %d of %d root%s carrying skills"
+        | Say.Ko -> Printf.sprintf " Skill 출처 · 루트 %d개 중 %d개에 Skill 있음" total ready
+        | Say.En -> Printf.sprintf " Skill Sources · %d of %d root%s carrying skills"
             ready total (if total = 1 then "" else "s")) )
   in
   let source_rows =
@@ -1272,7 +1272,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               ++ Say.of_ko_flag (fun ~ko -> title_missing_reading ~ko ~error:(selected_tools_error state)) )
           ]
     | Some { Masc.Tui_decode_tools.ts_effective = None; _ } ->
-        rows [ (Theme.warn ()), surface_title ++ Say.both ~ko:" — 고른 Keeper 없음" ~en:" — no Keeper selected" ]
+        rows [ (Theme.warn ()), surface_title ++ Say.both ~ko:" · 고른 Keeper 없음" ~en:" · no Keeper selected" ]
     | Some
         { Masc.Tui_decode_tools.ts_effective =
             Some
@@ -1281,8 +1281,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           _ } ->
         rows
           [ (Theme.bad ()),
-            surface_title ++ Say.code " — " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
-            ++ Say.both ~ko:" — 조회 불가 (" ~en:" — unavailable ("
+            surface_title ++ Say.code " · " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
+            ++ Say.both ~ko:" · 조회 불가 (" ~en:" · unavailable ("
             ++ Say.as_received (Terminal_text.single_line ets_reason) ++ Say.code ")";
             (Theme.bad ()), Say.code "   " ++ Say.as_received (Terminal_text.single_line ets_detail) ]
     | Some
@@ -1810,7 +1810,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         in
         rows
           [ Ansi.bold,
-            surface_title ++ Say.code " — " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
+            surface_title ++ Say.code " · " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
             ++ Say.code " ("
             ++ Say.per_language (function
                  | Say.Ko -> Printf.sprintf "도구 %d개" (List.length ets_tools)
@@ -1892,25 +1892,25 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
     match state.tools_activations with
     | None ->
         (match state.tools_activations_error with
-         | None -> [ Theme.warn (), log_title ++ Say.both ~ko:" — 미조회" ~en:" — not loaded" ]
+         | None -> [ Theme.warn (), log_title ++ Say.both ~ko:" · 미조회" ~en:" · not loaded" ]
          | Some _ ->
-           [ Theme.warn (), log_title ++ Say.both ~ko:" — 조회 불가 (읽은 것 없음)" ~en:" — unavailable (no reading)" ])
+           [ Theme.warn (), log_title ++ Say.both ~ko:" · 조회 불가 (읽은 것 없음)" ~en:" · unavailable (no reading)" ])
     | Some Masc_tui_types.Activations_no_keeper ->
-        [ Theme.warn (), log_title ++ Say.both ~ko:" — 고른 Keeper 없음" ~en:" — no Keeper selected" ]
+        [ Theme.warn (), log_title ++ Say.both ~ko:" · 고른 Keeper 없음" ~en:" · no Keeper selected" ]
     | Some
         (Masc_tui_types.Activations_read
            (Masc.Tui_decode_tools.Skill_activations_no_session
               { sap_keeper_name })) ->
         [ Theme.warn (),
-          log_title ++ Say.code " — " ++ safe sap_keeper_name
-          ++ Say.both ~ko:" — 세션 없음" ~en:" — no session" ]
+          log_title ++ Say.code " · " ++ safe sap_keeper_name
+          ++ Say.both ~ko:" · 세션 없음" ~en:" · no session" ]
     | Some
         (Masc_tui_types.Activations_read
            (Masc.Tui_decode_tools.Skill_activations_unavailable
               { sap_keeper_name; sap_reason; sap_detail })) ->
         [ Theme.bad (),
-          log_title ++ Say.code " — " ++ safe sap_keeper_name
-          ++ Say.both ~ko:" — 조회 불가 (" ~en:" — unavailable (" ++ safe sap_reason ++ Say.code ")";
+          log_title ++ Say.code " · " ++ safe sap_keeper_name
+          ++ Say.both ~ko:" · 조회 불가 (" ~en:" · unavailable (" ++ safe sap_reason ++ Say.code ")";
           Theme.bad (), Say.code "   " ++ safe sap_detail ]
     | Some
         (Masc_tui_types.Activations_read
@@ -2175,8 +2175,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           in
           [ Ansi.bold,
             Say.per_language (function
-              | Say.Ko -> Printf.sprintf " Skill 타임라인 — 사건 %d개 (최신부터)" total
-              | Say.En -> Printf.sprintf " Skill Timeline — %d event%s (newest first)"
+              | Say.Ko -> Printf.sprintf " Skill 타임라인 · 사건 %d개 (최신부터)" total
+              | Say.En -> Printf.sprintf " Skill Timeline · %d event%s (newest first)"
                   total (if total = 1 then "" else "s"))
           (* Masc_tui_token_scale writes this note in English for every screen
              that estimates tokens; it moves with the Context inspector. *)
@@ -2184,7 +2184,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           @ List.map (fun (_, line) -> (Ansi.dim, Say.code "   " ++ line)) capped
         in
         [ Ansi.bold,
-          Say.both ~ko:" Skill 사용 — " ~en:" Skill Use — " ++ safe sap_keeper_name
+          Say.both ~ko:" Skill 사용 · " ~en:" Skill Use · " ++ safe sap_keeper_name
           ++ Say.per_language (function
                | Say.Ko -> Printf.sprintf " (영수증 %d개)" (List.length sap_activations)
                | Say.En -> Printf.sprintf " (%d receipts)" (List.length sap_activations))
@@ -2250,7 +2250,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
     | None ->
         rows
           [ Theme.warn (),
-            Say.both ~ko:" 전체 등록 도구 — 조회 자료 없음" ~en:" All registered tools — no inventory reading" ]
+            Say.both ~ko:" 전체 등록 도구 · 조회 자료 없음" ~en:" All registered tools · no inventory reading" ]
     | Some { Masc.Tui_decode_tools.ts_usage; _ } ->
     let registered_rows = Tool_tree.rows registered_tools in
     let surfaces_text (tool : Masc.Tui_decode_tools.tool_entry) =
@@ -2285,8 +2285,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       let count = List.length registered_tools in
       [ Row (Ansi.bold,
              Say.per_language (function
-               | Say.Ko -> Printf.sprintf " 전체 등록 도구 — %d개" count
-               | Say.En -> Printf.sprintf " All registered tools — %s"
+               | Say.Ko -> Printf.sprintf " 전체 등록 도구 · %d개" count
+               | Say.En -> Printf.sprintf " All registered tools · %s"
                    (Masc_tui_message_layout.count_noun count "tool")));
         Row (Ansi.dim, Tool_table.catalog_tool_header layout) ]
       @ List.map
@@ -2345,13 +2345,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           [ Ansi.dim,
             usage_title
             ++ (match state.skills_catalog_error with
-                | None -> Say.both ~ko:" — 작업 공간 catalog 조회 없음" ~en:" — no workspace catalog reading"
-                | Some _ -> Say.both ~ko:" — 조회 불가 (catalog 조회 없음)" ~en:" — unavailable (no catalog reading)") ]
+                | None -> Say.both ~ko:" · 작업 공간 catalog 조회 없음" ~en:" · no workspace catalog reading"
+                | Some _ -> Say.both ~ko:" · 조회 불가 (catalog 조회 없음)" ~en:" · unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode_tools.sc_state; _ }
       when sc_state <> Masc.Tui_decode_tools.Skills_ready ->
         rows
           [ Ansi.dim,
-            usage_title ++ Say.code " — catalog "
+            usage_title ++ Say.code " · catalog "
             ++ Say.as_received (Terminal_text.single_line
                  (Masc.Tui_decode_tools.skills_catalog_state_to_string sc_state)) ]
     | Some
@@ -2530,9 +2530,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         let heading = card ~cols (rows
           ([ Ansi.bold,
              Say.per_language (function
-               | Say.Ko -> Printf.sprintf "Skill 사용 집계 — catalog Skill %d개 중 %d개 관측"
+               | Say.Ko -> Printf.sprintf "Skill 사용 집계 · catalog Skill %d개 중 %d개 관측"
                    (List.length sc_surfaces) (List.length used)
-               | Say.En -> Printf.sprintf "Skill Usage — %d of %d catalog Skills observed"
+               | Say.En -> Printf.sprintf "Skill Usage · %d of %d catalog Skills observed"
                    (List.length used) (List.length sc_surfaces))
            ; Theme.info (),
              Say.per_language (function
@@ -2604,8 +2604,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               [ card ~cols (rows
                 ((( Ansi.bold,
                     Say.per_language (function
-                      | Say.Ko -> Printf.sprintf "이 catalog 조회 밖의 사용 기록 — %d" (List.length outside)
-                      | Say.En -> Printf.sprintf "Usage rows outside this catalog reading — %d" (List.length outside)) )
+                      | Say.Ko -> Printf.sprintf "이 catalog 조회 밖의 사용 기록 · %d" (List.length outside)
+                      | Say.En -> Printf.sprintf "Usage rows outside this catalog reading · %d" (List.length outside)) )
                   :: List.concat_map
                        (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
                           [ ( Ansi.bold,
@@ -2632,8 +2632,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           | rejections ->
             ( Ansi.bold,
               Say.per_language (function
-                | Say.Ko -> Printf.sprintf " 거부된 Skill 출처 — %d" (List.length rejections)
-                | Say.En -> Printf.sprintf " Rejected Skill Sources — %d" (List.length rejections)) )
+                | Say.Ko -> Printf.sprintf " 거부된 Skill 출처 · %d" (List.length rejections)
+                | Say.En -> Printf.sprintf " Rejected Skill Sources · %d" (List.length rejections)) )
             :: List.concat_map
                  (fun (rejection : Masc.Tui_decode_tools.skill_catalog_rejection) ->
                     let source =
@@ -2688,8 +2688,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           | shadows ->
             ( Ansi.bold,
               Say.per_language (function
-                | Say.Ko -> Printf.sprintf " 가려진 Skill — %d" (List.length shadows)
-                | Say.En -> Printf.sprintf " Shadowed Skills — %d" (List.length shadows)) )
+                | Say.Ko -> Printf.sprintf " 가려진 Skill · %d" (List.length shadows)
+                | Say.En -> Printf.sprintf " Shadowed Skills · %d" (List.length shadows)) )
             :: List.concat_map
                  (fun (shadow : Masc.Tui_decode_tools.skill_catalog_shadow) ->
                     [ ( Theme.warn (),
@@ -2769,15 +2769,15 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with
     | true, _, Some _ ->
         [ Theme.warn (), Say.code " " ++ source
-                         ++ Say.both ~ko:" 다시 읽는 중 — 앞선 실패 유지" ~en:" — retrying, previous failure retained" ]
+                         ++ Say.both ~ko:" 다시 읽는 중 · 앞선 실패 유지" ~en:" · retrying, previous failure retained" ]
     | true, true, None ->
         [ Ansi.dim, Say.code " " ++ source
-                    ++ Say.both ~ko:" 새로 읽는 중 — 마지막 조회 유지" ~en:" — refreshing, last reading retained" ]
+                    ++ Say.both ~ko:" 새로 읽는 중 · 마지막 조회 유지" ~en:" · refreshing, last reading retained" ]
     | true, false, None ->
-        [ Ansi.dim, Say.code " " ++ source ++ Say.both ~ko:" 읽는 중…" ~en:" — reading…" ]
+        [ Ansi.dim, Say.code " " ++ source ++ Say.both ~ko:" 읽는 중" ~en:" · reading" ]
     | false, true, Some _ ->
         [ Theme.warn (), Say.code " " ++ source
-                         ++ Say.both ~ko:" 마지막 조회 유지 · r:새로 읽기" ~en:" — last reading retained · r:refresh" ]
+                         ++ Say.both ~ko:" 마지막 조회 유지 · r:새로 읽기" ~en:" · last reading retained · r:refresh" ]
     | false, false, None ->
         [ Ansi.dim, Say.code " " ++ source ++ Say.both ~ko:" 안 읽음 · r:새로 읽기" ~en:" not read · r:refresh" ]
     | false, true, None | false, false, Some _ -> []

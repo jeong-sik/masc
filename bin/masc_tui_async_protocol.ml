@@ -998,6 +998,12 @@ type 'a mailed = {
   message : 'a;
 }
 
+(* The loop may be asleep in its wait; the bell tells it to look
+   (RFC tui-idle-wait §2.1). *)
+let mail notifications message =
+  Eio.Stream.add notifications { ready_at_ns = Mtime_clock.elapsed_ns (); message };
+  Masc_tui_wake.(ring loop Mailbox)
+
 let capture_workspace_message state =
   let authority = state.workspace_authority in
   let reading = if server_authority_ready state then Some state.workspace_read_authority else None in

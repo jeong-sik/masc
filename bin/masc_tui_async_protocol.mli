@@ -991,6 +991,9 @@ type 'a mailed = {
   message : 'a;
 }
 
+val mail : 'a mailed Eio.Stream.t -> 'a -> unit
+(** Queue a message for the main loop, stamped now, and ring its bell. *)
+
 val capture_workspace_message : state -> (async_msg -> async_msg)
 (** Capture the original workspace authority/read epoch now; envelope formation
     later never borrows a successor workspace. Operation projection/admission

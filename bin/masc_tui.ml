@@ -1923,9 +1923,7 @@ type async_mailbox = {
   workspace_results : async_msg Masc_tui_workspace_result.t;
 }
 
-let enqueue_async mailbox msg =
-  Eio.Stream.add mailbox.notifications
-    { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
+let enqueue_async mailbox msg = Masc_tui_async_protocol.mail mailbox.notifications msg
 
 let same_server_workspace (expected : Tui_decode.server_identity)
     (actual : Tui_decode.server_identity) =
@@ -21655,7 +21653,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let progress_events = state.http_refresh_progress_events in
     let on_progress = Some (fun hp_event ->
       Masc_tui_types.publish_http_progress progress_events
-        { hp_ticket = refresh_ticket; hp_authority = (!requests).hrr_authority; hp_event }) in
+        { hp_ticket = refresh_ticket; hp_authority = (!requests).hrr_authority; hp_event };
+      Masc_tui_wake.(ring loop Refresh_progress)) in
     let on_dataset = if early_sources then
       Some (fun ed_identity ed_dataset ->
         enqueue_async mailbox (Http_msg (Http_dataset_loaded
@@ -24947,7 +24946,11 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
          && not !tui_credential_retry_pending ->
       (match Eio_context.get_switch_opt () with
        | Some sw ->
-           state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw state.preference_read)
+           (* The loop peeks this promise in its drain, so the bell says when
+              there is something to see. *)
+           state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw (fun () ->
+             Fun.protect ~finally:(fun () -> Masc_tui_wake.(ring loop Settings_reread))
+               state.preference_read))
        | None ->
            state.settings_reread <- Reread_settled;
            report_action state "error"
@@ -32531,7 +32534,8 @@ let main
 
   let request_full_repaint _ =
     ignore (Atomic.fetch_and_add resize_generation 1);
-    Atomic.set resize_requested true in
+    Atomic.set resize_requested true;
+    Masc_tui_wake.(ring loop Resize_signal) in
   (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
      second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
      terminal restore and nothing else: the switch release in
@@ -32545,7 +32549,8 @@ let main
   let exit_signals = Masc_tui_exit_signals.create () in
   let terminate signal =
     Masc_tui_exit_signals.request_terminate exit_signals
-      ~signal:(signal_name signal)
+      ~signal:(signal_name signal);
+    Masc_tui_wake.(ring loop Terminate_signal)
   in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
@@ -32557,7 +32562,8 @@ let main
      the signal stays a signal and the loop decides what it means — the first
      one says what a second one will do, and any other key withdraws it. *)
   let request_interrupt _ =
-    Masc_tui_exit_signals.request_interrupt exit_signals
+    Masc_tui_exit_signals.request_interrupt exit_signals;
+    Masc_tui_wake.(ring loop Interrupt_signal)
   in
   (* The terminal goes to another program for a while and comes back: the
      shell while Ctrl-Z has this process stopped, an [$EDITOR], a player. Every

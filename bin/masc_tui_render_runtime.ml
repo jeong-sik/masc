@@ -1184,7 +1184,8 @@ let render_tools (state : state) =
   done;
   if drawable > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
+      (Printf.sprintf (if state.ui_language = Lang_ko then "  [행 %s]" else "  [rows %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

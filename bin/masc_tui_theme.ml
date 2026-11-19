@@ -397,6 +397,11 @@ let lift_enabled = ref true
 let set_lift_enabled value = lift_enabled := value
 let lift_is_enabled () = !lift_enabled
 
+let direct_truecolor_enabled = ref false
+
+let set_direct_truecolor value = direct_truecolor_enabled := value
+let direct_truecolor_is_enabled () = !direct_truecolor_enabled
+
 type contrast_fallback = Keep_ansi | Default_foreground
 
 let ansi_readable_with_fallback ~fallback ~colors_enabled ~project ~surface
@@ -423,30 +428,65 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project ~surface
   in
   (* Off means the scheme's own colour goes out untouched -- what every other
      terminal UI does, and what a reader on a high-contrast scheme asked for
-     by picking one. *)
+     by picking one. When an explicit theme is active in direct Truecolor mode,
+     the scheme's 24-bit RGB goes out directly on Truecolor terminals instead
+     of relying on the terminal's 16-colour ANSI slot mapping. *)
   if not colors_enabled then ""
-  else if not !lift_enabled then code
   else
-    match palette with
-    | None -> fallback_code ()
-    | Some palette -> (
-      match Terminal_palette.ansi palette (ansi_color_index color) with
-      | None -> fallback_code ()
-      | Some entry ->
-        let background = surface_background surface palette in
-        let lifted =
-          Color.lift_for_contrast ~background ~floor:status_contrast_floor
-            entry
-        in
-        if lifted = entry then
-          if acceptable entry background then code else fallback_code ()
-        else
-          (match project lifted with
-           | None -> fallback_code ()
-           | Some projected ->
-             if acceptable_projection projected background
-             then projected_foreground ~colors_enabled (Some projected)
-             else fallback_code ()))
+    match !direct_truecolor_enabled, palette with
+    | true, Some pal ->
+      (match Terminal_palette.ansi pal (ansi_color_index color) with
+       | None -> if not !lift_enabled then code else fallback_code ()
+       | Some entry ->
+         let background = surface_background surface pal in
+         let target =
+           if !lift_enabled then
+             Color.lift_for_contrast ~background ~floor:status_contrast_floor
+               entry
+           else entry
+         in
+         (match project target with
+          | Some projected ->
+            (match Terminal_palette.direct_rgb projected with
+             | Some rgb ->
+               if not !lift_enabled || acceptable rgb background then
+                 projected_foreground ~colors_enabled (Some projected)
+               else fallback_code ()
+             | None ->
+               if not !lift_enabled then code
+               else if target = entry then
+                 if acceptable entry background then code else fallback_code ()
+               else if acceptable_projection projected background then
+                 projected_foreground ~colors_enabled (Some projected)
+               else fallback_code ())
+          | None ->
+            if not !lift_enabled then code
+            else if target = entry then
+              if acceptable entry background then code else fallback_code ()
+            else fallback_code ()))
+    | false, _ | true, None ->
+      if not !lift_enabled then code
+      else
+        match palette with
+        | None -> fallback_code ()
+        | Some palette -> (
+          match Terminal_palette.ansi palette (ansi_color_index color) with
+          | None -> fallback_code ()
+          | Some entry ->
+            let background = surface_background surface palette in
+            let lifted =
+              Color.lift_for_contrast ~background ~floor:status_contrast_floor
+                entry
+            in
+            if lifted = entry then
+              if acceptable entry background then code else fallback_code ()
+            else
+              (match project lifted with
+               | None -> fallback_code ()
+               | Some projected ->
+                 if acceptable_projection projected background
+                 then projected_foreground ~colors_enabled (Some projected)
+                 else fallback_code ()))
 ;;
 
 let ansi_readable_for ~colors_enabled ~project ~surface palette color =

@@ -1182,14 +1182,114 @@ let test_border_muted_fallbacks () =
        ~surface:Masc_tui_theme.Page (Some sample.palette))
 ;;
 
+let with_direct_truecolor enabled f =
+  let restore = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Masc_tui_theme.set_direct_truecolor enabled;
+  Fun.protect
+    ~finally:(fun () -> Masc_tui_theme.set_direct_truecolor restore)
+    f
+;;
+
+let test_direct_truecolor_emits_rgb_for_every_token_on_every_scheme () =
+  with_direct_truecolor true (fun () ->
+      with_lift true (fun () ->
+          List.iter
+            (fun scheme ->
+              let bg = background scheme in
+              List.iter
+                (fun (label, colour) ->
+                  let drawn = readable scheme colour in
+                  match truecolor_rgb ~prefix:truecolor_prefix drawn with
+                  | None ->
+                    Alcotest.failf
+                      "%s: %s expected direct Truecolor RGB, got %S"
+                      scheme.name label drawn
+                  | Some rgb ->
+                    let ratio = Color.contrast_ratio rgb bg in
+                    check bool
+                      (Printf.sprintf
+                         "%s: direct Truecolor %s reads at %.2f"
+                         scheme.name label ratio)
+                      true
+                      (ratio >= text_floor -. 0.01))
+                named_colours)
+            schemes);
+      (* Missing ANSI slot with lift_enabled = false still preserves the ANSI
+         code even under Default_foreground status text. *)
+      with_lift false (fun () ->
+          let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+          let empty_slots = Array.make Palette.ansi_slot_count None in
+          let palette =
+            Palette.of_responses ~foreground:(Some (rgb 240 240 240))
+              ~background:(Some (rgb 24 24 32)) ~ansi:empty_slots
+          in
+          check string "lift off with missing slot keeps ANSI code"
+            (Masc_tui_theme.For_testing.ansi_color_code Masc_tui_theme.Bright_cyan)
+            (Masc_tui_theme.For_testing.status_text_readable
+               ~colors_enabled:true ~project:truecolor
+               ~surface:Masc_tui_theme.Page palette Masc_tui_theme.Info)))
+;;
+
+let test_direct_truecolor_default_scheme_passes_natively () =
+  let name = Masc_tui_theme_choice.default_truecolor_theme in
+  match Catalog.find ~base_path:(themes_base_path ()) name with
+  | None -> Alcotest.fail (name ^ " is missing from config/themes")
+  | Some scheme ->
+    check bool (name ^ " is dark") false (Catalog.light scheme);
+    let entry =
+      List.find_opt
+        (fun (e : Masc_tui_theme_choice.entry) -> String.equal e.name name)
+        (Masc_tui_theme_choice.entries ())
+    in
+    (match entry with
+     | None -> Alcotest.fail (name ^ " is missing from picker entries")
+     | Some entry ->
+       check int (name ^ " clears all 7 measured slots natively") 0 entry.lifted)
+;;
+
+let test_terminal_probe_does_not_clobber_active_theme () =
+  let previous_palette = Palette.current () in
+  let previous_direct = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_tui_theme_choice.follow_terminal ();
+      Masc_tui_theme_choice.record_terminal_palette None;
+      Masc_tui_theme.set_direct_truecolor previous_direct;
+      Palette.set_current previous_palette)
+    (fun () ->
+      check bool "apply default truecolor theme" true
+        (Masc_tui_theme_choice.apply
+           Masc_tui_theme_choice.default_truecolor_theme);
+      check bool "apply enables direct truecolor" true
+        (Masc_tui_theme.direct_truecolor_is_enabled ());
+      let chosen_palette = Palette.current () in
+      let terminal_palette = (List.hd schemes).palette in
+      Masc_tui_theme_choice.record_terminal_palette (Some terminal_palette);
+      check bool "late OSC probe keeps active theme palette" true
+        (Palette.current () = chosen_palette);
+      Masc_tui_theme_choice.follow_terminal ();
+      check bool "follow_terminal disables direct truecolor" false
+        (Masc_tui_theme.direct_truecolor_is_enabled ());
+      check bool "follow_terminal restores observed terminal palette" true
+        (Palette.current () = Some terminal_palette))
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
 let test_theme_command_applies_a_retro_preset_by_name () =
-  check bool "apply accepts a bundled preset" true
-    (Masc_tui_theme_choice.apply "norton-commander");
-  check bool "apply rejects a name no scheme carries" false
-    (Masc_tui_theme_choice.apply "no-such-retro-preset")
+  let previous_palette = Palette.current () in
+  let previous_direct = Masc_tui_theme.direct_truecolor_is_enabled () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_tui_theme_choice.follow_terminal ();
+      Masc_tui_theme.set_direct_truecolor previous_direct;
+      Palette.set_current previous_palette)
+    (fun () ->
+      check bool "apply accepts a bundled preset" true
+        (Masc_tui_theme_choice.apply "norton-commander");
+      check bool "apply rejects a name no scheme carries" false
+        (Masc_tui_theme_choice.apply "no-such-retro-preset"))
 ;;
 
 let () =
@@ -1246,6 +1346,12 @@ let () =
             `Quick test_border_muted_is_softer_than_recede_on_every_scheme
         ; Alcotest.test_case "hairline border fallbacks follow capability"
             `Quick test_border_muted_fallbacks
+        ; Alcotest.test_case "direct truecolor emits RGB for every token on every scheme"
+            `Quick test_direct_truecolor_emits_rgb_for_every_token_on_every_scheme
+        ; Alcotest.test_case "default truecolor scheme passes all measured slots natively"
+            `Quick test_direct_truecolor_default_scheme_passes_natively
+        ; Alcotest.test_case "late terminal probe does not clobber active theme"
+            `Quick test_terminal_probe_does_not_clobber_active_theme
 
         ] )
     ; ( "toml theme loading"

@@ -601,6 +601,17 @@ val lift_is_enabled : unit -> bool
 (** What {!set_lift_enabled} was last given; used to invalidate cached
     colours when the setting changes. *)
 
+val set_direct_truecolor : bool -> unit
+(** When enabled on a Truecolor stdout with an active palette, semantic
+    colours emit their 24-bit RGB escape sequences ([38;2;r;g;b]) directly
+    instead of falling back to plain 16-colour ANSI SGR codes when an entry
+    clears the readability floor. Enabled when an explicit TUI theme is active
+    and disabled when following the terminal's own ANSI slots. *)
+
+val direct_truecolor_is_enabled : unit -> bool
+(** What {!set_direct_truecolor} was last given; used to invalidate cached
+    colours when switching between an explicit theme and terminal-follow mode. *)
+
 val strip_sgr_with_positions : string -> string * int array
 (** The same SGR stripping grammar as {!strip_sgr}, retaining each copied
     byte's original input offset for semantic source-map composition. *)

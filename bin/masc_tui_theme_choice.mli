@@ -35,8 +35,17 @@ val contrast_status : entry -> string
     measured scheme colour clears the floor; [3/7 low] means three start
     below it. Neither reports whether the terminal applied the scheme. *)
 
+val default_truecolor_theme : string
+(** Bundled Truecolor default scheme applied on Truecolor terminals when no
+    explicit theme preference (nor terminal-follow sentinel) is stored. *)
+
+val terminal_choice_name : string
+(** Sentinel stored in [runtime.toml] when the operator explicitly chooses to
+    follow the terminal's own colours instead of the Truecolor default. *)
+
 val apply : string -> bool
-(** Draw with this scheme's colours from now on. [false] for a name no
+(** Draw with this scheme's colours from now on, enabling direct 24-bit
+    Truecolor RGB output on Truecolor terminals. [false] for a name no
     bundled scheme answers to, so a stale choice in a config file cannot
     silently leave the reader on colours nobody picked.
 
@@ -44,7 +53,13 @@ val apply : string -> bool
     same way it does when the terminal reports a theme switch of its own. *)
 
 val follow_terminal : unit -> unit
-(** Go back to the terminal's own colours. *)
+(** Go back to the terminal's own colours (disabling direct Truecolor RGB
+    override and restoring the last observed terminal palette, if any). *)
+
+val record_terminal_palette : Masc_tui_terminal_palette.t option -> unit
+(** Remember the palette reported by the terminal's OSC probe. Updates the
+    active palette only when following the terminal so an active TUI theme is
+    not overwritten by a late OSC reply. *)
 
 val invalidate_cache : unit -> unit
 (** Invalidate cached entries so the next call to [entries] reloads from disk. *)

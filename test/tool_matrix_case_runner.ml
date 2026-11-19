@@ -6,7 +6,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 (* [masc_dashboard] registers the masc_dashboard tool handler in a module
    initializer ([Tool_misc.register_dashboard_handler]); the production server
    links it through masc.server. This runner is its own composition root, so
-   force the linkage the same way test_tool_misc_coverage does. *)
+   it forces the linkage itself. *)
 let () = ignore Dashboard.force_link
 
 let result_prefix = "__MCP_TOOL_MATRIX_RESULT__"

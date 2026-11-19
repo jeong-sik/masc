@@ -36,8 +36,7 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 # extension (lib/exec/parser/bash_subset.mly, config/tools/*.toml,
 # scripts/embed-setup.py, masc.opam.locked). A list of source extensions
 # missed those and skipped the check (#51595), so the list is of what is
-# known not to be read. test_pr_source_changes.py holds each entry to that
-# against the tracked dune files.
+# known not to be read.
 NOT_BUILD_INPUTS = ("changelog.d/", "dashboard/", "docs/")
 
 
@@ -71,8 +70,8 @@ def is_source(path: str) -> bool:
 
     The root `dune` file builds every tracked directory (#48323), so a path is
     a source unless it sits in a directory no build rule reads. The workflow,
-    this script, its tests and the reusable actions are sources by the same
-    rule, so a change to any of them starts the job that runs them.
+    this script and the reusable actions are sources by the same rule, so a
+    change to any of them starts the job that runs them.
     """
     return not path.startswith(NOT_BUILD_INPUTS)
 

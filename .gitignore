@@ -57,7 +57,6 @@ Thumbs.db
 # path the old line named is still covered.
 benchmarks/**/results/
 _coverage/
-.health/
 
 
 # Downloaded release binary

@@ -13,7 +13,7 @@
 ;   Masc_domain            -> masc_types  (wrapped false; iso8601/now helpers)
 ;   Yojson, Unix           -> external
 ; No flat-ns masc module appears below, so a future re-coupling becomes a dune
-; cycle that audit-sublib-cycle.py / dune build rejects (RFC-0056 G1).
+; cycle that dune build rejects (RFC-0056 G1).
 
 (include_subdirs no)
 

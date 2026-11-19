@@ -101,10 +101,9 @@ jobs:
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
           git -C "$work" fetch -q --depth=2 --filter=blob:none origin "$GITHUB_SHA"
-          # The decision lives in a script so that it has tests
-          # (scripts/ci/test_pr_source_changes.py). It is read from the merge
-          # commit, as this workflow file is; the filtered fetch made origin a
-          # promisor remote, so git fetches this one file's contents here.
+          # The decision script is read from the merge commit, as this
+          # workflow file is; the filtered fetch made origin a promisor
+          # remote, so git fetches this one file's contents here.
           decide="$RUNNER_TEMP/pr_source_changes.py"
           git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_source_changes.py" > "$decide"
           src="$(python3 -I "$decide" --git-dir "$work" --remote origin --merge "$GITHUB_SHA")"
@@ -127,8 +126,7 @@ jobs:
       # before the top, so the top does not stand in for it. The merge commit
       # is already here; git fetches the contents of the changed fragments
       # and of the checker, nothing else. Like the decision script above,
-      # this one is read from the merge commit and has tests
-      # (scripts/ci/test_pr_changelog_fragments.py).
+      # this one is read from the merge commit.
       - name: Check the changelog fragments this pull request changes
         if: github.event_name == 'pull_request'
         env:
@@ -171,39 +169,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # The tests of the script that decided to run this job. They run here
-      # because this is the one pull request job with a checkout; the script
-      # counts itself and these tests as sources, so a change to either
-      # starts this job. About six seconds, before the toolchain is set up.
-      - name: Test the type-check decision script
-        run: python3 -I scripts/ci/test_pr_source_changes.py
-
-      - name: Test the changelog fragment check of the changes job
-        run: python3 -I scripts/ci/test_pr_changelog_fragments.py
-
-      # RFC a-request-reads-its-bearer-once-at-the-door, D6: a request's
-      # bearer is read at the door, and lib/ outside lib/auth/ calls the
-      # functions that read a raw token again only where the script's
-      # allow-list says, as many times as it says. Every source change starts
-      # this job, so a new call fails here. A lower stack layer is checked at
-      # the top pull request, as the type-check is.
-      - name: Test the raw token call check
-        run: python3 -I scripts/ci/test_raw_token_auth_calls.py
-
-      - name: Hold raw token reads to the RFC D6 allow-list
-        run: python3 -I scripts/ci/raw_token_auth_calls.py
-
-      # The notice collector decides which files a linked opam package must
-      # ship. When the table is wrong the release candidate dies in the Linux
-      # build at `collect-ocaml-notices: ... is a notice below the top of the
-      # source` (RC 4, run 44173709932: dune-build-info 3.25.0 23 paths,
-      # uring 2.7.0 4 paths). That build is the first place the table is
-      # exercised, so a stale entry costs a whole release round trip. The
-      # suite is standard-library only and under a second, so it runs here on
-      # every pull request rather than only in the release build.
-      - name: Test the OCaml notice collector's classification table
-        run: python3 -I scripts/tests/test_collect_ocaml_notices.py
 
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.

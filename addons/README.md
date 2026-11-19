@@ -68,9 +68,8 @@ a known port with no matching rows is an empty supplied output. Original row
 identities and whole-producer coverage remain attached to the selected evidence.
 
 The [package image workflow](../.github/workflows/lane-addon-images.yml) discovers
-package Dockerfiles. The [DOS workflow](../.github/workflows/lane-dos-package.yml)
-also exercises the guest and retains its measured artifacts. These are example
-image build commands for CI, using the repository root and `addons` build context:
+package Dockerfiles. These are example image build commands for CI, using the
+repository root and `addons` build context:
 
 ```sh
 docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 addons

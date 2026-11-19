@@ -8,9 +8,7 @@
     The operation vocabulary stays in OCaml: [Local_runtime_tool_policy] maps
     each operation to an execution policy and a model-exposure decision, and
     those are code rather than declarations. Only the name, description and
-    parameters moved. [test_local_runtime_tool_toml_parity] keeps the
-    publication order and the clamped bounds; the descriptions and schemas it
-    also pinned were copies of these values. *)
+    parameters moved. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

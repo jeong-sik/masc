@@ -5,8 +5,7 @@
     keeper-coupled tail: [emit_transition] (telemetry / audit / metrics).
     Dependency direction is Keeper -> Turn.
 
-    Formal contract for the pure core: [specs/keeper-turn-fsm/KeeperTurnFSM.tla]
-    (verified by [test_keeper_turn_fsm_tla_parity]). *)
+    Formal contract for the pure core: [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
 
 include module type of Turn_fsm
 

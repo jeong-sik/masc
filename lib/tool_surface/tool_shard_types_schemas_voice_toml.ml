@@ -6,9 +6,7 @@
     partial voice surface, so a reader of these values never has to ask whether
     a schema loaded.
 
-    Nothing here derives a value from an owner module, so the whole list moved.
-    [test_voice_tool_toml_parity] keeps the publication order; the
-    descriptions and schemas it also pinned were copies of these values. *)
+    Nothing here derives a value from an owner module, so the whole list moved. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

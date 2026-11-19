@@ -9,8 +9,7 @@
 
     [masc_add_task], [masc_batch_add_tasks] and [masc_transition] carry nested
     shapes: an object parameter with its own params, and an array whose object
-    items declare required children. [test_task_tool_toml_parity] pins all
-    seven against the literals this module replaced. *)
+    items declare required children. *)
 
 val task_history : Masc_domain.tool_schema
 val tasks : Masc_domain.tool_schema

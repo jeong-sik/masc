@@ -132,7 +132,7 @@ vars ==
 \* TurnPhaseSet: phase membership type.
 \*
 \* R-B-1.a (iter 28, 2026-05-12): `routing` and `exhausted` added to close
-\* the spec drift identified by `audit-tla-annotation-drift.sh`.  OCaml has
+\* the drift between this spec and the OCaml phase annotations.  OCaml has
 \* carried these since PR #14395 (Turn_routing active + Turn_exhausted
 \* terminal).  This commit extends the type widening only; per-action
 \* transition modeling (e.g. RoutingStart, RoutingExhausted, retry pumps

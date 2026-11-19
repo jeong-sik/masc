@@ -94,9 +94,16 @@ interface AreaProps {
 }
 
 /** The form stays the same form while a key is on its way, so what the
-    person typed and the button they pressed stay where they are. */
+    person typed and the button they pressed stay where they are. The field
+    of the key has no name, and the form posts: a submission the page does
+    not handle carries no key, and nothing of it is in an address. */
 function Form({ model, integrations, view }: AreaProps & { readonly view: Extract<AddView, { kind: 'open' | 'sending' }> }): VNode {
   const field = useRef<HTMLInputElement>(null)
+  // The one subscription there is when the form opens is picked for the
+  // person. A list that changes under the open form picks nothing: the
+  // person chose among what they saw, and a subscription they did not choose
+  // gets no key.
+  const only = useRef(integrations.length === 1 ? integrations[0]?.id ?? null : null).current
   const sending = view.kind === 'sending'
   const onSubmit = (event: Event): void => {
     event.preventDefault()
@@ -107,15 +114,25 @@ function Form({ model, integrations, view }: AreaProps & { readonly view: Extrac
     // The key stays in the field until the server took it or may have.
     void model.add(picked, key).then((kept) => { if (kept === 'dropped' && input.value === key) input.value = '' })
   }
+  const failure = view.failure === null ? null : html`<${FailureNote} key=${view.failure.attempts} failure=${view.failure} />`
+  // No subscription takes a key any more: there is nothing to give one to,
+  // and no field to hold one. What came of the key given before stays.
+  if (integrations.length === 0) {
+    return html`
+      <p class="hint">지금 이 서버에는 API key 를 받는 구독이 없어요.</p>
+      <p class="actions"><button type="button" aria-disabled=${sending} onClick=${model.close}>닫기</button></p>
+      ${failure}
+    `
+  }
   return html`
-    <form class="connect-form" onSubmit=${onSubmit}>
+    <form class="connect-form" method="post" onSubmit=${onSubmit}>
       <fieldset>
         <legend>key 를 넣을 구독</legend>
         <ul class="choices">
           ${integrations.map((integration) => html`
             <li key=${integration.id}>
               <label class="choice">
-                <input type="radio" name="integration" value=${integration.id} required defaultChecked=${integrations.length === 1} />
+                <input type="radio" name="integration" value=${integration.id} required defaultChecked=${integration.id === only} />
                 <span class="choice-title">${integrationName(integration)}</span>
               </label>
             </li>
@@ -124,7 +141,7 @@ function Form({ model, integrations, view }: AreaProps & { readonly view: Extrac
       </fieldset>
       <div class="field">
         <label for="key-value">API key</label>
-        <input ref=${field} id="key-value" name="key" type="password" required autocomplete="off" spellcheck=${false}
+        <input ref=${field} id="key-value" type="password" required autocomplete="off" spellcheck=${false}
           readonly=${sending} aria-describedby="key-notes" />
         <ul id="key-notes" class="hint">
           ${notes.map((note) => html`<li key=${note}>${note}</li>`)}
@@ -135,7 +152,7 @@ function Form({ model, integrations, view }: AreaProps & { readonly view: Extrac
         <button type="button" aria-disabled=${sending} onClick=${model.close}>닫기</button>
       </p>
     </form>
-    ${view.failure === null ? null : html`<${FailureNote} key=${view.failure.attempts} failure=${view.failure} />`}
+    ${failure}
   `
 }
 
@@ -143,18 +160,20 @@ export function KeyArea(props: AreaProps): VNode {
   const view = props.model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
   const toggle = useRef<HTMLButtonElement>(null)
-  const before = useRef(view.kind)
+  const none = props.integrations.length === 0
+  const before = useRef({ kind: view.kind, none })
   // A step that takes the pressed control away moves the focus to the
   // heading of the form, or to the button that opens it once it closed,
-  // never to the body of the page. A focus the person moved elsewhere
-  // meanwhile stays.
+  // never to the body of the page. So does the last subscription that took
+  // a key leaving the list, which takes the field and its button away. A
+  // focus the person moved elsewhere meanwhile stays.
   useEffect(() => {
     const from = before.current
-    before.current = view.kind
-    if (from === view.kind || !fell()) return
+    before.current = { kind: view.kind, none }
+    if ((from.kind === view.kind && from.none === none) || !fell()) return
     if (view.kind === 'closed') toggle.current?.focus()
     else heading.current?.focus()
-  }, [view.kind])
+  }, [view.kind, none])
   const open = view.kind !== 'closed'
   const closable = view.kind === 'open'
   return html`

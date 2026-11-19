@@ -179,17 +179,30 @@ describe('the giving of a key', () => {
       .toEqual(['dropped', { kind: 'open', failure: { kind: 'unknown', answer: read, attempts: 1 } }, 1])
   })
 
-  it('sends one request while a key is on its way, and does not close meanwhile', async () => {
+  it.each([
+    ['no answer', 'no answer' as const],
+    ['an answer it cannot read', json(200, { provider_accounts: [] })],
+    ['a failure with no code of the route', new Response('Bad Gateway', { status: 502 })],
+  ])('drops the key after %s without waiting for the subscriptions to be read again', async (_name, answer) => {
+    const reading = later<void>()
+    const refresh = vi.fn(() => reading.promise)
+    const model = createKeyAdds({ send: answering([answer]).send, leave: vi.fn(), token: () => 'token-1', refresh })
+    model.open()
+    expect([await model.add('claude_code', key), refresh.mock.calls.length]).toEqual(['dropped', 1])
+  })
+
+  it('sends one request while a key is on its way, holds nothing of the key, and does not close meanwhile', async () => {
     const answer = later<Response>()
     const { model, sent } = adding([answer.promise])
     model.open()
     const first = model.add('claude_code', key)
     const second = await model.add('claude_code', key)
     model.close()
-    const during = model.view.value.kind
+    const during = model.view.value
     answer.give(notAKey())
     await first
-    expect([sent.length, second, during]).toEqual([1, 'kept', 'sending'])
+    expect([sent.length, second, during]).toEqual([1, 'kept', { kind: 'sending', failure: null }])
+    expect(Object.keys(during)).toEqual(['kind', 'failure'])
   })
 
   it('sends nothing from a form that is not open, or before a session', async () => {
@@ -286,6 +299,12 @@ describe('the area where a key is given', () => {
     expect(await axe(area(showing({ kind: 'open', failure: null }), [claude, second]))).toHaveNoViolations()
   })
 
+  it('has no field and no form once no subscription takes a key, and still says what came of the key given before', async () => {
+    const container = area(showing({ kind: 'open', failure: refused }), [])
+    expect([container.querySelector('#key-value'), container.querySelector('form'), container.querySelectorAll('[role=alert]').length]).toEqual([null, null, 1])
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it('has one line a screen reader reads out in every step, and the field only while the form is open', () => {
     expect(count('[role=status]')).toEqual(named(...steps.map(([name]) => name)))
     expect(count('#key-value')).toEqual(named(...withForm))
@@ -303,6 +322,36 @@ describe('the area where a key is given', () => {
     const field = fieldOf(container)
     const described = field.getAttribute('aria-describedby') ?? ''
     expect([field.type, field.autocomplete, field.required, container.querySelectorAll(`#${described} li`).length]).toEqual(['password', 'off', true, 4])
+  })
+
+  it('carries no key in a submission the page does not handle: the field has no name, and the form posts', () => {
+    const container = area(showing({ kind: 'open', failure: null }))
+    fieldOf(container).value = key
+    const form = formOf(container)
+    expect([fieldOf(container).name, form.method, [...new FormData(form).keys()]]).toEqual(['', 'post', ['integration']])
+  })
+
+  it('handles the submission itself', async () => {
+    const container = area(showing({ kind: 'open', failure: null }))
+    fieldOf(container).value = key
+    let unhandled = true
+    await act(() => { unhandled = fireEvent.submit(formOf(container)) })
+    expect(unhandled).toBe(false)
+  })
+
+  it('picks nothing for the person once the subscriptions change under the open form', () => {
+    const model = showing({ kind: 'open', failure: null })
+    const drawn = (integrations: readonly Integration[]) =>
+      html`<section aria-labelledby="h"><h2 id="h">구독</h2><${KeyArea} model=${model} integrations=${integrations} /></section>`
+    const picked = (container: Element): (readonly [string, boolean])[] =>
+      [...container.querySelectorAll<HTMLInputElement>('input[type=radio]')].map((radio) => [radio.value, radio.defaultChecked] as const)
+    const shrunk = render(drawn([claude, second]))
+    shrunk.rerender(drawn([claude]))
+    const afterTwo = picked(shrunk.container)
+    cleanup()
+    const grown = render(drawn([claude]))
+    grown.rerender(drawn([claude, second]))
+    expect([afterTwo, picked(grown.container)]).toEqual([[['claude_code', false]], [['claude_code', true], ['claude_team', false]]])
   })
 
   it('picks the one subscription there is, and none of two', () => {
@@ -355,6 +404,22 @@ describe('the area where a key is given', () => {
     await act(() => { fireEvent.submit(formOf(container)) })
     const disabled = [...container.querySelectorAll('button')].map((button) => button.getAttribute('aria-disabled'))
     expect([model.add.mock.calls.length, fieldOf(container).readOnly, disabled]).toEqual([0, true, ['true', 'true', 'true']])
+  })
+
+  it('empties the field once no answer came, while the subscriptions are still being read again, and sends nothing on a second press', async () => {
+    const reading = later<void>()
+    const { send, sent } = answering(['no answer'])
+    const model = createKeyAdds({ send, leave: vi.fn(), token: () => 'token-1', refresh: () => reading.promise })
+    const container = area(model)
+    await act(() => { model.open() })
+    fieldOf(container).value = key
+    await act(async () => {
+      fireEvent.submit(formOf(container))
+      await vi.waitFor(() => { expect(model.view.value).toMatchObject({ kind: 'open', failure: { kind: 'unknown' } }) })
+    })
+    const left = fieldOf(container).value
+    await act(() => { fireEvent.submit(formOf(container)) })
+    expect([left, sent.length]).toEqual(['', 1])
   })
 
   it('draws the key nowhere but in its field', async () => {

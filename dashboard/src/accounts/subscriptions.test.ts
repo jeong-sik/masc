@@ -818,6 +818,35 @@ describe('the panel', () => {
     ]).toEqual([1, null, false, true])
   })
 
+  it('keeps what the form of a key says once no subscription takes a key any more, and moves the focus to the heading when the area leaves', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offeredWithKey(), offered()],
+      [paths.owned]: [ownedNothing(), ownedNothing()],
+      [addPath]: [json(400, { error: 'The subscription takes no key.', code: 'integration_takes_no_key' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await act(() => { panel.adding.open() })
+    const field = container.querySelector<HTMLInputElement>('#key-value')
+    const form = container.querySelector('#key-steps form')
+    const submit = container.querySelector<HTMLButtonElement>('#key-steps button[type=submit]')
+    if (field === null || form === null || submit === null) throw new Error('no form of a key')
+    field.value = 'made-up-key'
+    submit.focus()
+    await act(async () => {
+      fireEvent.submit(form)
+      await vi.waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', integrations: [{ takesKey: false }, { takesKey: false }] }) })
+    })
+    const said = [
+      container.querySelectorAll('#key-steps [role=alert]').length, container.querySelector('#key-value'),
+      document.activeElement === container.querySelector('#key-steps h3'),
+    ]
+    const close = container.querySelector<HTMLButtonElement>('#key-steps button')
+    if (close === null) throw new Error('no button that closes the form')
+    close.focus()
+    await act(() => { close.click() })
+    expect([said, container.querySelector('#key-steps'), document.activeElement === container.querySelector('h2')]).toEqual([[1, null, true], null, true])
+  })
+
   /** What the line of the panel says of the accounts that left its list. */
   const lineOf = (container: Element): string => [...container.querySelectorAll('section > [role=status]')].map((one) => one.textContent ?? '').join('')
 
@@ -860,11 +889,7 @@ describe('the panel', () => {
     // A key whose answer did not come asks for a reading too, which replaces
     // the one the removal asked for.
     panel.adding.open()
-    let added: Promise<unknown> = Promise.resolve()
-    await act(async () => {
-      added = panel.adding.add('claude_code', 'made-up-key')
-      await vi.waitFor(() => { expect(panel.adding.view.value).toMatchObject({ kind: 'open', failure: { kind: 'unknown' } }) })
-    })
+    await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
     await act(async () => {
       asked.give(ownedNothing())
       await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
@@ -872,7 +897,7 @@ describe('the panel', () => {
     const replaced = [container.querySelectorAll('li.row').length, lineOf(container)]
     await act(async () => {
       newer.give(ownedNothing())
-      await added
+      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
     })
     expect([replaced, container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
       .toEqual([[1, ''], 0, false, true])
@@ -896,15 +921,23 @@ describe('the panel', () => {
   })
 
   it('moves a focus that was in the card of an account another page removed to the heading', async () => {
+    // The reading a key with no answer asks for is the one that finds the
+    // account gone. Its answer comes after the step of the key was drawn, as
+    // an answer of a server does.
+    const reading = later()
     const { panel, container } = live({
       [paths.integrations]: [offered(), offered()],
-      [paths.owned]: [ownedKey(), ownedNothing()],
+      [paths.owned]: [ownedKey(), reading.answer],
       [addPath]: ['no answer'],
     })
     await act(() => panel.load(sessionOf(person)))
     container.querySelector<HTMLButtonElement>('#remove-acct_key')?.focus()
     panel.adding.open()
     await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
+    await act(async () => {
+      reading.give(ownedNothing())
+      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
+    })
     expect([container.querySelectorAll('li.row').length, lineOf(container), document.activeElement === container.querySelector('h2')]).toEqual([0, '', true])
   })
 

@@ -125,10 +125,14 @@ export interface KeyAddModel {
   readonly close: () => void
   /** Sends `key` for a new account of `integrationId`, once: an add that
       runs, or any add once the session ended, sends nothing and keeps the
-      key. */
+      key. It ends when the page knows what the form does with the key, and
+      does not wait for the subscriptions it has read again after an answer
+      it has no word of the server on: until then the key would stay in a
+      field with a button that sends it. */
   readonly add: (integrationId: string, key: string) => Promise<Kept>
-  /** Leaves whatever runs behind, for another person is shown now. An
-      answer that comes later changes nothing. */
+  /** Leaves whatever runs behind and closes the form, for another person is
+      shown now or the page goes away. An answer that comes later changes
+      nothing. */
   readonly reset: () => void
 }
 
@@ -193,7 +197,7 @@ export function createKeyAdds({ send, leave, token, refresh }: KeyAddDeps): KeyA
       case 'unreadable':
       case 'server_failed':
         view.value = { kind: 'open', failure: { kind: 'unknown', answer: sent.kind === 'unreachable' ? 'none' : sent.kind, attempts } }
-        await refresh()
+        void refresh()
         return 'dropped'
       case 'refused':
         view.value = { kind: 'open', failure: { kind: 'refused', status: sent.status, code: sent.code, reason: sent.reason, accountId: sent.accountId, attempts } }

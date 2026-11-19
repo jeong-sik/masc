@@ -1,7 +1,9 @@
 // The Keepers panel: a card for each Keeper of the person, with the model it
 // works with, the field that gives it another and its conversation
 // (talk-area.ts), and the form of a new Keeper. The models offered are the ones a Keeper can run on here: a model
-// checked on an account whose subscription the server lets a Keeper run on.
+// checked on an account whose subscription the server lets a Keeper run on,
+// that holds what it runs on (a login, or a key the server read), and that
+// no removal was left on (account-rows.ts, `keeperOn`).
 // A Keeper that cannot work says so on its card before anything is pressed.
 
 import { html } from 'htm/preact'

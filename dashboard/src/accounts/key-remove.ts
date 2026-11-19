@@ -21,7 +21,7 @@ export const removePath = (accountId: string): string => `/api/v1/setup/accounts
 /** The codes of a removal the server did not do or did not finish
     (lib/server/server_key_account.ml, `removal_error`). */
 const refusalCodes = [
-  'unknown_account', 'not_a_key_account', 'account_call_running', 'removal_refused',
+  'unknown_account', 'not_a_key_account', 'account_call_running', 'removal_refused', 'internal_error',
   'removal_not_recorded', 'key_not_removed', 'home_not_removed',
 ] as const
 
@@ -132,6 +132,7 @@ function changedTheAccount(code: RemovalStopped): boolean {
     case 'not_a_key_account':
     case 'account_call_running':
     case 'removal_refused':
+    case 'internal_error':
     case 'unrecognised':
       return false
   }

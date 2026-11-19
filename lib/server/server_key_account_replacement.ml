@@ -151,56 +151,80 @@ let logged_at_start id what detail =
     detail
 ;;
 
+(* What a look at one account says of the accounts after it. *)
+type rest =
+  | Looked_at_next
+  | Left_alone of Authz_zone.uncertain
+
 (* An exception of one account would end the switch of the server, and at
    each start again. It goes to the log, and the accounts after it are
    looked at. *)
 let guarded id f =
   match f () with
-  | () -> ()
+  | rest -> rest
   | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
-  | exception exn -> logged_at_start id "it was not looked at" (Printexc.to_string exn)
+  | exception exn ->
+    logged_at_start id "it was not looked at" (Printexc.to_string exn);
+    Looked_at_next
+;;
+
+let remove_left_keys_of_and_say ~zone ~base_path id =
+  match remove_left_keys_of ~zone ~base_path id with
+  | Ok { Files.gone; stayed } ->
+    (* A file that held a key went with no request of its owner, so the log
+       of the server says it. *)
+    if gone > 0
+    then
+      Log.Server.info
+        "The start of the server removed %d of the files of the folder of the keys of account %s: \
+         none of them is the key its records say"
+        gone
+        (Provider_account_id.to_string id);
+    Option.iter (fun detail -> logged_at_start id "a file of it stays" detail) stayed;
+    Looked_at_next
+  | Error Call_running ->
+    (* The call can be a replacement, which removes them itself, and whether
+       a file was left is not known: it is no warning. It is said where a
+       log of the default level shows it, since a key the owner replaced can
+       stay on disk until the next start. *)
+    Log.Server.info
+      "The start of the server did not look at the folder of the keys of account %s: a call of \
+       the account runs. The next start looks again, and so do a replacement of its key and its \
+       removal."
+      (Provider_account_id.to_string id);
+    Looked_at_next
+  | Error (Zone_not_trusted uncertain) -> Left_alone uncertain
+  | Error Owner_without_membership ->
+    Log.Server.warn
+      "The start of the server did not look at the folder of the keys of account %s: its owner \
+       has no membership, so nothing names the folder of their files"
+      (Provider_account_id.to_string id);
+    Looked_at_next
+  | Error (Folder_not_read detail) ->
+    logged_at_start id "it was not looked at" detail;
+    Looked_at_next
 ;;
 
 let remove_left_keys ~zone ~base_path =
   (* The list names the accounts to ask about and decides nothing: each is
-     read again, where the zone can be trusted, inside its call. *)
-  List.iter
-    (fun id ->
-      guarded id
-      @@ fun () ->
-      match remove_left_keys_of ~zone ~base_path id with
-      | Ok { Files.gone; stayed } ->
-        (* A file that held a key went with no request of its owner, so the
-           log of the server says it. *)
-        if gone > 0
-        then
-          Log.Server.info
-            "The start of the server removed %d of the files of the folder of the keys of account \
-             %s: none of them is the key its records say"
-            gone
-            (Provider_account_id.to_string id);
-        Option.iter (fun detail -> logged_at_start id "a file of it stays" detail) stayed
-      | Error Call_running ->
-        (* The call can be a replacement, which removes them itself, and
-           whether a file was left is not known: it is no warning. It is
-           said where a log of the default level shows it, since a key the
-           owner replaced can stay on disk until the next start. *)
-        Log.Server.info
-          "The start of the server did not look at the folder of the keys of account %s: a call \
-           of the account runs. The next start looks again, and so do a replacement of its key \
-           and its removal."
-          (Provider_account_id.to_string id)
-      | Error (Zone_not_trusted uncertain) ->
-        logged_at_start
-          id
-          "it was not looked at, the authorization zone cannot be trusted now"
-          (Authz_zone.uncertain_detail uncertain)
-      | Error Owner_without_membership ->
-        Log.Server.warn
-          "The start of the server did not look at the folder of the keys of account %s: its \
-           owner has no membership, so nothing names the folder of their files"
-          (Provider_account_id.to_string id)
-      | Error (Folder_not_read detail) -> logged_at_start id "it was not looked at" detail)
-    (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
+     read again, where the zone can be trusted, inside its call.
+
+     A zone that cannot be trusted stays so until a restart reads its files
+     again ([Authz_zone.uncertain]). The first account that finds it so is
+     the last one asked about, and the one cause is said once. *)
+  let rec from = function
+    | [] -> ()
+    | id :: after ->
+      (match guarded id (fun () -> remove_left_keys_of_and_say ~zone ~base_path id) with
+       | Looked_at_next -> from after
+       | Left_alone uncertain ->
+         Log.Server.warn
+           "The start of the server looked at no folder of keys from account %s on, %d of the \
+            accounts: the authorization zone cannot be trusted now: %s"
+           (Provider_account_id.to_string id)
+           (List.length after + 1)
+           (Authz_zone.uncertain_detail uncertain))
+  in
+  from (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
 ;;

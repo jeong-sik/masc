@@ -67,7 +67,9 @@ val replace
 
     The records are read where the zone can be trusted ({!Authz_zone.read}),
     and a zone that cannot be is not acted on: records that went back name
-    a generation before the one on disk, whose file is the key in use.
+    a generation before the one on disk, whose file is the key in use. Such
+    a zone stays so until a restart, so the first account that finds it so
+    is the last one asked about, and the log says it once.
 
     The accounts are those the records hold when it starts: one registered
     after that has no file a stopped server left, and its replacements

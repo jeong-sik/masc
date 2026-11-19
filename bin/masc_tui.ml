@@ -40749,7 +40749,8 @@ Use relative paths for resources already held in the package. -->
               | "G" | "end" -> state.memory_changes_cursor <- maximum
               | _ ->
                   let page = max 1 (Masc_tui_render_keeper_memory.changes_page_size state
-                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget state
+                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget
+                      ~frame:Masc_tui_render_prim.Chrome_screen state
                       ~terminal_rows:(fst (get_terminal_size ()))) ~keeper_name) in
                   let delta = match key with
                     | "k" | "up" | "wheel-up" | "[" -> -1
@@ -41534,7 +41535,8 @@ Use relative paths for resources already held in the package. -->
                 let terminal_rows, _ = get_terminal_size () in
                 let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
                     ~scroll:state.home_decision_scroll
-                    ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                    ~budget:(Masc_tui_render_prim.surface_chrome_budget
+                      ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
                 if not (List.exists (fun (current,_) -> equal_home_action action current) body.hb_rows) then
                   report_action state "info" "Selected action is not visible; enlarge the window"
                 else if authority <> state.workspace_authority || not (server_authority_ready state) then original ()
@@ -42639,7 +42641,8 @@ Use relative paths for resources already held in the package. -->
                let terminal_rows, _ = get_terminal_size () in
                let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
                    ~scroll:state.home_decision_scroll
-                   ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                   ~budget:(Masc_tui_render_prim.surface_chrome_budget
+                     ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
                Masc_tui_scroll.page_step ~height:(List.length body.hb_rows)
              else if state.view = Repositories then
                let _, cols = get_terminal_size () in
@@ -45568,7 +45571,8 @@ Use relative paths for resources already held in the package. -->
                         state.home_selected <- selected;
                       let body = Masc_tui_home.home_body prepared
                           ~scroll:state.home_decision_scroll
-                          ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                          ~budget:(Masc_tui_render_prim.surface_chrome_budget
+                            ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
                       state.home_decision_scroll <- body.hb_first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()

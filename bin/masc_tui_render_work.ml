@@ -224,7 +224,7 @@ let work_tasks_projection (state : state) ~cols ~budget =
   context, geometry, window
 
 let work_tasks_page_rows state ~terminal_rows ~cols =
-  let budget = surface_chrome_budget state ~terminal_rows in
+  let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
   let _, _, window = work_tasks_projection state ~cols ~budget in
   max 1 window.capacity
 

@@ -299,17 +299,27 @@ type chrome_body = {
           body is handed its window by the contract. *)
 }
 
-val surface_chrome_rows : int
-(** The rows {!surface_chrome} draws around its body: the top border, the
-    title and its rule, the bottom border and the footer. A key handler that
-    bounds a body's scroll subtracts this, the same number the frame does. *)
-
-val surface_chrome_budget : Masc_tui_types.state -> terminal_rows:int -> int
-(** Available body rows for the shared surface chrome. *)
-
 type chrome_frame = Chrome_screen | Chrome_overlay
 (** [Chrome_screen] draws rules without a box, for a surface that is the whole
     screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
+
+val surface_chrome_rows : int
+(** The rows a boxed {!Chrome_overlay} draws around its body: the top border,
+    the title and its rule, the bottom border and the footer. *)
+
+val chrome_rows_for : frame:chrome_frame -> has_recovery:bool -> int
+(** Exact chrome rows drawn by {!surface_chrome}. [Chrome_overlay] keeps all
+    {!surface_chrome_rows} (5). [Chrome_screen] omits the blank top spacer and
+    collapses the empty Zone 4 notice row when [has_recovery] is [false],
+    reclaiming up to 2 body rows (RFC tui-one-screen-grammar §2). *)
+
+val surface_chrome_budget :
+  ?frame:chrome_frame ->
+  ?has_recovery:bool ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  int
+(** Available body rows for the shared surface chrome. *)
 
 (** What a body does with rows past its budget. Required, so every surface
     says it at the call: a body that fits, one the keypress windows and one
@@ -333,7 +343,12 @@ type overflow =
           the body has drawn, the only moment it can say what it clamped to. *)
 
 val surface_window_height :
-  Masc_tui_types.state -> terminal_rows:int -> count:int -> int
+  ?frame:chrome_frame ->
+  ?has_recovery:bool ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  count:int ->
+  int
 (** The window a {!Scrolled} body gets out of [count] rows: the whole
     budget, since the position is on the title row. A key handler that
     bounds the scroll asks this, the number the frame draws with. *)

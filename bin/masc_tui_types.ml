@@ -26376,7 +26376,9 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
               | Utilization_fraction value -> Float.compare value 1.0 >= 0
               | Utilization_percent value -> value >= 100
               | Utilization_usd { used; limit = Some limit } -> used >= limit
-              | Utilization_usd { limit = None; _ } -> false) (first :: rest))
+              | Utilization_usd { limit = None; _ } -> false
+              | Utilization_credit_balance { remaining; _ } -> remaining <= 0.0
+              | Utilization_credit_unlimited | Utilization_credit_retracted -> false) (first :: rest))
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   Option.is_some option.Tui_decode.ro_quota_rest || option.Tui_decode.ro_rate_limited

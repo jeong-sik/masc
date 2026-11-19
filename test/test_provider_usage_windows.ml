@@ -564,6 +564,12 @@ let kimi_coding_usages_response =
   {|{"usage":{"limit":"100","used":"15","remaining":"85","resetTime":"2026-09-30T10:10:16.485718Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20","remaining":"80","resetTime":"2026-09-24T15:10:16.485718Z"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-09-24T15:10:15Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-09-30T10:10:15Z"}},"booster_wallet":{"balance":"0"}}|}
 ;;
 
+(* Live shape recorded in MoonshotAI/kimi-code#3836. The fixed-point balance
+   values are 10^-6 cents; monthlyUsed names the wallet's currency. *)
+let kimi_coding_booster_response =
+  {|{"limits":[],"booster_wallet":{"balance":{"type":"BOOSTER","amount":"17500000000","amountLeft":"10336703900","unit":"UNIT_CURRENCY"},"status":"STATUS_ACTIVE","monthlyUsed":{"currency":"CNY","priceInCents":"9663"}}}|}
+;;
+
 (* The body in MoonshotAI/kimi-code#3951, the same shape the live endpoint
    answered on 2026-09-25: a count whose value is zero is left out, so the
    5-hour [detail] has no [used] and the weekly [usage] no [remaining]. *)
@@ -588,6 +594,12 @@ let utilization_to_string : Usage.utilization -> string = function
   | Percent value -> Printf.sprintf "percent %d" value
   | Usd { used; limit } -> Printf.sprintf "usd %g limit=%s" used
       (Option.fold ~none:"none" ~some:(Printf.sprintf "%g") limit)
+  | Credit_balance { currency; total; remaining } ->
+      Printf.sprintf "credit %s total=%s remaining=%g" currency
+        (Option.fold ~none:"none" ~some:(Printf.sprintf "%g") total)
+        remaining
+  | Credit_unlimited -> "credit_unlimited"
+  | Credit_retracted -> "credit_retracted"
 ;;
 
 let role_to_string : Usage.window_role -> string = function
@@ -617,6 +629,121 @@ let refused decode body =
   match decode (Yojson.Safe.from_string body) with
   | Error error -> Usage.decode_error_to_string error
   | Ok (_ : Usage.report) -> failf "accepted: %s" body
+;;
+
+let test_codex_credits () =
+  check (list string) "a finite Codex balance is retained in credit units"
+    [ "limit=codex label \"credit balance\" credit credits total=none remaining=2500.75 resets=- role=other" ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}},"rateLimitsByLimitId":null}|});
+  check (list string) "unlimited Codex credits are explicit"
+    [ "limit=codex label \"credit balance\" credit_unlimited resets=- role=other" ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":true,"balance":null}},"rateLimitsByLimitId":null}|});
+  check (list string) "a disabled balance retracts the earlier balance"
+    [ "limit=codex label \"credit balance\" credit_retracted resets=- role=other" ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":false,"balance":"2500"}},"rateLimitsByLimitId":null}|});
+  check (list string) "an unavailable balance retracts the earlier balance"
+    [ "limit=codex label \"credit balance\" credit_retracted resets=- role=other" ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|});
+  let retracted = [ "limit=- label \"credit balance\" credit_retracted resets=- role=other" ] in
+  check (list string) "a negative Codex balance revokes the earlier balance and does not fail the read"
+    retracted
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"-1"}},"rateLimitsByLimitId":null}|});
+  check (list string) "a numeric balance is outside the wire schema and revokes the earlier balance"
+    retracted
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":25}},"rateLimitsByLimitId":null}|});
+  List.iter
+    (fun malformed ->
+      check (list string) "non-JSON decimal forms revoke the earlier balance"
+        retracted
+        (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+           (Printf.sprintf
+              {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":%S}},"rateLimitsByLimitId":null}|}
+              malformed)))
+    [ "0x10"; "1_000" ];
+  check (list string) "credits out of shape keep the plan window of the same read"
+    [ "limit=codex five_hour percent 40 resets=1790200000 role=gates"
+    ; "limit=codex label \"credit balance\" credit_retracted resets=- role=other"
+    ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":40,"windowDurationMins":300,"resetsAt":1790200000},"credits":{"hasCredits":true,"unlimited":false,"balance":"-1"}},"rateLimitsByLimitId":null}|})
+;;
+
+let test_codex_credit_retraction () =
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:"codex_credit_retraction" None in
+  let read json = decode_ok (Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string json)) in
+  let finite =
+    read {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}},"rateLimitsByLimitId":null}|}
+  in
+  let disabled =
+    read {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|}
+  in
+  let hidden =
+    read {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|}
+  in
+  let no_credit () =
+    match Usage.state ~scope with
+    | Usage.Reported_no_windows { source = Usage.Codex_account_rate_limits_read; _ } -> true
+    | Usage.Reported _ | Usage.Not_reported_since_start | Usage.Reported_no_windows _ -> false
+  in
+  Usage.record ~scope ~observed_at:100.0 finite;
+  (match Usage.state ~scope with
+   | Usage.Reported ({ window = { utilization = Usage.Credit_balance { remaining; _ }; _ }; _ }, []) ->
+     check (float 0.0001) "finite balance before retraction" 2500.75 remaining
+   | Usage.Reported
+       ({ window =
+            { utilization = Usage.Fraction _ | Usage.Percent _ | Usage.Usd _
+                          | Usage.Credit_unlimited | Usage.Credit_retracted
+            ; _
+            }
+        ; _
+        }, [])
+   | Usage.Reported (_, _ :: _)
+   | Usage.Reported_no_windows _ | Usage.Not_reported_since_start ->
+     fail "finite balance was not recorded");
+  Usage.record ~scope ~observed_at:101.0 disabled;
+  check bool "disabled retracts the numeric balance" true (no_credit ());
+  Usage.record ~scope ~observed_at:100.5 finite;
+  check bool "an older balance cannot return after retraction" true (no_credit ());
+  Usage.record ~scope ~observed_at:102.0 finite;
+  check bool "a newer balance is accepted" false (no_credit ());
+  Usage.record ~scope ~observed_at:103.0 hidden;
+  check bool "a hidden balance also retracts the numeric balance" true (no_credit ())
+;;
+
+let test_codex_credit_retraction_across_sources () =
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:"codex_credit_retraction_sources" None in
+  let read json = decode_ok (Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string json)) in
+  let updated json = decode_ok (Usage.decode_codex_rate_limits_updated (Yojson.Safe.from_string json)) in
+  let finite_read =
+    read {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}},"rateLimitsByLimitId":null}|}
+  in
+  let disabled_update =
+    updated {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":false,"unlimited":false,"balance":null}}}|}
+  in
+  let finite_update =
+    updated {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"2500.75"}}}|}
+  in
+  let hidden_read =
+    read {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|}
+  in
+  let no_credit () =
+    match Usage.state ~scope with
+    | Usage.Reported_no_windows _ -> true
+    | Usage.Reported _ | Usage.Not_reported_since_start -> false
+  in
+  Usage.record ~scope ~observed_at:100.0 finite_read;
+  Usage.record ~scope ~observed_at:101.0 disabled_update;
+  check bool "a read balance retracts on a disabled update" true (no_credit ());
+  Usage.record ~scope ~observed_at:102.0 finite_update;
+  check bool "a newer update balance is accepted" false (no_credit ());
+  Usage.record ~scope ~observed_at:103.0 hidden_read;
+  check bool "an update balance retracts on a hidden read" true (no_credit ())
 ;;
 
 let test_openrouter_key () =
@@ -654,6 +781,25 @@ let test_openrouter_key () =
     "openrouter-key.data.free_model_daily_requests.used must be within 0..1000"
     (refused Usage.decode_openrouter_key
        {|{"data":{"limit":null,"free_model_daily_requests":{"used":1001,"limit":1000}}}|})
+;;
+
+let test_openrouter_credits () =
+  check (list string) "the account's remaining credit is preserved"
+    [ "limit=- label \"account credit balance\" credit USD total=100.5 remaining=74.75 resets=- role=other" ]
+    (decoded_windows Usage.decode_openrouter_credits ~source:"openrouter.credits"
+       {|{"data":{"total_credits":100.5,"total_usage":25.75}}|});
+  check (list string) "an empty account balance is still reported"
+    [ "limit=- label \"account credit balance\" credit USD total=0 remaining=0 resets=- role=other" ]
+    (decoded_windows Usage.decode_openrouter_credits ~source:"openrouter.credits"
+       {|{"data":{"total_credits":0,"total_usage":0}}|});
+  check string "usage above the purchased total is refused"
+    "openrouter-credits.data.total_usage must be within 0..100.5"
+    (refused Usage.decode_openrouter_credits
+       {|{"data":{"total_credits":100.5,"total_usage":101}}|});
+  check string "a negative purchased total is refused"
+    "openrouter-credits.data.total_credits must be 0 or more"
+    (refused Usage.decode_openrouter_credits
+       {|{"data":{"total_credits":-1,"total_usage":0}}|})
 ;;
 
 let test_openrouter_amounts_reach_operator_api () =
@@ -780,20 +926,66 @@ let test_kimi_coding_usages () =
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20"}},{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"90"}}]}|})
 ;;
 
+let test_kimi_booster_wallet () =
+  check (list string) "the real wallet shape retains its CNY balance"
+    [ "limit=- label \"booster credit balance\" credit CNY total=175 remaining=103.367 resets=- role=other" ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       kimi_coding_booster_response);
+  (match decode_ok (Usage.decode_kimi_coding_usages (Yojson.Safe.from_string kimi_coding_booster_response)) with
+   | { Usage.windows = [{ utilization = Credit_balance { currency = "CNY"; total = Some 175.0; remaining }; _ }]; _ } ->
+       check (float 0.0000001) "fixed-point precision is retained" 103.367039 remaining
+   | { Usage.windows =
+         [{ utilization =
+              Usage.Fraction _ | Usage.Percent _ | Usage.Usd _
+            | Usage.Credit_unlimited | Usage.Credit_retracted | Usage.Credit_balance _
+          ; _
+          }]
+     ; _
+       }
+   | { Usage.windows = [] | _ :: _ :: _; _ } ->
+     fail "the booster wallet did not decode as one Credit_balance");
+  check (list string) "missing amountLeft means an exhausted wallet"
+    [ "limit=- label \"booster credit balance\" credit CNY total=175 remaining=0 resets=- role=other" ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       {|{"limits":[],"booster_wallet":{"balance":{"type":"BOOSTER","amount":"17500000000","unit":"UNIT_CURRENCY"},"monthlyUsed":{"currency":"CNY","priceInCents":"17500"}}}|});
+  check (list string) "an empty wallet or another balance type adds no credit" []
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       {|{"limits":[],"booster_wallet":{"balance":{"type":"SUBSCRIPTION"}}}|});
+  List.iter
+    (fun (name, wallet) ->
+      check (list string) name
+        [ "limit=- label \"usage (provider resetTime)\" fraction 0.15 resets=1790763016 role=gates" ]
+        (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+           (Printf.sprintf
+              {|{"limits":[],"usage":{"limit":"100","used":"15","remaining":"85","resetTime":"2026-09-30T10:10:16.485718Z"},"booster_wallet":%s}|}
+              wallet)))
+    [ ( "a non-currency fixed-point balance adds no row and keeps the plan window"
+      , {|{"balance":{"type":"BOOSTER","amount":"100000000","amountLeft":"0","unit":"UNIT_TOKEN"}}|} )
+    ; ( "an amountLeft above amount adds no row and keeps the plan window"
+      , {|{"balance":{"type":"BOOSTER","amount":"100","amountLeft":"200","unit":"UNIT_CURRENCY"}}|} )
+    ; ( "a wallet that is not an object adds no row and keeps the plan window"
+      , {|"closed"|} )
+    ]
+;;
+
 let test_ollama_balance () =
-  check (list string) "a purchased balance pays past both windows"
+  check (list string) "a purchased balance pays past both windows and remains visible"
     [ "limit=- label \"session\" fraction 0.25 resets=1790838000 role=other"
     ; "limit=- seven_day fraction 0.6 resets=1791158400 role=other"
+    ; "limit=- label \"purchased credit balance\" credit USD total=none remaining=25 resets=- role=other"
     ]
     (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance" ollama_balance_response);
   check (list string) "without a purchased balance both windows refuse model calls"
     [ "limit=- label \"session\" fraction 0.1614 resets=1791360000 role=gates"
     ; "limit=- seven_day fraction 0.9919 resets=1791763200 role=gates"
+    ; "limit=- label \"purchased credit balance\" credit USD total=none remaining=0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
        {|{"included":{"session":{"remaining_percent":83.86,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0.81,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":0}}|});
   check (list string) "nothing left is a spent window; a missing entry is no window"
-    [ "limit=- seven_day fraction 1 resets=- role=gates" ]
+    [ "limit=- seven_day fraction 1 resets=- role=gates"
+    ; "limit=- label \"purchased credit balance\" credit USD total=none remaining=0 resets=- role=other"
+    ]
     (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
        {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":0}}|});
   check string "a missing purchased balance is refused" "ollama-balance.purchased is missing"
@@ -804,10 +996,26 @@ let test_ollama_balance () =
        {|{"included":{"weekly":{"remaining_percent":0}},"purchased":{"balance_usd":-1}}|});
   check string "a missing included object is refused" "ollama-balance.included is missing"
     (refused Usage.decode_ollama_balance {|{"range":"7d","totals":{"request_count":1}}|});
-  check string "a credit plan's balance is refused by name"
-    "ollama-balance.included.balance_usd must be absent: only a legacy plan's session and weekly windows are read"
-    (refused Usage.decode_ollama_balance
+  check (list string) "a credit plan states included and purchased balances"
+    [ "limit=- label \"included credit period\" credit USD total=100 remaining=72.5 resets=1792056600 role=other"
+    ; "limit=- label \"purchased credit balance\" credit USD total=none remaining=25 resets=- role=other"
+    ]
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
        {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"from":"2026-09-15T09:30:00Z","until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":25}}|});
+  check (list string) "an exhausted purchased balance leaves included credit gating"
+    [ "limit=- label \"included credit period\" credit USD total=100 remaining=72.5 resets=1792056600 role=gates"
+    ; "limit=- label \"purchased credit balance\" credit USD total=none remaining=0 resets=- role=other"
+    ]
+    (decoded_windows Usage.decode_ollama_balance ~source:"ollama.balance"
+       {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"from":"2026-09-15T09:30:00Z","until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":0}}|});
+  check string "included credit above its allowance is refused"
+    "ollama-balance.included.balance_usd must be within 0..100"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"balance_usd":101,"allowance_usd":100,"period":{"until":"2026-10-15T09:30:00Z"}},"purchased":{"balance_usd":0}}|});
+  check string "an unreadable included period end is refused"
+    "ollama-balance.included.period.until must be an RFC 3339 timestamp"
+    (refused Usage.decode_ollama_balance
+       {|{"included":{"balance_usd":72.5,"allowance_usd":100,"period":{"until":"soon"}},"purchased":{"balance_usd":0}}|});
   check string "more than 100 percent left is refused"
     "ollama-balance.included.weekly.remaining_percent must be within 0..100"
     (refused Usage.decode_ollama_balance
@@ -901,7 +1109,7 @@ let http_readable ~provider_id ~url ~key ~refresh_s =
   ; how =
       Http
         { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string key
-        ; usage_read = { shape = Runtime_schema.Ollama_balance; url; refresh_s }
+        ; usage_read = { shape = Runtime_schema.Ollama_balance; url; refresh_s; credit_url = None }
         }
   }
 ;;
@@ -935,7 +1143,7 @@ let test_http_empty_report_replaces_old_limit () =
     ; how = Read.Http
         { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string "fixture-key"
         ; usage_read = { shape = Runtime_schema.Openrouter_key;
-            url = "https://usage.invalid/key"; refresh_s = None }
+            url = "https://usage.invalid/key"; refresh_s = None; credit_url = None }
         }
     } in
   let read body =
@@ -950,6 +1158,51 @@ let test_http_empty_report_replaces_old_limit () =
   match Usage.state ~scope:account.scope with
   | Usage.Reported_no_windows { source = Openrouter_key_read; _ } -> ()
   | _ -> fail "successful empty HTTP report left its old credit cap behind"
+;;
+
+let test_openrouter_primary_and_credit_reads_are_independent () =
+  let run ~provider_id ~bad_url ?(raise_on_bad = false) () =
+    let key_url = "https://usage.invalid/key" in
+    let credits_url = "https://usage.invalid/credits" in
+    let account =
+      { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id None
+      ; how = Read.Http
+          { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string "fixture-key"
+          ; usage_read =
+              { shape = Runtime_schema.Openrouter_key
+              ; url = key_url
+              ; refresh_s = None
+              ; credit_url = Some credits_url
+              }
+          }
+      }
+    in
+    let fetched = ref [] in
+    let fetch ~api_key:_ url =
+      fetched := url :: !fetched;
+      if String.equal url bad_url && raise_on_bad then failwith "connection closed by peer"
+      else if String.equal url bad_url then Ok "not-json"
+      else if String.equal url key_url then Ok {|{"data":{"limit":20,"limit_remaining":15}}|}
+      else Ok {|{"data":{"total_credits":100.5,"total_usage":25.75}}|}
+    in
+    Read.read_scopes ~codex:(fun ~scope:_ _ -> fail "unexpected Codex read")
+      ~antigravity:no_antigravity ~fetch [account];
+    check (list string) "both declared endpoints were attempted" [credits_url; key_url] !fetched;
+    match Usage.state ~scope:account.scope with
+    | Usage.Reported (first, rest) ->
+        List.map (fun (row : Usage.recorded) -> Usage.source_to_string row.source) (first :: rest)
+    | Usage.Not_reported_since_start | Usage.Reported_no_windows _ -> []
+  in
+  check (list string) "a key-read failure leaves the account Credit report"
+    ["openrouter.credits"]
+    (run ~provider_id:"usage_openrouter_primary_failed" ~bad_url:"https://usage.invalid/key" ());
+  check (list string) "a credit-read failure leaves the API key usage report"
+    ["openrouter.key"]
+    (run ~provider_id:"usage_openrouter_credit_failed" ~bad_url:"https://usage.invalid/credits" ());
+  check (list string) "a raising key read still attempts the account Credit read"
+    ["openrouter.credits"]
+    (run ~provider_id:"usage_openrouter_primary_raised" ~bad_url:"https://usage.invalid/key"
+       ~raise_on_bad:true ())
 ;;
 
 let test_failed_background_schedule_releases_scope () =
@@ -1281,7 +1534,8 @@ let muse_window_rows (windows : Usage.window list) =
           | Usage.Provider_label label -> label)
        , (match window.utilization with
           | Usage.Percent percent -> percent
-          | Usage.Fraction _ | Usage.Usd _ -> fail "Muse states percentages")
+          | Usage.Fraction _ | Usage.Usd _ | Usage.Credit_unlimited
+          | Usage.Credit_retracted | Usage.Credit_balance _ -> fail "Muse states percentages")
        , Option.value window.resets_at ~default:0
        , Usage.window_role_to_string window.role ))
     windows
@@ -1423,6 +1677,7 @@ let test_gate_coverage_by_source () =
          (Usage.gate_coverage source))
     [ Usage.Antigravity_usage_read, Some Usage.Every_window_must_be_spent
     ; Usage.Openrouter_key_read, Some Usage.One_spent_window_refuses
+    ; Usage.Openrouter_credits_read, None
     ; Usage.Zai_quota_limit_read, Some Usage.One_spent_window_refuses
     ; Usage.Kimi_coding_usages_read, Some Usage.One_spent_window_refuses
     ; Usage.Ollama_balance_read, Some Usage.One_spent_window_refuses
@@ -1477,7 +1732,13 @@ let test_scope_room_when_every_window_must_be_spent () =
   read "USD at the key limit is spent" Usage.Spent_without_reset
     [ gating (Usage.Usd { used = 10.0; limit = Some 10.0 }) ];
   read "USD without a limit is never spent" Usage.Room_left
-    [ gating (Usage.Usd { used = 10.0; limit = None }) ]
+    [ gating (Usage.Usd { used = 10.0; limit = None }) ];
+  read "zero remaining Credit is spent"
+    Usage.Spent_without_reset
+    [ gating (Usage.Credit_balance { currency = "USD"; total = Some 100.0; remaining = 0.0 }) ];
+  read "remaining Credit without a total still has room"
+    Usage.Room_left
+    [ gating (Usage.Credit_balance { currency = "USD"; total = None; remaining = 25.0 }) ]
 ;;
 
 let test_scope_room_when_one_spent_window_refuses () =
@@ -1621,6 +1882,10 @@ let () =
             test_claude_default_and_explicit_home_share_scope
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
+        ; test_case "Codex Credit balances and unlimited state" `Quick test_codex_credits
+        ; test_case "Codex Credit retraction is durable" `Quick test_codex_credit_retraction
+        ; test_case "Codex Credit retraction spans read and update" `Quick
+            test_codex_credit_retraction_across_sources
         ; test_case "sink receives accepted reports once" `Quick
             test_durable_sink_receives_only_accepted_report
         ; test_case "sink failure marks history gap" `Quick
@@ -1628,9 +1893,11 @@ let () =
         ] )
     ; ( "http usage endpoints"
       , [ test_case "openrouter-key" `Quick test_openrouter_key
+        ; test_case "openrouter-credits" `Quick test_openrouter_credits
         ; test_case "OpenRouter USD reaches operator API" `Quick test_openrouter_amounts_reach_operator_api
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
+        ; test_case "kimi booster wallet" `Quick test_kimi_booster_wallet
         ; test_case "ollama-balance" `Quick test_ollama_balance
         ; test_case "only gating windows explain a refusal" `Quick
             test_only_gating_windows_explain_a_refusal
@@ -1663,6 +1930,8 @@ let () =
     ; ( "reading scopes"
       , [ test_case "empty HTTP report removes old API key credit limits" `Quick
             test_http_empty_report_replaces_old_limit
+        ; test_case "OpenRouter primary and credit reads are independent" `Quick
+            test_openrouter_primary_and_credit_reads_are_independent
         ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
         ; test_case "failed background schedule releases the account" `Quick

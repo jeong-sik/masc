@@ -60,6 +60,7 @@ let source_to_string = function
   | Codex_account_rate_limits_updated -> "codex.account_rate_limits_updated"
   | Codex_account_rate_limits_read -> "codex.account_rate_limits_read"
   | Openrouter_key_read -> "openrouter.key"
+  | Openrouter_credits_read -> "openrouter.credits"
   | Zai_quota_limit_read -> "zai.quota_limit"
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_balance_read -> "ollama.balance"
@@ -81,6 +82,7 @@ let source_of_string = function
   | "codex.account_rate_limits_updated" -> Some Codex_account_rate_limits_updated
   | "codex.account_rate_limits_read" -> Some Codex_account_rate_limits_read
   | "openrouter.key" -> Some Openrouter_key_read
+  | "openrouter.credits" -> Some Openrouter_credits_read
   | "zai.quota_limit" -> Some Zai_quota_limit_read
   | "kimi_coding.usages" -> Some Kimi_coding_usages_read
   | "ollama.balance" -> Some Ollama_balance_read
@@ -99,6 +101,14 @@ let utilization_fields : utilization -> (string * Yojson.Safe.t) list = function
     ; "value", `Float used
     ; "limit", Option.fold ~none:`Null ~some:(fun limit -> `Float limit) limit
     ]
+  | Credit_balance { currency; total; remaining } ->
+    [ "unit", `String "credit_balance"
+    ; "currency", `String currency
+    ; "total", Option.fold ~none:`Null ~some:(fun total -> `Float total) total
+    ; "remaining", `Float remaining
+    ]
+  | Credit_unlimited -> [ "unit", `String "credit_unlimited" ]
+  | Credit_retracted -> [ "unit", `String "credit_retracted" ]
 ;;
 
 open Result.Syntax
@@ -232,6 +242,89 @@ let codex_window ~path ~limit_id ~slot fields =
          })
 ;;
 
+let codex_boolean ~path = function
+  | `Bool value -> Ok value
+  | _ -> Error (Wrong_type { path; expected = "a boolean" })
+;;
+
+let codex_decimal_number raw =
+  match Yojson.Safe.from_string (String.trim raw) with
+  | `Int value -> Some (Float.of_int value)
+  | `Intlit value -> float_of_string_opt value
+  | `Float value -> Some value
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
+(* The row that revokes a held balance: a read that states no balance, or
+   cannot state one, no longer supports the balance it replaces. *)
+let codex_credit_retraction ~limit_id =
+  { limit_id
+  ; kind = Provider_label "credit balance"
+  ; role = Counts_other_use
+  ; utilization = Credit_retracted
+  ; resets_at = None
+  }
+;;
+
+let codex_credit_window ~path ~limit_id fields =
+  match List.assoc_opt "credits" fields with
+  | None | Some `Null -> Ok None
+  | Some json ->
+    let path = member_path path "credits" in
+    let* credit_fields = fields_at ~path json in
+    let* has_credits = required ~path "hasCredits" credit_fields in
+    let* has_credits = codex_boolean ~path:(member_path path "hasCredits") has_credits in
+    let* unlimited = required ~path "unlimited" credit_fields in
+    let* unlimited = codex_boolean ~path:(member_path path "unlimited") unlimited in
+    let* balance = optional_string ~path "balance" credit_fields in
+    let retracted = Some (codex_credit_retraction ~limit_id) in
+    if unlimited
+    then
+      Ok
+        (Some
+           { limit_id
+           ; kind = Provider_label "credit balance"
+           ; role = Counts_other_use
+           ; utilization = Credit_unlimited
+           ; resets_at = None
+           })
+    else if not has_credits
+    then Ok retracted
+    else (
+      match balance with
+      | None -> Ok retracted
+      | Some raw ->
+        let balance_path = member_path path "balance" in
+        (match codex_decimal_number raw with
+         | None -> Error (Wrong_type { path = balance_path; expected = "a decimal number string" })
+         | Some remaining when not (Float.is_finite remaining) || Float.compare remaining 0.0 < 0 ->
+           Error (Unexpected_value { path = balance_path; expected = "0 or more" })
+         | Some remaining ->
+           Ok
+             (Some
+                { limit_id
+                ; kind = Provider_label "credit balance"
+                ; role = Counts_other_use
+                ; utilization = Credit_balance { currency = "credits"; total = None; remaining }
+                ; resets_at = None
+                })))
+;;
+
+(* The credits object is a display row beside the plan windows of the same
+   snapshot, so one that is out of shape must not take them with it. It
+   revokes the balance held for this limit, which a read that cannot state
+   it no longer supports, and the log says why. *)
+let codex_credit_row ~path ~limit_id fields =
+  match codex_credit_window ~path ~limit_id fields with
+  | Ok credit -> credit
+  | Error error ->
+    Log.Runtime.warn
+      "Codex credits not read, the held balance is revoked: %s"
+      (decode_error_to_string error);
+    Some (codex_credit_retraction ~limit_id)
+;;
+
 (* One [RateLimitSnapshot]: the [rateLimits] of an update or a read, or one
    bucket of a read's [rateLimitsByLimitId]. *)
 let codex_snapshot ?keyed_by ~path snapshot =
@@ -242,7 +335,8 @@ let codex_snapshot ?keyed_by ~path snapshot =
   let limit_id = match stated with Some _ -> stated | None -> keyed_by in
   let* primary = codex_window ~path ~limit_id ~slot:"primary" snapshot_fields in
   let* secondary = codex_window ~path ~limit_id ~slot:"secondary" snapshot_fields in
-  Ok (List.filter_map Fun.id [ primary; secondary ])
+  let credit = codex_credit_row ~path ~limit_id snapshot_fields in
+  Ok (List.filter_map Fun.id [ primary; secondary; credit ])
 ;;
 
 let decode_codex_rate_limits_updated params =
@@ -479,6 +573,67 @@ let decode_openrouter_key json =
     { source = Openrouter_key_read; windows = List.filter_map Fun.id [ credit; free ] }
 ;;
 
+let nonnegative_number ~path value =
+  if Float.is_finite value && Float.compare value 0.0 >= 0
+  then Ok value
+  else Error (Unexpected_value { path; expected = "0 or more" })
+;;
+
+let credit_balance ~path ~currency ~total ~remaining =
+  let* remaining = nonnegative_number ~path remaining in
+  match total with
+  | None -> Ok (Credit_balance { currency; total = None; remaining })
+  | Some total ->
+    let* total = nonnegative_number ~path total in
+    let* remaining =
+      within
+        ~path
+        ~expected:(Printf.sprintf "within 0..%g" total)
+        ~low:0.0
+        ~high:total
+        remaining
+    in
+    Ok (Credit_balance { currency; total = Some total; remaining })
+;;
+
+let decode_openrouter_credits json =
+  let path = "openrouter-credits" in
+  let* fields = fields_at ~path json in
+  let* data = required ~path "data" fields in
+  let path = member_path path "data" in
+  let* data_fields = fields_at ~path data in
+  let* total = required_as number_at ~path "total_credits" data_fields in
+  let* total = nonnegative_number ~path:(member_path path "total_credits") total in
+  let* used = required_as number_at ~path "total_usage" data_fields in
+  let* used =
+    within
+      ~path:(member_path path "total_usage")
+      ~expected:(Printf.sprintf "within 0..%g" total)
+      ~low:0.0
+      ~high:total
+      used
+  in
+  let* utilization =
+    credit_balance
+      ~path:(member_path path "total_credits")
+      ~currency:"USD"
+      ~total:(Some total)
+      ~remaining:(total -. used)
+  in
+  distinct_windows
+    ~path
+    { source = Openrouter_credits_read
+    ; windows =
+        [ { limit_id = None
+          ; kind = Provider_label "account credit balance"
+          ; role = Counts_other_use
+          ; utilization
+          ; resets_at = None
+          }
+        ]
+    }
+;;
+
 (* Z.AI [unit] codes.  Only [3] is known to be hours: the TOKENS_LIMIT row
    with [unit 3, number 5] is the plan's 5-hour window.  Any other code keeps
    the provider's own numbers instead of a guessed length.  The row's [type]
@@ -641,6 +796,94 @@ let kimi_limit ~path json =
   kimi_count_window ~path ~kind:(kind_of_minutes minutes) ~role:Gates_model_calls detail_fields
 ;;
 
+let kimi_fixed_point_units_per_major = 100000000.0
+
+let kimi_wallet_currency ~path fields =
+  let currency_at name =
+    match List.assoc_opt name fields with
+    | None | Some `Null -> Ok None
+    | Some json ->
+      let money_path = member_path path name in
+      let* money_fields = fields_at ~path:money_path json in
+      optional_string ~path:money_path "currency" money_fields
+  in
+  let* limit_currency = currency_at "monthlyChargeLimit" in
+  let* used_currency = currency_at "monthlyUsed" in
+  let meaningful = function Some value when String.length value > 0 -> Some value | Some _ | None -> None in
+  Ok
+    (match meaningful limit_currency, meaningful used_currency with
+     | Some currency, _ | None, Some currency -> currency
+     | None, None -> "USD")
+;;
+
+let kimi_booster_window ~path fields =
+  match List.assoc_opt "balance" fields with
+  | None | Some `Null | Some (`String "0") -> Ok None
+  | Some balance ->
+    let balance_path = member_path path "balance" in
+    let* balance_fields = fields_at ~path:balance_path balance in
+    let* balance_type = required_as string_at ~path:balance_path "type" balance_fields in
+    if not (String.equal balance_type "BOOSTER")
+    then Ok None
+    else (
+      let* amount = required_as decimal_string_at ~path:balance_path "amount" balance_fields in
+      if amount <= 0
+      then Ok None
+      else
+        let* unit = required_as string_at ~path:balance_path "unit" balance_fields in
+        if not (String.equal unit "UNIT_CURRENCY")
+        then Error (Unexpected_value { path = member_path balance_path "unit"; expected = "UNIT_CURRENCY" })
+        else
+          let* amount_left =
+            optional_as decimal_string_at ~path:balance_path "amountLeft" balance_fields
+          in
+          let amount_left = Option.value ~default:0 amount_left in
+          let* amount_left =
+            count_within_limit ~path:(member_path balance_path "amountLeft") ~limit:amount amount_left
+          in
+          let* currency = kimi_wallet_currency ~path fields in
+          let total = Float.of_int amount /. kimi_fixed_point_units_per_major in
+          let remaining = Float.of_int amount_left /. kimi_fixed_point_units_per_major in
+          let* utilization =
+            credit_balance
+              ~path:(member_path balance_path "amount")
+              ~currency
+              ~total:(Some total)
+              ~remaining
+          in
+          Ok
+            (Some
+               { limit_id = None
+               ; kind = Provider_label "booster credit balance"
+               ; role = Counts_other_use
+               ; utilization
+               ; resets_at = None
+               }))
+;;
+
+let kimi_wallet_window ~path fields =
+  match List.assoc_opt "booster_wallet" fields with
+  | None | Some `Null -> Ok None
+  | Some wallet ->
+    let wallet_path = member_path path "booster_wallet" in
+    let* wallet_fields = fields_at ~path:wallet_path wallet in
+    if wallet_fields = [] then Ok None else kimi_booster_window ~path:wallet_path wallet_fields
+;;
+
+(* The wallet is a display row beside the limits. The limits gate model calls
+   and the wallet does not, so a wallet that is out of shape adds no row and
+   takes no limit with it: a report the decode refused would leave the
+   recorded limits stale. The log says why there is no row. *)
+let kimi_wallet_row ~path fields =
+  match kimi_wallet_window ~path fields with
+  | Ok booster -> booster
+  | Error error ->
+    Log.Runtime.warn
+      "Kimi booster wallet not read, no credit row: %s"
+      (decode_error_to_string error);
+    None
+;;
+
 (* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
    [usages.*.used_ratio] is not read: on the same response it contradicts
    the top-level [usage] (used 100 of 100 with [limit_7d] ratio 0, while the
@@ -669,25 +912,21 @@ let decode_kimi_coding_usages json =
       in
       Ok [ window ]
   in
-  distinct_windows ~path { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
+  let booster = kimi_wallet_row ~path fields in
+  distinct_windows
+    ~path
+    { source = Kimi_coding_usages_read
+    ; windows = windows @ plan_windows @ Option.to_list booster
+    }
 ;;
 
-(* Ollama, GET https://ollama.com/api/balance (ollama/ollama docs/api/balance.mdx,
-   read 2026-10-07). That day /api/usage stopped answering the session/weekly
-   limits; the remaining quota moved here. A legacy plan states
-   included.session and included.weekly as {remaining_percent, resets_at}:
-   remaining_percent runs 0..100 (75 means 75 % remains) and resets_at is the
-   next reset in UTC. A credit plan states included.balance_usd, allowance_usd
-   and period instead, and its model calls go on against purchased credits
-   once the allowance is spent, so no single window says when a call is
-   refused; that shape is refused by name.
-
-   Both shapes state purchased.balance_usd, the unexpired purchased credits.
-   Ollama spends the included allowance first and then the purchased balance
-   (ollama.com/pricing, read 2026-10-07), and its 429 for a spent session
-   window says "add usage credits". So a spent session or weekly window
-   refuses model calls only while that balance is zero; above zero the calls
-   it would refuse are paid from the balance. *)
+(* Ollama, GET https://ollama.com/api/balance (docs.ollama.com/api/balance).
+   A legacy plan states included.session and included.weekly as
+   {remaining_percent, resets_at}. A credit plan states included.balance_usd,
+   allowance_usd and period.until instead. Both shapes state
+   purchased.balance_usd, the unexpired purchased credits. Ollama spends the
+   included allowance first and then the purchased balance, so included
+   windows gate model calls only while the purchased balance is zero. *)
 let ollama_balance_window ~path ~kind ~role name fields =
   let* entry = optional_object ~path name fields in
   match entry with
@@ -713,49 +952,90 @@ let ollama_balance_window ~path ~kind ~role name fields =
          })
 ;;
 
+let required_rfc3339 ~path name fields =
+  let* raw = required_as string_at ~path name fields in
+  match Time_codec.parse_rfc3339_whole_seconds raw with
+  | Ok seconds -> Ok (Float.to_int seconds)
+  | Error Time_codec.Invalid_rfc3339 ->
+    Error (Wrong_type { path = member_path path name; expected = "an RFC 3339 timestamp" })
+;;
+
+let ollama_included_credit ~path ~role fields =
+  let balance_path = member_path path "balance_usd" in
+  let allowance_path = member_path path "allowance_usd" in
+  let* remaining = required_as number_at ~path "balance_usd" fields in
+  let* total = required_as number_at ~path "allowance_usd" fields in
+  let* total = nonnegative_number ~path:allowance_path total in
+  let* utilization =
+    credit_balance ~path:balance_path ~currency:"USD" ~total:(Some total) ~remaining
+  in
+  let* period = required ~path "period" fields in
+  let period_path = member_path path "period" in
+  let* period_fields = fields_at ~path:period_path period in
+  let* resets_at = required_rfc3339 ~path:period_path "until" period_fields in
+  Ok
+    { limit_id = None
+    ; kind = Provider_label "included credit period"
+    ; role
+    ; utilization
+    ; resets_at = Some resets_at
+    }
+;;
+
+let ollama_purchased_credit ~path remaining =
+  let* utilization =
+    credit_balance ~path:(member_path path "balance_usd") ~currency:"USD" ~total:None ~remaining
+  in
+  Ok
+    { limit_id = None
+    ; kind = Provider_label "purchased credit balance"
+    ; role = Counts_other_use
+    ; utilization
+    ; resets_at = None
+    }
+;;
+
 let decode_ollama_balance json =
   let root = "ollama-balance" in
   let* fields = fields_at ~path:root json in
   let* included = required ~path:root "included" fields in
-  let path = member_path root "included" in
-  let* included_fields = fields_at ~path included in
-  match List.assoc_opt "balance_usd" included_fields with
-  | Some _ ->
-    Error
-      (Unexpected_value
-         { path = member_path path "balance_usd"
-         ; expected = "absent: only a legacy plan's session and weekly windows are read"
-         })
-  | None ->
-    let* purchased = required ~path:root "purchased" fields in
-    let purchased_path = member_path root "purchased" in
-    let* purchased_fields = fields_at ~path:purchased_path purchased in
-    let* purchased_balance =
-      required_as number_at ~path:purchased_path "balance_usd" purchased_fields
-    in
-    let* purchased_balance =
-      within
-        ~path:(member_path purchased_path "balance_usd")
-        ~expected:"0 or more"
-        ~low:0.0
-        ~high:Float.infinity
-        purchased_balance
-    in
-    let role =
-      if Float.compare purchased_balance 0.0 > 0 then Counts_other_use else Gates_model_calls
-    in
-    let* session =
-      ollama_balance_window
-        ~path
-        ~kind:(Provider_label "session")
-        ~role
-        "session"
-        included_fields
-    in
-    let* weekly = ollama_balance_window ~path ~kind:Seven_day ~role "weekly" included_fields in
-    distinct_windows
-      ~path
-      { source = Ollama_balance_read; windows = List.filter_map Fun.id [ session; weekly ] }
+  let included_path = member_path root "included" in
+  let* included_fields = fields_at ~path:included_path included in
+  let* purchased = required ~path:root "purchased" fields in
+  let purchased_path = member_path root "purchased" in
+  let* purchased_fields = fields_at ~path:purchased_path purchased in
+  let* purchased_balance =
+    required_as number_at ~path:purchased_path "balance_usd" purchased_fields
+  in
+  let* purchased_balance =
+    nonnegative_number ~path:(member_path purchased_path "balance_usd") purchased_balance
+  in
+  let* purchased_credit = ollama_purchased_credit ~path:purchased_path purchased_balance in
+  let role =
+    if Float.compare purchased_balance 0.0 > 0 then Counts_other_use else Gates_model_calls
+  in
+  let* included_windows =
+    match List.assoc_opt "balance_usd" included_fields with
+    | Some _ ->
+      let* included = ollama_included_credit ~path:included_path ~role included_fields in
+      Ok [ included ]
+    | None ->
+      let* session =
+        ollama_balance_window
+          ~path:included_path
+          ~kind:(Provider_label "session")
+          ~role
+          "session"
+          included_fields
+      in
+      let* weekly =
+        ollama_balance_window ~path:included_path ~kind:Seven_day ~role "weekly" included_fields
+      in
+      Ok (List.filter_map Fun.id [ session; weekly ])
+  in
+  distinct_windows
+    ~path:root
+    { source = Ollama_balance_read; windows = included_windows @ [ purchased_credit ] }
 ;;
 
 (* Antigravity, [agy -p "/usage" --output-format json]. agy 1.1.11 answers
@@ -894,6 +1174,8 @@ let window_is_spent (window : window) =
   | Percent used -> used >= 100
   | Usd { used; limit = Some limit } -> used >= limit
   | Usd { limit = None; _ } -> false
+  | Credit_balance { remaining; _ } -> Float.compare remaining 0.0 <= 0
+  | Credit_unlimited | Credit_retracted -> false
 ;;
 
 (* Only a window that gates model calls can explain a refused model call. *)
@@ -916,13 +1198,14 @@ type gate_coverage =
 (* Whether a complete report of this source lets a scope be called refused. A
    sparse source holds only the windows it has stated so far, so a window it
    never stated is no evidence of room, and a spent one cannot say it covers
-   every model; those sources have typed refusals of their own. *)
+   every model; those sources have typed refusals of their own. OpenRouter's
+   auxiliary account Credit report is observation-only. *)
 let gate_coverage = function
   | Antigravity_usage_read -> Some Every_window_must_be_spent
   | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
   | Ollama_balance_read | Muse_subscription_usage -> Some One_spent_window_refuses
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
-  | Codex_account_rate_limits_read -> None
+  | Codex_account_rate_limits_read | Openrouter_credits_read -> None
 
 (* One gating window as the table holds it, read at [now]. *)
 type gating_reading =

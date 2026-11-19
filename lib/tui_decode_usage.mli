@@ -16,6 +16,12 @@ type provider_usage_utilization =
   | Utilization_percent of int
   | Utilization_usd of { used : float; limit : float option }
       (** A reported USD credit amount; [None] means no key cap. *)
+  | Utilization_credit_balance of { currency : string; total : float option; remaining : float }
+      (** Remaining Credit in the provider's currency; [None] means no stated total. *)
+  | Utilization_credit_unlimited
+      (** The provider explicitly reports unlimited Credit. *)
+  | Utilization_credit_retracted
+      (** A sparse provider report explicitly revokes an earlier Credit balance. *)
 
 (** What a window limits, as the server's decoder classified it from the
     provider's own shape. *)

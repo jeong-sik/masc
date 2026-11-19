@@ -42,12 +42,20 @@ type utilization = Runtime_provider_usage_types.utilization =
   | Usd of { used : float; limit : float option }
       (** USD-denominated credit use. [None] means no key cap was reported,
           so no percentage can be calculated. *)
+  | Credit_balance of { currency : string; total : float option; remaining : float }
+      (** A remaining Credit balance in the provider's currency. [total] is the
+          face amount of the same bucket when stated; [None] supplies no meter. *)
+  | Credit_unlimited
+      (** The provider explicitly reports unlimited Credit. *)
+  | Credit_retracted
+      (** A sparse provider report explicitly revokes an earlier Credit balance. *)
 
 type source = Runtime_provider_usage_types.source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read
   | Openrouter_key_read  (** OpenRouter [GET /api/v1/key]. *)
+  | Openrouter_credits_read  (** OpenRouter [GET /api/v1/credits], observation only. *)
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
   | Ollama_balance_read  (** Ollama [GET https://ollama.com/api/balance]. *)
@@ -71,11 +79,10 @@ type window_role = Runtime_provider_usage_types.window_role =
           model group each (Gemini; Claude and GPT), so there a spent bucket
           refuses only the calls of its own group: {!gate_coverage}. *)
   | Counts_other_use
-      (** It counts something a model call does not need: Z.AI's
-          TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
-          requests, uncapped credit usage totals, and Ollama's session and
-          weekly allowance while its purchased balance pays for calls past
-          them. *)
+      (** It counts something that does not independently refuse every model
+          call: Z.AI's TIME_LIMIT, OpenRouter's free-model daily requests,
+          uncapped usage totals, observation-only Credit balances, and
+          Ollama's included allowance while purchased Credit pays past it. *)
   | Unclassified_limit
       (** A Z.AI limit type this decoder does not know. *)
 
@@ -147,14 +154,18 @@ val decode_codex_rate_limits_updated : Yojson.Safe.t -> (report, decode_error) r
     window, so the window already recorded stands.  [windowDurationMins] of
     exactly 300 is {!Five_hour} and exactly 10080 is {!Seven_day}; another
     length is {!Duration_minutes}; no length keeps the slot name as
-    {!Provider_label}. *)
+    {!Provider_label}. A [credits] object can also add a Credit row: unlimited
+    is explicit, a finite [balance] is retained in credit units, and disabled
+    or unavailable balances add no row. A [credits] object that is out of shape
+    does not fail the decode: it counts as an unavailable balance and is
+    logged, so the plan windows of the same snapshot stand. *)
 
 val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) result
 (** The result of an [account/rateLimits/read] request, which the app-server
     answers without a thread or a turn. Every bucket of [rateLimitsByLimitId]
     is read, a bucket without its own [limitId] taking its key; when that map
-    is absent or null, the single [rateLimits] is read. Windows are decoded as
-    in {!decode_codex_rate_limits_updated}. *)
+    is absent or null, the single [rateLimits] is read. Windows and Credit
+    are decoded as in {!decode_codex_rate_limits_updated}. *)
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
@@ -170,6 +181,11 @@ val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
     Each HTTP decoder below refuses a report that states the same
     [(limit_id, kind)] twice ({!Duplicate_window}), and a value outside its
     stated range with {!Unexpected_value}. *)
+
+val decode_openrouter_credits : Yojson.Safe.t -> (report, decode_error) result
+(** OpenRouter [GET /api/v1/credits]. [data.total_credits] is the USD total and
+    [total_credits - total_usage] the remaining Credit balance. Both amounts
+    must be finite and nonnegative, with usage no greater than the total. *)
 
 val decode_zai_quota_limit : Yojson.Safe.t -> (report, decode_error) result
 (** Z.AI [GET /api/monitor/usage/quota/limit].  [success] must be [true].
@@ -187,19 +203,27 @@ val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
     [detail.limit] are decimal strings read as integers, [used] within
     [0..limit].  The top-level [usage] is one more window labelled
     "usage (provider resetTime)": it states no length, only its
-    [resetTime].  [usages.*.used_ratio] is not read. *)
+    [resetTime].  [usages.*.used_ratio] is not read.
+    A [booster_wallet] whose balance has [type = "BOOSTER"] also yields a
+    Credit row. [amount] and optional [amountLeft] are fixed-point values in
+    units of 10^-6 cents; absent [amountLeft] means zero. The currency comes
+    from [monthlyChargeLimit], then [monthlyUsed], then the official client's
+    USD fallback. Empty and other balance types add no row. A wallet that is
+    out of shape adds no row and is logged; the limits and the [usage] window
+    are still decoded, because the wallet is shown and gates nothing. *)
 
 val decode_ollama_balance : Yojson.Safe.t -> (report, decode_error) result
-(** Ollama [GET https://ollama.com/api/balance], a legacy plan's answer.
-    [included] is required; [included.session] is a {!Provider_label}
+(** Ollama [GET https://ollama.com/api/balance]. [included] and [purchased]
+    are required. A legacy plan's [included.session] is a {!Provider_label}
     "session" window and [included.weekly] a {!Seven_day} window, each a
     {!Fraction} of [1 - remaining_percent / 100] with [remaining_percent]
     within [0..100], and [resets_at] read as RFC 3339 when present.
-    [purchased.balance_usd] is required, 0 or more: above zero both windows
-    are {!Counts_other_use}, because Ollama pays a call past a spent window
-    from that balance; at zero they are {!Gates_model_calls}. A credit
-    plan's [included.balance_usd] is refused: its calls go on against
-    purchased credits, so no window alone says when a call is refused. *)
+    A credit plan instead states [included.balance_usd] within
+    [0..allowance_usd] and [period.until] as RFC 3339, yielding an included
+    Credit row. Every shape also yields purchased Credit from
+    [purchased.balance_usd], without a total. Above zero purchased Credit
+    pays calls past included windows, which are then {!Counts_other_use};
+    at zero included windows are {!Gates_model_calls}. *)
 
 val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
 (** The whole JSON answer of [agy -p "/usage" --output-format json] (agy
@@ -227,8 +251,10 @@ type scope_state = Runtime_provider_usage_types.scope_state =
 
 val utilization_fields : utilization -> (string * Yojson.Safe.t) list
 (** The JSON fields a utilization is written with: ["unit"] is ["fraction"],
-    ["percent"] or ["usd"], ["value"] the amount, and a USD utilization adds
-    ["limit"] (a number or null). The stored history rows and the windows of
+    ["percent"], ["usd"], ["credit_balance"] or ["credit_unlimited"]. Usage
+    carries ["value"], and USD adds ["limit"]. Credit balances carry
+    ["currency"], ["total"] and ["remaining"]; unlimited Credit carries only
+    ["unit"]. The stored history rows and the windows of
     [/api/v1/runtime/resolved] both write these fields. *)
 
 val window_role_of_string : string -> window_role option
@@ -249,8 +275,8 @@ val report_shape : source -> report_shape
 
 val window_is_spent : window -> bool
 (** The window's use reached its limit: a fraction at 1.0 or more, a
-    percentage at 100 or more, USD at the key limit. A USD window with no
-    limit is never spent. *)
+    percentage at 100 or more, USD at the key limit, or zero remaining Credit.
+    A USD window with no limit is never spent. *)
 
 val gates_model_calls : window -> bool
 (** [true] when the window's role is {!Gates_model_calls}. *)
@@ -282,11 +308,11 @@ type gate_coverage =
           is spent, until the {e first} of them resets. *)
 
 val gate_coverage : source -> gate_coverage option
-(** [None] for a sparse source (Claude Code events, Codex): it holds only the
-    windows it has stated, so a window it never stated is no evidence of room,
-    and the spent buckets it reports cannot be attributed to the models a
-    refused call used. Their refusals reach the quota table through the typed
-    paths of {!Runtime_provider_usage_read} and the Keeper runtimes. *)
+(** [None] for a sparse source (Claude Code events, Codex), whose unstated
+    windows and model attribution are unknown, and for OpenRouter's auxiliary
+    account Credit report, which is observation-only. Sparse-source refusals
+    reach the quota table through the typed paths of
+    {!Runtime_provider_usage_read} and the Keeper runtimes. *)
 
 val scope_room : coverage:gate_coverage -> now:float -> recorded list -> scope_room
 (** Read the windows of one complete report under [coverage]. A spent window

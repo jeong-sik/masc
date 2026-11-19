@@ -12,6 +12,9 @@ type provider_usage_utilization =
   | Utilization_fraction of float
   | Utilization_percent of int
   | Utilization_usd of { used : float; limit : float option }
+  | Utilization_credit_balance of { currency : string; total : float option; remaining : float }
+  | Utilization_credit_unlimited
+  | Utilization_credit_retracted
 
 type provider_usage_window_role =
   | Role_gates_model_calls
@@ -87,6 +90,20 @@ let decode_provider_usage_utilization json =
           ~some:(fun limit -> not (Float.is_finite limit) || limit <= 0.0) limit then
         Error "invalid USD usage limit"
       else Ok (Utilization_usd { used; limit })
+  | "credit_balance" ->
+      let* currency = required_string_field json "currency" in
+      let* total = required_nullable_float_field json "total" in
+      let* remaining = required_number_field json "remaining" in
+      if String.length currency = 0 then Error "invalid Credit currency"
+      else if not (Float.is_finite remaining) || remaining < 0.0 then
+        Error "invalid Credit remaining"
+      else if Option.fold ~none:false
+          ~some:(fun total -> not (Float.is_finite total) || total < 0.0 || remaining > total)
+          total then
+        Error "invalid Credit total or remaining"
+      else Ok (Utilization_credit_balance { currency; total; remaining })
+  | "credit_unlimited" -> Ok Utilization_credit_unlimited
+  | "credit_retracted" -> Ok Utilization_credit_retracted
   | other -> Error (Printf.sprintf "unknown usage unit %S" other)
 
 let decode_provider_usage_window_role json =
@@ -205,7 +222,8 @@ let decode_provider_usage_history_point json =
     | "percent" ->
         let* value = required_int_field json "value" in
         Ok (Utilization_percent value)
-    | "usd" -> decode_provider_usage_utilization json
+    | "usd" | "credit_balance" | "credit_unlimited" | "credit_retracted" ->
+        decode_provider_usage_utilization json
     | _ -> Error ("provider usage history: unknown unit " ^ unit)
   in
   Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }

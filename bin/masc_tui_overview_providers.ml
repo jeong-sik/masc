@@ -160,6 +160,12 @@ let share_of_full = function
       Some (float_of_int value /. float_of_int percent_of_full)
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> Some (used /. limit)
   | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> None
+  | Masc.Tui_decode_usage.Utilization_credit_balance { total = Some total; remaining; _ }
+    when Float.compare total 0.0 > 0 ->
+      Some ((total -. remaining) /. total)
+  | Masc.Tui_decode_usage.Utilization_credit_balance _
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> None
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> None
 
 (* The full value of the unit the provider reported in, not a threshold. *)
 let at_or_past_full = function
@@ -167,6 +173,8 @@ let at_or_past_full = function
   | Masc.Tui_decode_usage.Utilization_percent value -> value >= percent_of_full
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> used >= limit
   | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> false
+  | Masc.Tui_decode_usage.Utilization_credit_balance { remaining; _ } -> remaining <= 0.0
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited | Utilization_credit_retracted -> false
 
 (* Twelve significant digits cut binary noise such as 0.29 *. 100. =
    28.999999999999996 before the floor, and still keep 0.9999 below 100. *)
@@ -224,6 +232,26 @@ let coloured_meter ~cells ~fill:bar ~around share =
   in
   drawn_fill ^ String.concat "" track
 
+let credit_decimals = 2
+let credit_small_amount = 0.01
+
+let credit_number_text value =
+  if not (Float.is_finite value) then Printf.sprintf "%g" value
+  else if Float.equal value 0.0 then Printf.sprintf "%.*f" credit_decimals 0.0
+  else if Float.compare (Float.abs value) credit_small_amount < 0 then "<0.01"
+  else Printf.sprintf "%.*f" credit_decimals value
+;;
+
+let credit_text currency value =
+  let amount = credit_number_text value in
+  if String.equal currency "credits" then amount ^ " credits"
+  else currency ^ " " ^ amount
+;;
+
+let credit_remaining_text currency remaining =
+  "Credit " ^ credit_text currency remaining ^ " left"
+;;
+
 let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_fraction value when Float.is_finite value ->
       Printf.sprintf "%d%%" (percent_of_fraction value)
@@ -234,6 +262,10 @@ let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
       Printf.sprintf "$%.4f / $%.4f" used limit
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } -> Printf.sprintf "$%.4f" used
+  | Masc.Tui_decode_usage.Utilization_credit_balance { currency; remaining; _ } ->
+      credit_remaining_text currency remaining
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> "Credit unlimited"
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> "Credit retracted"
 
 let minutes_per_hour = 60
 let minutes_per_day = 24 * minutes_per_hour
@@ -267,20 +299,32 @@ let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =
    window: the server keeps the last report until a newer one arrives, so the
    meter still shows what the provider last said. The short form keeps the
    countdown and drops the clock, for a row that has no room for both. *)
+type reset_state =
+  | Reset_not_reported
+  | Reset_passed
+  | Reset_pending of float
+
+let reset_state ~now = function
+  | None -> Reset_not_reported
+  | Some at when at <= now -> Reset_passed
+  | Some at -> Reset_pending at
+
 type reset_words = {
   reset_tone : string option;
   reset_full : string;
   reset_short : string;
 }
 
-let reset_words ~now = function
-  | None -> { reset_tone = None; reset_full = "no reset"; reset_short = "no reset" }
-  | Some at when at <= now ->
+let reset_words ~now resets_at =
+  match reset_state ~now resets_at with
+  | Reset_not_reported ->
+      { reset_tone = None; reset_full = "reset not reported"; reset_short = "reset not reported" }
+  | Reset_passed ->
       { reset_tone = Some (Theme.text_status Masc_tui_theme.Warn)
-      ; reset_full = "reset time passed \xc2\xb7 no newer report"
+      ; reset_full = "reset time passed"
       ; reset_short = "reset passed"
       }
-  | Some at ->
+  | Reset_pending at ->
       { reset_tone = None
       ; reset_full =
           Printf.sprintf "resets %s (%s)"
@@ -629,11 +673,26 @@ let usd_text value =
     Printf.sprintf "$%.0f" value
   else Printf.sprintf "$%.*f" usd_decimals value
 
+let credit_used_total total remaining =
+  match total with
+  | Some total when Float.compare total 0.0 > 0 -> Some (total -. remaining, total)
+  | Some _ | None -> None
+
 let money_text = function
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
       Some (usd_text used ^ "/" ^ usd_text limit)
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } ->
       Some ("spent " ^ usd_text used)
+  | Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining } ->
+      let context =
+        match credit_used_total total remaining with
+        | Some (used, total) ->
+            " \xc2\xb7 used " ^ credit_text currency used ^ "/" ^ credit_text currency total
+        | None -> ""
+      in
+      Some (credit_remaining_text currency remaining ^ context)
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> Some "Credit unlimited"
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> Some "Credit retracted"
   | Masc.Tui_decode_usage.Utilization_fraction _
   | Masc.Tui_decode_usage.Utilization_percent _ -> None
 
@@ -704,6 +763,14 @@ let wrap_marked ~width ~attention text =
           else line)
         lines
 
+let shows_reset = function
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> false
+  | Masc.Tui_decode_usage.Utilization_fraction _
+  | Masc.Tui_decode_usage.Utilization_percent _
+  | Masc.Tui_decode_usage.Utilization_usd _
+  | Masc.Tui_decode_usage.Utilization_credit_balance _ -> true
+
 (* A window heard at a different time than its account's newest report says
    so; otherwise the time is left out. *)
 let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_window) =
@@ -723,8 +790,9 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   in
   let amount = money_text utilization in
   let detail_with reset_part notes =
+    let reset_part = if shows_reset utilization then Some reset_part else None in
     String.concat detail_separator
-      (List.filter_map Fun.id ([ amount; Some reset_part ] @ notes))
+      (List.filter_map Fun.id ([ amount; reset_part ] @ notes))
   in
   let notes = [ heard; role_tag window.puw_role ] in
   let tone = window_tone window in

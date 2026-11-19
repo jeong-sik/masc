@@ -37,7 +37,7 @@ let draw ~rows ~selected ~decisions ~continuation ~actions =
     ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
     ~decisions ~decisions_whole:true ~continuation
     ~status:(fun ~cells:_ -> [ "status" ])
-    ~actions
+    ~keep_actions_card:false ~actions
 
 (* Nothing selected, then each destination in turn. *)
 let selections ~decisions ~continuation ~actions =

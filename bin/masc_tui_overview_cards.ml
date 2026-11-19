@@ -60,7 +60,7 @@ let card_selection ~is_selected entries =
 
 let draw ~ko ~(edges : edges) ~inner
     ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status
-    ?(keep_actions_card = false) ~actions =
+    ~keep_actions_card ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count

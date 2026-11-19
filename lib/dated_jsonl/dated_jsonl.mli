@@ -78,7 +78,7 @@ val open_store :
 
     The writers of one store directory take one mutex, whichever spelling
     reached the directory. The process registry keeps it under the name the
-    file system gives the directory ({!Store.directory_name}). A handle asks
+    file system gives the directory ([File_system_named.name]). A handle asks
     for it on each write or prune, so a handle opened before its directory
     existed takes the directory's mutex once the directory is there. The
     file system is asked once for each spelling of a directory that exists;

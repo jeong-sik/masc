@@ -2210,11 +2210,27 @@ let test_compare_month_entries () =
 (* This executable never says [Fact_cell.keep_in_this_process]: it stands
    for a process that reads stores another process appends to, as the TUI does.
    Each [read_fact] is the strict read, so a row that reached the file
-   without this process's [append] is the next answer. *)
+   without this process's [append] is the next answer.
+
+   The store is one whose facts the lease holder keeps ([Store.facts]), so
+   the only thing that keeps them out of memory here is that this process
+   said nothing. A store that is read from the files in every process, as
+   the audit store of the other tests is, would pin nothing. *)
 let test_a_process_that_does_not_write_the_stores_keeps_no_fact () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let store = Dated_jsonl.open_store (temp_store "dated_jsonl_reader_process") in
+  let location =
+    Dated_jsonl.Store.(
+      keeper
+        (root_of_masc_dir (tmpdir "dated_jsonl_reader_process"))
+        ~keeper:"reader"
+        Keeper.Turn_records)
+  in
+  check bool "the lease holder keeps this store's facts" true
+    (match Dated_jsonl.Store.(facts (Keeper Keeper.Turn_records)) with
+     | Dated_jsonl.Store.Kept_by_the_lease_holder -> true
+     | Dated_jsonl.Store.Read_from_the_files -> false);
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (`Assoc [ "i", `Int 1 ]);
   let newest () =
     match Dated_jsonl.read_fact store Dated_jsonl.last_row with

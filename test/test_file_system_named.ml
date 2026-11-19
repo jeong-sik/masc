@@ -12,7 +12,10 @@
     3. A spelling whose file existed is remembered until a removal is told.
     4. After a change, [another_entry_now] gives the entry the path has now
        when the file came to exist under another name, or when a removal was
-       told and the path is another file. *)
+       told and the path is another file.
+    5. An answer the file system gave before a removal is not remembered
+       when the removal is told before the answer is put away.
+    6. Two domains that ask for one file at once make one entry. *)
 
 open Alcotest
 
@@ -195,6 +198,81 @@ let test_a_removal_forgets_the_remembered_names () =
     check int "the entries stay" 2 (List.length (File_system_named.entries registry)))
 ;;
 
+(* A removal is told between the question and the remembering of its answer.
+   The registry makes the name's entry between the two, so the function that
+   makes entries stands here for whoever tells the removal: it renames the
+   file away, makes the spelling a link to another file, and tells. The
+   answer from before the removal is then not remembered, and the spelling
+   is asked about again. *)
+let test_a_removal_told_while_a_name_is_asked () =
+  with_directory (fun directory ->
+    let spelled = Filename.concat directory "log" in
+    let other = Filename.concat directory "other" in
+    write spelled;
+    write other;
+    let while_the_next_entry_is_made = ref (fun () -> ()) in
+    let registry =
+      File_system_named.create (fun () ->
+        let act = !while_the_next_entry_is_made in
+        while_the_next_entry_is_made := (fun () -> ());
+        act ();
+        ref ())
+    in
+    let of_other = entry registry other in
+    (while_the_next_entry_is_made
+     := fun () ->
+          Unix.rename spelled (Filename.concat directory "log.1");
+          Unix.symlink other spelled;
+          File_system_named.removed registry);
+    let before = entry registry spelled in
+    check_two_entries "the entry of the file the spelling named" before of_other;
+    check_one_entry
+      "the spelling is asked about again"
+      of_other
+      (entry registry spelled))
+;;
+
+(* Two domains ask for one file by two spellings. The first is kept inside
+   the function that makes its entry, which runs under the registry's lock,
+   until the second has had time to ask. The second waits for the lock and
+   finds the entry made. Without the lock it would find none and make
+   another. *)
+let test_two_domains_asking_for_one_file_make_one_entry () =
+  with_directory (fun directory ->
+    let real = Filename.concat directory "real" in
+    let link = Filename.concat directory "link" in
+    Unix.mkdir real 0o755;
+    Unix.symlink real link;
+    write (Filename.concat real "log");
+    let made = Atomic.make 0 in
+    let the_first_is_making = Atomic.make false in
+    let the_first_may_finish = Atomic.make false in
+    let registry =
+      File_system_named.create (fun () ->
+        if Atomic.fetch_and_add made 1 = 0
+        then (
+          Atomic.set the_first_is_making true;
+          while not (Atomic.get the_first_may_finish) do
+            Unix.sleepf 0.001
+          done);
+        ref ())
+    in
+    let first = Domain.spawn (fun () -> entry registry (Filename.concat real "log")) in
+    while not (Atomic.get the_first_is_making) do
+      Unix.sleepf 0.001
+    done;
+    let second = Domain.spawn (fun () -> entry registry (Filename.concat link "log")) in
+    let deadline = Unix.gettimeofday () +. 0.3 in
+    while Atomic.get made < 2 && Unix.gettimeofday () < deadline do
+      Unix.sleepf 0.001
+    done;
+    Atomic.set the_first_may_finish true;
+    let first = Domain.join first in
+    let second = Domain.join second in
+    check int "one entry was made" 1 (Atomic.get made);
+    check_one_entry "both spellings reach it" first second)
+;;
+
 (* What a file system that folds letter case answers is taken as it is. *)
 let test_letter_case_follows_the_file_system () =
   with_directory (fun directory ->
@@ -225,6 +303,14 @@ let () =
             "a removal forgets the remembered names"
             `Quick
             test_a_removal_forgets_the_remembered_names
+        ; test_case
+            "a removal told while a name is asked"
+            `Quick
+            test_a_removal_told_while_a_name_is_asked
+        ; test_case
+            "two domains asking for one file make one entry"
+            `Quick
+            test_two_domains_asking_for_one_file_make_one_entry
         ; test_case
             "letter case follows the file system"
             `Quick

@@ -81,18 +81,14 @@ let record place event =
   Recorder.record ~at:(Time_compat.now ()) ~new_log_id:(Turn_log.Log_id.fresh ()) place event
 ;;
 
-let reported ~place ~turn_ref site = function
-  | Ok (Recorder.Appended _ | Nothing_to_append) -> ()
-  | Error error -> not_written ~place ~turn_ref site (Recorder.not_recorded_to_string error)
-;;
-
 (* A cancellation before the turn started is the turn's own and leaves. Any
    other failure is the log's: the turn starts without its line. *)
 let admit ~place ~turn_ref ~runtime ~task =
   let admitted =
     match record place (Writer.Admit { turn_ref; runtime; task }) with
-    | answer ->
-      reported ~place ~turn_ref Admission answer;
+    | Ok (Recorder.Appended _ | Nothing_to_append) as answer -> Recorder.admitted answer
+    | Error error as answer ->
+      not_written ~place ~turn_ref Admission (Recorder.not_recorded_to_string error);
       Recorder.admitted answer
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn ->
@@ -115,10 +111,15 @@ let finish turn exit =
   | Writer.Not_recorded -> ()
   | Recorded { opened = (_ : int) } as admitted ->
     let ending = ending exit (Atomic.get turn.closing_save) in
+    let not_written = not_written ~place:turn.place ~turn_ref:turn.turn_ref End in
     (match record turn.place (Writer.Finish { admitted; ending }) with
-     | answer -> reported ~place:turn.place ~turn_ref:turn.turn_ref End answer
-     | exception exn ->
-       not_written ~place:turn.place ~turn_ref:turn.turn_ref End (Printexc.to_string exn))
+     | Ok (Recorder.Appended _) -> ()
+     (* The log no longer shows this turn open: its file was replaced under
+        the turn. What the turn closed is named by the next unit, without the
+        turn's Task. *)
+     | Ok Recorder.Nothing_to_append -> not_written "the turn is not the open one in the log"
+     | Error error -> not_written (Recorder.not_recorded_to_string error)
+     | exception exn -> not_written (Printexc.to_string exn))
 ;;
 
 let exit_of_exception = function

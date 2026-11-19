@@ -6,7 +6,8 @@
     opened in the log is closed in it exactly once however it ends: by
     returning, by raising, or by being cancelled. A line that cannot be
     written is counted ([TurnLogAppendFailures]) and the turn runs all the
-    same. *)
+    same. So is an end that finds the log no longer showing the turn open
+    (its file was replaced under the turn): nothing is written then. *)
 
 (** A turn taken up. It carries whether its [Opened] is in the log. *)
 type t
@@ -40,7 +41,9 @@ val task_evidence : Keeper_turn_task_context.t -> Keeper_turn_log.task_evidence
 (** [around ~place ~turn_ref ~runtime ~task ~succeeded body] writes the turn's
     [Opened], runs [body], and writes its [Closed] before the answer or the
     exception leaves. [succeeded] says whether a returned answer is a turn
-    that completed.
+    that completed. The one caller passes "the settlement's result is [Ok]",
+    so [Completed] also labels a turn that settled without an error and has
+    more to do (held at a gate, deferred to another runtime).
 
     The [Closed] is written even when the turn's fiber is cancelled. Nothing
     the write does replaces the body's answer or its exception. *)

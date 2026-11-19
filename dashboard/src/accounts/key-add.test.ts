@@ -299,6 +299,12 @@ describe('the area where a key is given', () => {
     expect(await axe(area(showing({ kind: 'open', failure: null }), [claude, second]))).toHaveNoViolations()
   })
 
+  it('has no field and no form once no subscription takes a key, and still says what came of the key given before', async () => {
+    const container = area(showing({ kind: 'open', failure: refused }), [])
+    expect([container.querySelector('#key-value'), container.querySelector('form'), container.querySelectorAll('[role=alert]').length]).toEqual([null, null, 1])
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it('has one line a screen reader reads out in every step, and the field only while the form is open', () => {
     expect(count('[role=status]')).toEqual(named(...steps.map(([name]) => name)))
     expect(count('#key-value')).toEqual(named(...withForm))

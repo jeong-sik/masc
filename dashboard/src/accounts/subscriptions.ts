@@ -228,6 +228,14 @@ function leftWords(removing: ReadonlyMap<string, Removing>, owned: Owned): strin
     .join(' ')
 }
 
+/** Whether the area of a key is on the page: a subscription takes a key, or
+    the form is open. An open form stays when the last subscription that took
+    a key left the list, so what it says of the key it was given stays with
+    it. */
+const showsKeyArea = (view: PanelView, adding: KeyAddModel): boolean =>
+  view.kind === 'read'
+  && (view.integrations.some((integration) => integration.takesKey) || adding.view.value.kind !== 'closed')
+
 function PanelBody({ view, connecting, checking, adding, removing, onRetry }: {
   readonly view: PanelView
   readonly connecting: ConnectModel
@@ -253,7 +261,7 @@ function PanelBody({ view, connecting, checking, adding, removing, onRetry }: {
       return html`
         <${Offer} integrations=${view.integrations} />
         ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
-        ${takingKey.length === 0 ? null : html`<${KeyArea} model=${adding} integrations=${takingKey} />`}
+        ${showsKeyArea(view, adding) ? html`<${KeyArea} model=${adding} integrations=${takingKey} />` : null}
         <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} removals=${removing} />
         <p class="hint" role="status">${leftWords(removing.removing.value, view.owned)}</p>
       `
@@ -276,14 +284,18 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     if (before !== view.kind && hadControls && fell()) heading.current?.focus()
   }, [view.kind])
   // An account that left the list, removed here or elsewhere, takes its
-  // card away, and a focus on it with it. That focus goes to the heading of
-  // the panel in the same way.
+  // card away, and a focus on it with it. The area of a key leaves once its
+  // form closed and no subscription takes a key. That focus goes to the
+  // heading of the panel in the same way.
   const cards = view.kind === 'read' ? view.owned.accounts.map((account) => account.id) : null
-  const drawn = useRef(cards)
+  const keyed = showsKeyArea(view, model.adding)
+  const drawn = useRef({ cards, keyed })
   useEffect(() => {
     const before = drawn.current
-    drawn.current = cards
-    if (before !== null && cards !== null && before.some((id) => !cards.includes(id)) && fell()) heading.current?.focus()
+    drawn.current = { cards, keyed }
+    const cardLeft = before.cards !== null && cards !== null && before.cards.some((id) => !cards.includes(id))
+    const areaLeft = before.keyed && !keyed && view.kind === 'read'
+    if ((cardLeft || areaLeft) && fell()) heading.current?.focus()
   })
   return html`
     <section aria-labelledby="subscriptions-heading">

@@ -130,8 +130,9 @@ export interface KeyAddModel {
       it has no word of the server on: until then the key would stay in a
       field with a button that sends it. */
   readonly add: (integrationId: string, key: string) => Promise<Kept>
-  /** Leaves whatever runs behind, for another person is shown now. An
-      answer that comes later changes nothing. */
+  /** Leaves whatever runs behind and closes the form, for another person is
+      shown now or the page goes away. An answer that comes later changes
+      nothing. */
   readonly reset: () => void
 }
 

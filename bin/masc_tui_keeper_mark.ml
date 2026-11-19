@@ -177,16 +177,16 @@ let sandboxes = Masc.Keeper_types_profile.all_sandbox_profiles
 let now_header = "NOW"
 let age_header = "AGE"
 
-let operator_disposition_word : Masc.Keeper_execution_receipt.operator_disposition_kind -> string = function
-  | Disp_operator_action_required -> "사람 몫"
-  | Disp_effect_review_required -> "효과 확인"
-  | Disp_unknown -> "분류 안 됨"
-  | Disp_pass -> "pass"
-  | Disp_fail_open_next_runtime -> "fail open"
-  | Disp_retry_later -> "retry later"
-  | Disp_pass_next_model -> "next model"
-  | Disp_user_cancelled -> "cancelled"
-  | Disp_skipped -> "skipped"
+let operator_disposition_word ~ko : Masc.Keeper_execution_receipt.operator_disposition_kind -> string = function
+  | Disp_operator_action_required -> if ko then "사람 몫" else "human"
+  | Disp_effect_review_required -> if ko then "효과 확인" else "review"
+  | Disp_unknown -> if ko then "분류 안 됨" else "unclassed"
+  | Disp_pass -> if ko then "통과" else "pass"
+  | Disp_fail_open_next_runtime -> if ko then "다음 런타임" else "fail open"
+  | Disp_retry_later -> if ko then "나중에 재시도" else "retry later"
+  | Disp_pass_next_model -> if ko then "다음 모델" else "next model"
+  | Disp_user_cancelled -> if ko then "취소됨" else "cancelled"
+  | Disp_skipped -> if ko then "건너뜀" else "skipped"
 ;;
 
 let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity) =

@@ -524,7 +524,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   in
   let status_word =
     match operator_disposition with
-    | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
+    | Some disp -> Masc_tui_keeper_mark.operator_disposition_word ~ko disp
     | None -> keeper_row_activity_word ~ko row
   in
   status_color ^ glyph ^ " "
@@ -927,16 +927,17 @@ let grid_digest ~now memory =
 
 (* The memory view's right column: the atoms requests skip. *)
 let grid_gap (grid : Grid.t) memory =
-  let text =
+  let text, tone =
     match memory with
     | Memory_reading.Row { gap = Memory_reading.Gap { first_atom; past_last_atom }; _ }
       when past_last_atom > first_atom ->
-        Masc_tui_chart.format_compact_num (past_last_atom - first_atom)
-    | Memory_reading.No_row | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } -> Keeper_mark.unknown_mark
+        Masc_tui_chart.format_compact_num (past_last_atom - first_atom), Theme.warn ()
+    | Memory_reading.No_row | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } ->
+        Keeper_mark.unknown_mark, Theme.recede ()
     | Memory_reading.Row { gap = Memory_reading.Gap _ | Memory_reading.No_gap; _ }
-    | Memory_reading.Unknown | Memory_reading.Refused _ -> ""
+    | Memory_reading.Unknown | Memory_reading.Refused _ -> "", Theme.recede ()
   in
-  Theme.info () ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
+  tone ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
 
 module Age_ladder = Masc_tui_keeper_age_ladder
 
@@ -1237,9 +1238,12 @@ let group_wake_strip state (grid : Grid.t) ~now members =
     ~style:Masc_tui_keeper_strip.Wake_counts slots
 
 let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~pulse title =
-  let count = List.length members in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let memories = List.map (keeper_memory_reading state) members in
   let lag = group_number (group_sum group_lag memories) in
+  (* [title] already names the group and its member count once, so the right
+     side carries status marks or aggregate readings without repeating count. *)
   let now_text, tail, right = match group with
     | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named _ | Keeper_list_model.Cause_unnamed) ->
         let retry, wait, unknown = List.fold_left (fun (retry, wait, unknown) row ->
@@ -1249,26 +1253,25 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
               | Ok (Some (Tui_decode.Path_rest_serving _)) -> retry + 1, wait, unknown
               | Ok None | Error _ -> retry, wait, unknown + 1)
           | None -> retry, wait, unknown + 1) (0, 0, 0) members in
-        let parts = (if retry > 0 then [Printf.sprintf "▹ retry %d" retry] else [])
-          @ (if wait > 0 then [Printf.sprintf "◌ wait %d" wait] else [])
+        let parts = (if retry > 0 then [Printf.sprintf "▹ %s %d" (say "재시도" "retry") retry] else [])
+          @ (if wait > 0 then [Printf.sprintf "◌ %s %d" (say "대기" "wait") wait] else [])
           @ (if unknown > 0 then [Printf.sprintf "? %d" unknown] else []) in
-        (* The cause groups wear the row marks of their verdicts. *)
-        Printf.sprintf "%s %d failing" Keeper_mark.grid_failing_mark count,
+        Keeper_mark.grid_failing_mark ^ " " ^ say "실패" "failing",
         String.concat "  " parts, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
-        Printf.sprintf "%s %d" Keeper_mark.grid_recovered_mark count,
+        Keeper_mark.grid_recovered_mark,
         group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
-        Printf.sprintf "%s %d" Keeper_mark.grid_ok_mark count,
+        Keeper_mark.grid_ok_mark,
         group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused ->
-        Printf.sprintf "%s %d" Keeper_mark.grid_paused_mark count,
+        Keeper_mark.grid_paused_mark,
         group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_state _ | Keeper_list_model.Group_due _ ->
-        string_of_int count, group_wake_strip state grid ~now members, ""
+        "", group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_memory _ ->
         let gap = match group_sum group_gap memories with Some 0 -> "" | value -> group_number value in
-        string_of_int count, "Σ lag " ^ lag, gap
+        "", say "합계 지연 " "Σ lag " ^ lag, gap
     | Keeper_list_model.Group_age age ->
         let odd = if age <> Keeper_list_model.Age_older then 0 else
           List.length (List.filter (fun row -> match keeper_row_runtime row with
@@ -1276,8 +1279,9 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
                 | Tui_decode.Activation_autonomous -> true
                 | Tui_decode.Activation_manual | Tui_decode.Activation_on_demand -> false)
             | None -> false) members) in
-        (if odd > 0 then Printf.sprintf "%d · %d!" count odd else string_of_int count),
-        "Σ " ^ group_number (group_sum group_facts memories) ^ " facts · lag " ^ lag, "" in
+        (if odd > 0 then Printf.sprintf "%d!" odd else ""),
+        Printf.sprintf (if ko then "합계 %s 사실 · 지연 %s" else "Σ %s facts · lag %s")
+          (group_number (group_sum group_facts memories)) lag, "" in
   let pulse_width = match pulse with
     | Some _ -> grid.side_cells
     | None -> (match group with
@@ -1696,7 +1700,7 @@ let keeper_state_heading_text ~ko ~available_cells rows group count =
   let detail =
     match group with
     | Keeper_list_model.Waiting ->
-        Render_schedule.waiting_group_heading_detail ~available_cells ~group_count:count
+        Render_schedule.waiting_group_heading_detail ~ko ~available_cells ~group_count:count
           (Keeper_list_model.waiting_summary rows)
     | Keeper_list_model.Attention | Keeper_list_model.Failing | Keeper_list_model.Active
     | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
@@ -1704,47 +1708,50 @@ let keeper_state_heading_text ~ko ~available_cells rows group count =
   Printf.sprintf "%s %d%s" label count detail
 
 let keeper_group_heading_text ~ko ~available_cells rows group count =
+  let say korean english = if ko then korean else english in
   match group with
   | Keeper_list_model.Group_state attention ->
       keeper_state_heading_text ~ko ~available_cells rows attention count
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named cause) ->
-      Printf.sprintf "%s %s %d" failing_glyph
-        (String.uppercase_ascii (keeper_cause_group_word cause)) count
+      Printf.sprintf "%s %s %d" failing_glyph (keeper_cause_group_word cause) count
   | Keeper_list_model.Group_cause Keeper_list_model.Cause_unnamed ->
-      Printf.sprintf "%s FAILING · CAUSE NOT RECORDED %d" failing_glyph count
-  | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered -> "recovered · failed in 12h"
-  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> "no current failure"
-  | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused -> "paused"
+      Printf.sprintf "%s %s %d" failing_glyph (say "실패 · 원인 미기록" "Failing · unknown cause") count
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
+      Printf.sprintf "%s %d" (say "복구 · 12시간 내 실패" "Recovered · failed in 12h") count
+  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
+      Printf.sprintf "%s %d" (say "현재 실패 없음" "No current failure") count
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused ->
+      Printf.sprintf "%s %d" (say "일시정지" "Paused") count
   | Keeper_list_model.Group_due due ->
       let label =
         match due with
-        | Keeper_list_model.Due_late -> "LATE"
-        | Keeper_list_model.Due_held -> "HELD"
-        | Keeper_list_model.Due_within_hour -> "WITHIN 1H"
-        | Keeper_list_model.Due_within_half_day -> "WITHIN 12H"
-        | Keeper_list_model.Due_later -> "LATER"
-        | Keeper_list_model.Due_none -> "NO SCHEDULE"
-        | Keeper_list_model.Due_unknown -> "SCHEDULE UNKNOWN"
+        | Keeper_list_model.Due_late -> say "지연됨" "Late"
+        | Keeper_list_model.Due_held -> say "보류됨" "Held"
+        | Keeper_list_model.Due_within_hour -> say "1시간 내" "Within 1h"
+        | Keeper_list_model.Due_within_half_day -> say "12시간 내" "Within 12h"
+        | Keeper_list_model.Due_later -> say "이후 예정" "Later"
+        | Keeper_list_model.Due_none -> say "예약 없음" "No schedule"
+        | Keeper_list_model.Due_unknown -> say "예약 모름" "Schedule unknown"
       in
       Printf.sprintf "%s %s %d" (Masc_tui_keeper_mark.due_glyph due) label count
   | Keeper_list_model.Group_memory follow ->
       let label =
         match follow with
-        | Keeper_list_model.Memory_refused -> "MEMORY REFUSED"
-        | Keeper_list_model.Memory_gap -> "MEMORY GAP"
-        | Keeper_list_model.Memory_lagging -> "MEMORY LAGGING"
-        | Keeper_list_model.Memory_following -> "MEMORY FOLLOWING"
-        | Keeper_list_model.Memory_unread -> "NO MEMORY READING"
+        | Keeper_list_model.Memory_refused -> say "기억 거부됨" "Memory refused"
+        | Keeper_list_model.Memory_gap -> say "기억 누락" "Memory gap"
+        | Keeper_list_model.Memory_lagging -> say "기억 지연" "Memory lagging"
+        | Keeper_list_model.Memory_following -> say "기억 정상" "Memory following"
+        | Keeper_list_model.Memory_unread -> say "기억 미조회" "No memory reading"
       in
       Printf.sprintf "%s %d" label count
   | Keeper_list_model.Group_age age ->
       let label =
         match age with
-        | Keeper_list_model.Age_within_3h -> "UPDATED WITHIN 3H"
-        | Keeper_list_model.Age_within_day -> "UPDATED WITHIN 24H"
-        | Keeper_list_model.Age_within_3d -> "UPDATED WITHIN 3D"
-        | Keeper_list_model.Age_older -> "UPDATED EARLIER"
-        | Keeper_list_model.Age_unknown -> "UPDATE TIME UNKNOWN"
+        | Keeper_list_model.Age_within_3h -> say "3시간 내 갱신" "Updated within 3h"
+        | Keeper_list_model.Age_within_day -> say "24시간 내 갱신" "Updated within 24h"
+        | Keeper_list_model.Age_within_3d -> say "3일 내 갱신" "Updated within 3d"
+        | Keeper_list_model.Age_older -> say "이전 갱신" "Updated earlier"
+        | Keeper_list_model.Age_unknown -> say "갱신 시각 모름" "Update time unknown"
       in
       Printf.sprintf "%s %d" label count
 
@@ -1952,7 +1959,7 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
         (Theme.info ()
          ^ (if ko then "월드 · 공유 워크스페이스 기억" else "world · shared workspace memory")
          ^ Ansi.reset,
-         Masc_tui_keeper_world.dock_lines ~health_error:(memory_health_error_text state)
+         Masc_tui_keeper_world.dock_lines ~ko ~health_error:(memory_health_error_text state)
            ~cells:inner ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows)
            state.memory_health (Masc_tui_memory_world.reading state.memory_world))
     | Masc_tui_keeper_story.(Story | Schedule | Memory), None ->
@@ -2385,7 +2392,7 @@ let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
   let keeper_name = row.keeper.Tui_decode.k_name in
   let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko)
       ~padded:false row in
-  Masc_tui_keeper_strip.selected_summary ~now
+  Masc_tui_keeper_strip.selected_summary ~ko:(state.ui_language = Lang_ko) ~now
     ~activity_cell:now_cell
     ~next_run:(match state.schedules_agenda_error with
       | Some _ -> Masc_tui_keeper_next_run.Unknown
@@ -3039,31 +3046,31 @@ let render_keeper_axes (state : state) =
   List.iter
     (function
       | Keeper_world as entry ->
-          let world = Masc_tui_keeper_world.row_cells ~view:state.keeper_list_view
+          let world = Masc_tui_keeper_world.row_cells ~ko ~view:state.keeper_list_view
               ~health_error:(memory_health_error_text state) state.memory_health
               (Masc_tui_memory_world.reading state.memory_world) in
           let text = (grid_line grid
-            { gutter = Theme.info () ^ "▌ ■ " ^ Ansi.reset
-            ; name = fit_width "world · shared" grid.name_cells
+            { gutter = Theme.info () ^ "  ■ " ^ Ansi.reset
+            ; name = fit_width (if ko then "공유 세계" else "world · shared") grid.name_cells
             ; pulse = (match world.pulse with
                 | Masc_tui_keeper_world.Ledger_and_briefing ->
-                    fit_width "ledger + briefing" grid.side_cells
+                    fit_width (if ko then "원장 + 브리핑" else "ledger + briefing") grid.side_cells
                 | Masc_tui_keeper_world.Fact_ages bins -> grid_age_ladder_reading grid bins)
             ; now_cell = fit_width world.now_cell Grid.now_cells
             ; strip = fit_width world.strip (Grid.strip_cells grid)
             ; due = fit_width world.due Grid.due_cells
             ; right = Message_layout.pad_left world.right grid.mem_cells }) in
-          let text = pressable Press_keeper_world (fit_width text inner) in
+          let press value = pressable Press_keeper_world (fit_width value inner) in
           if keeper_entry_selected stop entry then
-            selected_line (Masc_tui_theme.strip_sgr text)
-          else box_line buf cols text
+            selected_line (press (Masc_tui_theme.strip_sgr text))
+          else box_line buf cols (press text)
       | Keeper_group_heading (group, count) as entry ->
           let text =
             let title =
               keeper_group_heading_text ~ko ~available_cells:inner model_rows group count
             in
             match matrix with
-            | Some _ -> keeper_group_heading_style group ^ "▌   " ^ title ^ Ansi.reset
+            | Some _ -> keeper_group_heading_style group ^ "  " ^ title ^ Ansi.reset
             | None ->
                 let members = keeper_group_rows list_reading group in
                 grid_group_title state grid ~now:now_unix ~group ~members
@@ -4382,7 +4389,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                        Masc_tui_connector_state.badge_column_cells
                    ^ tail
                  in
-                 if index = selected_index then Ansi.reverse ^ line ^ Ansi.reset
+                 if index = selected_index then
+                   Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
                  else line)
               connectors
           in
@@ -4469,7 +4477,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                            else "")
                           removal
                       in
-                      if selected then Ansi.reverse ^ line ^ Ansi.reset
+                      if selected then
+                        Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
                       else if missing_keeper then
                         (Theme.bad ()) ^ line ^ Ansi.reset
                       else line)

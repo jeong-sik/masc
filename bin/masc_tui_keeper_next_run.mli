@@ -75,4 +75,4 @@ val sum_wake_strips : wake_slot list list -> wake_slot list
     [Wakes_unknown]. It adds strips built for one window, which all have the
     same length. *)
 
-val cell : now:float -> t -> Masc_tui_keeper_axis_cell.t option
+val cell : ?ko:bool -> now:float -> t -> Masc_tui_keeper_axis_cell.t option

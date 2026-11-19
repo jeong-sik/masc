@@ -62,7 +62,7 @@ let runtime_cells ~now = function
 ;;
 
 let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
-  Masc_tui_keeper_next_run.cell ~now
+  Masc_tui_keeper_next_run.cell ~ko:(state.ui_language = Masc_tui_types.Lang_ko) ~now
     (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
 ;;
 

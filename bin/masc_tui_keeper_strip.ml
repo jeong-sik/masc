@@ -208,7 +208,8 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   ; due = let label = (if ko then "최대" else "max ") ^ wake_max in
       if Layout.display_width label <= Grid.due_cells then label else Layout.compact_count wake_peak }
 
-let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
+let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
+  let say korean english = if ko then korean else english in
   let observed = runtime row in
   let verdict = Grid.verdict ~now observed in
   let age = Option.bind row.Model.last_activity_at (fun since -> Layout.age_text ~now ~since) in
@@ -216,9 +217,9 @@ let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
     | Grid.Failing _, Some runtime ->
         Some (match runtime.Decode.kr_failing_since with
           | Some at when Float.is_finite at && at <= now ->
-              "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
-          | Some _ | None -> "since ?")
-    | Grid.Failing _, None -> Some "since ?"
+              say "시작 " "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
+          | Some _ | None -> say "시작 ?" "since ?")
+    | Grid.Failing _, None -> Some (say "시작 ?" "since ?")
     | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None) -> None in
   let next = match next_run with
     | Next.Scheduled_at at ->
@@ -228,23 +229,26 @@ let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
     | Next.No_schedule | Next.Late_since _ | Next.Held_current _ | Next.Held_as_of _
     | Next.Not_before _ | Next.Unknown ->
         Option.map (fun (cell : Masc_tui_keeper_axis_cell.t) -> cell.text)
-          (Next.cell ~now next_run) in
+          (Next.cell ~ko ~now next_run) in
   let next = Option.map (fun text -> text ^ (match recurrence with
-    | Some (Schedule_domain.Interval { interval_sec }) -> " every " ^ Grid.short_span (float_of_int interval_sec)
+    | Some (Schedule_domain.Interval { interval_sec }) ->
+        say " 주기 " " every " ^ Grid.short_span (float_of_int interval_sec)
     | Some (Schedule_domain.One_shot as recurrence)
     | Some (Schedule_domain.Daily _ as recurrence)
     | Some (Schedule_domain.Cron _ as recurrence) -> " " ^ clean (Schedule_domain.recurrence_summary recurrence)
     | None -> "")) next in
   let lag = match memory with
-    | Memory.Row { lag = Memory.Lag n; _ } -> if n > 0 then Some ("lag " ^ string_of_int n) else None
-    | Memory.Row { lag = Memory.Lag_unmeasured; _ } | Memory.Unknown -> Some "lag ?"
-    | Memory.Refused _ -> Some "lag !"
+    | Memory.Row { lag = Memory.Lag n; _ } ->
+        if n > 0 then Some (say "지연 " "lag " ^ string_of_int n) else None
+    | Memory.Row { lag = Memory.Lag_unmeasured; _ } | Memory.Unknown -> Some (say "지연 ?" "lag ?")
+    | Memory.Refused _ -> Some (say "지연 !" "lag !")
     | Memory.No_row -> None in
   let head = match verdict, observed with
     | Grid.Failing _, Some row ->
         (match row.Decode.kr_runtime_path_rest with
          | Ok (Some (Decode.Path_rest_serving path)) -> Some ("▹ " ^ clean path.runtime_id)
-         | Ok (Some (Decode.Path_rest_resting path)) -> Some ("◌ wait " ^ clean path.runtime_id)
+         | Ok (Some (Decode.Path_rest_resting path)) ->
+             Some (say "◌ 대기 " "◌ wait " ^ clean path.runtime_id)
          | Error _ | Ok None -> Some "▹ ?")
     | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None)
     | Grid.Failing _, None -> None in

@@ -33,7 +33,7 @@ let tab ~ko ~current page =
       | Some key -> " " ^ key ^ " " ^ label ^ " "
       | None -> " " ^ label ^ " "
     in
-    Ansi.reverse ^ text ^ Ansi.reset
+    Theme.selection_style () ^ Ansi.bold ^ text ^ Ansi.reset
   else
     match hotkey with
     | Some key ->
@@ -182,7 +182,7 @@ let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
 ;;
 
 let next_run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
-  Masc_tui_keeper_next_run.cell ~now
+  Masc_tui_keeper_next_run.cell ~ko:(state.ui_language = Masc_tui_types.Lang_ko) ~now
     (Masc_tui_keeper_next_run.find
        (Masc_tui_keeper_next_run.index_of_agenda
           ~freshness:state.schedules_agenda_freshness

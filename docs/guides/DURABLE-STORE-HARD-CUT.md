@@ -117,6 +117,36 @@ traces its most recent turn records name, so the next sweep after a Keeper's
 turn records are deleted removes that Keeper's raw traces. Carried-front
 recovery and request observation start from the turn records that remain.
 
+### Keeper turn boundaries
+
+The log is `.masc/keepers/<keeper>/turn-boundaries.jsonl`. The first refusal
+names the Keeper and line. Librarian positions count lines of this log, and a
+deleted log starts again at line 1. Delete these with the log:
+
+- `librarian-progress.json`, `librarian-official-progress.json`,
+  `librarian-external-read.json` and `librarian-continuity.json` next to the
+  log.
+- `.masc/config/keepers/<keeper>.librarian-range-commit.json` and
+  `<keeper>.librarian-unread.json`.
+- The Keeper's Librarian history scope. These are the `<scope digest>/`
+  directories under `.masc/lane-addons/` whose
+  `keeper-librarian-history-fences` records name the Keeper as
+  `physical_owner.keeper_id`. Delete that digest from `tool-request-owners`,
+  `tool-request-bodies`, `tool-request-owners-settled`,
+  `keeper-librarian-history-fences` and
+  `keeper-librarian-history-resolutions`. A history original left behind
+  checks its saved position against the new log and stops that Keeper's
+  Librarian.
+
+Then run `validate-stores` again. It names the Librarian gate scopes whose
+parent history is gone. Delete what its `fresh state` lines name.
+
+Turns the Librarian had not committed before the cut never reach Memory. The
+next round takes the first cut point the new log records as its starting
+position. The Keeper's unfinished Librarian requests are dropped. The external
+evidence log is read again from its start. Memory files under
+`.masc/config/keepers/` stay.
+
 ### Official-client turn fragments
 
 The files are `.masc/traces/<trace>/history.jsonl` and

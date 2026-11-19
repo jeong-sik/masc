@@ -233,6 +233,11 @@ type memory_retract_validation =
 
 val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation
 
+(** The two receipt fields that say what a commit took out of Memory:
+    [removed_memory_ids], and [support_invalidations] for the derived facts
+    among them that left because a premise did. *)
+val removal_receipt : Librarian_effects.t -> (string * Yojson.Safe.t) list
+
 module For_testing : sig
   val successor_candidates_for_query : query:string ->
     Keeper_memory_os_current.successor_recall_candidate list ->

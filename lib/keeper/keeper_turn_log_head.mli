@@ -2,7 +2,9 @@
     (RFC librarian-call-only-proposes §5.1, §5.2): how many of its messages
     are closed, how many are open, and which turns hold the closed ones.
 
-    Only the head is read. No message object is loaded. *)
+    {!read} reads the head alone. {!with_segments_as_needed} also reads the
+    segments a run reaches back into, each by the name the turns after it
+    hold. No message object or bundle is loaded. *)
 
 module Objects := Agent_core.Checkpoint_objects
 module Marks := Keeper_turn_log_marks
@@ -42,9 +44,18 @@ type segment_unread =
 
 val segment_unread_to_string : segment_unread -> string
 
+(** Why a run is not covered. A run that starts before what is covered is
+    not among them: {!with_segments_as_needed} reads the segment before. *)
 type covering_error =
-  | Range of Marks.range_error
-  (** The run ends after the last closed message, or is backwards. *)
+  | Ends_after_covered of
+      { through : int
+      ; last : int
+      }
+  (** The run ends after the last closed message. *)
+  | Backwards of
+      { from : int
+      ; through : int
+      }
   | Segment of segment_unread Marks.segment_error
 
 (** What [ask] answers. While it answers that its run starts before what is

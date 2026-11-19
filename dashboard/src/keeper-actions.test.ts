@@ -2231,6 +2231,38 @@ describe('sendKeeperThreadMessage operation stream', () => {
       expect(keeperSending.value.echo).toBe(false)
     })
 
+    it('takes the way out away as soon as the send a stop is held for fails', async () => {
+      // The failed send reads the stored history once before it leaves, and
+      // that read can take as long as its time limit. No stop is held in that
+      // time, so the screen is not told one is.
+      const stream = holdUnacceptedStream()
+      let answerHistory!: (entries: unknown[]) => void
+      fetchKeeperChatHistory.mockImplementation(() => new Promise(resolve => { answerHistory = resolve }))
+
+      const send = sendKeeperThreadMessage('echo', 'held and then failed').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(stopHeld()).toBe(true)
+
+      stream.fail(new Error('the server did not answer'))
+      await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalled())
+
+      // The send is still listed: its history read has not answered.
+      expect(keeperSending.value.echo).toBe(true)
+      expect(stopHeld()).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
+
+      answerHistory([])
+      await send
+
+      expect(stopHeld()).toBe(false)
+      expect(keeperSending.value.echo).toBe(false)
+    })
+
     it('shows a stream that closes before the acceptance as cut, and names nothing to the server', async () => {
       const stream = holdUnacceptedStream()
 

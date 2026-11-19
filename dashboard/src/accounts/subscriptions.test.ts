@@ -74,12 +74,12 @@ const linking = (): Response => new Response(
   { status: 200, headers: { 'content-type': 'text/event-stream' } },
 )
 
-const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
-const codex = { integration_id: 'codex', display_name: 'Codex', models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
+const claude = { integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
+const codex = { integration_id: 'codex', display_name: 'Codex', connect: ['login'], models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
 const offered = (): Response => json(200, { integrations: [claude, codex] })
 const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
 const ownedOne = (): Response => json(200, {
-  provider_accounts: [{ provider_account_id: 'acct_1', integration_id: 'claude_code' }],
+  provider_accounts: [{ provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code' }],
   runtimes: [{ runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }],
 })
 const notReady = (): Response => json(503, { error: 'the files are being read again' })
@@ -110,11 +110,11 @@ describe('reading the subscriptions', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: {
-        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' } }],
+        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }],
         runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
       },
     })
@@ -389,16 +389,16 @@ describe('checking a model from the panel', () => {
 
 describe('what the panel knows of each account', () => {
   const integrations: readonly Integration[] = [
-    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
   ]
   const facts = accountFacts(integrations, {
     accounts: [
-      { id: 'acct_gone', integration: { read: true, value: 'muse' } },
-      { id: 'acct_claude', integration: { read: true, value: 'claude_code' } },
-      { id: 'acct_codex', integration: { read: true, value: 'codex' } },
-      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' } },
-      { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+      { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
+      { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
     ],
     runtimes: [
       { id: 'acct_codex.gpt-5.5', accountId: 'acct_codex', model: { read: true, value: 'gpt-5.5' } },
@@ -450,14 +450,26 @@ describe('what the panel knows of each account', () => {
   it('tells an account that has a model to check from one whose subscription offers none', () => {
     const owned = {
       accounts: [
-        { id: 'acct_checked', integration: { read: true, value: 'claude_code' } },
-        { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+        { id: 'acct_checked', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
       ],
       runtimes: [{ id: 'acct_checked.claude-sonnet-5', accountId: 'acct_checked', model: { read: true, value: 'claude-sonnet-5' } }],
     } as const
     const kinds = (offered: readonly Integration[]) => accountFacts(offered, owned).map((one) => [one.account.id, one.keeper.kind])
     expect(kinds(integrations)).toEqual([['acct_checked', 'can_run'], ['acct_new', 'needs_model']])
     expect(kinds(integrations.map((one) => ({ ...one, models: [] })))).toEqual([['acct_checked', 'can_run'], ['acct_new', 'no_model']])
+  })
+
+  it('says a removal that was left on an account before anything else of it', () => {
+    const kinds = accountFacts(integrations, {
+      accounts: [
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
+        { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, removal: 'start_given_up' },
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
+      ],
+      runtimes: [],
+    }).map((one) => [one.account.id, one.keeper.kind])
+    expect(kinds).toEqual([['acct_left', 'removal_left'], ['acct_left_gone', 'removal_left'], ['acct_key', 'needs_model']])
   })
 
   it('counts a model as checked only while the server still finds it in its settings', () => {
@@ -473,8 +485,8 @@ describe('the panel', () => {
     kind: 'read',
     forUser: person,
     integrations: [
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
-      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
     ],
     owned,
   })
@@ -490,11 +502,11 @@ describe('the panel', () => {
     ['nothing connected', read({ accounts: [], runtimes: [] })],
     ['accounts of each kind', read({
       accounts: [
-        { id: 'acct_claude', integration: { read: true, value: 'claude_code' } },
-        { id: 'acct_codex', integration: { read: true, value: 'codex' } },
-        { id: 'acct_gone', integration: { read: true, value: 'muse' } },
-        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' } },
-        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' } },
+        { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, removal: null },
+        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' }, held: { kind: 'login' }, removal: null },
       ],
       runtimes: [
         { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
@@ -504,10 +516,18 @@ describe('the panel', () => {
         { id: 'acct_odd.y', accountId: 'acct_odd', model: { read: false, unread: 'unrecognised' } },
       ],
     })],
+    // The first holds a key the server did not find, and the second has a removal left on it.
+    ['key accounts', read({
+      accounts: [
+        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
+        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
+      ],
+      runtimes: [],
+    })],
   ]
   const named = (...names: string[]) => views.map(([name]) => [name, names.includes(name) ? 1 : 0])
   /** The states with a subscription to connect. */
-  const connectable = ['nothing connected', 'accounts of each kind']
+  const connectable = ['nothing connected', 'accounts of each kind', 'key accounts']
 
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
@@ -544,8 +564,15 @@ describe('the panel', () => {
   })
 
   it('offers to check a model only on an account of a subscription with a model to check', () => {
-    expect(count('.check button')).toEqual(named('accounts of each kind'))
-    expect(count('.check select')).toEqual(named('accounts of each kind'))
+    expect(count('.check button')).toEqual(named('accounts of each kind', 'key accounts'))
+    expect(count('.check select')).toEqual(named('accounts of each kind', 'key accounts'))
+  })
+
+  it('offers a check on a key account whose key the server did not find, and none on an account a removal was left on', () => {
+    const view = views.find(([name]) => name === 'key accounts')?.[1]
+    if (view === undefined) throw new Error('no view of the key accounts')
+    const rows = [...drawn(view).container.querySelectorAll('li.row')]
+    expect(rows.map((row) => [row.querySelectorAll('.check button').length, row.querySelectorAll('.models, .check').length > 0])).toEqual([[1, true], [0, false]])
   })
 
   it('names, before anything is connected, only the subscriptions with a model to check', () => {
@@ -554,9 +581,9 @@ describe('the panel', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called },
-        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called },
-        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called, takesKey: false },
+        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called, takesKey: false },
+        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: { accounts: [], runtimes: [] },
     })

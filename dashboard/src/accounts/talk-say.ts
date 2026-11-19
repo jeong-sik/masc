@@ -51,6 +51,7 @@ export function refusalOf(code: TalkRefusal): Refusal | null {
     case 'not_signed_in': return after('이 모델의 구독 계정이 로그인돼 있지 않아요. 위 구독 카드에서 다시 연결해 주세요.')
     case 'key_missing': return before('이 모델의 API key 가 서버에 없어요. 그 계정을 없애고 key 를 다시 넣어 주세요.')
     case 'key_unreadable': return before('서버가 이 모델의 API key 를 읽지 못했어요. 그 계정을 없애고 key 를 다시 넣어 주세요.')
+    case 'key_refused': return after('키가 거절됐어요. 구독 쪽이 이 모델의 API key 를 받지 않았어요. 그 계정을 없애고 key 를 다시 넣어 주세요.')
     case 'no_quota': return after('구독에 남은 사용량이 없어요. 사용량이 돌아온 뒤 다시 보내 주세요.')
     case 'silent': return after('Keeper가 한동안 아무것도 보내지 않아서 멈췄어요. 다시 보내 주세요.')
     case 'not_started': return after('Keeper를 시작하지 못했어요. 잠시 뒤 다시 보내 주세요.')

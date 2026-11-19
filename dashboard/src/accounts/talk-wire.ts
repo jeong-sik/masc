@@ -36,7 +36,7 @@ const refusalCodes = [
   'invalid_request', 'message_too_long', 'message_blank', 'runtime_not_supported', 'account_runtime_invalid',
   'turn_refused', 'native_tools_refused', 'unknown_keeper', 'unknown_conversation', 'unknown_account',
   'keeper_has_no_runtime', 'account_call_running', 'conversation_on_other_subscription', 'runtime_reassigned',
-  'not_signed_in', 'key_missing', 'key_unreadable',
+  'not_signed_in', 'key_missing', 'key_unreadable', 'key_refused',
   'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded',
   'conversation_row_not_understood', 'conversation_row_half_written', 'conversation_record_unavailable',
   'server_unavailable', 'internal_error',
@@ -61,7 +61,7 @@ export type TalkAnswer<T> = { readonly ok: true; readonly value: T } | { readonl
 
 /** How a turn that has no answer ended, as the record of the conversation
     spells it (lib/server/server_keeper_conversation.ml, `failure_to_string`). */
-const failureKinds = ['not_signed_in', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer'] as const
+const failureKinds = ['not_signed_in', 'key_refused', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer'] as const
 export type TurnFailure = typeof failureKinds[number] | 'unrecognised'
 
 /** What came of a message the person sent. `modelMayHaveRead` is whether the

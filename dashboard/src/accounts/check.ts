@@ -34,7 +34,7 @@ const unavailableCodes = [
   'invalid_configuration', 'client_not_authenticated', 'client_not_started', 'account_not_authorized',
 ] as const
 const failedCodes = [
-  'rate_limited', 'quota_exhausted', 'provider_overloaded', 'provider_auth_refused',
+  'rate_limited', 'quota_exhausted', 'provider_overloaded', 'provider_auth_refused', 'key_refused',
   'provider_unreachable', 'model_not_found', 'provider_rejected', 'timed_out',
   'tool_not_called', 'tool_result_not_consumed', 'empty_response', 'model_unreported',
 ] as const

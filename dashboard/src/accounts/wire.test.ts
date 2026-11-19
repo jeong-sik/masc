@@ -111,11 +111,11 @@ describe('signing out', () => {
 
 describe('readIntegrations', () => {
   const one = (fields: Record<string, unknown>): unknown => ({
-    integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed', ...fields }],
+    integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed', ...fields }],
   })
   it('reads a subscription whose models a Keeper may call', () => {
     expect(readIntegrations(one({}))).toEqual([
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
     ])
   })
   it.each([
@@ -145,13 +145,23 @@ describe('readIntegrations', () => {
     expect(readIntegrations(one({ display_name: '', models: [] }))?.[0]).toMatchObject({ displayName: '', models: [] })
   })
   it.each([
+    ['a login alone', ['login'], false],
+    ['a login and a key', ['login', 'key'], true],
+    ['a way named later beside the login', ['login', 'device'], false],
+  ] as const)('reads whether a subscription takes a key: %s', (_name, connect, takesKey) => {
+    expect(readIntegrations(one({ connect }))?.[0]?.takesKey).toBe(takesKey)
+  })
+  it.each([
     ['no object', []],
     ['no list', { integrations: {} }],
     ['no id', one({ integration_id: '' })],
+    ['no ways to connect it', one({ connect: undefined })],
+    ['ways to connect it that are no list', one({ connect: 'login' })],
+    ['a way to connect it that is no string', one({ connect: ['login', 1] })],
     ['a name that is no string', one({ display_name: null })],
     ['a model that is no string', one({ models: ['claude-sonnet-5', 7] })],
     ['an empty model', one({ models: [''] })],
-    ['no list of the models left out', { integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed' }] }],
+    ['no list of the models left out', { integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], calls: 'allowed' }] }],
     ['models left out that are no list', one({ withheld: {} })],
     ['a model left out with no name', one({ withheld: [{ reason: 'tools_not_declared' }] })],
     ['a model left out with no reason', one({ withheld: [{ model: 'claude-notools' }] })],
@@ -165,17 +175,35 @@ describe('readIntegrations', () => {
 
 describe('readOwned', () => {
   const answer = (account: Record<string, unknown>, runtime: Record<string, unknown>): unknown => ({
-    provider_accounts: [{ provider_account_id: 'acct_1', integration_id: 'claude_code', ...account }],
+    provider_accounts: [{ provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code', ...account }],
     runtimes: [{ runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5', ...runtime }],
   })
   it('reads the facts the server read', () => {
     expect(readOwned(answer({}, {}))).toEqual({
-      accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' } }],
+      accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null }],
       runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
     })
   })
   it('reads nothing owned', () => {
     expect(readOwned({ provider_accounts: [], runtimes: [] })).toEqual({ accounts: [], runtimes: [] })
+  })
+  it.each([
+    ['readable', 'readable'],
+    ['key_missing', 'key_missing'],
+    ['key_unreadable', 'key_unreadable'],
+    ['not_looked_at', 'not_looked_at'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads what the server found of the key of a key account: %s as %s', (code, key) => {
+    expect(readOwned(answer({ kind: 'key', key: code }, {}))?.accounts[0]?.held).toEqual({ kind: 'key', key })
+  })
+  it.each([
+    ['key_not_removed', 'key_not_removed'],
+    ['home_not_removed', 'home_not_removed'],
+    ['start_given_up', 'start_given_up'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads the removal left on an account: %s as %s', (code, removal) => {
+    const account = { provider_account_id: 'acct_1', kind: 'key', key: 'key_missing', integration_id: 'claude_code', removal: code }
+    expect(readOwned({ provider_accounts: [account], runtimes: [] })?.accounts[0]?.removal).toBe(removal)
   })
   it.each([
     ['login_receipt_missing', 'login_receipt_missing'],
@@ -198,6 +226,12 @@ describe('readOwned', () => {
     ['accounts as ids, the shape before', { provider_accounts: ['acct_1'], runtimes: [] }],
     ['no runtimes', { provider_accounts: [] }],
     ['an account with no id', answer({ provider_account_id: '' }, {})],
+    ['an account of no kind', answer({ kind: undefined }, {})],
+    ['an account of a kind named later', answer({ kind: 'token' }, {})],
+    ['a key account that says nothing of its key', answer({ kind: 'key' }, {})],
+    ['a key account whose key state is no string', answer({ kind: 'key', key: true }, {})],
+    ['a login account that says of a key', answer({ key: 'readable' }, {})],
+    ['a removal that is no string', answer({ removal: 2 }, {})],
     ['an empty integration', answer({ integration_id: '' }, {})],
     ['an integration and why it was not read', answer({ unread: 'login_receipt_missing' }, {})],
     ['an unread integration with no reason', answer({ integration_id: null }, {})],

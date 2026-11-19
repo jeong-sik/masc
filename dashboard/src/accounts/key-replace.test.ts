@@ -46,13 +46,13 @@ const noSuchAccount = (): Response => refusedAs(404, 'unknown_account')
 const noSession = (): Response => json(401, { error: 'no session cookie came with the request' })
 
 describe('sending a key for an account', () => {
-  it('asks with PUT on the path of the account, with the token of the session, the key in the body and no other credential', async () => {
+  it('asks with PUT on the path of the account, with the token of the session, the key in the body and no other credential, and follows no redirect', async () => {
     const { send, sent } = answering([replaced()])
     expect(await replaceKey(send, 'token-1', 'acct_key', key)).toEqual({ kind: 'replaced', oldKeysRemoved: true })
     const init: RequestInit = sent[0]?.init ?? {}
     const headers = new Headers(init.headers)
-    expect([sent.map(({ path }) => path), init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type'), init.body])
-      .toEqual([['/api/v1/setup/accounts/key/acct_key'], 'PUT', 'same-origin', 'token-1', false, 'application/json', JSON.stringify({ key })])
+    expect([sent.map(({ path }) => path), init.method, init.credentials, init.redirect, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type'), init.body])
+      .toEqual([['/api/v1/setup/accounts/key/acct_key'], 'PUT', 'same-origin', 'error', 'token-1', false, 'application/json', JSON.stringify({ key })])
   })
 
   it('names an account in one segment of the path, whatever its id holds', () => {
@@ -112,18 +112,24 @@ describe('the replacement of the key of an account', () => {
     expect([await model.replace('acct_key', key), sent.length, of('acct_key')]).toEqual(['kept', 0, { kind: 'open', failure: null }])
   })
 
-  it('holds the replacement the server did until the subscriptions were asked for again, and drops the key', async () => {
-    const reading = later<undefined>()
-    const { send } = answering([replaced(false)])
-    const refresh = vi.fn(() => reading.promise)
+  // The subscriptions that are asked for again never come in these cases.
+  it.each([
+    ['a replacement the server did', () => replaced(false), 'dropped', { kind: 'replaced', oldKeysRemoved: false }],
+    ['an account the server does not have', noSuchAccount, 'dropped', { kind: 'gone' }],
+  ] as const)('ends once the answer is read after %s, without the subscriptions it asked for again', async (_name, answer, kept, shown) => {
+    const { send } = answering([answer()])
+    const refresh = vi.fn(() => later<undefined>().promise)
     const model = createReplacements({ send, leave: vi.fn(), token: () => 'token-1', refresh })
     model.open('acct_key')
-    const run = model.replace('acct_key', key)
-    await vi.waitFor(() => { expect(refresh).toHaveBeenCalledTimes(1) })
-    const during = model.replacing.value.get('acct_key')
-    reading.give(undefined)
-    expect([await run, during, model.replacing.value.get('acct_key')])
-      .toEqual(['dropped', { kind: 'sending', failure: null }, { kind: 'replaced', oldKeysRemoved: false }])
+    expect([await model.replace('acct_key', key), model.replacing.value.get('acct_key'), refresh.mock.calls.length]).toEqual([kept, shown, 1])
+  })
+
+  it('ends once the answer is read after a refusal that can have changed the account, without the subscriptions it asked for again', async () => {
+    const { send } = answering([refusedAs(503, 'key_not_stored')])
+    const refresh = vi.fn(() => later<undefined>().promise)
+    const model = createReplacements({ send, leave: vi.fn(), token: () => 'token-1', refresh })
+    model.open('acct_key')
+    expect([await model.replace('acct_key', key), model.replacing.value.get('acct_key')?.kind, refresh.mock.calls.length]).toEqual(['kept', 'open', 1])
   })
 
   it('sends one key at a time for an account', async () => {
@@ -176,17 +182,19 @@ describe('the replacement of the key of an account', () => {
     expect([await model.replace('acct_key', key), of('acct_key'), refresh.mock.calls.length]).toEqual(['dropped', { kind: 'gone' }, 1])
   })
 
-  it('leaves once the session ended, with every key on its way, and sends nothing after', async () => {
+  it('leaves once the session ended, with every key on its way and every open field, and sends nothing after', async () => {
     const answer = later<Response>()
     const { model, sent, leave, of } = replacing([noSession(), answer.promise])
     model.open('acct_key')
     model.open('acct_other')
+    model.open('acct_idle')
     const other = model.replace('acct_other', otherKey)
     const mine = model.replace('acct_key', key)
     // The request of `acct_other` finds the session ended while that of `acct_key` is on its way.
     const first = await other
     answer.give(replaced())
-    expect([first, await mine, of('acct_key'), of('acct_other'), leave.mock.calls.length]).toEqual(['dropped', 'dropped', { kind: 'leaving' }, { kind: 'leaving' }, 1])
+    expect([first, await mine, of('acct_key'), of('acct_other'), of('acct_idle'), leave.mock.calls.length])
+      .toEqual(['dropped', 'dropped', { kind: 'leaving' }, { kind: 'leaving' }, { kind: 'leaving' }, 1])
     model.open('acct_third')
     expect([of('acct_third'), await model.replace('acct_key', key), sent.length]).toEqual([undefined, 'kept', 2])
   })
@@ -205,6 +213,16 @@ describe('the replacement of the key of an account', () => {
     await run
     model.close('acct_key')
     expect([opened, whileSending, of('acct_key')]).toEqual([{ kind: 'open', failure: null }, 'sending', undefined])
+  })
+
+  it('opens a field again after a reset that followed the end of a session', async () => {
+    const { model, of } = replacing([noSession()])
+    model.open('acct_key')
+    await model.replace('acct_key', key)
+    const ended = of('acct_key')
+    model.reset()
+    model.open('acct_key')
+    expect([ended, of('acct_key')]).toEqual([{ kind: 'leaving' }, { kind: 'open', failure: null }])
   })
 
   it('forgets every replacement at a reset, and an answer that comes after changes nothing', async () => {

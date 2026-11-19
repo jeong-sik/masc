@@ -99,7 +99,7 @@ let committed
     }
 ;;
 
-let direct ?(by = Effects.Keeper) write = Log.Direct { by; write }
+let direct ?(by = Effects.Keeper) write = Log.Direct { by; trace = "turn"; write }
 let transcript = Types.Observed Types.Transcript
 
 let stated : Answer.new_fact =
@@ -222,7 +222,7 @@ let test_pinned_text () =
     (part_text [ "working_state" ] (committed ~working_state:None ()));
   check string "a retraction by the keeper"
     (Printf.sprintf
-       {|{"kind":"direct","by":{"kind":"keeper"},"write":{"kind":"retract","id":"%s","reason":"the port moved"}}|}
+       {|{"kind":"direct","by":{"kind":"keeper"},"trace":"turn","write":{"kind":"retract","id":"%s","reason":"the port moved"}}|}
        (id port))
     (part_text [ "cause" ]
        (committed
@@ -358,8 +358,11 @@ let test_rejections () =
   expect_rejected "an unknown writer"
     ~path:[ Wire_field "cause"; Wire_field "by"; Wire_field "kind" ]
     ~reason:(Unknown_token "librarian")
-    (replace_once ~old:{|"by":{"kind":"keeper"},"write"|}
-       ~by:{|"by":{"kind":"librarian"},"write"|} retract);
+    (replace_once ~old:{|"by":{"kind":"keeper"},"trace"|}
+       ~by:{|"by":{"kind":"librarian"},"trace"|} retract);
+  expect_rejected "a direct write without its trace" ~path:[ Wire_field "cause" ]
+    ~reason:(Field_set_mismatch { missing = [ "trace" ]; unexpected = [] })
+    (replace_once ~old:{|"trace":"turn",|} ~by:"" retract);
   expect_rejected "a touched fact that is not a Memory id"
     ~path:[ Wire_field "effects"; Wire_field "touched"; Wire_index 0 ]
     ~reason:(Not_a_memory_id "m1")

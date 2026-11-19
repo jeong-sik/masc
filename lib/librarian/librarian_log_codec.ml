@@ -24,6 +24,7 @@ let f_covers_through = "covers_through"
 let f_working_state = "working_state"
 let f_by = "by"
 let f_write = "write"
+let f_trace = "trace"
 let f_observed = "observed"
 let f_name = "name"
 let f_claim = wire_field_claim
@@ -208,10 +209,11 @@ let write_to_json : Direct.write -> Yojson.Safe.t = function
 ;;
 
 let cause_to_json = function
-  | Direct { by; write } ->
+  | Direct { by; trace; write } ->
     `Assoc
       [ kind (cause_kind_token Kind_direct)
       ; f_by, actor_to_json by
+      ; f_trace, `String trace
       ; f_write, write_to_json write
       ]
   | Adopt { by; observed } ->
@@ -422,10 +424,11 @@ let cause_of_json json =
   let* cause = of_token ~token_of:cause_kind_token cause_kinds f_kind fields in
   match cause with
   | Kind_direct ->
-    let* () = exact_field_names_result [ f_kind; f_by; f_write ] fields in
+    let* () = exact_field_names_result [ f_kind; f_by; f_trace; f_write ] fields in
     let* by = object_field f_by fields actor_of_json in
+    let* trace = wire_string_field f_trace fields in
     let* write = object_field f_write fields write_of_json in
-    Ok (Direct { by; write })
+    Ok (Direct { by; trace; write })
   | Kind_adopt ->
     let* () = exact_field_names_result [ f_kind; f_by; f_observed ] fields in
     let* by = wire_string_field f_by fields in

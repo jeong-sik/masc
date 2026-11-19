@@ -118,6 +118,7 @@ let admitted (place : Recorder.place) n =
          { turn_ref = Ids.Turn_ref.make ~trace_id:place.session_id ~absolute_turn:n
          ; runtime = "test-runtime"
          ; task = Log.No_task
+         ; stimuli = []
          })
   in
   must (Printf.sprintf "admission of turn %d" n) answer;
@@ -227,8 +228,11 @@ let result_text changed_text = function
   | Error refusal -> "refused: " ^ Reset.refusal_to_string refused_text refusal
 ;;
 
-let reset ?(cause = Log.Cleared) ?(after = fun _ -> keep 0) place ~prepare ~change =
-  Reset.run ~at:200.0 ~new_log_id:log_id place ~cause ~prepare ~after ~change
+let cleared _ = Reset.Announce { cause = Cleared; after = keep 0 }
+let dropped _ = Reset.Drop { after = keep 0 }
+
+let reset ?(line = cleared) place ~prepare ~change =
+  Reset.run ~at:200.0 ~new_log_id:log_id place ~prepare ~line ~change
 ;;
 
 (* The change sees the line written and nothing open, and it is handed the
@@ -266,7 +270,9 @@ let test_nothing_open =
   finish place first Writer.Completed;
   let runs, prepare = checks (fun run -> Ok run) in
   let result =
-    reset ~cause:Log.Recovered ~after:(fun (_ : int) -> keep 1) place ~prepare ~change:Fun.id
+    reset
+      ~line:(fun (_ : int) -> Reset.Announce { cause = Recovered; after = keep 1 })
+      place ~prepare ~change:Fun.id
   in
   check string "the result" "changed: 1" (result_text string_of_int result);
   check int "the checks ran once" 1 !runs;
@@ -321,7 +327,7 @@ let test_a_closing_save_that_fails =
 ;;
 
 (* A log whose tail does not decode takes no line, so the head is not
-   changed. The closing save before it already landed. *)
+   changed, nor dropped. The closing save before it already landed. *)
 let test_a_line_that_cannot_be_written =
   with_keeper "log-unread"
   @@ fun place ->
@@ -330,13 +336,74 @@ let test_a_line_that_cannot_be_written =
   let unreadable = Fs_compat.load_file path ^ "not a line\n" in
   Fs_compat.save_file path unreadable;
   let changes = ref 0 in
-  (match reset place ~prepare:(fun () -> Ok ()) ~change:(fun () -> incr changes) with
-   | Error (Reset.Line_not_written (Recorder.Tail_unread _)) -> ()
-   | Error (Path_refused Busy | Open_not_closed _ | Line_not_written _ | Line_not_planned) ->
-     fail "refused for another reason"
-   | Ok () -> fail "the head was changed with no line");
+  List.iter
+    (fun (label, line) ->
+       match reset ~line place ~prepare:(fun () -> Ok ()) ~change:(fun () -> incr changes) with
+       | Error (Reset.Line_not_written (Recorder.Tail_unread _)) -> ()
+       | Error (Path_refused Busy | Open_not_closed _ | Line_not_written _ | Line_not_planned) ->
+         failf "%s: refused for another reason" label
+       | Ok () -> failf "%s: the head was changed with no line" label)
+    [ "an announced reset", cleared; "a drop", dropped ];
   check string "the log is as it was" unreadable (Fs_compat.load_file path);
   check int "no change" 0 !changes
+;;
+
+(* No head to name: the change runs at once, with no closing save and no
+   line. *)
+let test_no_line =
+  with_keeper "no-line"
+  @@ fun place ->
+  turn_two_open place;
+  let before = log_text place in
+  check string "the change ran" "changed: 1"
+    (result_text string_of_int
+       (reset ~line:(fun (_ : unit) -> Reset.No_line) place ~prepare:(fun () -> Ok ())
+          ~change:(fun () -> 1)));
+  check int "the message is still open" 1 (open_messages place);
+  check string "no line" before (log_text place)
+;;
+
+(* A head this build cannot decode is dropped without being read: the line
+   goes from the last mark to no closed message, and nothing is closed. *)
+let test_a_drop_reads_no_head =
+  with_keeper "drop"
+  @@ fun place ->
+  turn_two_open place;
+  let head =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:place.session_dir
+      ~session_id:place.session_id
+  in
+  Fs_compat.save_file head "not a head";
+  (match
+     Keeper_turn_log_head.read ~session_dir:place.session_dir ~session_id:place.session_id
+   with
+   | Error (_ : Keeper_checkpoint_store_decode.checkpoint_load_error) -> ()
+   | Ok (_ : Keeper_turn_log_head.t) -> fail "the head still decodes");
+  let runs, prepare = checks (fun run -> Ok run) in
+  check string "the change ran" "changed: 1"
+    (result_text string_of_int (reset ~line:dropped place ~prepare ~change:Fun.id));
+  check int "the checks ran once" 1 !runs;
+  check string "the log"
+    (String.concat "\n"
+       [ turn_one_closed; "opened 2 at 2"; "reset unannounced 2 to 0, named []" ])
+    (log_text place)
+;;
+
+(* A drop before the log started writes its first line at no closed
+   message, so the next unit names the head from its first message. *)
+let test_a_drop_before_the_log_started =
+  with_keeper "drop-first"
+  @@ fun place ->
+  save place ~boundary:Objects.Turn_closes ~turn_count:1 turn_one;
+  check string "the change ran" "changed: ()"
+    (result_text (fun () -> "()") (reset ~line:dropped place ~prepare:(fun () -> Ok ()) ~change:Fun.id));
+  let second = admitted place 2 in
+  save place ~boundary:Objects.Turn_closes ~turn_count:2
+    (waiting @ [ message Assistant "a answers 2" ]);
+  finish place second Writer.Completed;
+  check string "the log"
+    "started at 0\nopened 2 at 2\nclosed completed at 4, before [0+2], own [0+2]"
+    (log_text place)
 ;;
 
 (* The change fails after the line, or a kill cuts it: the disk is the same,
@@ -374,6 +441,9 @@ let () =
         ; test_case "a closing save that fails" `Quick test_a_closing_save_that_fails
         ; test_case "a line that cannot be written" `Quick test_a_line_that_cannot_be_written
         ; test_case "a change that does not land" `Quick test_a_change_that_does_not_land
+        ; test_case "no line" `Quick test_no_line
+        ; test_case "a drop reads no head" `Quick test_a_drop_reads_no_head
+        ; test_case "a drop before the log started" `Quick test_a_drop_before_the_log_started
         ] )
     ]
 ;;

@@ -136,7 +136,7 @@ export type ModelUnread =
 /** What the server found of the key file of a key account
     (lib/auth_preview.ml, `key_code`): a key it can read, no file, a file
     that gives no key, or a place it could not look at. It is what was there
-    at the reading: while a registration or a removal of the account runs,
+    at the reading: while a registration, a replacement or a removal of the account runs,
     the file can be missing for that moment. */
 const keyStates = ['readable', 'key_missing', 'key_unreadable', 'not_looked_at'] as const
 export type KeyState = typeof keyStates[number] | 'unrecognised'
@@ -154,6 +154,20 @@ export type Held =
 const removals = ['key_not_removed', 'home_not_removed', 'start_given_up'] as const
 export type Removal = typeof removals[number] | 'unrecognised'
 
+/** What is left of a replacement of the key of an account that did not go
+    through (lib/auth_preview.ml, `provider_accounts`): a start the server
+    gave up. Nothing runs on such an account until its owner sends a key for
+    it again, or removes it. */
+const replacements = ['start_given_up'] as const
+export type Replacement = typeof replacements[number] | 'unrecognised'
+
+/** What a step that did not go through left on an account. The server names
+    one at most: an account both were left on is listed with its removal,
+    which is what is done next with it. */
+export type Left =
+  | { readonly kind: 'removal'; readonly stage: Removal }
+  | { readonly kind: 'replacement'; readonly stage: Replacement }
+
 /** A subscription account the person connected. An account whose removal
     is under way or went through is not listed. */
 export interface ProviderAccount {
@@ -162,8 +176,8 @@ export interface ProviderAccount {
       key was registered for. */
   readonly integration: Fact<string, IntegrationUnread>
   readonly held: Held
-  /** Null for an account no removal was left on. */
-  readonly removal: Removal | null
+  /** Null for an account nothing was left on. */
+  readonly left: Left | null
 }
 
 /** A Runtime the person made: a model called through one of their accounts. */
@@ -322,11 +336,19 @@ function readHeld(json: Readonly<Record<string, unknown>>): Held | null {
   }
 }
 
-/** The removal left on the account: null when the answer names none. */
-function readRemoval(value: unknown): Removal | null | undefined {
-  if (value === undefined) return null
-  const code = text(value)
-  return code === null ? undefined : removals.find((known) => known === code) ?? 'unrecognised'
+/** What was left on the account: null when the answer names nothing. An
+    answer that names a removal and a replacement is not what the route
+    promises. */
+function readLeft(json: Readonly<Record<string, unknown>>): Left | null | undefined {
+  const { removal, replacement } = json
+  if (removal === undefined && replacement === undefined) return null
+  if (removal !== undefined && replacement !== undefined) return undefined
+  if (removal !== undefined) {
+    const code = text(removal)
+    return code === null ? undefined : { kind: 'removal', stage: removals.find((known) => known === code) ?? 'unrecognised' }
+  }
+  const code = text(replacement)
+  return code === null ? undefined : { kind: 'replacement', stage: replacements.find((known) => known === code) ?? 'unrecognised' }
 }
 
 function readAccount(json: unknown): ProviderAccount | null {
@@ -334,8 +356,8 @@ function readAccount(json: unknown): ProviderAccount | null {
   const id = text(json.provider_account_id)
   const integration = readFact(json, 'integration_id', readIntegrationUnread)
   const held = readHeld(json)
-  const removal = readRemoval(json.removal)
-  return id === null || integration === null || held === null || removal === undefined ? null : { id, integration, held, removal }
+  const left = readLeft(json)
+  return id === null || integration === null || held === null || left === undefined ? null : { id, integration, held, left }
 }
 
 function readRuntime(json: unknown): Runtime | null {

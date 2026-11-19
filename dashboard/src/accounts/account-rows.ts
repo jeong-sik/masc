@@ -12,7 +12,7 @@ import type { Check, CheckFailure, ChecksModel } from './check'
 import type { RemovalStopped, RemovalsModel, Removing } from './key-remove'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
-import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
+import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Replacement, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -50,13 +50,16 @@ export type KeeperOn =
   /** A removal of the account did not go through. The server refuses every
       use of it, whatever its subscription lets a Keeper do. */
   | { readonly kind: 'removal_left' }
+  /** A replacement of the key of the account did not go through. The server
+      refuses every use of it until its key is sent again. */
+  | { readonly kind: 'replacement_left' }
 
 /** Whether a call of the account has what it runs on: a login, or a key
     the server read when it listed the account. */
 const holdsWhatItRunsOn = (held: Held): boolean => held.kind === 'login' || held.key === 'readable'
 
 function keeperOn(account: ProviderAccount, offered: Integration | null, checked: boolean): KeeperOn {
-  if (account.removal !== null) return { kind: 'removal_left' }
+  if (account.left !== null) return account.left.kind === 'removal' ? { kind: 'removal_left' } : { kind: 'replacement_left' }
   if (offered === null) return { kind: 'not_offered' }
   if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
   if (checked) return holdsWhatItRunsOn(account.held) ? { kind: 'can_run' } : { kind: 'key_not_readable' }
@@ -134,6 +137,17 @@ function removalWords(removal: Removal, held: Held): string {
     case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. 계정의 다른 파일이 이 서버에 남아 있어요.${left}`
     case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요.${left}`
     case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요.${left}`
+  }
+}
+
+/** What a replacement of the key that did not go through left on the
+    server (lib/auth_preview.ml, `provider_accounts`). The key the account
+    had is the one the server holds: no record of the replacement went in. */
+function replacementWords(replacement: Replacement): string {
+  const left = '이 계정으로는 아무것도 실행되지 않아요.'
+  switch (replacement) {
+    case 'start_given_up': return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버에 있는 key 는 바꾸기 전 그대로예요. ${left}`
+    case 'unrecognised': return `이 계정의 key 를 바꾸는 일이 끝나지 않았어요. ${left}`
   }
 }
 
@@ -282,6 +296,7 @@ function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
   const { keeper, checked } = facts
   const held = facts.account.held.kind === 'key' ? html`<span class="chip">API key 로 연결</span>` : null
   if (keeper.kind === 'removal_left') return html`<p class="chips">${held}<span class="chip chip-todo">없애기가 끝나지 않음</span></p>`
+  if (keeper.kind === 'replacement_left') return html`<p class="chips">${held}<span class="chip chip-todo">key 바꾸기가 끝나지 않음</span></p>`
   if (keeper.kind === 'not_offered') return html`<p class="chips">${held}<span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
   return html`
     <p class="chips">
@@ -370,7 +385,7 @@ function CheckArea({ accountId, models, withheld, check, checks, card }: {
   `
 }
 
-/** What the card of an account says and offers while no removal is left on
+/** What the card of an account says and offers while nothing is left on
     it: what stands in the way of its use, the models checked on it, and the
     check of one. */
 function InUse({ facts, name, checks, card }: {
@@ -451,8 +466,8 @@ function AccountRow({ facts, checks, removals }: {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const removal = account.removal
-  const canCheck = removal === null && offered !== null && checkable(offered)
+  const left = account.left
+  const canCheck = left === null && offered !== null && checkable(offered)
   const couldCheck = useRef(canCheck)
   // A reading after a check can find the subscription with no model to
   // check, or its calls refused, which takes the pressed button away. The focus then
@@ -470,9 +485,11 @@ function AccountRow({ facts, checks, removals }: {
       <h3 ref=${title} id=${titleId} class="row-title" tabindex="-1">${name}</h3>
       <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
-      ${removal !== null ? html`<p class="hint">${removalWords(removal, account.held)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
+      ${left === null
+        ? html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`
+        : html`<p class="hint">${left.kind === 'removal' ? removalWords(left.stage, account.held) : replacementWords(left.stage)}</p>`}
       ${account.held.kind === 'key'
-        ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${removal !== null} />`
+        ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'removal'} />`
         : null}
     </li>
   `

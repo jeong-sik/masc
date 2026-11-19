@@ -121,6 +121,17 @@ let accepts_input composer =
   | Focused, Ready _ -> true
   | Focused, (No_target | Unreachable _) | Unfocused, _ -> false
 
+type band_surface =
+  | Plain
+  | Tinted
+  | Focused_tinted
+
+let band_surface composer =
+  match (composer.focus, composer.target) with
+  | Focused, Ready _ -> Focused_tinted
+  | Unfocused, Ready _ -> Tinted
+  | (Focused | Unfocused), (No_target | Unreachable _) -> Plain
+
 let has_draft_text draft = String.trim draft <> ""
 
 (* The key that sends. Named so a caller that has to send without a keypress

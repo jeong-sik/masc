@@ -1040,6 +1040,64 @@ let test_a_squashing_grid_keeps_its_rectangle () =
          lefts)
     [ 0; 1 ]
 
+let scrollbar_cell_t =
+  testable
+    (fun fmt cell ->
+       Format.pp_print_string fmt
+         (match cell with
+          | Card.Track -> "Track"
+          | Card.Thumb -> "Thumb"
+          | Card.Arrow_up -> "Arrow_up"
+          | Card.Arrow_down -> "Arrow_down"))
+    ( = )
+
+(* Focus stays distinguishable without colour: focused cards switch to heavy
+   border glyphs while preserving the exact cell geometry. *)
+let test_focused_card_uses_distinct_border_glyphs_without_colour () =
+  let unfocused =
+    Card.render ~ko:true ~style:plain ~width:24 ~height:4
+      { Card.edge = edge ~focus:Card.Unfocused "Title"; body = (fun ~cells:_ -> [ "a" ]) }
+  in
+  List.iter
+    (fun focus ->
+       let focused =
+         Card.render ~ko:true ~style:plain ~width:24 ~height:4
+           { Card.edge = edge ~focus "Title"; body = (fun ~cells:_ -> [ "a" ]) }
+       in
+       check bool "focused differs from unfocused even without SGR" true
+         (focused <> unfocused);
+       List.iter
+         (fun row -> check int "focused row width" 24 (Layout.display_width row))
+         focused)
+    [ Card.Focused_list; Card.Focused_other ]
+
+let test_scrollbar_cells_decisions () =
+  check (option (list scrollbar_cell_t)) "fits: no scrollbar" None
+    (Card.scrollbar_cells ~rows:6 { Card.offset = 0; visible = 6; total = 6 });
+  check (option (list scrollbar_cell_t)) "non-positive rows: no scrollbar" None
+    (Card.scrollbar_cells ~rows:0 { Card.offset = 0; visible = 5; total = 20 });
+  check (option (list scrollbar_cell_t)) "top of scrollable body"
+    (Some [ Card.Arrow_up; Card.Thumb; Card.Track; Card.Track; Card.Track; Card.Arrow_down ])
+    (Card.scrollbar_cells ~rows:6 { Card.offset = 0; visible = 5; total = 20 });
+  check (option (list scrollbar_cell_t)) "bottom of scrollable body"
+    (Some [ Card.Arrow_up; Card.Track; Card.Track; Card.Track; Card.Thumb; Card.Arrow_down ])
+    (Card.scrollbar_cells ~rows:6 { Card.offset = 999; visible = 5; total = 20 });
+  check (option (list scrollbar_cell_t)) "compact 2-row track omits arrows"
+    (Some [ Card.Thumb; Card.Track ])
+    (Card.scrollbar_cells ~rows:2 { Card.offset = 0; visible = 2; total = 10 });
+  check (option (list scrollbar_cell_t)) "high-ratio overflow keeps at least one track cell so thumb moves"
+    (Some [ Card.Arrow_up; Card.Track; Card.Thumb; Card.Arrow_down ])
+    (Card.scrollbar_cells ~rows:4 { Card.offset = 4; visible = 6; total = 10 });
+  check (option (list scrollbar_cell_t)) "negative offset clamps to top"
+    (Some [ Card.Arrow_up; Card.Thumb; Card.Track; Card.Arrow_down ])
+    (Card.scrollbar_cells ~rows:4 { Card.offset = -5; visible = 6; total = 10 });
+  let rows =
+    Card.render ~scrollbar:{ Card.offset = 3; visible = 4; total = 12 }
+      ~ko:true ~style:styled ~width:28 ~height:6 (card [ "a"; "b"; "c"; "d" ])
+  in
+  check int "scrollable card height" 6 (List.length rows);
+  List.iter (fun row -> check int "scrollable card row width" 28 (Layout.display_width row)) rows
+
 let () =
   run "tui card"
     [ ( "geometry"
@@ -1071,6 +1129,10 @@ let () =
             test_only_a_focused_list_drops_its_count
         ; test_case "a focused card borders in the focus token" `Quick
             test_a_focused_card_borders_in_the_focus_token
+        ; test_case "a focused card uses distinct border glyphs without colour" `Quick
+            test_focused_card_uses_distinct_border_glyphs_without_colour
+        ; test_case "scrollbar cells and scrollable card geometry" `Quick
+            test_scrollbar_cells_decisions
         ] )
     ; ( "bottom edge"
       , [ test_case "the bottom edge keeps the number whole" `Quick

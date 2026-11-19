@@ -165,6 +165,9 @@ end
     @param trajectory_acc Optional trajectory accumulator for recording
     @param shared_context Optional shared AGENT_CORE context for cross-turn state
     @param event_bus Optional MASC event bus
+    @param woken_by The event queue entries this turn was admitted with, in
+           the queue's order. The turn log's [Opened] names them. Empty for a
+           direct request and for a cadence tick.
     @param event_scope Producer scope shared with a turn subscriber. Omission
       creates a fresh scope for this execution.
     @param observation_token Captured registry observation ownership. Omission
@@ -189,6 +192,7 @@ val run_turn
        (base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
   -> user_message:string
   -> input_speaker:Keeper_input_speaker.t
+  -> woken_by:Keeper_event_queue.stimulus list
   -> turn_kind:Turn_record.turn_kind
   -> approval_admission:Keeper_approval_origin.admission
      (** Host-owned direct operation or exact admitted-source context. It is

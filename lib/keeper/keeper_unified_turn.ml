@@ -790,6 +790,9 @@ let run_keeper_cycle
                            ; approval_admission = Keeper_approval_origin.Admitted
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))
+                           ; woken_by =
+                               Keeper_heartbeat_source_batch.stimuli
+                                 (Keeper_heartbeat_source_batch.sources turn_input)
                            ; hitl_resolutions
                            ; config
                            ; drain_turn_event_bus

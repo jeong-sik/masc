@@ -201,6 +201,9 @@ checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-s
 ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
 마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.
 빌드가 실패하면(Docker 가 꺼져 있을 때 등) 아무것도 설치하지 않고 아래 명령을 알려 준다.
+설치한 뒤 `masc restart` 전까지는 아직 도는 옛 서버가 새 shim 을 거절한다. 그래서
+설치하고 바로 재시작한다. 재시작 전에 되돌리려면 `masc-exec-shim.previous` 를
+`masc-exec-shim` 으로 옮긴다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

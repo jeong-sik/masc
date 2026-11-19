@@ -289,11 +289,14 @@ let test_memory_overview_keeps_one_height () =
       ~push_divider:(fun () -> incr rows) ~push_empty:(fun () -> incr rows);
     (Render_memory.memory_overview_scrolled ~cols ~budget state).sc_chrome, !rows
   in
+  (* Each size follows a wider one in the same reading, so a measure the
+     detail kept from the wider frame, where readings wrap into fewer rows,
+     would be too short here and the list would move with the selection. *)
   List.iter
-    (fun (cols, budget) ->
+    (fun detail ->
+      state.memory_overview_detail <- detail;
       List.iter
-        (fun detail ->
-          state.memory_overview_detail <- detail;
+        (fun (cols, budget) ->
           let first = drawn ~cols ~budget 0 in
           List.iter
             (fun cursor ->
@@ -302,8 +305,70 @@ let test_memory_overview_keeps_one_height () =
                    detail cursor)
                 first (drawn ~cols ~budget cursor))
             (List.init count Fun.id))
-        [ false; true ])
-    [ 80, 17; 120, 33; 200, 53 ]
+        [ 200, 53; 120, 33; 80, 17 ])
+    [ false; true ]
+;;
+
+(* Under [v] a Keeper's reading draws its input reading, and the input is
+   read for the selected Keeper after the frame that selected it. The
+   reading that arrives makes that Keeper's detail taller, so the detail
+   under the list is measured again and the list keeps one height for every
+   selection once it has arrived. *)
+let test_memory_overview_measures_an_input_that_arrives () =
+  let keepers =
+    List.init 12 (fun index ->
+      make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:4
+        ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_overview_detail <- true;
+  state.memory_health <-
+    Some { (make_fleet_health (List.hd keepers)) with
+           Masc.Tui_decode_memory_health.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  (* The list's reported height, and the rows the body draws: the layout's
+     chrome and every row pushed. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let rows = ref 0 and list = ref 0 in
+    let row _ = incr rows in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~report_drawn_list:(fun _ ~height -> list := height) ~hand_position:ignore ~push:row
+      ~push_styled:(fun ~style:_ line -> row line) ~push_selected:row
+      ~push_divider:(fun () -> incr rows) ~push_empty:(fun () -> incr rows);
+    !list, ((Render_memory.memory_overview_scrolled ~cols ~budget state).sc_chrome, !rows)
+  in
+  let usage : Masc_tui_memory_usage.t =
+    { records = 3
+    ; tokens =
+        { distribution = Some { samples = 3; mean = 1200.; minimum = 900; maximum = 1500 }
+        ; last = Some 1100 }
+    ; bytes = { distribution = None; last = None } }
+  in
+  List.iter
+    (fun (cols, budget) ->
+      state.memory_input <- Masc_tui_fetched.initial;
+      let before = List.init count (drawn ~cols ~budget) in
+      let request =
+        match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key:"keeper-00" with
+        | Already_loading -> fail "a fresh input read was loading"
+        | Started (next, request) -> state.memory_input <- next; request
+      in
+      state.memory_input <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_input request (Ok usage);
+      let first = drawn ~cols ~budget 0 in
+      check bool
+        (Printf.sprintf "%dx%d: the reading that arrived takes rows from the list" cols budget)
+        true (fst first < fst (List.hd before));
+      List.iter
+        (fun cursor ->
+          check (pair int (pair int int))
+            (Printf.sprintf "%dx%d, Keeper %d: chrome and rows drawn" cols budget cursor)
+            first (drawn ~cols ~budget cursor))
+        (List.init count Fun.id))
+    [ 120, 33; 200, 53 ]
 ;;
 
 (* QA N01: a page key moves the Keeper list by the height the frame reports
@@ -1028,6 +1093,8 @@ let () =
           test_memory_list_hands_its_selected_row
       ; test_case "the overview keeps one height for every selection" `Quick
           test_memory_overview_keeps_one_height
+      ; test_case "the overview measures an input reading that arrives" `Quick
+          test_memory_overview_measures_an_input_that_arrives
       ; test_case "the list draws the height its page is cut from" `Quick
           test_memory_list_draws_the_height_its_page_is_cut_from
       ; test_case "rejected rows do not follow the selection" `Quick

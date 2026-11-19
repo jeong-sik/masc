@@ -458,8 +458,8 @@ let prepare_prompts_detail_lines (state : state) ~cols =
              in
              let moved = if row.pr_override_default_moved then
                  wrap (ui_text state
-                   ~ko:"△ 기본 프롬프트 변경됨 · 재정의 유지 중 · 현재 기본값과 대조 필요"
-                   ~en:"△ Default changed; override remains active · compare with current default")
+                   ~ko:"▲ 기본 프롬프트 변경됨 · 재정의 유지 중 · 현재 기본값과 대조 필요"
+                   ~en:"▲ Default changed; override remains active · compare with current default")
                else []
              in
              let authoring =
@@ -467,7 +467,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                  (function
                    | Tui_decode.Invalid_operator_surface {value; source_file} ->
                        List.concat_map wrap
-                         ["△ invalid_operator_surface";
+                         ["▲ invalid_operator_surface";
                           field (ui_text state ~ko:"원문 값" ~en:"Value") (Printf.sprintf "operator_surface = %S" value);
                           field (ui_text state ~ko:"원본 파일" ~en:"Source file") source_file;
                           ui_text state ~ko:"원본 MD의 operator_surface를 primary/fragment로 수정·재등록 후 r:새로고침"
@@ -727,7 +727,7 @@ let render_prompt_registry (state : state) =
         let authoring_mark, authoring_cells = match row.pr_authoring_issues with
           | [] -> "", 0
           | _ :: _ ->
-              let mark = "△ " in
+              let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " in
               Theme.warn () ^ mark ^ Ansi.reset, Message_layout.display_width mark
         in
         let label = mark ^ " "
@@ -809,7 +809,8 @@ let render_runtime_prompt_assets (state : state) =
     (fun index (asset : Tui_decode.runtime_prompt_asset) ->
        if index >= first && index < first + list_height then begin
          incr drawn;
-         let mark = if asset.pra_file_exists then " " else (Theme.bad ()) ^ "!" ^ Ansi.reset in
+         let mark = if asset.pra_file_exists then " "
+           else (Theme.bad ()) ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ Ansi.reset in
          let line = mark ^ " "
              ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                  (Terminal_text.single_line asset.pra_path) in

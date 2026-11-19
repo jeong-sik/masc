@@ -2500,11 +2500,11 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
     | [] -> []
     | [ (label, reason) ] ->
       [ warning "" (Message_layout.fit_width
-          ("! " ^ label ^ ": " ^ Terminal_text.single_line reason) cells) ]
+          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " ^ label ^ ": " ^ Terminal_text.single_line reason) cells) ]
     | many ->
       let prefix =
-        if ko then Printf.sprintf "! 원문 · 오류 %d종: " (List.length many)
-        else Printf.sprintf "! details · %d errors: " (List.length many) in
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ (if ko then Printf.sprintf " 원문 · 오류 %d종: " (List.length many)
+        else Printf.sprintf " details · %d errors: " (List.length many)) in
       let labels = String.concat " · " (List.map fst many) in
       [ warning "" (Message_layout.fit_width (prefix ^ labels) cells) ]
   in

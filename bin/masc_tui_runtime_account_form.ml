@@ -326,7 +326,9 @@ let label_cells =
 
 (* What a hint row starts with, and what a refusal starts with. *)
 let hint_lead = "  "
-let refusal_lead = "  ! "
+(* A refusal is the failed mark of RFC tui-one-screen-grammar 7.2 (실패·반려);
+   [!] is not a status mark. *)
+let refusal_lead = "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " "
 
 (* Prose after [lead], wrapped to [width] cells with indented continuation
    rows. Long words may break inside a row. Shell commands use [command_rows]
@@ -405,7 +407,7 @@ let filling_rows ~width ~height t =
   if height = 0 then [] else
   let mark field = if t.field = field then ">" else " " in
   let line field label value =
-    let lead = if height = 1 && field = t.field && Option.is_some t.error then "! " else "  " in
+    let lead = if height = 1 && field = t.field && Option.is_some t.error then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " else "  " in
     Printf.sprintf "%s%s %s %s" lead (mark field)
       (Masc_tui_message_layout.fit_width label label_cells)
       (Terminal_text.single_line value)

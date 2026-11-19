@@ -63,20 +63,6 @@ let runtime_overall_badge ~ko status =
    selected row's detail and the page's own status. *)
 let unknown_cell unknown = Ansi.dim ^ Masc_tui_value.Unknown.glyph unknown ^ Ansi.reset
 
-(* The account usage of the runtime: spent windows, none, or why it is not
-   known. A failed usage read and an account the read did not report are
-   different marks. *)
-let runtime_usage_reading state runtime =
-  match state.runtime_surface with
-  | None -> Error Masc_tui_value.Unknown.Unread
-  | Some snapshot ->
-      match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Ok windows -> Ok windows
-      | Error _ ->
-          Error (match snapshot.rss_resolved.rrs_usage with
-            | Error _ -> Masc_tui_value.Unknown.Read_failed
-            | Ok _ -> Masc_tui_value.Unknown.Unreported)
-
 (* The call side of the row: each refusal in warn, else [—] when none is
    recorded and the account usage reads none spent, else the mark of the
    usage that could not be read. A row that reads as it should recedes, so a
@@ -100,18 +86,6 @@ let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
       (match usage with
        | Ok _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
        | Error unknown -> unknown_cell unknown)
-
-(* The connection side of the row, for a runtime the probe has no entry for:
-   the probe not read yet, its read failed, or it read and left this runtime
-   out. *)
-let runtime_probe_missing state =
-  match state.runtime_surface with
-  | None -> Masc_tui_value.Unknown.Unread
-  | Some snapshot ->
-      (match snapshot.rss_probe_error, snapshot.rss_probe with
-       | Some _, _ -> Masc_tui_value.Unknown.Read_failed
-       | None, None -> Masc_tui_value.Unknown.Unread
-       | None, Some _ -> Masc_tui_value.Unknown.Unreported)
 
 let runtime_probe_badge state = function
   | None -> unknown_cell (runtime_probe_missing state)
@@ -768,14 +742,16 @@ let render_runtime_reading (state : state) =
      every row. A report that has several independent limits can still exceed
      the pane; full evidence stays in the selected summary or Enter's detail. *)
   let status_cells =
+    (* Measured from the cell each row draws, so the column fits what it shows. *)
     let statuses = match state.runtime_mode with
-      | Runtime_lanes -> List.map (fun row -> runtime_route_probe_text state
+      | Runtime_lanes -> List.map (fun row -> runtime_route_probe_badge state
           row.Tui_decode.rcr_runtime row.rcr_probe) candidates
       | Runtime_all -> List.map (fun (runtime, _) ->
           let probe = Option.bind state.runtime_surface (fun snapshot ->
             Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.rss_probe ~runtime_id:runtime.Tui_decode.ro_id) in
-          runtime_route_probe_text state runtime probe) all_runtimes in
-    List.fold_left (fun width text -> max width (Message_layout.display_width text)) 0 statuses in
+          runtime_route_probe_badge state runtime probe) all_runtimes in
+    List.fold_left (fun width cell ->
+      max width (Message_layout.display_width (Masc_tui_theme.strip_sgr cell))) 0 statuses in
   (* The budget counts the rows this screen draws, so it comes from the same
      call the drawing reads rather than a fixed one. *)
   let chrome_rows = runtime_surface_listing_chrome ~rows ~cols state in

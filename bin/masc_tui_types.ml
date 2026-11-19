@@ -26422,17 +26422,52 @@ let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
     (runtime_attempt_failure_word attempt.rfa_failure)
     (runtime_moment_text attempt.rfa_noted_at) attempt.rfa_recorded_by
 
+(* The account usage of the runtime: spent windows, none, or why it is not
+   known. A failed usage read and an account the read did not report are
+   different values. The runtime table draws this reading as a mark and the
+   selected row's summary as words, so the two cannot disagree. *)
+let runtime_usage_reading state runtime =
+  match state.runtime_surface with
+  | None -> Error Masc_tui_value.Unknown.Unread
+  | Some snapshot ->
+      match runtime_spent_usage snapshot.Tui_decode.rss_resolved runtime with
+      | Ok windows -> Ok windows
+      | Error _ ->
+          Error (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_usage with
+            | Error _ -> Masc_tui_value.Unknown.Read_failed
+            | Ok _ -> Masc_tui_value.Unknown.Unreported)
+
+(* The connection side of a runtime the probe has no entry for: the probe not
+   read yet, its read failed, or it read and left this runtime out. *)
+let runtime_probe_missing state =
+  match state.runtime_surface with
+  | None -> Masc_tui_value.Unknown.Unread
+  | Some snapshot ->
+      (match snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe with
+       | Some _, _ -> Masc_tui_value.Unknown.Read_failed
+       | None, None -> Masc_tui_value.Unknown.Unread
+       | None, Some _ -> Masc_tui_value.Unknown.Unreported)
+
+(* Why a value is not known, in the words a detail sentence uses (RFC
+   tui-one-screen-grammar 6.4). The table draws the mark instead. *)
+let runtime_unknown_words ~ko ~subject_ko ~subject_en = function
+  | Masc_tui_value.Unknown.Unread ->
+      if ko then subject_ko ^ " 미조회" else subject_en ^ " not read"
+  | Masc_tui_value.Unknown.Read_failed ->
+      if ko then subject_ko ^ " 조회 실패" else subject_en ^ " read failed"
+  | Masc_tui_value.Unknown.Unreported ->
+      if ko then subject_ko ^ " 보고 안 됨" else subject_en ^ " not reported"
+
 let runtime_usage_label state runtime =
   let ko = state.ui_language = Lang_ko in
-  match state.runtime_surface with
-  | None -> Some (if ko then "사용량 미확인" else "usage unknown")
-  | Some snapshot ->
-      match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Error _ -> Some (if ko then "사용량 미확인" else "usage unknown")
-      | Ok [] -> None
-      | Ok (_ :: _) when runtime_quota_rest_says_spent runtime -> None
-      | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
+  match runtime_usage_reading state runtime with
+  | Error unknown ->
+      Some (runtime_unknown_words ~ko ~subject_ko:"사용량" ~subject_en:"usage" unknown)
+  | Ok [] -> None
+  | Ok (_ :: _) when runtime_quota_rest_says_spent runtime -> None
+  | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
 
+(* The selected row's summary of its route and connection cell, in words. *)
 let runtime_route_probe_text state runtime probe =
   let ko = state.ui_language = Lang_ko in
   let route = match List.filter_map Fun.id
@@ -26441,7 +26476,9 @@ let runtime_route_probe_text state runtime probe =
     | [] -> if ko then "거절 없음" else "no refusal"
     | parts -> String.concat " " parts in
   route ^ " / " ^ (match probe with
-    | None -> if ko then "미관측" else "unobserved"
+    | None ->
+        runtime_unknown_words ~ko ~subject_ko:"프로브" ~subject_en:"probe"
+          (runtime_probe_missing state)
     | Some probe -> runtime_probe_status_label ~ko probe.Masc.Tui_decode_runtime_probe.rpp_status)
 
 let runtime_pick_facts = function

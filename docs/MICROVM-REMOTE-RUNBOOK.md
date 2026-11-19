@@ -198,7 +198,8 @@ microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
 이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 작업 공간의 shim 에 sidecar 가 없으면
 `install-local-build.sh` 가 설치할 때 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
-ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.backup-<UTC 시각>` 으로 남는다.
+ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
+마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.
 빌드가 실패하면(Docker 가 꺼져 있을 때 등) 아무것도 설치하지 않고 아래 명령을 알려 준다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게

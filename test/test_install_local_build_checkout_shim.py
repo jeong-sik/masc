@@ -12,6 +12,9 @@ import test_install_local_build_guest_shim as guest_shim
 
 BUILD_SOURCE = guest_shim.BUILD_SOURCE
 OTHER_SOURCE = guest_shim.OTHER_SOURCE
+# The source of a later commit, for a second rebuild.
+LATER_SOURCE = "d" * 40 + "/clean"
+PREVIOUS = "masc-exec-shim.previous"
 # ELF e_machine values (offset 18, little-endian).
 EM_AARCH64 = 0xB7
 EM_X86_64 = 0x3E
@@ -80,7 +83,7 @@ def checkout(root, built=lambda machine: elf(machine, BUILD_SOURCE), build_fails
 # curl records that it was asked, so a case can show no release was read.
 def no_release_env(root):
     hooks = root / "hooks"
-    hooks.mkdir()
+    hooks.mkdir(exist_ok=True)
     curl = hooks / "curl"
     curl.write_text(f'#!/bin/sh\ntouch "{root / "release-requested"}"\nexit 99\n')
     curl.chmod(0o755)
@@ -142,8 +145,8 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertTrue((root / "prefix/masc").is_file())
 
     # The architecture is the old shim's, read from its ELF header, and the
-    # old shim stays beside the new one.
-    def test_a_shim_of_another_source_is_rebuilt_from_the_checkout_with_a_backup(self):
+    # old shim stays beside the new one as the one previous copy.
+    def test_a_shim_of_another_source_is_rebuilt_from_the_checkout_with_a_previous_copy(self):
         for (machine, arch), old_source in ((arch, source) for arch in GUEST_ARCHES
                                             for source in (OTHER_SOURCE, None)):
             with self.subTest(arch=arch, old_source=old_source), \
@@ -161,15 +164,40 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertTrue(os.access(shim, os.X_OK),
                                 "the guest cannot run a shim without the execute bit")
                 self.assertFalse(sidecar.exists(), "a source-built shim was given a sidecar")
-                names = guest_shim.shim_directory(shim)
-                self.assertEqual(len(names), 2, names)
-                self.assertEqual(names[0], "masc-exec-shim")
-                self.assertRegex(names[1], r"^masc-exec-shim\.backup-\d{8}T\d{6}Z$")
-                self.assertEqual((shim.parent / names[1]).read_bytes(), old)
+                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
                 self.assertEqual(leftover_builds(repo), [])
                 self.assertIn(f"installed the {arch} guest exec shim built from {repo}",
                               result.stdout)
                 self.assertTrue((root / "prefix/masc").is_file())
+
+    # A second rebuild replaces the previous copy instead of adding one, and
+    # copies other hands left in the directory stay as they are.
+    def test_two_rebuilds_keep_one_previous_copy_and_leave_hand_copies(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repo = checkout(root)
+            old = elf(EM_AARCH64, OTHER_SOURCE)
+            base, shim, _ = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
+            hand_copies = {shim.parent / "masc-exec-shim.bak-20261118T234400Z": b"hand swap\n",
+                           shim.parent / "masc-exec-shim.sha256.20261118": b"old sidecar\n"}
+            for path, content in hand_copies.items():
+                path.write_bytes(content)
+            first = install(root, repo, guest_shim.build_naming(root), base)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
+            later = root / "later"
+            later.mkdir()
+            (repo / "fixture-shim-arm64").write_bytes(elf(EM_AARCH64, LATER_SOURCE))
+            second = install(root, repo, guest_shim.build_naming(later, source=LATER_SOURCE), base)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(len(build_calls(repo)), 2)
+            self.assertEqual(shim.read_bytes(), elf(EM_AARCH64, LATER_SOURCE))
+            self.assertEqual((shim.parent / PREVIOUS).read_bytes(), elf(EM_AARCH64, BUILD_SOURCE))
+            self.assertEqual(guest_shim.shim_directory(shim),
+                             sorted(["masc-exec-shim", PREVIOUS, *(p.name for p in hand_copies)]))
+            for path, content in hand_copies.items():
+                self.assertEqual(path.read_bytes(), content, str(path))
 
     # Docker is not running: the shim, the prefix and the checkout stay as
     # they were, and the refusal says how to build the shim by hand.
@@ -184,6 +212,7 @@ class CheckoutGuestShim(unittest.TestCase):
             self.assertEqual(len(build_calls(repo)), 1)
             self.assertIn("Cannot connect to the Docker daemon", result.stderr)
             self.assertIn("build-shim.sh --arch arm64 failed", result.stderr)
+            self.assertIn(f"so no shim was built for {shim}", result.stderr)
             self.assertIn(f"{BY_HAND} arm64 && cp dist/remote-ssh/masc-exec-shim-linux-arm64",
                           result.stderr)
 

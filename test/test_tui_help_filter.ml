@@ -266,6 +266,52 @@ let test_filter_chain_from_off_to_closed () =
   Alcotest.check step_t "the next Esc closes the sheet" Close
     (step_on_whole_sheet cleared_filter ~key:"esc")
 
+let test_three_column_codex_matrix () =
+  Alcotest.(check int) "narrow uses 1 column" 1 (Masc_tui_help.columns_for ~cols:80);
+  Alcotest.(check int) "medium uses 2 columns" 2 (Masc_tui_help.columns_for ~cols:100);
+  Alcotest.(check int) "wide uses 3 columns" 3 (Masc_tui_help.columns_for ~cols:132);
+  let blocks =
+    [ Masc_tui_help.Whole [ "Compose"; "/  Commands"; "@  Mention"; "!  Shell" ]
+    ; Masc_tui_help.Whole [ "Session"; "tab  Queue"; "f4  Inspect"; "^c  Interrupt" ]
+    ; Masc_tui_help.Whole [ "Transcript"; "^t  Open"; "f3  Find"; "pgup  Scroll" ]
+    ]
+  in
+  let rows_1 = Masc_tui_help.sheet ~cols:80 blocks in
+  let rows_2 = Masc_tui_help.sheet ~cols:100 blocks in
+  let rows_3 = Masc_tui_help.sheet ~cols:132 blocks in
+  Alcotest.(check bool) "3 columns is shorter than 2 columns" true
+    (List.length rows_3 < List.length rows_2);
+  Alcotest.(check bool) "2 columns is shorter than 1 column" true
+    (List.length rows_2 < List.length rows_1);
+  List.iter
+    (fun cols ->
+       let rows = Masc_tui_help.sheet ~cols blocks in
+       List.iter
+         (fun row ->
+            Alcotest.(check bool)
+              (Printf.sprintf "sheet row fits inside overlay at cols=%d" cols)
+              true (Masc_tui_message_layout.display_width row <= cols - 4))
+         rows)
+    [ 132; 140; 160; 200 ];
+  (* Regression: Whole + Parted must never leave column 2 blank while putting
+     Rest in column 3, and Rest must align beneath its own heading. *)
+  let parted_blocks =
+    [ Masc_tui_help.Whole [ "C1"; "C2"; "C3"; "C4"; "C5" ]
+    ; Masc_tui_help.Parted
+        { first = [ "Heading"; "k1" ]
+        ; rest = [ "k2"; "k3"; "k4"; "k5"; "k6"; "k7"; "k8" ]
+        }
+    ]
+  in
+  let parted_rows = Masc_tui_help.sheet ~cols:132 parted_blocks in
+  let col_w = Masc_tui_help.three_column_width ~cols:132 in
+  let col2_row0 = String.trim (String.sub (List.nth parted_rows 0) (col_w + 2) col_w) in
+  let col3_row0 = String.trim (String.sub (List.nth parted_rows 0) ((2 * col_w) + 4) col_w) in
+  let col3_row1 = String.trim (String.sub (List.nth parted_rows 1) ((2 * col_w) + 4) col_w) in
+  Alcotest.(check string) "heading sits in column 2, not skipped" "Heading" col2_row0;
+  Alcotest.(check string) "column 3 leaves row 0 blank beside heading" "" col3_row0;
+  Alcotest.(check string) "rest opens level with k1 on row 1" "k2" col3_row1
+
 let () =
   Alcotest.run "tui_help_filter"
     [ ( "filter_sections"
@@ -306,5 +352,9 @@ let () =
             test_korean_mode_types_the_letters_pressed
         ; Alcotest.test_case "off to kept to closed" `Quick
             test_filter_chain_from_off_to_closed
+        ] )
+    ; ( "columns"
+      , [ Alcotest.test_case "wide terminals use 3-column matrix within overlay width"
+            `Quick test_three_column_codex_matrix
         ] )
     ]

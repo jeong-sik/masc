@@ -1,51 +1,69 @@
 module Reading = Masc.Tui_decode
+module Status = Masc_tui_value.Mark
+
+(* A Keeper's state wears one of the seven status marks (RFC
+   tui-one-screen-grammar §7.2); its word says which state of that kind it
+   is. The mark of each state is chosen here and nowhere else, so the roster,
+   the NOW cell, the grid and the strip agree, and the colour comes from the
+   mark through [Theme.status_tone]. *)
 
 (* Operator pause outranks the health reading: it is a person's decision about
    a keeper that may well be healthy, and a reader looking for why a keeper is
    quiet wants that answer first. *)
-let paused_glyph = "\xe2\x97\x8b" (* ○ hollow: stopped on purpose *)
-let unread_glyph = "-"
+let paused_glyph = Status.glyph Status.Paused
+
+(* A Keeper whose health was not read has no state to mark: the not-read-yet
+   mark of a missing value (§6.4). *)
+let unread_glyph = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
 
 (* Opens every line about a failing keeper's past: the FAILING group heading,
    its count in the summary, and the sentence of its last failure. *)
 let failing_glyph = "\xe2\x97\x82" (* ◂ *)
 
-(* The filled dot: a healthy keeper that has turned, and the now cell of the
-   views' header. *)
-let filled_dot = "\xe2\x97\x8f" (* ● *)
+(* The filled dot: the now cell of the views' header. *)
+let filled_dot = Status.glyph Status.Settled
 
-let health_glyph : Reading.keeper_health_reading -> string = function
-  | Reading.Health_running -> filled_dot (* keepalive running, has turned *)
-  | Reading.Health_idle -> "\xc2\xb7" (* · small: keepalive running, no turn yet *)
-  | Reading.Health_failing -> "!" (* keepalive running, its turns failing *)
-  | Reading.Health_offline -> "\xc3\x97" (* × gone *)
+(* An offline process is stopped, not failing: whether that is odd for this
+   Keeper is the strip's reading ([Masc_tui_keeper_strip.odd_dormant]). *)
+let health_mark : Reading.keeper_health_reading -> Status.t = function
+  | Reading.Health_running -> Status.Settled
+  | Reading.Health_idle -> Status.Waiting
+  | Reading.Health_failing -> Status.Failed
+  | Reading.Health_offline -> Status.Paused
+
+let health_glyph reading = Status.glyph (health_mark reading)
+
+(* The mark of the roster's health cell; [None] when the health was not
+   read. *)
+let state_mark ~paused reading =
+  match reading with
+  | None -> None
+  | Some _ when paused -> Some Status.Paused
+  | Some value -> Some (health_mark value)
 
 let glyph ~paused reading =
-  match reading with
+  match state_mark ~paused reading with
+  | Some mark -> Status.glyph mark
   | None -> unread_glyph
-  | Some _ when paused -> paused_glyph
-  | Some value -> health_glyph value
 
-let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
-  | Held_call -> "!"
-  | Attempt_failed -> "\xe2\x9c\x97" (* ✗: an attempt of the open turn failed *)
-  | Question -> "?"
-  | Confirmation | Verifying -> "\xe2\x97\x87" (* ◇ *)
-  | Preparing | Running ->
-      (* Work under way wears the still mark of the state dictionary (RFC
-         tui-one-screen-grammar §7.2); its growing length says it is going. *)
-      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
-  | Streaming -> ">"
-  | Async_working _ -> "&"
-  | Deferred -> "\xe2\x97\x8c" (* ◌ *)
-  | Tool_waiting -> "\xe2\x96\xa0" (* ■ *)
-  | Model_waiting -> "\xe2\x97\x94" (* ◔ *)
-  | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
-  | Delegate_result -> "\xe2\x86\xa9" (* ↩ *)
-  | Idle -> "\xe2\x97\x8b" (* ○ *)
-  | Paused -> "\xe2\x85\xa1" (* Ⅱ *)
-  | Offline -> "\xc3\x97" (* × *)
-  | Unknown -> unread_glyph
+(* What the Keeper is doing now. The operator's turn is a held call, a
+   question or a confirmation; work under way is any turn the Keeper is
+   running, verifying included; a wait for a tool, a model, a delegate or the
+   world is waiting, and so is a Keeper at rest. [None] is an activity that
+   was not read. *)
+let activity_mark : Masc_tui_keeper_list_model.activity -> Status.t option = function
+  | Held_call | Question | Confirmation -> Some Status.Yours
+  | Attempt_failed -> Some Status.Failed
+  | Preparing | Running | Streaming | Async_working _ | Verifying -> Some Status.Under_way
+  | Deferred | Tool_waiting | Model_waiting | External_waiting | Delegate_result | Idle ->
+      Some Status.Waiting
+  | Paused | Offline -> Some Status.Paused
+  | Unknown -> None
+
+let activity_glyph activity =
+  match activity_mark activity with
+  | Some mark -> Status.glyph mark
+  | None -> unread_glyph
 
 let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
 
@@ -64,8 +82,7 @@ let legend =
   [ health_glyph Reading.Health_running, "healthy"
   ; health_glyph Reading.Health_failing, "failing"
   ; health_glyph Reading.Health_idle, "idle"
-  ; paused_glyph, "paused"
-  ; health_glyph Reading.Health_offline, "offline"
+  ; paused_glyph, "paused, or offline"
   ; unread_glyph, "unread"
   ]
 
@@ -141,7 +158,9 @@ let pulse_hours = 12
 let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
 let pulse_rested_mark = badge_glyph Masc_tui_keeper_list_model.Badge_quota_spent
 let pulse_failed_mark = attempt_glyph
-let pulse_quiet_mark = health_glyph Reading.Health_idle
+(* A quiet hour in the pulse is a small dot, not a status mark: the pulse
+   counts turns, it does not state the Keeper's state. *)
+let pulse_quiet_mark = "\xc2\xb7" (* · *)
 
 (* The header of the views' axis row (RFC-0515 §2.4): before, now and next.
    Before takes the mark of the failure sentence, which also looks back. *)
@@ -157,9 +176,10 @@ let grid_now_line = "│"
 let grid_dot_mark = pulse_quiet_mark
 let grid_wake_mark = "▁"
 let grid_unknown_range_mark = "─"
-let grid_failing_mark = health_glyph Reading.Health_failing
+let grid_failing_mark = Status.glyph Status.Failed
 let grid_paused_mark = paused_glyph
-let grid_recovered_mark = pulse_ok_mark
+(* Recovered: sound now after a failure in the window, so worth a look. *)
+let grid_recovered_mark = Status.glyph Status.Caution
 let grid_ok_mark = filled_dot
 let grid_late_word = "late"
 let grid_held_word = "held"

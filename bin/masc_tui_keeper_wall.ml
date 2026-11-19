@@ -85,10 +85,10 @@ let band ~ko ~count readings marks_of =
 let row ~ko ~cols ~now ~name runtime =
   let name_cells, count = dimensions cols in
   let hours = slots ~now ~count runtime in
-  let mark = match Grid.verdict ~now runtime with
-    | Grid.Failing _ -> "!"
-    | Grid.Paused -> "○"
-    | Grid.Recovered | Grid.Sound | Grid.Other -> "●" in
+  (* The row mark every view draws for this verdict (RFC
+     tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
+  let mark =
+    Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime) in
   prefix name_cells mark name ^ band ~ko ~count [ hours ] (fun () -> marks hours) ^ "┃ "
   ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 

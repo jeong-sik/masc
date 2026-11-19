@@ -220,16 +220,11 @@ let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   | Offline -> text "오프라인" "offline"
   | Unknown -> text "미확인" "unknown"
 
+(* The activity's colour is its mark's (RFC tui-one-screen-grammar §7.2). *)
 let keeper_activity_style (activity : Keeper_list_model.activity) =
-  match activity with
-  | Held_call -> Theme.bad ()
-  | Question | Confirmation | Offline | Attempt_failed -> Theme.warn ()
-  | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
-  | Tool_waiting -> Theme.warn ()
-  | Model_waiting -> Theme.info ()
-  | Delegate_result -> Theme.category Theme.Slot_2
-  | Verifying -> Theme.category Theme.Slot_1
-  | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
+  match Masc_tui_keeper_mark.activity_mark activity with
+  | Some mark -> Theme.status_tone mark
+  | None -> Theme.recede ()
 
 let keeper_badge_text ~ko (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
@@ -461,7 +456,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   in
   let status_color =
     match operator_disposition with
-    | Some _ -> Theme.bad ()
+    | Some _ -> Theme.status_tone Masc_tui_value.Mark.Yours
     | None -> keeper_activity_style activity
   in
   let glyph =
@@ -1197,13 +1192,18 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
         let parts = (if retry > 0 then [Printf.sprintf "▹ retry %d" retry] else [])
           @ (if wait > 0 then [Printf.sprintf "◌ wait %d" wait] else [])
           @ (if unknown > 0 then [Printf.sprintf "? %d" unknown] else []) in
-        Printf.sprintf "! %d failing" count, String.concat "  " parts, ""
+        (* The cause groups wear the row marks of their verdicts. *)
+        Printf.sprintf "%s %d failing" Keeper_mark.grid_failing_mark count,
+        String.concat "  " parts, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
-        Printf.sprintf "✓ %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_recovered_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
-        Printf.sprintf "● %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_ok_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused ->
-        Printf.sprintf "○ %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_paused_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_state _ | Keeper_list_model.Group_due _ ->
         string_of_int count, group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_memory _ ->

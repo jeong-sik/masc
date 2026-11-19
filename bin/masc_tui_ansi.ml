@@ -273,6 +273,17 @@ module Theme = struct
 
   let recede () = (resolved ()).recede
 
+  (* The colour of each status mark (RFC tui-one-screen-grammar §7.2), so a
+     screen that draws a mark takes its colour from the mark and not from a
+     match of its own. The RFC gives the operator's turn a new attention
+     role; until the palette has one, it wears the warning colour. *)
+  let status_tone : Masc_tui_value.Mark.t -> string = function
+    | Masc_tui_value.Mark.Settled -> ok ()
+    | Masc_tui_value.Mark.Under_way -> info ()
+    | Masc_tui_value.Mark.Waiting | Masc_tui_value.Mark.Paused -> recede ()
+    | Masc_tui_value.Mark.Caution | Masc_tui_value.Mark.Yours -> warn ()
+    | Masc_tui_value.Mark.Failed -> bad ()
+
   (* What a picture draws its colours with on the page: the process's colour
      depth and the palette the terminal reported. *)
   let paint () =

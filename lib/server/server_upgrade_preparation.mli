@@ -18,9 +18,8 @@ type single_user_listener
     {!request_termination}), in [Masc_cli_runtime_config_remote] and in
     [Masc_cli_model_resume]. [masc setup] calls {!confirm} in the caller,
     before the sign-in and before the Keeper boot. Other senders of the
-    bearer do not make this read: [masc keeper up], [masc keeper-create], the
-    requests of the TUI, and [masc_http_probe], which takes its URL from the
-    operator. *)
+    bearer do not make this read: [masc keeper up], [masc keeper-create] and
+    the requests of the TUI. *)
 
 val listener_pid : single_user_listener -> int
 val listener_port : single_user_listener -> int

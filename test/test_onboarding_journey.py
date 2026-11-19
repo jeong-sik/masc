@@ -452,61 +452,6 @@ class Journey(StepByStep):
             self.assertEqual(selected.stat().st_mode & 0o777, 0o600)
             self.assertEqual(original.read_text(), 'fixture-private-oauth-never-print')
             self.assertNotIn(original.read_text(), result.stdout + result.stderr)
-    def test_upgrade_selection_uses_reviewed_digest_and_stops_after_failed_file(self):
-        plans = [dict(keeper_name=name, plan=dict(activation_mode='on_demand', source_sha256=name + '-digest'))
-                 for name in ('imp', 'helper', 'third')]
-        with patch.object(SETUP, 'pick', return_value=[0, 1, 2]), \
-                patch.object(SETUP, 'workspace_upgrade_action', side_effect=[True, False]) as apply, \
-                contextlib.redirect_stderr(io.StringIO()):
-            SETUP.select_workspace_upgrades('/owned/masc', '/workspace', plans)
-        self.assertEqual(apply.call_count, 2)
-        self.assertEqual(apply.call_args_list[0].args[2], ['--apply', 'imp', '--source-sha256', 'imp-digest'])
-
-    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
-    def test_native_released_configuration_upgrade_and_backup_recovery(self):
-        with tempfile.TemporaryDirectory() as home:
-            base = Path(home, 'workspace')
-            keepers = base / '.masc/config/keepers'
-            keepers.mkdir(parents=True)
-            path = keepers / 'imp.toml'
-            original = ('# Preserve this exact prompt.\n[keeper]\nname = "imp"\n'
-                        'instructions = "Remember the user"\nautoboot_enabled = true\n'
-                        'proactive_enabled = false\nsandbox_profile = "microvm"\n'
-                        'microvm_backend = "apple_container"\n[keeper.tools]\nnative = "read"\n')
-            path.write_text(original)
-            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config',
-                       MASC_BASE_PATH_LEASE_DIR=home + '/leases')
-            Path(env['MASC_BASE_PATH_LEASE_DIR']).mkdir()
-            def command(*args):
-                return subprocess.run([BINARY, 'workspace-upgrade', '--base-path', str(base), *args],
-                                      env=env, capture_output=True, text=True, timeout=30)
-            listed = command()
-            self.assertEqual(listed.returncode, 0, listed.stderr)
-            plan = json.loads(listed.stdout)['keepers'][0]['plan']
-            self.assertEqual(path.read_text(), original)
-            rejected = command('--apply', 'imp', '--source-sha256', 'wrong-reviewed-digest')
-            self.assertEqual(rejected.returncode, 1)
-            self.assertEqual(path.read_text(), original)
-            self.assertFalse((base / '.masc/upgrades').exists())
-            applied = command('--apply', 'imp', '--source-sha256', plan['source_sha256'])
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            backup = Path(json.loads(applied.stdout)['backup_path'])
-            self.assertEqual(backup.read_text(), original)
-            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
-            updated = path.read_text()
-            self.assertIn('activation_mode = "on_demand"', updated)
-            backups = json.loads(command().stdout)['backups']
-            self.assertEqual(len(backups), 1)
-            backup_id = backups[0]['backup_id']
-            path.write_text(updated + '# a later user edit\n')
-            self.assertEqual(command('--restore', backup_id).returncode, 1)
-            self.assertTrue(path.read_text().endswith('# a later user edit\n'))
-            path.write_text(updated)
-            restored = command('--restore', backup_id)
-            self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
-            self.assertEqual(path.read_text(), original)
-            self.assertEqual(backup.read_text(), original)
-
     def test_final_workspace_owns_port_resolution_before_server_contact(self):
         events = []
         def check(*_):
@@ -1226,7 +1171,7 @@ class Journey(StepByStep):
     def test_a_chosen_directory_that_asks_for_accounts_is_not_checked_or_initialized(self):
         # The first document is about the workspace the journey proposed. The
         # directory typed on the workspace screen is read before the check of
-        # that directory, which can upgrade or restore what it finds, and
+        # that directory, which can move the journey to another directory, and
         # before `masc init`.
         with tempfile.TemporaryDirectory() as home:
             home = str(Path(home).resolve())

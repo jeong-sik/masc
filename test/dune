@@ -6590,16 +6590,6 @@
  (libraries alcotest masc.runtime masc.server masc.agent_core eio eio_main))
 
 (test
- (name test_released_workspace_upgrade)
- (modules test_released_workspace_upgrade)
- (libraries masc masc.server fs_compat alcotest unix yojson))
-
-(test
- (name test_keeper_journal_preparation)
- (modules test_keeper_journal_preparation)
- (libraries masc masc.server masc.masc_core masc.keeper_chat_operations masc.agent_core
-  masc.keeper_registry masc.keeper_checkpoint_ref masc_test_deps fs_compat alcotest unix sqlite3 yojson  masc.agent_core.digest eio))
-(test
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)
  (libraries masc_test_deps))

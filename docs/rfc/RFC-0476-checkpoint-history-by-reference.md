@@ -211,7 +211,6 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
   - 보관 head `<session>/agent-core-snapshot-*.json`
   - `<session>/accepted-checkpoints/*.json`
   - Keeper chat-operations SQLite 에 Gate 준비가 든 `Prepared_agent_core` head. 세션은 그 reference 의 trace id 다.
-  - journal 준비 도구가 `upgrades/journal-inputs/<id>/checkpoint.json` 에 복사한 head. 세션은 head 의 session id 다.
 - head 에서 닿는 객체는 head 가 직접 가리키는 것(머리 객체, 마지막 segment, 그 뒤의 묶음, 열린 메시지)과, 마지막 segment 부터 `previous` 를 따라가며 만나는 segment 와 그 묶음이다. `walk_segments` 가 이 순서로 읽는다.
 - `checkpoint_version` 이 더 낮은 head 는 기준점이 아니다. 이 binary 는 그 head 를 다시 읽지 않는다(§3.7). 그래서 하드컷 뒤 첫 기동이 이전 버전의 객체를 지운다.
 - 기준점을 하나라도 읽지 못하면 아무것도 지우지 않는다. 해석되지 않는 head, 더 높은 버전의 head, 끝까지 따라갈 수 없는 segment, 읽지 못한 Keeper store 도 같다. 그 head 가 무엇을 가리키는지 모르기 때문이다. 이유는 기동 로그에 남는다.

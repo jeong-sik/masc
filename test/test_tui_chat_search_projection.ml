@@ -16,7 +16,7 @@ let row ?(keeper = "alpha") ~id ~request_id ~role ~text at : T.msg_entry =
     me_operation_seq = 0; me_text = text; me_images = []; me_media = [];
     me_memory_summary = None; me_journal = []; me_memory_pass = Layout.No_pass;
     me_gate = None; me_submitted_at = None; me_tool_block = None;
-    me_skill_block = []; me_timestamp = "00:00:00"; me_request_id = request_id;
+    me_skill_block = []; me_request_id = request_id;
     me_execution_source = Some (Log.Operation request_id); me_at = at }
 
 let user = T.Message_user (T.Sent_by_operator {surface=None})

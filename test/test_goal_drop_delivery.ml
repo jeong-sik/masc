@@ -30,12 +30,12 @@ let with_workspace run =
     (fun () -> run config abandoned (Eio.Stdenv.process_mgr env))
 
 (* The fixture is written as stored state, so the audit ledger holds only
-   the events the drop under test produces. *)
-let create config =
+   the events the transition under test produces. *)
+let create ?(phase = Goal_phase.Executing) config =
   let now = Masc_domain.now_iso () in
   let goal = { Goal_store.id = "goal-drop-delivery"; criterion_revision = "fixture-criterion";
     title = "Preserve cancellation audit"; measure = Goal_measure_fixture.done_when "1";
-    procedure = "cancelled Goals with audit"; due_date = None; priority = 3; phase = Goal_phase.Executing;
+    procedure = "cancelled Goals with audit"; due_date = None; priority = 3; phase;
     last_review_note = None; last_review_at = None; created_at = now; updated_at = now } in
   Goal_store.write_state config
     { version = 1; updated_at = now; goals = [goal]; pending_events = []; pending_notifications = [] };
@@ -160,6 +160,148 @@ let test_missing_goal_is_not_created () = with_workspace @@ fun config abandoned
   check bool "no Goal invented" false (Sys.file_exists (Goal_store.goals_path config));
   check int "no verifier cancellation" 0 !abandoned
 
+(* {1 Confirmation, completion request and reopen}
+
+   Each of these phase moves commits its audit event as an intent in the same
+   Goal write. While the ledger refuses the append the intent stays pending,
+   and delivery after the ledger works again writes that one event. *)
+
+let transition config goal_id action =
+  let ctx : Masc.Workspace_types.context = {config; agent_name="operator"} in
+  Goals.handle_goal_transition ~tool_name:"masc_goal_transition"
+    ~start_time:(Tool_timing.start ()) ctx
+    (`Assoc ["goal_id", `String goal_id; "action", `String action])
+
+let committed_phase_pending config (goal : Goal_store.goal) phase =
+  let state = saved config in
+  let current = List.find (fun g -> g.Goal_store.id = goal.id) state.goals in
+  check string "phase is durably committed" phase (Goal_phase.to_string current.phase);
+  match state.pending_events with
+  | [event] -> event.Goal_store.event_id
+  | pending -> failf "expected one pending audit intent, found %d" (List.length pending)
+
+let check_phase_delivered_once config (goal : Goal_store.goal) ~phase event_id =
+  check bool "the audit ledger was written" true (Sys.file_exists (audit_path config));
+  let rows = events config in
+  check int "one audit row" 1 (List.length rows);
+  let row = List.hd rows in
+  check string "same durable event identity" event_id (text "event_id" row);
+  check string "event names its Goal" goal.id (text "goal_id" row);
+  check string "event kind" "goal_phase" (text "event_type" row);
+  check string "recorded phase" phase (member "payload" row |> text "phase");
+  check string "recorded actor" "operator" (member "payload" row |> text "actor");
+  check int "outbox acknowledged" 0 (List.length (saved config).pending_events)
+
+(* A proven completion written straight into the verification ledger: the
+   proof steps of a real run would already have put rows in the audit ledger. *)
+let proven config (goal : Goal_store.goal) : Goal_verification.verdict =
+  let criterion = Goal_store.criterion_of_goal goal in
+  let request_id =
+    match Goal_verification.mark_proof_pending config ~goal_id:goal.id ~criterion with
+    | Ok { Goal_verification.completion = Goal_verification.Proof_pending { request_id; _ }; _ } ->
+        request_id
+    | Ok _ -> fail "proof request is not pending"
+    | Error detail -> fail detail in
+  let verdict : Goal_verification.verdict =
+    { outcome = Goal_verification.Proven; request_id; criterion;
+      verification_run_id = "fixture-verifier-run";
+      authority = Masc_domain.System_llm_agent { agent_run_id = "fixture-verifier" };
+      evidence = "fixture evidence"; recorded_at = Masc_domain.now_iso () } in
+  (match Goal_verification.record_proof_verdict config ~goal_id:goal.id verdict with
+   | Ok _ -> () | Error detail -> fail detail);
+  verdict
+
+let test_confirmation_keeps_its_audit_event () = with_workspace @@ fun config _ _ ->
+  let goal = create ~phase:Goal_phase.Awaiting_confirmation config in
+  let verdict = proven config goal in
+  let confirm () =
+    match Goals.confirm_completion config ~goal_id:goal.id ~operator_id:"operator"
+            ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id
+            ~criterion_revision:goal.criterion_revision with
+    | Ok json -> json
+    | Error error -> fail (Goal_store.write_error_to_string error) in
+  obstruct_audit config;
+  let first = confirm () in
+  check string "confirmation answers the completed Goal" "completed"
+    (member "goal" first |> text "phase");
+  check string "commit reported separately from delivery" "deferred"
+    (member "effect_delivery" first |> text "status");
+  let event_id = committed_phase_pending config goal "completed" in
+  restore_audit config;
+  (* The same confirmation again finds the Goal completed and drains the outbox. *)
+  check string "the repeat reports the delivery" "delivered"
+    (member "effect_delivery" (confirm ()) |> text "status");
+  check_phase_delivered_once config goal ~phase:"completed" event_id;
+  check string "event names the confirmed proof request" verdict.request_id
+    (member "payload" (List.hd (events config)) |> text "request_id");
+  let before = Fs_compat.load_file (Goal_store.goals_path config) in
+  ignore (confirm ());
+  check string "settled repeat does not rewrite the Goal" before
+    (Fs_compat.load_file (Goal_store.goals_path config));
+  check_phase_delivered_once config goal ~phase:"completed" event_id
+
+let test_completion_request_keeps_its_audit_event () = with_workspace @@ fun config _ _ ->
+  let goal = create config in
+  let wakes = ref 0 in
+  let old = Atomic.exchange Hooks.goal_verification_pending_fn (fun _ ~goal_id:_ -> incr wakes) in
+  Fun.protect ~finally:(fun () -> Atomic.set Hooks.goal_verification_pending_fn old) @@ fun () ->
+  obstruct_audit config;
+  let response = transition config goal.id "request_complete" |> success in
+  check string "commit reported separately from delivery" "deferred"
+    (member "effect_delivery" response |> text "status");
+  let event_id = committed_phase_pending config goal "verifying" in
+  check int "verification is woken although the ledger refused the event" 1 !wakes;
+  restore_audit config;
+  (* The maintenance pass drains the outbox with this same call. *)
+  (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+  check_phase_delivered_once config goal ~phase:"verifying" event_id
+
+let test_reopen_keeps_its_audit_event () = with_workspace @@ fun config abandoned _ ->
+  let goal = create ~phase:Goal_phase.Dropped config in
+  obstruct_audit config;
+  let response = transition config goal.id "reopen" |> success in
+  check string "commit reported separately from delivery" "deferred"
+    (member "effect_delivery" response |> text "status");
+  let event_id = committed_phase_pending config goal "executing" in
+  check int "verifier cancellation notified once" 1 !abandoned;
+  restore_audit config;
+  let repeated = transition config goal.id "reopen" |> success in
+  check bool "repeat is a lifecycle no-op" true (member "noop" repeated |> Yojson.Safe.Util.to_bool);
+  check string "the repeat reports the delivery" "delivered"
+    (member "effect_delivery" repeated |> text "status");
+  check_phase_delivered_once config goal ~phase:"executing" event_id;
+  check int "repeat does not notify the verifier again" 1 !abandoned
+
+(* A reopen that has a proof to archive appends that row inside the Goal
+   transaction, after the pending intents. While the ledger refuses appends the
+   reopen is refused and nothing moves. Once the ledger works again the rows
+   are in the order the phases were committed. *)
+let test_reopen_with_a_proof_waits_for_the_ledger () = with_workspace @@ fun config abandoned _ ->
+  let goal = create config in
+  let old = Atomic.exchange Hooks.goal_verification_pending_fn (fun _ ~goal_id:_ -> ()) in
+  Fun.protect ~finally:(fun () -> Atomic.set Hooks.goal_verification_pending_fn old) @@ fun () ->
+  obstruct_audit config;
+  ignore (transition config goal.id "request_complete" |> success);
+  let requested = committed_phase_pending config goal "verifying" in
+  let refused = transition config goal.id "reopen" in
+  check bool "reopen is refused while its proof cannot be archived" false
+    (Tool_result.is_success refused);
+  check string "the refused reopen leaves the phase and the request intent" requested
+    (committed_phase_pending config goal "verifying");
+  check int "a refused reopen does not cancel verification" 0 !abandoned;
+  restore_audit config;
+  let response = transition config goal.id "reopen" |> success in
+  check string "reopen reports its delivery" "delivered"
+    (member "effect_delivery" response |> text "status");
+  let rows = events config in
+  check (list string) "ledger rows follow the commit order"
+    ["goal_phase"; "goal_proof_reopened"; "goal_phase"] (List.map (text "event_type") rows);
+  check (list string) "each row records its phase" ["verifying"; "executing"; "executing"]
+    (List.map (fun row -> member "payload" row |> text "phase") rows);
+  check string "the request event kept its identity" requested (text "event_id" (List.hd rows));
+  check int "outbox acknowledged" 0 (List.length (saved config).pending_events);
+  check int "verifier cancellation notified once" 1 !abandoned
+
 let () =
   if Array.length Sys.argv = 3 && Sys.argv.(1) = "--flush-goal-delivery" then (
     Eio_main.run @@ fun env ->
@@ -173,4 +315,13 @@ let () =
         test_case "fresh process drains audit after Goal deletion" `Quick test_restart_recovers_after_goal_deletion;
         test_case "failed commit creates no effects" `Quick test_failed_commit_has_no_effect;
         test_case "unavailable primary remains unchanged" `Quick test_unavailable_is_not_a_drop;
-        test_case "missing Goal remains missing" `Quick test_missing_goal_is_not_created]]
+        test_case "missing Goal remains missing" `Quick test_missing_goal_is_not_created];
+       "phase event outbox", [
+        test_case "confirmation keeps its audit event while the ledger refuses it" `Quick
+          test_confirmation_keeps_its_audit_event;
+        test_case "completion request keeps its audit event while the ledger refuses it" `Quick
+          test_completion_request_keeps_its_audit_event;
+        test_case "reopen keeps its audit event while the ledger refuses it" `Quick
+          test_reopen_keeps_its_audit_event;
+        test_case "reopen with a proof to archive waits for the ledger" `Quick
+          test_reopen_with_a_proof_waits_for_the_ledger]]

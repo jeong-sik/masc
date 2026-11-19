@@ -43,8 +43,8 @@ let rec private_dirs path =
 ;;
 
 (* A zone a fresh bootstrap made, opened as a server opens it. *)
-let with_zone work () =
-  Eio_main.run (fun _env ->
+let with_env_zone work () =
+  Eio_main.run (fun env ->
     let root = Unix.realpath (Filename.temp_dir "server-key-account-purge-" "") in
     Fun.protect
       ~finally:(fun () ->
@@ -71,8 +71,12 @@ let with_zone work () =
          | Ok (_ : B.completed) -> ()
          | Error error -> Alcotest.failf "bootstrap refused: %s" (B.error_to_string error));
         match Z.open_at_start ~now_ms ~log_path:(Authz_log.path_of_base_path ~base_path) ~store_path:store with
-        | Ok zone -> work ~zone ~base_path
+        | Ok zone -> work ~env ~zone ~base_path
         | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)))
+;;
+
+let with_zone work =
+  with_env_zone (fun ~env:(_ : Eio_unix.Stdenv.base) ~zone ~base_path -> work ~zone ~base_path)
 ;;
 
 let commit zone ~author ~kind body =
@@ -330,12 +334,14 @@ let test_key_stays =
    and one that went through whose files a restore brought back. A removal
    that failed, and an account no removal began of, are left. *)
 let test_resume =
-  with_zone (fun ~zone ~base_path ->
+  with_env_zone (fun ~env ~zone ~base_path ->
     let alice = with_key zone ~base_path ~name:"alice" ~hex:'a' in
     let bob = with_key zone ~base_path ~name:"bob" ~hex:'b' in
     let carol = with_key zone ~base_path ~name:"carol" ~hex:'c' in
     let dave = with_key zone ~base_path ~name:"dave" ~hex:'d' in
-    let resume () = Purge.resume ~zone ~base_path in
+    (* Through the one function a start calls, so a start that drops the
+       removals of key accounts fails here. *)
+    let resume () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
     (* A server that stopped after the record of the start. *)
     started alice;
     started dave;

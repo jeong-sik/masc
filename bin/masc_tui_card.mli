@@ -10,15 +10,19 @@
     exactly [width] cells, the body padded one cell from the sides.
 
     Cards are laid out as columns of stacks. Each card is as tall as its body,
-    and the columns end on the same row: the card at the bottom of a shorter
+    and the columns end on the same row: the lowest full card of a shorter
     column takes the difference, so the grid is one block with a straight
-    bottom edge rather than boxes of unrelated heights.
+    bottom edge rather than boxes of unrelated heights. A card the height
+    cannot hold is squashed to its top edge alone, one row that keeps its
+    name, status mark and count (RFC section 2, after lazygit's squashed
+    frame).
 
     The caller passes the style codes, so the same card reads in whatever
     palette the screen probed. That includes a focused card's border, the
     theme's border.focused token, which the caller takes from the probed
-    palette like every other colour. The corners stay rounded either way: RFC
-    section 12 leaves the focused card's border glyphs open. *)
+    palette like every other colour. A focused card also switches from light
+    rounded glyphs ([╭─╮│╰─╯]) to heavy glyphs ([┏━┓┃┗━┛]), so focus stays
+    distinguishable without colour (RFC tui-one-screen-grammar section 2). *)
 
 type count =
   | Whole of int  (** Every row of the reading is loaded: [12]. *)
@@ -41,6 +45,10 @@ type status =
             with no word, such as an unreported one. *)
   ; tone : string  (** Style code for the symbol and the word. *)
   }
+
+val symbol_glyph : symbol -> string
+(** The one cell the top edge draws for [symbol]. A layout that draws a
+    card's body without its edge puts this cell where the edge would have. *)
 
 type focus =
   | Unfocused
@@ -146,12 +154,42 @@ val min_height : int
 val content_cells : width:int -> int
 (** The width of a card's content for a card [width] cells wide. *)
 
+(** Scroll state for a card that shows a window over a longer body
+    (RFC tui-one-screen-grammar section 2, btop right-edge scrollbar). *)
+type scrollbar =
+  { offset : int
+  ; visible : int
+  ; total : int
+  }
+
+(** One cell of the right-edge scrollbar track. *)
+type scrollbar_cell =
+  | Track
+  | Thumb
+  | Arrow_up
+  | Arrow_down
+
+val scrollbar_cells : rows:int -> scrollbar -> scrollbar_cell list option
+(** The [rows] cells drawn along the right edge of a scrollable card, top row
+    first, or [None] when the body fits ([total <= visible]) or [rows <= 0] or
+    [visible <= 0]. For [rows >= 3] the first and last cells are {!Arrow_up}
+    and {!Arrow_down} with a proportional {!Thumb} moving across the inner
+    [rows - 2] track cells; for 1–2 rows the thumb moves without arrows. *)
+
 val render :
-  ko:bool -> style:style -> width:int -> height:int -> t -> string list
-(** [render ~ko ~style ~width ~height card] is [height] rows of [width] cells
-    each, the body stretched to the height with blank rows. Below {!min_width}
-    or {!min_height} it returns that many blank rows rather than a box with no
-    room in it, so a caller that counts rows still counts them. [ko] is the
+  ?scrollbar:scrollbar ->
+  ko:bool ->
+  style:style ->
+  width:int ->
+  height:int ->
+  t ->
+  string list
+(** [render ?scrollbar ~ko ~style ~width ~height card] is [height] rows of
+    [width] cells each, the body stretched to the height with blank rows. Below
+    {!min_width} or {!min_height} it returns that many blank rows rather than a
+    box with no room in it, so a caller that counts rows still counts them.
+    When [scrollbar] overflows, the right edge draws its btop-style scrollbar
+    in place of the vertical border without taking content cells. [ko] is the
     language of the count and of the cut-off rows. *)
 
 val columns_that_fit :
@@ -165,6 +203,54 @@ val column_widths : inner_width:int -> gap:int -> columns:int -> int list
     leftover cells going to the leftmost columns. The widths and the gaps add
     up to [inner_width]. *)
 
+type height =
+  | Full
+      (** Both edges and the body, as tall as the body, or taller when the
+          card is the lowest full card of a column shorter than the grid. *)
+  | Squashed
+      (** The top edge alone, one row of the column's width, its ends [╶] and
+          [╴] rather than corners. It keeps what a full card's top edge keeps
+          at that width ({!top_fit}), so its count says how many rows it
+          holds. With no bottom edge it writes no cut-off rows. *)
+
+type selection =
+  | Unselectable  (** No row of the card can be selected. *)
+  | Selectable
+      (** The selection can move to a row of the card and is elsewhere now,
+          or nowhere. *)
+  | Holds_selected_row
+      (** The selected row is in the card. At most one card of a grid holds
+          it: a column where two do is drawn only when both fit full. *)
+(** Where the selection is, as a grid sees each card. The caller passes it
+    beside the card: a card drawn alone by {!render} has none. *)
+
+type squash =
+  | By_selection of selection
+      (** An unfocused card. It stays full while it holds the selected row,
+          and its column must fit with it full whenever the selection can
+          reach it. *)
+  | Owns_keyboard  (** A focused card. It stays full whatever the selection. *)
+
+val heights :
+  row_gap:int -> max_rows:int -> (int * squash) list list -> height list list option
+(** The height of each card of each column, given each card's natural height
+    (its body and its two edges) and how the selection reaches it, so that
+    every column, [row_gap] rows between its cards, is at most [max_rows]
+    (RFC section 2).
+
+    [Some] exactly when every column fits with each card the selection can
+    reach ([Selectable] or [Holds_selected_row]) full in turn, the cards that
+    own the keyboard full and every other card squashed. So the answer does
+    not change when the selection moves between cards: moving it never
+    switches a screen between the cards and its plain layout (RFC section 8).
+
+    Each column is settled on its own, top card first: a card that holds the
+    selected row or owns the keyboard is full, and any other is full when the
+    column fits with it full and every card under it that may squash
+    squashed. So a column that fits squashes nothing, a column too tall loses
+    its lowest cards first, and an upper card too tall on its own squashes
+    while the cards under it open as far as they fit. *)
+
 val grid :
   ko:bool ->
   style:style ->
@@ -172,11 +258,14 @@ val grid :
   gap:int ->
   row_gap:int ->
   max_rows:int ->
-  t list list ->
+  (t * selection) list list ->
   string list option
 (** Lays out columns of stacked cards, [gap] cells between columns and
     [row_gap] blank rows between stacked cards. Every row is [inner_width]
-    cells wide, and the rows are those of the tallest column at its cards'
-    natural heights. [None] when that is more than [max_rows], so a caller
-    falls back to something shorter before anything is drawn. Each body is
-    asked once per card. *)
+    cells wide, and the rows are those of the tallest column at the heights
+    {!heights} chooses, so there are never more than [max_rows]. A focused
+    card owns the keyboard; any other card is reached by the selection as
+    its pair says. A column with no full card ends in blank rows. [None]
+    when {!heights} finds no fit, so a caller falls back to something
+    shorter before anything is drawn; the answer is the same wherever the
+    selection is. Each body is asked once per card. *)

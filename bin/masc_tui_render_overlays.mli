@@ -99,6 +99,7 @@ val render_agenda :
 
 val render_terminal_too_small :
   Masc_tui_types.state ->
+  Masc_tui_render_schedule.Viewport.too_small ->
   recovery_notice:string option ->
   rows:int ->
   cols:int ->

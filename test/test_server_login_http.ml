@@ -1701,6 +1701,29 @@ let a_person_registers_a_key () =
     let by_token = register [ "Authorization", "Bearer " ^ pat {|["manage_own_provider"]|} ] in
     Alcotest.(check int) ("a PAT that manages provider accounts: " ^ by_token.body) 200 by_token.status;
     Alcotest.(check int) "the same key again is a second account" 2 (accounts ());
+    (* The replacement of the key of the account goes through the same
+       gate (the same RFC, 3.7). *)
+    let replace ?(browser = fresh_browser ()) headers =
+      send
+        browser
+        router
+        ~meth:"PUT"
+        ~path:(Server_key_account.entry_prefix ^ account)
+        ~headers:(("Content-Type", "application/json") :: headers)
+        ~body:(Yojson.Safe.to_string (`Assoc [ "key", `String "sk-test-another-key-over-the-route" ]))
+    in
+    Alcotest.(check int) "a replacement with no credential" 401 (replace []).status;
+    Alcotest.(check int) "a replacement by the session without its token" 403 (replace ~browser:admin (changing ())).status;
+    Alcotest.(check int)
+      "a replacement by a PAT that manages Keepers and no provider account"
+      403
+      (replace [ "Authorization", "Bearer " ^ pat {|["manage_own_keeper","read_state"]|} ]).status;
+    let replaced = replace ~browser:admin (changing ~csrf ()) in
+    Alcotest.(check (pair int string))
+      "the replacement of its key, by the session with its token"
+      (200, Printf.sprintf {|{"provider_account_id":"%s","old_keys_removed":true}|} account)
+      (replaced.status, replaced.body);
+    Alcotest.(check int) "a replacement makes no account" 2 (accounts ());
     let removed =
       send admin router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ account) ~headers:(changing ~csrf ())
     in

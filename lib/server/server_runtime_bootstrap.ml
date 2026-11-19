@@ -1578,6 +1578,13 @@ let install_keeper_gate_persistence state =
            failure.approval_id
            failure.reason)
       report.delivery_replay_failures;
+    List.iter
+      (fun (failure : Keeper_approval_queue_result.delivery_replay_failure) ->
+         Log.Server.error
+           "keeper_gate: resolution not confirmed on the audit ledger; delivery kept approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      report.ledger_retry_failures;
     let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
     (match resume_report.queue_error with
      | Some error ->

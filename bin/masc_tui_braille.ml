@@ -58,6 +58,15 @@ let of_count count =
   | Some value -> Value value
   | None -> if count = 0 then Zero else Absent
 
+let microseconds_per_ms = 1000.0
+
+let of_milliseconds ms =
+  if not (Float.is_finite ms) then Absent
+  else
+    let microseconds = Float.ceil (ms *. microseconds_per_ms) in
+    if microseconds >= Float.of_int max_int then of_count max_int
+    else of_count (Float.to_int microseconds)
+
 type graph =
   | Never_read
   | Too_narrow
@@ -124,11 +133,16 @@ let row_dots ~row level =
 ;;
 
 (* The axis text sits in its own column at the graph's top-left, so it hides
-   no time; the rows under it leave that column blank. *)
+   no time; the rows under it leave that column blank. One cell of gap
+   separates the text from the dots. *)
+let dot_cells ~width ~axis_cells = width - (axis_cells + 1)
+
 let graph_layout ~width ~axis =
-  let axis_cells = Layout.display_width axis + 1 in
-  (axis_cells, width - axis_cells)
+  let axis_cells = Layout.display_width axis in
+  (axis_cells + 1, dot_cells ~width ~axis_cells)
 ;;
+
+let graph_times ~width ~axis_cells = 2 * Stdlib.max 0 (dot_cells ~width ~axis_cells)
 
 (* The two times of each cell, as levels on a column [dots] dots tall. *)
 let levelled ~dots ~maximum ~cells samples =

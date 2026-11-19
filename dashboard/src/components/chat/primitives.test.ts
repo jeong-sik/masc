@@ -1348,6 +1348,61 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
+  it('says a stop pressed before the acceptance waits for the server', () => {
+    // The stream is still open here, so the row must not read as the cut
+    // connection that a stop after the acceptance leaves.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'sending',
+            streamState: 'stop_pending',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder?.textContent).toContain('서버 접수 대기 중 · 접수되면 중지합니다')
+    expect(placeholder?.textContent).not.toContain('응답 연결 중단')
+    expect(container.querySelector('[data-chat-delivery="중지 대기 중"]')).not.toBeNull()
+  })
+
+  it('reads a turn whose stop waits for the acceptance as not finished', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            text: '',
+            delivery: 'sending',
+            streamState: 'stop_pending',
+            traceSteps: [{ kind: 'think', text: 'not started' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-tool-trace]')
+    expect(trace?.getAttribute('data-chat-turn-stream-state')).toBe('stop_pending')
+    expect(trace?.getAttribute('data-chat-turn-complete')).toBe('false')
+  })
+
   it('renders an optional message action and passes the clicked entry', () => {
     const onClick = vi.fn()
     const target = entry({

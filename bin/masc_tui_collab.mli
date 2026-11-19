@@ -51,6 +51,10 @@ val controller_note : Masc.Tui_decode.play_controller -> string -> string
 val controller_summary : Masc.Tui_decode.play_controller -> string list
 (** The line the invite list shows about the DOS controller, if any: who
     holds it, that no machine is loaded, or why it could not be asked. *)
+val position : t -> Masc_tui_value.Position.t option
+(** The selected invite among the invites listed, for the title row; [None]
+    with none listed. *)
+
 val lines : height:int -> width:int -> t -> string list
 (** The overlay body at [width] cells. Prose wraps at spaces and the three
     machine keys stack when they do not fit one row, so nothing is cut at the

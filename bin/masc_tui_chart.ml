@@ -208,6 +208,23 @@ let meter_cell_style scale ~index ~width ~value ~max_value =
         paint.Masc_tui_theme.palette (alarm_status alarm))
 ;;
 
+(* Text-readable SGR for a meter's numeric readout. Declared limits and
+   anomalies enforce 4.5:1 across their full range, so a one-cell bar
+   ([edge / width = 1.0]) evaluates the exact [clamped / max_value] share
+   without quantization. Series ramps lift only their bright end (position 1.0)
+   to the 4.5:1 text floor (the deep end uses the 3:1 non-text picture floor),
+   so series text readouts read position 1.0 to keep the series hue legible. *)
+let meter_tip_style scale ~value ~max_value =
+  if value <= 0 || max_value <= 0 then ""
+  else
+    let clamped = Stdlib.min value max_value in
+    match scale with
+    | Declared_limit _ | Anomaly _ ->
+      meter_cell_style scale ~index:0 ~width:1 ~value:clamped ~max_value
+    | Series { paint; series } ->
+      Masc_tui_theme.ramp_style paint series ~position:1.0
+;;
+
 (* [meter_cell_style] for every cell of one bar, with a series ramp's table
    found once for the whole bar. *)
 let meter_cell_styler scale ~width ~value ~max_value =
@@ -261,7 +278,7 @@ let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
 ;;
 
 let meter ~width ~value ~max_value ~scale ?label ?suffix
-    ?(track_style = "") ?(suffix_style = "")
+    ?(track_style = "") ?suffix_style
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
@@ -289,10 +306,15 @@ let meter ~width ~value ~max_value ~scale ?label ?suffix
       | Some s -> s
       | None -> Printf.sprintf "%3d%%" pct
     in
+    let resolved_suffix_style =
+      match suffix_style with
+      | Some s -> s
+      | None -> meter_tip_style scale ~value:clamped_val ~max_value
+    in
     let styled_suffix =
       if String.equal raw_suffix "" then ""
-      else if String.equal suffix_style "" then " " ^ raw_suffix
-      else " " ^ suffix_style ^ raw_suffix ^ reset
+      else if String.equal resolved_suffix_style "" then " " ^ raw_suffix
+      else " " ^ resolved_suffix_style ^ raw_suffix ^ reset
     in
     let suffix_cells =
       if String.equal raw_suffix "" then 0
@@ -310,7 +332,11 @@ let meter ~width ~value ~max_value ~scale ?label ?suffix
         if String.equal raw_suffix "" then Printf.sprintf "%d%%" pct
         else raw_suffix
       in
-      Layout.fit_width (prefix ^ fallback) width
+      let styled_fallback =
+        if String.equal resolved_suffix_style "" then fallback
+        else resolved_suffix_style ^ fallback ^ reset
+      in
+      Layout.fit_width (prefix ^ styled_fallback) width
 ;;
 
 

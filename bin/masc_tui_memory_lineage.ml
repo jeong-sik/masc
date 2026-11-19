@@ -137,7 +137,7 @@ let successor_count_text (event : Activity.event) =
   | Activity.Created | Reobserved | Revised | Absorbed | Retracted | Removed | Invalidated ->
       string_of_int (List.length event.after)
 
-let transition_svg ~ko ~palette (chart : t) =
+let transition_svg ~ko ~now ~palette (chart : t) =
   let module Palette = Masc_tui_terminal_palette in
   let module Layout = Masc_tui_message_layout in
   let text korean english = if ko then korean else english in
@@ -213,10 +213,9 @@ let transition_svg ~ko ~palette (chart : t) =
     add "<text x=\"%d\" y=\"%d\" font-size=\"%d\" font-weight=\"%s\"%s>%s</text>\n"
       x y size weight fill_attr (xml value) in
   line ~x:32 ~y:43 ~size:26 ~weight:"700" (text "기억의 변화" "Memory change");
-  let clock = Unix.gmtime event.recorded_at in
   line ~x:32 ~y:73 ~size:14
-    (Printf.sprintf "r%d  ·  %04d-%02d-%02d %02d:%02d UTC"
-      event.revision (clock.tm_year + 1900) (clock.tm_mon + 1) clock.tm_mday clock.tm_hour clock.tm_min);
+    (Printf.sprintf "r%d  ·  %s" event.revision
+      (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now event.recorded_at));
   line ~x:32 ~y:118 ~size:16 ~weight:"700"
     (Printf.sprintf "%s  %02d" (text "이전 기억" "Before") (List.length event.before));
   line ~x:504 ~y:118 ~size:16 ~weight:"700" (text "선택한 변화" "Selected change");
@@ -323,7 +322,7 @@ let palette_json = function
         "cyan", `String (slot_hex 14 "#22d3ee");
       ]
 
-let lineage_graph ~ko ?palette ~keeper_name (chart : t) =
+let lineage_graph ~ko ~now ?palette ~keeper_name (chart : t) =
   let text korean english = if ko then korean else english in
   let facts = chart.facts in
   let index = Hashtbl.create (List.length facts) in
@@ -345,9 +344,7 @@ let lineage_graph ~ko ?palette ~keeper_name (chart : t) =
     List.mapi (fun i (event : Activity.event) ->
       let eid = Printf.sprintf "E%d" i in
       let is_selected = String.equal event.identity chart.selected.identity in
-      let clock = Unix.gmtime event.recorded_at in
-      let timestamp = Printf.sprintf "%04d-%02d-%02d %02d:%02d UTC"
-          (clock.tm_year + 1900) (clock.tm_mon + 1) clock.tm_mday clock.tm_hour clock.tm_min in
+      let timestamp = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now event.recorded_at in
       let reason_lines = match event.reason with
         | Some r when String.trim r <> "" -> wrap_full_lines ~max_cells:42 (String.trim r)
         | Some _ | None -> [] in
@@ -413,7 +410,7 @@ let lineage_graph ~ko ?palette ~keeper_name (chart : t) =
   ] in
   Yojson.Safe.to_string payload
 
-let mermaid ~ko (chart : t) =
+let mermaid ~ko ~now (chart : t) =
   let buffer = Buffer.create 2048 in
   let add format = Printf.bprintf buffer format in
   add "flowchart TD\n";
@@ -449,10 +446,9 @@ let mermaid ~ko (chart : t) =
   let dotted_edges = ref [] in
   List.iteri (fun i (event : Activity.event) ->
     let selected = if event.identity = chart.selected.identity then "★ " else "" in
-    let clock = Unix.gmtime event.recorded_at in
-    let header = Printf.sprintf "%s%s · r%d · %02d-%02d %02d:%02d UTC"
+    let header = Printf.sprintf "%s%s · r%d · %s"
         selected (kind_label ~ko event.kind) event.revision
-        (clock.tm_mon + 1) clock.tm_mday clock.tm_hour clock.tm_min in
+        (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now event.recorded_at) in
     let reason_part = match event.reason with
       | Some r when String.trim r <> "" -> "<br/>" ^ mermaid_label ~max_cells:42 (String.trim r)
       | Some _ | None -> "" in
@@ -474,7 +470,7 @@ let mermaid ~ko (chart : t) =
     (List.rev !dotted_edges);
   Buffer.contents buffer
 
-let transition_mermaid ~ko (chart : t) =
+let transition_mermaid ~ko ~now (chart : t) =
   let ids = identities chart.selected in
-  mermaid ~ko {chart with events=[chart.selected];
+  mermaid ~ko ~now {chart with events=[chart.selected];
     facts=List.filter (fun (fact : Activity.fact) -> Ids.mem fact.memory_id ids) chart.facts}

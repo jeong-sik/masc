@@ -456,8 +456,16 @@ let test_every_change_of_the_files_waits_for_the_store_mutex () =
     check bool name true (waits_for_the_store_mutex env store change)
   in
   waits "an append" (fun () -> D.append store row);
-  waits "an append that may rotate the file" (fun () ->
-    ignore (D.append_rotating store ~max_current_file_bytes:0 row : D.append_outcome));
+  (* Today's file holds the row of the append above, so a cap of one byte
+     makes this append rename it away first. *)
+  let rotating = ref None in
+  waits "an append that rotates the file" (fun () ->
+    rotating := Some (D.append_rotating store ~max_current_file_bytes:1 row));
+  (match !rotating with
+   | Some (D.Appended_after_rotation _) -> ()
+   | Some
+       (D.Appended_to_current | D.Skipped_rotation_exhausted _ | D.Skipped_by_append_guard)
+   | None -> fail "the append did not rotate the file");
   waits "the prune of the store" (fun () -> ignore (D.prune store ~days:30 : int));
   waits "the pass over the listed stores" (fun () ->
     ignore

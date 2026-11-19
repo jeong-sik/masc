@@ -104,7 +104,9 @@ let list_head ~ko = function
 type list_layout =
   { layout : list_column Masc_tui_table.layout
   ; flex : list_column  (** The column that takes what the others leave. *)
-  ; width : list_column -> int }
+  ; width : list_column -> int
+  ; inner_width : int
+  ; dropped : int }
 
 (* The columns a list of resources draws at this width. With room for the
    description after the identifying columns the row is type, name, the check
@@ -143,10 +145,9 @@ let list_layout ~ko resources ~today ~inner_width =
       | Col_day -> day_cells
       | Col_detail -> detail_floor_cells
       | Col_meta -> meta_cells in
-    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_detail
-        ~drop_order:[Col_meta] (identifying @ marker @ [Col_detail; Col_meta])
-    ; flex = Col_detail
-    ; width }
+    let layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_detail
+      ~drop_order:[Col_meta] (identifying @ marker @ [Col_detail; Col_meta]) in
+    { layout; flex = Col_detail; width; inner_width; dropped = layout.dropped }
   else
     let width = function
       | Col_type -> type_cells
@@ -154,14 +155,13 @@ let list_layout ~ko resources ~today ~inner_width =
       | Col_check -> check_cells
       | Col_day -> day_cells
       | Col_detail | Col_meta -> 0 in
-    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_name
-        ~drop_order:[Col_day] (identifying @ marker)
-    ; flex = Col_name
-    ; width }
+    let layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_name
+      ~drop_order:[Col_day] (identifying @ marker) in
+    { layout; flex = Col_name; width; inner_width; dropped = layout.dropped + 2 }
 
 (* One row on the layout: [reading] gives a column's text and style for one
    resource, and [None] draws the column names. *)
-let list_cells ~ko ({ layout; flex; width } : list_layout) reading =
+let list_cells ~ko ({ layout; flex; width; _ } : list_layout) reading =
   List.map (fun column ->
     let header = list_head ~ko column in
     let fold = match column with
@@ -219,11 +219,48 @@ let render_resources (state : state) =
   let buf = Buffer.create 4096 in
   let split = resource_split state ~cols in
   if not split then box_top buf cols;
+  let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
+  let rows_list =
+    match visible_resources state with Some rows -> rows | None -> []
+  in
+  let total = List.length rows_list in
+  let cursor = max 0 (min state.resources_cursor (total - 1)) in
+  (* The document is laid out once, here, because the focused pane's
+     position goes on the title row above both panes. *)
+  let document_cols = if split then cols - keeper_roster_pane_cols else cols in
+  let document =
+    lazy
+      (Option.map
+         (fun reading ->
+           ( reading,
+             Masc_tui_resource_document.layout_with_search ~cols:document_cols state
+               reading ))
+         (Masc_tui_resource_document.current state))
+  in
+  let document_scroll total_lines =
+    Masc_tui_scroll.Position.clamp ~count:total_lines ~height:pane_rows
+      state.resource_scroll
+  in
+  let position =
+    match state.resource_focus with
+    | Left_pane ->
+        if total = 0 then None
+        else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
+    | Right_pane -> (
+        match Lazy.force document with
+        | None -> None
+        | Some (_, (rendered, _)) ->
+            let total_lines = List.length rendered in
+            Masc_tui_value.Position.window
+              ~first:
+                (Masc_tui_scroll.Position.offset ~count:total_lines ~height:pane_rows
+                   (document_scroll total_lines))
+              ~shown:pane_rows ~total:total_lines)
+  in
   box_line buf cols
     (here_row ~cols state
        ~path:[ ui_text state ~ko:"리소스" ~en:"resources" ]
-       ~readings:[] ~position:None);
-  let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
+       ~readings:[] ~position);
   Option.iter (fun prompt ->
     let input = prompt.rsp_path in
     let text = Terminal_text.single_line (Masc_tui_message_input.contents input) in
@@ -248,11 +285,6 @@ let render_resources (state : state) =
              ~en:"Editing the path · this input has not been submitted") in
     box_line buf cols notice)
     state.resource_save_prompt;
-  let rows_list =
-    match visible_resources state with Some rows -> rows | None -> []
-  in
-  let total = List.length rows_list in
-  let cursor = max 0 (min state.resources_cursor (total - 1)) in
   let list_pane ~framed pane_buf pane_cols =
     (* Same rule as the code surface: beside the content pane the box is the
        pane separator; alone on a narrow terminal it is the redundant outer
@@ -290,9 +322,7 @@ let render_resources (state : state) =
     let period = match state.resource_day with
       | None -> if ko then "모든 날짜" else "all dates"
       | Some day ->
-          Printf.sprintf
-            (if ko then "%04d-%02d-%02d (이 장비 시각)" else "%04d-%02d-%02d local")
-            day.year day.month day.day in
+          Masc_tui_value.Local_day.text day ^ (if ko then " (이 장비 시각)" else " local") in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     let unchecked = match resource_unchecked_today state ~day:today with
       | None -> Theme.muted () ^ (if ko then "모름" else "unknown")
@@ -300,11 +330,9 @@ let render_resources (state : state) =
       | Some count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
-        let at = Unix.localtime inventory.received_at in
         Printf.sprintf
-          (if ko then " · 마지막 확인 조회 %02d:%02d:%02d"
-           else " · last check query %02d:%02d:%02d")
-          at.tm_hour at.tm_min at.tm_sec
+          (if ko then " · 마지막 확인 조회 %s" else " · last check query %s")
+          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) inventory.received_at)
       | Some (_, (Absent | Loading | Failed _)) | None ->
           if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
@@ -313,15 +341,19 @@ let render_resources (state : state) =
       ^ Theme.recede () ^ query ^ Ansi.reset);
     let budget = list_rows state ~rows in
     let first = max 0 (cursor - max 1 budget + 1) in
-    let table = list_layout ~ko rows_list ~today
-      ~inner_width:(max 1 (framed_inner_width pane_cols - marker_cells)) in
+    let table_inner_width = max 1 (framed_inner_width pane_cols - marker_cells) in
+    let table = list_layout ~ko rows_list ~today ~inner_width:table_inner_width in
     (* The column names take a row even with nothing to name, so the rows that
        follow start in the same place for an empty list as for a full one. *)
     if total = 0 then framed_empty pane_buf pane_cols
     else
       framed_line pane_buf pane_cols
         (Theme.recede () ^ unselected_marker
-         ^ Masc_tui_table.header_row (list_cells ~ko table None) ^ Ansi.reset);
+         ^ Masc_tui_table.header_row_with_dropped ~ko
+             ~inner_width:table.inner_width
+             ~dropped:table.dropped
+             (list_cells ~ko table None)
+         ^ Ansi.reset);
     let visible = Rows.of_list ~first ~height:budget rows_list in
     for i = 0 to budget - 1 do
       match Rows.at visible (first + i) with
@@ -356,7 +388,7 @@ let render_resources (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
-    let reading = Masc_tui_resource_document.current state in
+    let reading = Option.map fst (Lazy.force document) in
     let shown_resource = Option.map Masc_tui_resource_document.entry reading in
     let title =
       match shown_resource with
@@ -385,11 +417,14 @@ let render_resources (state : state) =
          let ko = state.ui_language = Lang_ko in
          draw_list_idle pane_buf pane_cols ~ko ~empty:(no_resources ~ko)
            ~height:content_height (inventory_idle state)
-     | Some reading ->
-         let rendered,pictures = Masc_tui_resource_document.layout_with_search ~cols:pane_cols state reading in
+     | Some _ ->
+         let rendered, pictures =
+           match Lazy.force document with
+           | Some (_, layout) -> layout
+           | None -> [], []
+         in
          let total_lines = List.length rendered in
-         let position = Masc_tui_scroll.Position.clamp ~count:total_lines
-             ~height:content_height state.resource_scroll in
+         let position = document_scroll total_lines in
          let scroll = Masc_tui_scroll.Position.offset ~count:total_lines
              ~height:content_height position in
          let rendered_window = Rows.of_list ~first:scroll ~height:content_height rendered in

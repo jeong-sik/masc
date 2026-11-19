@@ -210,9 +210,12 @@ val row_text : row -> string
     the client's output that closed on it. *)
 (** Finished and failed results wrap every row, start at the summary, and
     retain a separate scroll position. Rendering clamps it to the current
-    viewport and includes an overflow indicator when space allows. *)
-val visible_lines : height:int -> width:int -> t -> row list
+    viewport. *)
+val visible_lines :
+  height:int -> width:int -> t -> row list * Masc_tui_value.Position.t option
 (** The rows that fit [height], the notice wrapped at [width] cells so a
-    server's reason is read whole. *)
+    server's reason is read whole, and where the reader stands for the title
+    row: the selected row of a provider or model list, or the window over
+    any other phase's rows when it hides some. *)
 val hints : t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

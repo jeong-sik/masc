@@ -308,28 +308,26 @@ let test_the_preview_never_takes_the_list_s_floor () =
   check int "a surface shorter than the floor leaves the list one row" 1
     (Masc_tui_scroll.body_height ~total:0 ~keep:0)
 
-(* Fixed chrome, an optional preview and a conditional overflow row each take
-   their declared rows before the list is handed its height. Every surface that
-   wrote this sum by hand got a different answer. *)
+(* Fixed chrome and an optional preview each take their declared rows before
+   the list is handed its height. Every surface that wrote this sum by hand got
+   a different answer. A list that hides rows keeps all of them: where it
+   stands is on the title row (RFC tui-one-screen-grammar, section 2). *)
 let test_the_list_height_is_the_rows_that_are_left () =
   check int "fixed chrome is all that is taken" 20
     (Masc_tui_scroll.content_height ~rows:24 ~chrome:4 ~count:50
-       ~preview_keep:None ~overflow_takes_row:false);
+       ~preview_keep:None);
   check int "a preview splits what the chrome left" 10
     (Masc_tui_scroll.content_height ~rows:24 ~chrome:4 ~count:50
-       ~preview_keep:(Some 6) ~overflow_takes_row:false);
+       ~preview_keep:(Some 6));
   check int "an empty list keeps the preview's rows in the list" 20
     (Masc_tui_scroll.content_height ~rows:24 ~chrome:4 ~count:0
-       ~preview_keep:(Some 6) ~overflow_takes_row:false);
-  check int "an overflow row is taken off a list that overflows" 19
-    (Masc_tui_scroll.content_height ~rows:24 ~chrome:4 ~count:50
-       ~preview_keep:None ~overflow_takes_row:true);
-  check int "an overflow row stays when the list fits" 20
+       ~preview_keep:(Some 6));
+  check int "a list that fits is handed the same rows" 20
     (Masc_tui_scroll.content_height ~rows:24 ~chrome:4 ~count:5
-       ~preview_keep:None ~overflow_takes_row:true);
+       ~preview_keep:None);
   check int "chrome taller than the surface leaves one row" 1
     (Masc_tui_scroll.content_height ~rows:3 ~chrome:10 ~count:5
-       ~preview_keep:None ~overflow_takes_row:false)
+       ~preview_keep:None)
 
 (* Every move key over a cursor, for an empty list, a list of one and a
    list of six, from the first row, a middle row and the last row. The

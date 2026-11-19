@@ -249,11 +249,12 @@ type refusal =
       }
       (** An account the person asked for as their own and does not spend now
           ({!Authz_provider_account.availability}): the log links it to
-          another person, its purge began, or the start of its purge was
-          given up. A turn on an account whose purge began is a
-          [Turn_refused] with [Provider_account_unavailable] of the same
-          defect, and one on an account whose start was given up is a
-          [Turn_refused] with [Revocation_pending]. It comes after the check
+          another person, its purge began, or the start of its purge or of
+          a replacement of its key was given up. A turn on an account whose
+          purge began is a [Turn_refused] with
+          [Provider_account_unavailable] of the same defect, and one on an
+          account a given-up start blocks is a [Turn_refused] with
+          [Revocation_pending]. It comes after the check
           of the home, so it says nothing of an account captured from
           another home. *)
   | Host_account of host_client
@@ -282,7 +283,9 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     runs. A turn it lets through and a record then takes back does take the
     call: {!authorize} refuses it inside. By then a server has read the key
     file of a key account to make its runtime; no client is started with
-    the key.
+    the key. That order is the server's, not this module's:
+    lib/server/server_preview_keeper_turn.ml, [run], and the RFC of the key
+    accounts, 3.5, say it where it is decided.
     It gives nothing a client starts on: {!authorize} judges the request
     again inside the call, on the state of that time, with the account.
 

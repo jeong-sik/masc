@@ -73,6 +73,52 @@ let provider_account_status state provider_account_id =
     (Authz_provider_account_state.find state.provider_accounts provider_account_id)
 ;;
 
+let is_held state event subject =
+  let change = C.Authz { event; subject } in
+  List.exists
+    (fun held -> C.equal (C.Authz { event = held.event; subject = held.subject }) change)
+    state.revocation_pending
+;;
+
+type account_removal =
+  | Removal_not_begun
+  | Removal_begun
+  | Removal_stayed of Authz_purge_event.account_failed_stage
+  | Removal_start_given_up
+
+(* A purge is the one reduction of a credential that removes it, so a held
+   [Purge] with no record of a purge is a removal whose start was given up. *)
+let account_removal state ~owner provider_account_id =
+  match Authz_purge_state.find_account state.purges { Authz_purge_event.owner; provider_account_id } with
+  | Some (Authz_purge_state.Account_pending | Authz_purge_state.Account_purged) -> Removal_begun
+  | Some (Authz_purge_state.Account_failed { failed_stage }) -> Removal_stayed failed_stage
+  | None ->
+    if is_held state C.Purge (Authz_records.Subject.Credential provider_account_id)
+    then Removal_start_given_up
+    else Removal_not_begun
+;;
+
+let key_replacement_given_up state provider_account_id =
+  is_held state C.Credential_replace (Authz_records.Subject.Credential provider_account_id)
+;;
+
+let provider_account_removal state ~owner provider_account_id =
+  match account_removal state ~owner provider_account_id with
+  | Removal_not_begun -> Authz_provider_account_state.Not_begun
+  | Removal_begun -> Authz_provider_account_state.Begun
+  | Removal_stayed (_ : Authz_purge_event.account_failed_stage) | Removal_start_given_up ->
+    Authz_provider_account_state.Stopped
+;;
+
+let key_to_replace state ~user_id provider_account_id =
+  Authz_provider_account_state.key_to_replace
+    state.provider_accounts
+    ~is_active:(Authz_principal_state.is_active state.principals)
+    ~removal:(provider_account_removal state)
+    ~user_id
+    provider_account_id
+;;
+
 let hold_revocations state helds =
   let revocation_pending =
     List.fold_left
@@ -464,7 +510,9 @@ let owner_of_issuer = function
    no turn spends the account while it is blocked, and its owner closes the
    block by asking for the purge again. The log has no start of that purge, so
    a start of the server finds none to end, and the key of the account stays
-   on disk until its owner asks again. *)
+   on disk until its owner asks again. Nor the block of one whose key
+   replacement was given up (the same RFC, 3.7): its owner closes it by
+   asking for the replacement again, or removes the account. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map
@@ -621,7 +669,9 @@ let service_credential state (record : R.t) =
 ;;
 
 (* A link takes no intent: cut back to before it, the account has no owner,
-   and no Runtime may spend it. *)
+   and no Runtime may spend it. A replacement of a key is a reduction of the
+   credential (design 8.2): cut back to before it, the key before it would be
+   the key of the account again. *)
 let provider_account state (record : R.t) =
   match Authz_provider_account_event.of_body record.R.body with
   | Error error -> Error (Provider_account_unreadable error)
@@ -631,10 +681,23 @@ let provider_account state (record : R.t) =
          state.provider_accounts
          ~author:record.R.author
          ~is_active:(Authz_principal_state.is_active state.principals)
+         ~removal:(provider_account_removal state)
          event
      with
      | Error refusal -> Error (Provider_account refusal)
-     | Ok provider_accounts -> Ok { state = { state with provider_accounts }; high_water = None })
+     | Ok provider_accounts ->
+       let high_water =
+         match event with
+         | Authz_provider_account_event.Linked _ | Authz_provider_account_event.Key_linked _ -> None
+         | Authz_provider_account_event.Key_replaced
+             { provider_account_id; user_id = _; generation = _ } ->
+           Some
+             (C.Authz
+                { event = C.Credential_replace
+                ; subject = Authz_records.Subject.Credential provider_account_id
+                })
+       in
+       Ok { state = { state with provider_accounts }; high_water })
 ;;
 
 (* A Runtime takes no intent either: cut back to before it, the Runtime and its

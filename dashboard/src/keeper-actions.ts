@@ -69,6 +69,8 @@ import {
   keeperToolApprovals,
   activeStreamEntryId,
   activeStreamRequestId,
+  holdStopUntilAccepted,
+  noteStreamAcceptance,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
@@ -292,6 +294,18 @@ export function cancelKeeperThreadRequest(
 export async function cancelActiveKeeperThreadMessage(name: string): Promise<boolean> {
   const keeperName = name.trim()
   if (!keeperName) return false
+  // Until the send reads the acceptance frame, the Dashboard cannot tell
+  // whether the server holds the operation. A stop that names it could reach
+  // the server before the submit and find nothing, and closing the stream does
+  // not take back an operation the server accepts: its turn would run under
+  // rows marked cancelled. The stop is held instead, and the send passes it on
+  // when the acceptance arrives. A send that ends without one drops the stop
+  // with its stream, and its rows say how the send ended.
+  const heldReplyRow = holdStopUntilAccepted(keeperName)
+  if (heldReplyRow !== null) {
+    finalizeAssistantEntry(keeperName, heldReplyRow, { streamState: 'stop_pending' })
+    return true
+  }
   const requestIdBeforeAbort = activeStreamRequestId(keeperName)
   const abortResult = abortKeeperThreadMessage(keeperName)
   const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
@@ -309,6 +323,10 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
 export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
   const name = keeperName.trim()
   if (!name) return false
+  // A stop for an operation whose acceptance the send has not read is held
+  // here and goes out at that acceptance. The Keeper interrupt below does not
+  // wait for it: it stops the turn that runs now and answers false when none
+  // does.
   await cancelActiveKeeperThreadMessage(name)
   try {
     const result = await apiInterruptKeeperTurn(name)
@@ -1574,6 +1592,7 @@ export async function sendKeeperThreadMessage(
       },
       onEvent: (event, sequence) => {
         markKeeperStreamSignal(keeperName)
+        let stopWasHeld = false
         if (
           event.type === 'CUSTOM'
           && event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED'
@@ -1584,6 +1603,7 @@ export async function sendKeeperThreadMessage(
           }
           operationAccepted = true
           markLiveSendRequestAccepted(acceptedOperationId)
+          stopWasHeld = noteStreamAcceptance(keeperName, operationId)
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
             keeperName,
@@ -1612,6 +1632,13 @@ export async function sendKeeperThreadMessage(
           assistantId,
           { operationId, sequence, event },
         )
+        // The server holds the operation, so the stop the operator pressed
+        // before this frame goes out the way a stop pressed after it does. That
+        // closes this stream: the frames behind the acceptance are not read.
+        if (stopWasHeld) {
+          void cancelActiveKeeperThreadMessage(keeperName)
+          controller.signal.throwIfAborted()
+        }
         if (event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR') {
           // The direct reader cancels itself on the terminal event, while
           // clearActiveStream in the send tail still holds live-send
@@ -1708,18 +1735,33 @@ export async function sendKeeperThreadMessage(
       return
     }
 
-    const finalDelivery = 'delivered' as KeeperConversationDelivery
-    const hasContinuationStatus = (
-      finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
-      && finalEntry.blocks?.some(block => (
-        block.t === 'status' && block.kind === 'continuation_checkpoint'
-      )) === true
-    )
+    // A finished stream whose frames typed the turn is not judged again by its
+    // text. The server sends RUN_FINISHED after KEEPER_REPLY_DETAILS only for a
+    // turn it does not fail, and some of those have no text: a reply with
+    // blocks to show (media), a reply a surface post delivered, a checkpoint. A
+    // turn with nothing to show ends in RUN_ERROR. Those frames settled the
+    // placeholder. A media-only reply is stored before the last frame, so its
+    // blocks arrive with the next history read. The placeholder gets its finish
+    // time here, as every settled row does, and is otherwise left as the frames
+    // left it. A stored row already in its place is the server's record of the
+    // reply and stays as stored.
     if (
-      !hasFinalText
-      && !toolCallEnded
-      && !hasContinuationStatus
+      reply.kind === 'replaced'
+      || (reply.kind === 'placeholder' && reply.entry.details?.turnOutcome != null)
     ) {
+      settlePlaceholder({ timestamp: new Date().toISOString() })
+      if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
+      if (operationAccepted) {
+        removeTrackedKeeperChatOperation(operationId)
+      }
+      return
+    }
+
+    // What is left finished without typing its turn: a cancelled stream, one
+    // that asks for reconciliation, or one whose details frame did not apply.
+    // Its text is all there is to judge it by.
+    const finalDelivery = 'delivered' as KeeperConversationDelivery
+    if (!hasFinalText && !toolCallEnded) {
       settlePlaceholder({
         text: EMPTY_VISIBLE_REPLY_TEXT,
         rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
@@ -1737,13 +1779,9 @@ export async function sendKeeperThreadMessage(
       }
       return
     }
-    let emptyTerminalText = ''
-    if (toolCallEnded && !hasContinuationStatus) {
-      emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
-    }
 
     settlePlaceholder({
-      text: hasFinalText ? finalText : emptyTerminalText,
+      text: hasFinalText ? finalText : TOOL_ONLY_EMPTY_REPLY_TEXT,
       delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),
@@ -1758,20 +1796,15 @@ export async function sendKeeperThreadMessage(
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
-    if (isAbortError(err)) {
-      const durablePendingRequest = operationAccepted
-        ? trackedKeeperChatOperationsForKeeper(keeperName)
-          .find(candidate => candidate.operationId === operationId) ?? null
-        : null
-      const hasDurablePendingRequest = durablePendingRequest !== null
-      const shouldAttemptServerCancel = Boolean(
-        operationAccepted && (liveSendOwnsRequest(operationId) || hasDurablePendingRequest),
-      )
-      const serverCancelAlreadyFinalized = Boolean(
-        operationAccepted
-        && !liveSendOwnsRequest(operationId)
-        && !hasDurablePendingRequest,
-      )
+    // A stop is what aborts this stream, and a stop waits for the acceptance.
+    // An abort before it is a failed send like any other: no row says cancelled
+    // for an operation the server was never asked to stop.
+    if (operationAccepted && isAbortError(err)) {
+      const durablePendingRequest = trackedKeeperChatOperationsForKeeper(keeperName)
+        .find(candidate => candidate.operationId === operationId) ?? null
+      const shouldAttemptServerCancel =
+        liveSendOwnsRequest(operationId) || durablePendingRequest !== null
+      const serverCancelAlreadyFinalized = !shouldAttemptServerCancel
       if (shouldAttemptServerCancel) {
         const pendingRequest = withCurrentTrackedOperationAssistantDraft(durablePendingRequest ?? {
           operationId,
@@ -1801,7 +1834,7 @@ export async function sendKeeperThreadMessage(
         delivery: 'cancelled',
         error: null,
         streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-          requestId: operationAccepted ? operationId : undefined,
+          requestId: operationId,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1811,7 +1844,7 @@ export async function sendKeeperThreadMessage(
         error: null,
         timestamp: new Date().toISOString(),
         streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-          requestId: operationAccepted ? operationId : undefined,
+          requestId: operationId,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })

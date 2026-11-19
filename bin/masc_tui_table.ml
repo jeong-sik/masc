@@ -41,13 +41,9 @@ let cell ?(align = Left) ?(fold = Fold_middle) ?(style = "") ~header ~width
    undressed. *)
 let default_close = "\027[0m"
 
-(* One cell between columns, on every table on every screen.
-
-   It used to be each table's own number. Nine of the ten picked one and the
-   Memory table picked two, for no reason it recorded, so moving between two
-   screens moved the columns under the reader's eye. A screen cannot pick its
-   own any more: there is nothing to pass. *)
-let cell_gap = 1
+(* Two cells between columns, on every table on every screen
+   (RFC tui-one-screen-grammar section 2). *)
+let cell_gap = 2
 let separator = String.make cell_gap ' '
 
 let used_width cells =
@@ -78,6 +74,7 @@ let used_width cells =
 type 'col layout = {
   shown : 'col list;
   flex_width : int;
+  dropped : int;
 }
 
 let fit ~inner_width ~width ~flex ~drop_order columns =
@@ -110,7 +107,8 @@ let fit ~inner_width ~width ~flex ~drop_order columns =
       0 shown
   in
   let gaps = cell_gap * max 0 (List.length shown - 1) in
-  { shown; flex_width = max (width flex) (inner_width - others - gaps) }
+  let dropped = max 0 (List.length columns - List.length shown) in
+  { shown; flex_width = max (width flex) (inner_width - others - gaps); dropped }
 
 (* Where a reading gives way is the column's choice. An identifier keeps both
    ends and folds in the middle: cut at the head it reads as a different
@@ -145,6 +143,34 @@ let line ~pick ~dress cells =
    wears whatever the caller dressed the line in. *)
 let header_row cells =
   line ~pick:(fun cell -> cell.header) ~dress:(fun _ text -> text) cells
+
+let dropped_columns_badge ~ko dropped =
+  if dropped <= 0 then None
+  else if ko then Some (Printf.sprintf "외 %d열" dropped)
+  else if dropped = 1 then Some "+1 col"
+  else Some (Printf.sprintf "+%d cols" dropped)
+
+let trim_trailing_spaces s =
+  let len = ref (String.length s) in
+  while !len > 0 && Char.equal s.[!len - 1] ' ' do
+    decr len
+  done;
+  if !len = String.length s then s else String.sub s 0 !len
+
+let header_row_with_dropped ~ko ~inner_width ~dropped cells =
+  let base = header_row cells in
+  match dropped_columns_badge ~ko dropped with
+  | None -> base
+  | Some badge ->
+    let trimmed = trim_trailing_spaces base in
+    let badge_cells = Masc_tui_message_layout.display_width badge in
+    let trimmed_cells = Masc_tui_message_layout.display_width trimmed in
+    if trimmed_cells + cell_gap + badge_cells <= inner_width then
+      trimmed ^ String.make (inner_width - trimmed_cells - badge_cells) ' ' ^ badge
+    else if inner_width >= badge_cells + cell_gap + 1 then
+      let keep = inner_width - badge_cells - cell_gap in
+      Masc_tui_message_layout.fit_width trimmed keep ^ separator ^ badge
+    else base
 
 let row ?(close = default_close) cells =
   line

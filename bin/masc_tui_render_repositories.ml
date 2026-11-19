@@ -82,7 +82,7 @@ type workspace_activity_column = Activity_date | Activity_keeper | Activity_task
 
 let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
-    | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
+    | Activity_date -> Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute | Activity_keeper -> 18 | Activity_task -> 16
     | Activity_result -> Message_layout.display_width (if ko then "결과" else "RESULT")
     | Activity_path -> 8 in
   let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
@@ -110,7 +110,15 @@ let render_workspace_activity (state : state) repo_id =
     [ ui_text state ~ko:"활동" ~en:"activity"; Terminal_text.single_line repo_id ]
   in
   let title = match state.workspace_activity_context_scroll with
-    | None -> here_row ~cols state ~path:activity_path ~readings:[] ~position:None
+    | None ->
+        here_row ~cols state ~path:activity_path ~readings:[]
+          ~position:
+            (match rows with
+             | [] -> None
+             | _ :: _ ->
+                 Some
+                   (Masc_tui_value.Position.row ~selected:(Some cursor)
+                      ~total:(List.length rows)))
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
@@ -118,8 +126,8 @@ let render_workspace_activity (state : state) repo_id =
         let scroll = max 0 (min requested (max 0 (count - height))) in
         here_row ~cols state
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
-          ~readings:[ Masc_tui_scroll.window_text ~scroll ~height count ]
-          ~position:None in
+          ~readings:[]
+          ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count) in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title
     ~hints:(match state.workspace_activity_context_scroll with
@@ -151,9 +159,8 @@ let render_workspace_activity (state : state) repo_id =
             match Rows.at rows_window (first + i) with
             | None -> if i = 0 && rows = [] then c.push (if ko then "  이 기간에 기록된 clone 쓰기 없음" else "  No recorded clone writes in this window") else c.push_empty ()
             | Some (change, path) ->
-                let tm = Unix.localtime change.Tui_decode.fc_at in
-                let date = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-                  (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min in
+                let date =
+                  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) change.Tui_decode.fc_at in
                 let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
                 let line = "  " ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
@@ -200,8 +207,17 @@ let render_workspace_activity (state : state) repo_id =
              ^ Terminal_text.single_line message);
           show ~budget:(max 1 (budget - 1)) reading)
 
+(* What the Workspace preview holds of one repository's Git state: a
+   reading, or the mark that says why there is none (RFC
+   tui-one-screen-grammar §6.4). *)
+type git_observation =
+  | Git_reading of string
+  | Git_absent of Masc_tui_value.Unknown.t
+
 (* The inventory names registered paths, not a fresh Git observation. Never
-   substitute [rp_default_branch] for the branch checked out at that path. *)
+   substitute [rp_default_branch] for the branch checked out at that path.
+   A read of this repository that failed before any snapshot arrived is a
+   failed read, not one still to come. *)
 let repository_git_observation (state : state) (repo : Tui_decode.repository) =
   match state.repository_changes_scope, state.repository_changes with
   | Some (Tui_decode.Repository_change_repository requested), Some snapshot ->
@@ -214,20 +230,26 @@ let repository_git_observation (state : state) (repo : Tui_decode.repository) =
                  Terminal_text.single_line name in
            let reading = Printf.sprintf "%s · %s %d"
                branch (ui_text state ~ko:"변경" ~en:"changes") snapshot.rcs_total in
-           Some (match state.repository_changes_error with
+           Git_reading (match state.repository_changes_error with
              | Some _ -> ui_text state ~ko:"이전 관측 · 갱신 실패 · " ~en:"Last read · refresh failed · " ^ reading
              | None -> ui_text state ~ko:"마지막 조회 · " ~en:"Last read · " ^ reading)
        | Tui_decode.Repository_change_project
-       | Tui_decode.Repository_change_repository _ -> None)
+       | Tui_decode.Repository_change_repository _ -> Git_absent Masc_tui_value.Unknown.Unread)
+  | Some (Tui_decode.Repository_change_repository requested), None
+    when String.equal requested repo.rp_id && Option.is_some state.repository_changes_error ->
+      Git_absent Masc_tui_value.Unknown.Read_failed
   | (Some Tui_decode.Repository_change_project | None), _
-  | Some (Tui_decode.Repository_change_repository _), None -> None
+  | Some (Tui_decode.Repository_change_repository _), None ->
+      Git_absent Masc_tui_value.Unknown.Unread
 
 let repository_preview_lines state ~width (repo : Tui_decode.repository) =
   let fields =
     [ ui_text state ~ko:"Git 관측" ~en:"Git observation",
         (match repository_git_observation state repo with
-         | Some reading -> reading
-         | None -> ui_text state ~ko:"미관측 · d:조회" ~en:"Not observed · d:read")
+         | Git_reading reading -> reading
+         (* No reading: the mark goes where the value goes (RFC
+            tui-one-screen-grammar §6.4), and the read key is zone 5's. *)
+         | Git_absent why -> Masc_tui_value.Unknown.glyph why)
     ; ui_text state ~ko:"키퍼" ~en:"Keeper", (match repo.rp_keepers with
         | [] -> ui_text state ~ko:"미배정" ~en:"Unassigned"
         | names -> String.concat ", " names)
@@ -288,7 +310,6 @@ type repository_studio_geometry = {
   rsg_detail : string list;
   rsg_errors : string list;
   rsg_content_height : int;
-  rsg_overflowing : bool;
 }
 
 let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
@@ -332,12 +353,11 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
            (Terminal_text.single_line reason) ^ Ansi.reset]
     | Some _ | None -> [] in
   let room = max 1 (list_budget - (if boxed then 2 else 0) - List.length errors) in
-  let overflowing = shown > room && room > 1 in
-  let content_height = max 1 (min shown (room - if overflowing then 1 else 0)) in
+  let content_height = max 1 (min shown room) in
   {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
    rsg_list_width = list_width; rsg_detail_width = detail_width;
    rsg_detail = detail; rsg_errors = errors;
-   rsg_content_height = content_height; rsg_overflowing = overflowing}
+   rsg_content_height = content_height}
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
   (repository_studio_geometry state ~cols ~budget ~cursor).rsg_content_height
@@ -357,11 +377,11 @@ let render_repository_list (state : state) =
     here_row ~cols state ~path:[]
       ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
-    ~title
-    ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
-              ~has_reading:(Option.is_some (selected_repository_reading state))
-              state.view)
+  surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    ~surface_key:"repositories" ~title
+    ~keys:(Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~has_rows:(shown > 0)
+             ~has_reading:(Option.is_some (selected_repository_reading state))
+             state.view)
     ~body:(fun ~budget c ->
       let geometry =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
@@ -401,12 +421,11 @@ let render_repository_list (state : state) =
                 Theme.selection ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
-      let lines =
-        geometry.rsg_errors @ lines
-        @ (if geometry.rsg_overflowing then
-             [ui_text state ~ko:"저장소 " ~en:"repositories "
-              ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
-           else []) in
+      if shown > 0 then
+        c.position
+          (Masc_tui_value.Position.row ~selected:(Some state.repositories_cursor)
+             ~total:shown);
+      let lines = geometry.rsg_errors @ lines in
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
         ui_text state ~ko:"등록된 저장소" ~en:"Registered repositories" in
@@ -585,9 +604,9 @@ let render_repository_changes (state : state) =
              | [] -> None
              | _ :: _ ->
                  Some
-                   (Masc_tui_value.Position.Row
-                      { at = state.repository_changes_cursor + 1
-                      ; total = List.length changes }))
+                   (Masc_tui_value.Position.row
+                      ~selected:(Some state.repository_changes_cursor)
+                      ~total:(List.length changes)))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
@@ -793,15 +812,14 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let diff_rows = prepared.diff_rows in
   let removed, added = prepared.removed, prepared.added in
   let total = prepared.count in
-  let header =
+  (* The title names where the window stands, known once the notes are
+     counted, so it is drawn last and put first. *)
+  let header ~position =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; change_row_address change ]
       ~readings:[ Printf.sprintf "-%d +%d" removed added ]
-      ~position:None
+      ~position
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
   (* Facts about the change the rows themselves cannot carry. *)
   let notes =
     let turn =
@@ -848,12 +866,14 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      rows plus the notes, which left the surface one row over its budget --
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
-  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  (* The position row carries the esc hint at every count, so it is one of
-     [listing_rows_below_the_body] and needs no row of its own. *)
+  (* One status row under the rows names the column and the esc key. *)
+  let status_rows = 1 in
+  let chrome_rows =
+    boxed_head_rows cols + count_frame_lines buf + status_rows + listing_rows_below_the_body
+  in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
-      ~preview_keep:None ~overflow_takes_row:false
+      ~preview_keep:None
   in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
@@ -872,20 +892,21 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~hscroll:state.changes_diff_hscroll ~width:(framed_inner_width cols) row)
     done;
-  let position = match Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total with
-    | None -> ""
-    | Some text -> " · " ^ String.trim text in
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d%s · Esc 로 닫기"
-        else "  col %d%s · esc closes")
-       (state.changes_diff_hscroll + 1) position);
+       (if state.ui_language = Lang_ko then "  열 %d · Esc 로 닫기"
+        else "  col %d · esc closes")
+       (state.changes_diff_hscroll + 1));
   box_bottom buf cols;
-  Buffer.add_string buf
+  let framed = Buffer.create (Buffer.length buf + 512) in
+  boxed_head framed cols
+    (header ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total));
+  Buffer.add_buffer framed buf;
+  Buffer.add_string framed
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_changes_diff ~lang:state.ui_language));
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
-    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+    ~surface_key:"changes" ~rows:terminal_rows ~cols framed
 
 let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -905,7 +926,13 @@ let render_changes_list (state : state) =
   let heading ~reading =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; whose ]
-      ~readings:[ reading ] ~position:None
+      ~readings:[ reading ]
+      ~position:
+        (if shown = 0 then None
+         else
+           Some
+             (Masc_tui_value.Position.row ~selected:(Some state.changes_cursor)
+                ~total:shown))
   in
   let header =
     match state.changes with
@@ -993,13 +1020,12 @@ let render_changes_list (state : state) =
     | Some _ when shown = 0 -> 0
     | Some keep -> Masc_tui_scroll.preview_height ~total:total_content ~keep
   in
-  (* The list's rows as the keypress counts them: what the preview leaves,
-     less the scroll row while the list overflows. *)
+  (* The list's rows as the keypress counts them: what the preview leaves. *)
   let content_height =
     match scrolled_surface state ~cols Changes with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
-          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+          ~preview_keep:s.sc_preview_keep
     | None -> max 1 (total_content - preview_height)
   in
   let max_scroll = max 0 (shown - content_height) in
@@ -1084,18 +1110,13 @@ let render_changes_list (state : state) =
          | None -> box_empty buf cols
        done
    | Some _ -> ());
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf
-         (if state.ui_language = Lang_ko then "  [변경 %s]" else "  [changes %s]")
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
-            Changes));
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
+            ~has_rows:(shown > 0) Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 

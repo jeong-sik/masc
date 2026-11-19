@@ -93,6 +93,11 @@ export const THREAD_ENTRY_CAP = 200
 interface KeeperActiveStream {
   entryId: string
   controller: AbortController
+  // Whether this send has read the server's acceptance, and whether the
+  // operator pressed stop while it had read none. It lasts as long as the
+  // stream does, unlike the live-send claim below, which a send that finished
+  // or handed its operation off releases while the stream is still listed.
+  acceptance: 'awaited' | 'awaited_stop_held' | 'observed'
 }
 
 // keeperName -> operationId -> stream. Map insertion order is the owner FIFO
@@ -1972,7 +1977,7 @@ export function setActiveStream(
   controller: AbortController,
 ): void {
   const streams = keeperActiveStreams.get(name) ?? new Map<string, KeeperActiveStream>()
-  streams.set(operationId, { entryId, controller })
+  streams.set(operationId, { entryId, controller, acceptance: 'awaited' })
   keeperActiveStreams.set(name, streams)
   // The client mints the operation id before opening the direct response
   // stream. Claim it at the same lifecycle boundary as the stream controller,
@@ -2004,6 +2009,39 @@ export function activeStreamRequestId(name: string): string | null {
   return operationId && acceptedLiveSendRequestIds.has(operationId)
     ? operationId
     : null
+}
+
+/** Keep a stop for the Keeper's first active operation while its send has not
+ *  read the server's acceptance. Until then the Dashboard cannot tell whether
+ *  the server holds the operation: a stop that names it could arrive before
+ *  the submit, and closing the stream does not take back an operation the
+ *  server accepts. Answers the reply row of the held operation, or null when
+ *  there is nothing to hold: no active operation, or one whose acceptance was
+ *  read. The held stop lives on the stream's record and goes when the stream
+ *  does. */
+export function holdStopUntilAccepted(name: string): string | null {
+  const streams = keeperActiveStreams.get(name)
+  const first = streams?.entries().next().value
+  if (!streams || !first) return null
+  const [operationId, stream] = first
+  switch (stream.acceptance) {
+    case 'observed':
+      return null
+    case 'awaited':
+    case 'awaited_stop_held':
+      streams.set(operationId, { ...stream, acceptance: 'awaited_stop_held' })
+      return stream.entryId
+  }
+}
+
+/** Record that this operation's send read the server's acceptance. Answers
+ *  whether a stop was held for it. */
+export function noteStreamAcceptance(name: string, operationId: string): boolean {
+  const streams = keeperActiveStreams.get(name)
+  const stream = streams?.get(operationId)
+  if (!streams || !stream) return false
+  streams.set(operationId, { ...stream, acceptance: 'observed' })
+  return stream.acceptance === 'awaited_stop_held'
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---

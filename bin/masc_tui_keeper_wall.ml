@@ -49,12 +49,19 @@ let header ~cols ~now =
   let name, count = dimensions cols in
   let start = Masc.Keeper_turn_pulse.slot_start now - ((count - 1) * Masc.Keeper_turn_pulse.slot_seconds) in
   let ruler = Bytes.make count ' ' in
-  let first_tick = if (Unix.localtime (float_of_int start)).Unix.tm_min = 0 then 0 else 1 in
+  let mark_at position =
+    Masc_tui_value.Instant.axis_hour
+      (float_of_int (start + position * Masc.Keeper_turn_pulse.slot_seconds))
+  in
+  (* Slots start on the half hour, so the first hour starts at the first or
+     the second slot. *)
+  let first_tick = match mark_at 0 with Some _ -> 0 | None -> 1 in
   let rec ticks position =
     if position < count then begin
-      let tm = Unix.localtime (float_of_int (start + position * Masc.Keeper_turn_pulse.slot_seconds)) in
-      let label = Printf.sprintf "%02d:00" tm.Unix.tm_hour in
-      Bytes.blit_string label 0 ruler position (min (String.length label) (count - position));
+      (match mark_at position with
+       | Some label ->
+           Bytes.blit_string label 0 ruler position (min (String.length label) (count - position))
+       | None -> ());
       ticks (position + 12)
     end in
   ticks first_tick;

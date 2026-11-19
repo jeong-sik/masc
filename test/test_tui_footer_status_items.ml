@@ -34,7 +34,8 @@ let test_action_text_is_not_dropped_as_a_key () =
       check_bool ("the diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) row))
       (Masc_tui_footer.undroppable_keys
-         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view)));
+         (Masc_tui_footer.prepare_hints
+           (Masc_tui_footer.Written (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view))));
     check_string "rendering keeps the complete outcome in state" action_message
       (Option.get (Masc_tui_action_notice.ordinary state.last_action) |> fst);
     let narrow = render_action state 60 in
@@ -44,7 +45,8 @@ let test_action_text_is_not_dropped_as_a_key () =
       check_bool ("the narrow diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
       (Masc_tui_footer.undroppable_keys
-         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view))))
+         (Masc_tui_footer.prepare_hints
+           (Masc_tui_footer.Written (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view)))))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
 let test_build_mismatch_names_the_older_side () =
@@ -57,8 +59,8 @@ let test_build_mismatch_names_the_older_side () =
    | Some item ->
      check_string "an older TUI is told to restart, ahead of the keys"
        "<dim>  TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc)  q:quit  | Port: 8935<reset>\n"
-       (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
-          ~max_cells:120 ~port:8935 ~hints:"q:quit" ())
+       (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>" ~refused_keys:Masc_tui_footer.Shown_dim
+          ~max_cells:120 ~port:8935 ~hints:(Masc_tui_footer.Written "q:quit") ())
    | None -> Alcotest.fail "a differing pair produced no item");
   (match
      Masc_tui_footer.build_mismatch_item
@@ -68,8 +70,8 @@ let test_build_mismatch_names_the_older_side () =
    | Some item ->
      check_bool "an older server is told to redeploy" true
        (contains ~needle:"server is older"
-          (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:""
-             ~max_cells:120 ~port:8935 ~hints:"q" ()))
+          (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:"" ~refused_keys:Masc_tui_footer.Shown_dim
+             ~max_cells:120 ~port:8935 ~hints:(Masc_tui_footer.Written "q") ()))
    | None -> Alcotest.fail "a differing pair produced no item");
   match
     Masc_tui_footer.build_mismatch_item
@@ -79,8 +81,8 @@ let test_build_mismatch_names_the_older_side () =
   | Some item ->
     check_bool "one unknown age blames neither lane" true
       (contains ~needle:"generations differ"
-         (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:""
-            ~max_cells:120 ~port:8935 ~hints:"q" ()))
+         (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:"" ~refused_keys:Masc_tui_footer.Shown_dim
+            ~max_cells:120 ~port:8935 ~hints:(Masc_tui_footer.Written "q") ()))
   | None -> Alcotest.fail "a differing pair produced no item"
 
 (* RFC-0484 §3.3: the server's rollup leads the row with its count and detail,
@@ -93,8 +95,8 @@ let test_operator_action_leads_the_row () =
       }
   in
   let line =
-    Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:"" ~max_cells:200 ~port:8935
-      ~hints:"q:quit" ()
+    Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:"" ~refused_keys:Masc_tui_footer.Shown_dim ~max_cells:200 ~port:8935
+      ~hints:(Masc_tui_footer.Written "q:quit") ()
   in
   check_bool "the keys still follow" true (contains ~needle:"q:quit" line);
   check_bool "a working surface keeps it" true (Masc_tui_footer.needs_operator item)

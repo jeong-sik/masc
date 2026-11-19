@@ -8,10 +8,12 @@ val summary_lines :
 
 val changes_lines :
   Masc_tui_types.state -> cols:int -> max_lines:int -> now:float ->
-  keeper_name:string -> string list
+  keeper_name:string -> hand_position:(Masc_tui_value.Position.t -> unit) ->
+  string list
 (** Committed changes in the shared Memory browser. The first visible event
-    is selected for the immutable full reading. Sources retain partial,
-    stale, failed and missing observations independently. *)
+    is selected for the immutable full reading, and [hand_position] is handed
+    its place in the list. Sources retain partial, stale, failed and missing
+    observations independently. *)
 
 val changes_page_size :
   Masc_tui_types.state -> max_lines:int -> keeper_name:string -> int

@@ -191,7 +191,7 @@ related: []
 - 키 파일을 읽지 못하면 CLI 를 띄우지 않고 값으로 답한다. `key_missing`(파일이 없다)과 `key_unreadable`(소유나 권한이 다르다)이다.
 - 확인이나 턴이 `api_error_status = Some 401` 로 끝나고 계정이 키 계정이면 답의 코드는 `key_refused` 다. 문장을 보고 가르지 않는다. 다른 상태 코드는 지금처럼 provider 의 문장을 그대로 싣는다.
   - 판정은 한 함수(`Runtime_claude_code.key_refused`)가 한다. 읽는 것은 둘이다. 상태 코드가 401 인지, 계정이 파일의 키로 도는지(`Runtime_official_account.key_file`). 그런 계정의 자식에게는 그 키가 유일한 자격이다(§3.4).
-  - 확인: 실패 코드가 `key_refused` 다(200, `verification.status = failed`). client 가 재시도하는 동안 알린 401 은 확인을 일찍 끝내지 않는다. 마지막 알림이 401 인 채로 시한이 오면 `timed_out` 대신 `key_refused` 로 답한다. 그 알림 뒤에 client 가 다른 것을 알리면 키는 받아들여진 것이다. 그때는 시한에 `timed_out` 으로 답한다.
+  - 확인: 실패 코드가 `key_refused` 다(200, `verification.status = failed`). client 가 재시도하는 동안 알린 401 은 확인을 일찍 끝내지 않는다. 시한의 답은 client 가 마지막으로 알린 것이 정한다. 401 재시도 알림이면 `timed_out` 대신 `key_refused` 다. 403 재시도 알림이면 `provider_auth_refused` 다. 다른 상태 코드의 재시도 알림이나 그 밖의 알림이면 `timed_out` 이다.
   - 턴: 409 `key_refused` 로 답하고, 턴 기록의 `failure` 도 `key_refused` 다. client 는 메시지를 받은 뒤라 `model_may_have_read` 는 true 다.
   - 403 은 키가 받아들여진 뒤에도 나오므로 키 거절로 읽지 않는다. 키 계정의 403 은 확인에서 `provider_auth_refused`, 턴에서 `no_answer` 다.
   - 로그인 계정의 401 은 그대로다. 확인에서 `provider_auth_refused`, 턴에서 `no_answer` 다.
@@ -295,7 +295,7 @@ related: []
   - `"integration_id"`: 로그인 계정은 영수증에서, 키 계정은 기록에서 읽는다.
   - `"key"`(키 계정만): `readable`, `key_missing`, `key_unreadable`, `not_looked_at`. 쓸 때와 같은 검사로 읽는다(§3.2). 폴더를 만들지 않는다. 호출 자리를 잡지 않으므로 읽은 순간의 값이다. 등록이나 없애기가 도는 순간에는 `key_missing` 으로 읽힐 수 있다.
   - `"removal"`(없애기가 끝나지 않은 계정만): `key_not_removed`, `home_not_removed`, `start_given_up`. 앞의 둘은 남은 단계다. 셋째는 없애기 시작이 intent 만 쓰고 기록을 못 쓴 경우다(설계 8.3). 셋 다 그 계정은 쓰이지 않고, 주인이 없애기를 다시 요청한다.
-  - `"replacement"`(키 바꾸기 시작이 포기된 계정만): `start_given_up`. 바꾸기가 intent 만 쓰고 기록을 못 쓴 경우다(§3.7). 그 계정은 쓰이지 않는다. 주인이 바꾸기를 다시 요청하거나 계정을 없앤다. `removal` 의 `start_given_up` 과는 막힌 축소의 종류로 가른다(`Purge` 와 `Credential_replace`). 둘 다 막힌 계정은 `removal` 만 준다. 그 계정은 없애는 것이 다음 일이다. 바꾸기를 요청하면 409(`removal_left`)다(§3.7).
+  - `"replacement"`(키 바꾸기 시작이 포기된 계정만): `start_given_up`. 바꾸기가 intent 만 쓰고 기록을 못 쓴 경우다(§3.7). 그 계정은 쓰이지 않는다. 주인이 바꾸기를 다시 요청하거나 계정을 없앤다. `removal` 의 `start_given_up` 과는 막힌 축소의 종류로 가른다(`Purge` 와 `Credential_replace`). 둘 다 막힌 계정은 `removal` 만 준다. 그 계정은 없애는 것이 다음 일이다. 둘 다 막힌 계정에 바꾸기를 요청하면 409(`removal_left`)다(§3.7).
   - 없애는 중이거나 없앤 계정은 목록에 없다(§3.6). 그 계정의 Runtime 도 목록에 없다. `removal` 이나 `replacement` 가 붙은 계정은 목록에 있고, 그 계정의 Runtime 은 목록에 없다. Runtime 기록은 로그에 남지만 그 Runtime 의 턴은 모두 거절되므로, Keeper 에 배정할 것으로 보이지 않게 한다.
 - 구독 목록 응답이 구독마다 연결하는 방법을 준다. `login`, `key` 가운데 받는 것이다. 1단계에서 `key` 를 받는 것은 `claude-code` template 이다.
   - `"connect"`: `["login"]` 또는 `["login", "key"]`. 등록 route 가 키를 받는지 정하는 판정과 같은 함수에서 나온다.
@@ -416,4 +416,4 @@ Stacked PR 로 올린다. 각 층은 아래층만 쓴다.
 - 2026-11-19: §3.7, §3.8, §5, §6 D1. 바꾸기의 요청 경로와 답, 단계마다 실패했을 때 남는 것, 포기된 바꾸기가 목록에 보이는 모양을 적었다. D1 은 넣기로 정했다.
 - 2026-11-19: §3.7, §3.8, §5. 바꾸기의 확인이 읽는 것, 없앤 계정에 남는 바꾸기의 막힘, 없애기와 바꾸기가 둘 다 막힌 계정의 목록 값을 적었다.
 - 2026-11-19: §3.5 의 두 문장을 코드와 맞췄다. 재시도 중에 알린 401 은 확인을 일찍 끝내지 않고 시한에 `key_refused` 로 답한다. 자리 안에서 다시 거절되는 턴은 키 파일이 읽힌 뒤에 거절된다(client 는 뜨지 않는다).
-- 2026-11-19: §3.5, §3.7, §3.8. 병합 뒤 리뷰 반영. 시한에 `key_refused` 로 답하는 것은 마지막 알림이 401 일 때뿐이다. 없애기까지 멈춘 계정에 바꾸기를 요청하면 409 이고 닫히는 막힘이 없다.
+- 2026-11-19: §3.5, §3.7, §3.8. 병합 뒤 리뷰 반영. 바로 앞 줄의 §3.5 문장을 고친다. 확인의 시한 답은 client 가 마지막으로 알린 것이 정한다(401 재시도 알림이면 `key_refused`, 403 이면 `provider_auth_refused`, 그 밖이면 `timed_out`). 없애기까지 멈춘 계정에 바꾸기를 요청하면 409 이고 닫히는 막힘이 없다.

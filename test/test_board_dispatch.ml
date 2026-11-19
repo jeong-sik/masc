@@ -1020,6 +1020,116 @@ let test_recent_author_match_applies_before_limit () =
       (Board.Post_id.to_string post.id)
   | _ -> Alcotest.fail "expected exactly one matching author post"
 
+let post_ids posts =
+  List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) posts
+
+(* The Board search box asks [list_posts ~text_query] for the whole Board
+   (#52957). The text is found in the title, the body, the author id or the
+   hearth, whatever its case. *)
+let test_list_posts_text_query_matches_each_field () =
+  let create ~author ~title ~content ?hearth () =
+    let post =
+      get_created
+        (Board_dispatch.create_post ~author ~title ~content ?hearth
+           ~post_kind:Board.Human_post ())
+    in
+    Board.Post_id.to_string post.id
+  in
+  let in_title =
+    create ~author:"search-writer" ~title:"Quarterly ZQNEEDLE report"
+      ~content:"nothing to see" ()
+  in
+  let in_body =
+    create ~author:"search-writer" ~title:"Plain heading"
+      ~content:"the zqneedle sits in the body" ()
+  in
+  let in_author =
+    create ~author:"zqneedle-writer" ~title:"Plain heading" ~content:"plain text" ()
+  in
+  let in_hearth =
+    create ~author:"search-writer" ~title:"Plain heading" ~content:"plain text"
+      ~hearth:"zqneedle-hearth" ()
+  in
+  let _unmatched =
+    create ~author:"search-writer" ~title:"Plain heading" ~content:"plain text" ()
+  in
+  let found text_query =
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator
+      ~sort_by:Board_dispatch.Recent ~text_query ~limit:50 ()
+    |> post_ids
+    |> List.sort String.compare
+  in
+  let expected = List.sort String.compare [ in_title; in_body; in_author; in_hearth ] in
+  Alcotest.(check (list string)) "each field matches" expected (found "zqneedle");
+  Alcotest.(check (list string)) "case does not matter" expected (found "ZqNeEdLe")
+
+(* Hot without a full scan cuts a window of the top 500 posts before any
+   filter runs. A text query reads every post, so a match ranked past that
+   window is still found. *)
+let test_list_posts_text_query_reads_past_the_hot_window () =
+  let hot_window = 500 in
+  let buried =
+    get_created
+      (Board_dispatch.create_post ~author:"buried-writer"
+         ~content:"the zqburied post ranks last" ~post_kind:Board.Human_post ())
+  in
+  let buried_id = Board.Post_id.to_string buried.id in
+  (* One down vote ranks it below every filler post, whatever their times. *)
+  (match
+     Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
+       ~voter:"buried-voter" ~post_id:buried_id ~direction:Board.Down
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  for index = 1 to hot_window do
+    ignore
+      (get_created
+         (Board_dispatch.create_post ~author:"filler-writer"
+            ~content:(Printf.sprintf "filler post %03d" index)
+            ~post_kind:Board.Human_post ()))
+  done;
+  let hot ?text_query () =
+    Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator
+      ~sort_by:Board_dispatch.Hot ?text_query ~limit:10 ()
+    |> post_ids
+  in
+  Alcotest.(check bool) "the buried post is not on the first Hot page" false
+    (List.mem buried_id (hot ()));
+  Alcotest.(check (list string)) "the text query finds it" [ buried_id ]
+    (hot ~text_query:"zqburied" ())
+
+(* A search never tells a reader of a post it cannot read, and a blank text
+   filters nothing. *)
+let test_list_posts_text_query_keeps_readers_and_ignores_blank_text () =
+  let owner = "search-direct-owner" in
+  let public =
+    get_created
+      (Board_dispatch.create_post ~author:owner ~content:"public zqsecret note"
+         ~visibility:Board.Public ~post_kind:Board.Human_post ())
+  in
+  let _private_post =
+    get_created
+      (Board_dispatch.create_post ~author:owner
+         ~content:"@search-direct-target private zqsecret note"
+         ~visibility:Board.Direct ~post_kind:Board.Human_post ())
+  in
+  let ids reader ?text_query () =
+    Board_dispatch.list_posts ~reader ~sort_by:Board_dispatch.Recent ?text_query
+      ~limit:50 ()
+    |> post_ids
+  in
+  let stranger = Masc_board_handlers.Board_access.named "search-stranger" in
+  let operator = Masc_board_handlers.Board_access.Operator in
+  Alcotest.(check (list string)) "a stranger finds only the public post"
+    [ Board.Post_id.to_string public.id ] (ids stranger ~text_query:"zqsecret" ());
+  Alcotest.(check int) "the operator finds both posts" 2
+    (List.length (ids operator ~text_query:"zqsecret" ()));
+  List.iter
+    (fun blank ->
+      Alcotest.(check (list string)) "a blank text filters nothing"
+        (ids operator ()) (ids operator ~text_query:blank ()))
+    [ ""; "   " ]
+
 let test_post_without_kind_is_rejected () =
   let post_id = seed_post_without_kind () in
   match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
@@ -3553,6 +3663,12 @@ let () =
         (with_eio test_author_filter_treats_wildcards_literally);
       Alcotest.test_case "author match precedes recent result limit" `Quick
         (with_eio test_recent_author_match_applies_before_limit);
+      Alcotest.test_case "text query matches each field" `Quick
+        (with_eio test_list_posts_text_query_matches_each_field);
+      Alcotest.test_case "text query reads past the Hot window" `Quick
+        (with_eio test_list_posts_text_query_reads_past_the_hot_window);
+      Alcotest.test_case "text query keeps readers and ignores blank text" `Quick
+        (with_eio test_list_posts_text_query_keeps_readers_and_ignores_blank_text);
       Alcotest.test_case "post without kind is rejected" `Quick
         (with_eio test_post_without_kind_is_rejected);
     ];

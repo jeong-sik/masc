@@ -136,37 +136,70 @@ let screen ~shown ~current ~removed_since ~named_before number op =
   Ok ({ number; removes; states }, named)
 ;;
 
-let observed_fact ~first_seen ~at ~trace_id (fact : Answer.new_fact) : fact =
+let observed_fact ~first_seen ~last_seen ~trace_id (fact : Answer.new_fact) : fact =
   { claim = fact.claim
   ; category = fact.category
   ; first_seen
-  ; last_seen = at
+  ; last_seen
   ; origin = { kind = Injected; trace_id }
   ; basis = Observed fact.observation
   }
 ;;
 
-(* For each claim a live op states, the earliest [first_seen] of the facts
-   the ops stating it replace. A merge or a revision says what those facts
-   said, so Memory has known it since the oldest of them was first seen. A
-   claim that replaces nothing has no entry: it is first seen at the commit. *)
-let replaced_since ~by_id live =
+(* What the facts a claim replaces say about time. A merge or a revision
+   says what those facts said, so Memory has known it since the oldest of
+   them was first seen, and has no newer evidence for it than the newest of
+   them was last seen unless an op names a unit for it. *)
+type replaced_span =
+  { earliest_first_seen : float
+  ; latest_last_seen : float
+  }
+
+(* For each claim a live op states, the span of the facts the ops stating it
+   replace. A claim that replaces nothing has no entry. *)
+let replaced_spans ~by_id live =
   List.fold_left
-    (fun earliest op ->
+    (fun spans op ->
        match op.states with
-       | None | Some (Seen_again _) -> earliest
+       | None | Some (Seen_again _) -> spans
        | Some (New_claim (successor, (_ : Answer.new_fact), (_ : int list))) ->
          List.fold_left
-           (fun earliest (replaced, (_ : Effects.removal)) ->
+           (fun spans (replaced, (_ : Effects.removal)) ->
               match By_id.find_opt replaced by_id with
-              | None -> earliest
+              | None -> spans
               | Some (fact : fact) ->
-                (match By_id.find_opt successor earliest with
-                 | Some seen when seen <= fact.first_seen -> earliest
-                 | Some _ | None -> By_id.add successor fact.first_seen earliest))
-           earliest
+                let span =
+                  match By_id.find_opt successor spans with
+                  | None ->
+                    { earliest_first_seen = fact.first_seen
+                    ; latest_last_seen = fact.last_seen
+                    }
+                  | Some span ->
+                    { earliest_first_seen = Float.min span.earliest_first_seen fact.first_seen
+                    ; latest_last_seen = Float.max span.latest_last_seen fact.last_seen
+                    }
+                in
+                By_id.add successor span spans)
+           spans
            op.removes)
     By_id.empty
+    live
+;;
+
+(* The claims a live op states or sees again while naming at least one unit.
+   Only those have new evidence: a held claim written again without a unit is
+   the question's own Memory read back, and a merge or a revision that names
+   no unit only says again what Memory held. *)
+let evidenced live =
+  List.fold_left
+    (fun ids op ->
+       match op.states with
+       | None -> ids
+       | Some stating ->
+         (match kept_and_units stating with
+          | (_ : string), [] -> ids
+          | id, _ :: _ -> Ids.add id ids))
+    Ids.empty
     live
 ;;
 
@@ -221,30 +254,39 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
     in
     let kept = List.filter (fun fact -> not (By_id.mem (memory_id fact) removal_of)) facts in
     let kept_ids = ids_of kept in
-    let replaced_since = replaced_since ~by_id live in
+    let spans = replaced_spans ~by_id live in
+    let evidenced = evidenced live in
     let touched, added, (_ : Ids.t) =
       List.fold_left
         (fun (touched, added, added_ids) op ->
            match op.states with
            | None -> touched, added, added_ids
-           | Some (Seen_again (id, (_ : int list))) ->
+           | Some stating ->
+             let id = fst (kept_and_units stating) in
              if Ids.mem id kept_ids
-             then Ids.add id touched, added, added_ids
-             else touched, added, added_ids
-           | Some (New_claim (id, fact, (_ : int list))) ->
-             if Ids.mem id kept_ids
-             then Ids.add id touched, added, added_ids
-             else if Ids.mem id added_ids
-             then touched, added, added_ids
+             then
+               if Ids.mem id evidenced
+               then Ids.add id touched, added, added_ids
+               else touched, added, added_ids
              else (
-               let first_seen =
-                 match By_id.find_opt id replaced_since with
-                 | Some seen -> Float.min seen at
-                 | None -> at
-               in
-               ( touched
-               , observed_fact ~first_seen ~at ~trace_id fact :: added
-               , Ids.add id added_ids )))
+               match stating with
+               | Seen_again ((_ : string), (_ : int list)) -> touched, added, added_ids
+               | New_claim ((_ : string), fact, (_ : int list)) ->
+                 if Ids.mem id added_ids
+                 then touched, added, added_ids
+                 else (
+                   (* Neither time is later than the commit. *)
+                   let first_seen, last_seen =
+                     match By_id.find_opt id spans, Ids.mem id evidenced with
+                     | None, (true | false) -> at, at
+                     | Some span, true -> Float.min span.earliest_first_seen at, at
+                     | Some span, false ->
+                       ( Float.min span.earliest_first_seen at
+                       , Float.min span.latest_last_seen at )
+                   in
+                   ( touched
+                   , observed_fact ~first_seen ~last_seen ~trace_id fact :: added
+                   , Ids.add id added_ids ))))
         (Ids.empty, [], Ids.empty)
         live
     in

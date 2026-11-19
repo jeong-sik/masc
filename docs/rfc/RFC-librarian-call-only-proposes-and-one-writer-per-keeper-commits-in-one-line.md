@@ -884,11 +884,11 @@ type log_line =
 계획의 규칙이다.
 
 - 답의 `m3` 같은 이름은 질문의 표로 fact id 가 된다. 표에 없는 이름은 `Unknown_ref` 다. 두 op 가 같은 이름을 쓰면 둘째가 `Ref_used_twice` 다. op 하나에 흠이 둘이면 검사 순서에서 먼저 걸린 것을 적는다. 순서는 `librarian_plan.mli` 에 있다. op 번호는 0부터 센다.
-- `Add` 한 claim 을 이미 갖고 있으면 `last_seen` 만 옮긴다(`touched`). fact id 는 claim 의 sha256 이다.
+- `Add` 한 claim 을 이미 갖고 있으면, 그 op 가 단위를 하나 이상 적었을 때만 `last_seen` 을 옮긴다(`touched`). 단위 없이 다시 적은 claim 은 질문의 Memory 를 되읽은 것이라 아무것도 바꾸지 않는다. fact id 는 claim 의 sha256 이다.
   - basis 는 올리지 않는다. 지금 코드는 올린다(`merge_basis`). 글자까지 같은 claim 은 질문이 보여 준 fact 를 되읽은 것일 수 있어서 새 근거로 치지 않는다.
 - `Seen` 도 그 fact 의 `last_seen` 만 옮긴다(`touched`). 그 단위들은 그 fact 의 출처로 줄에 남는다. fact 를 이름으로 가리키므로 이름을 쓰는 op 와 같은 검사를 받는다. 그 fact 가 같은 답에서 근거를 잃어 지워지면 그 `Seen` 은 `Successor_unsupported` 로 거둔다.
 - `Drop` 은 `Dropped` 로 지운다. `Merge` 는 원본들을 `Merged_into` 로 지우고 새 fact 를 더한다. `Revise` 는 옛 fact 를 `Revised_into` 로 지우고 새 fact 를 더한다.
-- `Merge` 와 `Revise` 가 더한 fact 의 `first_seen` 은 그 op 가 지운 원본 가운데 가장 이른 `first_seen` 이고, 반영 시각보다 늦지 않다. 합친 문장은 원본들이 말한 것을 말하므로 Memory 는 그것을 가장 오래된 원본 때부터 알았다. 그 밖의 새 fact 는 반영 시각에 처음 보인다. `last_seen` 은 모두 반영 시각이다.
+- `Merge` 와 `Revise` 가 더한 fact 의 `first_seen` 은 그 op 가 지운 원본 가운데 가장 이른 `first_seen` 이고, 반영 시각보다 늦지 않다. 합친 문장은 원본들이 말한 것을 말하므로 Memory 는 그것을 가장 오래된 원본 때부터 알았다. 그 밖의 새 fact 는 반영 시각에 처음 보인다. 새 fact 의 `last_seen` 은 그 op 가 단위를 하나 이상 적었으면 반영 시각이고, 적지 않았으면 그 op 가 지운 원본 가운데 가장 늦은 `last_seen` 이다. 단위를 적지 않은 합치기와 고쳐 쓰기는 Memory 가 이미 가진 것을 다시 말했을 뿐 새 근거가 아니다. 그래서 `last_seen` 은 근거, 곧 단위를 적은 op 가 있을 때만 옮겨 간다. 다시 본 기억이 단단해졌는지를 읽는 값이 말 바꾸기로 흐려지지 않는다.
 - 지운 fact 는 줄에 통째로 남는다. `memory_search source=dropped|absorbed` 가 반영 기록에서 찾아 준다.
 - 반영하지 않은 op 는 번호, 이유, 새 claim 을 줄에 남긴다. 멈춘 `Revise` 나 `Merge` 의 새 claim 을 `Add` 로 바꿔 넣지는 않는다. 그러면 방금 철회한 것을 되살릴 수 있다.
 - op 의 흠은 답 전체를 버리지 않는다. 지금은 흠 하나에 답 전체가 거절됐다.

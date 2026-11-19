@@ -23,18 +23,25 @@
 
     {b What a screened op does.}
 
-    - [Add]: adds the claim. A claim Memory already holds is only seen again:
-      its [last_seen] moves and nothing else of it changes. Its basis is not
-      raised. A claim that matches a held one byte for byte may be the
-      question's own text read back, so it is not counted as new grounds.
+    - [Add]: adds the claim. A claim Memory already holds is only seen again,
+      and only when the op names a unit: its [last_seen] moves and nothing
+      else of it changes. Its basis is not raised. A claim that matches a
+      held one byte for byte may be the question's own text read back, so it
+      is not counted as new grounds. Written again without a unit, it changes
+      nothing.
     - [Drop]: removes the fact.
     - [Merge], [Revise]: remove the named facts and state the new claim as
       [Add] does. A named fact whose claim is the new claim is kept. The new
-      fact keeps the earliest [first_seen] of the facts it replaced.
-    - [Seen]: the named fact is seen again, as a held claim's [Add] is: its
-      [last_seen] moves and nothing else of it changes. Its units are
-      recorded as its sources. The answer names the fact instead of copying
-      its claim, so no near copy of the fact is added.
+      fact keeps the earliest [first_seen] of the facts it replaced. Its
+      [last_seen] is the commit time when the op names a unit, and otherwise
+      the latest [last_seen] of the facts it replaced: saying again what
+      Memory held is no newer evidence.
+    - [Seen]: the named fact is seen again, as a held claim's [Add] with a
+      unit is: its [last_seen] moves and nothing else of it changes. Its
+      units are recorded as its sources. The answer names the fact instead of
+      copying its claim, so no near copy of the fact is added.
+
+    So [last_seen] moves only on evidence: an op that names a unit.
 
     A fact removed by one op and stated by another leaves and is added as a
     new fact.

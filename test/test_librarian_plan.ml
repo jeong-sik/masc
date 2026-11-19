@@ -137,7 +137,7 @@ let test_add_new () =
 ;;
 
 let test_add_held_only_moves_last_seen () =
-  let result = plan [ Add (stated port.claim) ] in
+  let result = plan [ Add (stated ~from_units:[ "u1" ] port.claim) ] in
   check (list string) "nothing added" [] (claims result.effects.added);
   check (list string) "touched" [ id port ] result.effects.touched;
   match result.facts with
@@ -146,6 +146,16 @@ let test_add_held_only_moves_last_seen () =
     check (float 0.0) "first seen stays" 100.0 first.first_seen;
     check bool "an authored row is not repainted" true (first.origin.kind = Types.Authored);
     check string "category stays" "constraint" (Types.category_to_string first.category)
+  | [] -> fail "Memory is empty"
+;;
+
+(* Without a unit the held claim is the question's Memory read back. *)
+let test_add_held_without_a_unit_changes_nothing () =
+  let result = plan [ Add (stated port.claim) ] in
+  check (list string) "nothing added" [] (claims result.effects.added);
+  check (list string) "not touched" [] result.effects.touched;
+  match result.facts with
+  | first :: _ -> check (float 0.0) "last seen stays" 100.0 first.last_seen
   | [] -> fail "Memory is empty"
 ;;
 
@@ -171,7 +181,9 @@ let test_merge () =
 
 (* The model keeps one of the sources by writing its sentence again. *)
 let test_merge_into_one_of_the_sources () =
-  let result = plan [ Merge { refs = [ "m1"; "m3" ]; into = stated port.claim } ] in
+  let result =
+    plan [ Merge { refs = [ "m1"; "m3" ]; into = stated ~from_units:[ "u1" ] port.claim } ]
+  in
   check (list string) "the kept source stays in place" [ port.claim; owner.claim ]
     (claims result.facts);
   check pairs "only the other source leaves" [ probe.claim, "merged into " ^ id port ]
@@ -192,6 +204,9 @@ let test_revise () =
    Librarian folds it into one sentence. *)
 let seen_since first_seen claim : Types.fact = { (observed claim) with first_seen }
 
+let seen_between first_seen last_seen claim : Types.fact =
+  { (observed claim) with first_seen; last_seen }
+
 let added_fact (result : Plan.t) claim =
   match
     List.find_opt (fun (fact : Types.fact) -> String.equal fact.claim claim) result.effects.added
@@ -201,16 +216,19 @@ let added_fact (result : Plan.t) claim =
 ;;
 
 let test_merge_keeps_the_earliest_first_seen () =
-  let older = seen_since 40.0 "the deploy runs on friday" in
-  let newer = seen_since 90.0 "the deploy needs the release team" in
+  let older = seen_between 40.0 60.0 "the deploy runs on friday" in
+  let newer = seen_between 90.0 95.0 "the deploy needs the release team" in
   let facts = [ older; newer; probe ] in
   let merged = "the release team runs the deploy on friday" in
-  let result =
-    plan ~facts [ Merge { refs = [ "m2"; "m1" ]; into = stated merged } ]
+  let merge from_units =
+    plan ~facts [ Merge { refs = [ "m2"; "m1" ]; into = stated ~from_units merged } ]
   in
-  let fact = added_fact result merged in
+  let fact = added_fact (merge []) merged in
   check (float 0.0) "first seen when the oldest source was" 40.0 fact.first_seen;
-  check (float 0.0) "last seen at the commit" at fact.last_seen
+  check (float 0.0) "no unit, last seen when the newest source was" 95.0 fact.last_seen;
+  let fact = added_fact (merge [ "u2" ]) merged in
+  check (float 0.0) "first seen stays with a unit" 40.0 fact.first_seen;
+  check (float 0.0) "a unit is evidence, last seen at the commit" at fact.last_seen
 ;;
 
 let test_revise_keeps_the_first_seen () =
@@ -220,7 +238,7 @@ let test_revise_keeps_the_first_seen () =
   in
   let fact = added_fact result "the port is 8936" in
   check (float 0.0) "first seen when the revised fact was" 70.0 fact.first_seen;
-  check (float 0.0) "last seen at the commit" at fact.last_seen
+  check (float 0.0) "no unit, last seen when the revised fact was" 100.0 fact.last_seen
 ;;
 
 let test_one_flawed_op_leaves_the_others () =
@@ -489,6 +507,8 @@ let () =
     [ ( "ops"
       , [ test_case "add a new claim" `Quick test_add_new
         ; test_case "add a held claim" `Quick test_add_held_only_moves_last_seen
+        ; test_case "a held claim without a unit" `Quick
+            test_add_held_without_a_unit_changes_nothing
         ; test_case "drop" `Quick test_drop
         ; test_case "merge" `Quick test_merge
         ; test_case "merge into one of the sources" `Quick test_merge_into_one_of_the_sources

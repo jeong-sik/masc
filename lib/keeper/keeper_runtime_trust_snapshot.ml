@@ -317,54 +317,71 @@ let report_decision_log_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
+(* The newest object row in the tail of the Keeper's decision record, read
+   from the file. This is the read of the kept row
+   ([Keeper_row_facts.newest_decision]): it fails rather than answer [None]
+   for a file it could not read. *)
+let latest_decision_result ~(config : Workspace.config) ~(keeper_name : string) :
+    (Yojson.Safe.t option, Keeper_memory_recall_exn_class.t) result =
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+  match
+    Keeper_memory.read_tail_of_file
+      path
+      ~max_bytes:Keeper_row_facts.decision_window_bytes
+      ~max_lines:Keeper_row_facts.decision_window_lines
+  with
+  | Error exn_class -> Error exn_class
+  | Ok Keeper_memory.No_file -> Ok None
+  | Ok (Keeper_memory.Tail { lines; completion; from_file_start = _ }) ->
+    Ok
+      (lines
+       |> List.rev
+       (* [List.rev] puts the newest row first, so index 0 is the file's last
+          line. The decision log is append-only and this read is not
+          synchronised with the writer, so that one line can be mid-write.
+          When the reader reports the tail as unterminated, its parse failure
+          is an in-flight append rather than corruption: [find_map] falls
+          through to the previous complete row and the next read sees it
+          whole. Position alone is not enough — a genuinely malformed last
+          line is newline-terminated and must keep [entry_load_error]. *)
+       |> List.mapi (fun index line -> index, line)
+       |> List.find_map (fun (index, line) ->
+         match Keeper_row_facts.decision_line line with
+         | Keeper_row_facts.Decision_row json -> Some json
+         | Keeper_row_facts.Not_json detail ->
+           let reason =
+             match index, completion with
+             | 0, Keeper_memory.Partial_last_line -> Read_drop_reason.Tail_partial_write
+             | 0, Keeper_memory.Complete
+             | _, Keeper_memory.Partial_last_line
+             | _, Keeper_memory.Complete -> Read_drop_reason.Entry_load_error
+           in
+           report_decision_log_read_drop ~reason ~path ~detail;
+           None
+         | Keeper_row_facts.Not_an_object ->
+           report_decision_log_read_drop
+             ~reason:Read_drop_reason.Invalid_payload
+             ~path
+             ~detail:"decision log row is not a JSON object";
+           None))
+
+(* In the process that writes the record the row comes from memory once it
+   was read, and the record's writer moves it. A row passed over is reported
+   when the file is read, so once for a kept row. *)
 let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
     Yojson.Safe.t option =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-  if not (Fs_compat.file_exists path) then None
-  else
-    let lines, completion =
-      match
-        Keeper_memory.read_file_tail_lines_with_completion path
-          ~max_bytes:40000 ~max_lines:20
-      with
-      | Ok { lines; completion; from_file_start = _ } -> (lines, completion)
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"keeper_runtime_trust_decisions" path exn_class;
-          ([], Keeper_memory.Complete)
-    in
-    lines
-    |> List.rev
-    (* [List.rev] puts the newest row first, so index 0 is the file's last
-       line. The decision log is append-only and this read is not synchronised
-       with the writer, so that one line can be mid-write. When the reader
-       reports the tail as unterminated, its parse failure is an in-flight
-       append rather than corruption: [find_map] falls through to the previous
-       complete row and the next read sees it whole. Position alone is not
-       enough — a genuinely malformed last line is newline-terminated and must
-       keep [entry_load_error]. *)
-    |> List.mapi (fun index line -> (index, line))
-    |> List.find_map (fun (index, line) ->
-           match Yojson.Safe.from_string line with
-           | exception Yojson.Json_error detail ->
-               let reason =
-                 match (index, completion) with
-                 | 0, Keeper_memory.Partial_last_line ->
-                     Read_drop_reason.Tail_partial_write
-                 | 0, Keeper_memory.Complete
-                 | _, Keeper_memory.Partial_last_line
-                 | _, Keeper_memory.Complete ->
-                     Read_drop_reason.Entry_load_error
-               in
-               report_decision_log_read_drop ~reason ~path ~detail;
-               None
-           | (`Assoc _ as json) -> Some json
-           | _ ->
-               report_decision_log_read_drop
-                 ~reason:Read_drop_reason.Invalid_payload
-                 ~path
-                 ~detail:"decision log row is not a JSON object";
-               None)
+  match
+    Keeper_row_facts.newest_decision ~path ~read:(fun () ->
+      latest_decision_result ~config ~keeper_name)
+  with
+  | Fact_cell.Held row | Fact_cell.Read_and_kept row | Fact_cell.Read_not_kept row -> row
+  | Fact_cell.Read_failed exn_class ->
+    Keeper_memory.record_memory_recall_read_error
+      ~site:"keeper_runtime_trust_decisions"
+      path
+      exn_class;
+    None
 
 
 let latest_turn_id ~(registry_entry : Keeper_registry.registry_entry option)

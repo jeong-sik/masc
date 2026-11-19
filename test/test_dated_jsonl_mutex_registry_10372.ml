@@ -16,7 +16,11 @@
        mutex once it is there; a directory that exists is asked about once.
     5. Behavioural: concurrent appends through two store
        instances at the same dir produce all-parseable lines,
-       even with payloads larger than [PIPE_BUF]. *)
+       even with payloads larger than [PIPE_BUF].
+    6. Each function that changes a store's files waits for the store's
+       mutex: both appends, the prune of one store and the pass over the
+       listed stores.
+    7. Stores under one root take a mutex each. *)
 
 open Alcotest
 
@@ -196,6 +200,40 @@ let test_relative_root_shares_the_mutex () =
       check bool "and it is the store of that directory" true
         (shares_mutex (store_under relative) (store_under (Filename.concat second relative))))
 
+(* Stores under one root take a mutex each: one Keeper's stores of two
+   kinds, two Keepers' stores of one kind, and a store of the root itself.
+   With one mutex for them all, every write under the root would wait for
+   every other one. Asked before the directories exist and again once they
+   do, since the registry names the two cases differently. *)
+let test_stores_under_one_root_take_a_mutex_each () =
+  let root = D.Store.root_of_masc_dir (tmpdir "djmr_one_root") in
+  let keeper name kind = D.Store.keeper root ~keeper:name kind in
+  let stores =
+    [ "one Keeper's metrics", keeper "alpha" D.Store.Keeper.Metrics
+    ; "that Keeper's turn records", keeper "alpha" D.Store.Keeper.Turn_records
+    ; "another Keeper's metrics", keeper "beta" D.Store.Keeper.Metrics
+    ; "the root's audit", D.Store.at root D.Store.Root.Audit
+    ; "the root's events", D.Store.at root D.Store.Root.Events
+    ]
+  in
+  let rec each_pair = function
+    | [] -> []
+    | first :: rest -> List.map (fun other -> first, other) rest @ each_pair rest
+  in
+  let check_each_has_its_own when_ =
+    List.iter
+      (fun ((first_name, first), (second_name, second)) ->
+        check
+          bool
+          (Printf.sprintf "%s and %s, %s" first_name second_name when_)
+          false
+          (shares_mutex first second))
+      (each_pair stores)
+  in
+  check_each_has_its_own "before the directories exist";
+  List.iter (fun (_, location) -> ignore (made location : D.Store.location)) stores;
+  check_each_has_its_own "once they exist"
+
 (* --- 4. when the file system is asked ------------------ *)
 
 (* The handles of a Keeper's stores are kept for the life of the process. A
@@ -360,6 +398,81 @@ let test_append_from_os_threads_under_contention () =
   in
   check int "every line parses as JSON" (8 * per_thread) parsed
 
+(* --- 6. whoever changes a store's files waits for its mutex ---------- *)
+
+let held_seconds = 0.3
+
+(* A thread holds the store's mutex while [change] runs on a fiber, as the
+   server's writers do. [change] has not returned after [held_seconds], and
+   it returns once the thread lets go.
+
+   The first half can err one way only. A change that takes the mutex never
+   returns while it is held. One that takes none returns at once, and is
+   missed only on a machine that does not run it for [held_seconds]. *)
+let waits_for_the_store_mutex env store change =
+  let mutex = mutex_of store in
+  let holding = Atomic.make false in
+  let release = Atomic.make false in
+  let holder =
+    Thread.create
+      (fun () ->
+        Cross_context_mutex.with_lock mutex (fun () ->
+          Atomic.set holding true;
+          while not (Atomic.get release) do
+            Thread.delay 0.001
+          done))
+      ()
+  in
+  while not (Atomic.get holding) do
+    Thread.delay 0.001
+  done;
+  let returned = Atomic.make false in
+  let returned_while_held = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set release true;
+      Thread.join holder)
+    (fun () ->
+      Eio.Fiber.both
+        (fun () ->
+          change ();
+          Atomic.set returned true)
+        (fun () ->
+          Eio.Time.sleep (Eio.Stdenv.clock env) held_seconds;
+          returned_while_held := Atomic.get returned;
+          Atomic.set release true));
+  (not !returned_while_held) && Atomic.get returned
+
+let test_every_change_of_the_files_waits_for_the_store_mutex () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = tmpdir "djmr_waits" in
+  let root = D.Store.root_of_base_path ~base_path in
+  (* A store the pass prunes: the operator's window is its retention. *)
+  let location = made (D.Store.at root D.Store.Root.Telemetry) in
+  let store = D.open_store location in
+  let row = `Assoc [ "i", `Int 1 ] in
+  let waits name change =
+    check bool name true (waits_for_the_store_mutex env store change)
+  in
+  waits "an append" (fun () -> D.append store row);
+  (* Today's file holds the row of the append above, so a cap of one byte
+     makes this append rename it away first. *)
+  let rotating = ref None in
+  waits "an append that rotates the file" (fun () ->
+    rotating := Some (D.append_rotating store ~max_current_file_bytes:1 row));
+  (match !rotating with
+   | Some (D.Appended_after_rotation _) -> ()
+   | Some
+       (D.Appended_to_current | D.Skipped_rotation_exhausted _ | D.Skipped_by_append_guard)
+   | None -> fail "the append did not rotate the file");
+  waits "the prune of the store" (fun () -> ignore (D.prune store ~days:30 : int));
+  waits "the pass over the listed stores" (fun () ->
+    ignore
+      (D.Store.with_retention_root root (fun held ->
+         D.prune_listed_stores_bound root held ~operator_window_days:30 ~on_pruned:ignore)
+       : int option))
+
 let () =
   run "dated_jsonl_mutex_registry_10372"
     [
@@ -381,6 +494,8 @@ let () =
             test_letter_case_follows_the_file_system;
           test_case "a relative root shares the mutex" `Quick
             test_relative_root_shares_the_mutex;
+          test_case "stores under one root take a mutex each" `Quick
+            test_stores_under_one_root_take_a_mutex_each;
           test_case "a handle opened early follows the directory" `Quick
             test_handle_opened_early_follows_the_directory;
           test_case "an existing directory is asked about once" `Quick
@@ -392,6 +507,11 @@ let () =
             test_concurrent_two_instances_no_corruption;
           test_case "append failure does not poison registry mutex" `Quick
             test_append_failure_does_not_poison_registry_mutex;
+        ] );
+      ( "store mutex",
+        [
+          test_case "every change of the files waits for the store's mutex" `Quick
+            test_every_change_of_the_files_waits_for_the_store_mutex;
         ] );
       ( "off-fiber append",
         [

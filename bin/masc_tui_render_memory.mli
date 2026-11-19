@@ -93,6 +93,7 @@ val render_memory_body :
   cols:int ->
   budget:int ->
   state ->
+  hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->
@@ -101,8 +102,8 @@ val render_memory_body :
   unit
 
 val memory_fact_list_floor_rows : int
-(** How many rows the fact list keeps before the detail below it takes any --
-    one of which the window reading takes when the list overflows. A fact has
+(** How many rows the fact list keeps before the detail below it takes any.
+    A fact has
     no length limit, so without this floor one long fact left a browser of a
     few hundred facts showing a single row. *)
 
@@ -116,6 +117,7 @@ val render_memory_facts_body :
   cols:int ->
   budget:int ->
   state ->
+  hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->

@@ -10,6 +10,8 @@
  (modules test_server_key_account_registration)
  (libraries
   alcotest
+  eio
+  eio.unix
   eio_main
   masc.auth
   masc.masc_log

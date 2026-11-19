@@ -120,12 +120,12 @@ type tone =
     pass has not ended. The line is only read: the second press sends the
     names of the first press's own report, not these. *)
 val server_report_line :
-  timestamp:(float -> string) -> Masc.Keeper_volume_gc_periodic.t option -> tone * string
+  timestamp:(float -> string) -> Masc.Keeper_volume_gc_periodic.t option -> tone * Masc_tui_say.t
 
 (** The pane's lines: what the next press does, [server_report] when the
     catalog has a reading, then the last answer. Text from the server is made
     single-line for the terminal. *)
-val lines : server_report:(tone * string) option -> t -> (tone * string) list
+val lines : server_report:(tone * Masc_tui_say.t) option -> t -> (tone * Masc_tui_say.t) list
 
 (** The footer line after an answer. *)
 val status_line : t -> string

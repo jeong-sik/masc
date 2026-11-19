@@ -327,11 +327,14 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
       ^ (if complete then text " · 대상 확인" " · inspect owners"
          else text " · 전체 미확인" " · coverage unknown")
   | Other_reported ->
-      let component = match item.component with
-        | "keeper_memory_execution" -> text "기억 처리" "Memory execution"
-        | "skill_catalog" -> text "스킬 목록" "Skill catalog"
-        | "keeper_config_schema" -> text "키퍼 설정" "Keeper configuration"
-        | component -> clean (String.escaped component) in
+      let component = match Masc_tui_health_section.of_wire item.component with
+        | Ok section ->
+            Masc_tui_health_section.label ~ko:(state.ui_language = Lang_ko) section
+        (* A section this build does not know is drawn as received
+           (RFC tui-one-screen-grammar §7.1). The server did report it, so
+           it carries no [?]: that mark says a value was not reported
+           (§6.4). *)
+        | Error received -> clean (String.escaped received) in
       component ^ text " · 진단 확인" " · inspect diagnostics"
 
 let operator_rows_of_state state =

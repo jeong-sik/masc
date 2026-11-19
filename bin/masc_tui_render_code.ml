@@ -221,7 +221,7 @@ let code_notes_viewport (state : state) =
     else cols
   in
   (List.length (code_notes_rows state ~cols:pane_cols),
-   max 1 (code_pane_content_height state - 1))
+   max 1 (code_pane_content_height state))
 
 (* These are tool-call bytes, not a reconstruction of today's checkout.
    Repeat the marker on wrapped rows so a narrow pane retains each side. *)
@@ -276,10 +276,7 @@ let prepare_code_history_rows (state : state) ~cols =
   in
   let field name text = name ^ ": " ^ Terminal_text.single_line text in
   let date seconds =
-    let t = Unix.localtime seconds in
-    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-      (t.Unix.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-      t.tm_hour t.tm_min t.tm_sec
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) seconds
   in
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
@@ -373,7 +370,7 @@ let code_history_pane_cols () =
 
 let code_history_viewport (state : state) =
   (List.length (code_history_rows state ~cols:(code_history_pane_cols ())),
-   max 1 (code_pane_content_height state - 1))
+   max 1 (code_pane_content_height state))
 
 (* The diff is drawn through the whole pane height with no row of its own
    above it, so its window is [code_pane_content_height]. A diff that has not
@@ -417,7 +414,9 @@ let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~path:[ ui_text state ~ko:"코드" ~en:"code" ] ~split;
+  (* The focused pane says where its reader is; the title row above both
+     panes draws it, so the panes are drawn first. *)
+  let position = ref None in
   let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
@@ -739,41 +738,11 @@ let render_code (state : state) =
     let file_scroll total_lines =
       max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
     in
-    (* The row under the pane's rows. A file or a diff longer than its window
-       says there where the window is, like the other panes' "rows X-Y/Z" line;
-       with nothing to say it is the gap above the footer. The diff says it
-       here, as the file does, and not in its title: the title ends in the
-       path, which a narrow pane cuts first. [content_height] budgets that one
-       row, so a position drawn beside the gap made the surface one row too
-       tall and [finish_surface] cut its last row, the footer. *)
-    let position_row =
-      if hover_showing || draft_showing || notes_showing then None
-      else if diff_showing then
-        match code_diff_viewport state with
-        | Some (count, height) when count > height ->
-            Some
-              (Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows")
-                 ~scroll:
-                   (Masc_tui_scroll.normalize ~count ~height
-                      state.code_diff_scroll)
-                 ~height count)
-        | Some _ | None -> None
-      else if history_showing then None
-      else
-        match Masc_tui_fetched.current state.code_file with
-        | Some (_, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ })
-          when Array.length file_rows > content_height ->
-            let total_lines = Array.length file_rows in
-            let scroll = file_scroll total_lines in
-            Some
-              (Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"lines") ~scroll
-                 ~height:content_height total_lines)
-        | Some (_, Masc_tui_fetched.Ready _)
-        | Some
-            ( _,
-              ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-              | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ) )
-        | None -> None
+    (* Where the file pane's window stands, for the title row while this
+       pane has the keys. Each reading below hands its own window. *)
+    let hand ~first ~shown ~total =
+      if state.code_focus_file = Right_pane then
+        position := Masc_tui_value.Position.window ~first ~shown ~total
     in
     (if hover_showing then
        let rendered = code_hover_rows state ~cols:pane_cols in
@@ -781,11 +750,10 @@ let render_code (state : state) =
        let total = List.length rendered in
        let scroll = match hover with
          | None -> 0 | Some reading -> max 0 (min reading.chr_scroll (max 0 (total - height))) in
+       hand ~first:scroll ~shown:height ~total;
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           ("  "
-            ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total
-            ^ ui_text state ~ko:" · Esc: 코드로 돌아가기" ~en:" · Esc returns to code");
+           (ui_text state ~ko:"  Esc: 코드로 돌아가기" ~en:"  Esc returns to code");
        let window = Rows.of_list ~first:scroll ~height rendered in
        for index = 0 to height - 1 do
          match Rows.at window (scroll + index) with
@@ -796,6 +764,7 @@ let render_code (state : state) =
        let rendered = code_draft_rows state ~cols:pane_cols in
        let maximum = max 0 (List.length rendered - content_height) in
        let scroll = max 0 (min state.code_draft_scroll maximum) in
+       hand ~first:scroll ~shown:content_height ~total:(List.length rendered);
        let window = Rows.of_list ~first:scroll ~height:content_height rendered in
        for index = 0 to content_height - 1 do
          match Rows.at window (scroll + index) with
@@ -805,11 +774,11 @@ let render_code (state : state) =
      else if notes_showing then
        let rendered = code_notes_rows state ~cols:pane_cols in
        let total = List.length rendered in
-       let height = max 1 (content_height - 1) in
+       (* Where the notes stand is on the title row, so they keep every row
+          of the pane. *)
+       let height = max 1 content_height in
        let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
-       if content_height > 1 then
-         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           ("  " ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total);
+       hand ~first:scroll ~shown:height ~total;
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -865,6 +834,7 @@ let render_code (state : state) =
                  Masc_tui_scroll.normalize ~count:total ~height:content_height
                    state.code_diff_scroll
                in
+               hand ~first:scroll ~shown:content_height ~total;
                let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
                (* The open file is a separate observation. A diff line number
                   cannot identify its text, for either a commit or a later
@@ -904,11 +874,9 @@ let render_code (state : state) =
      else if history_showing then
        let rendered = code_history_rows state ~cols:pane_cols in
        let total = List.length rendered in
-       let height = max 1 (content_height - 1) in
+       let height = max 1 content_height in
        let scroll = Masc_tui_scroll.normalize ~count:total ~height:1 state.code_history_scroll in
-       if content_height > 1 then
-         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           ("  " ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total);
+       hand ~first:scroll ~shown:height ~total;
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -946,6 +914,7 @@ let render_code (state : state) =
                 (Masc_tui_context_inspector.format_bytes bytes))
        | Some (open_path, Masc_tui_fetched.Ready { cfd_body = Code_text _; cfd_rows = file_rows; _ }) ->
            let scroll = file_scroll (Array.length file_rows) in
+           hand ~first:scroll ~shown:content_height ~total:(Array.length file_rows);
            let hscroll =
              max 0
                (min state.code_file_hscroll
@@ -1062,11 +1031,9 @@ let render_code (state : state) =
                       mark gutter_style (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
            done);
-    (match position_row with
-     | Some text ->
-         box_line_styled pane_buf pane_cols ~style:(Theme.recede ()) text
-     | None -> box_bottom pane_buf pane_cols)
+    box_bottom pane_buf pane_cols
   in
+  let panes = Buffer.create 4096 in
   (if split then begin
      let left_cols = keeper_roster_pane_cols in
      let right_cols = cols - left_cols in
@@ -1074,11 +1041,17 @@ let render_code (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane ~framed:true left_buf left_cols;
      content_pane ~split right_buf right_cols;
-     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+     write_two_panes panes ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
-   else if state.code_focus_file = Right_pane then content_pane ~split buf cols
-   else list_pane ~framed:false buf cols);
+   else if state.code_focus_file = Right_pane then content_pane ~split panes cols
+   else list_pane ~framed:false panes cols);
+  (* The list pane has the keys: its selected row is the position. *)
+  if state.code_focus_file = Left_pane && total > 0 then
+    position := Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total);
+  pane_surface_header buf cols state ~path:[ ui_text state ~ko:"코드" ~en:"code" ] ~split
+    ~position:!position;
+  Buffer.add_buffer buf panes;
   let code_pane = Masc_tui_keys.code_pane_of state in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

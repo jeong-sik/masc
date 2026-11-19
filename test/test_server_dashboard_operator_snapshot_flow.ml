@@ -413,7 +413,7 @@ let test_actual_context_tail_failure_retries_after_quiet_raw_repair () =
       sampling = {temperature = None; top_p = None; max_tokens = None; enable_thinking = None};
       usage = {input_tokens = Some 18_000; output_tokens = Some 412;
         cache_creation_input_tokens = None; cache_read_input_tokens = None;
-        scope = Runtime_usage_scope.Per_request; input_provenance = None};
+        scope = Runtime_usage_scope.Per_request; input_provenance = Some Turn_input_provenance.Measured_request};
       turn_output_tokens = None; ts = Eio.Time.now clock} in
     let store = Keeper_types_support.keeper_turn_record_store scope.config meta.name in
     Dated_jsonl.append store (Turn_record.to_json record);

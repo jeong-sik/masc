@@ -7,6 +7,7 @@ module Client = Runtime_setup_login_client
 module Login = Server_setup_account_login
 module Purge = Server_key_account_purge
 module Registration = Server_key_account_registration
+module Replacement = Server_key_account_replacement
 
 let path = "/api/v1/setup/accounts/key"
 let entry_prefix = path ^ "/"
@@ -161,7 +162,10 @@ let not_recorded =
 ;;
 
 let registration_refused =
-  refused R.Forbidden_403 ~code:"registration_refused" "Your account is not active, so it registers no key."
+  refused
+    R.Forbidden_403
+    ~code:"registration_refused"
+    "Your account is not active, or an action that restricts it has not finished, so it registers no key."
 ;;
 
 let unexpected =
@@ -172,21 +176,21 @@ let unexpected =
      stored."
 ;;
 
-(* What the state says of a [key_linked] record that a person wrote for
-   themselves, with an id the server drew. Only the author and the mode
-   refuse it; the other refusals are of other kinds of record, of a record
-   that closes a reduction, which this one does not, or of an id that was
-   linked before, which a drawn id is not. *)
-let state_answer : S.refusal -> R.answer = function
-  | S.Provider_account (Accounts.User_not_active (_ : Authz_types.User_id.t))
-  | S.Author_inactive (_ : Authz_types.User_id.t)
-  | S.Revocation_pending (_ : Authz_records.Subject.t) -> registration_refused
-  | S.Before_bootstrap (_ : Authz_record.Kind.t) | S.Accounts_off (_ : Authz_record.Kind.t) -> not_recorded
-  | S.Provider_account
-      ( Accounts.Already_linked (_ : Authz_types.Provider_account_id.t)
-      | Accounts.Linked_for_another { author = _; user_id = _ }
-      | Accounts.Not_a_human (_ : Authz_types.Principal.t)
-      | Accounts.Not_a_link_author (_ : Authz_records.Author.t) )
+(* What the state says of a record of a provider account that a person
+   wrote for themselves. Only the author, the mode and the account itself
+   refuse one; the other refusals are of other kinds of record, or of a
+   record that closes a reduction it does not hold. *)
+type state_refusal =
+  | Person_not_writing
+  | Log_not_writing
+  | Of_account of Accounts.refusal
+  | No_request_leads_here
+
+let state_refusal : S.refusal -> state_refusal = function
+  | S.Author_inactive (_ : Authz_types.User_id.t) | S.Revocation_pending (_ : Authz_records.Subject.t) ->
+    Person_not_writing
+  | S.Before_bootstrap (_ : Authz_record.Kind.t) | S.Accounts_off (_ : Authz_record.Kind.t) -> Log_not_writing
+  | S.Provider_account refusal -> Of_account refusal
   | S.Provider_account_unreadable _
   | S.Pat_unreadable _
   | S.Pat _
@@ -221,30 +225,65 @@ let state_answer : S.refusal -> R.answer = function
   | S.Keeper_unreadable _
   | S.Keeper _
   | S.Purge_unreadable _
-  | S.Purge _ -> unexpected
+  | S.Purge _ -> No_request_leads_here
+;;
+
+(* Why a record of a provider account did not go into the log. *)
+type not_recorded =
+  | Refused_by_state of S.refusal
+  | Not_built
+  | Store_did_not_take
+
+let not_recorded_of : Authz_provider_account.error -> not_recorded = function
+  | Authz_provider_account.Commit_failed (Authz_zone.Refused refusal) -> Refused_by_state refusal
+  | Authz_provider_account.Body_not_built (_ : Authz_body.error)
+  | Authz_provider_account.Commit_failed (Authz_zone.Record_not_built _ | Authz_zone.Log_holds_records _) ->
+    Not_built
+  | Authz_provider_account.Commit_failed
+      ( Authz_zone.Store_stopped _
+      | Authz_zone.Log_stopped _
+      | Authz_zone.Uncertain _
+      | Authz_zone.Store_holds_no_answer
+      | Authz_zone.Store_entry_refused _
+      | Authz_zone.Abort_not_confirmed _
+      | Authz_zone.Settlement_not_written _
+      | Authz_zone.Intent_not_written _
+      | Authz_zone.Record_not_appended _
+      | Authz_zone.Answer_not_written _ ) -> Store_did_not_take
+;;
+
+(* A [key_linked] record that a person wrote for themselves, with an id the
+   server drew: of the account, only an inactive owner refuses it. The other
+   refusals of an account are of an id that was linked before, which a drawn
+   id is not, or of a replacement. *)
+let registration_refusal refusal =
+  match state_refusal refusal with
+  | Person_not_writing | Of_account (Accounts.User_not_active (_ : Authz_types.User_id.t)) ->
+    registration_refused
+  | Log_not_writing -> not_recorded
+  | Of_account
+      ( Accounts.Already_linked (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Linked_for_another { author = _; user_id = _ }
+      | Accounts.Not_a_human (_ : Authz_types.Principal.t)
+      | Accounts.Not_an_account_author (_ : Authz_records.Author.t)
+      | Accounts.Replaced_for_another { author = _; user_id = _ }
+      | Accounts.Not_linked (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Not_the_owner (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Not_a_key_account (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Account_removed (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Removal_stopped (_ : Authz_types.Provider_account_id.t)
+      | Accounts.Generation_not_next { held = _; given = _ } )
+  | No_request_leads_here -> unexpected
 ;;
 
 (* The details of each failure are in the log ({!Registration.register}). *)
 let registration_error : Registration.error -> R.answer = function
   | Registration.Id_not_usable -> not_recorded
-  | Registration.Not_recorded (Authz_provider_account.Commit_failed (Authz_zone.Refused refusal)) ->
-    state_answer refusal
-  | Registration.Not_recorded
-      ( Authz_provider_account.Body_not_built (_ : Authz_body.error)
-      | Authz_provider_account.Commit_failed (Authz_zone.Record_not_built _ | Authz_zone.Log_holds_records _)
-        ) -> unexpected
-  | Registration.Not_recorded
-      (Authz_provider_account.Commit_failed
-         ( Authz_zone.Store_stopped _
-         | Authz_zone.Log_stopped _
-         | Authz_zone.Uncertain _
-         | Authz_zone.Store_holds_no_answer
-         | Authz_zone.Store_entry_refused _
-         | Authz_zone.Abort_not_confirmed _
-         | Authz_zone.Settlement_not_written _
-         | Authz_zone.Intent_not_written _
-         | Authz_zone.Record_not_appended _
-         | Authz_zone.Answer_not_written _ )) -> not_recorded
+  | Registration.Not_recorded error ->
+    (match not_recorded_of error with
+     | Refused_by_state refusal -> registration_refusal refusal
+     | Not_built -> unexpected
+     | Store_did_not_take -> not_recorded)
   | Registration.Files_not_made ->
     refused
       R.Service_unavailable_503
@@ -285,5 +324,115 @@ let register ~person ~base_path ~body =
                ; "kind", `String "key"
                ]
            | Error error -> registration_error error)))
+;;
+
+(* ---- replacement ---- *)
+
+let replacement_invalid_request =
+  refused R.Bad_request_400 ~code:"invalid_request" {|The body is {"key": ...}: this one member, a string.|}
+;;
+
+(* The body holds the key, as that of a registration does: it is read here
+   and nowhere else, and the answers of a refused body are fixed sentences. *)
+let replacement_key_of_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc [ ("key", `String key) ] ->
+    (match Runtime_api_key_file.key_of_string key with
+     | Some key -> Ok key
+     | None -> Error not_a_key)
+  | (_ : Yojson.Safe.t) -> Error replacement_invalid_request
+  | exception Yojson.Json_error (_ : string) -> Error replacement_invalid_request
+;;
+
+let replacement_refused =
+  refused
+    R.Forbidden_403
+    ~code:"replacement_refused"
+    "Your account is not active, or an action that restricts it has not finished, so it replaces no key."
+;;
+
+let replacement_not_recorded =
+  refused
+    R.Service_unavailable_503
+    ~code:"replacement_not_recorded"
+    "The replacement could not be recorded, and the key of the account was not changed. Send the key \
+     again."
+;;
+
+let replacement_unexpected =
+  refused
+    R.Internal_error_500
+    ~code:"internal_error"
+    "The replacement was refused for a reason this server does not expect. The key of the account was \
+     not changed."
+;;
+
+(* What the records of the account say of a replacement its owner asks for.
+   An account of another person answers as one that is not there. *)
+let replacement_refusal : Accounts.refusal -> R.answer = function
+  | Accounts.Not_linked (_ : Authz_types.Provider_account_id.t)
+  | Accounts.Not_the_owner (_ : Authz_types.Provider_account_id.t)
+  | Accounts.Account_removed (_ : Authz_types.Provider_account_id.t) -> unknown_account
+  | Accounts.Not_a_key_account (_ : Authz_types.Provider_account_id.t) ->
+    refused
+      R.Bad_request_400
+      ~code:"not_a_key_account"
+      "This account holds a login. Only the key of an account that holds a key is replaced here."
+  | Accounts.Removal_stopped (_ : Authz_types.Provider_account_id.t) ->
+    refused
+      R.Conflict_409
+      ~code:"removal_left"
+      "A removal of this account did not go through, so its key is not replaced. Remove the account."
+  | Accounts.User_not_active (_ : Authz_types.User_id.t) -> replacement_refused
+  | Accounts.Already_linked (_ : Authz_types.Provider_account_id.t)
+  | Accounts.Linked_for_another { author = _; user_id = _ }
+  | Accounts.Not_a_human (_ : Authz_types.Principal.t)
+  | Accounts.Not_an_account_author (_ : Authz_records.Author.t)
+  | Accounts.Replaced_for_another { author = _; user_id = _ }
+  | Accounts.Generation_not_next { held = _; given = _ } ->
+    (* The person replaces a key of their own, as a person, for the
+       generation after the one read inside the call of the account. *)
+    replacement_unexpected
+;;
+
+(* The details of each failure are in the log ({!Replacement.replace}). *)
+let replacement_error : Replacement.error -> R.answer = function
+  | Replacement.Refused refusal -> replacement_refusal refusal
+  | Replacement.Account_busy ->
+    refused
+      R.Conflict_409
+      ~code:"account_call_running"
+      "A call of this account is running. Try again when it ends."
+  | Replacement.Not_recorded error ->
+    (match not_recorded_of error with
+     | Refused_by_state refusal ->
+       (match state_refusal refusal with
+        | Person_not_writing -> replacement_refused
+        | Log_not_writing -> replacement_not_recorded
+        | Of_account refusal -> replacement_refusal refusal
+        | No_request_leads_here -> replacement_unexpected)
+     | Not_built -> replacement_unexpected
+     | Store_did_not_take -> replacement_not_recorded)
+  | Replacement.Key_not_stored ->
+    refused
+      R.Service_unavailable_503
+      ~code:"key_not_stored"
+      "The replacement was recorded, and the new key could not be stored on this server. The account \
+       has no key now. Send the key again."
+;;
+
+let replace ~person ~base_path ~provider_account_id ~body =
+  match Authz_types.Provider_account_id.of_string provider_account_id with
+  | Error (_ : Authz_id.error) -> unknown_account
+  | Ok id ->
+    (match replacement_key_of_body body with
+     | Error answer -> answer
+     | Ok key ->
+       (match Replacement.replace ~person ~base_path id key with
+        | Ok { Replacement.old_keys_removed } ->
+          R.json
+            R.Ok_200
+            [ "provider_account_id", `String provider_account_id; "old_keys_removed", `Bool old_keys_removed ]
+        | Error error -> replacement_error error))
 ;;
 

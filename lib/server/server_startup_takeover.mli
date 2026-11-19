@@ -197,12 +197,19 @@ val acquire_base_path_lock_after_owner_exits :
 
 val release_base_path_lease : base_path_lease -> unit
 
-val keep_store_facts : base_path_lease -> unit
-(** The holder of the lease is the one process that appends to the
-    workspace's dated JSONL stores, so it may keep their facts in memory
-    ([Dated_jsonl.keep_facts_in_this_process]). The server calls this once,
-    with the lease it runs under, and does not release that lease before it
-    exits or hands it to the image it execs. *)
+type store_facts =
+  | Store_facts_kept
+  | Lease_not_held
+      (** The lease is not the one this process holds: it was released, or
+          its descriptor did not close. Nothing was said, and the stores'
+          facts are read from the files each time. *)
+
+val keep_store_facts : base_path_lease -> store_facts
+(** Say that this process holds the workspace's writer lease, so it may keep
+    in memory the facts of the files only the lease holder writes
+    ([Fact_cell.keep_in_this_process], [Dated_jsonl.Store.facts]).
+    The server calls this once, with the lease it runs under, and does not
+    release that lease before it exits or hands it to the image it execs. *)
 
 (** Preserve an active lease across the caller's next [exec]. POSIX record
     locks survive [exec] in the same process, but the lease descriptor is

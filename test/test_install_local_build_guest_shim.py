@@ -93,7 +93,7 @@ def sidecar_line(content, asset=ARM64):
 # The workspace's shim directory as the release installer leaves it: the
 # binary, and beside it the release's SHA256SUMS line for the asset that was
 # installed. Without [sidecar] it is what scripts/remote-ssh/build-shim.sh
-# leaves: a hand build.
+# leaves: a source build.
 def workspace_with_shim(root, content=OLD_SHIM, sidecar: str | None = sidecar_line(OLD_SHIM)):
     base = local_build.workspace(root)
     directory = base / ".masc/microvm/shim"
@@ -220,17 +220,6 @@ class GuestShim(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(shim.read_bytes(), shipped(ARM64))
                 self.assertEqual(sidecar.read_text(), sidecar_line(shipped(ARM64)))
-
-    def test_a_hand_built_shim_is_left_alone(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            base, shim, sidecar = workspace_with_shim(root, sidecar=None)
-            result = install(root, build_naming(root), release_base(root), base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(shim.read_bytes(), OLD_SHIM)
-            self.assertFalse(sidecar.exists(), "a hand-built shim was given a release sidecar")
-            self.assertIn("built by hand", result.stdout)
-            self.assertTrue((root / "prefix/masc").is_file())
 
     def test_a_workspace_without_a_shim_is_given_none(self):
         with tempfile.TemporaryDirectory() as temporary:

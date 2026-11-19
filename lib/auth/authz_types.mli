@@ -67,6 +67,13 @@ module Key_generation : sig
 
   val first : t
 
+  (** The generation of the key that replaces a key of this one. *)
+  val next : t -> t
+
+  (** The generation an integer of a record names: {!first} or one after
+      it. [None] for an integer before {!first}. *)
+  val of_int : int -> t option
+
   (** [1] for {!first}. *)
   val to_int : t -> int
 

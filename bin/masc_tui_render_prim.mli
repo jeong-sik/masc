@@ -186,16 +186,11 @@ val zone4_notice :
 val footer_line :
   ?help_door:bool ->
   ?status:Masc_tui_footer.status_item list ->
-  ?position:string ->
   ?recovery_in_slot:recovery_row option ->
   ?choices:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
-(** [position] is where a scrolling surface stands in what it is scrolling.
-    It is separate from [hints] because the fitter gives up key items from
-    the back, and a position is the one item on the row that [?] cannot
-    recover; kept with the keys that cannot be dropped. Use the footer when
-    the detail has no spare content row; list panes with a window-reading row
-    keep their position in the body. [choices] is an open menu's complete
+(** The footer takes no position: where a surface stands is a value drawn on
+    the title row (RFC tui-one-screen-grammar, section 2). [choices] is an open menu's complete
     decision, retained ahead of ambient notices when it fits whole; otherwise
     its keys use the ordinary item fitter. Quit and input-recovery notices
     keep their existing priority. It does not authorize an action. *)
@@ -292,6 +287,12 @@ type chrome_body = {
           content will start -- where a picture placed over body rows goes.
           Holds while the body stays inside its budget, which a [Fits] body
           does. *)
+  position : Masc_tui_value.Position.t -> unit;
+      (** Where the reader stands in what the body holds (RFC
+          tui-one-screen-grammar, section 2). The contract draws it at the
+          right of the title row once the body has finished; the last one
+          handed is drawn. A body that hides rows hands one; a [Scrolled]
+          body is handed its window by the contract. *)
 }
 
 val surface_chrome_rows : int
@@ -319,9 +320,9 @@ type overflow =
           {!Masc_tui_scroll}. A body that miscounts is cut as [Fits] is. *)
   | Scrolled of { scroll : int; report : int -> Masc_tui_types.clamped_scroll }
       (** The body pushes every row it has. The contract shows the window
-          from [scroll], held inside the rows there are, draws the
-          ["[lines a-b/n]"] row under it when they overflow, and reports the
-          scroll it drew from through [report]. *)
+          from [scroll], held inside the rows there are, hands that window as
+          the title row's position when it hides rows, and reports the scroll
+          it drew from through [report]. *)
   | Self_scrolled of (unit -> Masc_tui_types.clamped_scroll)
       (** The body windows part of itself under rows it pins, which the
           contract cannot tell apart from the window. The thunk is read after
@@ -329,9 +330,20 @@ type overflow =
 
 val surface_window_height :
   Masc_tui_types.state -> terminal_rows:int -> count:int -> int
-(** The window a {!Scrolled} body gets out of [count] rows: the budget, less
-    the position row when they overflow. A key handler that bounds the scroll
-    asks this, the number the frame draws with. *)
+(** The window a {!Scrolled} body gets out of [count] rows: the whole
+    budget, since the position is on the title row. A key handler that
+    bounds the scroll asks this, the number the frame draws with. *)
+
+val surface_chrome_position :
+  overflow:overflow ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Masc_tui_value.Position.t option
+(** The position {!surface_chrome} draws on the title row for this [body],
+    decided the way the contract decides it: a [Scrolled] body's window, or
+    the last position any other body handed. Nothing is drawn. A test reads
+    the decision here rather than from the text. *)
 
 val surface_chrome :
   overflow:overflow ->
@@ -389,7 +401,44 @@ val here_row :
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. A step ahead of the last that the row
     cannot hold whole is folded in the middle, the longest first, so the last
-    step stays on the row. The product name is not drawn. *)
+    step stays on the row. The product name is not drawn. This,
+    {!zone_two_title} and the title row of {!surface_chrome} are the only
+    places a position becomes text. *)
+
+val zone_two_title :
+  cols:int ->
+  Masc_tui_types.state ->
+  position:Masc_tui_value.Position.t option ->
+  title:(cols:int -> string) ->
+  string
+(** A title row a surface lays out itself rather than through {!here_row},
+    with [position] at its right-hand end. [title] is asked for the row at
+    the frame width its text has: [cols] less the cells the position and its
+    gap take. A strip, heading or badge it sizes to that width keeps its end;
+    only a title wider than that loses its end, so the position keeps its
+    column. *)
+
+val zone_two_title_head :
+  cols:int ->
+  Masc_tui_types.state ->
+  position:Masc_tui_value.Position.t option ->
+  title:(cols:int -> string) ->
+  Masc_tui_message_layout.head
+(** What {!zone_two_title} decides for [title]: [Whole] when the title fits
+    the cells the position leaves, [Cut] when the row has to cut its end.
+    Nothing is drawn. A test reads the decision here. *)
+
+val titled_row :
+  cols:int ->
+  Masc_tui_types.state ->
+  title:string ->
+  position:Masc_tui_value.Position.t option ->
+  string
+(** {!zone_two_title} for a title handed as text. Text laid out for the
+    whole row loses its end to the position, so a title that lays out its
+    parts goes through {!zone_two_title}. Kept for {!surface_chrome}, whose
+    surfaces hand their title as text, and for two rows in
+    masc_tui_render_work.ml; it goes once those take [cols:int -> string]. *)
 
 val reading_separator : string
 (** The mark between two readings of one row. *)
@@ -404,6 +453,15 @@ val here_steps_room :
     also keep [after] cells for what follows the path: what the screen name
     and one separator a step leave. A row that lays out the path itself
     ({!here_path}) folds a long step to this. *)
+
+val keeper_detail_title :
+  Masc_tui_types.state -> keeper_name:string -> cols:int -> string
+(** A Keeper detail's title on a row [cols] wide: the path to the Keeper,
+    its name folded in the middle when the row is short, and the strip of
+    detail tabs with the open one marked. The strip drops whole tabs and
+    counts them, so its end is a whole tab or the count of those it hides.
+    Handed to {!zone_two_title}, which asks for it at the width the
+    position leaves. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -473,6 +531,12 @@ val keeper_roster_pane :
   Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit
 
 val listing_rows_below_the_body : int
+
+(** The top edge, the title row and the divider of a boxed surface. *)
+val boxed_head : Buffer.t -> int -> string -> unit
+
+(** How many rows {!boxed_head} draws at [cols]. *)
+val boxed_head_rows : int -> int
 
 val write_list_sidebar :
   Buffer.t ->
@@ -636,11 +700,6 @@ val planning_change_clauses :
 val pack_planning_summary_rows : cols:int -> string list -> string list
 (** Packs summary clauses within [framed_inner_width cols - 2] and prefixes
     each physical row with the 2-cell left margin. *)
-
-val work_tasks_room : budget:int -> header_rows:int -> count:int -> int
-(** Visible task rows for [Work / Tasks] given [budget] body rows and
-    [header_rows] summary/divider rows, reserving one row for [[tasks a-b/n]]
-    when overflowing and at least 2 rows remain below the header. *)
 
 val planning_goal_history_summary : unlisted:int -> ended:int -> string
 (** The retained-history count row: how many goals are no longer listed, and
@@ -810,7 +869,9 @@ val config_pane_title :
     nine of them spelled it identically, which is also why none could tell the
     strip to leave room for the badge. When those optional names and shortcuts
     cannot leave room for the active pane, the path names that pane in the
-    strip's place, ahead of the connection observation. *)
+    strip's place, ahead of the connection observation. Applied to all but
+    [cols] it is the [title] a pane hands {!zone_two_title}, so the strip
+    and the badge are laid out in the cells the position leaves. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
@@ -826,10 +887,8 @@ val runtime_config_status_lines :
 (** The runtime configuration's status page as styled rows, drawn as headed
     blocks of reading lines. *)
 
-val help_masthead : Masc_tui_types.state -> string list
-
-val help_lines : width:int -> Masc_tui_types.state -> string list
-(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+val help_lines : width:int -> Masc_tui_types.state -> Masc_tui_help.block list
+(** The cheat sheet's blocks, each entry's text wrapped to [width] cells and
     continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
@@ -865,7 +924,7 @@ val answering_preview_rows : int
 
 (** Common title and content geometry for surfaces with two panes. *)
 val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
-  path:string list -> split:bool -> unit
+  path:string list -> split:bool -> position:Masc_tui_value.Position.t option -> unit
 val pane_surface_content_height : rows:int -> int
 
 val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list

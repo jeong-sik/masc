@@ -49,6 +49,12 @@ type ('a, 'e) filled =
   | Read_not_kept of 'a
   | Read_failed of 'e
 
+(* Whether this process holds the lease under which the files are written. A
+   cell follows the changes of the process it lives in and no other's. *)
+let keeping = Atomic.make false
+let keep_in_this_process () = Atomic.set keeping true
+let kept_in_this_process () = Atomic.get keeping
+
 let fill cell ~read =
   let seen = Atomic.get cell in
   match seen.slot with

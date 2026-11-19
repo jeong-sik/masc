@@ -268,6 +268,13 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
 val needs_operator_broadcast : operator_disposition_kind -> bool
 
 val append : Workspace.config -> t -> unit
+
+(** The Keeper's newest receipt row that is JSON; rows that are not JSON are
+    passed over, and [None] is a store without such a row. The value is the
+    receipt store's kept fact ({!Dated_jsonl.newest_parsed_row}): in the
+    server no file is read once the store holds it, and {!append} moves it to
+    the row it wrote. A store the strict read refuses is read leniently on
+    each call, which is what this function did before there was a fact. *)
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 
 (** Historical evidence is bound only to the receipt that supplied it, never
@@ -320,6 +327,8 @@ type latest_receipt_reading =
   | Receipt_store_unreadable of Dated_jsonl.read_error
 
 (** Newest parsed receipt row of [keeper_name]. Malformed JSON rows are
-    skipped, as {!latest_json} skips them. *)
+    skipped, as {!latest_json} skips them: both take the store's kept fact, so
+    they answer from one row. A store the strict read refuses is
+    [Receipt_store_unreadable]. *)
 val read_latest_receipt : Workspace.config -> string -> latest_receipt_reading
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list

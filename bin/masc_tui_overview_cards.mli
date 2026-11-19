@@ -18,6 +18,13 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
+val card_selection :
+  is_selected:('action -> bool) -> ('action * string) list -> Masc_tui_card.selection
+(** Where the selection is, as the grid sees a card listing [entries]. Every
+    entry is a destination the selection moves over: a card that lists none
+    is {!Masc_tui_card.Unselectable}, a card that lists the selected one
+    holds it, and any other card is {!Masc_tui_card.Selectable}. *)
+
 type edges =
   { decisions : Masc_tui_card.edge
   ; continuation : Masc_tui_card.edge
@@ -41,13 +48,20 @@ val draw :
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit
     and the caller draws the plain rows instead: [inner] holds fewer than two
-    columns, the cards need more than [rows] lines, or [decisions_whole] is
-    false. [decisions_whole] says the window holds every decision; a partial
-    window uses the plain selectable list instead. The cards are as tall as
-    their rows and the two columns end on the same line. A card with no rows
-    has an empty body: its edge's count says there are none.
+    columns, the cards need more than [rows] lines with every card that may
+    squash squashed, or [decisions_whole] is false. [decisions_whole] says the
+    window holds every decision; a partial window uses the plain selectable
+    list instead. The cards are as tall as their rows and the two columns end
+    on the same line. A card with no rows has an empty body: its edge's
+    count says there are none.
+
+    A card that [rows] cannot hold is squashed to its top edge, which keeps
+    its name, mark and count ({!Masc_tui_card.grid}). The card that holds the
+    selected row never squashes. Whether the cards are drawn does not depend
+    on where the selection is: they are [None] unless each card that lists a
+    destination fits full in turn, so moving the selection never switches
+    the body between the cards and the plain rows.
 
     [actions] are the reasons the server gives for needing the operator, one
     row each, drawn as a card under the status readings. With none, there is
-    no card. An unfittable action card returns [None], so the plain window
-    retains its selected destination instead of silently dropping the card. *)
+    no card. *)

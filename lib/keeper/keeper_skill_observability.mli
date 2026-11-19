@@ -44,6 +44,11 @@ val execution_label : surface -> string
 (** ["on_demand"] for an instruction, else the composition's execution mode;
     the profile JSON's [execution]. *)
 
+val surfaces : surface list
+(** Every surface once: the instruction Skill, then a composition Skill for
+    each of {!Keeper_tool_composition_catalog.execution_modes}. A reader that
+    gets [kind] and [execution] back finds the surface here. *)
+
 type io =
   | Model_orchestrated
   | Composition_io of

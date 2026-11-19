@@ -35,6 +35,7 @@ const { mockedToolsData, mockedToolsError } = vi.hoisted(() => ({
 
 vi.mock('../keeper-actions', () => ({
   cancelActiveKeeperThreadMessage: vi.fn(async () => true),
+  closeKeeperSendWithHeldStop: vi.fn(() => true),
   hydrateKeeperStatus: vi.fn(async () => null),
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
@@ -132,6 +133,7 @@ import { keeperChatHistoryErrors, keeperActionErrors, keeperHydrating, keeperSen
 import { keeperStatusDetails } from '../keeper-state'
 import {
   cancelActiveKeeperThreadMessage,
+  closeKeeperSendWithHeldStop,
   hydrateKeeperStatus,
   interruptKeeperTurn,
   isKeeperThreadMessageSendInFlight,
@@ -235,6 +237,8 @@ describe('KeeperConversationPanel', () => {
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
     vi.mocked(cancelActiveKeeperThreadMessage).mockReset()
     vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
+    vi.mocked(closeKeeperSendWithHeldStop).mockReset()
+    vi.mocked(closeKeeperSendWithHeldStop).mockReturnValue(true)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
     cancelKeeperChatOperation.mockReset()
@@ -515,6 +519,78 @@ describe('KeeperConversationPanel', () => {
       )
     })
     consoleWarn.mockRestore()
+  })
+
+  describe('a stop that waits for the acceptance', () => {
+    function sendingThread(streamState: KeeperConversationEntry['streamState']): KeeperConversationEntry[] {
+      return [
+        {
+          id: 'local-user',
+          role: 'user',
+          source: 'direct_user',
+          label: 'You',
+          text: '멈춰',
+          timestamp: '2026-11-19T00:01:00.000Z',
+          delivery: 'delivered',
+          streamState: null,
+          details: null,
+        },
+        {
+          id: 'local-reply',
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: 'echo',
+          text: '',
+          rawText: '',
+          timestamp: null,
+          delivery: 'sending',
+          streamState,
+          details: null,
+        },
+      ]
+    }
+
+    const layouts = [
+      { layout: undefined, name: 'default' },
+      { layout: 'primary', name: 'primary' },
+      { layout: 'workspace', name: 'workspace' },
+    ] as const
+
+    it.each(layouts)('offers the way out in the $name layout', async ({ layout }) => {
+      keeperThreads.value = { echo: sendingThread('stop_pending') }
+      keeperSending.value = { echo: true }
+
+      render(
+        html`<${KeeperConversationPanel} keeperName="echo" placeholder="메시지 입력..." layout=${layout} />`,
+        container,
+      )
+      await Promise.resolve()
+
+      const notice = container.querySelector('[data-keeper-held-stop]') as HTMLElement
+      expect(notice).not.toBeNull()
+      expect(notice.textContent).toContain('중지가 서버 접수를 기다리는 중')
+
+      // Stop is still the stop. The way out is a control of its own.
+      fireEvent.click(container.querySelector('button[aria-label="응답 중지"]') as HTMLButtonElement)
+      expect(closeKeeperSendWithHeldStop).not.toHaveBeenCalled()
+
+      fireEvent.click(within(notice).getByRole('button', { name: '중지를 보내지 않고 연결 끊기' }))
+      expect(closeKeeperSendWithHeldStop).toHaveBeenCalledExactlyOnceWith('echo')
+    })
+
+    it.each(layouts)('offers no way out in the $name layout while no stop is held', async ({ layout }) => {
+      keeperThreads.value = { echo: sendingThread('opening') }
+      keeperSending.value = { echo: true }
+
+      render(
+        html`<${KeeperConversationPanel} keeperName="echo" placeholder="메시지 입력..." layout=${layout} />`,
+        container,
+      )
+      await Promise.resolve()
+
+      expect(container.querySelector('button[aria-label="응답 중지"]')).not.toBeNull()
+      expect(container.querySelector('[data-keeper-held-stop]')).toBeNull()
+    })
   })
 
   it('shows a live assistant placeholder while streaming without a reply entry', async () => {

@@ -18,6 +18,7 @@ import type {
 } from '../types'
 import {
   cancelActiveKeeperThreadMessage,
+  closeKeeperSendWithHeldStop,
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
@@ -362,6 +363,29 @@ function BusyToolbar({
         Keeper 턴 실행 중
       </span>
       <${GhostButton} onClick=${onInterrupt}>현재 턴 중단<//>
+    </div>
+  `
+}
+
+// ── Held stop notice (the way out of a wait for the acceptance) ─────────
+
+function HeldStopNotice({
+  keeperName,
+  onClose,
+}: {
+  keeperName: string
+  onClose: () => void
+}) {
+  return html`
+    <div
+      class="mb-2 flex items-center justify-between gap-2 text-2xs v2-monitoring-row"
+      data-keeper-name=${keeperName}
+      data-keeper-held-stop
+    >
+      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 font-medium text-[var(--color-status-warn)]">
+        중지가 서버 접수를 기다리는 중
+      </span>
+      <${GhostButton} onClick=${onClose}>중지를 보내지 않고 연결 끊기<//>
     </div>
   `
 }
@@ -842,6 +866,19 @@ export function KeeperConversationPanel({
     />
   `
 
+  // A stop pressed before the send read the server's acceptance waits for it,
+  // and its reply row says so. This is the way out of that wait. It is not the
+  // stop button, so pressing stop twice does not give the wait up. One value
+  // for the three composer layouts, as the busy toolbar above.
+  const heldStopNotice = rawThread.some(entry => entry.streamState === 'stop_pending')
+    ? html`
+        <${HeldStopNotice}
+          keeperName=${keeperName}
+          onClose=${() => { closeKeeperSendWithHeldStop(keeperName) }}
+        />
+      `
+    : null
+
   const serverOperationStatus = html`
     <${ServerOperationStatus}
       busy=${serverBusy}
@@ -957,6 +994,7 @@ export function KeeperConversationPanel({
             ${serverOperationStatus}
             ${queueControlPanel}
             ${isKeeperBusy ? renderBusyToolbar() : null}
+            ${heldStopNotice}
             <${ChatComposer}
               key=${keeperName}
               draftPersistKey=${keeperName}
@@ -1070,6 +1108,7 @@ export function KeeperConversationPanel({
         ${serverOperationStatus}
         ${queueControlPanel}
           ${isKeeperBusy ? renderBusyToolbar() : null}
+          ${heldStopNotice}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
@@ -1180,6 +1219,7 @@ export function KeeperConversationPanel({
         ${serverOperationStatus}
         ${queueControlPanel}
           ${isKeeperBusy ? renderBusyToolbar() : null}
+          ${heldStopNotice}
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}

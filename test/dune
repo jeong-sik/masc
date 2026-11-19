@@ -7024,6 +7024,8 @@
 
 (include stanzas/test_tui_surface_chrome_overflow.inc)
 
+(include stanzas/test_tui_zone_two_title.inc)
+
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)

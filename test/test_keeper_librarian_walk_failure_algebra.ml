@@ -210,10 +210,10 @@ let test_provider_context_overflow_keeps_the_stored_shape () =
   in
   let stored cause = Yojson.Safe.to_string (S.api_observation_to_yojson (S.api_observation cause)) in
   Alcotest.(check string) "an observed status keeps the old provider-refusal row"
-    {|["Provider_refused",{"http_status":400,"refusal":["Context_overflow"]}]]|}
+    {|["Provider_refused",{"http_status":400,"refusal":["Context_overflow"]}]|}
     (stored with_status);
   Alcotest.(check string) "no status keeps the old sent-completion row without a status"
-    {|["Completion_failed",{"sent":false,"cause":["Context_overflow_failure"]}]]|}
+    {|["Completion_failed",{"sent":false,"cause":["Context_overflow_failure"]}]|}
     (stored without_status);
   List.iter
     (fun cause ->

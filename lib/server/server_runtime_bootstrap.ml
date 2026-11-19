@@ -1396,6 +1396,10 @@ let claim_and_start_keeper_persistence
         (Owner_initialization_failed
            (Keeper_persistence_claim_failed error))
   in
+  (* The Memory writers of this workspace, on the server's switch: after the
+     persisted Keeper stores were reconciled, and before a Keeper's turn can
+     write. *)
+  Keeper_memory_writers.start ~sw ~config:(Mcp_server.workspace_config state);
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence

@@ -59,7 +59,8 @@ let card_selection ~is_selected entries =
       else Masc_tui_card.Selectable
 
 let draw ~ko ~(edges : edges) ~inner
-    ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
+    ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status
+    ?(keep_actions_card = false) ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
@@ -95,10 +96,14 @@ let draw ~ko ~(edges : edges) ~inner
       ; reset = Ansi.reset
       }
     in
+    let show_actions_card =
+      match actions, keep_actions_card with
+      | [], false -> false
+      | [], true | _ :: _, (true | false) -> true
+    in
     let status_column =
-      match actions with
-      | [] -> [ status_card ]
-      | _ :: _ -> [ status_card; actions_card ]
+      if show_actions_card then [ status_card; actions_card ]
+      else [ status_card ]
     in
     let columns =
       if fits >= column_count then
@@ -109,9 +114,9 @@ let draw ~ko ~(edges : edges) ~inner
            (decisions -> operator actions -> continuation -> status) so j/k
            traversal stays monotonically top-to-bottom. *)
         let single_column =
-          match actions with
-          | [] -> [ decision_card; continue_card; status_card ]
-          | _ :: _ -> [ decision_card; actions_card; continue_card; status_card ]
+          if show_actions_card then
+            [ decision_card; actions_card; continue_card; status_card ]
+          else [ decision_card; continue_card; status_card ]
         in
         [ single_column ]
     in

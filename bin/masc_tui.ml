@@ -41474,6 +41474,19 @@ Use relative paths for resources already held in the package. -->
              | Error detail -> report_action state "error" detail)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some ("1" | "2" | "3" | "4" as digit) when state.view = Overview ->
+            let index = int_of_string digit in
+            if List.mem index state.overview_collapsed_cards then
+              state.overview_collapsed_cards <-
+                List.filter (fun n -> n <> index) state.overview_collapsed_cards
+            else
+              let _, full_cols = get_terminal_size () in
+              let inner_width = Masc_tui_render_prim.framed_inner_width full_cols in
+              if
+                Masc_tui_card.columns_that_fit ~inner_width ~gap:2
+                  ~min_card_width:44 ~max_columns:2 >= 2
+              then
+                state.overview_collapsed_cards <- index :: state.overview_collapsed_cards
         | Some "f" when state.view = Metrics && not state.usage_telemetry_open ->
             state.palette_open <- true;
             state.palette_mode <- Palette_jump;

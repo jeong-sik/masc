@@ -59,13 +59,24 @@ type focus =
       (** Any other card that owns the keyboard. Zone 2's position does not
           count what this card counts, so the edge keeps its count. *)
 
+(** One inline action hint drawn on a card's bottom-left border (btop style:
+    highlighted key letter beside a short label, e.g. [p] + ["확인"]). *)
+type inline_key =
+  { key : string
+  ; label : string
+  }
+
+val superscript_digit : int -> string option
+(** UTF-8 superscript digit for [1..9] (["¹"]..["⁹"]), or [None] outside that
+    range. Use only when the corresponding digit key is actually bound to this
+    card (RFC tui-one-screen-grammar §3.1). *)
+
 type edge =
   { name : string  (** Plain text, one line. *)
   ; key : (string * string) option
-        (** A key tag and its style drawn ahead of the name ([("p", accent)]).
-            RFC section 12 leaves keys on card edges to the layer that moves
-            keys. Until then a tag is the first thing a narrow edge gives up,
-            so it never costs the name a cell. *)
+        (** A key tag and its style drawn ahead of the name ([("¹", accent)]).
+            A tag is the first thing a narrow edge gives up, so it never costs
+            the name a cell. *)
   ; status : status option
   ; count : count option
         (** A focused list card writes no count: zone 2's position already
@@ -75,6 +86,10 @@ type edge =
         (** Optional btop-style semantic border SGR used when unfocused
             ({!Masc_tui_theme.panel_border}). [None] uses [style.border]; a
             focused card always takes [style.focused_border]. *)
+  ; footer_keys : inline_key list
+        (** Optional btop-style inline action hints drawn on the bottom-left
+            border. Rightmost hints drop first when narrow so the bottom-right
+            overflow count ([외 N]) is never displaced. *)
   }
 
 type t =

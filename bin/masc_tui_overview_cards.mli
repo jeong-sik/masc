@@ -45,6 +45,7 @@ val draw :
   decisions_whole:bool ->
   continuation:('action * string) list ->
   status:(cells:int -> string list) ->
+  ?keep_actions_card:bool ->
   actions:('action * string) list ->
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit

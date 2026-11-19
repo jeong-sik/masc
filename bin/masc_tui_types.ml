@@ -10737,6 +10737,8 @@ type state = {
      ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
      the window where it is. *)
   mutable keeper_list_scroll: int;
+  (* Overview cards collapsed via btop-style 1..4 number toggles (1-based). *)
+  mutable overview_collapsed_cards: int list;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -21604,6 +21606,7 @@ let create_state
   keeper_list_view_save_request = None;
   keeper_message_return = None;
   keeper_list_scroll = 0;
+  overview_collapsed_cards = [];
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];

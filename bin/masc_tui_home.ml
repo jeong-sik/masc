@@ -383,9 +383,11 @@ type prepared = {
 }
 
 let prepare (state : state) =
-  let decisions = decision_rows_of_state state in
-  let continuation = continue_rows_of_state state in
-  let operator_rows = operator_rows_of_state state in
+  let collapsed index = List.mem index state.overview_collapsed_cards in
+  let raw_decisions = decision_rows_of_state state in
+  let decisions = if collapsed 1 then [] else raw_decisions in
+  let continuation = if collapsed 2 then [] else continue_rows_of_state state in
+  let operator_rows = if collapsed 4 then [] else operator_rows_of_state state in
   let first = function [] -> None | (action, _) :: _ -> Some action in
   let selected = match state.home_selected with
     | None ->
@@ -399,7 +401,7 @@ let prepare (state : state) =
          | Some _ as action -> action
          | None -> (match find operator_rows with Some _ as action -> action | None -> find continuation))
   in
-  { decisions; decision_count = decision_count_of_state state decisions;
+  { decisions; decision_count = decision_count_of_state state raw_decisions;
     continuation; operator_rows; selected;
     selection_changed = Option.is_some state.home_selected && Option.is_none selected;
     notices = notice_lines_of_state state;

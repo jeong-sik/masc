@@ -2075,7 +2075,7 @@ let availability_word state ~by provider_account_id =
    ({!Authz_provider_account.shown}). *)
 let shown_words state ~by =
   List.map
-    (fun ({ provider_account_id; kind; removal } : Authz_provider_account.shown) ->
+    (fun ({ provider_account_id; kind; blocked } : Authz_provider_account.shown) ->
       Printf.sprintf
         "%s, %s, %s"
         (Authz_types.Provider_account_id.to_string provider_account_id)
@@ -2083,11 +2083,14 @@ let shown_words state ~by =
          | Authz_provider_account_state.Login -> "a login"
          | Authz_provider_account_state.Key { integration_id; generation = _ } ->
            "a key of " ^ Authz_types.Integration_id.to_string integration_id)
-        (match removal with
+        (match blocked with
          | None -> "no removal"
-         | Some Authz_provider_account.Start_given_up -> "start given up"
-         | Some (Authz_provider_account.Stayed Pg.Key_not_removed) -> "the key stayed"
-         | Some (Authz_provider_account.Stayed Pg.Home_not_removed) -> "the home stayed"))
+         | Some (Authz_provider_account.Removal Authz_provider_account.Start_given_up) -> "start given up"
+         | Some (Authz_provider_account.Removal (Authz_provider_account.Stayed Pg.Key_not_removed)) ->
+           "the key stayed"
+         | Some (Authz_provider_account.Removal (Authz_provider_account.Stayed Pg.Home_not_removed)) ->
+           "the home stayed"
+         | Some Authz_provider_account.Replacement_start_given_up -> "replacement start given up"))
     (Authz_provider_account.shown state by)
 ;;
 
@@ -2209,6 +2212,201 @@ let test_account_purges () =
   Alcotest.(check string) "the last end" "purged" (account_purge_word state account)
 ;;
 
+(* ---- replacing the key of a key account ---- *)
+
+let generation_of value =
+  match Authz_types.Key_generation.of_int value with
+  | Some generation -> generation
+  | None -> Alcotest.failf "fixture generation %d refused" value
+;;
+
+let replaced ?(account = key_account) ~by generation =
+  Pae.Key_replaced { provider_account_id = account; user_id = by; generation }
+;;
+
+let key_generation_word state account =
+  match Pas.find state.S.provider_accounts account with
+  | Some { Pas.owner = _; kind = Pas.Key { integration_id = _; generation } } ->
+    string_of_int (Authz_types.Key_generation.to_int generation)
+  | Some { Pas.owner = _; kind = Pas.Login } -> "a login"
+  | None -> "not linked"
+;;
+
+(* The generation a replacement by this person would follow, or why they
+   replace nothing ({!Authz_state.key_to_replace}). *)
+let key_to_replace_word state ~by account =
+  match S.key_to_replace state ~user_id:by account with
+  | Ok generation -> string_of_int (Authz_types.Key_generation.to_int generation)
+  | Error refusal -> Pas.refusal_to_string refusal
+;;
+
+(* RFC a-persons-api-key-is-their-own-provider-account 3.7: the owner of a
+   key account replaces its key with one of the next generation, and no one
+   else does. The record is a Credential_replace intent on the credential,
+   so a log cut back to before it does not make the key before it the key of
+   the account again. An account whose removal began or stopped has no key
+   replaced. *)
+let test_key_replacements () =
+  let credential = Authz_records.Subject.Credential key_account in
+  let intent = Some "credential_replace of credential:claude-code-key-user" in
+  let first = Authz_types.Key_generation.first in
+  let second = generation_of 2 in
+  let third = generation_of 3 in
+  let replace ?(author = human user) ?(by = user) ?account generation =
+    account_record ~author (replaced ?account ~by generation)
+  in
+  let refused label state record refusal = refused_as label state record (S.Provider_account refusal) in
+  let linked_state =
+    applied_change
+      "a key link"
+      (two_admins ())
+      (account_record ~author:(human user) (key_linked ~by:user))
+      None
+  in
+  (match Pae.to_body (replaced ~by:user second) with
+   | Error _ -> Alcotest.fail "fixture key replacement body refused"
+   | Ok body ->
+     Alcotest.(check string)
+       "the body on disk"
+       {|{"event":"key_replaced","provider_account_id":"claude-code-key-user","user_id":"user-1","generation":2}|}
+       (Authz_body.to_string body);
+     (match Pae.of_body body with
+      | Ok event -> Alcotest.(check bool) "read back" true (Pae.equal event (replaced ~by:user second))
+      | Error error -> Alcotest.failf "its own body is refused: %s" (Pae.error_to_string error)));
+  Alcotest.(check string) "the generation a first replacement follows" "1" (key_to_replace_word linked_state ~by:user key_account);
+  let state = applied_change "a replacement" linked_state (replace second) intent in
+  Alcotest.(check string) "the generation after a replacement" "2" (key_generation_word state key_account);
+  Alcotest.(check string) "its owner spends the account as before" "spent" (availability_word state ~by:user key_account);
+  (* The record names the generation after the one held, so a record read
+     twice replaces a key once, and a generation is not skipped. *)
+  refused "the same record once more" state (replace second) (Pas.Generation_not_next { held = second; given = second });
+  refused "a generation that skips one" linked_state (replace third) (Pas.Generation_not_next { held = first; given = third });
+  refused "the generation the account holds" linked_state (replace first) (Pas.Generation_not_next { held = first; given = first });
+  let state = applied_change "a second replacement" state (replace third) intent in
+  Alcotest.(check string) "the generation after two" "3" (key_generation_word state key_account);
+  (* Who replaces a key. *)
+  refused
+    "an Admin replaces the key of another"
+    linked_state
+    (replace ~author:(human bob) second)
+    (Pas.Replaced_for_another { author = bob; user_id = user });
+  refused "another's account, as one's own" linked_state (replace ~author:(human bob) ~by:bob second) (Pas.Not_the_owner key_account);
+  refused "an account no record linked" linked_state (replace ~account:first_account second) (Pas.Not_linked first_account);
+  refused
+    "a person who is not active"
+    linked_state
+    (replace ~author:(human carol) ~by:carol second)
+    (Pas.User_not_active carol);
+  refused
+    "a service"
+    linked_state
+    (replace ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Service keeper_service)) second)
+    (Pas.Not_a_human (Authz_types.Principal.Service keeper_service));
+  let with_login =
+    applied_change "a login link" linked_state (account_record ~author:(human user) (linked ~by:user)) None
+  in
+  refused "a login account" with_login (replace ~account:first_account second) (Pas.Not_a_key_account first_account);
+  (* An account whose removal began, or stopped, has no key replaced. *)
+  let account : Pg.account = { owner = user; provider_account_id = key_account } in
+  let target = Pg.Provider_account account in
+  let removal_intent = Some "purge of credential:claude-code-key-user" in
+  let pending =
+    applied_change
+      "a removal starts"
+      linked_state
+      (purge_record ~author:(human user) (Pg.Purge_pending { target }))
+      removal_intent
+  in
+  refused "an account whose removal is pending" pending (replace second) (Pas.Account_removed key_account);
+  let stayed =
+    applied_change
+      "the removal stops at the key"
+      pending
+      (purge_record
+         ~author:Authz_records.Author.System_maintenance
+         (Pg.Purge_failed (Pg.Account_not_purged { account; failed_stage = Pg.Key_not_removed })))
+      None
+  in
+  refused "an account a stage of whose removal stayed" stayed (replace second) (Pas.Removal_stopped key_account);
+  let through =
+    applied_change
+      "a removal goes through"
+      pending
+      (purge_record ~author:Authz_records.Author.System_maintenance (Pg.Purged (Pg.Account_purged { account })))
+      None
+  in
+  refused "an account that was removed" through (replace second) (Pas.Account_removed key_account);
+  let removal_given_up =
+    S.hold_revocations linked_state [ held ~event:Authz_external_store.Change.Purge credential ]
+  in
+  refused
+    "an account whose removal start was given up"
+    removal_given_up
+    (replace second)
+    (Pas.Removal_stopped key_account);
+  (* Another person learns nothing of the removal of an account: the owner
+     is compared first. *)
+  refused "another's account whose removal stopped" stayed (replace ~author:(human bob) ~by:bob second) (Pas.Not_the_owner key_account);
+  (* The start of a replacement that wrote its intent and no record (design
+     8.3) blocks the account. Its list says so, and the replacement asked
+     again, which names the block, closes it. *)
+  let block =
+    held ~aborted:(String.make 64 'b') ~event:Authz_external_store.Change.Credential_replace credential
+  in
+  let given_up = S.hold_revocations linked_state [ block ] in
+  Alcotest.(check string) "an account whose replacement start was given up" "blocked" (availability_word given_up ~by:user key_account);
+  Alcotest.(check (list string))
+    "in the list of its owner"
+    [ "claude-code-key-user, a key of claude_code, replacement start given up" ]
+    (shown_words given_up ~by:user);
+  Alcotest.(check string) "its key is replaced all the same" "1" (key_to_replace_word given_up ~by:user key_account);
+  let again = applied_change "the replacement asked again" given_up (R.closing (replace second) ~closes:[ block.S.aborted ]) intent in
+  Alcotest.(check string) "the account after it" "spent" (availability_word again ~by:user key_account);
+  Alcotest.(check string) "the generation after it" "2" (key_generation_word again key_account);
+  Alcotest.(check (list string))
+    "in the list of its owner after it"
+    [ "claude-code-key-user, a key of claude_code, no removal" ]
+    (shown_words again ~by:user);
+  (* A removal that stopped beside it is what the list shows: the account is
+     removed next, and its key is not replaced until then. *)
+  let both =
+    S.hold_revocations
+      given_up
+      [ held ~aborted:(String.make 64 'c') ~event:Authz_external_store.Change.Purge credential ]
+  in
+  Alcotest.(check (list string))
+    "an account both stopped on, in the list of its owner"
+    [ "claude-code-key-user, a key of claude_code, start given up" ]
+    (shown_words both ~by:user);
+  refused "an account both stopped on" both (replace second) (Pas.Removal_stopped key_account);
+  Alcotest.(check string)
+    "what its owner is told before a record is written"
+    (Pas.refusal_to_string (Pas.Removal_stopped key_account))
+    (key_to_replace_word both ~by:user key_account);
+  (* A body that names no generation, or one before the first. *)
+  let members_of members = record_by ~author:(human user) K.Provider_account (body_of_json (`Assoc members)) in
+  let text value = `String value in
+  let of_generation generation =
+    members_of
+      [ "event", text "key_replaced"
+      ; "provider_account_id", text "claude-code-key-user"
+      ; "user_id", text "user-1"
+      ; "generation", generation
+      ]
+  in
+  refused_as "a generation before the first" linked_state (of_generation (`Int 0)) (S.Provider_account_unreadable (Pae.Invalid_generation 0));
+  refused_as "a generation that is no integer" linked_state (of_generation (text "2")) (S.Provider_account_unreadable Pae.Wrong_members);
+  refused_as
+    "a replacement with no generation"
+    linked_state
+    (members_of
+       [ "event", text "key_replaced"
+       ; "provider_account_id", text "claude-code-key-user"
+       ; "user_id", text "user-1"
+       ])
+    (S.Provider_account_unreadable Pae.Wrong_members)
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -2296,6 +2494,7 @@ let () =
     ; ( "purges"
       , [ Alcotest.test_case "started by the owner, ended by the maintenance" `Quick test_purges_and_their_intent
         ; Alcotest.test_case "of an account, by the owner the log links it to" `Quick test_account_purges
+        ; Alcotest.test_case "the key of an account is replaced by its owner" `Quick test_key_replacements
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

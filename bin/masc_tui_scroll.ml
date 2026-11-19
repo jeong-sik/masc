@@ -175,6 +175,27 @@ let window_of_heights ~heights ~cursor ~rows scroll =
     in
     first, fitting first - first
 
+(* A page over items of different heights is a count of items, and the
+   count a window holds depends on where it starts: three short items or one
+   tall one. A page of the count the window holds now can pass an item when
+   the next window holds fewer, so the page is the fewest any window holds.
+   A run that reaches the last item holds no fewer than the window it starts:
+   nothing past it is left to pass. *)
+let items_always_shown ~heights ~rows =
+  let heights = Array.of_list heights in
+  let count = Array.length heights in
+  let rec fitting first taken used =
+    if first + taken >= count then None
+    else
+      let used = used + heights.(first + taken) in
+      if used > rows then Some taken else fitting first (taken + 1) used
+  in
+  let fewest = ref count in
+  for first = 0 to count - 1 do
+    Option.iter (fun taken -> fewest := Int.min !fewest taken) (fitting first 0 0)
+  done;
+  Int.max 1 !fewest
+
 let preview_height ~total ~keep = Int.max 0 (Int.min (total - keep) (total / 2))
 let body_height ~total ~keep = Int.max 1 (total - preview_height ~total ~keep)
 

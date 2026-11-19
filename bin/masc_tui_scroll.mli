@@ -150,6 +150,15 @@ val window_of_heights : heights:int list -> cursor:int -> rows:int -> int -> int
     around it are not drawn in its place. [(0, 0)] for an empty list or a
     window of no lines. *)
 
+val items_always_shown : heights:int list -> rows:int -> int
+(** The fewest items in a row that a window of [rows] lines holds whole,
+    wherever the run starts, at least one: item [i] takes the [i]th of
+    [heights]. It is the height a list of such items reports for a page key,
+    so from any window a page down lands on an item that fits with every item
+    the window showed after the cursor, and nothing is passed unseen when the
+    windows ahead hold fewer items than this one. An item taller than the
+    window holds no run, so a list with one pages by one item. *)
+
 (** A surface that draws a preview under its list splits the rows it has. The
     split belongs here for the same reason the bound does: the keypress and
     the frame have to work it out the same way. A renderer that shrank its

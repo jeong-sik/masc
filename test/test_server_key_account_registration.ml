@@ -854,12 +854,6 @@ let test_replacement_refused =
       ~code:"replacement_refused")
 ;;
 
-(* A file in the place of the key of the generation after, which no
-   replacement of this server wrote: the record that names the generation
-   makes it the file the account reads. The store fails on it, and the
-   folder of the keys goes, so the account reads no key, and neither that
-   file nor the key before stays on disk. The next replacement puts its key
-   in place. *)
 (* The record goes in and the key file is refused, in a folder the server
    can remove: the folder of the keys goes with the key before in it, and
    the home of the account stays. A folder of keys that others read is one
@@ -888,6 +882,12 @@ let test_replacement_not_stored_and_the_folder_gone =
       (read_name (key_file_of alice ~runtime_root account)))
 ;;
 
+(* A file in the place of the key of the generation after, which no
+   replacement of this server wrote: the record that names the generation
+   makes it the file the account reads. The store fails on it, and the
+   folder of the keys goes, so the account reads no key, and neither that
+   file nor the key before stays on disk. The next replacement puts its key
+   in place. *)
 let test_replacement_over_a_file_in_its_place =
   with_zone (fun ~zone ~root ~base_path ->
     declare ~base_path;

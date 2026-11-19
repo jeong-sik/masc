@@ -14,6 +14,7 @@
   eio.unix
   eio_main
   masc.auth
+  masc.fs_compat
   masc.masc_log
   masc.runtime
   masc.server

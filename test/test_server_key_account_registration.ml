@@ -17,6 +17,61 @@ module B = Authz_bootstrap
 module E = Authz_invite_event
 module Z = Authz_zone
 
+(* The child of [with_foreign_lock]: takes the lock file the way [Fs_compat]
+   does, says so, and holds the lock until its input closes. A lock that
+   another process holds needs a second process, so the case starts this
+   executable again. *)
+let hold_lock_child_flag = "--hold-log-lock"
+
+let () =
+  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) hold_lock_child_flag
+  then (
+    let fd = Unix.openfile Sys.argv.(2) [ Unix.O_WRONLY ] 0o600 in
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+        Unix.lockf fd Unix.F_LOCK 0;
+        output_char stdout 'R';
+        flush stdout;
+        try ignore (input_char stdin) with
+        | End_of_file -> ());
+    exit 0)
+;;
+
+(* Runs [f] while another process holds [lock_path], and returns once that
+   process ended and the lock is free. *)
+let with_foreign_lock ~lock_path f =
+  (* Close-on-exec, so that the child does not inherit the write end of the
+     release pipe and the parent's close of it reaches the child as EOF. *)
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let pid =
+    Unix.create_process
+      Sys.executable_name
+      [| Sys.executable_name; hold_lock_child_flag; lock_path |]
+      release_read
+      ready_write
+      Unix.stderr
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  let rec wait_for_child () =
+    match Unix.waitpid [] pid with
+    | result -> result
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close release_write;
+      ignore (wait_for_child () : int * Unix.process_status))
+    (fun () ->
+      let ready = Bytes.create 1 in
+      let count = Unix.read ready_read ready 0 1 in
+      Unix.close ready_read;
+      if count <> 1 || Bytes.get ready 0 <> 'R' then Alcotest.fail "the lock holder did not start";
+      f ())
+;;
+
 let get = function
   | Ok value -> value
   | Error _ -> Alcotest.fail "a fixture value was refused"
@@ -933,7 +988,9 @@ let spent (person : Login.person) id =
   Result.is_ok (Authz_provider_account.availability (state_of person) ~user_id:person.Login.user_id id)
 ;;
 
-(* The log takes the intent of a replacement and not its record. At the next
+(* The log takes the intent of a replacement and not its record, and stops.
+   The request that found it so is answered as every request after it is:
+   the 503 of a zone that cannot be trusted, which has no code. At the next
    start of the server the intent is one that was given up: it blocks the
    account, and the same request closes it (the same RFC, 3.7). The
    superuser writes a file whatever its mode is, so the case is skipped
@@ -950,7 +1007,7 @@ let test_replacement_given_up =
       Unix.chmod log_path 0o400;
       let answer = replace alice ~base_path account (replacement_body second_key) in
       Unix.chmod log_path 0o600;
-      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      answered "under a log that stopped" answer ~status:503 ~code:None;
       says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
       (* The server starts again. *)
       let alice = { alice with Login.zone = opened ~root ~base_path } in
@@ -1049,7 +1106,7 @@ let test_left_keys_under_a_stopped_log =
       Unix.chmod log_path 0o400;
       let answer = replace alice ~base_path account (replacement_body third_key) in
       Unix.chmod log_path 0o600;
-      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      answered "under a log that stopped" answer ~status:503 ~code:None;
       Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path);
       Alcotest.(check (list string))
         "a start over the zone whose log stopped leaves the file"
@@ -1062,6 +1119,69 @@ let test_left_keys_under_a_stopped_log =
       Alcotest.(check string)
         "the key the records say reads back"
         ("key:" ^ second_key)
+        (read_name (key_file_of alice ~runtime_root account)))
+    else Alcotest.skip ())
+;;
+
+(* Another process holds the lock of the log for a moment and writes
+   nothing. The record is not taken and the log is not stopped: the answer
+   says to send the key again, and the same server takes it then. *)
+let test_replacement_under_a_held_log =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let lock_path = Fs_compat.private_jsonl_lock_path (Authz_log.path_of_base_path ~base_path) in
+    let answer =
+      with_foreign_lock ~lock_path (fun () -> replace alice ~base_path account (replacement_body second_key))
+    in
+    answered "while another process holds the log" answer ~status:503 ~code:(Some "replacement_not_recorded");
+    says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+    unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+    let again = replace alice ~base_path account (replacement_body third_key) in
+    answered "the replacement, asked again of the same server" again ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 2 (generation_of alice account);
+    Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+    Alcotest.(check string)
+      "the key that was sent again reads back"
+      ("key:" ^ third_key)
+      (read_name (key_file_of alice ~runtime_root account)))
+;;
+
+(* A registration and a removal that find the log stopped are answered as
+   every request after them is, and leave what was there. Each is asked of
+   a zone a start opened. *)
+let test_under_a_log_that_stopped =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let log_path = Authz_log.path_of_base_path ~base_path in
+      let under_a_log_that_takes_no_record f =
+        Unix.chmod log_path 0o400;
+        Fun.protect ~finally:(fun () -> Unix.chmod log_path 0o600) f
+      in
+      let answer = under_a_log_that_takes_no_record (fun () -> register alice ~base_path (key_body second_key)) in
+      answered "a registration under a log that stopped" answer ~status:503 ~code:None;
+      says_nothing_of "a registration that was not recorded" ~key:second_key answer;
+      Alcotest.(check (list string)) "no file of the server holds its key" [] (holding ~text:second_key root);
+      (* The server starts again. *)
+      let alice = { alice with Login.zone = opened ~root ~base_path } in
+      let answer =
+        under_a_log_that_takes_no_record (fun () ->
+          Server_key_account.remove
+            ~person:alice
+            ~base_path
+            ~provider_account_id:(Provider_account_id.to_string account))
+      in
+      answered "a removal under a log that stopped" answer ~status:503 ~code:None;
+      Alcotest.(check string)
+        "the key of the account is in place"
+        ("key:" ^ the_key)
         (read_name (key_file_of alice ~runtime_root account)))
     else Alcotest.skip ())
 ;;
@@ -1163,6 +1283,8 @@ let () =
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
         ; Alcotest.test_case "a file in the place of the new key" `Quick test_replacement_over_a_file_in_its_place
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
+        ; Alcotest.test_case "a log another process holds for a moment" `Quick test_replacement_under_a_held_log
+        ; Alcotest.test_case "a registration and a removal under a log that stopped" `Quick test_under_a_log_that_stopped
         ; Alcotest.test_case "what a stopped server left in the folder of the keys" `Quick test_left_keys_at_start
         ; Alcotest.test_case "records that cannot be trusted remove no key" `Quick test_left_keys_under_a_stopped_log
         ; Alcotest.test_case "one account keeps no other waiting" `Quick test_left_keys_of_two_accounts

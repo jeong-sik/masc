@@ -808,7 +808,7 @@ let for_surface = function
           ~help:
             "roster focused: return to the composer; chat focused: back \
              without interrupting"
-      ; b ~ko:"턴 멈춤" Act "Ctrl-C" "interrupt"
+      ; b ~role:Acts ~ko:"턴 멈춤" Act "Ctrl-C" "interrupt"
           ~help:"chat focused during a turn: interrupt it; otherwise arm quit"
       ]
   | Keepers Keeper_runtime_pick ->

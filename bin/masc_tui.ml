@@ -34484,7 +34484,7 @@ Use relative paths for resources already held in the package. -->
                   && not state.image_open
                   && not state.msx_open
                   && Option.is_none state.lane_addons
-                  && Option.is_none state.account_server
+                  && Option.is_none state.account_login
                   && Option.is_none state.voice_agent_voices
                 in
                 if chat_pane_active

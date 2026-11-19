@@ -10,6 +10,8 @@ import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
 import type { RemovalStopped, RemovalsModel, Removing } from './key-remove'
+import type { ReplacementsModel } from './key-replace'
+import { ReplaceArea } from './key-replace-area'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
 import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Replacement, Runtime, Withheld } from './wire'
@@ -146,7 +148,8 @@ function removalWords(removal: Removal, held: Held): string {
 function replacementWords(replacement: Replacement): string {
   const left = '이 계정으로는 아무것도 실행되지 않아요.'
   switch (replacement) {
-    case 'start_given_up': return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버에 있는 key 는 바꾸기 전 그대로예요. ${left}`
+    case 'start_given_up':
+      return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버에 있는 key 는 바꾸기 전 그대로예요. ${left} key 를 다시 보내면 풀려요. 계정을 없애도 돼요.`
     case 'unrecognised': return `이 계정의 key 를 바꾸는 일이 끝나지 않았어요. ${left}`
   }
 }
@@ -458,10 +461,11 @@ function RemoveArea({ accountId, removals, card, again }: {
   `
 }
 
-function AccountRow({ facts, checks, removals }: {
+function AccountRow({ facts, checks, removals, replacements }: {
   readonly facts: AccountFacts
   readonly checks: ChecksModel
   readonly removals: RemovalsModel
+  readonly replacements: ReplacementsModel
 }): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
@@ -488,6 +492,9 @@ function AccountRow({ facts, checks, removals }: {
       ${left === null
         ? html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`
         : html`<p class="hint">${left.kind === 'removal' ? removalWords(left.stage, account.held) : replacementWords(left.stage)}</p>`}
+      ${account.held.kind === 'key' && left?.kind !== 'removal'
+        ? html`<${ReplaceArea} accountId=${account.id} replacements=${replacements} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'replacement'} />`
+        : null}
       ${account.held.kind === 'key'
         ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'removal'} />`
         : null}
@@ -495,16 +502,17 @@ function AccountRow({ facts, checks, removals }: {
   `
 }
 
-export function AccountList({ integrations, owned, checks, removals }: {
+export function AccountList({ integrations, owned, checks, removals, replacements }: {
   readonly integrations: readonly Integration[]
   readonly owned: Owned
   readonly checks: ChecksModel
   readonly removals: RemovalsModel
+  readonly replacements: ReplacementsModel
 }): VNode {
   if (owned.accounts.length === 0) return html`<p>아직 연결한 구독이 없어요.</p>`
   return html`
     <ul class="rows">
-      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} removals=${removals} />`)}
+      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} removals=${removals} replacements=${replacements} />`)}
     </ul>
   `
 }

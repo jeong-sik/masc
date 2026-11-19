@@ -55,6 +55,17 @@ export const sessionEndedWords = '세션이 끝났어요. 로그인 화면으로
 
 export const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.'
 
+/** What a person reads before they give a key, for a new account or for
+    one they hold (RFC of the key accounts, 3.8). */
+export const keyGivenWords = [
+  'key 는 이 서버에 암호화하지 않은 파일로 저장돼요. 서버를 운영하는 사람은 그 파일을 읽을 수 있어요.',
+  '저장한 뒤에는 이 화면에서 다시 보여 주지 않아요.',
+  '이 key 로 쓴 만큼 key 를 발급한 조직에 요금이 나가요.',
+] as const
+
+/** What the server answers `not_a_key` for (lib/server/server_key_account.ml). */
+export const notAKeyWords = 'key 로 읽을 수 없는 값이에요. key 하나만 넣어 주세요. 비어 있거나, 줄바꿈 같은 제어 문자가 있거나, JSON 문서면 받지 않아요.'
+
 /** What removing a key account does not do, said where a key is given and
     where an account is removed: the server takes its own copy of the key
     away, and the vendor still takes the key (RFC of the key accounts, 3.8). */

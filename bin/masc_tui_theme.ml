@@ -538,14 +538,14 @@ type series =
   | Usage
   | Wakes
 
-type hue = Green | Yellow | Blue | Magenta | Cyan
+type hue = Green | Yellow | Blue | Magenta
 
-(* One place says which hue a quantity draws in. Red is left to status: a
-   bucket in which every call failed is red across every row and the Calls
-   legend says so, so the failures row walks magenta instead. Latency and
+(* One place says which hue a quantity draws in. Red is left to status.danger
+   and Cyan is left to status.info (in-progress and focus, RFC §7.3), so no
+   picture series collides with active/focus or danger tokens. Latency and
    backlog share yellow because both are waiting. *)
 let series_hue = function
-  | Calls -> Cyan
+  | Calls -> Blue
   | Failures -> Magenta
   | Latency -> Yellow
   | Memory -> Magenta
@@ -553,7 +553,7 @@ let series_hue = function
   | Capacity -> Blue
   | Backlog -> Yellow
   | Usage -> Blue
-  | Wakes -> Cyan
+  | Wakes -> Green
 ;;
 
 (* The bright palette entry of each hue, the top of its ramp. *)
@@ -562,7 +562,6 @@ let bright_index = function
   | Yellow -> 11
   | Blue -> 12
   | Magenta -> 13
-  | Cyan -> 14
 ;;
 
 let bright_code = function
@@ -570,7 +569,6 @@ let bright_code = function
   | Yellow -> Sgr.bright_yellow
   | Blue -> Sgr.bright_blue
   | Magenta -> Sgr.bright_magenta
-  | Cyan -> Sgr.bright_cyan
 ;;
 
 let ramp_steps = 100

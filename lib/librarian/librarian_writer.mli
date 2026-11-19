@@ -17,6 +17,10 @@ module Digest := Agent_core.Checkpoint_objects
 
 type t
 
+(** The writer's lock is [<keeper><lock_suffix>] in the Memory directory. The
+    file is empty: only holding it means anything. *)
+val lock_suffix : string
+
 (** What a Keeper's request reads: how far the turn log is read, and what the
     Keeper was doing (§11.1). *)
 type view =

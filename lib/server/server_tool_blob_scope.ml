@@ -278,6 +278,17 @@ let config_keepers =
       { suffix = ".turn-boundaries.jsonl"
       ; reason = M.Writes_no_reference
       }
+    (* A commit log line carries facts, the write or adoption that caused it,
+       offsets into the turn log and what the Keeper was doing — no tool blob
+       key. The writer's lock is an empty file. *)
+  ; M.Keeper_files
+      { suffix = Librarian_log_store.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Librarian_writer.lock_suffix
+      ; reason = M.Writes_no_reference
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

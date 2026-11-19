@@ -49,8 +49,15 @@ val attempt_glyph : string
 (** The mark beside an attempt node in the secondary-row attempt chain. *)
 
 val badge_glyph : Masc_tui_keeper_list_model.badge -> string
-(** The mark beside a secondary activity badge; the badge always keeps its
-    own text label and count where applicable. *)
+(** The status mark (RFC tui-one-screen-grammar §7.2) beside a secondary
+    activity badge; the badge always keeps its own word and count where
+    applicable. A list that could not be read wears the read-failed mark of
+    a missing value (§6.4). *)
+
+val due_glyph : Masc_tui_keeper_list_model.due -> string
+(** The mark of a due group's heading in the time view: late is caution, held
+    paused, a coming run waiting, no schedule the dash of a value read as
+    none, and an unknown next time the unreported mark. *)
 
 val legend : (string * string) list
 (** Each mark and the word the wide surfaces print beside it, in the order a
@@ -108,7 +115,7 @@ val pulse_ok_mark : string
     mark. *)
 
 val pulse_rested_mark : string
-(** An hour whose worst turn rested. The mark of a spent quota. *)
+(** An hour whose worst turn rested. *)
 
 val pulse_failed_mark : string
 (** An hour with a failed turn. The mark of a failed attempt. *)

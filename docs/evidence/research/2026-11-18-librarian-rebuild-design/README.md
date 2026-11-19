@@ -3,7 +3,7 @@
 [RFC](../../../rfc/RFC-librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line.md)가 이 기록을 근거로 쓴다.
 이 폴더에는 스크립트, 표, 집계한 수만 있다. TLA+ 모델과 설정은 `specs/bug-models/Librarian*.tla` 에 있고 결과는 RFC §21 에 있다. Keeper 의 대화, Memory 의 글, 요청 본문은 넣지 않았다.
 
-코드에서 읽은 것은 모두 main `55a024cc280e` 의 것이다.
+코드에서 읽은 것은 main `55a024cc280e` 의 것이다. slot 결과 표만 L2 뒤의 `995e5d49669f` 에서 뽑았다.
 
 ## 폴더
 
@@ -36,11 +36,11 @@ python3 check_state_table.py <RFC 파일> [pairs.tsv]
 
 | 파일 | 내용 |
 | --- | --- |
-| `types.txt` | 분류가 읽는 타입 16개. 파일과 타입 이름 |
+| `types.txt` | 분류가 읽는 타입 17개. 파일과 타입 이름 |
 | `extract_constructors.py` | 인터페이스 파일에서 그 타입들의 생성자를 뽑는다 |
-| `constructors.tsv` | 뽑은 생성자 163개 |
-| `table.tsv` | 생성자마다 갈래 하나. 168행 |
-| `not-constructors.tsv` | 생성자가 아닌 것 9행. 방문이 없는 slot, 잡힌 slot, 답 검사의 결과, Agent-Core 에 새로 생길 생성자 둘 |
+| `constructors.tsv` | 뽑은 생성자 176개 |
+| `table.tsv` | 생성자마다 갈래 하나. 181행 |
+| `not-constructors.tsv` | 표가 읽는 타입의 생성자가 아닌 것 7행. 방문이 없는 slot, `order` 가 잡은 HTTP slot, 답 검사의 결과 |
 | `check_table.py` | `constructors.tsv` 와 `table.tsv` 를 맞춘다 |
 
 ```
@@ -51,25 +51,28 @@ python3 check_table.py constructors.tsv table.tsv
 - 행이 없는 생성자, 생성자가 없는 행, 조건으로 갈리지 않는 두 행, 열두 갈래 밖의 값이 있으면 실패한다.
 - 다른 타입을 읽으라는 행(`> 파일 타입`)이 행 없는 타입을 가리켜도 실패한다. 세 뿌리 타입에서 닿지 않는 타입이 있어도 실패한다.
 - 다섯 생성자는 타입 있는 칸으로 둘로 나뉜다. Claude 와 Codex 의 `Context_window_exceeded`, Codex 와 Muse 의 `Turn_failed`, Claude 의 `Turn_failed_with_observation` 이다.
+- `incomplete_stop` 은 그 타입을 선언한 `exact_output_plan.mli` 에서 뽑는다. `exact_output.mli` 는 같은 타입을 `= Exact_output_plan.incomplete_stop =` 로 다시 내보내고, 뽑는 스크립트는 그 줄의 모듈 이름을 생성자로 읽는다.
+- Exact 의 `Ambiguous_output` 과 `Unexpected_output_content` 는 답의 칸을 읽기 전에 멈춘다. 그래서 틀린 칸을 `wire_error` 로 싣는 `Schema_violation` 이 아니라 `Silent (Unusable Not_json)` 이다.
+- CLI 의 `Invalid_domain_output` 은 `walk` 만 만들고, 소비자의 거절을 글로 접는다. 그래서 `Silent Lost` 다. 묻기는 `walk` 를 쓰지 않고 답을 직접 읽는다.
+- `test/test_librarian_slot_visit.ml` 이 두 표의 모든 행을 `Librarian_slot_visit.classify` 로 돌려 표의 갈래와 같은지 본다. 값 하나가 지나는 행이 표의 `> 파일 타입` 사슬과 맞는지도 본다.
 
-결과: 생성자 163개, 행 168개, 타입 16개. 실패 0.
+결과: 생성자 176개, 행 181개, 타입 17개. 실패 0.
 
 | 갈래 | 행 |
 | --- | --- |
-| `Refused (Sized Input_too_large)` | 7 |
+| `Refused (Sized Input_too_large)` | 8 |
 | `Refused (Sized Output_over_reserve)` | 2 |
-| `Refused (Sized Window_reached)` | 3 |
-| `Refused Unsized` | 6 |
+| `Refused (Sized Window_reached)` | 4 |
+| `Refused Unsized` | 8 |
 | `Silent Not_called` | 3 |
-| `Silent Unavailable` | 45 |
+| `Silent Unavailable` | 46 |
 | `Silent Busy` | 11 |
-| `Silent Lost` | 58 |
-| `Silent (Unusable _)` | 18 |
+| `Silent Lost` | 59 |
+| `Silent (Unusable _)` | 25 |
 
 확인하지 않은 것:
 
 - 표는 타입에서 만들었다. 어느 생성자가 실제로 Exact 경로에 닿는지는 따라가지 않았다.
-- `Incomplete_output` 과 `Empty_completion` 의 행은 Agent-Core 가 stop reason 을 실어 준 뒤의 것이다(RFC §7.2 의 넷째 변경). 지금 `Incomplete_output` 은 값을 싣지 않는다.
 - Codex 가 tool 을 쓰지 않고 알린 창 넘침을 생성 전의 거절로 읽었다. 지금 코드의 읽기를 따른 것이고 따로 재지 않았다.
 
 ## 자리 재생 (`seat-replay/`)

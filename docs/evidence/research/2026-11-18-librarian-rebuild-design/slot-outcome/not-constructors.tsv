@@ -6,5 +6,3 @@ the Librarian's answer check	Schema_violation	Silent (Unusable Schema_violation)
 the Librarian's answer check	Echo_mismatch	Silent (Unusable Echo_mismatch)	the answer echoes another snapshot or another range
 the Librarian's answer check	Empty_or_partial	Silent (Unusable Empty_or_partial)	the answer is empty or cut
 the Librarian's answer check	accepted	Slot_answered	the proposal goes to the writer
-Agent-Core change 2 (new constructor)	a response that stopped at the window, content or none	Refused (Sized Window_reached)	one generation spent
-Agent-Core change 3 (new constructor)	a status no other refusal names (3xx, 405, 408, 409, ...)	Silent Unavailable	today these fall into Invalid_request

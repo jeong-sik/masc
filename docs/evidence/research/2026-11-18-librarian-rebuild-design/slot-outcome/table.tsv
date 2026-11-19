@@ -16,11 +16,13 @@ exact_output.mli	token_capacity_rejection	Capacity_input_rejected	-	Refused (Siz
 exact_output.mli	execution_error_cause	Completion_failed	-	> http_client.mli http_error	read the transport error
 exact_output.mli	execution_error_cause	Response_body_deadline_exceeded	-	Silent Lost	headers came and the body did not finish; a slow provider and a long answer cannot be told apart
 exact_output.mli	execution_error_cause	Provider_response_refused	-	> exact_output.mli provider_refusal	read the refusal
+exact_output.mli	execution_error_cause	Provider_context_overflow	-	Refused (Sized Input_too_large)	the provider codec typed an overflow of the input; it keeps that type whatever the status (Agent-Core change 1), and the error it carries is not read
 exact_output.mli	execution_error_cause	Output_limit_reached	-	Refused (Sized Output_over_reserve)	the provider typed a stop at max_tokens
-exact_output.mli	execution_error_cause	Incomplete_output	-	> types.mli stop_reason	after Agent-Core change 4 it carries its stop reason
+exact_output.mli	execution_error_cause	Window_reached	-	Refused (Sized Window_reached)	the provider typed a stop at the window, with output or none; one generation spent (Agent-Core change 2)
+exact_output.mli	execution_error_cause	Incomplete_output	-	> exact_output_plan.mli incomplete_stop	read the stop it carries (Agent-Core change 4)
 exact_output.mli	execution_error_cause	Missing_output	-	Silent (Unusable Empty_or_partial)	a response with no output
-exact_output.mli	execution_error_cause	Ambiguous_output	-	Silent (Unusable Schema_violation)	more than one output
-exact_output.mli	execution_error_cause	Unexpected_output_content	-	Silent (Unusable Schema_violation)	content the consumer did not ask for
+exact_output.mli	execution_error_cause	Ambiguous_output	-	Silent (Unusable Not_json)	more than one output text, so not one JSON value; no field of an answer was read, so there is no schema violation to name
+exact_output.mli	execution_error_cause	Unexpected_output_content	-	Silent (Unusable Not_json)	a block that is not text (a tool call, a media block), so not one JSON value; no field of an answer was read
 exact_output.mli	execution_error_cause	Invalid_json_output	-	Silent (Unusable Not_json)	the output is not one JSON value
 exact_output.mli	provider_refusal	Request_body_refused	-	Refused (Sized Input_too_large)	HTTP 413
 exact_output.mli	provider_refusal	Refusal_body_not_received	-	Silent Lost	the status came and its reason did not
@@ -31,12 +33,23 @@ exact_output.mli	provider_refusal	Auth_failed	-	Silent Unavailable	401
 exact_output.mli	provider_refusal	Authorization_refused	-	Silent Unavailable	403
 exact_output.mli	provider_refusal	Payment_required	-	Silent Unavailable	402; the account cannot be used until someone pays
 exact_output.mli	provider_refusal	Invalid_request	-	Refused Unsized	400 or 422 after Agent-Core change 3: the provider refused this request and named no size
+exact_output.mli	provider_refusal	Unclassified_status	-	Silent Unavailable	a status no other refusal names (3xx, 405, 408, 409, ...); the provider did not refuse the request as 400 and 422 do (Agent-Core change 3)
 exact_output.mli	provider_refusal	Not_found	-	Silent Unavailable	404; the declared model or path is not there
 exact_output.mli	provider_refusal	Context_overflow	-	Refused (Sized Input_too_large)	the provider typed an overflow of the input in its error envelope
 exact_output.mli	provider_refusal	Input_capacity	-	Silent Unavailable	masc's own serving check, with its reason dropped by the projection; no size can be read from it
 exact_output.mli	provider_refusal	Network_error	-	Silent Lost	transport
 exact_output.mli	provider_refusal	Connect_failed	-	Silent Lost	the connection did not open
 exact_output.mli	provider_refusal	Timeout	-	Silent Lost	transport
+exact_output_plan.mli	incomplete_stop	End_turn	-	Silent (Unusable Empty_or_partial)	ended and the output is not a whole answer
+exact_output_plan.mli	incomplete_stop	Tool_use	-	Silent (Unusable Empty_or_partial)	a tool call where an answer was required
+exact_output_plan.mli	incomplete_stop	Stop_sequence	-	Silent (Unusable Empty_or_partial)	stopped early
+exact_output_plan.mli	incomplete_stop	Refusal	-	Refused Unsized	the model refused this request's content
+exact_output_plan.mli	incomplete_stop	Content_filter	-	Refused Unsized	the provider filtered this request's content
+exact_output_plan.mli	incomplete_stop	Repetition_truncation	-	Silent (Unusable Empty_or_partial)	cut by the provider
+exact_output_plan.mli	incomplete_stop	Pause_turn	-	Silent (Unusable Empty_or_partial)	paused, no whole answer
+exact_output_plan.mli	incomplete_stop	Compaction	-	Silent (Unusable Empty_or_partial)	no whole answer
+exact_output_plan.mli	incomplete_stop	Unmatched_tool_calls	-	Silent (Unusable Empty_or_partial)	no whole answer
+exact_output_plan.mli	incomplete_stop	Unknown_stop	-	Silent (Unusable Empty_or_partial)	a stop reason carried as a string; the string is not read
 http_client.mli	http_error	HttpError	-	Silent Lost	a status that reached here was not classified; the interface says a refusal never arrives in Completion_failed
 http_client.mli	http_error	NetworkError	-	Silent Lost	transport
 http_client.mli	http_error	Connect_failed	-	Silent Lost	the connection did not open
@@ -75,7 +88,7 @@ keeper_lane_cli_oneshot.mli	failure	Unknown_runtime	-	Silent Unavailable	no runt
 keeper_lane_cli_oneshot.mli	failure	Not_an_official_client	-	Silent Unavailable	the id is not a client this path may run
 keeper_lane_cli_oneshot.mli	failure	Execution_failed	-	> fusion_official_client.mli failure	read the cause
 keeper_lane_cli_oneshot.mli	failure	Invalid_json_output	-	Silent (Unusable Not_json)	the text is not one JSON value
-keeper_lane_cli_oneshot.mli	failure	Invalid_domain_output	-	Silent (Unusable Schema_violation)	the consumer rejected the value
+keeper_lane_cli_oneshot.mli	failure	Invalid_domain_output	-	Silent Lost	only walk makes it, folding the consumer's rejection into text, and the text is not read; the ask reads a CLI answer itself (Librarian_slot_visit.Cli_answer_rejected)
 keeper_lane_cli_oneshot.mli	failure	Held	-	Silent Not_called	the provider stated a time and the slot was not called
 fusion_official_client.mli	failure	Missing_reply	-	Silent (Unusable Empty_or_partial)	the turn completed with no assistant message; the same fact as Missing_output
 fusion_official_client.mli	failure	Setup_failure	-	Silent Unavailable	the client could not be set up

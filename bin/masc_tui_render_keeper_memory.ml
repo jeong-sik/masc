@@ -211,7 +211,7 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
       | [] -> "—"
       | facts -> String.concat "\n\n" (List.map (fun (fact : Activity.fact) ->
           match fact.claim with Some claim -> claim
-          | None -> text "본문 미확인 · " "claim not observed · " ^ fact.memory_id) facts) in
+          | None -> text "본문 보고 안 됨 · " "claim not reported · " ^ fact.memory_id) facts) in
     let notes = match activity_view state keeper_name with
       | Fetched.Ready activity -> activity.notes
       | Fetched.Stale (activity, reason) ->

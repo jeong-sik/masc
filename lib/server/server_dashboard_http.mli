@@ -66,13 +66,16 @@ val dashboard_scheduled_automation_http_json :
 (** Schedule projection for [GET /api/v1/dashboard/scheduled-automation],
     cached and offloaded. Both the HTTP/1 router and the H2 gateway call this
     rather than the projection directly, so the two transports cannot serve
-    different data or drift on cache policy. *)
+    different data or drift on cache policy. This is the fleet list, the
+    answer to a request with no selector. *)
 
 val dashboard_scheduled_automation_query_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
-(** Query-aware owner for the scheduled-automation route. With no [schedule_id]
-    it delegates to {!dashboard_scheduled_automation_http_json}; an exact lookup
-    reads the schedule store without populating a client-controlled cache key. *)
+(** Query-aware owner for the scheduled-automation route. With no selector it
+    delegates to {!dashboard_scheduled_automation_http_json}.
+    [active_only=true] answers the active-only list, cached the same way. A
+    [payload_target], a [cursor] and an exact [schedule_id] lookup read the
+    schedule store without populating a client-controlled cache key. *)
 
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t

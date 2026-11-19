@@ -17,7 +17,8 @@ type state =
   | Clean  (** the working tree had no change against the commit *)
   | Modified of { digest : string }
       (** the git object id of the working tree's change set: the tracked
-          diff, the untracked paths and their object ids *)
+          diff, untracked regular files and their object ids, untracked
+          symlinks and their link targets, and untracked nested repositories *)
 
 type t =
   { commit : string  (** a full lowercase git object name *)

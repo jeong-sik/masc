@@ -66,7 +66,7 @@ describe('sending a key for an account', () => {
 
   it.each([
     ['unknown_account', 404], ['not_a_key_account', 400], ['invalid_request', 400], ['not_a_key', 400], ['account_call_running', 409],
-    ['removal_left', 409], ['replacement_refused', 403], ['internal_error', 500], ['replacement_not_recorded', 503], ['key_not_stored', 503],
+    ['removal_left', 409], ['replacement_refused', 403], ['internal_error', 500], ['files_not_reached', 503], ['replacement_not_recorded', 503], ['key_not_stored', 503],
   ])('reads the refusal %s by its code', async (code, status) => {
     const { send } = answering([refusedAs(status, code)])
     expect(await replaceKey(send, 'token-1', 'acct_key', key)).toEqual({ kind: 'refused', status, code, reason: `The server said ${code}.` })

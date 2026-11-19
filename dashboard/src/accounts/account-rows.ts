@@ -108,7 +108,7 @@ function keyWords(key: KeyState): string | null {
     case 'readable': return null
     case 'key_missing':
       return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣을 수 있어요.'
-    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. ${operatorWords}`
+    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣어 보세요. 그래도 읽지 못하면 ${operatorWords}`
     case 'not_looked_at': return `이 서버가 이 계정의 key 파일을 확인하지 못했어요. ${operatorWords}`
     case 'unrecognised': return '서버가 이 계정의 key 상태를 알려 주지 않았어요.'
   }

@@ -9,7 +9,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { ReplaceFailure, ReplacementStopped, ReplacementsModel, Replacing } from './key-replace'
-import { Callout, ProblemNote, fell, keyGivenWords, notAKeyWords, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, keyGivenWords, notAKeyWords, operatorWords, sessionEndedWords } from './notes'
 
 // ---- words ----
 
@@ -36,6 +36,7 @@ function refusedWords(code: Exclude<ReplacementStopped, 'unrecognised'>): string
     case 'removal_left': return '없애기가 끝나지 않은 계정이라 key 를 바꿀 수 없어요. 이 계정을 먼저 없애 주세요.'
     case 'replacement_refused': return '내 계정이 지금 쓸 수 있는 상태가 아니라서 key 를 받지 않았어요. key 는 바뀌지 않았어요.'
     case 'internal_error': return '서버가 예상하지 못한 까닭으로 거절했어요. key 는 바뀌지 않았어요.'
+    case 'files_not_reached': return `서버가 이 계정의 폴더에 닿지 못해서 key 를 받지 않았어요. key 는 바뀌지 않았어요. 다시 보내도 같아요. ${operatorWords}`
     case 'replacement_not_recorded': return '서버가 바꾸기를 기록하지 못했어요. 서버에 있는 key 는 그대로예요. key 를 다시 보내 주세요.'
     case 'key_not_stored':
       return '서버가 바꾸기를 기록했고, 새 key 파일은 놓지 못했어요. 예전 key 는 더 쓰이지 않아요. key 를 다시 보내 주세요.'

@@ -103,16 +103,29 @@ let activity_glyph activity =
 
 let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
 
+(* A badge says in a word what else goes on beside the activity, behind the
+   status mark of its kind (§7.2). A list the screen could not read wears the
+   read-failed mark of a missing value (§6.4); a background run is under way;
+   a queued run, a delegate's result, a verification and a scheduled wake are
+   waits; a run being cancelled is paused; a spent quota asks for a look. *)
 let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
-  | Badge_read_error -> "!"
-  | Badge_waiting_unavailable -> "!"
-  | Badge_async _ -> "&"
-  | Badge_async_queued _ -> ">"
-  | Badge_async_cancelling _ -> "\xc3\x97" (* × *)
-  | Badge_delegate -> "\xe2\x86\xa9" (* ↩ *)
-  | Badge_verification -> "\xe2\x97\x87" (* ◇ *)
-  | Badge_schedule -> "\xe2\x97\xb7" (* ◷ *)
-  | Badge_quota_spent -> "\xe2\x8a\x98" (* ⊘ *)
+  | Badge_read_error | Badge_waiting_unavailable ->
+      Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+  | Badge_async _ -> Status.glyph Status.Under_way
+  | Badge_async_queued _ | Badge_delegate | Badge_verification | Badge_schedule ->
+      Status.glyph Status.Waiting
+  | Badge_async_cancelling _ -> Status.glyph Status.Paused
+  | Badge_quota_spent -> Status.glyph Status.Caution
+
+(* The due groups of the time view: a run that should have started asks for
+   a look, a held one is paused, a coming one waits. No schedule is a value
+   read as none, and an unknown next time one the answer did not carry. *)
+let due_glyph : Masc_tui_keeper_list_model.due -> string = function
+  | Due_late -> Status.glyph Status.Caution
+  | Due_held -> Status.glyph Status.Paused
+  | Due_within_hour | Due_within_half_day | Due_later -> Status.glyph Status.Waiting
+  | Due_none -> Masc_tui_theme.Glyph.no_value
+  | Due_unknown -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let legend =
   [ health_glyph Reading.Health_running, "healthy"
@@ -192,7 +205,7 @@ let failing_since_word = "failing"
 let unknown_mark = "?"
 let pulse_hours = 12
 let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
-let pulse_rested_mark = badge_glyph Masc_tui_keeper_list_model.Badge_quota_spent
+let pulse_rested_mark = "\xe2\x8a\x98" (* ⊘ *)
 let pulse_failed_mark = attempt_glyph
 (* A quiet hour in the pulse is a small dot, not a status mark: the pulse
    counts turns, it does not state the Keeper's state. *)
@@ -348,9 +361,8 @@ let column_legend =
     , Printf.sprintf
         "resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL %s prefixes next candidate after turn failure"
         axis_next_glyph )
-  ; ( badge_glyph Badge_schedule
-    , Printf.sprintf "next scheduled run or hold status (Detailed second row; %s in the views)"
-        grid_due_header )
+  ; ( grid_due_header
+    , "the views' next scheduled run or hold status; DETAIL's schedule badge says the same" )
   ; ( "mem · lag · stale"
     , Printf.sprintf
         "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \

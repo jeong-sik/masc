@@ -1651,9 +1651,7 @@ let keeper_group_heading_text ~ko ~available_cells rows group count =
         | Keeper_list_model.Due_none -> "NO SCHEDULE"
         | Keeper_list_model.Due_unknown -> "SCHEDULE UNKNOWN"
       in
-      Printf.sprintf "%s %s %d"
-        (Masc_tui_keeper_mark.badge_glyph Keeper_list_model.Badge_schedule)
-        label count
+      Printf.sprintf "%s %s %d" (Masc_tui_keeper_mark.due_glyph due) label count
   | Keeper_list_model.Group_memory follow ->
       let label =
         match follow with

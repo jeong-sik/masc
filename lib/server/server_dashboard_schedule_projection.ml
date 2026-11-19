@@ -1240,6 +1240,11 @@ let schedule_page_key (request : Schedule_domain.schedule_request) =
   ; page_schedule_id = request.schedule_id
   }
 
+(* Active schedules first, then soonest due. The cursor above is cut along
+   this order, and the Dashboard calendar reads it too: when a page leaves
+   active schedules out, it tells the operator that each of them is due at or
+   after the last row of the page ([calendarCoverage] in
+   dashboard/src/components/schedule/schedule-agenda.ts). *)
 let compare_schedule_order ~left_active ~left_due_at ~left_id
     ~right_active ~right_due_at ~right_id =
   match Bool.compare right_active left_active with

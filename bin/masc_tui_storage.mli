@@ -34,4 +34,4 @@ val lines :
   timestamp:(float -> string) ->
   uptime:string option ->
   Masc.Tui_decode_tools.storage ->
-  (tone * string) list
+  (tone * Masc_tui_say.t) list

@@ -365,9 +365,9 @@ let require_interactive_terminal () =
    worked out from the full body while the frame draws half of it is not a
    bound, and the rows past the shortened list stop being reachable. *)
 let surface_body_height ~rows
-    { sc_count; sc_chrome; sc_overflow_takes_row; sc_preview_keep } =
+    { sc_count; sc_chrome; sc_preview_keep } =
   Masc_tui_scroll.content_height ~rows ~chrome:sc_chrome ~count:sc_count
-    ~preview_keep:sc_preview_keep ~overflow_takes_row:sc_overflow_takes_row
+    ~preview_keep:sc_preview_keep
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
@@ -2793,16 +2793,6 @@ let () =
                | Error _ -> ());
               `Stop_daemon))
 
-let current_clock_text () =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-    now.Unix.tm_sec
-
-let clock_text_of_unix at =
-  let time = Unix.localtime at in
-  Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
-    time.Unix.tm_sec
-
 let next_chat_operation_seq state request_id =
   List.fold_left
     (fun next entry ->
@@ -2856,7 +2846,6 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
              server ([msg_entry_of_history_row]). *)
           me_tool_block = None;
           me_skill_block = [];
-          me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
           me_execution_source = Some (Keeper_chat_log.Operation request.request_id);
@@ -11897,14 +11886,6 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Fusion_conclusion _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
-  let timestamp =
-    let source_at =
-      Option.value ~default:row.Keeper_chat_history.at submitted_at
-    in
-    if Float.is_finite source_at && source_at > 0.
-    then clock_text_of_unix source_at
-    else "--:--:--"
-  in
   (* Display metadata without pulling image bytes into every history page.
      The typed preview below is derived from the original text and refs. *)
   let text =
@@ -11984,7 +11965,6 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_block = skill_block
-  ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
        persisted turn_ref. Old rows and Memory journal entries carry neither,
@@ -13335,7 +13315,6 @@ let append_chat_local_message state ~keeper text =
           me_submitted_at = None;
           me_tool_block = None;
           me_skill_block = [];
-          me_timestamp = current_clock_text ();
           me_keeper_name = keeper;
           me_request_id = "";
           me_execution_source = None;
@@ -24503,10 +24482,7 @@ let handle_composer_key state ~base_path ~mailbox key =
    a terminal escape could arrive, and it arrives as spaces instead. *)
 (* A paste filename pairs the wall-clock minute with a random suffix. The
    publication step refuses to replace an existing name if that suffix collides. *)
-let spill_stamp () =
-  let time = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%04d%02d%02d-%02d%02d" (time.Unix.tm_year + 1900)
-    (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min
+let spill_stamp () = Masc_tui_value.Instant.file_stamp (Unix.gettimeofday ())
 
 let spill_nonce () =
   (* Keep the existing short filename; [write_file] refuses any collision. *)

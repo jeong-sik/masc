@@ -3040,6 +3040,9 @@
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 (include stanzas/test_dated_jsonl_kept_facts.inc)
 (include stanzas/test_fact_cell.inc)
+(include stanzas/test_file_system_named.inc)
+(include stanzas/test_keeper_decision_row_kept.inc)
+(include stanzas/test_masc_test_workspace_names.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -3317,6 +3320,8 @@
 (include stanzas/test_turn_record.inc)
 
 (include stanzas/test_keeper_context_observation_projection.inc)
+(include stanzas/test_keeper_execution_receipt_kept.inc)
+(include stanzas/test_keeper_tool_call_log_kept.inc)
 
 (include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
@@ -3360,6 +3365,7 @@
 
 (include stanzas/test_runtime_resolved_fleet.inc)
 
+(include stanzas/test_tui_overview_cards.inc)
 (include stanzas/test_tui_overview_providers.inc)
 (include stanzas/test_tui_kept_reads.inc)
 (include stanzas/test_tui_io_domain.inc)
@@ -4407,7 +4413,8 @@
   agent_core
   masc_tui_acting
   masc_tui_message_layout
-  masc_tui_observer))
+  masc_tui_observer
+  masc_tui_value))
 
 (test
  (name test_tui_observer)
@@ -4555,7 +4562,8 @@
 (test
  (name test_tui_context_state)
  (modules test_tui_context_state)
- (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc))
+ (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc
+  masc_test_deps))
 
 (test
  (name test_tui_context_inspector)
@@ -4902,7 +4910,7 @@
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_memory_usage masc_tui_surface_search
+ (libraries masc_tui_memory_usage masc_tui_surface_search masc_tui_value
   masc_tui_pick_list
   alcotest
   masc
@@ -4976,7 +4984,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -5471,8 +5479,11 @@
 (include stanzas/test_tui_file_icon.inc)
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
+(include stanzas/test_tui_health_section.inc)
 (include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_value.inc)
+(include stanzas/test_tui_position_source.inc)
+(include stanzas/test_tui_value_forms_source.inc)
 (include stanzas/test_tui_say.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
@@ -6168,7 +6179,7 @@
 (test
  (name test_tui_collab)
  (modules test_tui_collab)
- (libraries alcotest masc masc_tui_collab))
+ (libraries alcotest masc masc_tui_collab masc_tui_value))
 
 (rule
  (alias runtest-test_install_runtime_setup)
@@ -6296,6 +6307,26 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_install_local_build_guest_shim)))
+
+; A local install rebuilds the workspace's source-built guest shim from the
+; same checkout before it replaces the server (#53164). The suite borrows the
+; fixtures of test_install_local_build.py and
+; test_install_local_build_guest_shim.py, and stands a fake in for
+; scripts/remote-ssh/build-shim.sh, which needs Docker.
+(rule
+ (alias runtest-test_install_local_build_checkout_shim)
+ (deps
+  test_install_local_build_checkout_shim.py
+  test_install_local_build_guest_shim.py
+  test_install_local_build.py
+  ../scripts/install-local-build.sh
+  ../scripts/lib/install-workspace-dashboard.sh)
+ (action
+  (run python3 %{dep:test_install_local_build_checkout_shim.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_local_build_checkout_shim)))
 
 ; A local install refreshes the Pele helper its prefix already holds
 ; (#47301). The suite borrows the build fixtures of test_install_local_build.py.
@@ -7013,11 +7044,13 @@
 
 (include stanzas/test_tui_surface_chrome_overflow.inc)
 
+(include stanzas/test_tui_zone_two_title.inc)
+
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
  (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_message_layout
-  masc_tui_sgr_text masc_tui_terminal_palette masc_tui_theme yojson))
+  masc_tui_sgr_text masc_tui_terminal_palette masc_tui_theme masc_tui_value yojson))
 
 (test
  (name test_runtime_setup_login_session)

@@ -8,7 +8,7 @@ usage: idle.py --tui BIN --out DIR --base-path DIR --upstream-port PORT
 
 One fresh TUI process per screen. It starts against readonly_proxy.py, which
 forwards reads to --upstream-port (a live server or frozen_server.py), the
-step's keys bring it to its screen, and then nothing is pressed for --idle
+step's keys (screen_steps.py) bring it to its screen, and then nothing is pressed for --idle
 seconds. In that window the tool counts what the TUI wrote to its terminal
 (bytes, and bursts: output separated by at least BURST_GAP_S of silence), the
 CPU time `ps` reports for it, its RSS at the end, which screen rows changed
@@ -23,6 +23,12 @@ The frame report's times count from the TUI's start, so the window is placed
 in it by the time since the fork; the exec delay is the error. The TUI keeps
 the first 512 frames of each phase; when the window reaches past them its
 frame counts are marked not covered.
+
+The keys stop at the first that fails, and then no window runs: the keys
+after it would reach the screen the failure left. The frame report also
+names the surface each frame drew. The one on screen when the window starts
+is compared with the surface the step's last place names (screen_steps.py),
+and a screen that shows another, or whose report does not say, fails the run.
 
 The TUI starts a MASC server itself when nothing answers on its port
 (bin/masc_tui.ml react_to_server_contact). It looks for `masc` beside its own
@@ -74,9 +80,10 @@ from types import FrameType
 from typing import IO, cast
 
 from key_steps import NavKey, parse_keys, run_keys
-from pty_driver import (POLL_S, Child, Exit, Geometry, Jump, Key, Press, Sent, first_frame, press, read_chunk, settle,
-                        spawn, stop, take)
+from pty_driver import (POLL_S, Child, Exit, Geometry, Key, Sent, first_frame, press, read_chunk, settle, spawn, stop,
+                        take)
 from relay_files import json_object, read_log
+from screen_steps import STEP_NAMES, STEPS, Planned, Refused, plan
 from vte import Vte, png_cell_size, render_png
 
 HERE = Path(__file__).resolve().parent
@@ -108,8 +115,9 @@ DEFAULT_IDLE_S = 20.0
 DEFAULT_CELL_WIDTH_PX = 10
 DEFAULT_CELL_HEIGHT_PX = 22
 USAGE_ERROR = 2
-# The run finished, but a screen did not open or reach its keys, or the relay's
-# refusals could not be read: the report holds why.
+# The run finished, but a screen did not open, reach its keys or land on the
+# surface its step names, or the relay's refusals could not be read: the
+# report holds why.
 INCOMPLETE = 3
 NS_PER_S = 1_000_000_000
 MS_PER_S = 1000
@@ -141,50 +149,13 @@ PROBE_SETTLE_LIMIT_S = 2.0
 
 
 @dataclass(frozen=True, slots=True)
-class Step:
-    name: str
-    keys: tuple[Key, ...]
-
-
-def go(target: str) -> Jump:
-    return Jump(f'go {target}')
-
-
-V = Press(b'v')
-
-# One row per screen with the keys that reach it. Every screen runs in a fresh
-# TUI, so its keys start from the screen the TUI opens on. Jumps are `go`
-# entries of bin/masc_tui_palette.ml; single keys are bindings of
-# bin/masc_tui_keys.ml for the screen the jump reached.
-STEPS: tuple[Step, ...] = (
-    Step('overview', (go('Operations'),)),
-    Step('usage_plan', (go('Operations / Usage'),)),
-    # Usage opens on Plan; v walks Plan, Trend, Keepers, Calls.
-    Step('usage_calls', (go('Operations / Usage'), V, V, V)),
-    Step('usage_telemetry', (go('Operations / Usage'), Press(b'p'))),
-    Step('work_goals', (go('Work'),)),
-    Step('work_tasks', (go('Work'), Press(b't'))),
-    Step('work_requests', (go('Work / Requests'),)),
-    Step('work_board', (go('Work / Board'),)),
-    # The Keeper list opens on the view tui-keepers.toml stores, so a number of
-    # `v` presses reaches a different view in each workspace.
-    Step('keepers', (go('Keepers'),)),
-    Step('features', (go('Features & plugins'),)),
-    Step('features_tools', (go('Features & plugins / Tools & Skills'),)),
-    Step('workspace', (go('Workspace'),)),
-    Step('system', (go('System'),)),
-)
-STEP_NAMES = {step.name: step for step in STEPS}
-
-
-@dataclass(frozen=True, slots=True)
 class Options:
     tui: Path
     out: Path
     base_path: Path
     geometry: Geometry
     idle_s: float
-    steps: tuple[Step, ...]
+    steps: tuple[Planned, ...]
     upstream_port: int
     relay_port: int
     record: Path | None
@@ -264,7 +235,11 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
             return f'--png-font: {measured}'
         cell = measured
     geometry = Geometry(int(sized.group(1)), int(sized.group(2)), cell[0], cell[1])
-    steps = tuple(STEP_NAMES[name] for name in names) if names else STEPS
+    planned = [plan(step) for step in (tuple(STEP_NAMES[name] for name in names) if names else STEPS)]
+    refused = [step.why() for step in planned if isinstance(step, Refused)]
+    if refused:
+        return f'keys outside the allow-list of screen_steps.py: {"; ".join(refused)}'
+    steps = tuple(step for step in planned if isinstance(step, Planned))
     return Options(tui.resolve(), out, base_path.resolve(), geometry, idle_s, steps,
                    upstream_port, relay_port, record, probes, png_fonts, keys)
 
@@ -443,11 +418,31 @@ class Frames:
     present_bytes: Stats
     surfaces: Mapping[str, int]
     omitted: Mapping[str, int]
+    # The surface of the last frame presented before the window: what the
+    # step's keys left on screen. None when no kept frame came before the
+    # window, or when frames were dropped and none kept came after its start.
+    surface_at_start: str | None
 
     def report(self) -> dict[str, object]:
         return {'covered': self.covered, 'build_ms': self.build_ms.report(),
                 'present_ms': self.present_ms.report(), 'present_bytes': self.present_bytes.report(),
-                'surfaces': dict(self.surfaces), 'omitted': dict(self.omitted)}
+                'surfaces': dict(self.surfaces), 'omitted': dict(self.omitted),
+                'surface_at_start': self.surface_at_start}
+
+
+@dataclass(frozen=True, slots=True)
+class Landing:
+    """The surface the step's last place names against the one on screen when
+    the window started (screen_steps.py)."""
+    expected: str
+    shown: str | None  # None: the frame report does not say
+
+    @property
+    def ok(self) -> bool:
+        return self.shown == self.expected
+
+    def report(self) -> dict[str, object]:
+        return {'expected': self.expected, 'shown': self.shown, 'ok': self.ok}
 
 
 def json_fields(line: str) -> dict[str, object] | None:
@@ -475,6 +470,8 @@ def frames_in(path: Path, low_ns: int, high_ns: int) -> Frames | str:
     surfaces: dict[str, int] = {}
     omitted: dict[str, int] = {}
     last_build_ns = -1
+    before_window: tuple[int, str] | None = None  # the last present started at or before low_ns
+    present_after_start = False
     for line in lines:
         cap = OMITTED_LINE.match(line)
         if cap is not None:
@@ -489,6 +486,12 @@ def frames_in(path: Path, low_ns: int, high_ns: int) -> Frames | str:
         phase = fields.get('phase')
         if phase == 'build':
             last_build_ns = max(last_build_ns, started)
+        if phase == 'present':
+            drawn = fields.get('surface')
+            if started > low_ns:
+                present_after_start = True
+            elif isinstance(drawn, str) and (before_window is None or started >= before_window[0]):
+                before_window = (started, drawn)
         if not low_ns <= started <= high_ns:
             continue
         if phase == 'build':
@@ -503,7 +506,11 @@ def frames_in(path: Path, low_ns: int, high_ns: int) -> Frames | str:
             if isinstance(written, int):
                 present_bytes.append(float(written))
     covered = omitted.get('build', 0) == 0 or last_build_ns >= high_ns
-    return Frames(covered, stats(build), stats(present), stats(present_bytes), surfaces, omitted)
+    # The TUI keeps the first frames of each phase, so a kept present after
+    # the window start shows that none before it was dropped.
+    known = before_window is not None and (omitted.get('present', 0) == 0 or present_after_start)
+    surface_at_start = before_window[1] if before_window is not None and known else None
+    return Frames(covered, stats(build), stats(present), stats(present_bytes), surfaces, omitted, surface_at_start)
 
 
 @contextlib.contextmanager
@@ -537,7 +544,44 @@ class Running:
             return None if child is None else stop(child, STOP_GRACE_S)
 
 
-def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Mapping[str, str],
+def press_keys(child: Child, vte: Vte, keys: Sequence[Key]) -> list[Sent]:
+    """Press `keys` in order up to the first that fails. A key after a failed
+    one would reach the screen the failure left, not the one MOVES names."""
+    sent: list[Sent] = []
+    for key in keys:
+        sent.append(press(child, vte, key))
+        if not sent[-1].ok:
+            break
+    return sent
+
+
+def after_keys(step: Planned, child: Child, vte: Vte, options: Options, result: dict[str, object]) -> Window:
+    """The idle window, then the --keys and the probes. Adds what each found to `result`."""
+    window = idle_window(child, vte, options.idle_s)
+    result |= window.report()
+    result['rss_mb'] = rss_mb(child.pid)
+    # Keys pressed after the window need an open terminal. When it closed
+    # in the window, the presses asked for are missing, and the error
+    # names the window.
+    closed = window.terminal_closed
+    if closed and (options.keys or options.probes):
+        result['error'] = 'terminal: closed during the idle window, so no key after it was pressed'
+    if options.keys and not closed and step.takes_text:
+        result['key_steps'] = {'skipped': 'this screen types printable keys into a text field'}
+    elif options.keys and not closed:
+        steps = run_keys(child, vte, options.keys, options.out, step.name, options.png_fonts)
+        result['key_steps'] = steps.report()
+        closed = steps.closed
+        if closed:
+            result['error'] = 'terminal: closed during the key steps'
+    if options.probes and not closed:
+        down, down_busy = probe(child, vte, DOWN, options.probes)
+        up, up_busy = probe(child, vte, UP, options.probes)
+        result |= {'key_latency_ms': stats(down + up).report(), 'key_busy_skipped': down_busy + up_busy}
+    return window
+
+
+def run_screen(step: Planned, options: Options, tui: Path, relay_port: int, env: Mapping[str, str],
                running: Running) -> dict[str, object]:
     timing_path = options.out / f'{step.name}.frame-timing.txt'
     argv = [str(tui), '--base-path', str(options.base_path), '--port', str(relay_port)]
@@ -549,43 +593,31 @@ def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Ma
     try:
         result['opened'] = first_frame(child, vte, START_LIMIT_S)
         settle(child, vte, START_QUIET_S, START_SETTLE_LIMIT_S)
-        sent: list[Sent] = []
-        for key in step.keys:
-            sent.append(press(child, vte, key))
+        sent = press_keys(child, vte, step.keys)
         settle(child, vte, STEP_QUIET_S, STEP_LIMIT_S)
-        result |= {'keys': [entry.report() for entry in sent], 'keys_ok': all(entry.ok for entry in sent),
+        keys_ok = len(sent) == len(step.keys) and all(entry.ok for entry in sent)
+        result |= {'keys': [entry.report() for entry in sent], 'keys_ok': keys_ok,
                    'top_rows': [vte.row_text(row) for row in range(min(TOP_ROWS, vte.rows))]}
         if options.png_fonts:
             png_path = options.out / f'{step.name}.png'
             failed = render_png(vte, png_path, options.png_fonts)
             result['png'] = png_path.name if failed is None else {'error': failed}
-        window = idle_window(child, vte, options.idle_s)
-        result |= window.report()
-        result['rss_mb'] = rss_mb(child.pid)
-        # Keys pressed after the window need an open terminal. When it closed
-        # in the window, the presses asked for are missing, and the error
-        # names the window.
-        closed = window.terminal_closed
-        if closed and (options.keys or options.probes):
-            result['error'] = 'terminal: closed during the idle window, so no key after it was pressed'
-        if options.keys and not closed:
-            steps = run_keys(child, vte, options.keys, options.out, step.name, options.png_fonts)
-            result['key_steps'] = steps.report()
-            closed = steps.closed
-            if closed:
-                result['error'] = 'terminal: closed during the key steps'
-        if options.probes and not closed:
-            down, down_busy = probe(child, vte, DOWN, options.probes)
-            up, up_busy = probe(child, vte, UP, options.probes)
-            result |= {'key_latency_ms': stats(down + up).report(), 'key_busy_skipped': down_busy + up_busy}
+        if keys_ok:
+            window = after_keys(step, child, vte, options, result)
+        else:
+            result['error'] = f'keys: {sent[-1].key} {sent[-1].note}; no later key was pressed and no window ran'
     except OSError as exc:
         result['error'] = f'terminal: {exc}'
     finally:
         exited = running.stop_tui()
         result['exit'] = None if exited is None else exited.report()
+    # The TUI writes its frame report as it exits.
     if window is not None:
         frames = frames_in(timing_path, *window.since_start_ns)
         result['frames'] = {'error': frames} if isinstance(frames, str) else frames.report()
+        if step.surface is not None:
+            shown = None if isinstance(frames, str) else frames.surface_at_start
+            result['landed'] = Landing(step.surface, shown).report()
     return result
 
 
@@ -756,7 +788,9 @@ def refused_requests(log_path: Path, relay_exit: int) -> list[dict[str, object]]
 
 
 def screen_failed(result: Mapping[str, object]) -> bool:
-    return 'error' in result or result.get('opened') is False or result.get('keys_ok') is False
+    landed = json_object(result.get('landed'))
+    return ('error' in result or result.get('opened') is False or result.get('keys_ok') is False
+            or (landed is not None and landed.get('ok') is not True))
 
 
 def restore_or_why(snapshot: Snapshot) -> str:
@@ -773,7 +807,9 @@ def screen_line(result: Mapping[str, object]) -> str:
     idle_text = json.dumps(idle) if isinstance(idle, dict) else str(result.get('error', 'no window'))
     kinds = (json_object(result.get('key_steps')) or {}).get('kinds')
     kinds_text = f' layout {",".join(map(str, cast(list[object], kinds)))}' if isinstance(kinds, list) else ''
-    return f'[{result.get("name")}] keys_ok={result.get("keys_ok")} {idle_text}{kinds_text}'
+    landed = json_object(result.get('landed'))
+    landed_text = '' if landed is None else f' landed={landed.get("ok")}({landed.get("shown")})'
+    return f'[{result.get("name")}] keys_ok={result.get("keys_ok")}{landed_text} {idle_text}{kinds_text}'
 
 
 def write_report(path: Path, report: Mapping[str, object]) -> None:

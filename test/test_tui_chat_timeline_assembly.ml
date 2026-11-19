@@ -28,7 +28,6 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_block = []
-  ; me_timestamp = ""
   ; me_request_id = request_id
   ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
   ; me_at = at

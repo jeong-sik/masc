@@ -114,7 +114,7 @@ let test_history_closes_only_matching_autonomous_progress () =
     me_images=[]; me_media=[]; me_memory_summary=None;
     me_journal=[]; me_memory_pass=Masc_tui_message_layout.No_pass;
     me_gate=None; me_submitted_at=None; me_tool_block=None; me_skill_block=[];
-    me_timestamp=""; me_request_id=raw; me_execution_source=Some (Log.Operation raw);
+    me_request_id=raw; me_execution_source=Some (Log.Operation raw);
     me_at=12. } in
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- [row];

@@ -76,6 +76,19 @@ module Instant : sig
       is handed its zone as an argument passes that zone, so every moment it
       draws reads in one zone. *)
 
+  val day_of : ?localtime:(float -> Unix.tm) -> now:float -> float -> distance
+  (** {!distance} of a moment from [now], both broken down by [localtime]
+      ([Unix.localtime] when it is not given). For a column too narrow for a
+      date: a moment today reads as {!detail_text}, and one on another day
+      reads as something that fits, such as a length. *)
+
+  val clock_within_day : precision -> Unix.tm -> string
+  (** The clock alone ([15:43:07]), for a row drawn under a heading that
+      already names the row's day: the chat's day rule. A moment anywhere
+      else reads as {!cell_text} or {!detail_text}, which add the date once
+      the day differs. A clock written by hand outside this module drew
+      yesterday's [20:29:21] under a screen clock reading [04:28]. *)
+
   val offset_minutes : utc:Unix.tm -> local:Unix.tm -> int
   (** How far the operator's zone runs ahead of UTC, from the two breakdowns
       of one moment. Negative west of Greenwich. *)
@@ -93,6 +106,82 @@ module Instant : sig
   (** The instant the local minute next turns over: when {!wall_clock} next
       reads differently. A screen that draws the clock notes it with
       {!Redraw.note_change_at}; one too narrow to draw it does not. *)
+
+  val axis_hour : float -> string option
+  (** The mark a ruler over the last day puts at [at] ([15:00]) when [at]
+      starts a local hour, [None] otherwise. The ruler ends at now, so where a
+      mark stands says which day it is in, and the mark carries no date. In a
+      zone whose hours start between two of the ruler's slots no slot starts
+      an hour, and the ruler has no marks. *)
+
+  val day_start : float -> float option
+  (** The local midnight that starts the day [at] falls on. A day that gains
+      or loses an hour still starts at its midnight. [None] when the zone's
+      breakdown cannot be turned back into an instant. *)
+
+  val file_stamp : float -> string
+  (** The moment as a file name, local and to the minute
+      ([20261119-0428]): names written by one machine sort by time. *)
+end
+
+(** A day of the operator's calendar, in the zone {!Instant} draws in. *)
+module Local_day : sig
+  type t =
+    { year : int
+    ; month : int  (** 1 to 12 *)
+    ; day : int  (** 1 to 31 *)
+    }
+
+  val of_moment : float -> t
+  val text : t -> string
+  (** [2026-11-18]. *)
+end
+
+(** One hour of the operator's calendar: the chat's day rule draws one
+    heading where the hour of the messages changes. Two breakdowns of the
+    same wall-clock hour on either side of a daylight-saving change are two
+    hours, told apart by [is_dst]. *)
+module Local_hour : sig
+  type t = private
+    { year : int
+    ; month : int
+    ; day : int
+    ; hour : int
+    ; is_dst : bool
+    }
+
+  val of_tm : Unix.tm -> t
+  (** The hour of a moment already broken down in the local zone, so a row
+      that also draws the moment's clock breaks it down once. *)
+
+  val equal : t -> t -> bool
+
+  val heading : t -> string
+  (** [2026-11-18 · 15:00], and [ DST] after it during daylight-saving
+      time. *)
+end
+
+(** A day as a server's usage history counts it: midnight to midnight UTC.
+    It is a bucket the server chose, not a moment, so it does not read in
+    the operator's zone: a UTC day starts at 09:00 in Seoul. A screen that
+    draws one says UTC beside it. *)
+module Utc_day : sig
+  type t
+
+  val of_moment : float -> t
+  (** The UTC day [at] falls on. *)
+
+  val month_day : t -> string
+  (** [11-18]. *)
+
+  val date : t -> string
+  (** [2026-11-18]. *)
+
+  val day_of_month : t -> int
+  (** [18], for a row of figures that lists days by their number. *)
+
+  val day_of_month_text : t -> string
+  (** [08]: two cells, for a ruler that marks one column per day. *)
 end
 
 (** The length of something still going, how long ago something happened, or
@@ -217,6 +306,8 @@ module Count : sig
     | File  (** One file a keeper wrote. *)
     | Task  (** One Task of the Work hub. *)
     | Open_task  (** A Task not yet done or cancelled. *)
+    | Claim  (** One claim in the workspace memory ledger. *)
+    | Conflict  (** Two claims in that ledger that disagree. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],
@@ -236,10 +327,10 @@ module Count : sig
 
   val partial : ko:bool -> loaded:int -> total:int -> string
   (** A list read in part: the rows read, then how many the server holds,
-      [50 · 전체 2,000] and [50 · of 2,000]. The word ahead of the total is the
-      one {!Position.text} writes, so a card edge and the position on the
-      same screen say a partial read the same way (RFC tui-one-screen-grammar,
-      section 2). *)
+      [50 · 전체 2,000] and [50 · of 2,000]. Zone 2 writes a {!Position.Partial}
+      with this count after the selected row, so a card edge and the position
+      on the same screen say a partial read the same way (RFC
+      tui-one-screen-grammar, section 2). *)
 
   val more : ko:bool -> int -> string
   (** Rows that were cut off, not where the reader is: [외 3], [3 more]
@@ -254,19 +345,38 @@ module Hash : sig
       that draws a digest this way offers the whole value as a copy. *)
 end
 
-(** Where the reader is in what the screen holds. *)
+(** Where the reader is in what the screen holds (RFC tui-one-screen-grammar,
+    section 2). A screen hands one of these to the frame, and only the
+    function that draws zone 2 turns it into text: a body has no way to write
+    a position of its own. The constructors are private, so a window that
+    shows every row, or a selected row outside its list, cannot be built. *)
 module Position : sig
-  type t =
+  type t = private
     | Row of { at : int; total : int }
-        (** The selected row, counted from one, and how many rows there
-            are: [7/29]. Nothing selected is [at = 0] and draws a dash in
-            the row's place. *)
+        (** A list with its selected row, counted from one, among [total]
+            rows: [7/29]. [at = 0] is a list with nothing selected. *)
+    | Window of { first : int; last : int; total : int }
+        (** A reading window over [total] rows, its first and last rows
+            counted from one: [1–49/75]. Only a window that hides rows is one;
+            [first = 0] is a window too short to show any. *)
     | Partial of { at : int; loaded : int; total : int }
-        (** A list read in part: the selected row among the rows read, and
-            how many the server holds: [1/50 · 전체 8,347],
-            [1/50 · of 8,347]. *)
+        (** A list read in part: the selected row among the [loaded] rows
+            read, and how many the server holds: [1/50 · 전체 8,347]. *)
 
-  val text : ko:bool -> t -> string
-  (** [7/29], or [1/50 · 전체 8,347] and [1/50 · of 8,347] for a list read in
-      part. *)
+  val row : selected:int option -> total:int -> t
+  (** The list of [total] rows with the row at index [selected], counted from
+      zero, chosen. An index past either end names the nearest row; [None],
+      or an empty list, selects nothing. A list names its selected row even
+      when every row is on screen. *)
+
+  val partial : selected:int option -> loaded:int -> total:int -> t
+  (** {!row} over the [loaded] rows read of a list the server says holds
+      [total]. *)
+
+  val window : first:int -> shown:int -> total:int -> t option
+  (** The window of [shown] rows from index [first] over [total] rows.
+      [None] when [total] fits in [shown]: a reading with nothing hidden
+      hands no position. [first] is held inside the list, and the window
+      ends at the last row there is, so it names the rows a body that
+      starts at [first] draws. *)
 end

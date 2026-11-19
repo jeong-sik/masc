@@ -8,7 +8,9 @@ usage: summary.py OUT [OUT ...] [--reads]
 Screen line: frames per second the TUI recorded in the window ('?' when the
 window reached past the frames it keeps, '-' without a frame report), PTY bytes
 per second, CPU percent, RSS, build p50/p95 in ms, and the rows that changed
-most with the cells that moved.
+most with the cells that moved. A screen with an error shows the error instead,
+and one that did not land on the surface its step names shows the surface that
+was on screen.
 
 --reads adds, per window, from the relay's log in the same directory:
   reads    requests that arrived in the window and are not event streams,
@@ -88,7 +90,13 @@ def screen_line(screen: Mapping[str, object]) -> str:
     rss = number(screen.get('rss_mb'))
     build = f'{text(field(screen, "frames", "build_ms", "p50"))}/{text(field(screen, "frames", "build_ms", "p95"))}'
     error = screen.get('error')
-    tail = f'error: {error}' if isinstance(error, str) else rows
+    landed = json_object(screen.get('landed'))
+    if isinstance(error, str):
+        tail = f'error: {error}'
+    elif landed is not None and landed.get('ok') is not True:
+        tail = f'not landed: {text(landed.get("shown"))} on screen, {text(landed.get("expected"))} named'
+    else:
+        tail = rows
     return (f'{text(screen.get("name"), "?"):16s} {frames_per_second(screen):>8s} '
             f'{text(None if bytes_per_s is None else f"{bytes_per_s:.1f}"):>9s} '
             f'{text(None if cpu is None else f"{cpu:.2f}"):>6s} {text(None if rss is None else f"{rss:.0f}"):>7s} '

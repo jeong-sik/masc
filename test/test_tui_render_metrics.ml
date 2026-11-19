@@ -641,17 +641,21 @@ let test_the_fleet_section_escapes_the_probe_word () =
    first, then the cause, then what to do. *)
 let session_width = 40
 
+(* A fixed instant, so every event is the same day as [session_now] in any
+   zone the test runs in and the clock beside it keeps one width. *)
+let session_now = 1_700_000_000.
+
 let session_log =
-  let event clock content =
-    { Types.timestamp = clock; event_type = "observer"; content } in
-  [ event "11:06:00"
+  let event minutes_ago content =
+    { Types.at = session_now -. (60. *. minutes_ago); event_type = "observer"; content } in
+  [ event 0.
       ("runtime event feed closed: the server refused the subscription because \
         the operator token expired; run masc login for this workspace and \
         press r to open the feed again")
-  ; event "11:05:00" "keeper alpha started"
-  ; event "11:04:00" "keeper beta paused by the operator"
-  ; event "11:03:00" "workspace declaration saved"
-  ; event "11:02:00" "approval queue read"
+  ; event 1. "keeper alpha started"
+  ; event 2. "keeper beta paused by the operator"
+  ; event 3. "workspace declaration saved"
+  ; event 4. "approval queue read"
   ]
 
 let rows_of (entry : Render_metrics.session_entry) = List.length entry.rows
@@ -670,9 +674,9 @@ let rec drop count list =
    take, and they and the count fit the room, unless the newest alone is
    taller. No older event would have fit as well. *)
 let check_session_room room =
-  let whole = Render_metrics.session_block ~width:session_width session_log in
+  let whole = Render_metrics.session_block ~now:session_now ~width:session_width session_log in
   let block =
-    Render_metrics.session_block ~width:session_width ~room session_log in
+    Render_metrics.session_block ~now:session_now ~width:session_width ~room session_log in
   let total = List.length whole.kept in
   check int "unbounded, nothing is left out" 0 whole.earlier;
   check int "every folded event is kept or counted" total
@@ -689,7 +693,7 @@ let check_session_room room =
       (rows_used block + rows_of (List.nth whole.kept (block.earlier - 1)) > room)
 
 let test_a_long_session_event_takes_the_rows_its_sentence_needs () =
-  let block = Render_metrics.session_block ~width:session_width session_log in
+  let block = Render_metrics.session_block ~now:session_now ~width:session_width session_log in
   let newest = List.nth block.kept (List.length block.kept - 1) in
   List.iter
     (fun row ->
@@ -704,12 +708,38 @@ let test_the_session_room_is_spent_in_rows_on_whole_events () =
 
 let test_the_newest_session_event_is_kept_when_taller_than_the_room () =
   let block =
-    Render_metrics.session_block ~width:session_width ~room:3 session_log in
+    Render_metrics.session_block ~now:session_now ~width:session_width ~room:3 session_log in
   check int "the earlier events are counted" 4 block.earlier;
   check bool "the newest is drawn whole past the room" true
     (match block.kept with
      | [ newest ] -> rows_of newest > 3
      | [] | _ :: _ :: _ -> false)
+
+(* The usage diagnostics body hands its window to the title row when the
+   section hides lines, and nothing when it shows them all (RFC
+   tui-one-screen-grammar, section 2). *)
+let test_the_metrics_body_hands_its_window_only_when_it_hides_lines () =
+  let state = make_state () in
+  let suffix_lines = List.init 60 (Printf.sprintf "line-%02d") in
+  let handed ~budget =
+    let positions = ref [] in
+    Render_metrics.render_metrics_body ~cols:100 ~budget ~suffix_lines state
+      ~report_scroll:(fun _ _ _ -> ())
+      ~hand_position:(fun position -> positions := position :: !positions)
+      ~push:ignore ~push_styled:(fun ~style:_ _ -> ()) ~push_selected:ignore
+      ~push_divider:ignore ~push_empty:ignore;
+    !positions
+  in
+  (match handed ~budget:20 with
+   | [ Masc_tui_value.Position.Window { first; last; total } ] ->
+       check int "the window starts at the top" 1 first;
+       check bool "the window ends inside what it hides" true (last < total);
+       check bool "the total counts the hidden lines" true (total >= 60)
+   | [] -> fail "a body that hides lines hands its window"
+   | [ Masc_tui_value.Position.(Row _ | Partial _) ] | _ :: _ :: _ ->
+       fail "the body hands one window and no row");
+  check int "a body that shows every line hands nothing" 0
+    (List.length (handed ~budget:400))
 
 let () =
   run "tui_render_metrics"
@@ -762,6 +792,8 @@ let () =
     ; ( "render_body"
       , [ test_case "a Tasks read error is sanitized before it is drawn" `Quick
             test_tasks_error_is_sanitized
+        ; test_case "the body hands its window only when it hides lines" `Quick
+            test_the_metrics_body_hands_its_window_only_when_it_hides_lines
         ;] )
     ]
 ;;

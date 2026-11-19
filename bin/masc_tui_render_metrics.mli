@@ -60,8 +60,9 @@ type session_block = {
   kept : session_entry list;  (** Oldest first; the newest is last. *)
 }
 
-val session_block : width:int -> ?room:int -> event list -> session_block
-(** Which TUI session events fit [room] rows, from the log as [state.events]
+val session_block : now:float -> width:int -> ?room:int -> event list -> session_block
+(** Which TUI session events fit [room] rows, each drawn beside its moment as
+    read at [now], from the log as [state.events]
     holds it (newest first). Room is counted in rows, an event is kept or
     left out whole, and when any is left out one row of the room goes to
     counting them. The newest event is kept even when it alone does not fit
@@ -83,6 +84,7 @@ val render_metrics_body :
   suffix_lines:string list ->
   state ->
   report_scroll:(int -> int -> int -> unit) ->
+  hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->
@@ -93,4 +95,5 @@ val render_metrics_body :
     the drawing knows how many lines a section came to -- it formats them out
     of the readings -- so the keypress steps an unbounded value and this says
     where it landed. Without it the stored scroll climbed past the end and
-    coming back took one press per step taken beyond it. *)
+    coming back took one press per step taken beyond it. [hand_position] is
+    handed the window when it hides lines, for the title row. *)

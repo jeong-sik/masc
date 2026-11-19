@@ -528,9 +528,15 @@ val read_latest :
   ?keeper_name:string ->
   unit ->
   Yojson.Safe.t option
-(** [read_latest ?keeper_name ()] returns the newest matching entry, if any.
-    Uses a small raw-line scan so hot-path callers can avoid materializing
-    a larger recent-entry window when they only need the latest tool. *)
+(** [read_latest ~keeper_name ()] is that Keeper's newest call among the
+    ledger's newest 16 rows, and [None] when none of the 16 is the Keeper's.
+    [read_latest ()] is the ledger's last row, and [None] when that row is not
+    JSON. Rows that are not JSON count among the 16 and are passed over.
+
+    The 16 rows are the ledger store's kept fact ({!Dated_jsonl.last_rows}):
+    in the server no file is read once the store holds them, and each logged
+    call moves them. A store the strict read refuses is read leniently on
+    each call, which is what this function did before there was a fact. *)
 
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)

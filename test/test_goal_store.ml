@@ -2121,6 +2121,12 @@ let test_audit_outbox_retains_creation_and_deduplicates_retry () =
    | Error _ -> () | Ok () -> fail "a duplicate pending batch cannot publish");
   check int "duplicate pending batch leaves the ledger untouched" 1 (List.length (event_rows path))
 
+(* An ordinary event is appended inside a Goal transaction, so the fixture
+   holds the Goal lock that writer requires. *)
+let append_after_pending config json =
+  Workspace_utils.with_file_lock config (Goal_store.goals_path config) (fun () ->
+    Goal_store.append_audit_event_after_pending_locked config json)
+
 let test_audit_outbox_preserves_malformed_complete_rows () =
   with_workspace @@ fun config ->
   let path = Filename.concat (Filename.dirname (Goal_store.goals_path config)) "goal_events.jsonl" in
@@ -2146,7 +2152,7 @@ let test_audit_outbox_preserves_malformed_complete_rows () =
   let other = upsert_exn config ~title:"another Goal" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"proof" () in
   let phase = `Assoc ["goal_id", `String other.id; "event_type", `String "goal_phase";
       "payload", `Assoc ["phase", Goal_phase.to_yojson Goal_phase.Dropped]] in
-  (match Goal_store.append_audit_event_after_pending config phase with
+  (match append_after_pending config phase with
    | Ok () -> () | Error detail -> fail detail);
   let contents = Fs_compat.load_file path in
   check string "historical bytes remain intact" prefix
@@ -2239,7 +2245,7 @@ let test_pending_phase_precedes_drop_and_survives_retry () =
     [ "ts", `String closed_at; "goal_id", `String goal.id;
       "event_type", `String "goal_phase";
       "payload", `Assoc ["phase", `String "dropped"; "actor", `String "operator"] ] in
-  (match Goal_store.append_audit_event_after_pending config dropped with
+  (match append_after_pending config dropped with
    | Ok () -> () | Error detail -> fail detail);
   let rows = event_rows path in
   let phases = List.filter_map (fun row ->

@@ -77,6 +77,11 @@ module Instant = struct
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm
 
+  let day_of ?(localtime = Unix.localtime) ~now at =
+    distance ~now:(localtime now) (localtime at)
+
+  let clock_within_day = clock
+
   let minutes_per_hour = 60
   let minutes_per_day = 24 * minutes_per_hour
 
@@ -114,6 +119,86 @@ module Instant = struct
     let local = Unix.localtime now in
     clock To_minute local ^ " "
     ^ zone_label ~offset_minutes:(offset_minutes ~utc:(Unix.gmtime now) ~local)
+
+  let axis_hour at =
+    let local = Unix.localtime at in
+    if local.Unix.tm_min = 0 && local.Unix.tm_sec = 0 then Some (clock To_minute local)
+    else None
+
+  let day_start at =
+    let day = Unix.localtime at in
+    match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
+    | start, _ -> Some start
+    | exception Unix.Unix_error _ -> None
+
+  let file_stamp at =
+    let tm = Unix.localtime at in
+    Printf.sprintf "%04d%02d%02d-%02d%02d" (tm.Unix.tm_year + tm_year_origin)
+      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+end
+
+let date_text ~year ~month ~day = Printf.sprintf "%04d-%02d-%02d" year month day
+
+module Local_day = struct
+  type t =
+    { year : int
+    ; month : int
+    ; day : int
+    }
+
+  let of_moment at =
+    let tm = Unix.localtime at in
+    { year = tm.Unix.tm_year + Instant.tm_year_origin
+    ; month = tm.Unix.tm_mon + 1
+    ; day = tm.Unix.tm_mday
+    }
+
+  let text { year; month; day } = date_text ~year ~month ~day
+end
+
+module Local_hour = struct
+  type t =
+    { year : int
+    ; month : int
+    ; day : int
+    ; hour : int
+    ; is_dst : bool
+    }
+
+  let of_tm (tm : Unix.tm) =
+    { year = tm.Unix.tm_year + Instant.tm_year_origin
+    ; month = tm.Unix.tm_mon + 1
+    ; day = tm.Unix.tm_mday
+    ; hour = tm.Unix.tm_hour
+    ; is_dst = tm.Unix.tm_isdst
+    }
+
+  let equal left right =
+    Int.equal left.year right.year
+    && Int.equal left.month right.month
+    && Int.equal left.day right.day
+    && Int.equal left.hour right.hour
+    && Bool.equal left.is_dst right.is_dst
+
+  let heading { year; month; day; hour; is_dst } =
+    date_text ~year ~month ~day
+    ^ Printf.sprintf " \xc2\xb7 %02d:00" hour
+    ^ if is_dst then " DST" else ""
+end
+
+module Utc_day = struct
+  (* Whole days since the epoch: the UTC day is the floor of the moment in
+     days, so two moments on one UTC day give the same value. *)
+  type t = int
+
+  let seconds_per_day = 86_400.
+  let of_moment at = int_of_float (Float.floor (at /. seconds_per_day))
+  let breakdown day = Unix.gmtime (float_of_int day *. seconds_per_day)
+
+  let month_day day = Instant.month_day (breakdown day)
+  let date day = Instant.year_month_day (breakdown day)
+  let day_of_month day = (breakdown day).Unix.tm_mday
+  let day_of_month_text day = Printf.sprintf "%02d" (day_of_month day)
 end
 
 module Ongoing = struct
@@ -292,6 +377,8 @@ module Count = struct
     | File
     | Task
     | Open_task
+    | Claim
+    | Conflict
 
   (* Singular, plural. *)
   let english = function
@@ -306,6 +393,8 @@ module Count = struct
     | File -> "file", "files"
     | Task -> "task", "tasks"
     | Open_task -> "open task", "open tasks"
+    | Claim -> "claim", "claims"
+    | Conflict -> "conflict", "conflicts"
 
   (* The thing, then the figure with its counter. A row is counted by the
      word that names it. *)
@@ -322,6 +411,8 @@ module Count = struct
     | File -> "파일 " ^ figure ^ "개"
     | Task -> "작업 " ^ figure ^ "개"
     | Open_task -> "열린 작업 " ^ figure ^ "개"
+    | Claim -> "공유 주장 " ^ figure ^ "건"
+    | Conflict -> "충돌 " ^ figure ^ "건"
 
   let written ~ko noun count figure =
     if ko then korean noun figure
@@ -361,14 +452,29 @@ end
 module Position = struct
   type t =
     | Row of { at : int; total : int }
+    | Window of { first : int; last : int; total : int }
     | Partial of { at : int; loaded : int; total : int }
 
-  (* The mark for a value that is absent (RFC section 6.4). *)
-  let nothing_selected = "\xe2\x80\x94"
+  (* The selected index as a row counted from one, held inside the list: a
+     cursor left past the end by a list that shrank names the last row. *)
+  let selected_row ~selected ~total =
+    match selected with
+    | None -> 0
+    | Some _ when total <= 0 -> 0
+    | Some index -> Int.max 0 (Int.min index (total - 1)) + 1
 
-  let text ~ko = function
-    | Row { at = 0; total } -> nothing_selected ^ "/" ^ Count.grouped total
-    | Row { at; total } -> Count.grouped at ^ "/" ^ Count.grouped total
-    | Partial { at; loaded; total } ->
-        Count.grouped at ^ "/" ^ Count.partial ~ko ~loaded ~total
+  let row ~selected ~total =
+    let total = Int.max 0 total in
+    Row { at = selected_row ~selected ~total; total }
+
+  let partial ~selected ~loaded ~total =
+    let loaded = Int.max 0 loaded in
+    Partial { at = selected_row ~selected ~total:loaded; loaded; total = Int.max loaded total }
+
+  let window ~first ~shown ~total =
+    if total <= shown then None
+    else if shown <= 0 then Some (Window { first = 0; last = 0; total })
+    else
+      let first = Int.max 0 (Int.min first (total - 1)) in
+      Some (Window { first = first + 1; last = Int.min total (first + shown); total })
 end

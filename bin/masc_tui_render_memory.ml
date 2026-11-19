@@ -144,10 +144,7 @@ let memory_fact_age_label ts =
   Masc_tui_value.Ongoing.Narrow.since ~now:(Unix.gettimeofday ()) ts
 
 let memory_date ts =
-  let tm = Unix.localtime ts in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min
+  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) ts
 
 let memory_updated_text = function
   | None -> Masc_tui_theme.Glyph.no_value
@@ -588,9 +585,11 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
   in
   if server_error then Some (Theme.bad ())
   else
+    (* The colour of the mark the state wears (RFC tui-one-screen-grammar
+       7.2): a failed read wears the failure mark, so it takes the failure
+       colour with starving. It took the caution colour. *)
     match memory_state k with
-    | Memory_starving -> Some (Theme.bad ())
-    | Memory_read_error
+    | Memory_starving | Memory_read_error -> Some (Theme.bad ())
     | Memory_no_current
     | Memory_source_only
     | Memory_degraded
@@ -681,8 +680,8 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
   let tail = if Message_layout.display_width tail <= room / 3 then tail else "" in
   let claim = Message_layout.truncate_middle
       (max 0 (room - Message_layout.display_width tail)) (Terminal_text.single_line claim) in
-  Message_layout.take_cells
-    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset) inner_width
+  Message_layout.truncate_end inner_width
+    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset)
 
 (* One label column for the three detail blocks. They take turns in the same
    rows as the cursor moves down the list, and each line padded its own label
@@ -1367,11 +1366,10 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
   (* The context divider needs a row only when the detail itself is shown. *)
   let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
-  (* Keep the selected Keeper and neighbouring rows together where they fit;
-     an overflowing list also needs its window line. *)
+  (* Keep the selected Keeper and neighbouring rows together where they fit.
+     Where the list stands is on the title row, so no row is kept for it. *)
   let count = List.length keepers in
-  let visible_floor = min 3 count in
-  let list_rows = if count = 0 then 1 else visible_floor + (if count > visible_floor then 1 else 0) in
+  let list_rows = if count = 0 then 1 else min 3 count in
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
@@ -1439,15 +1437,26 @@ let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
     ~refused_rows:(refused_rows projection)
     ~context_rows:(List.length projection.context) state
 
+(* A row the operator picks a keeper from: the mark, the name and the state's
+   word. A reading that is off wears its colour on the mark and the word, so a
+   stopped Librarian reads as a warning from across the screen; an ordinary
+   one wears it on the mark alone. Both were the plain text colour. *)
 let memory_selector_line ~cols (state : state) keeper =
   let width = max 1 (framed_inner_width cols - 2) in
   let name_cells = max 1 (width / 2) in
   let status_cells = max 1 (width - name_cells - 3) in
-  "  " ^ memory_state_cell (memory_state keeper) ^ " "
+  let mark_style, word_style =
+    match memory_deviation_style keeper with
+    | Some style -> style, style
+    | None -> Theme.ok (), ""
+  in
+  let word = Message_layout.fit_width (memory_operator_state state keeper) status_cells in
+  "  " ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
   ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
-  ^ " " ^ Message_layout.fit_width (memory_operator_state state keeper) status_cells
+  ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1514,7 +1523,7 @@ let render_memory_body ~cols ~budget (state : state)
   push_styled ~style:(Theme.recede ())
     (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
      else ui_text state
-       ~ko:"  Keeper · 상태"
+       ~ko:"  키퍼 · 상태"
        ~en:"  Keeper · state");
   push_divider ();
   (match memory_health_error_text state with
@@ -1535,14 +1544,9 @@ let render_memory_body ~cols ~budget (state : state)
       ~refused_rows:(refused_rows projection)
       ~context_rows:(List.length projection.context) state in
   let rows = budget + Masc_tui_frame.chrome_rows in
-  let available = max 1 (rows - layout.sc_chrome) in
-  (* With only one row there is room for the selection but not a separate
-     window label. Drawing both would hide the selection behind the cut. *)
-  let overflowing = available > 1 && shown > available in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   let scroll =
     Masc_tui_scroll.normalize ~count:shown ~height:content_height
@@ -1584,10 +1588,7 @@ let render_memory_body ~cols ~budget (state : state)
             push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
-    if overflowing then
-      push_styled ~style:(Theme.recede ())
-        (Printf.sprintf (if ko then "  [키퍼 %s]" else "  [keepers %s]")
-           (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+    hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   end;
   (match projection.context with
    | [] -> ()
@@ -1599,9 +1600,7 @@ let render_memory_body ~cols ~budget (state : state)
 (* How many fact rows the list keeps before the detail below it takes any.
    Enough to read the cursor against its neighbours -- one row above, one
    below, and the room a filter leaves when it lands the cursor near an
-   edge. One of these rows goes to the window reading when the list
-   overflows, the way it does on every other reading pane. Under this the
-   browser stops being one. *)
+   edge. Under this the browser stops being one. *)
 let memory_fact_list_floor_rows = 5
 
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
@@ -1652,23 +1651,23 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
         fact_detail_prefix parts (kept - 1)
-        @ [ Printf.sprintf (if state.ui_language = Lang_ko then "      [사실 %s · Enter:전체 사실]" else "      [fact %s · Enter for the whole fact]")
-              (Masc_tui_scroll.window_text ~scroll:0
-                 ~height:(kept - 1) total_detail_lines) ]
+        @ [ "      "
+            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
+                (total_detail_lines - (kept - 1))
+            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
+               else " · Enter for the whole fact") ]
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)
   let detail_rows =
     match detail_lines with [] -> 0 | lines -> 1 + List.length lines
   in
-  let room = max 1 (room_below_chrome - detail_rows) in
-  let overflowing = total > room in
-  let height = if overflowing then max 1 (room - 1) else room in
+  let height = max 1 (room_below_chrome - detail_rows) in
   let scroll =
     Masc_tui_scroll.normalize ~count:total ~height state.memory_facts_scroll
     |> Masc_tui_scroll.ensure_visible ~cursor ~height
   in
-  (detail_lines, height, overflowing, scroll)
+  (detail_lines, height, scroll)
 
 let memory_facts_pane_cols state cols =
   if state.memory_facts_categories_open && cols >= Masc_tui_roster_pane.threshold_cols then
@@ -1676,12 +1675,13 @@ let memory_facts_pane_cols state cols =
   else cols
 
 let memory_facts_content_height ~cols ~budget ~cursor state =
-  let _, height, _, _ =
+  let _, height, _ =
     memory_facts_layout ~cols:(memory_facts_pane_cols state cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
 
 let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1776,7 +1776,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
-  let detail_lines, content_height, overflowing, scroll =
+  let detail_lines, content_height, scroll =
     memory_facts_layout ~cols ~budget ~cursor state rows
   in
   if total = 0 then
@@ -1821,9 +1821,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
-    if overflowing then
-      push_styled ~style:(Theme.recede ())
-        (Printf.sprintf (if ko then "  [사실 %s]" else "  [facts %s]") (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
   end;
   (match detail_lines with
    | [] -> ()
@@ -1832,10 +1830,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
-    ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+    ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
   if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
-      ~push ~push_styled ~push_selected ~push_divider ~push_empty
+      ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
@@ -1843,6 +1841,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
+      ~hand_position
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->
@@ -1879,8 +1878,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let room = max 1 (rows * (width - 2) - Message_layout.display_width suffix) in
         let name = Terminal_text.single_line (memory_category_filter_text ~ko category) in
         let name =
-          if Message_layout.display_width name <= room then name
-          else Message_layout.take_cells name (max 0 (room - 1)) ^ "…"
+          Message_layout.truncate_end room name
         in
         Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
         |> List.map (fun text -> category, text)) in

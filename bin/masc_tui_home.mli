@@ -13,6 +13,17 @@ val open_approvals : Masc_tui_types.state -> navigate:(Masc_tui_types.surface ->
 type prepared
 val prepare : Masc_tui_types.state -> prepared
 val home_decision_rows : prepared -> (Masc_tui_types.home_action * string) list
+
+(** How many decisions wait: the request rows among {!home_decision_rows},
+    not the row that opens the whole list or a row that says a source was not
+    read. *)
+type decision_count =
+  | Every_source_read of int
+  | Some_source_unread of int
+      (** A list the requests come from was not read, so this many wait and
+          there may be more. *)
+
+val home_decision_count : prepared -> decision_count
 val clear_ask_answering : Masc_tui_types.state -> unit
 val reconcile_home_request_detail : Masc_tui_types.state -> unit
 val home_continue_rows : prepared -> (Masc_tui_types.home_action * string) list

@@ -48,7 +48,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~ko ~(edges : edges) ~empty_decisions ~inner
+let draw ~ko ~(edges : edges) ~inner
     ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
@@ -59,16 +59,10 @@ let draw ~ko ~(edges : edges) ~empty_decisions ~inner
     let rows_of entries ~cells =
       List.concat_map (row_body ~is_selected ~cells) entries
     in
+    (* With no decision waiting the edge's count says so, and the body has
+       nothing to list, as the conversations card with none. *)
     let decision_card =
-      { Masc_tui_card.edge = edges.decisions
-      ; body =
-          (fun ~cells ->
-             match decisions with
-             (* The cards are drawn only for a whole window, so an empty list
-                means no decision waits. *)
-             | [] -> [ Theme.recede () ^ empty_decisions ^ Ansi.reset ]
-             | _ :: _ -> rows_of decisions ~cells)
-      }
+      { Masc_tui_card.edge = edges.decisions; body = rows_of decisions }
     in
     let continue_card =
       { Masc_tui_card.edge = edges.continuation; body = rows_of continuation }

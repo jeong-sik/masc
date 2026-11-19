@@ -166,7 +166,6 @@ let refused label request captured expected =
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
-(* The Muse home of the person's account, as the layout spells it. *)
 (* The judgment of a turn before its account is read ({!Access.admit}). *)
 let admitted label request =
   match Access.admit request with
@@ -183,6 +182,7 @@ let not_admitted label request expected =
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
+(* The Muse home of the person's account, as the layout spells it. *)
 let muse_path (who : person) =
   get_text
     (Layout.home

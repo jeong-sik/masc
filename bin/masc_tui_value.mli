@@ -225,6 +225,10 @@ module Count : sig
       Korean names the thing first and counts it with the counter that
       thing takes. The figure is {!grouped}. *)
 
+  val lower_bound : int -> string
+  (** The figure of a lower bound, with nothing it counts: [≥3], [≥1,250]
+      (RFC tui-one-screen-grammar, section 6.3). *)
+
   val at_least : ko:bool -> noun -> int -> string
   (** {!reading} for a lower bound: [≥3 tasks], [작업 ≥3개]. A list read
       in part holds this many and may hold more (RFC tui-one-screen-grammar,

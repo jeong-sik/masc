@@ -24,6 +24,9 @@ type count =
   | Whole of int  (** Every row of the reading is loaded: [12]. *)
   | Partial of { loaded : int; total : int }
       (** Some of them: [50 · 전체 2,000], [50 · of 2,000]. *)
+  | At_least of int
+      (** A source of the reading was not read, so there may be more and
+          nobody knows how many: [≥3] (RFC section 6.3). *)
 
 type symbol =
   | Mark of Masc_tui_value.Mark.t

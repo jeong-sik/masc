@@ -174,7 +174,7 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 
 Downloading a tag’s installer alone does not pin the installed version: pass
 `--version "$TAG"` as above. Without `--version`, the installer resolves the
-latest release. The example pins the published v0.60.0; `main` documentation can
+latest release. The example pins the published v0.73.1; `main` documentation can
 describe changes that are not in that release.
 
 A new terminal finds `masc` if you accepted the shell PATH prompt. Otherwise,

@@ -34,6 +34,16 @@ val scheduler_probe_symbol :
     raised, failed. A word this build does not know, and no probe at all,
     are [?]. *)
 
+val scheduler_probe_status :
+  ko:bool -> tone:string -> Masc.Tui_decode.scheduler_probe option -> Masc_tui_card.status
+(** The scheduler card's status: {!scheduler_probe_symbol} and the state's
+    word. A stopped probe's word is the state alone; its reason is
+    {!scheduler_stop_reason}, which the card writes in its body. *)
+
+val scheduler_stop_reason : Masc.Tui_decode.scheduler_probe option -> string option
+(** The exception a stopped probe raised, escaped to one line. [None] for any
+    other state, and with no probe. *)
+
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
 type session_entry = {

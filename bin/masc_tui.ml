@@ -10342,10 +10342,16 @@ let launch_asks_read state ~mailbox =
      | Some asks_request ->
        let enqueue_async = workspace_enqueue state in
        let host = server_peer_host and port = state.port in
-       launch_workspace_async_read state ~mailbox
+       (* The guard's refusal stays [Request_withdrawn]: that read was not sent
+          and is no failed read (RFC §2). *)
+       launch_workspace_async_read_with state ~mailbox
+         ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun asks_result ->
            enqueue_async mailbox (Ask_msg (Asks_reloaded { asks_request; asks_result })))
-         (fun () -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ());
+         (fun () ->
+           Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+           |> Result.map_error (fun detail -> Request_failed detail));
        true)
 
 (* Runs on every loop iteration. A read already in flight, the refresh's or
@@ -17401,6 +17407,33 @@ let apply_keeper_chat_result state request result =
          true)
   | Some _ | None -> false
 
+(* A background read's own answer, for zone 4 (RFC tui-one-screen-grammar
+   §2). Called where the read's answer arrives, never where an error is put
+   in place of one. The session event list still gets its line from the
+   caller. *)
+let note_read state read result =
+  Masc_tui_types.note_read_answer state read ~at:(Unix.gettimeofday ()) result
+
+(* A probe failed, or a pass raised before it settled: the next pass waits
+   (RFC tui-one-screen-grammar §2). The owed reads' retry constants. The
+   wall clock read here fixes the next try zone 4 says, so a redraw cannot
+   move it. *)
+let fail_refresh_pace state =
+  state.refresh_pace <-
+    Masc_tui_refresh_pace.probe_failed ~retry_s:stream_reconnect_s
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      ~wall_now:(Unix.gettimeofday ()) state.refresh_pace
+
+(* The [/health] probe's reading: its error is the probe's own failure. It
+   also paces the next pass; [answered] says what an answer settles, the
+   owed pass itself or only the wait before it. *)
+let note_server_health state ~answered reading =
+  note_read state Masc_tui_read_failure.Server_health
+    (Result.map_error (fun detail -> Request_failed detail) reading);
+  match reading with
+  | Ok _ -> state.refresh_pace <- answered state.refresh_pace
+  | Error _ -> fail_refresh_pace state
+
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
     match current_error with
@@ -17571,9 +17604,20 @@ let apply_asks_load state = function
 
 (* A read of the questions: what it found, and whether the owed read is
    settled or waits to retry. *)
-let apply_asks_read state result =
+let settle_asks state result =
   settle_asks_read state result;
   apply_asks_load state result
+
+(* The background read of the questions, which zone 4 also hears about. The
+   guard's refusal is said as kept back, never as the read's failure
+   (RFC §2). The reread that follows an answer is that action's outcome and
+   goes to [settle_asks] alone. *)
+let apply_asks_read state result =
+  note_read state Masc_tui_read_failure.Asks result;
+  settle_asks state
+    (Result.map_error
+       (request_failure_text ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Questions_read)
+       result)
 
 let apply_asks_observation state observation =
   Option.iter (apply_asks_read state)
@@ -17599,6 +17643,19 @@ let apply_approvals_read state result =
 let apply_approval_observation state observation =
   Option.iter (fun result ->
     apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result))
+    (take_approval_observation state observation)
+
+(* The confirm queue's own answer, which zone 4 also hears about.
+   [apply_approvals_read] alone also takes an error put in place of a read --
+   a booting server, an account server, a refresh that raised -- and that is
+   no failed read (RFC §2). *)
+let apply_approvals_answer state result =
+  note_read state Masc_tui_read_failure.Confirmations result;
+  apply_approvals_read state result
+
+let apply_approval_answer_observation state observation =
+  Option.iter (fun result ->
+    apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result))
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -17630,7 +17687,7 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
     then
       (* Carried as [request_failure], so a read the guard kept back is drawn
          as kept back and not as a failed read (RFC §2). *)
-      if admit_approval_listing state listing_ticket then apply_approvals_read state result
+      if admit_approval_listing state listing_ticket then apply_approvals_answer state result
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -18250,8 +18307,10 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
          observe_http_reader ~on_progress Http_refresh_progress.Questions
            ~outcome:(fun observation -> Http_refresh_progress.of_result observation.asks_result) (fun () ->
          let asks_result = match expected_workspace with
-           | None -> Error "Server workspace identity is unavailable"
-           | Some expected_workspace -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
+           | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
+           | Some expected_workspace ->
+               Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ()
+               |> Result.map_error (fun detail -> Request_failed detail) in
          let observation = { asks_request; asks_result } in
          (match on_asks with
           | None -> ()
@@ -18582,7 +18641,7 @@ let apply_http_scoped_data state ~datasets results =
       record dataset (if received then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
-  Option.iter (apply_approval_observation state) results.http_approvals;
+  Option.iter (apply_approval_answer_observation state) results.http_approvals;
   Option.iter (apply_asks_observation state) results.http_asks;
   if List.mem Surface_read_order.Board_posts datasets then begin
     (* The terminal reservation already marked missing data unavailable. Only
@@ -19728,6 +19787,8 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
        cannot replace identity observed by a newer collector. *)
     (match admission with
      | Admit_identity_and_data | Admit_identity_only ->
+         note_server_health state ~answered:Masc_tui_refresh_pace.answered_again
+           results.http_scoped_server_identity;
          apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
      | Admit_data_only | Admit_nothing -> ());
     match admission with
@@ -19770,6 +19831,10 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
     let err = request_failure_text ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Surface_read failure in
+    (* The last [/health] reading its probes took, the probe's own answer
+       whatever stopped the refresh after it. *)
+    Option.iter
+      (note_server_health state ~answered:Masc_tui_refresh_pace.answered_again) latest;
     apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
@@ -19779,9 +19844,15 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
     add_event state "error" err
   end
 
+(* A refresh pass settled, and its [/health] probe read [identity]. *)
+let note_refresh_settled state identity =
+  note_read state Masc_tui_read_failure.Refresh_pass (Ok ());
+  note_server_health state ~answered:Masc_tui_refresh_pace.pass_answered identity
+
 let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
+  note_refresh_settled state results.http_server_identity;
   let previous_items = visible_item_revision state in
   let request = results.http_scoped.http_surface_request in
   (* Navigation joins this pass's ticket while it runs, so the ticket alone
@@ -19795,7 +19866,7 @@ let apply_http_surfaces state ~mailbox results =
   let roster_refreshed = match admission with
     | Admit_identity_and_data | Admit_data_only ->
         if state.workspace_identity = Workspace_identity_match then
-          Option.iter (apply_approval_observation state) results.http_approvals;
+          Option.iter (apply_approval_answer_observation state) results.http_approvals;
         apply_http_scoped_data state ~datasets results.http_scoped
     | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
@@ -19820,6 +19891,7 @@ let apply_http_surfaces state ~mailbox results =
 
 let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  note_refresh_settled state identity;
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
@@ -19845,6 +19917,8 @@ let account_server_reason =
 
 let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  (* The probe answered; what answered is the account server. *)
+  note_refresh_settled state (Ok ());
   (* The footer's last notice was said on the screen this one covers, such
      as the settings this server could not answer at start. *)
   (match state.connection_status with
@@ -19865,6 +19939,7 @@ let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticke
   end
 
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
+  note_refresh_settled state latest_identity;
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
@@ -20791,8 +20866,22 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
         | Observer_existing_workspace _ -> report session_id
         | Observer_initial_workspace _ -> () in
       let open_refused = ref false in
+      (* Whether an earlier attempt of this recovery did not open its stream. *)
+      let failed_attempt = ref false in
       let rec follow () =
         open_refused := false;
+        let opened = ref false in
+        (* The open is reported before what it carries, so a [/health] wait
+           it ends is over before the restored identity asks for a pass. *)
+        let note_opened () =
+          if not !opened then begin
+            opened := true;
+            enqueue_async mailbox
+              (Observer_msg (Observer_recovery_opened
+                 (authority, owner,
+                  if !failed_attempt then Masc_tui_refresh_pace.Opened_after_failure
+                  else Masc_tui_refresh_pace.Opened_each_time)))
+          end in
         let outcome =
           try
             match (match !session with
@@ -20809,15 +20898,20 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
                   Masc_tui_http.observe_runtime_events ~clock ~expected_base_path ~expected_masc_root ~host ~port
                     ~session_id ~cursor:None
                     ~on_identity:(fun (handshake, identity) ->
+                      note_opened ();
                       enqueue_async mailbox
                         (Observer_msg (Observer_recovery_identity
                            (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
                             origin, identity))))
-                    ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
+                    ~on_open:(fun _ ->
+                      note_opened ();
+                      refusal_reported := false;
+                      report_existing (Some session_id))
                     ~on_chunk:(fun _ -> ()))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn)) in
+        if not !opened then failed_attempt := true;
         (match outcome with
          | Error (Masc_tui_http.Http_refused {status; detail})
            when Masc_tui_http.observer_workspace_refused ~status ~detail ->
@@ -21283,11 +21377,15 @@ let log_http_surface_read_finished state context =
 
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  (* While [/health] keeps failing, a pass the TUI asks for by itself waits
+     for the one the failure owes, which revalidates everything this one
+     would, side reads included (RFC tui-one-screen-grammar §2). *)
+  let paced = Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace in
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle. A revalidation owes it a read. Owed, so a pane
      scrolled into older rows or a read in flight takes it when it can; the
      owed read brings the tool details with it. *)
-  begin
+  if paced then begin
     Option.iter
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
@@ -21335,7 +21433,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       ~full_refresh_inflight:!refresh_inflight
       ~scoped_refresh_inflight:!scoped_refresh_inflight
       !scoped_refresh_followup;
-  if not !refresh_inflight then begin
+  if not !refresh_inflight && paced then begin
     refresh_inflight := true;
     scoped_refresh_followup := No_scoped_followup;
     let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in
@@ -21928,7 +22026,8 @@ let apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mail
   resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox
   end
 
-let start_http_scoped_refresh state ~host ~port ~refresh_inflight
+let start_http_scoped_refresh state ~host ~port
+    ~(ask : Masc_tui_refresh_pace.screen_ask) ~refresh_inflight
     ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   (* Entering a surface that draws the roster owes it a whole read rather
@@ -21938,7 +22037,15 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
   let needs = { needs with needs_keeper_roster = false } in
   let authority = state.workspace_authority in
-  if Masc_tui_types.surface_needs_any needs then begin
+  (* This bundle probes [/health] first, so while the probe keeps failing a
+     read the screen owes by itself waits for the pass the failure owes
+     (RFC tui-one-screen-grammar §2). A held read starts nothing and records
+     no start, so its debt stays owed and its launcher asks again on a later
+     loop. Every caller states its [ask]; none is assumed. *)
+  if Masc_tui_types.surface_needs_any needs
+     && Masc_tui_refresh_pace.screen_read_starts ~now:(monotonic_now_s ()) ask
+          state.refresh_pace
+  then begin
     let collection_inflight = !full_refresh_inflight
       || Surface_read_order.navigation_in_flight state.http_surface_reads in
     refresh_inflight := true;
@@ -22078,6 +22185,7 @@ let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
   in
   if due <> [] && server_authority_ready state then
     start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+      ~ask:Masc_tui_refresh_pace.Owed_read_due
       ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
       ~needs:
         (List.fold_left
@@ -22107,6 +22215,7 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
        && not reading
     then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with needs_board = true }
   end
@@ -22144,6 +22253,7 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     if (planning_due || goals_due) && server_authority_ready state
        && state.workspace_identity = Workspace_identity_match then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~ask:Masc_tui_refresh_pace.Owed_read_due
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with
                  needs_planning = planning_due; needs_overview_goals = goals_due }
@@ -22161,6 +22271,19 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
   if launch then
     start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
       ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+
+(* Runs on every loop iteration. A failing [/health] probe owes one pass,
+   which starts once its wait is over, whether or not anything asked
+   (RFC tui-one-screen-grammar §2). Only a full pass in flight holds it: a
+   screen read in flight is the same case for this pass as for any other,
+   and [start_http_refresh] decides it through [note_full_refresh_intent]. *)
+let launch_owed_refresh_pass state ~refresh_inflight ~scoped_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  if not !refresh_inflight
+     && Masc_tui_refresh_pace.due ~now:(monotonic_now_s ()) state.refresh_pace
+  then
+    start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Owed_pass
+      ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
 let open_board_post_id state ~mailbox ~focus post_id =
   state.board_mode <- Board_read post_id;
@@ -22773,7 +22896,7 @@ let apply_ask_answer_completion state submission result asks =
           draft it kept, never an unconfirmed recording (RFC §2). *)
        report_kept_back state ~request:Kept_request.Ask_answer
          (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
-  apply_asks_read state asks
+  settle_asks state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
@@ -24606,6 +24729,19 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
+(* Start a server here, and read it once it answers. The failures in a row
+   were of an address where nothing listened, so that answer ends their wait
+   (RFC tui-one-screen-grammar §2). The start the TUI makes by itself and the
+   Keeper list's [s] both come here. *)
+let start_server_here_then_read state ~base_path ~host ~port ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  start_masc_server_here ~base_path ~host ~port
+    ~note:(fun msg -> add_event state "system" msg)
+    ~on_ready:(fun () ->
+      state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
+      start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
+        ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox)
+
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -24624,13 +24760,10 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
       ~already_attempted:!tui_auto_start_spent
   then begin
     tui_auto_start_spent := true;
-    start_masc_server_here ~base_path ~host ~port
-      ~note:(fun msg -> add_event state "system" msg)
-      ~on_ready:(fun () ->
-        start_http_refresh state ~host ~port ~intent:Revalidate
-          ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight
-          ~scoped_refresh_followup ~mailbox)
+    start_server_here_then_read state ~base_path ~host ~port
+      ~refresh_inflight:http_refresh_inflight
+      ~scoped_refresh_inflight:http_scoped_refresh_inflight
+      ~scoped_refresh_followup ~mailbox
   end;
   (* A server answering here is the workspace appearing. The decision is the
      same guarded one taken at boot -- it still refuses a base path that holds
@@ -24865,7 +24998,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -25526,7 +25659,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result);
+        apply_approvals_answer state (Result.map_error (fun detail -> Request_failed detail) result);
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
@@ -26462,6 +26595,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
               | Workspace_identity_match | Workspace_identity_mismatch _),
               Account_server _ -> ())
+  | Observer_msg (Observer_recovery_opened (authority, owner, opened)) ->
+      (* A stream that would not open opening now is the server answering
+         again: the owed pass starts now. It is not a [/health] answer, so
+         the run of failures goes on (RFC tui-one-screen-grammar §2). *)
+      if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then
+        state.refresh_pace <- Masc_tui_refresh_pace.stream_opened opened state.refresh_pace
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
@@ -26529,6 +26668,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       withdraw_currency_authority state;
       state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
+      note_read state Masc_tui_read_failure.Refresh_pass (Error (Request_failed err));
+      fail_refresh_pace state;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -36284,6 +36425,9 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_story_turns state ~mailbox:async_messages;
       launch_owed_memory state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
+      launch_owed_refresh_pass state ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+        ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
@@ -36568,7 +36712,7 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
-        start_http_refresh state ~host ~port ~intent:Revalidate
+        start_http_refresh state ~host ~port ~intent:Operator_key
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
@@ -36699,7 +36843,7 @@ Use relative paths for resources already held in the package. -->
            else (match k with
              | "r" ->
                  start_http_refresh state ~host:server_peer_host ~port:state.port
-                   ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                   ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                    ~scoped_refresh_inflight:http_scoped_refresh_inflight
                    ~scoped_refresh_followup ~mailbox:async_messages
              | _ -> ())
@@ -39161,7 +39305,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
                      start_http_refresh state ~host:server_peer_host ~port:state.port
-                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                       ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_board_post post_id) ->
@@ -39840,7 +39984,7 @@ Use relative paths for resources already held in the package. -->
               authority even when retained rows cannot authorize that read.
               Do not refresh the live browser hidden underneath history. *)
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
@@ -40935,8 +41079,11 @@ Use relative paths for resources already held in the package. -->
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
             let needs = cycle_usage_history_window state in
+            (* The operator's key: the window it picks is read at once, during
+               a [/health] wait too (RFC tui-one-screen-grammar §2). *)
             start_http_scoped_refresh state ~host:server_peer_host
-              ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+              ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+              ~refresh_inflight:http_scoped_refresh_inflight
               ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
               ~mailbox:async_messages ~needs
        (* In chat, printable keys normally belong to the draft. Keep [?] as
@@ -42372,7 +42519,7 @@ Use relative paths for resources already held in the package. -->
               end)
        | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
            let read_candle goal_id =
-             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Operator_key
                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                ~scoped_refresh_followup ~mailbox:async_messages;
              clear_goal_candle_revalidation state ~goal_id;
@@ -43672,7 +43819,7 @@ Use relative paths for resources already held in the package. -->
               | None -> "Board: every hearth"
               | Some hearth -> "Board hearth: " ^ hearth);
            start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~intent:Operator_key ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
         | Some "f" | Some "F" when state.view = Planning ->
@@ -44316,15 +44463,10 @@ Use relative paths for resources already held in the package. -->
                  | Disconnected ->
                      (* RFC tui-server-lifecycle: with no server up there is
                         no keeper to shut down, so "s" starts one here. *)
-                     start_masc_server_here ~base_path ~host:server_peer_host
-                       ~port:state.port
-                       ~note:(fun msg -> add_event state "system" msg)
-                       ~on_ready:(fun () ->
-                         start_http_refresh state ~host:server_peer_host
-                           ~port:state.port ~intent:Revalidate
-                           ~refresh_inflight:http_refresh_inflight
-                           ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                           ~scoped_refresh_followup ~mailbox:async_messages)
+                     start_server_here_then_read state ~base_path ~host:server_peer_host
+                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
@@ -44342,7 +44484,7 @@ Use relative paths for resources already held in the package. -->
                        ("Board order: "
                         ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
-                       ~port:state.port ~intent:Revalidate
+                       ~port:state.port ~intent:Operator_key
                        ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup
@@ -44697,9 +44839,14 @@ Use relative paths for resources already held in the package. -->
         in
         drawn_needs := needed;
         Masc_tui_types.note_drawn_surface_needs state needed;
+        (* The operator moved to another screen or view, and it reads what
+           the destination adds at once, during a [/health] wait too (RFC
+           tui-one-screen-grammar §2). [drawn_needs] already holds the
+           destination, so a held read here would be lost; it is not held. *)
         if Masc_tui_types.surface_needs_any delta then
           start_http_scoped_refresh state ~host:(server_peer_host)
-            ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+            ~port:state.port ~ask:Masc_tui_refresh_pace.Operator_change
+            ~refresh_inflight:http_scoped_refresh_inflight
             ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
             ~mailbox:async_messages ~needs:delta
       end;

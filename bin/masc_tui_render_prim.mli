@@ -166,6 +166,23 @@ type recovery_row = {
   recovery_quit : Masc_tui_action_notice.quit_confirmation option;
 }
 
+(** What competes for the footer's notice slot, which stands in for zone 4
+    until the frame draws that row of its own (RFC tui-one-screen-grammar
+    §2, §9 item 6). *)
+type zone4_notice =
+  | Zone4_pending  (** The quit question, which takes the slot. *)
+  | Zone4_action  (** What the last key did: the action text or an outcome. *)
+  | Zone4_read_failure of Masc_tui_read_failure.failure
+
+val zone4_notice :
+  Masc_tui_types.state ->
+  action_text:string option ->
+  preferred_action:Masc_tui_footer.preferred_action option ->
+  zone4_notice Masc_tui_notice_order.shown option
+(** The notice the slot draws and how many wait behind it, in the order of
+    RFC §2: the quit question, then the action result, then the reads in
+    [state.read_failures]. *)
+
 val footer_line :
   ?help_door:bool ->
   ?status:Masc_tui_footer.status_item list ->

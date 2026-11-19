@@ -214,11 +214,16 @@ describe('ScheduleSurface', () => {
       .toContain('관측 전용')
     expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
       .toContain('keeper turn을 자동 구동하지 않습니다')
-    // Calendar is the default view; with no projection it renders the empty
-    // agenda/polling states rather than the diagnostic panel's placeholder.
+    // Calendar is the default view. With no projection nothing was read, so
+    // no calendar is drawn: empty days and an empty polling strip would be
+    // statements about schedules nobody has looked at.
     expect(container.querySelector('[data-testid="schedule-viewbar"]')).not.toBeNull()
-    expect(container.textContent).toContain('다가오는 7일에 예정된 예약이 없습니다')
-    expect(container.textContent).toContain('활성 폴링 없음')
+    expect(container.querySelector('[data-testid="sch-agenda"]')).toBeNull()
+    expect(container.querySelector('[data-testid="sch-agenda-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="sch-polling-empty"]')).toBeNull()
+    // Nor cadence counts, which would read zero.
+    expect(container.querySelector('[data-testid="sch-cadsum"]')).toBeNull()
+    expect(container.textContent).toContain('예약 자동화 projection 없음')
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
@@ -472,6 +477,28 @@ describe('ScheduleSurface', () => {
     expect(totalKpi?.textContent).toContain('42')
     expect(container.querySelector('[data-testid="schedule-page-metadata"]')?.textContent)
       .toContain('표시 1 / 전체 42 · 최대 20 · 일부만 표시')
+    // The rows left out are terminal ones: the one active schedule is on the
+    // page, so the calendar is not short of anything.
+    expect(container.querySelector('[data-testid="sch-calendar"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="sch-calendar-partial"]')).toBeNull()
+  })
+
+  it('says the calendar is partial when the page leaves active schedules out (#52961)', async () => {
+    const automation = sampleAutomation()
+    automation.request_count = 42
+    automation.truncated = true
+    // One active row on the page; the server counts five in the ledger.
+    automation.fsm = { ...automation.fsm, active_count: 5 }
+    setAutomation(automation)
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="sch-calendar-partial"]')?.textContent).toContain('4건')
   })
 
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
@@ -504,6 +531,7 @@ describe('ScheduleSurface', () => {
   })
 
   it('defaults to the calendar view with a cadence filter strip', async () => {
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },

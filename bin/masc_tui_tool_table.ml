@@ -1,6 +1,38 @@
 module Table = Masc_tui_table
 module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
+module Say = Masc_tui_say
+
+(* Column names in the screen's language, never in capitals only (RFC
+   tui-one-screen-grammar section 5.1). Every row of a table is drawn once per
+   language from these, so a header and the rows under it are laid out on the
+   same cells in either language. *)
+type names = {
+  tool : string;
+  origin : string;
+  calls : string;
+  failures : string;
+  direct : string;
+  surfaces : string;
+  keeper : string;
+  triggered : string;
+  delivered : string;
+  actions : string;
+  last_used : string;
+}
+
+let names = function
+  | Say.Ko ->
+    { tool = "도구"; origin = "출처"; calls = "호출"; failures = "실패"; direct = "직접";
+      surfaces = "노출 위치"; keeper = "Keeper"; triggered = "호출"; delivered = "전달";
+      actions = "동작"; last_used = "마지막 사용" }
+  | Say.En ->
+    { tool = "Tool"; origin = "Origin"; calls = "Calls"; failures = "Fail"; direct = "Direct";
+      surfaces = "Surfaces"; keeper = "Keeper"; triggered = "Triggered"; delivered = "Delivered";
+      actions = "Actions"; last_used = "Last used" }
+
+(* The percentile names itself the same way in both languages. *)
+let p95_name = "P95"
 
 let effective_tool_name_width = 34
 let catalog_tool_name_width = 32
@@ -19,18 +51,18 @@ let effective_row_indent = "   "
 let skill_usage_keeper_name_width = 22
 let skill_usage_count_width = 9
 
-let skill_usage_keeper_cells ~keeper ~invocations ~deliveries ~actions =
-  [ Table.cell ~header:"KEEPER" ~width:skill_usage_keeper_name_width keeper
-  ; Table.cell ~align:Table.Right ~header:"TRIGGERED"
+let skill_usage_keeper_cells names ~keeper ~invocations ~deliveries ~actions =
+  [ Table.cell ~header:names.keeper ~width:skill_usage_keeper_name_width keeper
+  ; Table.cell ~align:Table.Right ~header:names.triggered
       ~width:skill_usage_count_width invocations
-  ; Table.cell ~align:Table.Right ~header:"DELIVERED"
+  ; Table.cell ~align:Table.Right ~header:names.delivered
       ~width:skill_usage_count_width deliveries
-  ; Table.cell ~align:Table.Right ~header:"ACTIONS"
+  ; Table.cell ~align:Table.Right ~header:names.actions
       ~width:skill_usage_count_width actions
   ]
 
-let effective_tool_cells name =
-  [ Table.cell ~header:"TOOL" ~width:effective_tool_name_width name ]
+let effective_tool_cells names name =
+  [ Table.cell ~header:names.tool ~width:effective_tool_name_width name ]
 
 type usage_reading =
   | Usage_unread
@@ -69,13 +101,14 @@ type catalog_layout = catalog_column list
    SURFACES loses any: P95 first, FAIL next, CALLS last, and the table is
    TOOL DIRECT SURFACES again, which is what a terminal too narrow for them
    drew before they existed. *)
-let catalog_layout ~width ~surfaces_cells =
+let catalog_layout ~language ~width ~surfaces_cells =
   let inner_width = max 0 (width - String.length catalog_row_indent) in
   let column_width = function
     | Col_name -> catalog_tool_name_width
     | Col_calls | Col_failures | Col_p95 -> catalog_reading_width
     | Col_direct -> catalog_direct_width
-    | Col_surfaces -> max (String.length "SURFACES") surfaces_cells
+    | Col_surfaces ->
+      max (Masc_tui_message_layout.display_width (names language).surfaces) surfaces_cells
   in
   let fitted =
     Table.fit ~inner_width ~width:column_width ~flex:Col_surfaces
@@ -115,7 +148,7 @@ let p95_reading = function
 (* The cells of one catalog line. The column names are drawn from the same
    cells with empty readings, so header and rows cannot place a column
    differently. *)
-let catalog_cells layout ~metadata ~name ~direct ~usage =
+let catalog_cells names layout ~metadata ~name ~direct ~usage =
   let count header (value, style) =
     Table.cell ~align:Table.Right ~style ~header ~width:catalog_reading_width
       value
@@ -124,13 +157,13 @@ let catalog_cells layout ~metadata ~name ~direct ~usage =
     (function
       | Col_name ->
           Some
-            (Table.cell ~header:"TOOL" ~width:catalog_tool_name_width name)
-      | Col_calls -> Some (count "CALLS" (calls_reading usage))
-      | Col_failures -> Some (count "FAIL" (failures_reading usage))
-      | Col_p95 -> Some (count "P95" (p95_reading usage))
+            (Table.cell ~header:names.tool ~width:catalog_tool_name_width name)
+      | Col_calls -> Some (count names.calls (calls_reading usage))
+      | Col_failures -> Some (count names.failures (failures_reading usage))
+      | Col_p95 -> Some (count p95_name (p95_reading usage))
       | Col_direct ->
           Some
-            (Table.cell ~style:metadata ~header:"DIRECT"
+            (Table.cell ~style:metadata ~header:names.direct
                ~width:catalog_direct_width direct)
       | Col_surfaces -> None)
     layout
@@ -142,43 +175,55 @@ let catalog_cells layout ~metadata ~name ~direct ~usage =
 let framed ~indent ~cells ~tail =
   indent ^ cells ^ String.make Table.cell_gap ' ' ^ tail
 
+(* Each table row in both languages: the same cells, named in each. *)
+let in_each_language draw = Say.per_language (fun language -> draw language (names language))
+
 let effective_tool_header =
-  framed ~indent:effective_row_indent
-    ~cells:(Table.header_row (effective_tool_cells ""))
-    ~tail:"ORIGIN"
+  in_each_language (fun _ names ->
+    framed ~indent:effective_row_indent
+      ~cells:(Table.header_row (effective_tool_cells names ""))
+      ~tail:names.origin)
 
 let effective_tool_line ~name ~origin =
-  framed ~indent:effective_row_indent
-    ~cells:(Table.row (effective_tool_cells name))
-    ~tail:origin
+  in_each_language (fun _ names ->
+    framed ~indent:effective_row_indent
+      ~cells:(Table.row (effective_tool_cells names name))
+      ~tail:origin)
 
 let catalog_tool_header layout =
-  framed ~indent:catalog_row_indent
-    ~cells:
-      (Table.header_row
-         (catalog_cells layout ~metadata:"" ~name:"" ~direct:""
-            ~usage:Usage_unread))
-    ~tail:"SURFACES"
+  in_each_language (fun _ names ->
+    framed ~indent:catalog_row_indent
+      ~cells:
+        (Table.header_row
+           (catalog_cells names layout ~metadata:"" ~name:"" ~direct:""
+              ~usage:Usage_unread))
+      ~tail:names.surfaces)
 
 let catalog_tool_line layout ~metadata ~name ~direct ~usage ~surfaces =
-  framed ~indent:catalog_row_indent
-    ~cells:(Table.row (catalog_cells layout ~metadata ~name ~direct ~usage))
-    ~tail:(metadata ^ surfaces)
+  in_each_language (fun language names ->
+    framed ~indent:catalog_row_indent
+      ~cells:
+        (Table.row
+           (catalog_cells names layout ~metadata ~name
+              ~direct:(Say.render language direct) ~usage))
+      ~tail:(metadata ^ Say.render language surfaces))
 
 let skill_usage_keeper_header =
-  framed ~indent:""
-    ~cells:
-      (Table.header_row
-         (skill_usage_keeper_cells ~keeper:"" ~invocations:"" ~deliveries:""
-            ~actions:""))
-    ~tail:"LAST USED"
+  in_each_language (fun _ names ->
+    framed ~indent:""
+      ~cells:
+        (Table.header_row
+           (skill_usage_keeper_cells names ~keeper:"" ~invocations:"" ~deliveries:""
+              ~actions:""))
+      ~tail:names.last_used)
 
 let skill_usage_keeper_line ~keeper ~invocations ~deliveries ~actions ~last_used =
-  framed ~indent:""
-    ~cells:
-      (Table.row
-         (skill_usage_keeper_cells ~keeper
-            ~invocations:(string_of_int invocations)
-            ~deliveries:(string_of_int deliveries)
-            ~actions:(string_of_int actions)))
-    ~tail:last_used
+  in_each_language (fun _ names ->
+    framed ~indent:""
+      ~cells:
+        (Table.row
+           (skill_usage_keeper_cells names ~keeper
+              ~invocations:(string_of_int invocations)
+              ~deliveries:(string_of_int deliveries)
+              ~actions:(string_of_int actions)))
+      ~tail:last_used)

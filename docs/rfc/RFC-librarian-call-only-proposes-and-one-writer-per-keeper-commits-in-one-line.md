@@ -1924,6 +1924,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 3. 새 파일의 store 검증, Keeper 삭제 계획, blob GC 분류는 서버가 그 파일을 처음 쓰는 층이나 그 앞의 층에 넣는다.
 4. 삭제는 마지막이다. 커밋 하나가 파일 다섯 개를 넘지 않는다.
 
+쓰는 쪽을 서버가 시작하는 층은 턴 기록을 쓰는 층(L3c) 뒤에 온다. 턴 기록이 없는 Keeper 의 저장소는 `Store_unwritable` 로 서고 쓰기는 `Unavailable` 로 답한다.
+
 앞서 끝나 있어야 하는 것은 「Exact 요청은 자리만 기다린다」 RFC(#52986)의 자리 걷기 층이다. 그 층이 병합되기 전에는 이 스택의 어느 PR 도 `exact_output.ml`, `exact_output.mli`, `retry.ml` 을 고치지 않는다.
 
 | 층 | 넣는 것 | 확인 |
@@ -1964,6 +1966,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5n | Keeper 의 `keeper_memory_write` 가 admission queue 에 넣지 않고 지금 스냅샷에 바로 쓴다. queue 에 넣는 곳은 이 도구 하나였다. 이미 든 줄은 옛 admission pass 가 비우고, 파일은 컷에서 지운다 | 평범한 관찰이 바로 지금 Memory 에 든다. 같은 claim 을 다시 쓰면 `reobserved` 다. 옛 admission 경로의 시험은 queue 를 직접 채운다 |
 | L5o | 서버가 큐 신호에 working-context pass 만 싣는다. launch, boot, checkpoint purge 가 durable catch-up 을 싣지 않는다 | launch 가 memory lane 에 아무것도 싣지 않는다. 돌고 있는 unit 뒤에 쌓이는 것이 없다 |
 | L5p | 운영자가 옛 durable pass 를 싣던 두 길을 지운다. `memory-catch-up` route 와 TUI 의 `/memory sync`, history original resolution route 다 | `/memory sync` 는 모르는 명령이다. 두 경로에 route 가 없다 |
+| L5q | workspace 마다 쓰는 쪽의 표 하나를 쥐는 모듈(`keeper_memory_writers`). 표는 서버가 시작하고, 시작한 switch 와 같이 끝난다. 이 층에서는 서버가 아직 시작하지 않는다 | 등록부에 없는 Keeper 는 쓰는 쪽이 없다. 스냅샷과 반영 기록이 Keeper config 디렉터리에 생긴다. 턴 기록이 없는 Keeper 의 저장소는 선다. 시작하지 않은 workspace 에는 표가 없다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |

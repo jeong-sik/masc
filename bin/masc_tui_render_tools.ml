@@ -193,7 +193,8 @@ let skill_invocation_text = function
   | Masc.Keeper_skill_activation_ledger.Nested_composition_invocation
       { origin; tool_name; scope = _ } ->
     ( skill_composition_origin_text ~tool_name origin
-    , Say.code ("composition invocation tool=" ^ tool_name) )
+    , Say.both ~ko:"composition 호출" ~en:"composition invocation"
+      ++ Say.code (" tool=" ^ tool_name) )
 
 let skill_delivery_text ~has_action = function
   | None -> Say.both ~ko:"대기" ~en:"pending"
@@ -328,10 +329,12 @@ let async_logical_lines value =
      Ansi.dim, Say.both ~ko:" 원본 Task: " ~en:" Original Task: "
        ++ Option.fold ~none:(Say.both ~ko:"없음(기록)" ~en:"none (recorded)") ~some:safe run.source_task_id;
      Ansi.dim, Say.both ~ko:" 현재 run owner: " ~en:" Current run owner: " ++ safe run.owner.request_id
-       ++ say_dot ++ Say.code (Printf.sprintf "generation %d" run.owner.generation);
+       ++ say_dot ++ Say.per_language (function
+            | Say.Ko -> Printf.sprintf "세대 %d" run.owner.generation
+            | Say.En -> Printf.sprintf "generation %d" run.owner.generation);
      Ansi.dim, Say.both ~ko:" 논리 관측 시각: " ~en:" Logical observed at: "
        ++ Say.code (Printf.sprintf "%.3f" run.observed_at)
-       ++ say_dot ++ Say.code "journal " ++ safe run.journal_version]
+       ++ say_dot ++ Say.both ~ko:"저널 " ~en:"journal " ++ safe run.journal_version]
     @ (match run.resolution with
       | None ->
         [Theme.warn (), Say.both ~ko:" 논리: 명시적 종결 없음 · 실행 허가는 별도"
@@ -1516,9 +1519,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                                 action_count
                                 (Terminal_text.single_line (string_field "activated_at")))
                          ; Ansi.dim,
-                           Say.code (Printf.sprintf "       trace %s · tool use %s"
-                             (Terminal_text.single_line item.sea_trace_id)
-                             (Terminal_text.single_line (string_field "skill_tool_use_id")))
+                           Say.code "       trace "
+                           ++ Say.as_received (Terminal_text.single_line item.sea_trace_id)
+                           ++ Say.both ~ko:" · 도구 호출 " ~en:" · tool use "
+                           ++ Say.as_received (Terminal_text.single_line (string_field "skill_tool_use_id"))
                            ++ (if tied then Say.both ~ko:" · 같은 시각 후보" ~en:" · equal-time candidate"
                                else Say.empty)
                          ; Ansi.dim,
@@ -1639,8 +1643,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                      coverage.sec_composition_unavailable
                  in
                    [ Ansi.dim,
-                     Say.code (Printf.sprintf
-                       "       coverage retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s runs_observed=%d"
+                     Say.both ~ko:"       범위" ~en:"       coverage"
+                     ++ Say.code (Printf.sprintf
+                       " retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s runs_observed=%d"
                        coverage.sec_activation_sessions_inspected
                        coverage.sec_activation_ledgers_loaded
                        coverage.sec_activation_scope
@@ -1929,7 +1934,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                   | [] -> []
                   | runtimes ->
                       [ ( Ansi.dim
-                        , Say.code "     runtimes \xc2\xb7 "
+                        , Say.both ~ko:"     runtime 별 \xc2\xb7 " ~en:"     runtimes \xc2\xb7 "
                           ++ Say.concat ~sep:say_dot
                                (List.map
                                   (fun (label, counts) -> label ++ Say.code " " ++ runtime_counts counts)
@@ -1944,7 +1949,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                (* The receipt in the ledger's own field names, which a reader
                   matches against the ledger file. *)
                [ Ansi.dim,
-                 Say.code "   begin id=" ++ safe activation.skill_tool_use_id
+                 Say.both ~ko:"   시작" ~en:"   begin" ++ Say.code " id=" ++ safe activation.skill_tool_use_id
                ; Ansi.dim,
                  Say.code "   receipt_sha256="
                  ++ Say.as_received
@@ -1952,7 +1957,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                          sap_ledger
                          ~skill_tool_use_id:activation.skill_tool_use_id)
                ; Ansi.dim,
-                 Say.code "   exact source_id="
+                 Say.both ~ko:"   정확한" ~en:"   exact" ++ Say.code " source_id="
                  ++ safe (Skill_reference.identity_source_id_to_string activation.identity)
                ; Ansi.dim,
                  Say.code "     package_id="
@@ -1963,16 +1968,17 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                  Say.code "     content_revision="
                  ++ safe (Skill_reference.content_revision_to_string activation.content_revision)
                ; Ansi.dim,
-                 Say.code (Printf.sprintf
-                   "     invoked turn=%d id=%s runtime=%s at=%s"
+                 Say.both ~ko:"     호출" ~en:"     invoked"
+                 ++ Say.code (Printf.sprintf
+                   " turn=%d id=%s runtime=%s at=%s"
                    activation.agent_core_turn
                    (Terminal_text.single_line activation.skill_tool_use_id)
                    (Terminal_text.single_line activation.runtime_id)
                    (Terminal_text.single_line activation.activated_at))
                ; Ansi.dim,
-                 Say.code "       served " ++ Say.map Terminal_text.single_line served
+                 Say.both ~ko:"       제공 " ~en:"       served " ++ Say.map Terminal_text.single_line served
                ; Ansi.dim,
-                 Say.code "       delivered "
+                 Say.both ~ko:"       전달 " ~en:"       delivered "
                  ++ Say.map Terminal_text.single_line
                       (skill_delivery_text
                          ~has_action:(not (List.is_empty activation.actions))
@@ -1988,7 +1994,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                ]
                @ skill_action_lines activation.actions
                @ [ Ansi.dim,
-                   Say.code "       end id=" ++ safe activation.skill_tool_use_id
+                   Say.both ~ko:"       끝" ~en:"       end" ++ Say.code " id=" ++ safe activation.skill_tool_use_id
                  ])
             sap_activations
         in
@@ -2057,6 +2063,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
               | Say.Ko -> Printf.sprintf " Skill 타임라인 — 사건 %d개 (최신부터)" total
               | Say.En -> Printf.sprintf " Skill Timeline — %d event%s (newest first)"
                   total (if total = 1 then "" else "s"))
+          (* Masc_tui_token_scale writes this note in English for every screen
+             that estimates tokens; it moves with the Context inspector. *)
           ; Ansi.dim, Say.code "   " ++ Say.as_received (Masc_tui_token_scale.note Masc_tui_token_scale.fleet) ]
           @ List.map (fun (_, line) -> (Ansi.dim, Say.code "   " ++ line)) capped
         in
@@ -2412,7 +2420,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                | Say.En -> Printf.sprintf "Skill Usage — %d of %d catalog Skills observed"
                    (List.length used) (List.length sc_surfaces))
            ; Theme.info (),
-             Say.code (Printf.sprintf "Keepers %d · " keepers)
+             Say.per_language (function
+               | Say.Ko -> Printf.sprintf "Keeper %d · " keepers
+               | Say.En -> Printf.sprintf "Keepers %d · " keepers)
              ++ counts_text ~invocations:(invocations all_usage) ~deliveries:(deliveries all_usage)
                   ~actions:(actions all_usage)
            ; Ansi.dim, Say.both ~ko:"범위: 지금 Keeper 세션의 정확한 Skill revision · 전달에는 비동기 넘김 포함"

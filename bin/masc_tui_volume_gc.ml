@@ -127,8 +127,11 @@ let keeper_line (verdict : Answer.verdict) =
   in
   ( tone
   , Say.code "  " ++ received verdict.keeper_name ++ Say.code ": " ++ received verdict.outcome
-    ++ Say.code (Printf.sprintf " (work %s, build %s)"
-         (volume_label verdict.work_volume) (volume_label verdict.build_volume)) )
+    ++ Say.per_language (function
+         | Say.Ko -> Printf.sprintf " (작업 %s, build %s)"
+             (volume_label verdict.work_volume) (volume_label verdict.build_volume)
+         | Say.En -> Printf.sprintf " (work %s, build %s)"
+             (volume_label verdict.work_volume) (volume_label verdict.build_volume)) )
 ;;
 
 let report_lines (report : Answer.t) =

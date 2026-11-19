@@ -32,10 +32,12 @@ val as_received : string -> t
 
 val code : string -> t
 (** A literal that reads the same in both languages because it holds no
-    words: a field label in an evidence row ([bytes=], [sha256=]), a protocol
-    name the reader compares with logs, a glyph, a separator. A word, or a
-    wire state a reader is meant to read as one ([queued]), goes through
-    {!both}. *)
+    words: a field name written as [key=] in an evidence row ([bytes=],
+    [sha256=], [tool use=]), a code the reader compares with a log
+    ([document_unreadable]), a product noun the Korean screen also writes in
+    English (Skill, Keeper, Task, Composition, runtime, snapshot), a glyph, a
+    separator. Any other word, and a wire state a reader is meant to read as
+    one ([queued]), goes through {!both}. *)
 
 val of_ko_flag : (ko:bool -> string) -> t
 (** The text a function that still takes [~ko:bool] writes in each language.

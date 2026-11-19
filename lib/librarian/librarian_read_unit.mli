@@ -1,8 +1,8 @@
 (** One unit of a Keeper's turn log as a question shows it
     (RFC librarian-call-only-proposes §5.3, §5.5).
 
-    The items are the values their stores hold, one row each, numbered and
-    ordered as {!Librarian_unit} says. The question reduces them as §5.5
+    The items are the values their stores hold, one row each, in the order
+    {!Librarian_unit} says. The question reduces them as §5.5
     says when it writes them out, so one module writes the question's
     bytes. Nothing here is written to the commit log. *)
 
@@ -26,7 +26,9 @@ type body =
       }
 
 type item =
-  { index : int (** Its number in the unit. *)
+  { index : int
+  (** Its place in the unit as this question shows it, counted from 0. It
+      is not written to the commit log. *)
   ; body : body
   }
 

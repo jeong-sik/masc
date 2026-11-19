@@ -1,28 +1,16 @@
-module Digest = Agent_core.Checkpoint_objects
+type range =
+  { from : int
+  ; until : int
+  }
 
 type missing_part =
-  | Bundle of
-      { bundle : Digest.digest
-      ; first : int
-      ; count : int
-      }
-  | History_bytes of
-      { first : int
-      ; count : int
-      }
-  | Internal_bytes of
-      { first : int
-      ; count : int
-      }
-  | Chat_bytes of
-      { first : int
-      ; count : int
-      }
-  | External_rows of
-      { first : int
-      ; count : int
-      }
-  | Undecodable_fragment_line of { item : int }
+  | Bundle of Keeper_turn_log.slice
+  | History_bytes of range
+  | Internal_bytes of range
+  | Chat_bytes of range
+  | External_rows of range
+  | Undecodable_history_line of { offset : int }
+  | Undecodable_internal_line of { offset : int }
 
 type missing_at =
   { line : int

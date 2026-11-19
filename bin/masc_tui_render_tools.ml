@@ -42,8 +42,8 @@ let refusal_text ~request refusal =
 
 (* What a section of this screen hands the frame. A [Row] holds its words in
    both languages. A [Cursor] is the row of the entry the list keys act on: it
-   draws as a [Row], and {!tools_display} says which physical row it starts
-   on, so the key handler brings it into view by that number rather than by
+   draws as a [Row], and {!tools_display} says which physical rows it takes,
+   so the key handler brings it into view by those numbers rather than by
    looking for its colour. A [Laid_out] block is rows fitted to a width by a
    step that has to see the words first -- a boxed card wraps its rows, a
    table keeps its columns only if its header fits, a chart sizes its bars
@@ -1171,7 +1171,9 @@ let skill_source_picker_page state ~terminal_rows =
 
 let surface_title = Say.both ~ko:" Keeper 호출 범위" ~en:" Effective Keeper Surface"
 
-type display = { lines : (string * string) list; cursor_row : int option }
+type cursor_rows = { first_row : int; last_row : int }
+
+type display = { lines : (string * string) list; cursor : cursor_rows option }
 
 let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let language = say_language state in
@@ -1189,7 +1191,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                List.mapi (fun index source ->
                  (if view.selected_row = Some index then Theme.selection else Ansi.dim),
                  Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
-    ; cursor_row = None }
+    ; cursor = None }
   | None ->
   let registered_tools =
     match state.tools_inventory with
@@ -2704,11 +2706,11 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let wrap pieces = List.concat_map (fun ((style, text), cursor) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as
-          Markdown or shorten its identities to fit the frame. A cursor row
-          that wraps is found by its first row. *)
+          Markdown or shorten its identities to fit the frame. Every row a
+          wrapped cursor row becomes keeps the mark, so its span is whole. *)
        if Masc_tui_message_layout.display_width text <= width then [ (style, text), cursor ]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
-            |> List.mapi (fun row line -> (style, line), cursor && row = 0))
+            |> List.map (fun line -> (style, line), cursor))
        (draw_marked language pieces) in
   let drafts = List.map (fun draft ->
       Theme.warn (),
@@ -2730,7 +2732,21 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       wrap prefix @ draw_marked language pane_lines
     else wrap (prefix @ pane_lines)
   in
-  { lines = List.map fst marked; cursor_row = List.find_index snd marked }
+  (* One [Cursor] piece, so the marked rows are one run. *)
+  let cursor =
+    List.fold_left
+      (fun (index, span) (_, marked_row) ->
+         let span =
+           match marked_row, span with
+           | false, _ -> span
+           | true, None -> Some { first_row = index; last_row = index }
+           | true, Some rows -> Some { rows with last_row = index }
+         in
+         index + 1, span)
+      (0, None) marked
+    |> snd
+  in
+  { lines = List.map fst marked; cursor }
 ;;
 
 let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines

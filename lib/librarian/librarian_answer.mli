@@ -76,6 +76,13 @@ val rejection_kind : rejection -> string
     what it reads. *)
 val to_json : t -> Yojson.Safe.t
 
+(** A new fact alone, with the fields it has inside an op: [claim],
+    [category], [basis], [from]. A commit line carries the claim of an op
+    that was left out in this shape. *)
+val new_fact_to_json : new_fact -> Yojson.Safe.t
+
+val new_fact_of_json : Yojson.Safe.t -> (new_fact, wire_error) result
+
 (** Decode an answer to the question [asked]. Every object is field-exact.
     Checks run in this order, and the first failure is the rejection: the
     document's field set, the two echoed halves being strings

@@ -169,6 +169,16 @@ let new_fact_of_fields fields =
   Ok { claim; category; observation; from_units }
 ;;
 
+let new_fact_to_json fact = `Assoc (new_fact_to_fields fact)
+
+let new_fact_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result new_fact_fields fields in
+    new_fact_of_fields fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    wire_here Expected_object
+;;
+
 let op_of_json = function
   | `Assoc fields ->
     let* token = wire_string_field field_op fields in

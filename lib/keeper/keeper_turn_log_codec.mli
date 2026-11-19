@@ -10,6 +10,14 @@
 
 val to_json : Keeper_turn_log.line -> Yojson.Safe.t
 
+(** A mark as a line carries it. The commit log writes its own marks in the
+    same shape. *)
+val mark_to_json : Keeper_turn_log.mark -> Yojson.Safe.t
+
+val mark_of_json
+  :  Yojson.Safe.t
+  -> (Keeper_turn_log.mark, Keeper_memory_os_types.wire_error) result
+
 (** Every object has exactly its fields. Counts and offsets are not negative,
     and a slice takes at least one message. *)
 val of_json

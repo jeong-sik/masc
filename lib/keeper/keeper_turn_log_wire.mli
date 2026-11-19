@@ -1,4 +1,4 @@
-(** Readers the turn log's codecs share. *)
+(** Readers the line codecs share: the turn log's and the commit log's. *)
 
 open Keeper_memory_os_types
 

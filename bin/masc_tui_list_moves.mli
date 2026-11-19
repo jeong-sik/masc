@@ -17,9 +17,45 @@ type row_list = {
     window to the row needs the frame's geometry, which only the executable
     has. *)
 
+(** The two lists on the Tools surface a reader chooses from. *)
+type tools_list =
+  | Tools_skills  (** the Skill list on the Available pane *)
+  | Tools_async_requests  (** the async request list, while no request is open *)
+
+val tools_list : Masc_tui_types.state -> tools_list option
+(** The list the move keys walk on the Tools surface. [None] on the panes
+    that are readings -- receipts, usage, all tools, storage, the volume
+    report, an open async request -- whose move keys scroll the page, and
+    while the source picker is open, which walks its own list. [None] too
+    on Available while its page is read ({!read_skill_page}), and on a list
+    with nothing in it: a page with no Skill or no request still scrolls. *)
+
+val read_skill_page : Masc_tui_types.state -> unit
+(** Enter or f on Available, after the selected Skill's evidence is asked
+    for: the move keys read the whole page -- the Skill's flow, its
+    evidence, the tool table -- instead of walking the list. With no Skill
+    selected there is nothing to read, and the keys stay where they were.
+    Other panes keep their own Enter. *)
+
+val choose_skill_again : Masc_tui_types.state -> bool
+(** Esc on Available while its page is read: the move keys walk the Skill
+    list again. [true] when Esc was spent this way, so the caller brings the
+    selected Skill back on screen and Esc goes no further out. *)
+
+val tools_keys : Masc_tui_types.state -> Masc_tui_keys.tools_keys
+(** What the Tools footer says j/k and Esc do, from the same state
+    {!tools_list} and {!choose_skill_again} read, and the original Task and
+    open request Esc's arm reads: a list walked, the chosen Skill's page read,
+    an open request or its original Task read, or a page with no list. *)
+
+val show_tools_pane : Masc_tui_types.state -> Masc_tui_types.tools_pane -> unit
+(** Change the Tools pane. A page read on Available belongs to that visit,
+    so every arrival starts with the move keys on the list. *)
+
 val moves :
   Masc_tui_types.state ->
   rows:(unit -> row_list option) ->
+  follow:(tools_list -> unit) ->
   (Masc_tui_scroll.Cursor_move.t -> unit) option
 (** How the move keys move the list on screen; [None] when no list answers
     them.
@@ -28,6 +64,8 @@ val moves :
     list) moves its [rows]. Otherwise the Keeper list walks its stops
     ({!Masc_tui_types.move_keeper_list_stop}) and Overview its destinations
     ({!Masc_tui_home.home_move}); neither asks for [rows], since a Keeper row
-    chosen by position opens its group and Overview has no row cursor. Every
-    other surface moves its [rows], and only an empty list ignores the
-    key. *)
+    chosen by position opens its group and Overview has no row cursor. Tools
+    walks the selection of its {!tools_list} and then calls [follow] with
+    that list, because where the selection is drawn on the page is the
+    frame's to say; the key itself never scrolls the page. Every other
+    surface moves its [rows], and only an empty list ignores the key. *)

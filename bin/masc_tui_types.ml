@@ -6331,6 +6331,16 @@ let tools_volume_gc_parent_scroll = function
   | Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
   | Tools_catalog Tools_catalog_list -> None
 
+(* What the six move keys act on in the Available pane. The pane draws the
+   Skill list and, below it, the selected Skill's page: its flow, its
+   evidence, the tool table. Choosing walks the list. Enter loads the
+   Skill's evidence and turns the keys to the page; Esc gives them back to
+   the list (RFC tui-one-screen-grammar section 3.1). Another pane, another
+   screen or a Skill that is no longer there starts again at Choosing. *)
+type tools_skill_focus =
+  | Choosing_skill
+  | Reading_page
+
 type tools_read_part =
   | Tools_inventory_read
   | Tools_catalog_read
@@ -11163,6 +11173,7 @@ type state = {
   mutable tools_task_follow_end: tools_task_owner option;
   mutable tools_task_presented: tools_task_frame option;
   mutable tools_skill_cursor: int;
+  mutable tools_skill_focus: tools_skill_focus;
   (* Whether the Effective Keeper Surface's diagnostics -- the runtime, the
      two digests and the byte budgets -- are folded under their heading.
      Folded is the default: these rows sat above the Skill list, and a reader
@@ -15365,20 +15376,27 @@ let apply_tools_async_observation_result state ~generation result =
        | Error failure -> state.tools_async_observation_error <- Some failure);
       true)
 
-let move_tools_async_selection state delta =
+(* One move key over the async request list (RFC tui-one-screen-grammar
+   §3.1): held inside the list like every other list, so k on the first
+   request stays there rather than wrapping to the last. A selection the list
+   no longer holds starts again at an edge, as Overview's does. *)
+let move_tools_async_selection state (move : Masc_tui_scroll.Cursor_move.t) =
   let targets = tools_async_targets state in
-  let current = Option.bind state.tools_async_selection (fun selected ->
-    List.find_index (Masc.Tui_decode_async_request.equal_target selected) targets) in
   let count = List.length targets in
-  if count > 0 then begin
-    let index = match current with
-      | Some index -> (index + delta + count) mod count
-      | None -> if delta < 0 then count - 1 else 0 in
-    let target = List.nth targets index in
+  let index =
+    match Option.bind state.tools_async_selection (fun selected ->
+      List.find_index (Masc.Tui_decode_async_request.equal_target selected) targets) with
+    | Some index -> Masc_tui_scroll.cursor_apply ~count move index
+    | None ->
+        (match move with
+         | To_end -> Masc_tui_scroll.cursor_last ~count
+         | Line_down | Line_up | Page_down _ | Page_up _ | To_top -> 0)
+  in
+  Option.iter (fun target ->
     if not (Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection (Some target)) then
       state.tools_async_last_logical <- None;
-    state.tools_async_selection <- Some target
-  end
+    state.tools_async_selection <- Some target)
+    (List.nth_opt targets index)
 
 (* Records one Keeper's Usage read in Keeper name order. A failed read keeps
    the Keeper's last answer beside the failure. *)
@@ -21607,6 +21625,7 @@ let create_state
   tools_task_follow_end = None;
   tools_task_presented = None;
   tools_skill_cursor = 0;
+  tools_skill_focus = Choosing_skill;
   tools_diagnostics_folded = true;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];

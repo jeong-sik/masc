@@ -4639,12 +4639,6 @@ let normalize_tools_skill_cursor state =
   then state.tools_skill_cursor <- 0
 ;;
 
-let move_tools_skill_cursor state delta =
-  let count = List.length (tools_skill_profiles state) in
-  if count > 0
-  then state.tools_skill_cursor <- (state.tools_skill_cursor + delta + count) mod count
-;;
-
 let cycle_tools_keeper state ~mailbox ~delta =
   let count = List.length state.keepers in
   if count > 0 then begin
@@ -4660,6 +4654,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.tools_activations_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
     tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
+    state.tools_skill_focus <- Choosing_skill;
     launch_tools_load state ~mailbox
   end
 ;;
@@ -8348,7 +8343,9 @@ let launch_verification_load state ~mailbox =
 
    [None] is a surface with no row cursor, or one whose rows only exist once
    the frame is built. Those keep the keys they already have: Activity has g
-   and G, the Keeper log and Tools have their own Home and End. *)
+   and G, the Keeper log and the Tools readings have their own Home and End.
+   The two Tools lists walk a selection rather than a row of the page, so
+   [Masc_tui_list_moves] moves them itself. *)
 type row_list = Masc_tui_list_moves.row_list = {
   rl_count : int;
   rl_cursor : int;
@@ -8873,11 +8870,117 @@ let place_row_cursor state index =
 
 (* The list the six move keys walk (RFC tui-one-screen-grammar §3.1). The
    choice lives in [Masc_tui_list_moves], which a test links; this only hands
-   it the surface's rows, which need the frame's geometry. *)
+   it the surface's rows and the Tools follow, which need the frame's
+   geometry. *)
 module Cursor_move = Masc_tui_scroll.Cursor_move
+
+(* Where the selected Skill is drawn on the Available pane: the rows its
+   entry takes there, every row of it when it wraps ([cursor]), and the
+   lines above it that belong with it. The group heading above it is not
+   part of the entry, so the lead brings it in.
+
+   The first Skill brings everything above it, so Home shows the top of the
+   page. A Skill that opens its group brings the group heading, which the
+   renderer draws above the first Skill of each kind. *)
+let tools_skill_landing (state : state) (display : Masc_tui_render_tools.display) =
+  Option.map (fun ({ first_row = first; last_row = last } : Masc_tui_render_tools.cursor_rows) ->
+      let instruction (profile : Masc.Tui_decode_tools.effective_skill_profile) =
+        match profile.esp_io with
+        | Model_orchestrated -> true
+        | Composition_io _ -> false
+      in
+      let profiles = tools_skill_profiles state in
+      let cursor = state.tools_skill_cursor in
+      let lead =
+        if cursor <= 0 then first
+        else
+          match List.nth_opt profiles (cursor - 1), List.nth_opt profiles cursor with
+          | Some previous, Some selected
+            when not (Bool.equal (instruction previous) (instruction selected)) -> 1
+          | Some _, Some _ | Some _, None | None, Some _ | None, None -> 0
+      in
+      first, last, lead)
+    display.cursor
+
+(* Where the selected async request is drawn: the rows it adds to the list.
+   The page is drawn three times -- with no request, with the requests above
+   the selected one, and through it -- and the differences in length are the
+   rows each part takes. Only line counts are compared, so the age each row
+   shows, which moves while it is drawn, cannot shift the landing. *)
+let tools_async_landing (state : state) ~cols ~terminal_rows =
+  match state.tools_async_observation, state.tools_async_selection with
+  | Some (Tui_decode.Async_ready { summary; requests; recovery }), Some selected ->
+      Option.map (fun index ->
+        let drawn requests =
+          Masc_tui_render_tools.tools_display_lines ~cols ~terminal_rows
+            { state with
+              tools_async_observation =
+                Some (Tui_decode.Async_ready { summary; requests; recovery }) }
+        in
+        let empty = drawn [] in
+        let before = drawn (List.take index requests) in
+        let through = drawn (List.take (index + 1) requests) in
+        let same (style, text) (style', text') =
+          String.equal style style' && String.equal text text'
+        in
+        let rec shared count = function
+          | x :: rest, y :: rest' when same x y -> shared (count + 1) (rest, rest')
+          | _ :: _, _ :: _ | [], _ | _, [] -> count
+        in
+        let start = shared 0 (empty, through) in
+        let first = start + List.length before - List.length empty in
+        let last = start + List.length through - List.length empty - 1 in
+        first, last, (if index = 0 then first else 0))
+        (List.find_index (Masc.Tui_decode_async_request.equal_target selected)
+           (tools_async_targets state))
+  | Some (Tui_decode.Async_ready _), None
+  | Some (Tui_decode.Async_unavailable _), _
+  | None, _ -> None
+
+(* The window follows the selection a Tools move key landed on, the way
+   [row_list]'s [follow] does for a row cursor: the last line first, then the
+   first with its lead, so a Skill or a request that wraps is on screen whole
+   when it fits. *)
+let follow_tools_list (state : state) list =
+  let terminal_rows, cols = get_terminal_size () in
+  let landing =
+    match list with
+    | Masc_tui_list_moves.Tools_skills ->
+        tools_skill_landing state
+          (Masc_tui_render_tools.tools_display ~cols ~terminal_rows state)
+    | Tools_async_requests -> tools_async_landing state ~cols ~terminal_rows
+  in
+  match landing, scrolled_surface state state.view with
+  | Some (first, last, lead), Some scrolled ->
+      let height = surface_body_height_at state ~cursor:first scrolled in
+      tools_task_user_scroll state
+        (Masc_tui_scroll.ensure_visible_with_lead ~cursor:first ~lead ~height
+           (Masc_tui_scroll.ensure_visible ~cursor:last ~height state.tools_scroll))
+  | None, _ | Some _, None -> ()
+
+(* The selection of the Tools list on screen, brought into view where the
+   window may have left it: arriving on the pane, back from an open request,
+   or after a read moved the selection. A reading has no selection and keeps
+   its scroll. *)
+let follow_tools_selection (state : state) =
+  if state.view = Tools then
+    Option.iter (follow_tools_list state) (Masc_tui_list_moves.tools_list state)
+
+(* Where f leaves the page it opens: the chosen Composition's performance
+   card at the top of the window. The renderer draws it under the Skill list
+   and says where ([card]); the card grows downward as the measurements
+   arrive, so its first row stays put. With no card drawn, the selected
+   Skill's own rows take its place. *)
+let tools_performance_card_top (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let display = Masc_tui_render_tools.tools_display ~cols ~terminal_rows state in
+  match display.card, display.cursor with
+  | Some { first_row; _ }, (Some _ | None) | None, Some { first_row; _ } -> first_row
+  | None, None -> 0
 
 let list_moves (state : state) =
   Masc_tui_list_moves.moves state ~rows:(fun () -> row_list state)
+    ~follow:(follow_tools_list state)
 
 let move_list (state : state) move =
   Option.iter (fun moves -> moves move) (list_moves state)
@@ -9514,6 +9617,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
+  if destination <> Tools then state.tools_skill_focus <- Choosing_skill;
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
   state.runtime_model_jump <- None;
@@ -9606,7 +9710,10 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   if state.view = Keepers Keeper_list || destination = Keepers Keeper_list then
     transition_keeper_view state destination
   else
-    state.view <- destination
+    state.view <- destination;
+  (* The scroll a pane kept from an earlier visit may not show the selection
+     the first move key steps from. *)
+  if destination = Tools then follow_tools_selection state
 
 (* One step around the ring the surface strip draws. Tab and Shift-Tab
    call this; so does board compose when its handler declines the key, so
@@ -18918,6 +19025,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_evidence_run_id <- None;
   state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
+  state.tools_skill_focus <- Choosing_skill;
   tools_task_user_scroll state 0;
   state.msg_loaded_pages <- [];
   state.item_account <- None;
@@ -20448,8 +20556,10 @@ let enter_metrics_section state section =
    shorter section opens it part-way down for no reason the reader gave. *)
 let enter_tools_pane state pane =
   if pane <> Tools_async then close_tools_async_detail state;
-  state.tools_pane <- pane;
+  Masc_tui_list_moves.show_tools_pane state pane;
   tools_task_user_scroll state 0;
+  (* From the top, unless the selection a list kept is further down. *)
+  follow_tools_selection state;
   (* Opening the Usage pane reads the catalog and every Keeper's usage once,
      and the Activations pane the selected Keeper's ledger (RFC-0483 §4.3).
      The inventory is read on its pushes on every pane but Async, so opening
@@ -30197,6 +30307,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       match result with
       | Ok snapshot ->
           let selected = tools_skill_reference_for_refresh state ~keeper_name in
+          let previous_cursor = state.tools_skill_cursor in
           state.tools_inventory <- Some snapshot;
           state.tools_inventory_keeper <- keeper_name;
           state.tools_error <- None;
@@ -30207,13 +30318,36 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match snapshot.Masc.Tui_decode_tools.ts_freshness with
              | Masc.Tui_decode_tools.Settled -> Masc_tui_owed_read.succeeded state.tools_inventory_owed
              | Masc.Tui_decode_tools.Warming -> failed_read state.tools_inventory_owed);
-          (match selected with
-           | None -> ()
-           | Some reference ->
-               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
-                 (tools_skill_profiles state)
-               |> Option.iter (fun index -> state.tools_skill_cursor <- index));
-          normalize_tools_skill_cursor state
+          let kept =
+            match selected with
+            | None -> false
+            | Some reference -> (
+                match
+                  List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
+                    (tools_skill_profiles state)
+                with
+                | Some index ->
+                    state.tools_skill_cursor <- index;
+                    true
+                | None -> false)
+          in
+          normalize_tools_skill_cursor state;
+          (* A page read about a Skill the new inventory no longer holds is
+             not the page of the Skill now selected. *)
+          if not kept then state.tools_skill_focus <- Choosing_skill;
+          (* The selection moved under the reader: to another row, or to
+             another Skill. Only the Skill list on screen follows; a page
+             being read keeps its scroll. *)
+          let moved =
+            match selected with
+            | None -> false
+            | Some _ -> (not kept) || state.tools_skill_cursor <> previous_cursor
+          in
+          if moved && state.view = Tools then
+            (match Masc_tui_list_moves.tools_list state with
+             | Some Masc_tui_list_moves.Tools_skills ->
+                 follow_tools_list state Masc_tui_list_moves.Tools_skills
+             | Some Masc_tui_list_moves.Tools_async_requests | None -> ())
       | Error detail ->
           (* The failure and its wait are this Keeper's, like a reading. *)
           state.tools_inventory_keeper <- keeper_name;
@@ -36544,7 +36678,12 @@ Use relative paths for resources already held in the package. -->
          a dispatched task opening its view, must not keep a delete armed. *)
       if state.view <> Tools && input_seen then begin
         state.tools_skill_delete_armed <- None;
-        state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc
+        state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc;
+        (* What [goto_surface] ends on leaving Tools, for the views a send
+           or a browser lane opens without it: the next visit starts on the
+           Skill list, and an open request does not outlive the screen. *)
+        state.tools_skill_focus <- Choosing_skill;
+        if state.tools_async_detail_open then close_tools_async_detail state
       end;
       (match state.view with
        | Approvals ->
@@ -40672,9 +40811,6 @@ Use relative paths for resources already held in the package. -->
        | Some "H" when state.view=Tools && state.tools_pane=Tools_async
            && state.tools_async_detail_open && Option.is_some state.tools_async_task_source ->
            launch_tools_async_task_history ~older:true state ~mailbox:async_messages
-       | Some ("J" | "K") when state.view = Tools && state.tools_pane = Tools_async ->
-           if not state.tools_async_detail_open then
-             move_tools_async_selection state (if key = Some "J" then 1 else -1)
        | Some ("o" | "O") when state.view = Tools && state.tools_pane = Tools_async ->
            handle_async_request_lookup ()
        | Some ("t" | "T") when state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open ->
@@ -40709,9 +40845,13 @@ Use relative paths for resources already held in the package. -->
             | None -> report_action state "system" "No Composition Skill is available on this Keeper surface"
             | Some (index, _) ->
                 state.tools_skill_cursor <- index;
-                state.tools_pane <- Tools_surface;
-                tools_task_user_scroll state 0;
-                handle_skill_evidence ())
+                Masc_tui_list_moves.show_tools_pane state Tools_surface;
+                handle_skill_evidence ();
+                (* f is for the chosen Composition's performance, so it
+                   reads the page where that card is. Esc goes back to the
+                   list, on the Composition. *)
+                Masc_tui_list_moves.read_skill_page state;
+                tools_task_user_scroll state (tools_performance_card_top state))
        | Some k
          when String.equal k Masc_tui_volume_gc.key
               && state.view = Tools && state.tools_pane = Tools_catalog Tools_catalog_list ->
@@ -40722,8 +40862,6 @@ Use relative paths for resources already held in the package. -->
            enter_tools_pane state
              (Tools_catalog (Tools_catalog_volumes {catalog_scroll}));
            press_tools_volume_gc state ~mailbox:async_messages
-       | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
-       | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->
            handle_skill_delete ()
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
@@ -40732,7 +40870,12 @@ Use relative paths for resources already held in the package. -->
              tools_task_user_scroll state 0;
              launch_tools_async_detail state ~mailbox:async_messages
            end
-       | Some "\r" when state.view = Tools -> handle_skill_evidence ()
+       | Some "\r" when state.view = Tools ->
+           (* Enter loads the selected revision's evidence as before, and
+              again (the latest) while the page is read. On Available it
+              also turns the move keys from the list to that page. *)
+           handle_skill_evidence ();
+           Masc_tui_list_moves.read_skill_page state
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_edit_open ~advanced:false ()
@@ -42032,8 +42175,13 @@ Use relative paths for resources already held in the package. -->
              Metrics_tail.maximum_scroll
                ~entry_count:(keeper_log_row_count state)
                ~content_height:(keeper_log_content_height state)
-       | Some "home" when state.view = Tools -> tools_task_user_scroll state 0
-       | Some "end" when state.view = Tools ->
+       (* The Tools readings. Its two lists take the edge keys below, through
+          [list_moves], as every other list does. *)
+       | Some "home"
+         when state.view = Tools && Option.is_none (Masc_tui_list_moves.tools_list state) ->
+           tools_task_user_scroll state 0
+       | Some "end"
+         when state.view = Tools && Option.is_none (Masc_tui_list_moves.tools_list state) ->
            if not (tools_task_select_end state) then
              tools_task_user_scroll state
                (move_surface_to_end state ~rows:(surface_rows state)
@@ -42376,6 +42524,11 @@ Use relative paths for resources already held in the package. -->
                       let entries = Masc_tui_render_resources.list_page_size state
                           ~rows:(surface_rows state) in
                       move_list state (page_move entries))
+             (* A list on the page counts its page in the rows the page
+                window shows, the same window the readings below page by. *)
+             | Tools when Option.is_some (Masc_tui_list_moves.tools_list state) ->
+                 let _, height = tools_scroll_viewport state in
+                 move_list state (page_move (Masc_tui_scroll.page_step ~height))
              | Tools ->
                  let count, height = tools_scroll_viewport state in
                  move_tools_task
@@ -42885,10 +43038,16 @@ Use relative paths for resources already held in the package. -->
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
-                end else if state.tools_async_detail_open then
+                end else if state.tools_async_detail_open then begin
                   (* Back on the request list, which reads on its own pushes
-                     ([launch_owed_async_requests]). *)
-                  close_tools_async_detail state
+                     ([launch_owed_async_requests]), with the request just
+                     read on screen. *)
+                  close_tools_async_detail state;
+                  follow_tools_selection state
+                end else if Masc_tui_list_moves.choose_skill_again state then
+                  (* From the page back to the Skill list, with the selected
+                     Skill on screen again. *)
+                  follow_tools_list state Masc_tui_list_moves.Tools_skills
                 else goto_surface state ~mailbox:async_messages
                   (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->
@@ -43186,6 +43345,13 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_detail_scroll <- Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:1
                 else
                   move_list state Cursor_move.Line_down
+            (* The Skill list and the request list move their selection; the
+               readings scroll. The wheel scrolls the page in both focuses,
+               so the tool table under the Skill list is in its reach. *)
+            | Tools
+              when Option.is_some (Masc_tui_list_moves.tools_list state)
+                   && key <> Some "wheel-down" ->
+                move_list state Cursor_move.Line_down
             | Tools ->
                 let count, height = tools_scroll_viewport state in
                 move_tools_task (Masc_tui_scroll.down ~count ~height state.tools_scroll)
@@ -43418,6 +43584,10 @@ Use relative paths for resources already held in the package. -->
                     max 0 (state.runtime_detail_scroll - 1)
                 else
                   move_list state Cursor_move.Line_up
+            | Tools
+              when Option.is_some (Masc_tui_list_moves.tools_list state)
+                   && key <> Some "wheel-up" ->
+                move_list state Cursor_move.Line_up
             | Tools ->
                 if state.tools_scroll > 0 || tools_task_following_end state then begin
                   let count, height = tools_scroll_viewport state in

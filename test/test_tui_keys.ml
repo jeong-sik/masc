@@ -2631,6 +2631,65 @@ let test_activity_search_lands_on_the_row_the_cursor_reads () =
   Alcotest.(check bool) "a filter that leaves no row opens no search" true
     (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting))
 
+(* The Tools footer names j/k and Esc from what they do (RFC
+   tui-one-screen-grammar §3.1). Enter on a Skill turns the same two keys to
+   its page, and a footer that said the same before and after left the reader
+   to guess which one was on screen. *)
+let test_tools_footer_says_what_j_k_and_esc_do () =
+  let module K = Masc_tui_keys in
+  let list_moves, list_back = K.tools_footer_moves_and_back K.Tools_walks_list in
+  let page_moves, page_back = K.tools_footer_moves_and_back K.Tools_reads_skill_page in
+  let pane_moves, pane_back = K.tools_footer_moves_and_back K.Tools_reads_page in
+  check str "the list and the page name the same move key" list_moves.key page_moves.key;
+  check str "the list and the page name the same back key" list_back.key page_back.key;
+  Alcotest.(check bool) "j/k on the page is another binding than on the list" false
+    (list_moves = page_moves);
+  Alcotest.(check bool) "Esc on the page is another binding than on the list" false
+    (list_back = page_back);
+  Alcotest.(check bool) "a pane with no list scrolls as the page does" true
+    (pane_moves = page_moves);
+  Alcotest.(check bool) "a pane with no list leaves as the list does" true
+    (pane_back = list_back);
+  let footer keys = K.footer_hints_tools ~lang:Lang_en ~pane:Tools_surface ~keys in
+  Alcotest.(check bool) "the footer changes when Enter turns the keys" false
+    (String.equal (footer K.Tools_walks_list) (footer K.Tools_reads_skill_page));
+  (* Esc leaves an open request for the request list and its original Task for
+     the request, so the footer names that place. "features" is where Esc goes
+     from the request list, which is not where it goes from an open request. *)
+  let request_moves, request_back = K.tools_footer_moves_and_back K.Tools_reads_request in
+  let task_moves, task_back = K.tools_footer_moves_and_back K.Tools_reads_original_task in
+  Alcotest.(check bool) "an open request scrolls as the page does" true (request_moves = page_moves);
+  Alcotest.(check bool) "the original Task scrolls as the page does" true (task_moves = page_moves);
+  check str "an open request's Esc names the list" "list" request_back.label;
+  check str "the original Task's Esc names the request" "request" task_back.label;
+  let contains text word =
+    let length = String.length word in
+    let rec from index =
+      index + length <= String.length text
+      && (String.equal (String.sub text index length) word || from (index + 1))
+    in
+    from 0
+  in
+  let says lang keys word =
+    contains (K.footer_hints_tools ~lang ~pane:Tools_async ~keys) word
+  in
+  Alcotest.(check bool) "the request list says Esc:features" true
+    (says Lang_en K.Tools_walks_list "Esc:features");
+  Alcotest.(check bool) "an open request says Esc:list" true
+    (says Lang_en K.Tools_reads_request "Esc:list");
+  Alcotest.(check bool) "an open request does not say Esc:features" false
+    (says Lang_en K.Tools_reads_request "Esc:features");
+  Alcotest.(check bool) "the original Task says Esc:request" true
+    (says Lang_en K.Tools_reads_original_task "Esc:request");
+  Alcotest.(check bool) "the original Task does not say Esc:features" false
+    (says Lang_en K.Tools_reads_original_task "Esc:features");
+  Alcotest.(check bool) "an open request says Esc:목록 in Korean" true
+    (says Lang_ko K.Tools_reads_request "Esc:목록");
+  Alcotest.(check bool) "the original Task says Esc:요청 in Korean" true
+    (says Lang_ko K.Tools_reads_original_task "Esc:요청");
+  Alcotest.(check bool) "an open request does not say Esc:기능 in Korean" false
+    (says Lang_ko K.Tools_reads_request "Esc:기능")
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2662,7 +2721,9 @@ let () =
             `Quick test_input_that_is_not_the_second_press_cancels
         ] )
     ; ( "projections"
-      , [ Alcotest.test_case "schedule display name uses the named field" `Quick
+      , [ Alcotest.test_case "the Tools footer says what j/k and Esc do" `Quick
+            test_tools_footer_says_what_j_k_and_esc_do
+        ; Alcotest.test_case "schedule display name uses the named field" `Quick
             test_schedule_who_uses_the_named_field
         ; Alcotest.test_case "a schedule row reads only its Keepers' queues" `Quick
             test_a_schedule_row_reads_only_its_keepers_queues

@@ -108,8 +108,11 @@ val register
     - 503 [replacement_not_recorded]: the record was not written, and the
       key of the account was not changed. The person sends the key again.
     - 503 [key_not_stored]: the record was written and the new key was not
-      put in place. The account has no key until the person sends one
-      again: the key before is not read.
+      put in place. The key before is not read, and the server removes the
+      folder of the keys of the account, so the account has no key until
+      the person sends one again. The answer does not say whether the
+      folder went: the log of the server does, and a list of the accounts
+      says what the account reads.
 
     The id is read first, then the body, then the records of the account.
     A path that is no id answers 404 with the body not read. For an id that

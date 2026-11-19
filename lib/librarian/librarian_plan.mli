@@ -18,6 +18,9 @@
     - [Ref_used_twice]: an earlier op that passed screening named the fact.
     - [Source_outside_question]: a unit name the question did not give.
 
+    A [Seen] names one fact and at least one unit, so it is screened as the
+    ops that name a fact are, its units as a stated claim's are.
+
     {b What a screened op does.}
 
     - [Add]: adds the claim. A claim Memory already holds is only seen again:
@@ -28,13 +31,18 @@
     - [Merge], [Revise]: remove the named facts and state the new claim as
       [Add] does. A named fact whose claim is the new claim is kept. The new
       fact keeps the earliest [first_seen] of the facts it replaced.
+    - [Seen]: the named fact is seen again, as a held claim's [Add] is: its
+      [last_seen] moves and nothing else of it changes. Its units are
+      recorded as its sources. The answer names the fact instead of copying
+      its claim, so no near copy of the fact is added.
 
     A fact removed by one op and stated by another leaves and is added as a
     new fact.
 
     {b Support.} After the ops, a derived fact whose premises are gone is
-    removed as [Support_lost]. If that takes away the fact an op stated, the
-    op is withdrawn as [Successor_unsupported]: the facts it removed stay.
+    removed as [Support_lost]. If that takes away the fact an op stated or
+    saw again, the op is withdrawn as [Successor_unsupported]: the facts it
+    removed stay.
     This repeats until nothing changes. A withdrawn op is not tried again, and
     the claim it carried is not added. *)
 

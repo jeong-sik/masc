@@ -21,36 +21,53 @@ type t =
   ; working_state : working_state
   }
 
+(* What a screened op says of one fact, in Memory ids. *)
+type stating =
+  | New_claim of string * Answer.new_fact * int list
+  (** Id of the claim, the claim, and the offsets of the units it names. *)
+  | Seen_again of string * int list
+  (** Id of a fact Memory holds, and the offsets of the units that said it
+      again. *)
+
+(* The fact a stating op leaves in Memory, and the offsets of its units. *)
+let kept_and_units = function
+  | New_claim (id, (_ : Answer.new_fact), offsets) | Seen_again (id, offsets) -> id, offsets
+;;
+
 (* An op that passed screening, in Memory ids. *)
 type screened =
   { number : int
   ; removes : (string * Effects.removal) list
-  ; states : (string * Answer.new_fact * int list) option
-  (** Id of the claim, the claim, and the offsets of the units it names. *)
+  ; states : stating option
   }
 
 let ( let* ) = Result.bind
 let ids_of facts = List.fold_left (fun ids fact -> Ids.add (memory_id fact) ids) Ids.empty facts
 
+let resolve_one table name ~missing =
+  match List.assoc_opt name table with
+  | Some value -> Ok value
+  | None -> Error missing
+;;
+
 let resolve_all table names ~missing =
   List.fold_right
     (fun name resolved ->
        let* resolved = resolved in
-       match List.assoc_opt name table with
-       | Some value -> Ok (value :: resolved)
-       | None -> Error missing)
+       let* value = resolve_one table name ~missing in
+       Ok (value :: resolved))
     names
     (Ok [])
 ;;
 
 let stated_fact = function
   | Answer.Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } -> Some fact
-  | Drop _ -> None
+  | Drop _ | Seen _ -> None
 ;;
 
 let named_facts = function
   | Answer.Add _ -> []
-  | Drop { ref_; _ } | Revise { ref_; _ } -> [ ref_ ]
+  | Drop { ref_; _ } | Revise { ref_; _ } | Seen { ref_; _ } -> [ ref_ ]
   | Merge { refs; _ } -> refs
 ;;
 
@@ -62,9 +79,9 @@ let replaced ids ~by removal =
 let screen ~shown ~current ~removed_since ~named_before number op =
   let* table =
     match shown.memory, op with
-    | None, (Answer.Drop _ | Merge _ | Revise _) -> Error Effects.Not_valid_alone
+    | None, (Answer.Drop _ | Merge _ | Revise _ | Seen _) -> Error Effects.Not_valid_alone
     | None, Add _ -> Ok []
-    | Some table, (Add _ | Drop _ | Merge _ | Revise _) -> Ok table
+    | Some table, (Add _ | Drop _ | Merge _ | Revise _ | Seen _) -> Ok table
   in
   let* named = resolve_all table (named_facts op) ~missing:Effects.Unknown_ref in
   let stated =
@@ -91,18 +108,23 @@ let screen ~shown ~current ~removed_since ~named_before number op =
     then Error Effects.Ref_used_twice
     else Ok ()
   in
+  let units names =
+    resolve_all shown.units names ~missing:Effects.Source_outside_question
+  in
   let* states =
-    match stated with
-    | None -> Ok None
-    | Some (id, fact) ->
-      let* offsets =
-        resolve_all shown.units fact.from_units ~missing:Effects.Source_outside_question
-      in
-      Ok (Some (id, fact, offsets))
+    match op, stated with
+    | Answer.Seen { ref_; from_units }, (_ : (string * Answer.new_fact) option) ->
+      let* seen = resolve_one table ref_ ~missing:Effects.Unknown_ref in
+      let* offsets = units from_units in
+      Ok (Some (Seen_again (seen, offsets)))
+    | (Add _ | Drop _ | Merge _ | Revise _), None -> Ok None
+    | (Add _ | Drop _ | Merge _ | Revise _), Some (id, fact) ->
+      let* offsets = units fact.from_units in
+      Ok (Some (New_claim (id, fact, offsets)))
   in
   let removes =
     match op with
-    | Answer.Add _ -> []
+    | Answer.Add _ | Seen _ -> []
     | Drop { reason; _ } -> List.map (fun id -> id, Effects.Dropped { reason }) named
     | Merge { into; _ } ->
       let successor = memory_id_of_claim into.claim in
@@ -132,8 +154,8 @@ let replaced_since ~by_id live =
   List.fold_left
     (fun earliest op ->
        match op.states with
-       | None -> earliest
-       | Some (successor, (_ : Answer.new_fact), (_ : int list)) ->
+       | None | Some (Seen_again _) -> earliest
+       | Some (New_claim (successor, (_ : Answer.new_fact), (_ : int list))) ->
          List.fold_left
            (fun earliest (replaced, (_ : Effects.removal)) ->
               match By_id.find_opt replaced by_id with
@@ -205,7 +227,11 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
         (fun (touched, added, added_ids) op ->
            match op.states with
            | None -> touched, added, added_ids
-           | Some (id, fact, (_ : int list)) ->
+           | Some (Seen_again (id, (_ : int list))) ->
+             if Ids.mem id kept_ids
+             then Ids.add id touched, added, added_ids
+             else touched, added, added_ids
+           | Some (New_claim (id, fact, (_ : int list))) ->
              if Ids.mem id kept_ids
              then Ids.add id touched, added, added_ids
              else if Ids.mem id added_ids
@@ -231,7 +257,7 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
       List.filter
         (fun op ->
            match op.states with
-           | Some (id, (_ : Answer.new_fact), (_ : int list)) -> not (Ids.mem id supported_ids)
+           | Some stating -> not (Ids.mem (fst (kept_and_units stating)) supported_ids)
            | None -> false)
         live
     in
@@ -265,9 +291,9 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
                Some
                  ( op.number
                  , Effects.Successor_unsupported
-                 , Option.map
-                     (fun ((_ : string), fact, (_ : int list)) -> fact)
-                     op.states )
+                 , match op.states with
+                   | Some (New_claim ((_ : string), fact, (_ : int list))) -> Some fact
+                   | Some (Seen_again _) | None -> None )
              else None)
           screened
       in
@@ -291,9 +317,10 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
               (List.filter_map
                  (fun op ->
                     match op.states with
-                    | Some (id, (_ : Answer.new_fact), offsets)
-                      when Ids.mem id supported_ids -> Some (id, offsets)
-                    | Some _ | None -> None)
+                    | Some stating ->
+                      let id, offsets = kept_and_units stating in
+                      if Ids.mem id supported_ids then Some (id, offsets) else None
+                    | None -> None)
                  live)
         }
       in

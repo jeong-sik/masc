@@ -31,7 +31,7 @@ type why_not =
   | Not_valid_alone
   (** The answer saw one item and no Memory, and tried to remove a fact. *)
   | Successor_unsupported
-  (** The fact the op stated is not in Memory after the answer: it is a
+  (** The fact the op stated or saw again is not in Memory after the answer: it is a
       derived fact, and its premises are not there. Usually the same answer
       removed them. A fact whose premises were already gone before the
       answer is recorded the same way when an op states it. *)
@@ -44,7 +44,8 @@ type t =
   (** Op number in the answer counted from 0, the reason, and the claim it
       carried. Ascending by op number. *)
   ; sources : (string * int list) list
-  (** For a fact an op stated: the turn log offsets of the units it named. *)
+  (** For a fact an op stated or saw again: the turn log offsets of the units
+      it named. *)
   }
 
 val empty : t

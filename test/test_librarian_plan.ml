@@ -406,6 +406,60 @@ let test_support_lost_takes_a_stated_fact () =
   check (list (pair string (list int))) "and has no source" [] result.effects.sources
 ;;
 
+(* Seen again by name: no copy of the claim, so no near copy of the fact. *)
+let test_seen_moves_last_seen () =
+  let result = plan [ Seen { ref_ = "m1"; from_units = [ "u2"; "u1" ] } ] in
+  check (list string) "nothing added" [] (claims result.effects.added);
+  check (list string) "touched" [ id port ] result.effects.touched;
+  check (list (pair string (list int))) "the units that said it again"
+    [ id port, [ 10; 20 ] ] result.effects.sources;
+  check refusals "nothing refused" [] (not_applied result);
+  match result.facts with
+  | first :: _ ->
+    check string "the same fact" port.claim first.claim;
+    check (float 0.0) "last seen moves" at first.last_seen;
+    check (float 0.0) "first seen stays" 100.0 first.first_seen
+  | [] -> fail "Memory is empty"
+;;
+
+let test_seen_is_screened () =
+  let result =
+    plan
+      [ Seen { ref_ = "m9"; from_units = [ "u1" ] }
+      ; Seen { ref_ = "m2"; from_units = [ "u9" ] }
+      ; Drop { ref_ = "m3"; reason = "the probe stopped" }
+      ; Seen { ref_ = "m3"; from_units = [ "u1" ] }
+      ; Seen { ref_ = "m1"; from_units = [ "u1" ] }
+      ]
+  in
+  check refusals "each flaw is recorded, with no claim carried"
+    [ 0, "unknown ref", None; 1, "source outside question", None; 3, "ref used twice", None ]
+    (not_applied result);
+  check (list string) "the sound seen applies" [ id port ] result.effects.touched;
+  let alone : Plan.shown = { memory = None; units = [ "u1", 10 ] } in
+  check refusals "an answer that saw no Memory cannot see a fact again"
+    [ 0, "not valid alone", None ]
+    (not_applied (plan ~shown:alone [ Seen { ref_ = "m1"; from_units = [ "u1" ] } ]))
+;;
+
+let test_seen_of_a_fact_that_loses_support () =
+  let lesson = derived "the probe must call 8935" [ port ] in
+  let facts = memory @ [ lesson ] in
+  let result =
+    plan ~facts
+      [ Drop { ref_ = "m1"; reason = "the port moved" }
+      ; Seen { ref_ = "m4"; from_units = [ "u1" ] }
+      ]
+  in
+  check pairs "the premise and the derived fact leave"
+    [ port.claim, "dropped: the port moved"; lesson.claim, "support lost: " ^ id port ]
+    (removed result);
+  check refusals "the seen is withdrawn" [ 1, "successor unsupported", None ]
+    (not_applied result);
+  check (list string) "a fact that left is not touched" [] result.effects.touched;
+  check (list (pair string (list int))) "and has no source" [] result.effects.sources
+;;
+
 let test_dropped_and_stated_again () =
   let result =
     plan [ Drop { ref_ = "m1"; reason = "stale" }; Add (stated port.claim) ]
@@ -442,6 +496,7 @@ let () =
         ; test_case "a merge keeps the earliest first seen" `Quick
             test_merge_keeps_the_earliest_first_seen
         ; test_case "a revision keeps the first seen" `Quick test_revise_keeps_the_first_seen
+        ; test_case "seen again by name" `Quick test_seen_moves_last_seen
         ; test_case "dropped and stated again" `Quick test_dropped_and_stated_again
         ; test_case "two ops state one claim" `Quick test_two_ops_state_one_claim
         ] )
@@ -453,6 +508,7 @@ let () =
         ; test_case "removed during flight" `Quick test_removed_during_flight
         ; test_case "an answer that saw no Memory" `Quick test_alone
         ; test_case "working state" `Quick test_working_state_passes_through
+        ; test_case "a seen is screened as a named op" `Quick test_seen_is_screened
         ] )
     ; ( "support"
       , [ test_case "a derived fact loses its premise" `Quick test_support_lost
@@ -460,6 +516,8 @@ let () =
             test_support_lost_takes_a_stated_fact
         ; test_case "withdrawing one op withdraws another" `Quick
             test_withdrawal_runs_until_nothing_changes
+        ; test_case "a seen fact loses its premise" `Quick
+            test_seen_of_a_fact_that_loses_support
         ; test_case "a merge that would lose its own successor" `Quick
             test_successor_unsupported
         ] )

@@ -467,8 +467,8 @@ describe('giving another key for an account in the panel', () => {
     await panel.load(sessionOf(person, 'second'))
     panel.replacing.open('acct_key')
     const kept = await panel.replacing.replace('acct_key', 'made-up-key')
-    await vi.waitFor(() => { expect([ownedReadings(sent), kind(panel)]).toEqual([2, `read for ${person}`]) })
-    expect([kept, replaceTokens(sent), panel.replacing.replacing.value.get('acct_key')]).toEqual(['dropped', ['second'], { kind: 'replaced', oldKeysRemoved: true }])
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([kept, replaceTokens(sent), ownedReadings(sent), kind(panel)]).toEqual(['dropped', ['second'], 2, `read for ${person}`])
   })
 
   it('forgets the replacements of one person once it shows another', async () => {
@@ -937,9 +937,22 @@ describe('the panel', () => {
     const before = lineOf(container)
     panel.replacing.open('acct_key')
     await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
-    // The page is drawn again when `act` ends, so the wait is for the list the panel holds.
-    await act(async () => { await vi.waitFor(() => { expect(listed(panel)).toBe(0) }) })
+    // The page is drawn again when `act` ends, so the wait is for what the panel holds.
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
     expect([before, lineOf(container) === '', container.querySelectorAll('li.row').length]).toEqual(['', false, 0])
+  })
+
+  it('does not say that account went while a list that has it is on the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [json(404, { error: 'No such account.', code: 'unknown_account' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    panel.replacing.open('acct_key')
+    await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
+    expect([lineOf(container), container.querySelectorAll('li.row').length]).toEqual(['', 1])
   })
 
   it('says an account went only once its card is off the page, however the readings overlap', async () => {

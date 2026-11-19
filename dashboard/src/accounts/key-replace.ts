@@ -101,12 +101,14 @@ export type ReplaceFailure =
 export type Replacing =
   /** The field is on the card. `failure` is what came of the latest replacement, if it came to nothing. */
   | { readonly kind: 'open'; readonly failure: ReplaceFailure | null }
-  /** A key is on its way. The field stays as it is. */
+  /** A key is on its way, or the server answered that it took the key or
+      has no such account and the subscriptions are read again. The field
+      stays as it is. */
   | { readonly kind: 'sending'; readonly failure: ReplaceFailure | null }
-  /** The server said the new key is in place. The subscriptions were asked for again. */
+  /** The server said the new key is in place. The subscriptions were read again. */
   | { readonly kind: 'replaced'; readonly oldKeysRemoved: boolean }
   /** The server has no such account: another page removed it. The
-      subscriptions were asked for again. */
+      subscriptions were read again. */
   | { readonly kind: 'gone' }
   /** A request found that the session had ended; the browser is on its way
       to the sign-in page. Every field that was open went with it. */
@@ -133,7 +135,8 @@ export interface ReplacementsModel {
   /** Sends `key` as the key of `accountId`, once: with no open field it
       sends nothing and keeps the key. It ends when the answer is read, and
       does not wait for the subscriptions it asks for again: until they
-      came, a key the server took would stay in the field. */
+      came, a key the server took would stay in the field. What the card
+      says of that key changes once they came. */
   readonly replace: (accountId: string, key: string) => Promise<Kept>
   /** Forgets every replacement: another person is shown now, or the
       browser leaves the page. An answer that comes later changes nothing. */
@@ -193,6 +196,15 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
     replacing.value = all
   }
 
+  /** Shows what the server said of the account once the subscriptions were
+      read again. Before that, the card would say it beside what an older
+      list says of the account. The button of the account stays held until
+      then, as after a removal (key-remove.ts, `went`). */
+  const settled = async (mine: number, accountId: string, next: Replacing): Promise<void> => {
+    await refresh()
+    if (mine === round && !left) set(accountId, next)
+  }
+
   const replace = async (accountId: string, key: string): Promise<Kept> => {
     const before = replacing.peek().get(accountId)
     const csrfToken = token()
@@ -217,8 +229,7 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
       }
       // No branch below waits for the subscriptions it asks for again.
       case 'replaced':
-        set(accountId, { kind: 'replaced', oldKeysRemoved: asked.oldKeysRemoved })
-        void refresh()
+        void settled(mine, accountId, { kind: 'replaced', oldKeysRemoved: asked.oldKeysRemoved })
         return 'dropped'
       case 'unreachable':
       case 'unreadable':
@@ -228,8 +239,7 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
         return 'dropped'
       case 'refused':
         if (asked.code === 'unknown_account') {
-          set(accountId, { kind: 'gone' })
-          void refresh()
+          void settled(mine, accountId, { kind: 'gone' })
           return 'dropped'
         }
         set(accountId, { kind: 'open', failure: { kind: 'refused', status: asked.status, code: asked.code, reason: asked.reason, attempts } })

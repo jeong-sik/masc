@@ -254,14 +254,32 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 - 스트림: frozen 서버는 새 사건을 밀어 주지 않는다. 그래서 `Mailbox` 종은 읽기 답(위 7 번)과
   `test_tui_wake_writers` 로만 확인했다. 스피너는 이 두 화면에 없었다.
 
+### 5.1 Esc·시작 서버·drain·벽시계 수리 뒤 (2026-11-20)
+
+조건은 위와 같다. 빌드는 `18477e92` 이고 같은 임시 기록으로 셌다.
+재생 자료의 나이가 이미 분 단위라서 keepers 나이 글자는 매초가 아니라 3 번 바뀌었다.
+그래서 위 표와 바퀴 수를 바로 견주지 않는다. 늘어난 몫은 바퀴마다 남은 까닭으로 센다.
+
+| 화면 | 키 없는 180 초의 바퀴 | 바퀴/초 | 그중 `Wall_clock_recheck` | 나머지/초 | CPU |
+|---|---|---|---|---|---|
+| overview | 61 | 0.34 | 32 (0.18/초) | 0.16 | 0.05 % |
+| keepers | 67 | 0.37 | 28 (0.15/초) | 0.21 | 0.05 % |
+
+- `Drain_budget_spent` 로 깬 바퀴는 두 화면 모두 0 이다.
+- 홀로 온 Esc: 하네스 VTE 는 그래픽 질의에 답하지 않아 시작 probe 가 세션 내내 decoder 앞에 있다.
+  overview 에서 palette 를 열고 0.3·5·12·30 초 조용히 둔 뒤 Esc 를 보냈다.
+  6 회 × 6 번, 36 번 모두 palette 가 닫혔고 51.7~60.7 ms 걸렸다.
+  수리 전 빌드는 6 번 중 3 번이 40 초 안에 닫히지 않았고, 나머지는 5.8~32.8 초 걸렸다. main 은 57.5~65.7 ms 였다.
+
 ## 6. 열린 것
 
 - `Machine_view_cadence` 가 지키는 것이 남았는지 MSX 게임을 열고 확인한다. 없으면 지운다.
 - 벽시계 시각과 기계의 잠. 결정: 5 초 상한으로 다시 읽는다(`Wall_clock_recheck`).
-  - 문제: 벽시계 시각은 적을 때의 남은 시간으로 루프 시계에 옮긴다. 루프 시계는 Mtime 인데, macOS 에서
-    mach_absolute_time 을 쓴다(`mtime/clock/mtime_clock_stubs.c` 가 `MACOSX_VERSION_MIN_REQUIRED` 로
-    mach_continuous_time 을 고르지만 그 매크로가 정의되지 않아 `nm` 에 `_mach_absolute_time` 만 있다).
-    그 밑의 기다림은 커널 poll 의 timeout 이다. 둘 다 기계가 잠든 시간을 세지 않고, 벽시계가 바뀌어도 그대로다.
+  - 문제: 벽시계 시각은 적을 때의 남은 시간으로 루프 시계에 옮긴다. 루프 시계는 Mtime 이다.
+    macOS 의 Mtime 은 mach_absolute_time 을 쓴다. mtime 2.2.0 `clock/mtime_clock_stubs.c` 는
+    `MACOSX_VERSION_MIN_REQUIRED >= 101200` 이면 mach_continuous_time 을 고른다.
+    SDK 가 정의하는 이름은 `MAC_OS_X_VERSION_MIN_REQUIRED` 다. 정의되지 않은 이름은 0 이라 조건이 거짓이 된다.
+    TUI 실행 파일의 `nm` 에도 `_mach_absolute_time` 만 있다. 그 밑의 기다림은 커널 poll 의 timeout 이다. 둘 다 기계가 잠든 시간을 세지 않고, 벽시계가 바뀌어도 그대로다.
     그래서 깨어난 뒤 시계·나이 글자는 적어 둔 시각이 루프 시계로 올 때까지, 길면 1 분 동안 틀린 채 남았다.
     다른 종이 울리면 그때 고쳐진다.
   - 알림으로 고치는 길: 잠에서 깬 것이나 시계가 바뀐 것을 Eio 도, OCaml runtime 도, `Unix` 도 알려 주지 않는다.

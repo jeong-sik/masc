@@ -318,18 +318,39 @@ let selected_lines ~table ~starts ~total cursor =
     in
     (start, stop)
 
-let window ~table ~starts ~total ~height ~cursor scroll =
+(* The lines the window keeps on screen for binding [cursor]: its own, and
+   for the first table row the column names above it as well, so Home shows
+   them -- while both fit. A pane one line tall keeps the binding. *)
+let binding_span ~table ~starts ~total ~height cursor =
   let start, stop = selected_lines ~table ~starts ~total cursor in
-  (* The first binding brings the column names above it, so Home shows them. *)
-  let start = if table && cursor = 0 then 0 else start in
+  if table && cursor = 0 && stop < height then (0, stop) else (start, stop)
+
+let window ~table ~starts ~total ~height ~cursor scroll =
+  let start, stop = binding_span ~table ~starts ~total ~height cursor in
   let max_scroll = Int.max 0 (total - height) in
   let scroll = Int.max 0 (Int.min scroll max_scroll) in
   Int.min max_scroll (Masc_tui_scroll.ensure_span_visible ~start ~stop ~height scroll)
 
-let drawn_bindings ~table ~starts ~total ~height ~first =
-  let firsts = if table then List.init (Int.max 0 (total - 1)) (fun index -> index + 1) else starts in
-  Int.max 1
-    (List.length (List.filter (fun line -> line >= first && line < first + height) firsts))
+let page_bindings ~table ~starts ~total ~height =
+  let count = if table then Int.max 0 (total - 1) else List.length starts in
+  let spans = Array.init count (binding_span ~table ~starts ~total ~height) in
+  (* How many bindings from [first] on fit the pane together; [None] when
+     the list ends before the pane does, which limits no page. *)
+  let fit_from first =
+    let rec grow taken =
+      if first + taken >= count then None
+      else if snd spans.(first + taken) - fst spans.(first) + 1 > height then Some taken
+      else grow (taken + 1)
+    in
+    grow 0
+  in
+  let fewest =
+    List.fold_left
+      (fun fewest first ->
+        match fit_from first with Some taken -> Int.min fewest taken | None -> fewest)
+      count (List.init count Fun.id)
+  in
+  Int.max 1 fewest
 
 let reads_selected ~table ~starts ~total ~height cursor =
   let start, stop = selected_lines ~table ~starts ~total cursor in

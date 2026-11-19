@@ -121,9 +121,11 @@ val cursor_apply : count:int -> Cursor_move.t -> int -> int
 
 val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 (** Like {!ensure_visible} for a cursor that names a run of lines [start] to
-    [stop] (inclusive). A window that already shows some line of the run is
-    left where the reader scrolled it, so the body of a tall item can be
-    walked; the window moves only when the whole run has left it. *)
+    [stop] (inclusive). A run no taller than the window is shown whole, by
+    the smallest move: a run below the window ends it, a run above starts
+    it. A taller run is read inside: a window that shows some line of it is
+    left where the reader scrolled it, so its body can be walked, and the
+    window moves only when the whole run has left it. *)
 
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)

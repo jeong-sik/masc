@@ -83,19 +83,23 @@ val selected_lines : table:bool -> starts:int list -> total:int -> int -> int * 
 val window : table:bool -> starts:int list -> total:int -> height:int -> cursor:int -> int -> int
 (** The first document line a pane [height] lines tall draws once binding
     [cursor] is selected, coming from a window that began at [scroll]: the
-    smallest move that shows the binding, held inside the document. A
+    smallest move that shows the whole binding when it fits the pane
+    ({!Masc_tui_scroll.ensure_span_visible}), held inside the document. A
     selection the window already shows leaves the window where it was, so a
     step inside it moves only the mark, and the table's column names on line
     0 stay on screen until the selection passes the first window. The first
-    binding brings the names back with it. *)
+    binding brings the names back with it when both fit the pane. *)
 
-val drawn_bindings :
-  table:bool -> starts:int list -> total:int -> height:int -> first:int -> int
-(** The bindings a pane [height] lines tall draws when its window starts at
-    document line [first]: the table rows in the window, which leave out the
-    column names while line 0 is shown, or the stacked items whose first
-    line is in it. At least one. A page key moves the cursor by these less
-    the one a page keeps. *)
+val page_bindings : table:bool -> starts:int list -> total:int -> height:int -> int
+(** The most bindings in a row that a pane [height] lines tall always shows
+    whole together: wherever such a run starts, its lines fit. At least one.
+    It is the height the pane's list reports, so a page key moves the cursor
+    by these less one. From any binding the window shows, a page down then
+    lands on a binding that fits on screen with every binding the window
+    showed after it, and a page up with every one before it, so no binding
+    is passed unseen even when the items are of different heights. An item
+    taller than the pane fits no run, so a list that holds one pages by one
+    binding. *)
 
 val reads_selected : table:bool -> starts:int list -> total:int -> height:int -> int -> bool
 (** Whether binding [cursor] is taller than a pane [height] lines tall. Only

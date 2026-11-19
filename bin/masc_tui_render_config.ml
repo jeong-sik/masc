@@ -1691,8 +1691,8 @@ type models_list = {
   ml_window : cursor:int -> int -> int;
 }
 
-(* The bindings the move keys walk. A page is the bindings the window the
-   frame draws holds: table rows, or stacked items. [None] while the pane
+(* The bindings the move keys walk. A page is the bindings the pane always
+   shows whole together: table rows, or stacked items. [None] while the pane
    draws a form, a jump, an error or nothing read yet: there is no binding
    on screen. *)
 let config_models_list (state : state) ~terminal_rows ~cols =
@@ -1708,9 +1708,7 @@ let config_models_list (state : state) ~terminal_rows ~cols =
       in
       Some
         { ml_count = List.length state.config_models_rows
-        ; ml_height =
-            Masc_tui_model_runtime_table.drawn_bindings ~table ~starts ~total ~height
-              ~first:(window ~cursor:state.config_models_cursor state.config_scroll)
+        ; ml_height = Masc_tui_model_runtime_table.page_bindings ~table ~starts ~total ~height
         ; ml_reads_selected =
             Masc_tui_model_runtime_table.reads_selected ~table ~starts ~total ~height
               state.config_models_cursor

@@ -122,8 +122,16 @@ let cursor_apply ~count (move : Cursor_move.t) cursor =
   | To_top -> 0
   | To_end -> cursor_last ~count
 
+(* A run that fits is a row of several lines: it is on screen whole or the
+   reader cannot read it, so a step that leaves its tail under the window
+   brings that tail to the bottom. Only a run taller than the window is
+   read inside, line by line, and a window on any of its lines stands. *)
 let ensure_span_visible ~start ~stop ~height scroll =
-  if stop < scroll then start
+  if stop - start + 1 <= height then
+    if start < scroll then start
+    else if stop >= scroll + height then stop - height + 1
+    else Int.max 0 scroll
+  else if stop < scroll then start
   else if start >= scroll + height then start - height + 1
   else Int.max 0 scroll
 

@@ -184,7 +184,11 @@ let test_the_window_follows_the_row_that_left_it () =
   check int "a run taller than the window ends the window at its first row" 16
     (Masc_tui_scroll.ensure_span_visible ~start:20 ~stop:25 ~height:5 10);
   check int "a run the window already shows leaves the window alone" 10
-    (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
+    (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10);
+  check int "a run that fits and ends under the window ends the window at its last row" 11
+    (Masc_tui_scroll.ensure_span_visible ~start:14 ~stop:15 ~height:5 10);
+  check int "a run that fits and starts above the window starts the window at it" 9
+    (Masc_tui_scroll.ensure_span_visible ~start:9 ~stop:10 ~height:5 10)
 
 (* A row that opens a group brings the group's heading with it. The heading is
    no row the cursor can name, so following the row alone left it above the

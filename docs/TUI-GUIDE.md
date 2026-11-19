@@ -2765,8 +2765,11 @@ being buried below a long Tool list.
 On the effective Tool surface, `j/k`, paging and `Home/End` select a Skill.
 `Enter` loads its retained evidence and turns those keys to the page below the
 list, where the evidence and the tool table are; `Esc` returns them to the
-Skill list with the selected Skill in view. Another pane or screen starts on
-the list again.
+Skill list with the selected Skill in view. `f` selects the next Composition,
+loads its performance and opens its page at the performance card. The footer says which of the two the keys do: `j/k:move` and
+`Esc:features` on the list, `j/k:scroll` and `Esc:list` on the page. The mouse
+wheel scrolls the page in both. Another pane or screen starts on the list
+again.
 
 In async requests, `j/k` selects an original request and `Enter` opens its
 detail. `r` refreshes that exact request; `Esc` returns to the active list.

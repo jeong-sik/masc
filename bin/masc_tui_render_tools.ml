@@ -27,6 +27,11 @@ module Say = Masc_tui_say
 let ( ++ ) = Say.( ++ )
 let say_dot = Say.code " \xc2\xb7 "
 
+(* Pads to [cells] display cells and never cuts, as Printf's "%-Ns" did for
+   ASCII: a Korean word is counted in cells, not bytes. *)
+let pad_cells cells text =
+  text ^ String.make (max 0 (cells - Masc_tui_message_layout.display_width text)) ' '
+
 let say_language (state : state) =
   match state.ui_language with
   | Lang_ko -> Say.Ko
@@ -194,7 +199,7 @@ let skill_invocation_text = function
       { origin; tool_name; scope = _ } ->
     ( skill_composition_origin_text ~tool_name origin
     , Say.both ~ko:"composition 호출" ~en:"composition invocation"
-      ++ Say.code (" tool=" ^ tool_name) )
+      ++ Say.code " tool=" ++ Say.as_received (Terminal_text.single_line tool_name) )
 
 let skill_delivery_text ~has_action = function
   | None -> Say.both ~ko:"대기" ~en:"pending"
@@ -660,10 +665,10 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
          in
          ( tone
          , Say.code (Printf.sprintf "   %s " mark)
-           ++ Say.as_received (Printf.sprintf "%-16s %-10s "
-                (Terminal_text.single_line source.scso_id)
-                (Terminal_text.single_line source.scso_anchor))
-           ++ Say.map (Printf.sprintf "%-26s") path
+           ++ Say.as_received
+                (pad_cells 16 (Terminal_text.single_line source.scso_id) ^ " "
+                 ^ pad_cells 10 (Terminal_text.single_line source.scso_anchor) ^ " ")
+           ++ Say.map (pad_cells 26) path
            ++ Say.code (Printf.sprintf " %-2s  " (skill_access_short source.scso_access))
            ++ reading ))
       sources
@@ -929,7 +934,7 @@ let skill_settlement_lines_uncached ~cols composition =
         let field name = match json_assoc_member_opt name node with
           | Some (`String value) -> Say.as_received (Terminal_text.single_line value)
           | Some value -> Say.as_received (Terminal_text.single_line (Yojson.Safe.to_string value))
-          | None -> Say.both ~ko:"없음" ~en:"unavailable" in
+          | None -> Say.both ~ko:"알 수 없음" ~en:"unavailable" in
         let content label name = (Ansi.bold, Say.code "       " ++ label) ::
           (match json_assoc_member_opt name node with
            | Some value -> json_rows (skill_json_lines ~cols ~indent:9 value)
@@ -1065,7 +1070,7 @@ let tools_selection_document ~cols state =
          identity. *)
       let field label value = label ++ Say.code " " ++ Say.as_received value in
       [ named_again ~selection_row:(skill_selection_prefix state ++ name)
-          ~title:(Row (Ansi.bold, Say.both ~ko:"고른 Skill: " ~en:"Action Skill: " ++ name))
+          ~title:(Row (Ansi.bold, Say.both ~ko:"동작 대상 Skill: " ~en:"Action Skill: " ++ name))
       ; Row (Ansi.dim,
              Say.concat ~sep:say_dot
                [ field (Say.both ~ko:"출처" ~en:"Source") (Terminal_text.single_line
@@ -1155,11 +1160,6 @@ let skill_source_picker_page state ~terminal_rows =
   max 1 (tools_content_rows state ~terminal_rows ~count:0
     - List.length (skill_source_picker_prefix Say.empty))
 
-(* Pads to [cells] display cells and never cuts, as Printf's "%-Ns" did for
-   ASCII: a Korean word is counted in cells, not bytes. *)
-let pad_cells cells text =
-  text ^ String.make (max 0 (cells - Masc_tui_message_layout.display_width text)) ' '
-
 let surface_title = Say.both ~ko:" Keeper 호출 범위" ~en:" Effective Keeper Surface"
 
 let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
@@ -1204,7 +1204,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         rows
           [ (Theme.bad ()),
             surface_title ++ Say.code " — " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
-            ++ Say.both ~ko:" — 쓸 수 없음 (" ~en:" — unavailable ("
+            ++ Say.both ~ko:" — 조회 불가 (" ~en:" — unavailable ("
             ++ Say.as_received (Terminal_text.single_line ets_reason) ++ Say.code ")";
             (Theme.bad ()), Say.code "   " ++ Say.as_received (Terminal_text.single_line ets_detail) ]
     | Some
@@ -1459,7 +1459,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             let key =
               Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
             in
-            let unavailable = Say.both ~ko:"없음" ~en:"unavailable" in
+            let unavailable = Say.both ~ko:"알 수 없음" ~en:"unavailable" in
             (match state.tools_skill_evidence with
              | Some (observed_key, json) when String.equal key observed_key ->
               (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
@@ -1519,7 +1519,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                                 action_count
                                 (Terminal_text.single_line (string_field "activated_at")))
                          ; Ansi.dim,
-                           Say.code "       trace "
+                           Say.both ~ko:"       추적 " ~en:"       trace "
                            ++ Say.as_received (Terminal_text.single_line item.sea_trace_id)
                            ++ Say.both ~ko:" · 도구 호출 " ~en:" · tool use "
                            ++ Say.as_received (Terminal_text.single_line (string_field "skill_tool_use_id"))
@@ -1596,7 +1596,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                                | _ -> unavailable)
                            ++ say_dot ++ or_unavailable (string_field "composition_execution")
                            ++ Say.code " · request="
-                           ++ Say.as_received (Option.value ~default:"inline" (string_field "request_id"))
+                           (* Inline evidence carries no request: the server
+                              refuses one, and the execution kind is the cell
+                              just before. *)
+                           ++ Option.fold (string_field "request_id")
+                                ~none:(Say.both ~ko:"없음" ~en:"none")
+                                ~some:Say.as_received
                          ; Ansi.dim,
                            Say.code "       parent tool use="
                            ++ Say.as_received (Option.value ~default:"" (string_field "parent_tool_use_id"))
@@ -2530,7 +2535,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                     let revision =
                       match rejection.scr_content_revision with
                       | Some revision -> Say.as_received (Terminal_text.single_line revision)
-                      | None -> Say.both ~ko:"없음" ~en:"unavailable"
+                      | None -> Say.both ~ko:"알 수 없음" ~en:"unavailable"
                     in
                     (* The catalog's own diagnostic codes, which the reader
                        matches against the catalog's log. *)

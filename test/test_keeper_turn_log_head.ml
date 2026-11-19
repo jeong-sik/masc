@@ -125,10 +125,9 @@ let run_text ~session_dir (head : Head.t) ~from ~through =
       (List.map
          (fun (slice : Masc.Keeper_turn_log.slice) -> Printf.sprintf "%d:%d" slice.skip slice.take)
          slices)
-  | Error (Head.Range (Starts_before_covered _)) -> "range: starts before"
-  | Error (Head.Range (Ends_after_covered { through; last })) ->
+  | Error (Head.Ends_after_covered { through; last }) ->
     Printf.sprintf "range: ends at %d after %d" through last
-  | Error (Head.Range (Backwards _)) -> "range: backwards"
+  | Error (Head.Backwards _) -> "range: backwards"
   | Error (Head.Segment Nothing_before) -> "segment: nothing before"
   | Error (Head.Segment (Not_read Segment_missing)) -> "segment: missing"
   | Error (Head.Segment (Not_read (Segment_unreadable _))) -> "segment: unreadable"

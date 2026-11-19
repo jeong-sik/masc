@@ -547,24 +547,38 @@ let skill_access_short = function
   | other -> other
 ;;
 
+(* The status marks of RFC tui-one-screen-grammar 7.2 in their 7.3 tones. A
+   source that holds skills is settled. One that holds none, or is not there,
+   is a value read as none (6.4). A path that is not a directory asks for a
+   look, and a source that could not be read or whose path the config refused
+   failed; the words say which. [!] and [✓] are not status marks. *)
+let skill_source_status status = (Theme.status_tone status, Masc_tui_value.Mark.glyph status)
+
 let skill_source_reading (observation : Masc.Tui_decode_tools.skill_source_observation) =
   match observation with
   | Masc.Tui_decode_tools.Skill_source_ready count ->
-    ( (if count = 0 then Ansi.dim else Theme.ok ())
-    , (if count = 0 then "\xc2\xb7" else "\xe2\x9c\x93")
+    let tone, mark =
+      if count = 0 then (Theme.recede (), Masc_tui_theme.Glyph.no_value)
+      else skill_source_status Masc_tui_value.Mark.Settled
+    in
+    ( tone
+    , mark
     , Say.per_language (function
         | Say.Ko -> Printf.sprintf "Skill 디렉터리 %d개" count
         | Say.En -> Printf.sprintf "%d skill director%s" count (if count = 1 then "y" else "ies")) )
   | Masc.Tui_decode_tools.Skill_source_missing ->
-    (Ansi.dim, "\xc2\xb7", Say.both ~ko:"없음" ~en:"missing")
+    (Theme.recede (), Masc_tui_theme.Glyph.no_value, Say.both ~ko:"없음" ~en:"missing")
   | Masc.Tui_decode_tools.Skill_source_not_directory kind ->
-    ( Theme.warn (), "!"
+    let tone, mark = skill_source_status Masc_tui_value.Mark.Caution in
+    ( tone, mark
     , Say.both ~ko:"디렉터리가 아님 (" ~en:"not a directory (" ++ Say.as_received kind ++ Say.code ")" )
   | Masc.Tui_decode_tools.Skill_source_unavailable operation ->
-    ( Theme.warn (), "!"
+    let tone, mark = skill_source_status Masc_tui_value.Mark.Failed in
+    ( tone, mark
     , Say.both ~ko:"읽을 수 없음: " ~en:"unreadable at " ++ Say.as_received operation )
   | Masc.Tui_decode_tools.Skill_source_unresolved ->
-    (Theme.warn (), "!", Say.both ~ko:"설정이 경로를 거부함" ~en:"path refused by config")
+    let tone, mark = skill_source_status Masc_tui_value.Mark.Failed in
+    (tone, mark, Say.both ~ko:"설정이 경로를 거부함" ~en:"path refused by config")
 ;;
 
 let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config option) =
@@ -1569,7 +1583,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                          let delivered =
                            match json_assoc_member_opt "delivery" activation with
                            | Some `Null | None -> Say.both ~ko:"호출됨" ~en:"invoked"
-                           | Some _ -> Say.both ~ko:"✓ 전달됨" ~en:"✓ delivered"
+                           | Some _ ->
+                             Say.code (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " ")
+                             ++ Say.both ~ko:"전달됨" ~en:"delivered"
                          in
                          let action_count =
                            match json_assoc_member_opt "actions" activation with
@@ -1634,11 +1650,17 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                            | Some _ | None -> Masc_tui_theme.Glyph.no_value
                          in
                          let success =
+                           (* Status marks (7.2); deferred is under way, as on
+                              the lane run detail. A disposition missing or
+                              not taught to this build is unreported (6.4). *)
+                           let marked status word =
+                             Say.code (Masc_tui_value.Mark.glyph status ^ " ") ++ word in
                            match json_assoc_member_opt "disposition" result with
-                           | Some (`String "completed") -> Say.code "✓ " ++ completed_word
-                           | Some (`String "deferred") -> Say.code "◌ " ++ deferred_word
-                           | Some (`String "failed") -> Say.code "✗ " ++ failed_word
-                           | Some _ | None -> Say.both ~ko:"모름" ~en:"unknown"
+                           | Some (`String "completed") -> marked Masc_tui_value.Mark.Settled completed_word
+                           | Some (`String "deferred") -> marked Masc_tui_value.Mark.Under_way deferred_word
+                           | Some (`String "failed") -> marked Masc_tui_value.Mark.Failed failed_word
+                           | Some _ | None ->
+                             Say.code (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
                          in
                          let settlement_count =
                            match

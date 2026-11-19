@@ -1,10 +1,10 @@
 (** The rows the help overlay draws, and the height it draws them in.
 
-    The overlay folds its lines into two columns once the terminal is wide
-    enough, so what it draws is fewer rows than it was written as. The key
-    handler bounded the scroll with the line count and no height at all, and
-    the drawing clamped the result on the way past -- the shape
-    {!Masc_tui_scroll} was written to end. On a wide terminal the sheet
+    The overlay folds its lines into two columns at medium widths and three
+    columns on wide terminals, so what it draws is fewer rows than it was
+    written as. The key handler bounded the scroll with the line count and no
+    height at all, and the drawing clamped the result on the way past -- the
+    shape {!Masc_tui_scroll} was written to end. On a wide terminal the sheet
     stopped at its last row while the state counted on to twice that, so
     scrolling back up paid off the surplus one press at a time before the
     reader saw anything move.
@@ -13,17 +13,28 @@
 
 val line_cells : cols:int -> int
 (** The cells one sheet line has at this width: the frame's inner width while
-    the sheet is one column, a column's width once it is two. Lines wider than
-    this are cut where they are drawn, so the lines are wrapped to it first. *)
+    the sheet is one column, {!column_width} at two columns, and
+    {!three_column_width} at three columns. Lines wider than this are cut
+    where they are drawn, so the lines are wrapped to it first. *)
 
 val two_column_minimum_cols : int
 (** The terminal width where [sheet] folds to two columns; the frame folds
     at the same width so its height answer matches what it draws. *)
 
+val three_column_minimum_cols : int
+(** The terminal width where [sheet] folds to a Codex-style 3-column shortcut
+    matrix (132 cols), fitting multi-section help onto one screen without
+    scrolling. *)
+
+val columns_for : cols:int -> int
+(** How many columns {!sheet} draws at [cols]: 1, 2, or 3. *)
+
 val column_width : cols:int -> int
-(** The cells one column of the folded sheet has. The feature sheet folds to
-    the same columns and draws its lines at the same width, so a reader sees
-    one layout on both sheets. *)
+(** The cells one column of the two-column folded sheet has. The feature sheet
+    uses this two-column layout at medium and wide widths. *)
+
+val three_column_width : cols:int -> int
+(** The cells one column of the three-column folded sheet has. *)
 
 (** One run of the sheet's rows that a column holds together. *)
 type block =
@@ -39,10 +50,11 @@ type block =
           level with the first key of [first]. *)
 
 val sheet : cols:int -> block list -> string list
-(** The rows drawn at this width: the blocks down one column, or -- once a
-    terminal is wide enough to hold two columns -- each block whole, the
-    first ones down the left column and the rest down the right one, cut
-    where the taller column is shortest. *)
+(** The rows drawn at this width: the blocks down one column below
+    {!two_column_minimum_cols}, two balanced columns from
+    {!two_column_minimum_cols}, and a three-column matrix from
+    {!three_column_minimum_cols}, each block kept whole and cut where the
+    tallest column is shortest. *)
 
 val one_section : heading:string -> string list list -> block list
 (** The blocks of a sheet that holds a single section. [entries] is each key's

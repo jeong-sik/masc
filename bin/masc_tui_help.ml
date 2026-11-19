@@ -1,15 +1,27 @@
 module Message_layout = Masc_tui_message_layout
 
 let two_column_minimum_cols = 96
+let three_column_minimum_cols = 132
 
-(* The gutter the two columns leave: one border and one pad on each side. *)
+(* The gutter the two columns leave: one border and one pad on each side,
+   plus a 2-cell gap between columns (4 + 2 = 6). Three columns add one more
+   2-cell gap (4 + 4 = 8). *)
 let column_gutter_cols = 6
+let three_column_gutter_cols = 8
+
+let columns_for ~cols =
+  if cols >= three_column_minimum_cols then 3
+  else if cols >= two_column_minimum_cols then 2
+  else 1
 
 let column_width ~cols = (cols - column_gutter_cols) / 2
+let three_column_width ~cols = (cols - three_column_gutter_cols) / 3
 
 let line_cells ~cols =
-  if cols < two_column_minimum_cols then Masc_tui_frame.inner_width ~cols
-  else column_width ~cols
+  match columns_for ~cols with
+  | 3 -> three_column_width ~cols
+  | 2 -> column_width ~cols
+  | _ -> Masc_tui_frame.inner_width ~cols
 
 let rec zip left right =
   match left, right with
@@ -17,6 +29,16 @@ let rec zip left right =
   | l :: lt, [] -> (l, "") :: zip lt []
   | [], r :: rt -> ("", r) :: zip [] rt
   | l :: lt, r :: rt -> (l, r) :: zip lt rt
+
+let rec zip3 c1 c2 c3 =
+  match c1, c2, c3 with
+  | [], [], [] -> []
+  | _ ->
+      let hd_tl = function [] -> ("", []) | h :: t -> (h, t) in
+      let a, t1 = hd_tl c1 in
+      let b, t2 = hd_tl c2 in
+      let c, t3 = hd_tl c3 in
+      (a, b, c) :: zip3 t1 t2 t3
 
 type block =
   | Whole of string list
@@ -68,11 +90,15 @@ let last_piece_row pieces =
    first part's first key, under the heading's row. It started level with the
    left column's first row, so with the Candle details above the Operations
    keys its first key sat beside the Candle rows. *)
-let right_column_rows ~left right =
+let right_column_rows_aligned ~left_offset ~left right =
   match right with
   | Rest _ :: _ ->
-      List.init (last_piece_row left + 1) (fun _ -> "") @ column_rows right
-  | Block _ :: _ | [] -> column_rows right
+      let offset = left_offset + last_piece_row left + 1 in
+      (offset, List.init offset (fun _ -> "") @ column_rows right)
+  | Block _ :: _ | [] -> (0, column_rows right)
+
+let right_column_rows ~left right =
+  snd (right_column_rows_aligned ~left_offset:0 ~left right)
 
 (* The left column takes the first pieces and the right one the rest, cut
    where the taller of the two is shortest; on a tie the left one takes more.
@@ -111,14 +137,58 @@ let fold_pieces pieces =
   in
   zip left right
 
-let sheet ~cols blocks =
-  if cols < two_column_minimum_cols then column_rows (pieces blocks)
+let fold_three_pieces pieces =
+  let n = List.length pieces in
+  if n = 0 then []
   else
-    let width = column_width ~cols in
-    let row (l, r) =
-      Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
+    let slice lo hi =
+      List.filteri (fun index _ -> index >= lo && index < hi) pieces
     in
-    List.map row (fold_pieces (pieces blocks))
+    let columns i j =
+      let p1 = slice 0 i in
+      let p2 = slice i j in
+      let p3 = slice j n in
+      let c1 = column_rows p1 in
+      let c2_offset, c2 = right_column_rows_aligned ~left_offset:0 ~left:p1 p2 in
+      let _, c3 = right_column_rows_aligned ~left_offset:c2_offset ~left:p2 p3 in
+      (c1, c2, c3)
+    in
+    let tallest (c1, c2, c3) =
+      max (List.length c1) (max (List.length c2) (List.length c3))
+    in
+    let best = ref (columns n n) in
+    (* Scan from left-filled splits downwards so earlier columns are never left
+       blank on a height tie, and never leave column 2 empty while column 3
+       holds pieces (j > i whenever i < n). *)
+    for i = n - 1 downto 1 do
+      for j = n downto i + 1 do
+        let candidate = columns i j in
+        if tallest candidate < tallest !best then best := candidate
+      done
+    done;
+    let c1, c2, c3 = !best in
+    zip3 c1 c2 c3
+
+let sheet ~cols blocks =
+  let ps = pieces blocks in
+  match columns_for ~cols with
+  | 3 ->
+      let width = three_column_width ~cols in
+      let row (a, b, c) =
+        Message_layout.fit_width a width
+        ^ "  "
+        ^ Message_layout.fit_width b width
+        ^ "  "
+        ^ Message_layout.fit_width c width
+      in
+      List.map row (fold_three_pieces ps)
+  | 2 ->
+      let width = column_width ~cols in
+      let row (l, r) =
+        Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
+      in
+      List.map row (fold_pieces ps)
+  | _ -> column_rows ps
 
 let one_section ~heading entries =
   let total = List.fold_left (fun sum entry -> sum + List.length entry) 0 entries in

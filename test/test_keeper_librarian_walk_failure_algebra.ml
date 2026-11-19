@@ -125,7 +125,8 @@ let test_capacity_only_keeps_all_non_capacity_visits () =
       Alcotest.(check bool) "slot order cannot hide a non-capacity visit" false
         (S.input_capacity_only evidence))
       [S.combine capacity other;S.combine other capacity])
-    [EO.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+    [EO.Output_limit_reached;Window_reached {output=Partial_output};
+     Incomplete_output {stop=Refusal};Missing_output;Ambiguous_output 2;
      Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
      Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
      Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};

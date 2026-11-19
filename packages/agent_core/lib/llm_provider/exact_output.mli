@@ -294,6 +294,31 @@ type generation_dispatch_fact =
   | No_generation_dispatch
   | Generation_dispatch_started
 
+(** The provider's typed stop reason for an answer that ended without one
+    structured output. [Types.MaxTokens] and [Types.ContextWindowExceeded] are
+    not here: they are {!Output_limit_reached} and {!Window_reached}. *)
+type incomplete_stop =
+  | End_turn
+  | Tool_use
+  | Stop_sequence
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Pause_turn
+  | Compaction
+  | Unmatched_tool_calls
+  | Unknown_stop of string
+
+(** The provider stop reason this incomplete stop came from. *)
+val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason
+
+(** What a response that stopped at the model's window had produced. *)
+type window_output =
+  | No_output
+      (** The completion was empty. *)
+  | Partial_output
+      (** Text came, and it was not one structured output. *)
+
 (** Why one dispatched or dispatching attempt failed. Every cause belongs to
     the binding or to its answer, never to masc's wiring: the plan parsed its
     URL and headers when it was frozen, the flow always runs on a clock, and
@@ -329,7 +354,12 @@ type execution_error_cause =
   | Output_limit_reached
       (** The normalized provider stop reason is [Types.MaxTokens]. No JSON
           output was accepted; distinct from refusal and other incomplete stops. *)
-  | Incomplete_output
+  | Window_reached of { output : window_output }
+      (** The provider typed a stop at the model's context window
+          ([Types.ContextWindowExceeded]), with or without text. The input fit
+          and one generation was spent, so this is not a refusal of the input. *)
+  | Incomplete_output of { stop : incomplete_stop }
+      (** The answer stopped for [stop] without one structured output. *)
   | Missing_output
   | Ambiguous_output of int
   | Unexpected_output_content

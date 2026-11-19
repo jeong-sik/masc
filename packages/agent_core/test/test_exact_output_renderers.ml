@@ -106,7 +106,14 @@ let test_execution_error_cause () =
           { http_status = 429; refusal = EO.Rate_limited; retry_after_s = None }
       , "provider refused (http_status=429 refusal=rate_limited)" )
     ; EO.Output_limit_reached, "output limit reached"
-    ; EO.Incomplete_output, "incomplete output"
+    ; ( EO.Window_reached { output = EO.No_output }
+      , "context window reached (no output)" )
+    ; ( EO.Window_reached { output = EO.Partial_output }
+      , "context window reached (partial output)" )
+    ; ( EO.Incomplete_output { stop = EO.Refusal }
+      , "incomplete output (stop_reason=refusal)" )
+    ; ( EO.Incomplete_output { stop = EO.Unknown_stop "fixture_stop" }
+      , "incomplete output (stop_reason=fixture_stop)" )
     ; EO.Missing_output, "missing output"
     ; EO.Ambiguous_output 3, "ambiguous output (candidates=3)"
     ; EO.Unexpected_output_content, "unexpected output content"

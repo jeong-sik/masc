@@ -178,7 +178,10 @@ let test_every_execution_cause_renders_distinctly () =
         }
     ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
     ; Output_limit_reached
-    ; Incomplete_output
+    ; Window_reached { output = No_output }
+    ; Window_reached { output = Partial_output }
+    ; Incomplete_output { stop = Refusal }
+    ; Incomplete_output { stop = End_turn }
     ; Missing_output
     ; Ambiguous_output 3
     ; Unexpected_output_content

@@ -4787,7 +4787,8 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
          check bool "the one aggregate report remains an ordinary refusal" true (actual=mixed)
        | _ -> fail "a mixed walk was mislabeled as a capacity-only refusal"))
       [Failure.combine other capacity;Failure.combine capacity other])
-    [Exact.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+    [Exact.Output_limit_reached;Window_reached {output=Partial_output};
+     Incomplete_output {stop=Refusal};Missing_output;Ambiguous_output 2;
      Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
      Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
      Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};

@@ -82,7 +82,11 @@ let execution = function
   | Exact.Completion_failed { error; _ } -> completion error
   | Exact.Response_body_deadline_exceeded -> Transient
   | Exact.Output_limit_reached -> Output_limit
-  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  (* The same classes an empty window stop and a cut text answer had before
+     they had their own cause. *)
+  | Exact.Window_reached { output = Exact.No_output } -> Input_refused Context_overflow
+  | Exact.Window_reached { output = Exact.Partial_output }
+  | Exact.Incomplete_output _ | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> Output_unusable
 
 let candidate rejection =

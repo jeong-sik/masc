@@ -1533,7 +1533,7 @@
  (name masc_tui_planning_proof_mark)
  (wrapped false)
  (modules masc_tui_planning_proof_mark)
- (libraries masc masc_tui_message_layout))
+ (libraries masc masc_tui_message_layout masc_tui_value))
 
 ; Whether a Goal at work has passed its due date, read once for the Planning
 ; list, its preview and the detail. Pure: the caller passes the moment.

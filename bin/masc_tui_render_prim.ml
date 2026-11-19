@@ -3928,14 +3928,9 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
    literals and the legend was a state short. *)
 let planning_proof_mark proof =
   let mark = Masc_tui_planning_proof_mark.glyph proof in
-  match proof with
-  | Tui_decode.Proof_idle -> mark
-  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ mark ^ Ansi.reset
-  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ mark ^ Ansi.reset
-  | Tui_decode.Proof_pending
-  | Tui_decode.Proof_stale _
-  | Tui_decode.Proof_unreadable _ ->
-      (Theme.warn ()) ^ mark ^ Ansi.reset
+  match Masc_tui_planning_proof_mark.tone proof with
+  | None -> mark
+  | Some status -> Theme.status_tone status ^ mark ^ Ansi.reset
 
 
 (* The footer names the action behind each key for the keeper under the cursor,

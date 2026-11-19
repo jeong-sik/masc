@@ -5844,6 +5844,11 @@ let context_retained_body_lines ~width text =
           ; retained_table_frame = !table_frame_enabled; retained_lines = lines };
       lines
 
+let section_rule_text = Masc_tui_ansi.Section.rule_text
+let section_heading_style = Masc_tui_ansi.Section.style
+
+let section_heading_line title = section_heading_style ^ section_rule_text title ^ Ansi.reset
+
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
@@ -5856,7 +5861,7 @@ let context_exact_item_detail_lines ~width ~scale ~part
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
+  [ section_heading_line "RETAINED ITEM"
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
@@ -6915,13 +6920,11 @@ let studio_panel ~width ~title ~lines =
   @ [ border "└" "┘" ]
 
 let detail_heading_rows ~first lines =
-  let heading =
-    List.map (fun line -> Theme.info () ^ Ansi.bold, "  " ^ line) lines
-  in
+  let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in
   if first then heading else (Ansi.dim, "") :: heading
 
 let detail_section_heading ?(first = false) title =
-  detail_heading_rows ~first [ "[ " ^ title ^ " ]" ]
+  detail_heading_rows ~first [ section_rule_text title ]
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
@@ -6941,7 +6944,7 @@ let detail_page ~width blocks =
     (List.mapi
        (fun index (title, lines) ->
           detail_heading_rows ~first:(index = 0)
-            (Message_layout.wrap_words ~max_cells ("[ " ^ title ^ " ]"))
+            (Message_layout.wrap_words ~max_cells (section_rule_text title))
           @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
        blocks)
 
@@ -6994,7 +6997,7 @@ let runtime_config_status_lines state ~cols =
   detail_page ~width:(framed_inner_width cols) blocks
 
 let detail_section_lines ?(first = false) title =
-  let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+  let heading = [ "  " ^ section_heading_line title ] in
   if first then heading else "" :: heading
 
 let wrap_summary_column_items ~width items =

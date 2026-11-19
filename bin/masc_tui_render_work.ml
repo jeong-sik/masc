@@ -450,7 +450,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
-  | Planning_detail.Heading -> Theme.info () ^ Ansi.bold
+  | Planning_detail.Heading -> Masc_tui_ansi.Section.style
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -1050,7 +1050,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
        | Some words -> " · " ^ words) in
   let _, next_text = planning_next_step ~ko goal in
   let section title =
-    Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+    Masc_tui_text_block.rows ~max_cells:width (Masc_tui_ansi.Section.rule_text title)
     |> List.map (fun line -> { Planning_detail.tone = Heading; text = "  " ^ line })
   in
   let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in

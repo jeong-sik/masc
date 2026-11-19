@@ -138,6 +138,8 @@ let tally_of_records (records : record list) : tally =
 (* ── Durable sink + log read — Stdlib I/O via the sibling-log family ──── *)
 
 let record ~(config : Workspace.config) (r : record) : (unit, [ `Io of string ]) result =
+  (* The path is only a path, and append_jsonl_line makes no directory. *)
+  let (_ : string) = Keeper_fs.keeper_dir config in
   let path = Keeper_types_support.keeper_feedback_log_path config r.keeper_id in
   (* append_jsonl_line shares the sibling JSONL writer (rotation included).
      append_lines raises Sys_error on IO fault — caught here, surfaced as `Io,

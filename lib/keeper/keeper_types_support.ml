@@ -223,16 +223,22 @@ let is_internal_history_source = function
   | Direct_user | Direct_assistant -> false
   | World_state_prompt | Internal_assistant -> true
 
+(* The two records a Keeper keeps in the keepers directory: paths, with no
+   look at the file system, for the same reason as [keeper_store_location].
+   The newest decision row is kept in memory ([Keeper_row_facts]) and its
+   readers ask for it by this path on every Keeper row. The records' writers
+   make the directory ([append_decision_record],
+   [Keeper_response_feedback.record]). *)
 let keeper_decision_log_path config name =
   Filename.concat
-    (keeper_dir_ config)
+    (Workspace.keepers_runtime_dir config)
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Decision_log)
 
 let keeper_feedback_log_path config name =
   Filename.concat
-    (keeper_dir_ config)
+    (Workspace.keepers_runtime_dir config)
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Feedback_log)
@@ -310,6 +316,8 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
    kept row over the row it wrote. The runtime history reads every Keeper's
    decision log too, so a row written moves it. *)
 let append_decision_record config name json =
+  (* [Fs_compat.append_lines] makes no directory. *)
+  ignore (keeper_dir_ config : string);
   let path = keeper_decision_log_path config name in
   let row = jsonl_row json in
   Keeper_row_facts.appending_decision ~path ~row (fun () ->

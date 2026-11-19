@@ -106,7 +106,12 @@ val history_source_of_string : string -> history_source option
     conversation. *)
 val is_internal_history_source : history_source -> bool
 
+(** Where a Keeper's decision record and feedback record are. Paths: the
+    file system is not looked at and nothing is made. The records' writers
+    make the keepers directory ({!append_decision_record},
+    [Keeper_response_feedback.record]). *)
 val keeper_decision_log_path : Workspace.config -> string -> string
+
 val keeper_feedback_log_path : Workspace.config -> string -> string
 
 (** Rotate [path] when it reaches the configured size threshold.

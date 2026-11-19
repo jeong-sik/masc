@@ -2853,7 +2853,7 @@ let sidebar_heading ~cols ~title ~count =
 (* A quiet rail beside the conversation. Only the cursor row gets a band when
    this pane owns the keys; the selected Keeper's readings sit below the list.
    [rows] includes the caller's footer, as it does for the detail/chat panes. *)
-let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
+let keeper_roster_pane ?(focused = false) ?(top_spacer = true) (state : state) ~rows ~cols buf =
   let height = max 0 (rows - 1) in
   let inner = max 0 (cols - 1) in
   let ground = Theme.side_pane_background () in
@@ -2905,7 +2905,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
               (Terminal_text.single_line runtime)
           ]
   in
-  let header_rows = min 3 height in
+  let header_rows = min (if top_spacer then 3 else 2) height in
   let available = height - header_rows in
   let count = List.length state.keepers in
   (* Supplementary details get no more rows than the list keeps, unless the
@@ -2938,15 +2938,15 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
      title row's to say. *)
   let hidden = count - Rows.length window in
   let header =
-    [ ""
-    ; sidebar_heading ~cols ~title:"KEEPERS"
-        ~count:
-          (Masc_tui_value.Count.grouped count
-          ^ (if hidden <= 0 then ""
-             else
-               " \xc2\xb7 "
-               ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
-    ; rule ]
+    (if top_spacer then [ "" ] else [])
+    @ [ sidebar_heading ~cols ~title:(ui_text state ~ko:"키퍼" ~en:"KEEPERS")
+          ~count:
+            (Masc_tui_value.Count.grouped count
+            ^ (if hidden <= 0 then ""
+               else
+                 " \xc2\xb7 "
+                 ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
+      ; rule ]
   in
   List.iter (draw ~style:(Theme.Side_pane.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
@@ -3046,15 +3046,16 @@ let list_count_text ~loaded ~holding =
    Asked of every caller rather than defaulted: a list that is filtered
    rather than paged has nothing more to hold, and passing [None] says so
    where leaving it out could not be told from forgetting. *)
-let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
+let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
   let draw ?style text = sidebar_line ?style buf ~cols text in
-  draw "";
+  if framed then draw "";
   draw ~style:(Theme.Side_pane.recede ())
     (sidebar_heading ~cols ~title
        ~count:(list_count_text ~loaded:(List.length labels) ~holding));
   draw ~style:(Theme.Side_pane.border_muted ()) (sidebar_rule ~cols);
-  let content_height = max 0 (rows - framed_chrome_rows) in
+  let chrome = if framed then framed_chrome_rows else max 0 (framed_chrome_rows - 2) in
+  let content_height = max 0 (rows - chrome) in
   let first =
     match selection with
     | Some selected when selected >= content_height ->
@@ -3089,7 +3090,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
       else draw (String.make sidebar_row_lead_cells ' ' ^ drawn)
     | None -> draw ""
   done;
-  draw ""
+  if framed then draw ""
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels

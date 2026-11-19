@@ -89,7 +89,7 @@ let rows ?(input_locked=false) ~width ~height t =
   let heading = (match t.mode with Edit -> "Edit model" | Copy -> "Copy model") ^ " · " ^ t.source.provider in
   let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
   let field_rows = List.mapi (fun i field ->
-    Printf.sprintf "%s %-17s %s" (if i = t.selected then ">" else " ") (label field)
+    Printf.sprintf "%s %-17s %s" (if i = t.selected then "›" else " ") (label field)
       (value t field ^ (if i = t.selected then "_" else "")
        ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
   let hint = if input_locked then "Input retained · Esc back · Ctrl-X closes recovery after receipt" else

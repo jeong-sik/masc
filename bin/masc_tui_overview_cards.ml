@@ -42,11 +42,20 @@ let row_lines ~cells label =
 (* The band covers the card's whole content width on every line of the row, so
    a row that wraps is still one selected thing. *)
 let band ~cells line =
-  Theme.selection_style () ^ Layout.fit_width line cells ^ Ansi.reset
+  Theme.selection_style ()
+  ^ Layout.fit_width (Masc_tui_theme.strip_sgr line) cells
+  ^ Ansi.reset
 
 let row_body ~is_selected ~cells (action, label) =
-  let lines = row_lines ~cells label in
-  if is_selected action then List.map (band ~cells) lines else lines
+  let gutter = 2 in
+  let text_cells = max 1 (cells - gutter) in
+  let selected = is_selected action in
+  let lines =
+    row_lines ~cells:text_cells label
+    |> List.mapi (fun index line ->
+         (if selected && index = 0 then "› " else "  ") ^ line)
+  in
+  if selected then List.map (band ~cells) lines else lines
 
 (* Every row a card lists is a destination the selection moves over, so a
    card with rows can hold it and a card with none cannot. *)

@@ -25609,7 +25609,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
                    | Pick_refused refusal ->
                        "[" ^ runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal
                        ^ "] " in
-                 "> " ^ refusal ^ runtime_model_picker_title runtime
+                 "› " ^ refusal ^ runtime_model_picker_title runtime
              | Some (Lane_choice _) | None ->
                  runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) picker in
           [ui_text state ~ko:"후보 추가 · " ~en:"Add candidate · " ^ choice
@@ -26096,7 +26096,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
             |> List.mapi (fun offset row ->
               let index = first + offset in
               let lead = Printf.sprintf "%s %d%s "
-                  (if Some index = selected then ">" else " ") (index + 1)
+                  (if Some index = selected then "›" else " ") (index + 1)
                   (if row.sr_admitted then "" else " !") in
               let line = lead ^ Masc_tui_message_layout.fit_middle
                   (max 1 (width - Masc_tui_message_layout.display_width lead)) (clean row.sr_slot) in

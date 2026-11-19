@@ -560,6 +560,7 @@ val fit_runtime_id : int -> string -> string
 
 val keeper_roster_pane :
   ?focused:bool ->
+  ?top_spacer:bool ->
   Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit
 
 val listing_rows_below_the_body : int
@@ -590,6 +591,7 @@ val write_list_sidebar :
     its row; an unfocused selection keeps a caret without claiming focus. *)
 
 val write_list_sidebar_selection :
+  ?framed:bool ->
   Buffer.t ->
   rows:int ->
   cols:int ->

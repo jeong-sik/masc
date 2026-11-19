@@ -5021,13 +5021,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               this field, rather than a second copy of its format: three
               lists show a run's start, and a copy is one that stops
               following when the other two change. *)
-           Printf.sprintf "%s %s · %s · %s · %s"
-             (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
-                   (Masc_tui_fusion_model.selected_keeper_run state) then ">" else " ")
-             (fusion_run_clock run)
-             (Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status)
-             (Terminal_text.single_line run.fur_preset)
-             (Terminal_text.single_line run.fur_run_id)) runs)
+           let selected =
+             Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
+               (Masc_tui_fusion_model.selected_keeper_run state)
+           in
+           let row =
+             Printf.sprintf "%s %s · %s · %s · %s"
+               (if selected then "›" else " ")
+               (fusion_run_clock run)
+               (Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status)
+               (Terminal_text.single_line run.fur_preset)
+               (Terminal_text.single_line run.fur_run_id)
+           in
+           if selected then
+             Theme.selection_style () ^ fit_width (Masc_tui_theme.strip_sgr row) inner ^ Ansi.reset
+           else row) runs)
       in
       match Masc_tui_fusion_model.keeper_runs_view state with
       | Masc_tui_fetched.Absent -> [ Ansi.dim ^ (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset ]
@@ -5208,9 +5216,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           ~content_height state.detail_scroll
         |> fun scroll ->
           if state.detail_tab = Detail_runs then
+            let header_offset =
+              match Masc_tui_fusion_model.keeper_runs_view state with
+              | Masc_tui_fetched.Stale _ -> 2
+              | Masc_tui_fetched.Absent | Loading | Failed _ | Ready _ -> 1
+            in
             Option.fold ~none:scroll
               ~some:(fun (cursor, _) ->
-                Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
+                Masc_tui_scroll.ensure_visible ~cursor:(cursor + header_offset)
                   ~height:(max 1 content_height) scroll)
               (Masc_tui_fusion_model.selected_keeper_run state)
           else

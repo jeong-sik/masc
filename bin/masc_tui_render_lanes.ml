@@ -582,7 +582,7 @@ let render_exact_lane_provider_editor (state : state) editor =
             let line bracket note =
               Printf.sprintf "  %s [%s] %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
-                 then ">" else " ")
+                 then "›" else " ")
                 bracket
                 (Masc_tui_types.runtime_model_picker_title runtime)
                 note

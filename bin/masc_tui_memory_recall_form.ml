@@ -574,7 +574,7 @@ let window ~room ~cursor rows =
 ;;
 
 let rows ~width ~height t =
-  let mark index = if t.cursor = index then ">" else " " in
+  let mark index = if t.cursor = index then "›" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead intro in
   let server_rows =
     capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line t.server))

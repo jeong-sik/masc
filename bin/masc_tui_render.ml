@@ -498,7 +498,7 @@ let render_overview (state : state) home =
   let sidebar =
     if state.keeper_navigation_open then
       Some (keeper_roster_pane_cols,
-        fun ~rows buf -> keeper_roster_pane ~focused:true state
+        fun ~rows buf -> keeper_roster_pane ~focused:true ~top_spacer:false state
           ~rows:(rows + 1) ~cols:keeper_roster_pane_cols buf)
     else None
   in
@@ -558,8 +558,9 @@ let render_overview (state : state) home =
           (ui_text state ~ko:" 선택한 관측이 바뀌었습니다 · j/k:다시 선택"
              ~en:" Selected observation changed · j/k to choose again");
       let draw_row (action,label) =
-        let line = "  " ^ label in
-        if Option.equal equal_home_action (Some action) selected then c.push_selected line
+        let is_selected = Option.equal equal_home_action (Some action) selected in
+        let line = (if is_selected then "› " else "  ") ^ label in
+        if is_selected then c.push_selected line
         else c.push line in
       let available = List.length body.hb_rows + body.hb_spare in
       let card_rows =

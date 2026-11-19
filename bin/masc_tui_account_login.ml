@@ -881,19 +881,19 @@ let model_rows t = List.mapi (fun i (m:model) ->
   let mark = if connected then "[연결됨] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in
   let reason = if connected then "" else if m.tools = Some false then " · 도구 호출 미지원"
     else if Option.is_none m.context then " · context 확인 필요" else "" in
-  Text ((if i=t.cursor then "> " else "  ") ^ mark ^ m.label ^ reason)) t.models
+  Text ((if i=t.cursor then "› " else "  ") ^ mark ^ m.label ^ reason)) t.models
 (* Everything under the notice. *)
 let body_rows t =
   match t.phase with
   | Providers Clients -> List.mapi (fun i client ->
       let count = List.length (accounts t client) in
-      Text ((if i=t.cursor then "> " else "  ") ^ client_label client
+      Text ((if i=t.cursor then "› " else "  ") ^ client_label client
             ^ (if count = 0 then "" else Printf.sprintf " · 계정 %d" count))) (clients t)
   | Providers (Accounts client) -> List.mapi (fun i row ->
-      Text ((if i=t.cursor then "> " else "  ")
+      Text ((if i=t.cursor then "› " else "  ")
             ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
   | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
-      Text ((if i=t.cursor then "> " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
+      Text ((if i=t.cursor then "› " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
   | Models | Refreshing_models | Preparing_context _ -> model_rows t
   | Failed when t.recovery=Refresh_model_inventory -> model_rows t
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)

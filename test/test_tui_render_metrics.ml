@@ -767,6 +767,26 @@ let test_the_metrics_body_hands_its_window_only_when_it_hides_lines () =
   check int "a body that shows every line hands nothing" 0
     (List.length (handed ~budget:400))
 
+let test_kpi_layout_responsive_tiers () =
+  check bool "below 80 cols falls back to Compact" true
+    (Render_metrics.kpi_layout ~cols:79 = Render_metrics.Compact);
+  (match Render_metrics.kpi_layout ~cols:80 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "80 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=80");
+  (match Render_metrics.kpi_layout ~cols:120 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "120 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=120");
+  (match Render_metrics.kpi_layout ~cols:155 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "155 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=155");
+  (match Render_metrics.kpi_layout ~cols:156 with
+   | Render_metrics.Cards_4 { card_cells; _ } ->
+       check bool "156 cols 4x1 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_2x2 _ | Compact -> fail "expected Cards_4 at cols=156")
+
 let () =
   run "tui_render_metrics"
     [ ( "connection"
@@ -816,7 +836,9 @@ let () =
             test_the_newest_session_event_is_kept_when_taller_than_the_room
         ] )
     ; ( "responsiveness"
-      , [] )
+      , [ test_case "KPI cards step down 4x1 -> 2x2 -> Compact cleanly" `Quick
+            test_kpi_layout_responsive_tiers
+        ] )
     ; ( "render_body"
       , [ test_case "a Tasks read error is sanitized before it is drawn" `Quick
             test_tasks_error_is_sanitized

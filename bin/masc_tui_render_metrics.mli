@@ -46,6 +46,16 @@ val scheduler_stop_reason : Masc.Tui_decode.scheduler_probe option -> string opt
 
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
+type kpi_layout =
+  | Cards_4 of { card_w : int; card_cells : int }
+  | Cards_2x2 of { card_w : int; card_cells : int }
+  | Compact
+
+val kpi_layout : cols:int -> kpi_layout
+(** Progressive KPI card tier for [cols]: 4x1 row when four 32-cell cards fit
+    ([cols >= 156]), 2x2 card grid when two 32-cell cards fit ([cols >= 80]),
+    and compact summaries only below that floor. *)
+
 val engine_graph_capacity : cols:int -> state -> int option
 (** How many [/health] samples the engine graphs keep at this terminal width
     ([Some]) while Telemetry's engine section is the surface's view: as many

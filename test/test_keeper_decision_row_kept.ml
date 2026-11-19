@@ -22,7 +22,9 @@
        a name remembered across a rotation or a failed write, are not held
        against the file.
     6. A writer that another writer overtook leaves nothing kept.
-    7. Over 300 random steps the kept row is the row the file gives. *)
+    7. Over 300 random steps the kept row is the row the file gives.
+    8. A kept row is answered without the fiber giving up its turn: asking
+       for the record's path looks at no file. *)
 
 open Alcotest
 open Masc
@@ -61,6 +63,7 @@ let row_of_bytes turn bytes =
 ;;
 
 let by_hand config text =
+  Fs_compat.mkdir_p (Filename.dirname (path config));
   Out_channel.with_open_gen
     [ Open_wronly; Open_append; Open_creat; Open_binary ]
     0o644
@@ -187,12 +190,52 @@ let test_an_append_that_fails_keeps_nothing () =
    no row as it did, and that answer is not kept. *)
 let test_a_record_that_cannot_be_read_keeps_nothing () =
   with_workspace (fun config ->
+    Fs_compat.mkdir_p (Filename.dirname (path config));
     Unix.mkdir (path config) 0o755;
     Out_channel.with_open_text (Filename.concat (path config) "child") (fun channel ->
       output_string channel "x");
     check string "the file" "the file could not be read" (in_the_file config);
     check string "the reader" "no row" (shown config);
     check string "nothing is kept" "nothing kept" (kept config))
+;;
+
+(* How many turns a fiber that is ready to run gets while [read] is called
+   fifty times. Fibers of one domain take turns only where one of them
+   waits, so a read that never waits gives the fiber beside it none. A read
+   that asks the file system through Eio waits for a worker thread, and the
+   fiber beside it runs. *)
+let turns_of_a_fiber_beside read =
+  Eio.Switch.run
+  @@ fun sw ->
+  let turns = ref 0 in
+  let stop = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+    while not !stop do
+      incr turns;
+      Eio.Fiber.yield ()
+    done);
+  Eio.Fiber.yield ();
+  let before = !turns in
+  for _ = 1 to 50 do
+    read ()
+  done;
+  let during = !turns - before in
+  stop := true;
+  during
+;;
+
+(* The record's path used to look whether the keepers directory was there,
+   through Eio, each time a reader asked for it. *)
+let test_a_kept_row_is_answered_without_waiting () =
+  with_workspace (fun config ->
+    append config (row 1);
+    check string "read and kept" "turn 1" (shown config);
+    check string "kept" "kept: turn 1" (kept config);
+    check
+      int
+      "the fiber beside got no turn"
+      0
+      (turns_of_a_fiber_beside (fun () -> check string "held" "turn 1" (shown config))))
 ;;
 
 (* --- a record written and read by hand ----------------------------------
@@ -494,6 +537,10 @@ let () =
             "a record that cannot be read keeps nothing"
             `Quick
             test_a_record_that_cannot_be_read_keeps_nothing
+        ; test_case
+            "a kept row is answered without waiting"
+            `Quick
+            test_a_kept_row_is_answered_without_waiting
         ; test_case
             "two spellings of a record are one kept row"
             `Quick

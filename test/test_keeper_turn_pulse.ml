@@ -132,6 +132,7 @@ let chat_line at =
 ;;
 
 let write_lines path lines =
+  let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname path) in
   Out_channel.with_open_text path (fun oc ->
     List.iter (fun line -> output_string oc (line ^ "\n")) lines)
 ;;

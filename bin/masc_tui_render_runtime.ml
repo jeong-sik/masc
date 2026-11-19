@@ -202,7 +202,9 @@ let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~cand
     let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
     Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
 
-let runtime_bool = function true -> "yes" | false -> "no"
+let runtime_bool ~ko = function
+  | true -> if ko then "예" else "yes"
+  | false -> if ko then "아니오" else "no"
 
 (* A field as one fact line, so an absent field is [[]] and a repeated one is a
    [List.concat_map]. A blank value draws the empty mark, as it did when each
@@ -359,31 +361,35 @@ let runtime_detail_lines state target ~width =
        | Runtime_lane_candidate _ | Runtime_catalog_entry _ ->
            Masc_tui_page_reading.rows
              ~max_cells:(max 1 (width - String.length Masc_tui_page_reading.detail_indent))
-             (runtime_fact ~tone:Page_line.Attention "Runtime"
-                "This runtime row is no longer present in the refreshed projection"))
+             (runtime_fact ~tone:Page_line.Attention
+                (if ko then "런타임" else "Runtime")
+                (if ko then "새로고침된 목록에 이 런타임 행이 더 이상 없습니다"
+                 else "This runtime row is no longer present in the refreshed projection")))
   | Some (runtime, lanes, position, probe) ->
+      let say korean english = if ko then korean else english in
       let fact = runtime_fact in
       let model_fields =
-        fact "Runtime ID" runtime.ro_id
-        @ fact "Provider" runtime.ro_provider
-        @ fact "Model" runtime.ro_model
-        @ fact "Effective context"
-            (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
-        @ fact "Context source"
+        fact (say "런타임 ID" "Runtime ID") runtime.ro_id
+        @ fact (say "제공자" "Provider") runtime.ro_provider
+        @ fact (say "모델" "Model") runtime.ro_model
+        @ fact (say "적용 컨텍스트" "Effective context")
+            (Printf.sprintf (if ko then "%d 토큰" else "%d tokens")
+               runtime.ro_effective_max_context)
+        @ fact (say "컨텍스트 출처" "Context source")
             (runtime_context_source_label runtime.ro_max_context_source)
-        @ fact "Max output"
+        @ fact (say "최대 출력" "Max output")
             (match runtime.ro_max_output_tokens with
-             | Some tokens -> Printf.sprintf "%d tokens" tokens
-             | None -> "not specified")
-        @ fact "Local runtime"
-            (runtime_bool runtime.ro_is_local)
+             | Some tokens ->
+                 Printf.sprintf (if ko then "%d 토큰" else "%d tokens") tokens
+             | None -> say "미지정" "not specified")
+        @ fact (say "로컬 런타임" "Local runtime")
+            (runtime_bool ~ko runtime.ro_is_local)
       in
-      (* Every label on this page is English, so the scope fallback is too. *)
       let connection_fields =
-        fact "Connection / provider ID" runtime.ro_provider_id
-        @ fact "Quota scope" (runtime_quota_scope_label ~ko:false runtime)
-        @ fact "Response-local quota scope"
-            (Option.value ~default:"not reported" runtime.ro_quota_scope)
+        fact (say "연결 / 제공자 ID" "Connection / provider ID") runtime.ro_provider_id
+        @ fact (say "쿼터 범위" "Quota scope") (runtime_quota_scope_label ~ko runtime)
+        @ fact (say "응답 로컬 쿼터 범위" "Response-local quota scope")
+            (Option.value ~default:(say "보고 안 됨" "not reported") runtime.ro_quota_scope)
       in
       let assignment_fields =
         (match position with
@@ -392,18 +398,19 @@ let runtime_detail_lines state target ~width =
              (* The lane is named because "Used by lanes" below can now hold
                 several, and a position without its lane is a place in an
                 unnamed list. *)
-             fact "Lane position"
-               (Printf.sprintf "%d of %d in %s" at total lane))
-        @ fact "Used by lanes"
-            (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
-        @ fact "Default runtime"
-            (runtime_bool runtime.ro_is_default)
+             fact (say "레인 순번" "Lane position")
+               (if ko then Printf.sprintf "%s 중 %d/%d번째" lane at total
+                else Printf.sprintf "%d of %d in %s" at total lane))
+        @ fact (say "사용 레인" "Used by lanes")
+            (match lanes with [] -> say "미배정" "unassigned" | values -> String.concat ", " values)
+        @ fact (say "기본 런타임" "Default runtime")
+            (runtime_bool ~ko runtime.ro_is_default)
       in
       let quota =
         match runtime.ro_quota_rest with
         | None -> []
         | Some spent ->
-            fact ~tone:Page_line.Attention "Quota"
+            fact ~tone:Page_line.Attention (say "쿼터" "Quota")
               (Printf.sprintf "%s, %s"
                  (runtime_quota_cause_label spent.Runtime_quota_window.cause)
                  (runtime_quota_end_label spent.Runtime_quota_window.rest))
@@ -412,42 +419,49 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
         | false, _ -> []
         | true, Some resets_at ->
-          fact ~tone:Page_line.Attention "Rate limit"
-            (Printf.sprintf "until %s or the next successful answer" (runtime_moment_text resets_at))
+          fact ~tone:Page_line.Attention (say "속도 제한" "Rate limit")
+            (Printf.sprintf
+               (if ko then "%s까지 또는 다음 성공 응답까지"
+                else "until %s or the next successful answer")
+               (runtime_moment_text resets_at))
         | true, None ->
-          fact ~tone:Page_line.Attention "Rate limit"
-            "no wait stated, cleared by the next successful answer"
+          fact ~tone:Page_line.Attention (say "속도 제한" "Rate limit")
+            (say "대기 시각 미지정 · 다음 성공 응답 시 해제"
+               "no wait stated, cleared by the next successful answer")
       in
       let credential =
         match runtime.ro_credential_refused_at with
         | None -> []
         | Some at ->
-          fact ~tone:Page_line.Attention "Credential"
-            (Printf.sprintf "refused %s, until a call on it is answered" (runtime_moment_text at))
+          fact ~tone:Page_line.Attention (say "인증" "Credential")
+            (Printf.sprintf
+               (if ko then "%s 거부됨 · 호출 응답 성공 시 해제"
+                else "refused %s, until a call on it is answered")
+               (runtime_moment_text at))
       in
       let probe_lines =
         match probe with
-        | None -> fact ~tone:Page_line.Quiet "Probe" "unobserved"
+        | None -> fact ~tone:Page_line.Quiet (say "프로브" "Probe") (say "미관측" "unobserved")
         | Some row ->
             let transport =
               match row.rpp_transport with
               | Runtime_probe_http -> "http"
               | Runtime_probe_cli -> "cli"
             in
-            fact "Probe status"
+            fact (say "프로브 상태" "Probe status")
               (runtime_probe_status_label ~ko row.rpp_status)
-            @ fact "Probe transport" transport
+            @ fact (say "전송 방식" "Probe transport") transport
             @ (match row.rpp_latency_ms with
                | None -> []
                | Some value ->
-                   fact "Latency"
+                   fact (say "지연 시간" "Latency")
                      (Printf.sprintf "%.0fms" value))
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->
-                   fact "HTTP status"
+                   fact (say "HTTP 상태" "HTTP status")
                      (string_of_int value))
-            @ fact "Checked at"
+            @ fact (say "확인 시각" "Checked at")
                 (Terminal_text.short_timestamp row.rpp_checked_at)
             (* No Reachable row: the decoder admits a probe only when its
                reachable flag agrees with its status, so the row could only
@@ -456,14 +470,14 @@ let runtime_detail_lines state target ~width =
             @ (match runtime_probe_annotation ~status:row.rpp_status row.rpp_error with
                | None -> []
                | Some (Runtime_probe_note note) ->
-                   fact ~tone:Page_line.Quiet "Probe note" note
+                   fact ~tone:Page_line.Quiet (say "프로브 참고" "Probe note") note
                | Some (Runtime_probe_failure error) ->
-                   fact ~tone:Page_line.Failure "Probe error" error)
+                   fact ~tone:Page_line.Failure (say "프로브 오류" "Probe error") error)
       in
       let probe_limitations =
         match state.runtime_surface with
         | Some { rss_probe = Some snapshot; _ } ->
-            runtime_items "Probe limitation" snapshot.rps_limitations
+            runtime_items (say "프로브 한계" "Probe limitation") snapshot.rps_limitations
         | Some { rss_probe = None; _ } | None -> []
       in
       let keeper_lines =
@@ -477,40 +491,50 @@ let runtime_detail_lines state target ~width =
         in
         match target_keepers with
         | [] ->
-            fact ~tone:Page_line.Quiet "Bound keepers" "none"
+            fact ~tone:Page_line.Quiet (say "배정 키퍼" "Bound keepers") (say "없음" "none")
         | ks ->
             let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
             let activity_str = match aggregate_keeper_stats ks with
-              | None -> "activity not observed"
+              | None -> say "활동 미관측" "activity not observed"
               | Some (turns, tokens, cost) ->
-                Printf.sprintf "%d turns · %s tokens · %s" turns
-                  (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
+                Printf.sprintf
+                  (if ko then "%d턴 · %s 토큰 · %s" else "%d turns · %s tokens · %s")
+                  turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
             in
-            fact "Bound keepers" names
-            @ fact "Keeper lifetime" (activity_str ^ " · across all runtimes")
+            fact (say "배정 키퍼" "Bound keepers") names
+            @ fact (say "키퍼 누적 활동" "Keeper lifetime")
+                (activity_str ^ say " · 전체 런타임 합산" " · across all runtimes")
       in
       let usage_lines =
         match state.runtime_surface with
-        | None -> fact ~tone:Page_line.Quiet "Account usage" "unavailable"
+        | None ->
+            fact ~tone:Page_line.Quiet (say "계정 사용량" "Account usage")
+              (say "조회 불가" "unavailable")
         | Some snapshot ->
           match runtime_spent_usage snapshot.rss_resolved runtime with
-          | Error detail -> fact ~tone:Page_line.Quiet "Account usage"
+          | Error detail -> fact ~tone:Page_line.Quiet (say "계정 사용량" "Account usage")
               (Terminal_text.single_line detail)
           | Ok [] -> []
           | Ok windows ->
-            fact ~tone:Page_line.Attention "Account usage"
-              "A model-call limit is spent; this account report does not identify which models are refused."
+            fact ~tone:Page_line.Attention (say "계정 사용량" "Account usage")
+              (say "모델 호출 한도가 소진되었습니다. 이 계정 보고서는 거부되는 개별 모델을 구분하지 않습니다."
+                 "A model-call limit is spent; this account report does not identify which models are refused.")
             @ List.concat_map (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
                 let limit = match window.puw_limit_id with
                   | Some id -> Terminal_text.single_line id
-                  | None -> "account" in
+                  | None -> say "계정" "account" in
                 let observed = runtime_moment_text window.puw_observed_at in
-                fact ~tone:Page_line.Attention "Spent limit"
-                  (limit ^ " (observed " ^ observed ^ ")")) windows
+                fact ~tone:Page_line.Attention (say "소진된 한도" "Spent limit")
+                  (Printf.sprintf
+                     (if ko then "%s (%s 관측)" else "%s (observed %s)")
+                     limit observed)) windows
       in
       let evidence_lines = match state.runtime_evidence with
-        | None -> fact ~tone:Page_line.Quiet "Runtime history" "not read"
-        | Some (Error detail) -> fact ~tone:Page_line.Quiet "Runtime history" detail
+        | None ->
+            fact ~tone:Page_line.Quiet (say "런타임 이력" "Runtime history")
+              (say "미조회" "not read")
+        | Some (Error detail) ->
+            fact ~tone:Page_line.Quiet (say "런타임 이력" "Runtime history") detail
         | Some (Ok evidence) ->
           Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
           |> List.concat_map (fun (label, value) -> fact label value) in
@@ -518,7 +542,7 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_failed_attempt with
         | None -> []
         | Some attempt ->
-          fact ~tone:Page_line.Attention "Last failure"
+          fact ~tone:Page_line.Attention (say "최근 실패" "Last failure")
             (Terminal_text.single_line (runtime_failed_attempt_text attempt))
       in
       detail_page ~width
@@ -890,8 +914,11 @@ let render_runtime_reading (state : state) =
             ~reading:(Option.is_some state.runtime_surface_inflight)
       | Page_empty ->
           (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"
-           | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
+           | Masc_tui_types.Runtime_lanes ->
+               ui_text state ~ko:"  (설정된 런타임 후보 순서 없음)"
+                 ~en:"  (no runtime candidate orders configured)"
+           | Masc_tui_types.Runtime_all ->
+               ui_text state ~ko:"  (설정된 런타임 없음)" ~en:"  (no runtimes configured)")
     in
     c.push_styled ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -908,26 +935,43 @@ let render_runtime_reading (state : state) =
                let open Masc.Tui_decode in
                let used_by =
                  match lanes with
-                 | [] -> (Theme.recede ()) ^ "unassigned" ^ Ansi.reset
+                 | [] ->
+                     (Theme.recede ())
+                     ^ (if ko then "미배정" else "unassigned")
+                     ^ Ansi.reset
                  | [ one ] -> one
-                 | many -> Printf.sprintf "%d lanes" (List.length many)
+                 | many ->
+                     Printf.sprintf
+                       (if ko then "레인 %d개" else "%d lanes")
+                       (List.length many)
                in
                let bound_keepers =
                  keepers_for_runtime_with_lanes state ~lanes runtime.ro_id
                in
                let default_fact =
-                 if runtime.ro_is_default then [ (Theme.ok ()) ^ "[DEFAULT]" ^ Ansi.reset ] else []
+                 if runtime.ro_is_default then
+                   [ (Theme.ok ()) ^ (if ko then "[기본]" else "[DEFAULT]") ^ Ansi.reset ]
+                 else []
                in
                let assignment_fact =
                  match bound_keepers with
-                 | [] -> [ (Theme.recede ()) ^ "[no keepers]" ^ Ansi.reset ]
+                 | [] ->
+                     [ (Theme.recede ()) ^ (if ko then "[배정 없음]" else "[no keepers]") ^ Ansi.reset ]
                  | [ one ] ->
                      let stats = keeper_assignment_activity bound_keepers in
-                     [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
+                     [ (Theme.info ())
+                       ^ Printf.sprintf
+                           (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
+                           one.k_name stats
+                       ^ Ansi.reset ]
                  | many ->
                      let stats = keeper_assignment_activity bound_keepers in
                      let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
-                     [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
+                     [ (Theme.info ())
+                       ^ Printf.sprintf
+                           (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
+                           names stats
+                       ^ Ansi.reset ]
                in
                let detail =
                  String.concat " \xc2\xb7 "
@@ -968,7 +1012,7 @@ let render_runtime_reading (state : state) =
             else
               Message_layout.join_fitting ~sep:" " ~cells:runtime_lane_width
                 [ "  " ^ (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
-                ; "fallback"
+                ; (if ko then "예비" else "fallback")
                 ; Printf.sprintf "#%d" (candidate.rcr_position - 1)
                 ]
           in
@@ -989,14 +1033,22 @@ let render_runtime_reading (state : state) =
           let assignment_fact =
             if is_first then
               match lane_keepers with
-              | [] -> [ (Theme.recede ()) ^ "[unassigned]" ^ Ansi.reset ]
+              | [] -> [ (Theme.recede ()) ^ (if ko then "[미배정]" else "[unassigned]") ^ Ansi.reset ]
               | [ one ] ->
                   let stats = keeper_assignment_activity lane_keepers in
-                  [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
+                  [ (Theme.info ())
+                    ^ Printf.sprintf
+                        (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
+                        one.k_name stats
+                    ^ Ansi.reset ]
               | many ->
                   let stats = keeper_assignment_activity lane_keepers in
                   let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
-                  [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
+                  [ (Theme.info ())
+                    ^ Printf.sprintf
+                        (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
+                        names stats
+                    ^ Ansi.reset ]
             else []
           in
           let lane_fact =
@@ -1007,13 +1059,20 @@ let render_runtime_reading (state : state) =
                one is that [D] has no table to remove. *)
             match Masc_tui_types.runtime_lane_fact_of_row candidate with
             | Masc_tui_types.Lane_undeclared ->
-              [ (Theme.recede ()) ^ "runtime, not a declared lane" ^ Ansi.reset ]
-            | Masc_tui_types.Lane_single_candidate -> [ "single candidate" ]
-            | Masc_tui_types.Lane_head -> [ "head" ]
+              [ (Theme.recede ())
+                ^ (if ko then "선언된 레인 아님(단독 런타임)" else "runtime, not a declared lane")
+                ^ Ansi.reset ]
+            | Masc_tui_types.Lane_single_candidate ->
+                [ if ko then "단일 후보" else "single candidate" ]
+            | Masc_tui_types.Lane_head -> [ if ko then "우선" else "head" ]
             | Masc_tui_types.Lane_fallback position ->
-              [ Printf.sprintf "fallback #%d" position ]
+              [ Printf.sprintf (if ko then "예비 #%d" else "fallback #%d") position ]
           in
-          let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
+          let default_fact =
+            if runtime.ro_is_default then
+              [ (Theme.ok ()) ^ (if ko then "[기본]" else "[default]") ^ Ansi.reset ]
+            else []
+          in
           (* The detail column leads with the lane fact. When it does not fit,
              Enter still opens the complete candidate reading. *)
           let detail =
@@ -1194,12 +1253,18 @@ let render_tools (state : state) =
 
 
 let provider_history_lines ~cols ~rows (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   match usage_history_reading state with
   | Provider_history_unread ->
-      [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
+      [ Printf.sprintf
+          (if ko then " 쿼터 범위 추이 (%d일 UTC) · 미관측"
+           else " Quota scope trend (%d UTC days) · not observed")
           state.provider_history_days ]
   | Provider_history_error reason ->
-      [ Printf.sprintf " Quota scope trend (%d UTC days) · unavailable: %s"
+      [ Printf.sprintf
+          (if ko then " 쿼터 범위 추이 (%d일 UTC) · 조회 불가: %s"
+           else " Quota scope trend (%d UTC days) · unavailable: %s")
           state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read trend ->
       let days = trend.Masc_tui_usage_trend.days in
@@ -1215,7 +1280,7 @@ let provider_history_lines ~cols ~rows (state : state) =
                   String.equal (Overview_providers.scope_id account) scope_id)
                 scopes with
         | None ->
-            "scope "
+            say "범위 " "scope "
             ^ Terminal_text.single_line
                 (String.sub scope_id 0
                    (min Overview_providers.scope_id_cells
@@ -1242,23 +1307,25 @@ let provider_history_lines ~cols ~rows (state : state) =
         if Float.equal (float_of_string short) value then short
         else Printf.sprintf "%.17g" value in
       let daily_value = function
-        | None -> "no window sample"
+        | None -> say "구간 표본 없음" "no window sample"
         | Some { Masc_tui_usage_trend.report = Reported_no_windows; _ } ->
-            "reported no windows"
+            say "보고된 구간 없음" "reported no windows"
         | Some { report = Measured (value, _); _ } ->
             match value with
             | Masc.Tui_decode_usage.Utilization_fraction value ->
-                float_text value ^ " of limit"
+                float_text value ^ say " / 한도" " of limit"
             | Utilization_percent value -> Printf.sprintf "%d%%" value
             | Utilization_usd { used; limit = Some limit } ->
                 Printf.sprintf "$%s / $%s" (float_text used) (float_text limit)
             | Utilization_usd { used; limit = None } ->
-                Printf.sprintf "$%s (uncapped)" (float_text used)
+                Printf.sprintf
+                  (if ko then "$%s (상한 없음)" else "$%s (uncapped)")
+                  (float_text used)
             | Utilization_credit_balance { currency; total; remaining } ->
                 Overview_providers.utilization_text
                   (Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining })
-            | Utilization_credit_unlimited -> "Credit unlimited"
-            | Utilization_credit_retracted -> "Credit retracted" in
+            | Utilization_credit_unlimited -> say "크레딧 무제한" "Credit unlimited"
+            | Utilization_credit_retracted -> say "크레딧 회수됨" "Credit retracted" in
       let chart (row : Masc_tui_usage_trend.row) =
         let unmetered_credit = Masc_tui_usage_trend.has_unmetered_credit row in
         let account = List.find_opt (fun account ->
@@ -1267,9 +1334,10 @@ let provider_history_lines ~cols ~rows (state : state) =
           ~account_emails:state.overview_account_emails) in
         let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") row.limit_id in
         let latest = match Masc_tui_usage_trend.latest row with
-          | None -> "No reports in this window"
+          | None -> say "이 기간의 보고 없음" "No reports in this window"
           | Some sample ->
-            Printf.sprintf "Latest report %s · %s"
+            Printf.sprintf
+              (if ko then "최근 보고 %s · %s" else "Latest report %s · %s")
               (daily_value (Some sample)) (runtime_moment_text sample.observed_at) in
         let name = text (label row.scope_id) in
         let full_name =
@@ -1279,7 +1347,7 @@ let provider_history_lines ~cols ~rows (state : state) =
         let daily =
           if not bare && not unmetered_credit && not (Masc_tui_usage_trend.compact ~width:inner row) then []
           else
-            "Daily values (UTC)" ::
+            say "일별 수치 (UTC)" "Daily values (UTC)" ::
             List.map (fun (day, sample) ->
               Masc_tui_value.Utc_day.date day ^ " " ^ daily_value sample)
               (Masc_tui_usage_trend.dated_samples trend row)
@@ -1289,7 +1357,10 @@ let provider_history_lines ~cols ~rows (state : state) =
           @ wrap latest
           @ (if unmetered_credit then [] else Masc_tui_usage_trend.plot ~width:inner trend row)
           @ daily
-          @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
+          @ wrap
+              (Printf.sprintf
+                 (if ko then "%d/%d일(UTC) 보고됨" else "%d/%d UTC days reported")
+                 row.reported_days days) in
         let heading = Message_layout.truncate_middle inner name in
         let edge = Theme.border_muted () in
         let line text = edge ^ Ansi.box_v ^ Ansi.reset ^ " "
@@ -1315,25 +1386,41 @@ let provider_history_lines ~cols ~rows (state : state) =
         Masc_tui_value.Utc_day.of_moment (trend.generated_at -. float_of_int (days - 1) *. 86400.0)
       in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %s"
+         (if ko then " 쿼터 범위 추이 (%d일 UTC) · 일별 최근 보고 · %s 기준"
+          else " Quota scope trend (%d UTC days) · latest report per day · as of %s")
          days (runtime_moment_text trend.generated_at))
-      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use · C = Credit without a meter"
+      :: Printf.sprintf
+           (if ko then " %s → %s UTC · 0–100%% 사용 · 0 = 0 보고 · · = 보고 없음 · ○ = 구간 없음 · $ = 상한 없는 USD · C = 미계량 크레딧"
+            else " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use · C = Credit without a meter")
            (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
-      :: " ↓ below zero · ↑ above limit"
+      :: say " ↓ 0 미만 · ↑ 한도 초과" " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []
-          | count -> [Printf.sprintf "   %d stored reports could not be read%s; missing days stay absent" count
-              (if Option.is_some state.usage_scope_id then " (whole history)" else "")])
+          | count ->
+              [ Printf.sprintf
+                  (if ko then "   저장된 보고 %d건 읽기 실패%s · 누락된 날은 비워 둠"
+                   else "   %d stored reports could not be read%s; missing days stay absent")
+                  count
+                  (if Option.is_some state.usage_scope_id then
+                     say " (전체 이력)" " (whole history)"
+                   else "") ])
       @ (match trend.rows with
-         | [] -> [if Option.is_some state.usage_scope_id then "   No reports for the selected account in this window"
-                  else "   No reports recorded in this window"]
+         | [] ->
+             [ if Option.is_some state.usage_scope_id then
+                 say "   선택한 계정의 보고가 이 기간에 없습니다"
+                   "   No reports for the selected account in this window"
+               else
+                 say "   이 기간에 기록된 보고가 없습니다"
+                   "   No reports recorded in this window" ]
          | rows -> arrange rows)
 
 let usage_lines ~cols ~rows (state : state) =
   let open Masc.Tui_decode_usage in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let text = Overview_providers.text_for_viewport ~columns:(framed_inner_width cols) ~rows in
   let scopes () =
-    match Overview_providers.section_cards ~ko:(state.ui_language = Lang_ko)
+    match Overview_providers.section_cards ~ko
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_limit_exhausted:state.usage_show_limit_exhausted
@@ -1344,9 +1431,11 @@ let usage_lines ~cols ~rows (state : state) =
   in
   let keepers () =
     match state.keeper_usage with
-    | Keeper_usage_unread -> [ " Keeper usage (24h) · not observed" ]
+    | Keeper_usage_unread ->
+        [ say " 키퍼 사용량 (24시간) · 미관측" " Keeper usage (24h) · not observed" ]
     | Keeper_usage_error reason ->
-        [ " Keeper usage (24h) · unavailable: " ^ Terminal_text.single_line reason ]
+        [ say " 키퍼 사용량 (24시간) · 조회 불가: " " Keeper usage (24h) · unavailable: "
+          ^ Terminal_text.single_line reason ]
     | Keeper_usage_read { kuw_rows; kuw_window_minutes; kuw_generated_at } ->
         let readable row = match row.kur_coverage with
           | Keeper_usage_failed _ | Keeper_usage_partial _ -> false
@@ -1369,16 +1458,20 @@ let usage_lines ~cols ~rows (state : state) =
           | Some amount -> format amount
           | None when List.exists (fun row ->
               Option.fold ~none:false ~some:valid (value row)) kuw_rows ->
-              "unavailable (no complete window)"
-          | None -> "unreported"
+              say "산출 불가 (완전한 기간 없음)" "unavailable (no complete window)"
+          | None -> say "미보고" "unreported"
         in
         let width = max 1 (framed_inner_width cols - 3) in
-        let tokens_text row = Option.fold ~none:"unreported" ~some:count row.kur_tokens in
+        let tokens_text row =
+          Option.fold ~none:(say "미보고" "unreported") ~some:count row.kur_tokens in
         let cost_text row =
-          Option.fold ~none:"unreported" ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
+          Option.fold ~none:(say "미보고" "unreported") ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
         let metric_text label value reported missing =
-          Printf.sprintf "%s %s · %s reported, %s missing" label value (count reported) (count missing)
+          Printf.sprintf
+            (if ko then "%s %s · 보고 %s, 누락 %s" else "%s %s · %s reported, %s missing")
+            label value (count reported) (count missing)
         in
+        let tok_label = say "토큰" "Tokens" and cost_label = say "비용" "Cost" in
         let widest_metric = List.fold_left (fun widest row ->
           let width_of label text reported missing value =
             match value row with
@@ -1387,8 +1480,8 @@ let usage_lines ~cols ~rows (state : state) =
             | _ -> 0
           in
           max widest (max
-            (width_of "Tokens" (tokens_text row) row.kur_tokens_reported row.kur_tokens_missing token_value)
-            (width_of "Cost" (cost_text row) row.kur_cost_reported row.kur_cost_missing cost_value)))
+            (width_of tok_label (tokens_text row) row.kur_tokens_reported row.kur_tokens_missing token_value)
+            (width_of cost_label (cost_text row) row.kur_cost_reported row.kur_cost_missing cost_value)))
           0 kuw_rows in
         (* One width per metric set keeps the relative bars comparable. *)
         let beside = width - widest_metric - 4 in
@@ -1403,33 +1496,45 @@ let usage_lines ~cols ~rows (state : state) =
               Some ("[" ^ Overview_providers.meter ~cells:bar_cells share ^ "]")
           | _ -> None
         in
-        [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics"
+        [ Printf.sprintf
+            (if ko then " 키퍼 사용량 · 최근 %s · 기록된 턴 지표"
+             else " Keeper usage · last %s · recorded turn metrics")
             (Overview_providers.minutes_label kuw_window_minutes)
-        ; " As of " ^ runtime_moment_text kuw_generated_at
-        ; " Bars: relative to largest read value per metric; not quota."
-        ; " Partial rows: no bars. Missing values can understate totals."
-        ; Printf.sprintf " Scale: tokens %s · cost %s"
+        ; (if ko then " 기준 " ^ runtime_moment_text kuw_generated_at
+           else " As of " ^ runtime_moment_text kuw_generated_at)
+        ; say " 막대: 지표별 최대 관측값 대비 상대 비율 (쿼터 한도 아님)."
+            " Bars: relative to largest read value per metric; not quota."
+        ; say " 부분 관측 행은 막대를 생략합니다. 누락된 값이 있으면 합계가 실제보다 적을 수 있습니다."
+            " Partial rows: no bars. Missing values can understate totals."
+        ; Printf.sprintf
+            (if ko then " 기준치: 토큰 %s · 비용 %s" else " Scale: tokens %s · cost %s")
             (scale token_value (fun value -> count (Float.to_int (Float.round value))) token_max)
             (scale cost_value (Printf.sprintf "$%.4f") cost_max)
         ; "" ]
-        @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
+        @ (if kuw_rows = [] then
+             [ say "   조회된 목록에 키퍼가 없습니다" "   No Keepers in the returned roster" ]
             else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens = tokens_text row in
                 let cost = cost_text row in
                 let coverage =
                   match row.kur_coverage with
-                  | Keeper_usage_complete -> "read"
+                  | Keeper_usage_complete -> say "조회됨" "read"
                   | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
-                      Printf.sprintf "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds"
+                      Printf.sprintf
+                        (if ko then "일부 관측 (형식 오류 %d, 미조회 턴 %d) · 합계는 하한값"
+                         else "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds")
                         malformed_rows unread_turn_rows
                   | Keeper_usage_failed reason ->
-                      "unavailable: " ^ Terminal_text.single_line reason
+                      say "조회 불가: " "unavailable: " ^ Terminal_text.single_line reason
                 in
                 let width = max 1 (framed_inner_width cols - 3) in
                 let heading =
                   Masc_tui_ansi.Section.style ^ text (Terminal_text.single_line row.kur_name)
-                  ^ Ansi.reset ^ Printf.sprintf " · %s turns · %s" (count row.kur_turn_samples) coverage
+                  ^ Ansi.reset
+                  ^ Printf.sprintf
+                      (if ko then " · %s턴 · %s" else " · %s turns · %s")
+                      (count row.kur_turn_samples) coverage
                 in
                 let metric label value reported missing bar =
                   metric_text label value reported missing
@@ -1439,9 +1544,9 @@ let usage_lines ~cols ~rows (state : state) =
                     (fun line -> List.map (fun text -> "   " ^ text)
                         (Masc_tui_message_layout.wrap_styled_words ~max_cells:width line))
                     [ heading
-                    ; metric "Tokens" tokens row.kur_tokens_reported row.kur_tokens_missing
+                    ; metric tok_label tokens row.kur_tokens_reported row.kur_tokens_missing
                         (meter token_value token_max row)
-                    ; metric "Cost" cost row.kur_cost_reported row.kur_cost_missing
+                    ; metric cost_label cost row.kur_cost_reported row.kur_cost_missing
                         (meter cost_value cost_max row)
                     ]
                 @ [ "" ])
@@ -1476,13 +1581,17 @@ let usage_lines ~cols ~rows (state : state) =
           | Providers_unread | Providers_failed _ -> []
           | Providers_read reading -> reading.puws_accounts in
         let account = List.find_opt (fun account -> String.equal account.pua_scope_id scope_id) accounts in
-        let label = Option.fold ~none:("scope " ^ scope_id)
+        let label = Option.fold ~none:(say "범위 " "scope " ^ scope_id)
             ~some:Overview_providers.scope_name account in
         let missing = match state.overview_providers, account with
-          | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
+          | Providers_read _, None ->
+              [ say "현재 목록에 없는 계정입니다. 선택은 유지됩니다."
+                  "Account absent from the current inventory; selection retained." ]
           | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
         Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))
-          (String.concat "\n" (("Account · " ^ label ^ "  f:choose  a:all accounts") :: missing))
+          (String.concat "\n"
+             ((say "계정 · " "Account · " ^ label
+               ^ say "  f:계정 선택  a:전체 계정" "  f:choose  a:all accounts") :: missing))
         @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
@@ -1492,7 +1601,7 @@ let usage_lines ~cols ~rows (state : state) =
       let currency = match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
         | [] -> []
         | lines ->
-            [ " " ^ Ansi.bold ^ "Candle · workspace supply" ^ Ansi.reset ]
+            [ " " ^ Ansi.bold ^ say "Candle · 워크스페이스 공급량" "Candle · workspace supply" ^ Ansi.reset ]
             @ List.map (fun line -> "   " ^ Terminal_text.single_line line) lines
             @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
       in
@@ -1502,15 +1611,15 @@ let usage_lines ~cols ~rows (state : state) =
   | Usage_calls ->
       (match state.tool_series with
        | Tool_series_read calls ->
-           Masc_tui_usage_calls.lines ~width:(max 1 (framed_inner_width cols)) ~rows calls
+           Masc_tui_usage_calls.lines ~ko ~width:(max 1 (framed_inner_width cols)) ~rows calls
        | Tool_series_unread ->
            wrap_evidence
-             (Masc_tui_usage_calls.note_lines ~days:state.provider_history_days
-                "not observed")
+             (Masc_tui_usage_calls.note_lines ~ko ~days:state.provider_history_days
+                (say "미관측" "not observed"))
        | Tool_series_error reason ->
            wrap_evidence
-             (Masc_tui_usage_calls.note_lines ~days:state.provider_history_days
-                ("unavailable: " ^ Terminal_text.single_line reason)))
+             (Masc_tui_usage_calls.note_lines ~ko ~days:state.provider_history_days
+                (say "조회 불가: " "unavailable: " ^ Terminal_text.single_line reason)))
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1715,10 +1824,10 @@ let render_runtime_pick (state : state) =
               do. *)
            let header =
              Printf.sprintf "  %s  %s  %s"
-               (fit_width "KIND   TARGET"
+               (fit_width (ui_text state ~ko:"종류   대상" ~en:"KIND   TARGET")
                   (Masc_tui_types.runtime_pick_badge_cells + target_width))
-               (fit_width "CONFIGURED ROUTE / MODEL" route_width)
-               (fit_width "PROPERTIES / CANDIDATES"
+               (fit_width (ui_text state ~ko:"설정된 경로 / 모델" ~en:"CONFIGURED ROUTE / MODEL") route_width)
+               (fit_width (ui_text state ~ko:"속성 / 후보" ~en:"PROPERTIES / CANDIDATES")
                   (Masc_tui_types.runtime_pick_properties_room ~cols
                      ~target:target_width ~route:route_width))
            in

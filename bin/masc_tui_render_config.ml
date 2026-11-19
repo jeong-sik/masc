@@ -1417,7 +1417,11 @@ let render_themes (state : state) =
          (Theme.keeper_origin ()) Ansi.reset
          (Theme.tool_origin ()) Ansi.reset);
     box_line buf cols
-      (Printf.sprintf "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s"
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then
+            "  구문: %slet%s x = %s\"val\"%s in %s123%s  %s(+증가)%s  %s(-감소)%s"
+          else
+            "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s")
          (Theme.Syntax.keyword ()) Ansi.reset
          (Theme.Syntax.string ()) Ansi.reset
          (Theme.Syntax.code_number ()) Ansi.reset
@@ -1489,8 +1493,9 @@ let config_models_drawn_rows (state : state) =
    missing on 2026-10-08, when fourteen were moved onto one account. Only a
    complete roster is counted: a partial one would read as fewer Keepers. *)
 let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let ko = state.ui_language = Lang_ko in
   let account_email, account_notes =
-    models_source_account_reading ~provider:row.provider state.runtime_config_view in
+    models_source_account_reading ~ko ~provider:row.provider state.runtime_config_view in
   let keepers =
     match Masc_tui_keeper_control.roster_view state.keeper_roster with
     | Masc_tui_keeper_control.Roster_complete rows ->
@@ -1507,7 +1512,7 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
     | Masc_tui_keeper_control.Roster_partial _
     | Masc_tui_keeper_control.Roster_invalid _ -> None
   in
-  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ~ko ?account_email ?keepers row
 
 let selected_model_reading (state : state) =
   Option.bind (List.nth_opt state.config_models_rows state.config_models_cursor)
@@ -1516,7 +1521,10 @@ let selected_model_reading (state : state) =
         (match state.runtime_config_view_error with
          | None -> []
          | Some (Request_failed reason) ->
-             [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}]
+             [{Masc_tui_detail_reading.heading=
+                 ui_text state ~ko:"새로고침 실패 · 이전 관측 유지"
+                   ~en:"Refresh failed · retained reading";
+               body=reason}]
          | Some (Request_withdrawn refusal) ->
              [{Masc_tui_detail_reading.heading=
                  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -1534,7 +1542,8 @@ let selected_model_reading (state : state) =
                     ~en:"Account / Model & Keepers");
              body=String.concat "\n" (config_models_detail state row)}]) in
       Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
-        ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
+        ~title:(ui_text state ~ko:"시스템 › 모델 › " ~en:"System / Models / "
+                ^ row.provider ^ " / " ^ row.model) sections))
 
 type model_scope_line = Model_identity of string | Model_observation of string
 
@@ -1553,12 +1562,13 @@ type models_projection = {
    retain their exact provider on every list row. Full provenance stays in
    [v]. *)
 let config_models_projection state ~terminal_rows ~cols =
+  let ko = state.ui_language = Lang_ko in
   let pane = max 1 (framed_inner_width cols - 2 - 2) in
   let rows = config_models_drawn_rows state in
   let content_height = max 1 (surface_body_rows state ~terminal_rows - 4) in
   let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
   let account (row : Masc_tui_model_runtime_table.row) =
-    let email, notes = models_source_account_reading
+    let email, notes = models_source_account_reading ~ko
         ~provider:row.provider state.runtime_config_view in
     let identity =
       ui_text state ~ko:"선택 · " ~en:"Selected · " ^ row.provider
@@ -1593,9 +1603,9 @@ let config_models_projection state ~terminal_rows ~cols =
                       (ui_text state ~ko:"… v:전체 안내·계정" ~en:"… v:all notices/account")))
       ~blank:(Model_identity "") prefix
   in
-  let table = Masc_tui_model_runtime_table.fits ~width:pane rows in
-  { model_document = Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows;
-    model_starts = if table then [] else Masc_tui_model_runtime_table.stacked_item_starts ~pane rows;
+  let table = Masc_tui_model_runtime_table.fits ~ko ~width:pane rows in
+  { model_document = Masc_tui_model_runtime_table.render ~ko ~width:(max 40 pane) ~pane rows;
+    model_starts = if table then [] else Masc_tui_model_runtime_table.stacked_item_starts ~ko ~pane rows;
     model_table = table; model_prefix = prefix;
     model_height = max 1 (content_height - List.length prefix);
     model_reading_hint = reading_hint }
@@ -1649,7 +1659,12 @@ let render_config_models (state : state) =
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
-       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings · Esc cancels" ^ Ansi.reset);
+       box_line buf cols
+         (Ansi.dim
+          ^ ui_text state
+              ~ko:"  선택한 계정·모델 설정을 읽는 중 · Esc:취소"
+              ~en:"  Loading selected account/model settings · Esc cancels"
+          ^ Ansi.reset);
        for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
@@ -1659,7 +1674,8 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, None ->
-       box_line buf cols (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset);
+       box_line buf cols
+         (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset);
        for _ = 2 to content_height do
          box_empty buf cols
        done
@@ -2486,7 +2502,7 @@ let render_config (state : state) =
       match state.runtime_config_view with
       | None ->
           if Option.is_none state.runtime_config_view_error then
-            c.push (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset)
+            c.push (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset)
       | Some _ ->
           let rows = runtime_config_active_rows state in
           let total = List.length rows in

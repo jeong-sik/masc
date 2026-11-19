@@ -7009,30 +7009,38 @@ let pane_surface_header buf cols (state : state) ~path ~split ~position =
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
 
-let models_account_reading ~provider = function
-  | Account_emails_unread -> None, ["Account emails: not yet read"]
+let models_account_reading ?(ko = false) ~provider = function
+  | Account_emails_unread ->
+      None, [ if ko then "계정 이메일: 미조회" else "Account emails: not yet read" ]
   | Account_emails_failed reason ->
-      None, ["Account emails unread: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
+      None,
+      [ (if ko then "계정 이메일 미조회: " else "Account emails unread: ")
+        ^ Masc.Tui_terminal_text.sanitize_terminal_text reason ]
   | Account_emails_read { emails; unreadable_rows } ->
       let email = List.assoc_opt provider emails
         |> Option.map Masc.Tui_terminal_text.sanitize_terminal_text in
       let notes = if unreadable_rows > 0 then
-          [Printf.sprintf "Account emails: %d rows this build cannot read" unreadable_rows]
+          [ Printf.sprintf
+              (if ko then "계정 이메일: 이 빌드에서 읽지 못한 행 %d개"
+               else "Account emails: %d rows this build cannot read")
+              unreadable_rows ]
         else [] in
       email, notes
 
 (* Read from the same published source observation as Models rows. Usage's
    loaded-runtime observation is deliberately not an input to this join. *)
-let models_source_account_reading ~provider reading =
+let models_source_account_reading ?(ko = false) ~provider reading =
   let open Masc_tui_account_login in
   match reading with
-  | None -> models_account_reading ~provider Account_emails_unread
+  | None -> models_account_reading ~ko ~provider Account_emails_unread
   | Some reading ->
     match reading.rcv_account_emails with
-    | Error detail -> models_account_reading ~provider (Account_emails_failed detail)
+    | Error detail -> models_account_reading ~ko ~provider (Account_emails_failed detail)
     | Ok Email_list_unrecognized ->
-        models_account_reading ~provider
-          (Account_emails_failed "the response carries no readable account email list")
+        models_account_reading ~ko ~provider
+          (Account_emails_failed
+             (if ko then "응답에 읽을 수 있는 계정 이메일 목록이 없습니다"
+              else "the response carries no readable account email list"))
     | Ok (Email_rows {rows; unattributed}) ->
         let unreadable_rows = unattributed + List.length (List.filter (function
           | _, Unrecognized -> true
@@ -7040,14 +7048,24 @@ let models_source_account_reading ~provider reading =
         let emails = List.filter_map (function
           | id, Email email -> Some (id, email)
           | _, (Not_read _ | Unrecognized) -> None) rows in
-        let email, notes = models_account_reading ~provider
+        let email, notes = models_account_reading ~ko ~provider
           (Account_emails_read {emails; unreadable_rows}) in
         let gap = match List.assoc_opt provider rows with
-          | Some (Not_read Login_file_unreadable) -> Some "Account email unread: login file unavailable"
-          | Some (Not_read Login_file_unrecognized) -> Some "Account email unread: unrecognized login file"
-          | Some (Not_read Email_not_displayable) -> Some "Account email unread: invalid email"
-          | Some (Not_read Email_not_reported) -> Some "Account email: not reported by the client"
-          | Some (Not_read Environment_credential) -> Some "Account email: environment credential"
+          | Some (Not_read Login_file_unreadable) ->
+              Some (if ko then "계정 이메일 미조회: 로그인 파일을 읽을 수 없음"
+                    else "Account email unread: login file unavailable")
+          | Some (Not_read Login_file_unrecognized) ->
+              Some (if ko then "계정 이메일 미조회: 로그인 파일 형식 미인식"
+                    else "Account email unread: unrecognized login file")
+          | Some (Not_read Email_not_displayable) ->
+              Some (if ko then "계정 이메일 미조회: 유효하지 않은 이메일"
+                    else "Account email unread: invalid email")
+          | Some (Not_read Email_not_reported) ->
+              Some (if ko then "계정 이메일: 클라이언트가 보고하지 않음"
+                    else "Account email: not reported by the client")
+          | Some (Not_read Environment_credential) ->
+              Some (if ko then "계정 이메일: 환경변수 자격 증명 사용 중"
+                    else "Account email: environment credential")
           | Some (Email _ | Unrecognized) | None -> None in
         email, (match gap with Some note -> note :: notes | None -> notes)
 

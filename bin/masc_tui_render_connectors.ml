@@ -137,22 +137,36 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None -> Masc_tui_keys.footer_hints_browser_lane_reading ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
-        | Loading (_, Discover _) -> "Reading browser connections", Theme.info ()
+        | Loading (_, Discover _) ->
+            ui_text state ~ko:"브라우저 연결 확인 중" ~en:"Reading browser connections", Theme.info ()
         | Loading (_, Read) ->
             (match browser_label view with
-             | Some browser -> "Reading " ^ browser
-             | None -> "Reading"), Theme.info ()
-        | Loading (_, Read_refresh) -> "Refreshing browser text", Theme.info ()
-        | Loading (_, Scene_regions _) -> "Reading page regions", Theme.info ()
-        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene", Theme.info ()
-        | Loading (_, Scene_focus _) -> "Reading selected page region", Theme.info ()
-        | Loading (_, Scene_read _) -> "Reading browser text and controls", Theme.info ()
-        | Loading (_, Scene_refresh _) -> "Refreshing current browser view", Theme.info ()
-        | Loading (_, Scene_follow _) -> "Following observed browser link", Theme.info ()
-        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination", Theme.info ()
-        | Loading (_, Scene_click _) -> "Clicking observed browser control", Theme.info ()
-        | Loading (_, (Viewport_refresh _ | Viewport_observed _)) -> "Refreshing selected browser viewport", Theme.info ()
-        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport", Theme.info ()
+             | Some browser ->
+                 if state.ui_language = Lang_ko then browser ^ " 읽는 중"
+                 else "Reading " ^ browser
+             | None -> ui_text state ~ko:"읽는 중" ~en:"Reading"), Theme.info ()
+        | Loading (_, Read_refresh) ->
+            ui_text state ~ko:"브라우저 텍스트 새로고침 중" ~en:"Refreshing browser text", Theme.info ()
+        | Loading (_, Scene_regions _) ->
+            ui_text state ~ko:"페이지 영역 읽는 중" ~en:"Reading page regions", Theme.info ()
+        | Loading (_, Scene_scroll _) ->
+            ui_text state ~ko:"페이지 스크롤 및 화면 새로고침 중" ~en:"Scrolling page and refreshing scene", Theme.info ()
+        | Loading (_, Scene_focus _) ->
+            ui_text state ~ko:"선택한 페이지 영역 읽는 중" ~en:"Reading selected page region", Theme.info ()
+        | Loading (_, Scene_read _) ->
+            ui_text state ~ko:"브라우저 텍스트와 컨트롤 읽는 중" ~en:"Reading browser text and controls", Theme.info ()
+        | Loading (_, Scene_refresh _) ->
+            ui_text state ~ko:"현재 브라우저 화면 새로고침 중" ~en:"Refreshing current browser view", Theme.info ()
+        | Loading (_, Scene_follow _) ->
+            ui_text state ~ko:"관측된 브라우저 링크로 이동 중" ~en:"Following observed browser link", Theme.info ()
+        | Loading (_, Scene_follow_refresh _) ->
+            ui_text state ~ko:"이동한 브라우저 목적지 재확인 중" ~en:"Rechecking followed browser destination", Theme.info ()
+        | Loading (_, Scene_click _) ->
+            ui_text state ~ko:"관측된 브라우저 컨트롤 클릭 중" ~en:"Clicking observed browser control", Theme.info ()
+        | Loading (_, (Viewport_refresh _ | Viewport_observed _)) ->
+            ui_text state ~ko:"선택한 브라우저 뷰포트 새로고침 중" ~en:"Refreshing selected browser viewport", Theme.info ()
+        | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) ->
+            ui_text state ~ko:"선택한 브라우저 뷰포트 스크롤 중" ~en:"Scrolling selected browser viewport", Theme.info ()
         | Loading
             ( _
             , Viewport_pointer
@@ -168,20 +182,31 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Browser_lane.Click_target _ | Browser_lane.Fill_target _
                     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ )
                 ; _
-                } ) -> "Interacting with selected browser viewport", Theme.info ()
+                } ) ->
+            ui_text state ~ko:"선택한 브라우저 뷰포트 조작 중" ~en:"Interacting with selected browser viewport", Theme.info ()
         | Loading (_, Screenshot _) ->
             (match browser_label view with
-             | Some browser -> "Capturing selected " ^ browser ^ " tab (any key cancels preview)"
-             | None -> "Capturing selected tab (any key cancels preview)"), Theme.info ()
+             | Some browser ->
+                 if state.ui_language = Lang_ko then
+                   Printf.sprintf "선택한 %s 탭 캡처 중 (아무 키나 누르면 미리보기 취소)" browser
+                 else
+                   "Capturing selected " ^ browser ^ " tab (any key cancels preview)"
+             | None ->
+                 ui_text state ~ko:"선택한 탭 캡처 중 (아무 키나 누르면 미리보기 취소)"
+                   ~en:"Capturing selected tab (any key cancels preview)"), Theme.info ()
         | Failed detail ->
             let retry = match view.scene_guard with
-              | Some _ -> " · followed destination pending · r:recheck"
+              | Some _ ->
+                  ui_text state ~ko:" · 이동 대상 대기 중 · r:재확인"
+                    ~en:" · followed destination pending · r:recheck"
               | None -> "" in
-            "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
-        | No_browser -> "Browser bridge not connected", Theme.recede ()
+            ui_text state ~ko:"원인: " ~en:"Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
+        | No_browser ->
+            ui_text state ~ko:"브라우저 브리지가 연결되지 않음" ~en:"Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
              | Some scene ->
+                 let ko = state.ui_language = Lang_ko in
                  let summary = match Browser_lane_view.scene_summary scene with
                    | None -> ""
                    | Some text -> " • " ^ text in
@@ -189,18 +214,29 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                    | None -> ""
                    | Some {added; removed; unchanged; changed} ->
                        let changed_text = if changed = 0 then ""
-                         else Printf.sprintf " · %d changed" changed in
-                       Printf.sprintf " • Δ +%d new · -%d out · =%d same%s"
+                         else Printf.sprintf (if ko then " · 변경 %d" else " · %d changed") changed in
+                       Printf.sprintf
+                         (if ko then " • Δ +%d 신규 · -%d 제거 · =%d 유지%s"
+                          else " • Δ +%d new · -%d out · =%d same%s")
                          added removed unchanged changed_text in
-                 let truncation = if scene.content.truncated then " • truncated" else "" in
-                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s%s" scene.elapsed_ms
+                 let truncation =
+                   if scene.content.truncated then ui_text state ~ko:" • 일부 생략" ~en:" • truncated"
+                   else ""
+                 in
+                 Printf.sprintf
+                   (if ko then "화면 %.1f ms • 노드 %d개%s%s%s"
+                    else "Scene %.1f ms • %d nodes%s%s%s")
+                   scene.elapsed_ms
                    (List.length scene.content.nodes)
                    truncation summary delta, Theme.ok ()
-             | None -> "Not read yet", Theme.recede ())
+             | None -> ui_text state ~ko:"아직 조회되지 않음" ~en:"Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
-            | None -> "Not read yet", Theme.recede ()
-            | Some reading -> Printf.sprintf "Read %.1f ms • %d tabs"
-                reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
+            | None -> ui_text state ~ko:"아직 조회되지 않음" ~en:"Not read yet", Theme.recede ()
+            | Some reading ->
+                Printf.sprintf
+                  (if state.ui_language = Lang_ko then "조회 %.1f ms • 탭 %d개"
+                   else "Read %.1f ms • %d tabs")
+                  reading.elapsed_ms (List.length reading.tabs), Theme.recede ())
       in
       (* The global coordinator status is not the result of the browser HTTP
          request. Keep it labeled, including the existing workspace warning. *)
@@ -208,7 +244,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       List.iter (fun (style, row) -> c.push_styled ~style row) connection_rows;
       match view.client_picker with
       | Some cursor ->
-          c.push_styled ~style:(Theme.info ()) "  Choose browser";
+          c.push_styled ~style:(Theme.info ())
+            (ui_text state ~ko:"  브라우저 선택" ~en:"  Choose browser");
           c.push_divider ();
           let empty_line = browser_lane_picker_empty_line ~ko:(state.ui_language = Lang_ko) view in
           let choices = browser_choices view in
@@ -218,7 +255,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
               let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
-                ^ (if browser_choice_selected view choice then " (current)" else "") in
+                ^ (if browser_choice_selected view choice then
+                     ui_text state ~ko:" (현재)" ~en:" (current)"
+                   else "") in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
@@ -238,11 +277,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (match List.nth_opt (scene_targets view) view.scene_cursor with
               | Some node ->
                   let label = match node.kind with
-                    | Region _ -> "Region"
-                    | Text | Raster | Control _ -> "Element" in
-                  Printf.sprintf "  %s %d/%d: %s  n/p:select  y:copy context"
+                    | Region _ -> ui_text state ~ko:"영역" ~en:"Region"
+                    | Text | Raster | Control _ -> ui_text state ~ko:"요소" ~en:"Element" in
+                  Printf.sprintf
+                    (if state.ui_language = Lang_ko then "  %s %d/%d: %s  n/p:선택  y:컨텍스트 복사"
+                     else "  %s %d/%d: %s  n/p:select  y:copy context")
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
-              | None -> "  No observed elements in this viewport  Ctrl-O:image")
+              | None ->
+                  ui_text state ~ko:"  이 화면 영역에서 관측된 요소 없음  Ctrl-O:이미지"
+                    ~en:"  No observed elements in this viewport  Ctrl-O:image")
          | None -> live_connection_row view);
       let tabs, page = match view.reading with
         | None -> [], None
@@ -258,36 +301,56 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let selected = List.nth_opt tabs index in
       c.push_styled ~style:(Theme.info ())
         (match selected with
-         | None -> "  No open tabs · Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s%s  [/]:select tab  1-9:jump"
-             (index + 1) tab_count (Terminal_text.single_line tab.title)
-             (if tab.active then " (active)" else "")
-             (match tab.ego_page with None -> "" | Some page ->
-               " · " ^ (match page.label with None -> "unmanaged" | Some label -> Terminal_text.single_line label)
-               ^ " · " ^ (match page.opened_by with Masc.Browser_surface.Agent_created -> "agent-created"
-                   | Unknown_origin -> "unknown origin")));
+         | None ->
+             ui_text state
+               ~ko:"  열린 탭 없음 · 선택한 브라우저 연결에서 페이지를 여세요"
+               ~en:"  No open tabs · Open a page in the selected browser connection"
+         | Some tab ->
+             Printf.sprintf
+               (if state.ui_language = Lang_ko then "  [%d/%d] %s%s%s  [/]:탭 선택  1-9:이동"
+                else "  [%d/%d] %s%s%s  [/]:select tab  1-9:jump")
+               (index + 1) tab_count (Terminal_text.single_line tab.title)
+               (if tab.active then ui_text state ~ko:" (활성)" ~en:" (active)" else "")
+               (match tab.ego_page with None -> "" | Some page ->
+                 " · " ^ (match page.label with
+                   | None -> ui_text state ~ko:"미관리" ~en:"unmanaged"
+                   | Some label -> Terminal_text.single_line label)
+                 ^ " · " ^ (match page.opened_by with
+                   | Masc.Browser_surface.Agent_created ->
+                       ui_text state ~ko:"에이전트 생성" ~en:"agent-created"
+                   | Unknown_origin ->
+                       ui_text state ~ko:"출처 미상" ~en:"unknown origin")));
       c.push_styled ~style:(Theme.recede ())
         (match view.scene, page with
          | Some scene, _ ->
              let scope = match scene.content.view, scene.content.scope with
-               | Browser_lane.Regions, _ -> "Page regions"
+               | Browser_lane.Regions, _ -> ui_text state ~ko:"페이지 영역" ~en:"Page regions"
                | Content, Some target ->
                    (match view.scene_scope with
                     | Some context when context.target = target ->
-                        "Selected " ^ Masc.Browser_scene.region_role_to_string context.role
+                        ui_text state ~ko:"선택됨 " ~en:"Selected "
+                        ^ Masc.Browser_scene.region_role_to_string context.role
                         ^ " · " ^ fit_width (Terminal_text.single_line context.label)
                             (max 8 (framed_inner_width cols - 28))
-                    | None | Some _ -> "Selected region")
-               | Content, None -> "Page content" in
-             let viewport = Printf.sprintf "page scroll x=%.0f y=%.0f"
+                    | None | Some _ -> ui_text state ~ko:"선택한 영역" ~en:"Selected region")
+               | Content, None -> ui_text state ~ko:"페이지 본문" ~en:"Page content" in
+             let viewport = Printf.sprintf
+                 (if state.ui_language = Lang_ko then "스크롤 x=%.0f y=%.0f"
+                  else "page scroll x=%.0f y=%.0f")
                  scene.content.scroll_x scene.content.scroll_y in
              "  " ^ scope ^ " · " ^ viewport ^ " · " ^
              Terminal_text.single_line scene.content.url
-         | None, None -> "  No page content"
-         | None, Some page -> Printf.sprintf "  %s • %s%s%s"
-             (Terminal_text.single_line page.url) (Masc_tui_message_layout.count_noun page.chars "char")
-             (if page.truncated then " • truncated" else "")
-             (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
+         | None, None -> ui_text state ~ko:"  페이지 본문 없음" ~en:"  No page content"
+         | None, Some page ->
+             Printf.sprintf "  %s • %s%s%s"
+               (Terminal_text.single_line page.url)
+               (if state.ui_language = Lang_ko then Printf.sprintf "%d자" page.chars
+                else Masc_tui_message_layout.count_noun page.chars "char")
+               (if page.truncated then ui_text state ~ko:" • 일부 생략" ~en:" • truncated" else "")
+               (match view.load with
+                | Idle -> ""
+                | No_browser | Loading _ | Failed _ ->
+                    ui_text state ~ko:" • 이전 조회" ~en:" • previous read"));
       (match browser_lane_source_hint view with
        | None -> ()
        | Some hint -> c.push_styled ~style:(Theme.recede ())
@@ -327,8 +390,12 @@ let render_browser_history (state : state) (history : Browser_history.t) =
     ~hints:(Masc_tui_keys.footer_hints_browser_observations ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status = match history.content with
-        | Listing -> "Reading the Keeper's recent tool receipts"
-        | List_failed detail -> "Could not read observations: " ^ Terminal_text.single_line detail
+        | Listing ->
+            ui_text state ~ko:"키퍼의 최근 도구 실행 기록을 불러오는 중"
+              ~en:"Reading the Keeper's recent tool receipts"
+        | List_failed detail ->
+            ui_text state ~ko:"관측 기록 조회 실패: " ~en:"Could not read observations: "
+            ^ Terminal_text.single_line detail
         | List_kept_back notice -> Terminal_text.single_line notice
         | Entries {entries;cursor;selection} ->
           (* The selected observation is the position, on the title row. *)
@@ -336,22 +403,35 @@ let render_browser_history (state : state) (history : Browser_history.t) =
             c.position
               (Masc_tui_value.Position.row ~selected:(Some cursor)
                  ~total:(List.length entries));
-          "Observations from 100 recent tool calls"
-          ^ (match selection with Loading -> " · loading saved page"
-            | Failed detail -> " · " ^ Terminal_text.single_line detail | Observed _ -> "") in
+          ui_text state ~ko:"최근 도구 호출 100건의 관측 기록" ~en:"Observations from 100 recent tool calls"
+          ^ (match selection with
+             | Loading -> ui_text state ~ko:" · 저장된 페이지 불러오는 중" ~en:" · loading saved page"
+             | Failed detail -> " · " ^ Terminal_text.single_line detail
+             | Observed _ -> "") in
       c.push_styled ~style:(Theme.info ()) ("  " ^ status);
-      c.push_styled ~style:(Theme.recede ()) "  Historical read · browser actions and live screenshots are inactive here";
+      c.push_styled ~style:(Theme.recede ())
+        (ui_text state
+           ~ko:"  이력 조회 모드 · 브라우저 조작과 실시간 스크린샷은 비활성 상태입니다"
+           ~en:"  Historical read · browser actions and live screenshots are inactive here");
       (match Browser_history.selected history with
-       | None -> c.push_styled ~style:(Theme.recede ()) "  No selected observation"
+       | None ->
+           c.push_styled ~style:(Theme.recede ())
+             (ui_text state ~ko:"  선택된 관측 기록 없음" ~en:"  No selected observation")
        | Some entry -> c.push_styled ~style:(Theme.recede ())
            ("  " ^ Terminal_text.single_line (Masc_domain.iso8601_of_unix_seconds entry.at)
             ^ " · " ^ entry.execution_id));
       (match Browser_history.observation history with
-       | None -> c.push_styled ~style:(Theme.recede ()) "  Page content has not been loaded"
+       | None ->
+           c.push_styled ~style:(Theme.recede ())
+             (ui_text state ~ko:"  페이지 본문이 아직 로드되지 않음"
+                ~en:"  Page content has not been loaded")
        | Some observation -> c.push_styled ~style:(Theme.info ())
            ("  " ^ Terminal_text.single_line observation.scene.title ^ " · "
             ^ Terminal_text.single_line observation.scene.url
-            ^ (if observation.scene.truncated then " · partial observation" else " · observed viewport")));
+            ^ (if observation.scene.truncated then
+                 ui_text state ~ko:" · 부분 관측" ~en:" · partial observation"
+               else
+                 ui_text state ~ko:" · 관측된 화면" ~en:" · observed viewport")));
       c.push_divider ();
       let view = Browser_history.page_view history in
       let lines = browser_lane_rows ~cols view in

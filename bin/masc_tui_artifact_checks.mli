@@ -35,10 +35,10 @@ val next_unchecked : reports_complete:bool ->
     supplied list's order. MCP entries are skipped. [Ok None] means a complete,
     settled inventory establishes that no listed report is unchecked. Unknown,
     partial or mismatched evidence is an error, including for an empty list. *)
-val label : status -> string
+val label : ?ko:bool -> status -> string
 (** One column cell: the status mark and a few words. *)
 
 val widest_label_cells : int
 (** The display width of the widest {!label}, so a column holds still while
     rows of different status scroll past. *)
-val description : status -> string
+val description : ?ko:bool -> status -> string

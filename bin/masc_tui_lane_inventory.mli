@@ -13,7 +13,7 @@ val overview_entries : Masc.Tui_decode_lane_inventory.row list -> overview_entry
     objects and their order within a group are preserved. *)
 val ordered_rows : Masc.Tui_decode_lane_inventory.row list -> Masc.Tui_decode_lane_inventory.row list
 (** The selectable rows in the same grouping as [overview_entries]. *)
-val category_label : Masc.Lane_addon_category.t option -> string
+val category_label : ?ko:bool -> Masc.Lane_addon_category.t option -> string
 val row_position : id:string -> overview_entry list -> int option
 (** Visual position of the exact row ID, including headers, or [None] if absent. *)
 val row_lead : id:string -> overview_entry list -> int

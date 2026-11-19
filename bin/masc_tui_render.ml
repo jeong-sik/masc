@@ -372,10 +372,11 @@ let overview_telemetry_snapshot (state : state) : Masc_tui_overview_bands.teleme
     | Some _ | None -> (None, None)
   in
   let tool_calls_summary =
+    let ko = state.ui_language = Lang_ko in
     match state.tool_series with
     | Tool_series_read calls
       when calls.Masc_tui_usage_calls.window = Masc_tui_usage_calls.Last_day ->
-        Some (Masc_tui_usage_calls.summary_line ~cells:32 calls)
+        Some (Masc_tui_usage_calls.summary_line ~ko ~cells:32 calls)
     | Tool_series_read _ | Tool_series_unread | Tool_series_error _ -> None
   in
   { Masc_tui_overview_bands.fleet_running
@@ -504,16 +505,19 @@ let render_overview (state : state) home =
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
   let tool_calls_line ~cells =
+    let ko = state.ui_language = Lang_ko in
     let window = Masc_tui_usage_calls.Last_day in
     pressable Press_usage_calls
       (match state.tool_series with
        | Tool_series_read calls when calls.Masc_tui_usage_calls.window = window ->
-           Masc_tui_usage_calls.summary_line ~cells calls
+           Masc_tui_usage_calls.summary_line ~ko ~cells calls
        | Tool_series_read _ | Tool_series_unread ->
-           Masc_tui_usage_calls.summary_note ~cells window "reading…"
+           Masc_tui_usage_calls.summary_note ~ko ~cells window
+             (ui_text state ~ko:"불러오는 중" ~en:"reading")
        | Tool_series_error reason ->
-           Masc_tui_usage_calls.summary_note ~cells window
-             ("unavailable: " ^ Terminal_text.single_line reason))
+           Masc_tui_usage_calls.summary_note ~ko ~cells window
+             (ui_text state ~ko:"조회 불가: " ~en:"unavailable: "
+              ^ Terminal_text.single_line reason))
   in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)

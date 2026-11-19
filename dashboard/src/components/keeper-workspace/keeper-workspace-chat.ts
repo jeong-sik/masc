@@ -50,8 +50,7 @@ interface WorkspaceCommand {
   onClick: () => void | Promise<void>
 }
 
-// Header/composer glyphs mirror the prototype's FSM_ACTIONS table
-// (prototypes/keeper-v2/data.jsx, ported at v2/keeper-fsm.ts): pause ⏸,
+// Header/composer glyphs follow the FSM_ACTIONS table in v2/keeper-fsm.ts: pause ⏸,
 // stop ⏹, resume/start ▶, restart ↻, config ⚙. Two deliberate local
 // deviations: boot keeps ⏻ (keeper-action-panel.ts documents why boot must
 // not share resume's ▶ in icon-only rows), and the utility commands are

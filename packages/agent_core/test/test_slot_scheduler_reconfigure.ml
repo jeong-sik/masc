@@ -116,11 +116,12 @@ let test_lowering_the_permits_waits_for_holders_to_return () =
 ;;
 
 let test_removing_the_limit_grants_the_waiting_priority_first () =
-  (* With the limit kept, standard would get the second slot: P1 S1 P2 P3. *)
+  (* Without a run limit, strict Priority > Standard > Background applies
+     across all waiters in their class queues. *)
   check
     (list string)
-    "priority waiters the limit queued go first, then arrival order"
-    [ "P1"; "P2"; "S1"; "P3" ]
+    "strict priority then standard arrival order"
+    [ "P1"; "P2"; "P3"; "S1" ]
     (grant_order
        ~priority_run_limit:(Some 1)
        ~before:[ "S1"; "P1"; "P2" ]
@@ -130,11 +131,11 @@ let test_removing_the_limit_grants_the_waiting_priority_first () =
 ;;
 
 let test_adding_a_limit_applies_to_requests_queued_after_it () =
-  (* Without a limit the waiters share one queue: S1 P1 P2. *)
+  (* All waiters keep their class queues across reconfiguration. *)
   check
     (list string)
-    "the later priority request goes first, earlier waiters keep arrival order"
-    [ "P2"; "S1"; "P1" ]
+    "priority runs up to the limit before yielding to waiting standard"
+    [ "P1"; "S1"; "P2" ]
     (grant_order
        ~priority_run_limit:None
        ~before:[ "S1"; "P1" ]
@@ -146,8 +147,8 @@ let test_adding_a_limit_applies_to_requests_queued_after_it () =
 let test_removing_the_limit_drains_old_background_before_the_shared_fifo () =
   check
     (list string)
-    "old priority, old background, then FIFO including new background"
-    [ "P1"; "P2"; "B1"; "B2"; "S1"; "P3"; "B3" ]
+    "strict Priority > Standard > Background arrival order"
+    [ "P1"; "P2"; "P3"; "S1"; "B1"; "B2"; "B3" ]
     (grant_order
        ~priority_run_limit:(Some 1)
        ~before:[ "B1"; "S1"; "P1"; "B2"; "P2" ]
@@ -159,8 +160,8 @@ let test_removing_the_limit_drains_old_background_before_the_shared_fifo () =
 let test_adding_the_limit_keeps_old_background_in_its_original_fifo () =
   check
     (list string)
-    "old background retains its shared queue; new background gets bounded service"
-    [ "P2"; "B2"; "B1"; "P1"; "S1" ]
+    "bounded service grants background after each foreground limit while draining classes in order"
+    [ "P1"; "B1"; "S1"; "B2"; "P2" ]
     (grant_order
        ~priority_run_limit:None
        ~before:[ "B1"; "P1"; "S1" ]
@@ -215,8 +216,8 @@ let test_background_cancel_and_expiry_leave_original_queue_after_reconfigure () 
     check_counts scheduler ~what:"both departed from their original queue" ~active:1 ~queued:3;
     Eio.Promise.resolve resolve_release ());
   check_counts scheduler ~what:"all slots returned" ~active:0 ~queued:0;
-  check (list string) "remaining original background precedes shared FIFO"
-    [ "B1"; "S1"; "B2" ] (List.rev !granted)
+  check (list string) "remaining waiters follow strict Standard > Background order"
+    [ "S1"; "B1"; "B2" ] (List.rev !granted)
 ;;
 
 let test_an_invalid_allowance_is_refused_and_changes_nothing () =

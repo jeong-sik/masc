@@ -1352,3 +1352,52 @@ val requirement_of_exact_lane :
   exact_lane ->
   lane_requirement
 
+(** {1 Librarian/Keeper Seat Overlap Diagnostics}
+
+    Non-breaking diagnostic check surfacing any shared HTTP endpoint or CLI
+    subscription account between enabled Librarian exact lanes ([librarian]
+    working-context pass and [librarian_memory] consolidation pass) and
+    Keeper-reachable runtimes (default route, keeper assignments, and lanes). *)
+
+type librarian_lane_kind =
+  | Librarian_exact
+  | Librarian_memory
+
+type seat_slot_channel =
+  | Http_slot
+  | Cli_slot
+
+type seat_overlap_mechanism =
+  | Same_runtime_id of string
+  | Shared_http_account of
+      { provider_kind : string
+      ; canonical_base_url : string
+      ; shared_credential : bool
+      }
+  | Shared_cli_account of { client_label : string }
+
+type librarian_keeper_seat_overlap =
+  { librarian_lane : librarian_lane_kind
+  ; slot_channel : seat_slot_channel
+  ; librarian_runtime_id : string
+  ; keeper_runtime_id : string
+  ; mechanism : seat_overlap_mechanism
+  }
+
+val librarian_keeper_seat_overlap_to_string : librarian_keeper_seat_overlap -> string
+
+(** Inspect resolved runtimes, Keeper routes/assignments, and enabled
+    exact-output lanes for account/seat overlaps between Librarian
+    ([Background]) and Keeper ([Standard]) traffic. Read-only and non-fatal:
+    returns a typed diagnostic report covering both HTTP [(kind,
+    canonical_base_url, secret/quota_scope)] and official-client CLI
+    [cli_slots] accounts without altering boot or reload admissibility. *)
+val detect_librarian_keeper_seat_overlaps
+  :  runtimes:t list
+  -> default_runtime:t
+  -> default_route:string
+  -> keeper_assignments:(string * string) list
+  -> lanes:Runtime_lane.t list
+  -> exact_output_lane_decls:Runtime_schema.exact_output_lane_decl list
+  -> librarian_keeper_seat_overlap list
+

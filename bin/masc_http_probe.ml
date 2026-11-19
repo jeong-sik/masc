@@ -312,9 +312,7 @@ let run ~env ~sw ~args ~token =
     end
   in
   if args.io_domain then
-    let domain =
-      Masc_tui_io_domain.start ~sw ~env ~minor_heap:Masc_tui_domains.(minor_heap Io)
-    in
+    let domain = Masc_tui_io_domain.start ~sw ~env in
     measure (fun work -> Masc_tui_io_domain.run domain work)
   else measure (fun work -> work ())
 

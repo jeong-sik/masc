@@ -26,9 +26,9 @@
 
 type t
 
-val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> minor_heap:Minor_heap.t -> t
-(** [start ~sw ~env ~minor_heap] spawns the domain, with its own Eio
-    scheduler, its own connection pool and the minor heap [minor_heap]. It
+val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> t
+(** [start ~sw ~env] spawns the domain, with its own Eio scheduler, its own
+    connection pool and the minor heap [Masc_tui_domains] gives [Io]. It
     lives as long as [sw]: finishing [sw] cancels the work still running
     there. A domain that fails fails [sw]. *)
 

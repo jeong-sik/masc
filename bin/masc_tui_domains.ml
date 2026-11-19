@@ -23,3 +23,13 @@ let minor_heap = function
   | Io -> Minor_heap.Runtime_default
   | Worker -> Minor_heap.Runtime_default
 ;;
+
+let use_ui_heap () = Minor_heap.apply (minor_heap Ui)
+
+(* One worker keeps answer decoding and local reads off the UI domain; HTTP
+   requests have their own domain. The server's core-sized default would add
+   idle domains to every stop-the-world collection, and the client has no
+   Keeper actors to spread over them. *)
+let start_worker_pool ~sw domain_mgr =
+  Domain_pool.create ~sw ~domain_count:1 (Minor_heap.domain_mgr (minor_heap Worker) domain_mgr)
+;;

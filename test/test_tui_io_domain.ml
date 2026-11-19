@@ -11,7 +11,7 @@ let regression_deadline_s = 10.0
 let with_io_domain f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let domain = Masc_tui_io_domain.start ~sw ~env ~minor_heap:Minor_heap.Runtime_default in
+  let domain = Masc_tui_io_domain.start ~sw ~env in
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) regression_deadline_s
     (fun () -> f ~env domain)
 

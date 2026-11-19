@@ -45044,7 +45044,7 @@ Use relative paths for resources already held in the package. -->
     ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
-  Minor_heap.apply Masc_tui_domains.(minor_heap Ui);
+  Masc_tui_domains.use_ui_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -45063,22 +45063,14 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
-            (* One background worker keeps response decoding and local reads
-               off the UI domain. HTTP requests already have their own domain.
-               The server's core-sized default adds idle domains to every
-               stop-the-world collection while the chat allocates scroll rows;
-               the client has no Keeper actors to distribute over that pool. *)
-            let cpu_pool=Domain_pool.create ~sw ~domain_count:1
-                (Minor_heap.domain_mgr Masc_tui_domains.(minor_heap Worker)
-                   (Eio.Stdenv.domain_mgr env)) in
-            Domain_pool_ref.set cpu_pool;
+            Domain_pool_ref.set
+              (Masc_tui_domains.start_worker_pool ~sw (Eio.Stdenv.domain_mgr env));
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-            Masc_tui_http.start_io_domain ~sw ~env
-              ~minor_heap:Masc_tui_domains.(minor_heap Io);
+            Masc_tui_http.start_io_domain ~sw ~env;
             f ()))
   with
   | Break -> ()

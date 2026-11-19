@@ -1,47 +1,63 @@
-(** The parts of a Keeper's turn log a question carries
-    (RFC librarian-call-only-proposes §5.3 to §5.5, §7.1).
+(** What a commit line names of the units of a Keeper's turn log
+    (RFC librarian-call-only-proposes §5.3, §5.4, §8.1).
 
     A [Closed] line and a [Reset] line are each one unit. What lies in a unit
-    is counted in items: the rows the other side sent come first, then the
-    messages. An item is named by its unit's line and its number in the
-    unit. The line decides the numbers, not the content, so a bundle that
-    goes missing or comes back moves no other item's number.
+    is counted in items, and an item is named by its unit's line and its
+    number in the unit, counted from 0. A commit line stores that number
+    ([Librarian_log.within]), so the numbers are a function of the turn
+    log's lines alone, never of what a store holds when it is read. Every
+    row of every store is one item, and the marks give each store's row
+    count: a bundle slice gives [take], and each store's two marks give the
+    rows between them. A store that loses rows, or a bundle that goes
+    missing or comes back, moves no other item's number.
 
-    This module holds the types the asking layers share. Reading the turn
-    log, reading a unit's content and making the question are done
-    elsewhere. *)
+    A [Turn] splits every store at its [Opened] line's [baseline]: before it
+    is [unattributed], after it is [own], and when a [Reset] followed that
+    [Opened] everything is [unattributed]. A [Reset] unit is one segment.
+    Numbers run through [unattributed] and then [own]. Inside one segment
+    the rows the other side sent come first, then the messages, in this
+    order: chat rows, external rows, Agent-Core messages in slice order,
+    official-client history rows, official-client internal rows.
+
+    These types are written to the commit log, so they hold no type another
+    store owns. The unit as a question shows it is {!Librarian_read_unit}. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
-(** One item's name. *)
-type item_ref =
-  { line : int (** Byte offset of the unit's line in the turn log. *)
-  ; index : int (** The item's number in its unit, counted from 0. *)
-  }
-
 (** Content a unit's line names that is not there when the question is
-    made. The items that are there are still read. Each missing part says
-    which item numbers it stands in for, and the commit line records it.
-
-    A part whose size the line gives stands in for that many items: a
-    bundle for the [take] messages of its slice, the external store for the
-    rows its two marks count. A byte range of a file stands in for one item:
-    the line gives its bytes, not its rows. *)
+    made. The items that are there are still read. Each part names the item
+    numbers in its unit that it stands in for. *)
 type missing_part =
   | Bundle of
       { bundle : Digest.digest
-      ; first : item_ref
+      ; first : int
+      ; count : int (** The slice's [take]. *)
+      }
+  | History_bytes of
+      { first : int
       ; count : int
       }
-  | History_bytes of { item : item_ref }
-  | Internal_bytes of { item : item_ref }
-  | Chat_bytes of { item : item_ref }
+  | Internal_bytes of
+      { first : int
+      ; count : int
+      }
+  | Chat_bytes of
+      { first : int
+      ; count : int
+      }
+  (** The rows the marks count that the file no longer holds. *)
   | External_rows of
-      { first : item_ref
+      { first : int
       ; count : int
       }
-  | Undecodable_fragment_line of { item : item_ref }
-  (** A line of an official-client history file that does not decode. *)
+  | Undecodable_fragment_line of { item : int }
+  (** A row of an official-client file that does not decode. *)
+
+(** What is missing from the unit at [line]. *)
+type missing_at =
+  { line : int (** Byte offset of the unit's line in the turn log. *)
+  ; parts : missing_part list
+  }
 
 (** Why the turn log cannot be read from where reading stands. The reader
     looks in this order: the turn log's id, the stored offset, the lines.
@@ -64,53 +80,3 @@ type input_fault =
       start of a line. *)
   | Content_unreadable of { line : int }
   (** A bundle the unit at [line] names is there and cannot be read now. *)
-
-(** What a turn's [Opened] line said. *)
-type opened =
-  { runtime : string (** The runtime declaration's id. *)
-  ; task : Keeper_turn_log.task_evidence
-  ; stimuli : Keeper_turn_log.stimulus list
-  }
-
-(** One item as the question shows it: reduced as §5.5 says, and written
-    out. A tool call keeps its id and name, a tool result its id and kind, a
-    tool observation its index, tool name and outcome. A row keeps its
-    sender. *)
-type item =
-  { index : int (** Its number in the unit. *)
-  ; text : string
-  }
-
-type kind =
-  | Turn of
-      { turn : int (** Byte offset of the turn's [Opened] line: the turn's id. *)
-      ; outcome : Keeper_turn_log.outcome
-      (** [Close_missing] and [Process_exited] say the turn's own items
-          were closed after it was admitted, not that the turn closed them. *)
-      ; opened : opened option
-      (** [None]: the [Opened] line did not decode and an operator passed
-          over it. The turn is read without its Task. *)
-      ; unattributed : item list
-      (** Closed before the turn's [baseline], or everything when a [Reset]
-          followed its [Opened]. Shown without the Task. *)
-      ; own : item list (** Shown with the Task. *)
-      }
-  | Reset of
-      { cause : Keeper_turn_log.announced
-      ; items : item list (** Shown without a Task. *)
-      }
-
-(** One unit as a question shows it. An [Unannounced] reset is never one:
-    what it covers cannot be read. *)
-type t =
-  { line : int (** Byte offset of the unit's line. *)
-  ; at : float (** When the line was written: the turn closed, or the reset. *)
-  ; kind : kind
-  ; missing : missing_part list
-  }
-
-(** What one question carried. *)
-type offered =
-  { units : int
-  ; head_items : int (** Items of its first unit. *)
-  }

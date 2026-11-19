@@ -1,0 +1,45 @@
+module Digest = Agent_core.Checkpoint_objects
+
+type reach =
+  { line : int
+  ; within : Librarian_log.within
+  ; covered : Keeper_turn_log.mark
+  ; turn_log_offset : int
+  }
+
+type question =
+  { id : Librarian_question_id.t
+  ; shown : Librarian_plan.shown
+  ; reach : reach
+  ; trace : string
+  ; missing : Librarian_unit.missing_at list
+  }
+
+type failed =
+  | Raised
+  | Flow_stopped
+  | Read_failed
+
+type t =
+  | Answered of
+      { question : question
+      ; answer : Librarian_answer.t
+      ; slot : string
+      }
+  | Nothing_to_ask
+  | No_answer of
+      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.t) list }
+  | Nothing_readable of
+      { reach : reach
+      ; missing : Librarian_unit.missing_at list
+      }
+  | Span_unknown of
+      { before : Keeper_turn_log.mark
+      ; reach : reach
+      }
+  | Memory_diverged of
+      { expected : Digest.digest
+      ; observed : Digest.digest
+      }
+  | Input_fault of Librarian_unit.input_fault
+  | Ask_failed of failed

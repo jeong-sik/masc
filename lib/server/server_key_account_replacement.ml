@@ -10,6 +10,7 @@ let ( let* ) = Result.bind
 type error =
   | Refused of Accounts.refusal
   | Account_busy
+  | Files_not_reached
   | Not_recorded of Authz_provider_account.error
   | Key_not_stored
 
@@ -32,6 +33,20 @@ let state_of (person : Login.person) = (Authz_zone.snapshot person.zone).Authz_z
 let held (person : Login.person) id =
   Authz_state.key_to_replace (state_of person) ~user_id:person.user_id id
   |> Result.map_error (fun refusal -> Refused refusal)
+;;
+
+(* Before the record: the runtime root of the person, under which the
+   folder of the keys of the account is. Under a root that is not reached
+   the key of the record could not be written, and a store that failed
+   could not clear the folder. So the replacement is turned down while
+   nothing was written, and every failure after the record is one of a
+   folder this process reaches. *)
+let reached (person : Login.person) ~base_path id =
+  match Login.person_runtime_root person ~base_path with
+  | Ok runtime_root -> Ok runtime_root
+  | Error (_ : string) ->
+    logged id "it was not recorded" "the runtime root of the person was not made";
+    Error Files_not_reached
 ;;
 
 (* The second step, and the generation the record names.
@@ -68,27 +83,19 @@ let recorded (person : Login.person) id ~held:before =
    the account reads; the key that was sent can be in place with its folder
    not synced. So the folder of the keys goes, as it does first in a
    removal of the account, and the key before goes with it. The next
-   replacement makes the folder again.
-
-   A runtime root that was not made holds no file this process reaches, so
-   nothing is removed after it. *)
-let stored (person : Login.person) ~base_path id ~generation key =
-  match Login.person_runtime_root person ~base_path with
-  | Error (_ : string) ->
-    logged id "its record went in, and its key was not stored" "the runtime root of the person was not made";
+   replacement makes the folder again. *)
+let stored ~runtime_root id ~generation key =
+  match Files.replace ~runtime_root ~account_id:id ~generation key with
+  | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
+  | Ok (Files.Other_keys_left detail) ->
+    logged id "its new key is in place, and a file of the folder of its keys stays" detail;
+    Ok { old_keys_removed = false }
+  | Error error ->
+    logged id "its record went in, and its key was not stored" (Files.make_error_detail error);
+    (match Files.remove_keys ~runtime_root ~account_id:id with
+     | Ok () -> ()
+     | Error detail -> logged id "its key was not stored, and the folder of its keys stays" detail);
     Error Key_not_stored
-  | Ok runtime_root ->
-    (match Files.replace ~runtime_root ~account_id:id ~generation key with
-     | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
-     | Ok (Files.Other_keys_left detail) ->
-       logged id "its new key is in place, and a file of the folder of its keys stays" detail;
-       Ok { old_keys_removed = false }
-     | Error error ->
-       logged id "its record went in, and its key was not stored" (Files.make_error_detail error);
-       (match Files.remove_keys ~runtime_root ~account_id:id with
-        | Ok () -> ()
-        | Error detail -> logged id "its key was not stored, and the folder of its keys stays" detail);
-       Error Key_not_stored)
 ;;
 
 let replace ~(person : Login.person) ~base_path id key =
@@ -99,8 +106,9 @@ let replace ~(person : Login.person) ~base_path id key =
     (* Read again inside the call, whoever holds it: the records of that
        time say whose the account is and which generation it holds. *)
     let* before = held person id in
+    let* runtime_root = reached person ~base_path id in
     let* generation = recorded person id ~held:before in
-    stored person ~base_path id ~generation key)
+    stored ~runtime_root id ~generation key)
 ;;
 
 (* ---- the start of the server ---- *)

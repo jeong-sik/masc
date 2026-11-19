@@ -1538,7 +1538,8 @@ end = struct
     | Memory -> request.memory
     | Initial_reply -> request.initial_reply
   let publish_cell cell ~ready_at_ns result =
-    ignore (Atomic.compare_and_set cell Waiting (Ready {result; ready_at_ns}))
+    if Atomic.compare_and_set cell Waiting (Ready {result; ready_at_ns}) then
+      Masc_tui_wake.(ring loop History_read)
   let publish request source = publish_cell (slot request source)
   let publish_page request = publish_cell request.page
   let take_cell cell =
@@ -4087,7 +4088,9 @@ end = struct
   let create () = Atomic.make Waiting
   let read = Atomic.get
   let publish cell ~observed_ns result =
-    Atomic.compare_and_set cell Waiting (Returned {result; observed_ns})
+    let published = Atomic.compare_and_set cell Waiting (Returned {result; observed_ns}) in
+    if published then Masc_tui_wake.(ring loop Ask_answer_receipt);
+    published
   let close cell = ignore (Atomic.compare_and_set cell Waiting Closed_without_result)
 end
 
@@ -4118,7 +4121,9 @@ end = struct
   let create () = Atomic.make Waiting
   let read = Atomic.get
   let publish cell ~observed_ns ~receipt ~asks =
-    Atomic.compare_and_set cell Waiting (Returned {receipt; asks; observed_ns})
+    let published = Atomic.compare_and_set cell Waiting (Returned {receipt; asks; observed_ns}) in
+    if published then Masc_tui_wake.(ring loop Ask_answer_completion);
+    published
   let close cell = ignore (Atomic.compare_and_set cell Waiting Closed_without_result)
 end
 
@@ -15160,7 +15165,7 @@ let publish_runtime_assignment request ~observed_ns status =
     let before = Atomic.get request.ras_observation in
     if not (runtime_assignment_advances (fst before) status) then false
     else if Atomic.compare_and_set request.ras_observation before (status,observed_ns)
-    then true else publish () in
+    then (Masc_tui_wake.(ring loop Runtime_assignment_saved); true) else publish () in
   publish ()
 
 let pending_runtime_assignment_receipts state =
@@ -15259,7 +15264,7 @@ let publish_keeper_settings_save request ~observed_ns status =
     let before = Atomic.get request.ksv_observation in
     if not (keeper_settings_save_advances (fst before) status) then false
     else if Atomic.compare_and_set request.ksv_observation before (status,observed_ns)
-    then true else publish () in
+    then (Masc_tui_wake.(ring loop Keeper_settings_saved); true) else publish () in
   publish ()
 
 let keeper_settings_same_input_kind left right =
@@ -16449,7 +16454,8 @@ let owe_identity_deadline_reads (state : state) ~now =
   state.identity_deadline_reads <-
     List.filter (fun attempt_id -> List.mem attempt_id waited) state.identity_deadline_reads;
   List.iter (fun expectation ->
-    if expectation.ile_expires_at <= now
+    if Masc_tui_wake.reached Masc_tui_wake.Identity_attempt_deadline ~now
+         ~at:expectation.ile_expires_at
        && not (List.mem expectation.ile_attempt_id state.identity_deadline_reads)
     then begin
       state.identity_deadline_reads <- expectation.ile_attempt_id :: state.identity_deadline_reads;
@@ -16581,7 +16587,8 @@ let retire_identity_login_state (state : state) retirement =
           attempt's own terminal status or its deadline ends them. *)
        | Login_provider_inventory _ -> true
        | Login_keeper_inventory _ -> true
-       | Login_deadline now -> expires_at > now)
+       | Login_deadline now ->
+           not (Masc_tui_wake.reached Masc_tui_wake.Identity_login_expiry ~now ~at:expires_at))
   in
   state.identity_login_expectations <- List.filter
     (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
@@ -19265,7 +19272,7 @@ let publish_runtime_form_save request ~observed_ns status =
     let previous = Atomic.get request.rfs_observation in
     if not (runtime_form_save_advances (fst previous) status) then false
     else if Atomic.compare_and_set request.rfs_observation previous (status, observed_ns)
-    then true else publish () in
+    then (Masc_tui_wake.(ring loop Runtime_form_saved); true) else publish () in
   publish ()
 
 let begin_runtime_form_save state ~draft ~started_ns =
@@ -19499,7 +19506,7 @@ let publish_keeper_creation_status request ~observed_ns status =
     let previous = Atomic.get request.kcr_observation in
     if not (keeper_creation_status_advances (fst previous) status) then false
     else if Atomic.compare_and_set request.kcr_observation previous (status, observed_ns)
-    then true else publish ()
+    then (Masc_tui_wake.(ring loop Keeper_creation_observed); true) else publish ()
   in
   publish ()
 
@@ -20200,7 +20207,7 @@ let take_tool_series_due (state : state) ~now =
         true
       end else
         match state.tool_series_reread_at with
-        | Some at when at <= now ->
+        | Some at when Masc_tui_wake.reached Masc_tui_wake.Tool_series_reread ~now ~at ->
             state.tool_series_reread_at <- None;
             true
         | Some _ | None -> false

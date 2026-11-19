@@ -36,7 +36,8 @@ let reading t = is_reading t.roster || Names.exists (fun _ owed -> is_reading ow
 (* A failed whole read dropped the roster a row would go into, and the whole
    read that follows its wait reads every owed row. *)
 let waiting_out_a_failure ~now = function
-  | Owed.Waiting { retry_at; _ } -> now < retry_at
+  | Owed.Waiting { retry_at; _ } ->
+      not (Masc_tui_wake.reached Masc_tui_wake.Owed_read_retry ~now ~at:retry_at)
   | Owed.Settled | Owed.Owed _ | Owed.Reading _ -> false
 
 let next_read ~now t =
@@ -78,5 +79,6 @@ let schedule_rows due t =
   }
 
 let release_scheduled ~now t =
-  let due, later = Names.partition (fun _ at -> at <= now) t.scheduled in
+  let due, later = Names.partition (fun _ at ->
+      Masc_tui_wake.reached Masc_tui_wake.Roster_row_scheduled ~now ~at) t.scheduled in
   Names.fold (fun keeper_name _ t -> row_changed ~keeper_name t) due { t with scheduled = later }

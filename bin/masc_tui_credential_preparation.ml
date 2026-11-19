@@ -63,6 +63,7 @@ let start t ~sw ~purpose ~base_path ~host ~port ~install =
         request; worker_started_ns = !worker_started_ns;
         observed_ns = Mtime_clock.elapsed_ns (); outcome } in
       t.status <- Awaiting_ui completion;
+      Masc_tui_wake.(ring loop Credential_prepared);
       ignore (Eio.Promise.try_resolve observe_current ());
       (match purpose with
        | Initial -> ignore (Eio.Promise.try_resolve t.initial_observe ())

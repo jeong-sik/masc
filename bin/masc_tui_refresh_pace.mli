@@ -91,7 +91,9 @@ val next_try : t -> float option
     [/health] answered or the owed pass starts now. *)
 
 val due : now:float -> t -> bool
-(** Whether the owed pass should start now. *)
+(** Whether the owed pass should start now. While the probe's wait has not
+    ended, [retry_at] is noted for the main loop's wait
+    ({!Masc_tui_wake.reached}). *)
 
 val starts : now:float -> ask -> t -> bool
 (** Whether a pass asked for by [ask] starts now when nothing else holds

@@ -987,6 +987,9 @@ type 'a mailed = {
   message : 'a;
 }
 
+val mail : 'a mailed Eio.Stream.t -> 'a -> unit
+(** Queue a message for the main loop, stamped now, and ring its bell. *)
+
 val capture_workspace_message : state -> (async_msg -> async_msg)
 (** Capture the original workspace authority/read epoch now; envelope formation
     later never borrows a successor workspace. Operation projection/admission
@@ -1005,7 +1008,10 @@ module Delivery_round : sig
   type 'a t
   val empty : 'a t
   (** Drain the captured shared FIFO prefix before collecting a finite set of
-      owned results. A paused round retains that prefix or result remainder. *)
+      owned results. [can_take] is asked only with an item in hand, so a
+      [false] always leaves work; capturing the prefix and collecting the
+      owned results do not ask. A paused round retains that prefix or result
+      remainder. *)
   val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
     take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
     'a option * 'a t

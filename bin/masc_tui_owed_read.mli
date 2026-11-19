@@ -64,7 +64,9 @@ val placeholder : retry_s:float -> max_retry_s:float -> now:float -> t -> t
     in a row are kept, so the next one still waits longer. *)
 
 val due : now:float -> t -> bool
-(** Whether a read should start now, when the surface is able to read. *)
+(** Whether a read should start now, when the surface is able to read.
+    While a failure's wait has not ended, its [retry_at] is noted for the
+    main loop's wait ({!Masc_tui_wake.reached}). *)
 
 val stale_at_to_schedule : now:float -> float option -> float option
 (** The [stale_at] a server answer carries, kept only when it still lies in

@@ -4961,7 +4961,7 @@
 (test
  (name test_tui_server_lifecycle)
  (modules test_tui_server_lifecycle)
- (libraries alcotest masc_tui_server_lifecycle masc.masc_process unix))
+ (libraries alcotest masc_tui_server_lifecycle masc_tui_wake masc.masc_process unix))
 
 (test
  (name test_tui_link)
@@ -5309,6 +5309,46 @@
   masc_tui_roster_pane
   masc_tui_table
   masc_tui_value))
+
+(test
+ (name test_tui_wake)
+ (modules test_tui_wake)
+ (libraries
+  alcotest
+  eio
+  eio.mock
+  eio_main
+  unix
+  mtime.clock.os
+  masc
+  masc_core
+  masc_eio_context
+  masc_tui_wake
+  masc_tui_input_reader
+  masc_tui_owed_read
+  masc_tui_refresh_pace
+  masc_tui_roster_owed
+  masc_tui_engine_samples
+  masc_tui_braille
+  masc_tui_play_room
+  masc_tui_terminal_probe
+  masc_tui_input_decoder))
+
+(test
+ (name test_tui_wake_writers)
+ (modules test_tui_wake_writers)
+ (libraries
+  alcotest
+  eio
+  eio.mock
+  masc
+  masc_tui_wake
+  masc_tui_async_protocol
+  masc_tui_task_dispatch
+  masc_tui_terminal_write_repair
+  masc_tui_preference_writer
+  masc_tui_config
+  masc_tui_types))
 
 (test
  (name test_tui_terminal_write_repair)

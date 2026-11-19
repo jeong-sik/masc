@@ -1,6 +1,6 @@
 (** A Keeper's commit log on disk
-    (RFC librarian-call-only-proposes §8.2 step 4, §8.6): read the tail line,
-    append at the end that was read.
+    (RFC librarian-call-only-proposes §8.2 step 4, §8.6, §10): read the tail
+    line, append at the end that was read, read every line from the first.
 
     The tail line is the last line that ends in a line break. Bytes after it
     are an append that was cut short. They were never a line: the tail stops
@@ -47,6 +47,29 @@ type read_error =
 
 (** Reads the tail line and no line before it. *)
 val read_tail : string -> (tail, read_error) result
+
+type scan_error =
+  | Scan_read_failed of
+      { path : string
+      ; detail : string
+      }
+  | Scan_moved
+  (** The offset the scan had reached no longer starts a line: the file was
+      cut or replaced while it was being read. *)
+
+type scanned =
+  { at : int (** Byte offset of the line. *)
+  ; line : (Librarian_log.line, undecodable) result
+  (** A line that does not decode is given as such. It does not end the
+      scan: a log an operator adopted past an unreadable tail keeps that
+      line for good. *)
+  }
+
+(** Every complete line from the first, in order. The file is read a window
+    of lines at a time, each under the store's lock, so lines appended while
+    the scan runs are seen and nothing is held between windows. No file is
+    no line. *)
+val fold : string -> init:'acc -> f:('acc -> scanned -> 'acc) -> ('acc, scan_error) result
 
 type append_error =
   | End_moved of

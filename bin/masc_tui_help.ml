@@ -32,54 +32,51 @@ let sections lines =
   in
   gather [] [] lines
 
-(* One column of the folded sheet: the sections set in it, the last first, and
-   the rows they take with a blank row between two sections. *)
-type column = { sections : string list list; height : int }
-
-let empty_column = { sections = []; height = 0 }
-
-let add_section column section =
-  let gap = match column.sections with [] -> 0 | _ :: _ -> 1 in
-  { sections = section :: column.sections;
-    height = column.height + gap + List.length section }
-
-let column_rows column =
+(* The rows of one column holding these sections, a blank row between two. *)
+let column_rows sections =
   List.concat
-    (List.mapi
-       (fun index section -> if index = 0 then section else "" :: section)
-       (List.rev column.sections))
+    (List.mapi (fun index section -> if index = 0 then section else "" :: section) sections)
 
-(* Each section, whole and in the order written, goes under the shorter column,
-   the left one when they are as tall. A heading stays above its own rows; a
-   column cut at a line count starts under no heading, partway through someone
-   else's keys.
+(* The left column takes the first sections and the right one the rest, cut
+   where the taller of the two is shortest; on a tie the left one takes more.
+   Each section stays whole, and the order written runs down the left column
+   and on into the right one, so the part [one_section] cut from a section can
+   only come after its heading.
 
-   The sections were set two to a row, left then right, so the shorter of each
-   pair stood beside blank rows. Measured at 100x30 on the Dashboard, the slash
-   commands (138 rows) stood beside the surface's own keys (20 rows), and 32%
-   of the sheet's cells were blank. *)
+   Each section used to go under whichever column was shorter. That kept the
+   columns level, but a block set before a parted section -- the live Candle
+   details on the Operations sheet -- made the left column the shorter one
+   when the second part came: at 120x40 five keys stood under the Candle rows
+   with no heading, and their heading sat in the right column beside them.
+   Before that the sections were set two to a row, and at 100x30 on the
+   Dashboard 32% of the sheet's cells were blank; the cut at the shortest
+   taller column keeps that gain where the order allows it. *)
 let fold_sections sections =
-  let left, right =
-    List.fold_left
-      (fun (left, right) section ->
-        if right.height < left.height then (left, add_section right section)
-        else (add_section left section, right))
-      (empty_column, empty_column) sections
+  let cut count =
+    ( List.filteri (fun index _ -> index < count) sections,
+      List.filteri (fun index _ -> index >= count) sections )
   in
+  let taller count =
+    let left, right = cut count in
+    max (List.length (column_rows left)) (List.length (column_rows right))
+  in
+  let best =
+    List.fold_left
+      (fun best count -> if taller count <= taller best then count else best)
+      0
+      (List.init (List.length sections + 1) Fun.id)
+  in
+  let left, right = cut best in
   zip (column_rows left) (column_rows right)
 
-let sheet ?(header = []) ~cols lines =
-  let body =
-    if cols < two_column_minimum_cols then lines
-    else begin
-      let width = column_width ~cols in
-      let row (l, r) =
-        Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
-      in
-      List.map row (fold_sections (sections lines))
-    end
-  in
-  header @ body
+let sheet ~cols lines =
+  if cols < two_column_minimum_cols then lines
+  else
+    let width = column_width ~cols in
+    let row (l, r) =
+      Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
+    in
+    List.map row (fold_sections (sections lines))
 
 (* Blank to the eye and not to [sections], which parts columns at an empty
    line: it stands where the heading stands in the first column, so the two

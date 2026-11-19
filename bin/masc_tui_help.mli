@@ -25,12 +25,12 @@ val column_width : cols:int -> int
     the same columns and draws its lines at the same width, so a reader sees
     one layout on both sheets. *)
 
-val sheet : ?header:string list -> cols:int -> string list -> string list
-(** The rows drawn at this width: optional full-width header rows, followed by
-    the lines as written, or -- once a terminal is wide enough to hold two
-    columns -- the sections between blank lines, each whole and in the order
-    written, set under whichever column is shorter (the left one when they are
-    as tall), with a blank row between two sections of a column. *)
+val sheet : cols:int -> string list -> string list
+(** The rows drawn at this width: the lines as written, or -- once a terminal
+    is wide enough to hold two columns -- the sections between blank lines,
+    each whole, the first ones down the left column and the rest down the
+    right one, cut where the taller column is shortest, with a blank row
+    between two sections of a column. *)
 
 val one_section :
   cols:int -> heading:string -> string list list -> string list
@@ -39,7 +39,8 @@ val one_section :
     {!sheet} sets whole sections under its two columns, so one section alone
     would stand in the left column beside an empty right one; here the
     section's keys are parted at the key nearest the middle, and the second
-    part begins level with the first key of the first. Below
+    part begins level with the first key of the first when nothing is set
+    above the heading. Below
     {!two_column_minimum_cols} the lines are the heading and the rows as
     written. *)
 

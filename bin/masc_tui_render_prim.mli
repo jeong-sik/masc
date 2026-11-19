@@ -859,8 +859,6 @@ val runtime_config_status_lines :
 (** The runtime configuration's status page as styled rows, drawn as headed
     blocks of reading lines. *)
 
-val help_masthead : Masc_tui_types.state -> string list
-
 val help_lines : width:int -> Masc_tui_types.state -> string list
 (** The cheat sheet's sections, each entry's text wrapped to [width] cells and
     continued under the column every entry's text starts at. *)

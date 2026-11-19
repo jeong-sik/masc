@@ -1628,11 +1628,35 @@ let render_memory_body ~cols ~budget (state : state)
    edge. Under this the browser stops being one. *)
 let memory_fact_list_floor_rows = 5
 
+(* The tallest detail among the loaded facts, in lines. Counting it wraps
+   every fact's claim, so it is kept for the rows it was counted from: the
+   rows are the projection [memory_fact_rows] keeps until the snapshot, the
+   filter or the sort changes, and a frame that draws the same rows reads
+   the count back. *)
+let memory_fact_tallest_detail :
+    (memory_fact_row list * int * bool * int) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let tallest_fact_detail_lines ~ko ~cols rows =
+  match Domain.DLS.get memory_fact_tallest_detail with
+  | Some (seen, seen_cols, seen_ko, tallest)
+    when seen == rows && seen_cols = cols && Bool.equal seen_ko ko -> tallest
+  | Some _ | None ->
+      let tallest =
+        List.fold_left
+          (fun tallest row ->
+            Int.max tallest (fact_detail_line_count (memory_fact_detail_parts ~ko ~cols row)))
+          0 rows
+      in
+      Domain.DLS.set memory_fact_tallest_detail (Some (rows, cols, ko, tallest));
+      tallest
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
+  let ko = state.ui_language = Lang_ko in
   let detail =
-    Option.map (memory_fact_detail_parts ~state ~ko:(state.ui_language = Lang_ko) ~cols) (List.nth_opt rows cursor)
+    Option.map (memory_fact_detail_parts ~state ~ko ~cols) (List.nth_opt rows cursor)
   in
   let total_detail_lines =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
@@ -1640,9 +1664,8 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let scope_rows = List.length (memory_facts_scope_lines ~cols state) in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
-     divider. Input asks for the target cursor because wrapped details can
-     change the height on every movement. The search row is counted from
-     [memory_search_query], the same value the renderer draws it from. *)
+     divider. The search row is counted from [memory_search_query], the same
+     value the renderer draws it from. *)
   let chrome_rows =
     4
     + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
@@ -1650,37 +1673,35 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     + scope_rows
     + (if scope_rows > 0 then 1 else 0)
   in
-  (* The detail is as tall as the fact under the cursor, and a fact can be
-     any length. On the live store at thirty rows one fact filled fifteen of
-     them and the list fell to its floor of one: a browser of 254 facts
-     showing one row, whose height then moved on every [j] as the next fact
-     wrapped to a different depth. The list keeps this many rows before the
-     detail takes any, and what the detail then loses is one keypress away --
-     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  (* The detail is as tall as the tallest loaded fact's (RFC
+     tui-one-screen-grammar §8), so the list above it keeps one height while
+     [j] walks facts of different lengths; a shorter fact's detail ends in
+     blank rows. A fact can be any length: on the live store at thirty rows
+     one fact filled fifteen of them and the list fell to one row of 254
+     facts. The list keeps this many rows before the detail takes any, and
+     what the detail then loses is one keypress away -- [Enter] opens the
+     whole fact in an overlay that owns the terminal. *)
   let room_below_chrome = max 1 (budget - chrome_rows) in
-  let detail_row_budget =
-    min (if total_detail_lines = 0 then 0 else 1 + total_detail_lines)
-      (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  let detail_budget =
+    (* Less the detail's divider. *)
+    max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
+  let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
   let detail_lines =
     match detail with
     | None -> []
     | Some parts ->
-      let kept = max 0 (detail_row_budget - 1) in
-      (* The detail also needs its divider. With no line left after that,
-         even the folded marker would exceed the rows reserved for it. *)
-      if kept = 0 then []
-      else if kept >= total_detail_lines then
-        fact_detail_prefix parts total_detail_lines
-      else
+        let height = min detail_budget (max tallest total_detail_lines) in
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
-        fact_detail_prefix parts (kept - 1)
-        @ [ "      "
-            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
-                (total_detail_lines - (kept - 1))
-            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
-               else " · Enter for the whole fact") ]
+        let overflow =
+          "      "
+          ^ Masc_tui_value.Count.more ~ko (total_detail_lines - (height - 1))
+          ^ (if ko then " · Enter:전체 사실" else " · Enter for the whole fact")
+        in
+        Masc_tui_detail_height.fit_tallest ~budget:detail_budget ~tallest
+          ~too_tall:(Masc_tui_detail_height.Cut_with overflow) ~blank:""
+          (fact_detail_prefix parts total_detail_lines)
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)

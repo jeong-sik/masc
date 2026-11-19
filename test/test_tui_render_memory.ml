@@ -931,6 +931,31 @@ let test_memory_refresh_keeps_the_selected_keeper () =
     [""; "a"]
 ;;
 
+(* QA R8c: the fact list shares its body with the selected fact's detail,
+   and the detail was as tall as the selected fact, so the list's height
+   moved with every [j] that crossed a long fact. Thirty short facts and one
+   long one: the list keeps one height for every selection (RFC
+   tui-one-screen-grammar §8). *)
+let test_facts_list_height_does_not_follow_the_selection () =
+  let long = String.concat " " (List.init 60 (fun i -> Printf.sprintf "word%02d" i)) in
+  let extra =
+    List.init 30 (fun i -> make_memory_fact Cat.Fact (Printf.sprintf "short fact %02d" i))
+    @ [ make_memory_fact Cat.Fact long ]
+  in
+  let state = three_kinds_state ~extra_ordinary:extra () in
+  let rows = List.length (Types.memory_fact_rows state) in
+  List.iter
+    (fun (cols, budget) ->
+      let heights =
+        List.init rows (fun cursor ->
+          Render_memory.memory_facts_content_height ~cols ~budget ~cursor state)
+      in
+      let lo = List.fold_left min max_int heights and hi = List.fold_left max 0 heights in
+      check int
+        (Printf.sprintf "%dx%d: facts list height over %d rows, min %d max %d" cols budget rows lo hi)
+        lo hi)
+    [ 120, 33; 80, 17; 80, 21 ]
+
 (* The fact list reports the rows its window was cut to, which a page key
    moves by less one: the run of rows the body pushes before it hands over
    its position, whichever fact is selected. *)
@@ -1007,6 +1032,8 @@ let () =
           test_memory_list_draws_the_height_its_page_is_cut_from
       ; test_case "rejected rows do not follow the selection" `Quick
           test_memory_rejected_rows_do_not_follow_the_selection
+      ; test_case "the fact list keeps one height for every selection" `Quick
+          test_facts_list_height_does_not_follow_the_selection
       ; test_case "the fact list reports the rows it drew" `Quick
           test_facts_list_reports_the_rows_it_drew
       ; test_case "failed facts refresh retains facts and unread scope" `Quick

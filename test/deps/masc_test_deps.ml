@@ -897,6 +897,34 @@ let write_checkpoint_head
     Out_channel.with_open_bin path (fun channel -> output_string channel plan.head_bytes);
     plan.head_bytes
 
+(** A Keeper turn log whose one line starts it after [closed_messages] closed
+    messages of [trace_id]: where a request with no seed starts
+    ({!Masc.Keeper_turn_driver_try_provider.turn_start}). For a fixture whose
+    history holds completed turns that no turn of this process recorded. *)
+let start_turn_log ~keepers_dir ~keeper_name ~trace_id ~closed_messages =
+  let mark : Masc.Keeper_turn_log.mark =
+    { trace = trace_id
+    ; closed_messages
+    ; session = trace_id
+    ; history_bytes = 0
+    ; internal_bytes = 0
+    ; chat_bytes = 0
+    ; external_rows = 0
+    }
+  in
+  match
+    Masc.Keeper_turn_log_store.append
+      ~path:(Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+      ~at_end:0
+      (Masc.Keeper_turn_log.Log_started { id = Masc.Keeper_turn_log.Log_id.fresh (); at = 1.0; mark }, [])
+  with
+  | Ok (_ : Masc.Keeper_turn_log_store.appended) -> ()
+  | Error error ->
+    invalid_arg
+      ("start_turn_log: "
+       ^ Masc.Keeper_turn_log_recorder.not_recorded_to_string
+           (Masc.Keeper_turn_log_recorder.Not_appended error))
+
 (** [bytes], a checkpoint head, with the checkpoint field's [name] set to
     [value]: the same head for other content (RFC-0476 §3.2). *)
 let checkpoint_head_bytes_with_field bytes name value =

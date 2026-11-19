@@ -290,67 +290,6 @@ let test_without_snapshot_starts_at_the_turn_start () =
    | Ok () -> () | Error _ -> fail "the snapshot-less path borrowed stale prefix obligations")
 ;;
 
-let rec mkdir_p dir =
-  if not (Sys.file_exists dir) then (mkdir_p (Filename.dirname dir); Sys.mkdir dir 0o755)
-;;
-
-(* The reader answers Turn_boundary_unknown, not 0, when the boundary store
-   cannot be read: here the log's path is a directory. *)
-let test_turn_start_reader_says_unknown_when_the_store_is_unreadable () =
-  let base_path = Filename.temp_dir "turn-start-unknown-" "" in
-  let config = Masc.Workspace.default_config base_path in
-  let keeper_name = "reader" in
-  mkdir_p (Filename.concat
-    (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_name) "turn-boundaries.jsonl");
-  let before =
-    match Log.Ring.recent ~limit:1 () with
-    | [] -> -1
-    | entry :: _ -> entry.Log.Ring.seq
-  in
-  (match Driver.turn_start ~config ~keeper_name ~trace_id:"t" ~messages:source with
-   | Front.Turn_boundary_unknown _ -> ()
-   | Front.Turn_boundary { end_atom } ->
-     fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom));
-  (* Reading decides nothing: the request whose range it opens reports it. *)
-  check int "reading the unknown start logs no warning" 0
-    (Log.Ring.recent ~since_seq:before ~min_level:(Log.level_to_int Log.Warn) ()
-     |> List.filter (fun (entry : Log.Ring.entry) ->
-       Option.equal String.equal entry.keeper_name (Some keeper_name))
-     |> List.length)
-;;
-
-(* A boundary log whose end lines no longer match the history -- the history
-   was rewritten or renumbered after they were written -- is an unknown start,
-   not the start: 0 would send the whole history, the provider would refuse
-   it, and the failed turn would write no end line to fix the next one. A log
-   with no end line of this trace is a first turn, and that one is 0. *)
-let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
-  let base_path = Filename.temp_dir "turn-start-unmatched-" "" in
-  let config = Masc.Workspace.default_config base_path in
-  let keeper_name = "renumbered" in
-  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
-  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:source with
-   | Front.Turn_boundary { end_atom = 0 } -> ()
-   | Front.Turn_boundary { end_atom } ->
-     fail (Printf.sprintf "a log with no end line answered atom %d" end_atom)
-   | Front.Turn_boundary_unknown { reason } ->
-     fail ("a log with no end line answered unknown: " ^ reason));
-  let position = match Boundary.position_of_messages source with
-    | Ok position -> position | Error detail -> fail detail in
-  mkdir_p (Filename.concat keepers_dir keeper_name);
-  (match Boundary.append ~keepers_dir ~keeper_id:keeper_name
-     { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-         { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-           history_at_start = Boundary.Fresh_history; position } } with
-   | Ok () -> () | Error error -> fail (Boundary.append_error_to_string error));
-  let rewritten = [pinned; text T.User "Rebuild the patch."; text T.Assistant "The rebuild passed."] in
-  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:rewritten with
-   | Front.Turn_boundary_unknown _ -> ()
-   | Front.Turn_boundary { end_atom } ->
-     fail (Printf.sprintf "an end line that matches nothing answered atom %d" end_atom))
-
-;;
-
 let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
   { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
 ;;
@@ -707,7 +646,9 @@ let test_completed_boundary_protects_resumed_work () =
   let resumed = completed @ [text T.User "Still awaiting approval"]
     @ exchange "resumed-unfinished" (String.make 8000 'u') in
   let endpoint = snd (Window.annotate completed) in
-  let completed_end lines messages = Driver.completed_history_end ~trace_id ~lines ~messages in
+  let completed_end lines messages =
+    Snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
+    |> Result.map (fun (range : Masc.Keeper_librarian_range.range) -> range.end_atom) in
   check bool "seed can contain resumed work beyond completed boundary" true
     (snd (Window.annotate resumed) > endpoint);
   check bool "typed completed endpoint excludes all resumed work" true
@@ -998,8 +939,6 @@ let () = run "continuity request projection"
         test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
         test_case "without a snapshot the range starts at the seed, else the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
         test_case "without a snapshot a seed range sends earlier tool bodies as sent" `Quick test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent;
-        test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
-        test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
         test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
         test_case "a rule-8 front is named after the continuity" `Quick

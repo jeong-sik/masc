@@ -93,14 +93,24 @@ async function readBoth(send: Send): Promise<Found> {
   return { ok: true, integrations: offered.value, owned: mine.value }
 }
 
+/** An end, and what brings it. */
+interface Ending { readonly ended: Promise<void>; readonly end: () => void }
+
+function ending(): Ending {
+  let end = (): void => undefined
+  const ended = new Promise<void>((resolve) => { end = resolve })
+  return { ended, end }
+}
+
 export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsModel {
   const view = signal<PanelView>({ kind: 'waiting' })
   /** The reading whose answer the panel takes. A later one, a retry or the
       reading for another person signed in meanwhile, replaces it. */
   let latest = 0
-  /** The reading that began last, by its number, and its end. `stop`
-      replaces a reading and begins none. */
-  let begun: { readonly number: number; readonly ended: Promise<void> } | null = null
+  /** The end of the readings that replace one another. It comes once the
+      newest of them wrote what it found, or the panel was stopped. No one
+      waits for the answer of a reading that was replaced. */
+  let overlapping: Ending | null = null
   /** The session of the person the panel shows. A login sends its token. */
   let session: Session | null = null
   /** The person whose login and checks the panel holds. `stop` keeps them. */
@@ -118,14 +128,12 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     }, slowAfterMs)
     const found = await readBoth(send)
     clearTimeout(slow)
-    if (mine !== latest) {
-      // It ends with the reading that began after it: whoever waits for a
-      // reading waits for the list that is on the page after it.
-      if (begun !== null && begun.number !== mine) await begun.ended
-      return
-    }
+    if (mine !== latest) return
     if (found.ok) {
-      if (landed !== asOf) return read(forUser, attemptsBefore)
+      if (landed !== asOf) {
+        void read(forUser, attemptsBefore)
+        return
+      }
       view.value = { kind: 'read', forUser, integrations: found.integrations, owned: found.owned }
       return
     }
@@ -140,11 +148,21 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
   }
 
-  /** Begins a reading, which replaces the one before it. */
+  const endOverlapping = (): void => {
+    const now = overlapping
+    overlapping = null
+    now?.end()
+  }
+
+  /** Begins a reading, which replaces the one before it. It ends with the
+      readings it overlaps: whoever waits for a reading waits for what the
+      newest one wrote. */
   const read = (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1
-    const ended = reading(latest, forUser, attemptsBefore)
-    begun = { number: latest, ended }
+    const mine = latest
+    overlapping ??= ending()
+    const { ended } = overlapping
+    void reading(mine, forUser, attemptsBefore).then(() => { if (mine === latest) endOverlapping() })
     return ended
   }
 
@@ -192,6 +210,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     if (view.peek().kind === 'waiting') return
     latest += 1
     view.value = { kind: 'waiting' }
+    endOverlapping()
   }
 
   return { view, load, retry, connecting, checking, adding, removing, replacing, stop }

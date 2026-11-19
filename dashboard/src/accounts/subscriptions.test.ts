@@ -164,6 +164,8 @@ describe('reading the subscriptions', () => {
     await forOther
     first.give(offered())
     await forPerson
+    // No one waits for a reading that was replaced: its answer is taken in by now.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     const view = panel.view.value
     expect([kind(panel), view.kind === 'read' ? view.owned.accounts.length : null]).toEqual([`read for ${other}`, 0])
   })
@@ -214,7 +216,17 @@ describe('reading the subscriptions', () => {
     await panel.load(sessionOf(person))
     first.give(notReady())
     await older
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(kind(panel)).toBe(`read for ${person}`)
+  })
+
+  it('lets go of whoever waits for a reading once it is stopped, though no answer came', async () => {
+    const { panel } = start({ [paths.integrations]: [offered()], [paths.owned]: [later().answer] })
+    let ended = false
+    void panel.load(sessionOf(person)).then(() => { ended = true })
+    panel.stop()
+    await vi.waitFor(() => { expect(ended).toBe(true) })
+    expect(kind(panel)).toBe('waiting')
   })
 
   it('keeps the page of a failed reading while it leaves after a retry finds no session', async () => {
@@ -493,7 +505,28 @@ describe('giving another key for an account in the panel', () => {
     expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('sending')
     third.give(offeredWithKey())
     await Promise.all([replaced, added])
-    expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true })
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+  })
+
+  it('says the key was replaced once the newest list is on the page, though the readings before it have no answer', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey(), offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedKey(), later().answer, later().answer, ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+      [addPath]: ['no answer', 'no answer'],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    await panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(2) })
+    // A key whose answer did not come asks for the list again, twice. Only
+    // the last of the three readings gets an answer.
+    panel.adding.open()
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    const held = panel.replacing.replacing.value.get('acct_key')?.kind
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([held, ownedReadings(sent), kind(panel)]).toEqual(['sending', 4, `read for ${person}`])
   })
 
   it('forgets the replacements of one person once it shows another', async () => {

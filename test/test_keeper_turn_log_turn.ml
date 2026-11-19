@@ -181,9 +181,9 @@ let mentions text part =
 let turn_ref n = Ids.Turn_ref.make ~trace_id:session_id ~absolute_turn:n
 
 (* One turn around [body]. The answer says whether the turn completed. *)
-let turn ?(task = Log.No_task) place n body =
-  Turn.around ~place ~turn_ref:(turn_ref n) ~runtime:"test-runtime" ~task ~succeeded:Result.is_ok
-    body
+let turn ?(task = Log.No_task) ?(stimuli = []) place n body =
+  Turn.around ~place ~turn_ref:(turn_ref n) ~runtime:"test-runtime" ~task ~stimuli
+    ~succeeded:Result.is_ok body
 ;;
 
 let failures site =
@@ -252,6 +252,209 @@ let test_the_task_of_a_turn () =
   match Turn.task_evidence (Task { task_id; goals = Error (Goal_links_unavailable "no index") }) with
   | Task { goals = None; _ } -> ()
   | _ -> fail "Goals that were not read are not kept as unread"
+;;
+
+let ok_or_fail label = function
+  | Ok value -> value
+  | Error detail -> failf "%s: %s" label detail
+;;
+
+let stimulus_text stimulus =
+  Yojson.Safe.to_string (Masc.Keeper_turn_log_stimulus_codec.to_json stimulus)
+;;
+
+(* One entry of each kind the event queue holds, and the line type it
+   becomes. The conversion is a total match, so a new kind of entry does not
+   compile until it has a line type. This pins which ids and names each one
+   keeps and that no two kinds share a line type. *)
+let test_every_kind_of_queue_entry () =
+  let module Q = Keeper_event_queue in
+  let channel =
+    ok_or_fail "channel" (Keeper_continuation_channel.dashboard ~thread_id:"thread-1")
+  in
+  let signal kind : Q.board_stimulus =
+    { kind
+    ; author = "alice"
+    ; title = "a title"
+    ; content = "a body"
+    ; hearth = None
+    ; updated_at = None
+    ; audience = Audience_discoverable
+    }
+  in
+  let queued ?(post_id = "queue-id") payload : Q.stimulus =
+    { post_id; urgency = Normal; arrived_at = 10.0; payload }
+  in
+  let judge : Masc_domain.completion_authority = Human_operator { operator_id = "owner" } in
+  let entries =
+    [ ( queued ~post_id:"post-9" (Board_signal (signal Post_created))
+      , {|{"kind":"board","post":"post-9","author":"alice","event":"post_created"}|} )
+    ; ( queued ~post_id:"post-9"
+          (Board_signal (signal (Post_updated { content_updated_at = 5.0 })))
+      , {|{"kind":"board","post":"post-9","author":"alice","event":"post_updated"}|} )
+    ; ( queued ~post_id:"post-9"
+          (Board_signal (signal (Comment_added { comment_id = "comment-3"; parent_id = None })))
+      , {|{"kind":"board","post":"post-9","author":"alice","event":"comment_added","comment":"comment-3"}|}
+      )
+    ; ( queued ~post_id:"post-9"
+          (Board_signal
+             (signal
+                (Reaction_changed
+                   { target_type = Reaction_post
+                   ; target_id = "post-9"
+                   ; user_id = "bob"
+                   ; emoji = "+1"
+                   ; reacted = true
+                   })))
+      , {|{"kind":"board","post":"post-9","author":"alice","event":"reaction_changed","by":"bob"}|}
+      )
+    ; ( queued ~post_id:"post-9"
+          (Board_signal
+             (signal
+                (Vote_cast
+                   { target = Vote_on_post "post-9"
+                   ; target_author = "alice"
+                   ; voter = "carol"
+                   ; direction = Vote_up
+                   })))
+      , {|{"kind":"board","post":"post-9","author":"alice","event":"vote_cast","by":"carol"}|} )
+    ; ( queued ~post_id:"post-9" (Board_routing_pending (signal Post_created))
+      , {|{"kind":"board_routing_pending","post":"post-9","author":"alice","event":"post_created"}|}
+      )
+    ; ( queued ~post_id:"post-9"
+          (Board_attention { candidate_id = "candidate-1"; signal = signal Post_created })
+      , {|{"kind":"board_attention","candidate":"candidate-1","post":"post-9","author":"alice","event":"post_created"}|}
+      )
+    ; queued Bootstrap, {|{"kind":"bootstrap"}|}
+    ; queued (Tool_result_ready "receipt-1"), {|{"kind":"tool_result","receipt":"receipt-1"}|}
+    ; ( queued
+          (Fusion_completed
+             { run_id = "run-1"
+             ; terminal = Fusion_succeeded "an answer"
+             ; board_post_id = ""
+             ; channel
+             })
+      , {|{"kind":"fusion","run":"run-1"}|} )
+    ; ( queued
+          (Schedule_due
+             { occurrence_id = "occurrence-1"
+             ; schedule_instance_id = "instance-1"
+             ; schedule_id = "schedule-1"
+             ; due_at = 9.0
+             ; payload_digest = "digest"
+             ; title = None
+             ; message = "a message"
+             ; result_delivery = None
+             })
+      , {|{"kind":"schedule","schedule":"schedule-1","occurrence":"occurrence-1"}|} )
+    ; ( queued (Connector_attention { event_id = "attention-1"; channel })
+      , {|{"kind":"connector","attention":"attention-1"}|} )
+    ; ( queued (Hitl_resolved { approval_id = "approval-1"; decision = Hitl_approved; channel })
+      , {|{"kind":"hitl","approval":"approval-1"}|} )
+    ; queued (Ask_answered { ask_id = "ask-1"; channel }), {|{"kind":"ask","ask":"ask-1"}|}
+    ; ( queued
+          (Completion_authority_rejected
+             { car_task_id = "task-1"
+             ; car_verification_id = "verification-1"
+             ; car_reason = "a reason"
+             ; car_authority = judge
+             })
+      , {|{"kind":"completion_rejected","task":"task-1","verification":"verification-1","judge":"human_operator","operator":"owner"}|}
+      )
+    ; ( queued
+          (Task_outcome
+             { to_task_id = "task-1"
+             ; to_verification_id = "verification-1"
+             ; to_producer = "producer"
+             ; to_authority = System_llm_agent { agent_run_id = "judge-run-1" }
+             })
+      , {|{"kind":"completion_approved","task":"task-1","verification":"verification-1","judge":"system_agent","run":"judge-run-1"}|}
+      )
+    ; ( queued
+          (Task_cancelled { tc_task_id = "task-2"; tc_cancelled_by = "dave"; tc_reason = None })
+      , {|{"kind":"task_cancelled","task":"task-2","by":"dave"}|} )
+    ; ( queued (Workspace_message { wmsg_request_id = "request-1"; wmsg_from = "erin" })
+      , {|{"kind":"workspace_message","request":"request-1","from":"erin"}|} )
+    ; ( queued
+          (Delegate_completed
+             { dc_operation_id = "operation-1"
+             ; dc_keeper = "frank"
+             ; dc_terminal = Delegate_no_reply
+             })
+      , {|{"kind":"delegate","operation":"operation-1","keeper":"frank"}|} )
+    ; ( queued
+          (Composition_completed
+             { cc_request_id = "request-2"
+             ; cc_tool = "compose"
+             ; cc_terminal = Composition_succeeded
+             })
+      , {|{"kind":"composition","request":"request-2","tool":"compose"}|} )
+    ]
+  in
+  List.iter
+    (fun (entry, expected) -> check string expected expected (stimulus_text (Turn.stimulus entry)))
+    entries;
+  let job = Keeper_owned_job_identity.Job_id.fresh () in
+  check string "an owned job"
+    (Printf.sprintf {|{"kind":"owned_job","job":"%s"}|}
+       (Keeper_owned_job_identity.Job_id.to_string job))
+    (stimulus_text
+       (Turn.stimulus
+          (queued
+             (Owned_job_completed
+                { oj_job_id = job
+                ; oj_source =
+                    { task_id = None
+                    ; turn_ref = None
+                    ; tool_use_id = None
+                    ; trace_id = None
+                    ; keeper_turn_id = None
+                    }
+                ; oj_channel = channel
+                }))));
+  (* The queue's own label of a kind and the line type's kind are one to one. *)
+  let pairs =
+    List.sort_uniq
+      (fun (queue_kind, line_kind) (other_queue_kind, other_line_kind) ->
+         match String.compare queue_kind other_queue_kind with
+         | 0 -> String.compare line_kind other_line_kind
+         | order -> order)
+      (List.map
+         (fun ((entry : Q.stimulus), (_ : string)) ->
+            ( Q.payload_kind_label entry.payload
+            , match Masc.Keeper_turn_log_stimulus_codec.to_json (Turn.stimulus entry) with
+              | `Assoc (("kind", `String kind) :: _) -> kind
+              | _ -> fail "a stimulus whose first field is not its kind" ))
+         entries)
+  in
+  let distinct project = List.length (List.sort_uniq String.compare (List.map project pairs)) in
+  check int "kinds of queue entry here" 16 (distinct fst);
+  check int "line types for them" 16 (distinct snd);
+  check int "one line type for each" 16 (List.length pairs)
+;;
+
+let test_a_turn_names_what_woke_it =
+  in_workspace
+  @@ fun place ->
+  let stimuli : Log.stimulus list =
+    [ Workspace_message { request = "request-1"; from = "erin" }
+    ; Board { post = "post-9"; author = "alice"; event = Comment_added { comment = "comment-3" } }
+    ]
+  in
+  let (_ : (unit, string) result) = turn ~stimuli place 1 (fun (_ : Turn.t) -> Ok ()) in
+  let (_ : (unit, string) result) = turn place 2 (fun (_ : Turn.t) -> Ok ()) in
+  let woken =
+    List.filter_map
+      (function
+        | Log.Opened { stimuli; _ } -> Some (String.concat " " (List.map stimulus_text stimuli))
+        | Log_started _ | Closed _ | Reset _ -> None)
+      (log_lines place)
+  in
+  check (list string) "each Opened carries its own, in order"
+    [ {|{"kind":"workspace_message","request":"request-1","from":"erin"} {"kind":"board","post":"post-9","author":"alice","event":"comment_added","comment":"comment-3"}|}
+    ; ""
+    ]
+    woken
 ;;
 
 let test_a_turn_that_completes =
@@ -379,9 +582,12 @@ let () =
     [ ( "values"
       , [ test_case "the label of an end" `Quick test_the_label_of_an_end
         ; test_case "the Task of a turn" `Quick test_the_task_of_a_turn
+        ; test_case "every kind of queue entry has a line type" `Quick
+            test_every_kind_of_queue_entry
         ] )
     ; ( "around"
       , [ test_case "a turn that completes" `Quick test_a_turn_that_completes
+        ; test_case "a turn names what woke it" `Quick test_a_turn_names_what_woke_it
         ; test_case "every way out writes one end" `Quick test_every_way_out_writes_one_end
         ; test_case "a turn the log cannot take" `Quick test_a_turn_the_log_cannot_take
         ; test_case "a Keeper directory that was removed" `Quick

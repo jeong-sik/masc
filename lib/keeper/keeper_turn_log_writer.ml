@@ -18,6 +18,7 @@ type event =
       { turn_ref : Ids.Turn_ref.t
       ; runtime : string
       ; task : Log.task_evidence
+      ; stimuli : Log.stimulus list
       }
   | Finish of
       { admitted : admitted
@@ -62,12 +63,15 @@ let closed ~at ~covered ~(point : Log.mark) ~(now : Log.mark) ~(open_turn : Stor
 ;;
 
 let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
-  let opened ~turn_ref ~runtime ~task = Log.Opened { at; turn_ref; runtime; task; baseline = now } in
+  let opened ~turn_ref ~runtime ~task ~stimuli =
+    Log.Opened { at; turn_ref; runtime; task; stimuli; baseline = now }
+  in
   match tail with
   | Nothing_written ->
     let started = Log.Log_started { id = new_log_id; at; mark = now } in
     (match event with
-     | Admit { turn_ref; runtime; task } -> Ok [ started; opened ~turn_ref ~runtime ~task ]
+     | Admit { turn_ref; runtime; task; stimuli } ->
+       Ok [ started; opened ~turn_ref ~runtime ~task ~stimuli ]
      | Process_start -> Ok [ started ]
      | Finish { admitted = Recorded { opened = (_ : int) } | Not_recorded; ending = (_ : ending) }
        -> Ok [])
@@ -94,10 +98,11 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
       Ok (reset @ [ line ])
     in
     (match event, open_turn with
-     | Admit { turn_ref; runtime; task }, None -> Ok (reset @ [ opened ~turn_ref ~runtime ~task ])
-     | Admit { turn_ref; runtime; task }, Some open_turn ->
+     | Admit { turn_ref; runtime; task; stimuli }, None ->
+       Ok (reset @ [ opened ~turn_ref ~runtime ~task ~stimuli ])
+     | Admit { turn_ref; runtime; task; stimuli }, Some open_turn ->
        let* lines = close open_turn Close_missing in
-       Ok (lines @ [ opened ~turn_ref ~runtime ~task ])
+       Ok (lines @ [ opened ~turn_ref ~runtime ~task ~stimuli ])
      | Finish { admitted = Recorded { opened }; ending }, Some open_turn ->
        (* Another writer closed this turn already, and the open one is not
           this turn's to close. *)

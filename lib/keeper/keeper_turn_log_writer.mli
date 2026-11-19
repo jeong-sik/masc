@@ -41,6 +41,7 @@ type event =
       { turn_ref : Ids.Turn_ref.t
       ; runtime : string
       ; task : Keeper_turn_log.task_evidence
+      ; stimuli : Keeper_turn_log.stimulus list
       }
   (** The last line of the plan is the turn's [Opened]. *)
   | Finish of

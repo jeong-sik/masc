@@ -38,8 +38,13 @@ val ending : exit -> closing_save option -> Keeper_turn_log_writer.ending
     text of its phase and criterion, encoded by the Goal's own encoders. *)
 val task_evidence : Keeper_turn_task_context.t -> Keeper_turn_log.task_evidence
 
-(** [around ~place ~turn_ref ~runtime ~task ~succeeded body] writes the turn's
-    [Opened], runs [body], and writes its [Closed] before the answer or the
+(** One entry of the Keeper's event queue as the turn log keeps it: its id
+    and the names it carries. Every kind of entry has a line type of its
+    own. *)
+val stimulus : Keeper_event_queue.stimulus -> Keeper_turn_log.stimulus
+
+(** [around ~place ~turn_ref ~runtime ~task ~stimuli ~succeeded body] writes
+    the turn's [Opened], runs [body], and writes its [Closed] before the answer or the
     exception leaves. [succeeded] says whether a returned answer is a turn
     that completed. The one caller passes "the settlement's result is [Ok]",
     so [Completed] also labels a turn that settled without an error and has
@@ -52,6 +57,7 @@ val around
   -> turn_ref:Ids.Turn_ref.t
   -> runtime:string
   -> task:Keeper_turn_log.task_evidence
+  -> stimuli:Keeper_turn_log.stimulus list
   -> succeeded:('a -> bool)
   -> (t -> 'a)
   -> 'a

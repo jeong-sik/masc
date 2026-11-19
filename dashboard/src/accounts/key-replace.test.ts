@@ -112,18 +112,23 @@ describe('the replacement of the key of an account', () => {
     expect([await model.replace('acct_key', key), sent.length, of('acct_key')]).toEqual(['kept', 0, { kind: 'open', failure: null }])
   })
 
-  // The subscriptions that are asked for again never come in these cases.
   it.each([
-    ['a replacement the server did', () => replaced(false), 'dropped', { kind: 'replaced', oldKeysRemoved: false }],
-    ['an account the server does not have', noSuchAccount, 'dropped', { kind: 'gone' }],
-  ] as const)('ends once the answer is read after %s, without the subscriptions it asked for again', async (_name, answer, kept, shown) => {
+    ['a replacement the server did', () => replaced(false), { kind: 'replaced', oldKeysRemoved: false }],
+    ['an account the server does not have', noSuchAccount, { kind: 'gone' }],
+  ] as const)('gives the key up once the answer is read after %s, and shows it once the subscriptions were read again', async (_name, answer, shown) => {
+    const reading = later<undefined>()
     const { send } = answering([answer()])
-    const refresh = vi.fn(() => later<undefined>().promise)
+    const refresh = vi.fn(() => reading.promise)
     const model = createReplacements({ send, leave: vi.fn(), token: () => 'token-1', refresh })
     model.open('acct_key')
-    expect([await model.replace('acct_key', key), model.replacing.value.get('acct_key'), refresh.mock.calls.length]).toEqual([kept, shown, 1])
+    const kept = await model.replace('acct_key', key)
+    const during = model.replacing.value.get('acct_key')
+    reading.give(undefined)
+    await vi.waitFor(() => { expect(model.replacing.value.get('acct_key')).toEqual(shown) })
+    expect([kept, during, refresh.mock.calls.length]).toEqual(['dropped', { kind: 'sending', failure: null }, 1])
   })
 
+  // The subscriptions that are asked for again never come.
   it('ends once the answer is read after a refusal that can have changed the account, without the subscriptions it asked for again', async () => {
     const { send } = answering([refusedAs(503, 'key_not_stored')])
     const refresh = vi.fn(() => later<undefined>().promise)

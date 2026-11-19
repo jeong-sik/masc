@@ -1321,7 +1321,17 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
        (Option.is_none (List.assoc_opt "memory_id" fields));
      Alcotest.(check string) "source receipt and search share exact identity"
        (string_field "source_sha256" first_write)
-       (string_field "source_sha256" matched)
+       (string_field "source_sha256" matched);
+     Alcotest.(check string) "source match shows when the claim was bound"
+       (match Masc.Keeper_memory_source_current.read_for_keepers_dir
+                ~keepers_dir ~keeper_id:meta.name with
+        | Ok (Some { Masc.Keeper_memory_source_current.facts = [ stored ]; _ }) ->
+          Masc_domain.iso8601_of_unix_seconds stored.first_seen
+        | Ok _ -> Alcotest.fail "expected one stored source-bound fact"
+        | Error detail -> Alcotest.fail detail)
+       (string_field "first_seen" matched);
+     Alcotest.(check bool) "a file-bound claim has no re-observation time" true
+       (Option.is_none (List.assoc_opt "last_seen" fields))
    | _ -> Alcotest.fail "expected one source-bound memory match");
   let first_prompt = render () in
   let index_prompt = render_prompt ~now:(Time_compat.now ()) in
@@ -2281,7 +2291,13 @@ let test_search_keeps_exact_matches_in_store_order () =
       (Masc.Keeper_memory_os_types.memory_id first_match)
       (string_field "memory_id" first);
     Alcotest.(check string) "match exposes observed basis" "observed"
-      (string_field "kind" (json_field "basis" first))
+      (string_field "kind" (json_field "basis" first));
+    Alcotest.(check string) "match shows when the claim entered memory"
+      (Masc_domain.iso8601_of_unix_seconds first_match.first_seen)
+      (string_field "first_seen" first);
+    Alcotest.(check string) "match shows when the claim was last observed again"
+      (Masc_domain.iso8601_of_unix_seconds first_match.last_seen)
+      (string_field "last_seen" first)
   | _ -> Alcotest.fail "expected matches array"
 ;;
 

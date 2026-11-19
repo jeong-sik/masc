@@ -727,7 +727,12 @@ let test_prompt_contract () =
     ; {|"observed"|}
     ; "m1"
     ; "u1"
-    ; "마지막 단위가 닫힌 시각"
+    ; "closed_at"
+    ; "closed_after_admission"
+    ; "unattributed"
+    ; "runtime_context"
+    ; "missing"
+    ; "tool_observation"
     ; "no_wall_clock_death"
     ; "상대 날짜"
     ; "절대 날짜"

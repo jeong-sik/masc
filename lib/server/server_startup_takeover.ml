@@ -445,7 +445,7 @@ let keep_store_facts lease =
   Mutex.protect base_path_lease_mu (fun () ->
     match Hashtbl.find_opt base_path_leases lease.file with
     | Some (Active_lease current) when current == lease ->
-      Dated_jsonl.keep_facts_in_this_process ();
+      Fact_cell.keep_in_this_process ();
       Store_facts_kept
     | Some (Active_lease _) | Some (Failed_close _) | None -> Lease_not_held)
 

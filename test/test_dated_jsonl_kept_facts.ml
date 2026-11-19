@@ -1065,7 +1065,7 @@ let test_an_append_and_a_reader_together () =
 ;;
 
 let () =
-  D.keep_facts_in_this_process ();
+  Fact_cell.keep_in_this_process ();
   run
     "dated_jsonl_kept_facts"
     [ ( "a reader fills the fact"

@@ -177,6 +177,32 @@ let test_purge_forgets_the_kept_turn_record () =
   check string "and the kept row with it" "read, no row" (newest ())
 ;;
 
+(* The purged Keeper's newest decision row is held in memory too
+   ([Keeper_row_facts.newest_decision]). The purge removes the record itself,
+   so it tells the kept rows, and a same-name successor reads its own record:
+   here none. *)
+let test_purge_forgets_the_kept_decision_row () =
+  with_base_path @@ fun config base_path ->
+  let oauth_source = Filename.concat base_path "operator-oauth.json" in
+  let account_home = Filename.concat base_path "muse-account" in
+  write_runtime_toml
+    base_path
+    (runtime_toml ~oauth_source ~account_home
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+  let row = `Assoc [ "turn_id", `Int 1 ] in
+  Masc.Keeper_types_support.append_decision_record config keeper_name row;
+  let newest () =
+    Masc.Keeper_runtime_trust_snapshot.latest_decision_json ~config ~keeper_name
+    |> Option.map Yojson.Safe.to_string
+  in
+  check (option string) "the row is read" (Some (Yojson.Safe.to_string row)) (newest ());
+  purge config;
+  check bool "the purge removes the decision record" false
+    (Sys.file_exists
+       (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name));
+  check (option string) "and the kept row with it" None (newest ())
+;;
+
 (* A home whose derivation inputs are gone (the runtime configuration no
    longer assigns this Keeper) cannot be named by the purge either. The purge
    stays complete, the entry is omitted rather than failing, and the resolver
@@ -303,7 +329,7 @@ candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
 (* The purge runs in the server, the process that writes the stores and
    keeps their facts in memory. *)
 let () =
-  Dated_jsonl.keep_facts_in_this_process ();
+  Fact_cell.keep_in_this_process ();
   run "Keeper shutdown official-client purge"
     [ ( "official-client homes"
       , [ test_case "purge removes the Antigravity HOME and prepare lock" `Quick
@@ -312,6 +338,8 @@ let () =
             test_purge_removes_muse_identity_directory
         ; test_case "purge forgets the kept TurnRecord" `Quick
             test_purge_forgets_the_kept_turn_record
+        ; test_case "purge forgets the kept decision row" `Quick
+            test_purge_forgets_the_kept_decision_row
         ; test_case "purge omits a home it can no longer derive" `Quick
             test_purge_omits_home_it_cannot_derive
         ; test_case

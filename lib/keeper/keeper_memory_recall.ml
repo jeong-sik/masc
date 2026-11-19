@@ -20,6 +20,79 @@ type tail_lines = {
    ([Error class]).  The catch-all classifies the exception through the
    closed sum {!Keeper_memory_recall_exn_class.t} so the caller can
    branch on a bounded label instead of a free-form string. *)
+(* The last lines of an open file. *)
+let tail_lines_of_fd fd ~max_bytes ~max_lines =
+  let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
+  let min_start =
+    if max_bytes <= 0
+    then 0L
+    else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
+  in
+  let chunk_size = 64 * 1024 in
+  let pos = ref file_len in
+  let chunks = ref [] in
+  let newline_count = ref 0 in
+  let count_newlines s =
+    String.iter (fun ch -> if ch = '\n' then incr newline_count) s
+  in
+  while Int64.compare !pos min_start > 0 && !newline_count <= max_lines do
+    let available = Int64.sub !pos min_start in
+    let read_len =
+      Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
+    in
+    let start = Int64.sub !pos (Int64.of_int read_len) in
+    ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
+    let buf = Bytes.create read_len in
+    let rec read_exact offset remaining =
+      if remaining <= 0 then offset
+      else
+        let n = Unix.read fd buf offset remaining in
+        if n = 0 then offset else read_exact (offset + n) (remaining - n)
+    in
+    let bytes_read = read_exact 0 read_len in
+    let chunk = Bytes.sub_string buf 0 bytes_read in
+    count_newlines chunk;
+    chunks := chunk :: !chunks;
+    pos := start
+  done;
+  let content = String.concat "" !chunks in
+  let lines =
+    content
+    |> String.split_on_char '\n'
+    |> List.filter (fun s -> String.trim s <> "")
+  in
+  let lines =
+    if Int64.compare !pos 0L > 0
+    then (match lines with _ :: rest -> rest | [] -> [])
+    else lines
+  in
+  (* The read always ends at end-of-file, so the last byte of
+     [content] tells whether the final line was terminated. A file
+     whose last line is still being appended has no trailing
+     newline yet. The symmetric case at the other end -- a first
+     line cut by the [max_bytes] window -- is already handled above
+     by dropping it when [!pos > 0]. *)
+  let completion =
+    if String.length content > 0
+       && content.[String.length content - 1] = '\n'
+    then Complete
+    else Partial_last_line
+  in
+  let n = List.length lines in
+  let from_file_start = Int64.equal !pos 0L && n <= max_lines in
+  let lines =
+    if n <= max_lines then lines
+    else
+      let drop = n - max_lines in
+      List.filteri (fun i _ -> i >= drop) lines
+  in
+  { lines; completion; from_file_start }
+
+let with_open_tail fd ~max_bytes ~max_lines =
+  Fun.protect
+    ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+    (fun () -> tail_lines_of_fd fd ~max_bytes ~max_lines)
+
 let read_file_tail_lines_with_completion path ~max_bytes ~max_lines :
     (tail_lines, Keeper_memory_recall_exn_class.t) result =
   if max_lines <= 0
@@ -29,78 +102,25 @@ let read_file_tail_lines_with_completion path ~max_bytes ~max_lines :
   else
     try
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-      Ok
-        (Fun.protect
-           ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
-           (fun () ->
-             let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
-             let min_start =
-               if max_bytes <= 0
-               then 0L
-               else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
-             in
-             let chunk_size = 64 * 1024 in
-             let pos = ref file_len in
-             let chunks = ref [] in
-             let newline_count = ref 0 in
-             let count_newlines s =
-               String.iter (fun ch -> if ch = '\n' then incr newline_count) s
-             in
-             while Int64.compare !pos min_start > 0 && !newline_count <= max_lines do
-               let available = Int64.sub !pos min_start in
-               let read_len =
-                 Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
-               in
-               let start = Int64.sub !pos (Int64.of_int read_len) in
-               ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
-               let buf = Bytes.create read_len in
-               let rec read_exact offset remaining =
-                 if remaining <= 0 then offset
-                 else
-                   let n = Unix.read fd buf offset remaining in
-                   if n = 0 then offset else read_exact (offset + n) (remaining - n)
-               in
-               let bytes_read = read_exact 0 read_len in
-               let chunk = Bytes.sub_string buf 0 bytes_read in
-               count_newlines chunk;
-               chunks := chunk :: !chunks;
-               pos := start
-             done;
-             let content = String.concat "" !chunks in
-             let lines =
-               content
-               |> String.split_on_char '\n'
-               |> List.filter (fun s -> String.trim s <> "")
-             in
-             let lines =
-               if Int64.compare !pos 0L > 0
-               then (match lines with _ :: rest -> rest | [] -> [])
-               else lines
-             in
-             (* The read always ends at end-of-file, so the last byte of
-                [content] tells whether the final line was terminated. A file
-                whose last line is still being appended has no trailing
-                newline yet. The symmetric case at the other end -- a first
-                line cut by the [max_bytes] window -- is already handled above
-                by dropping it when [!pos > 0]. *)
-             let completion =
-               if String.length content > 0
-                  && content.[String.length content - 1] = '\n'
-               then Complete
-               else Partial_last_line
-             in
-             let n = List.length lines in
-             let from_file_start = Int64.equal !pos 0L && n <= max_lines in
-             let lines =
-               if n <= max_lines then lines
-               else
-                 let drop = n - max_lines in
-                 List.filteri (fun i _ -> i >= drop) lines
-             in
-             { lines; completion; from_file_start }))
+      Ok (with_open_tail fd ~max_bytes ~max_lines)
     with
     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
         Error (Keeper_memory_recall_exn_class.classify exn)
+
+type tail_of_file =
+  | No_file
+  | Tail of tail_lines
+
+let read_tail_of_file path ~max_bytes ~max_lines :
+    (tail_of_file, Keeper_memory_recall_exn_class.t) result =
+  match Unix.openfile path [ Unix.O_RDONLY ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok No_file
+  | exception (Unix.Unix_error _ as exn) ->
+    Error (Keeper_memory_recall_exn_class.classify exn)
+  | fd ->
+    (try Ok (Tail (with_open_tail fd ~max_bytes ~max_lines)) with
+     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
+       Error (Keeper_memory_recall_exn_class.classify exn))
 
 (* The completion flag matters to exactly one caller (the decision-log reader,
    which must tell an in-flight append from corruption). Everyone else keeps

@@ -137,7 +137,7 @@ let test_narrow_width_keeps_one_column_cards () =
       ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
       ~decisions ~decisions_whole:true ~continuation
       ~status:(fun ~cells:_ -> [ "running" ])
-      ~actions
+      ~keep_actions_card:false ~actions
   in
   check bool "43 inner cells falls back to plain list" true
     (Option.is_none (draw_at ~inner:43 ~rows:24 ~selected:None));

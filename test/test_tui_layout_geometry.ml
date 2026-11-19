@@ -533,7 +533,8 @@ let overview_cards_fit () =
                  match
                    Masc_tui_overview_cards.draw ~ko:true ~edges:overview_edges
                      ~inner ~rows ~is_selected:(fun action -> action = 1)
-                     ~decisions ~decisions_whole:true ~continuation ~status ~actions
+                     ~decisions ~decisions_whole:true ~continuation ~status
+                     ~keep_actions_card:false ~actions
                  with
                  | None -> ()
                  | Some lines ->

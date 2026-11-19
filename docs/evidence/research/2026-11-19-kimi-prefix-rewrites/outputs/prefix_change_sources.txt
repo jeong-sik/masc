@@ -16,3 +16,11 @@ tool array changes (added | removed | schema changed):
     1  - | cloudflare_whoami | -
     1  keeper_workspace_memory_read | - | -
     1  - | keeper_analyze_image,keeper_image_read,masc_schedule_create | -
+keeper_tool_search schema changes, by tool names that entered | left it:
+   10  keeper_receipt_wait | -
+   10  - | keeper_receipt_wait
+per pair: "Admitted Request Source" toggled | keeper_receipt_wait offered toggled | other tools entered or left:
+   81  False | False | False
+   15  True | True | False
+    9  False | False | True
+    5  True | True | True

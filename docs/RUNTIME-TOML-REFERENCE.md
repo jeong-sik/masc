@@ -92,6 +92,7 @@ Optional:
 | --- | --- | --- |
 | `display-name` | string | UI label |
 | `kind` | `anthropic`\|`kimi`\|`openai_compat`\|`ollama`\|`gemini`\|`glm` | dialect, **only** for an uncatalogued `messages-http`/`openai-compatible-http` endpoint; refused elsewhere (§9) |
+| `catalog-provider` | string | HTTP protocols only: the AGENT_CORE catalog provider row this account speaks as when its own provider id names no row, e.g. a second Anthropic account `[providers.claude_a]` with `catalog-provider = "claude"`. Catalog lookups (dialect, capabilities, request policy) read that row; the credential, quota scope, runtime ids and admission stay per account, so two accounts of one row are separate exact-output slots. Write the row id as the catalog spells it. Refused at load (`Catalog_provider_refused`, reported under `Undeclared_bindings`) when it names no catalog row (`Names_no_row`), when the provider's own id is already a catalog row (`Beside_own_row`), when it spells an alias of a row (`Names_alias`; the message gives the id to write), or when `kind` is stated beside it (`Beside_kind`); the check runs for a provider an enabled binding names. An official-client protocol may not declare it. See [provider admission fairness](guides/provider-admission-fairness.md#several-accounts-of-one-catalog-provider) |
 | `request-path` | string | request path override, checked before the catalog row's path — also valid for a catalogued provider reached over a different supported surface (e.g. `ollama_cloud` over OpenAI-compatible, where the catalog's native path 404s, #33652) |
 | `enabled` | bool | default `true` |
 | `max-context` | positive int | provider-level window default (precedence in spec/14 §3) |
@@ -236,7 +237,7 @@ assignments. Unknown keys are load errors.
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `max-context` | positive int | per-binding window override |
-| `max-concurrent` | positive int | static client-side cap. **Omitted means no cap and no admission at all**: the binding dispatches straight out and stops only when the provider itself refuses (HTTP 429). Whether HTTP bindings should be required to declare it is open (#25401). `0` or negative is a load error |
+| `max-concurrent` | positive int | static client-side cap. **Omitted means no cap and no admission at all**: the binding dispatches straight out and stops only when the provider itself refuses (HTTP 429). Whether HTTP bindings should be required to declare it is open (#25401); the exception is a runtime an enabled exact-output lane lists in `cli_slots`, whose binding **must** declare it (the seats: client processes the lane may run at once) — omitting it refuses the load with `Exact_lane_cli_slot_unservable`, reason `Seats_undeclared` (§7). `0` or negative is a load error |
 | `max-tokens` | positive int | per-request output budget; omitted lets the provider default decide (ollama.com/v1 defaults to 65536) |
 | `disable-parallel-tool-use` | bool, default `false` | limit responses to one tool call |
 | `price-input`, `price-output` | float | per-million pricing override (catalog otherwise) |
@@ -270,12 +271,27 @@ name a lane instead of a single runtime.
 | --- | --- |
 | `enabled` | bool, default `true` (a required lane cannot be disabled) |
 | `slots` | HTTP binding ids, tried in order |
-| `cli_slots` | official-client runtime ids, used when every HTTP slot is blocked |
+| `cli_slots` | official-client runtime ids, used when every HTTP slot is blocked. Each entry's binding must declare `max-concurrent` (§4): every call starts a client process on this machine and nothing stops an overflow, so the lane runs a CLI slot only within its declared seats |
 | `max_output_tokens` | positive int output budget |
 | `thinking` | bool thinking control |
 
 `slots = []` means `cli_slots` only; both empty is refused at load on an
 enabled lane (a disabled lane may keep empty lists).
+
+**Seats rule** (#53025): an enabled lane whose `cli_slots` entry resolves to an
+official client with an output-schema channel but whose binding declares no
+`max-concurrent` is refused at load, built-in and add-on lanes alike
+(`exact_lane_cli_slot_gaps` and `validate_exact_lane_cli_slots` in
+`lib/runtime/runtime.ml`). The refusal is
+`Exact_lane_cli_slot_unservable` with reason `Seats_undeclared`
+(`lib/runtime/runtime_config_error.ml`); it names the lane table, the slot and
+the provider, and tells you to add `max-concurrent = <seats>` to the binding
+table of that runtime. A raw-config save is refused the same way. The same
+runtime listed in `slots` is not held to the rule (only a `cli_slots` entry is
+counted), and a lane with `enabled = false` is not checked. See
+[lane add-on TOML](guides/lane-addon-toml.md),
+[Keeper memory execution](guides/keeper-memory-execution.md) and
+[provider admission fairness](guides/provider-admission-fairness.md).
 
 **Deadline rule**: a `slots` entry that newly adds an HTTP runtime whose
 provider declares no `exact-body-timeout-s` is refused at save time

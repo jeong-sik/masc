@@ -158,13 +158,17 @@ let changes_page_size (state : Masc_tui_types.state) ~max_lines ~keeper_name =
   let scope_rows = if Option.is_some (Fetched.value (activity_view state keeper_name)) then 1 else 0 in
   max 0 (max_lines - 1 - List.length notes - scope_rows - 4)
 
-let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name =
+let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_name
+    ~hand_position =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let text ko_text en = if ko then ko_text else en in
   let notes = activity_notes ~ko state keeper_name in
   let rows = events state keeper_name in
   let total = List.length rows in
   let offset = max 0 (min (max 0 (total - 1)) state.memory_changes_cursor) in
+  (* The selected change is the first drawn; its place is the title row's. *)
+  if total > 0 then
+    hand_position (Masc_tui_value.Position.row ~selected:(Some offset) ~total);
   let header = quiet (text "1 최근  2 조회  3 변화  4 저장" "1 recent  2 retrievals  3 changes  4 storage") in
   let scope = match Fetched.value (activity_view state keeper_name) with
     | None -> []
@@ -182,8 +186,8 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
           let row = Table.row ~close:(if i = 0 then Ansi.reset ^ Theme.selection else Ansi.reset)
             (event_cells ~selected:(i = 0) ~ko ~now ~cols:cells event) in
           if i = 0 then Theme.selection ^ row ^ Ansi.reset else row) shown
-      @ [quiet (Printf.sprintf "%d–%d / %d · Enter %s" (offset + 1) (offset + List.length shown) total
-          (text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree"))] in
+      @ [quiet ("Enter "
+          ^ text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
   let style : Card.style = {border=Theme.recede (); focused_border=Theme.border_focus ();
                             title_style=Theme.info (); reset=Ansi.reset} in

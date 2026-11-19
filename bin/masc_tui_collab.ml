@@ -77,6 +77,14 @@ let selected t = match t.read, t.inventory with
   | None, Fetched.Ready listed ->
       List.find_opt (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) listed.pis_rows
   | Some _, _ | None, (Fetched.Absent | Fetched.Loading | Fetched.Stale _ | Fetched.Failed _) -> None
+let position t =
+  match rows t with
+  | [] -> None
+  | rows ->
+      Some
+        (Masc_tui_value.Position.row
+           ~selected:(List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows)
+           ~total:(List.length rows))
 let move t delta =
   let rows = rows t in
   let index = List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows in

@@ -715,6 +715,32 @@ let test_the_newest_session_event_is_kept_when_taller_than_the_room () =
      | [ newest ] -> rows_of newest > 3
      | [] | _ :: _ :: _ -> false)
 
+(* The usage diagnostics body hands its window to the title row when the
+   section hides lines, and nothing when it shows them all (RFC
+   tui-one-screen-grammar, section 2). *)
+let test_the_metrics_body_hands_its_window_only_when_it_hides_lines () =
+  let state = make_state () in
+  let suffix_lines = List.init 60 (Printf.sprintf "line-%02d") in
+  let handed ~budget =
+    let positions = ref [] in
+    Render_metrics.render_metrics_body ~cols:100 ~budget ~suffix_lines state
+      ~report_scroll:(fun _ _ _ -> ())
+      ~hand_position:(fun position -> positions := position :: !positions)
+      ~push:ignore ~push_styled:(fun ~style:_ _ -> ()) ~push_selected:ignore
+      ~push_divider:ignore ~push_empty:ignore;
+    !positions
+  in
+  (match handed ~budget:20 with
+   | [ Masc_tui_value.Position.Window { first; last; total } ] ->
+       check int "the window starts at the top" 1 first;
+       check bool "the window ends inside what it hides" true (last < total);
+       check bool "the total counts the hidden lines" true (total >= 60)
+   | [] -> fail "a body that hides lines hands its window"
+   | [ Masc_tui_value.Position.(Row _ | Partial _) ] | _ :: _ :: _ ->
+       fail "the body hands one window and no row");
+  check int "a body that shows every line hands nothing" 0
+    (List.length (handed ~budget:400))
+
 let () =
   run "tui_render_metrics"
     [ ( "connection"
@@ -766,6 +792,8 @@ let () =
     ; ( "render_body"
       , [ test_case "a Tasks read error is sanitized before it is drawn" `Quick
             test_tasks_error_is_sanitized
+        ; test_case "the body hands its window only when it hides lines" `Quick
+            test_the_metrics_body_hands_its_window_only_when_it_hides_lines
         ;] )
     ]
 ;;

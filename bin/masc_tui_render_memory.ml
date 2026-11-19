@@ -1364,11 +1364,10 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
   (* The context divider needs a row only when the detail itself is shown. *)
   let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
-  (* Keep the selected Keeper and neighbouring rows together where they fit;
-     an overflowing list also needs its window line. *)
+  (* Keep the selected Keeper and neighbouring rows together where they fit.
+     Where the list stands is on the title row, so no row is kept for it. *)
   let count = List.length keepers in
-  let visible_floor = min 3 count in
-  let list_rows = if count = 0 then 1 else visible_floor + (if count > visible_floor then 1 else 0) in
+  let list_rows = if count = 0 then 1 else min 3 count in
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
@@ -1445,6 +1444,7 @@ let memory_selector_line ~cols (state : state) keeper =
   ^ " " ^ Message_layout.fit_width (memory_operator_state state keeper) status_cells
 
 let render_memory_body ~cols ~budget (state : state)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1532,14 +1532,9 @@ let render_memory_body ~cols ~budget (state : state)
       ~refused_rows:(refused_rows projection)
       ~context_rows:(List.length projection.context) state in
   let rows = budget + Masc_tui_frame.chrome_rows in
-  let available = max 1 (rows - layout.sc_chrome) in
-  (* With only one row there is room for the selection but not a separate
-     window label. Drawing both would hide the selection behind the cut. *)
-  let overflowing = available > 1 && shown > available in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   let scroll =
     Masc_tui_scroll.normalize ~count:shown ~height:content_height
@@ -1581,10 +1576,7 @@ let render_memory_body ~cols ~budget (state : state)
             push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
-    if overflowing then
-      push_styled ~style:(Theme.recede ())
-        (Printf.sprintf (if ko then "  [키퍼 %s]" else "  [keepers %s]")
-           (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+    hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
   end;
   (match projection.context with
    | [] -> ()
@@ -1596,9 +1588,7 @@ let render_memory_body ~cols ~budget (state : state)
 (* How many fact rows the list keeps before the detail below it takes any.
    Enough to read the cursor against its neighbours -- one row above, one
    below, and the room a filter leaves when it lands the cursor near an
-   edge. One of these rows goes to the window reading when the list
-   overflows, the way it does on every other reading pane. Under this the
-   browser stops being one. *)
+   edge. Under this the browser stops being one. *)
 let memory_fact_list_floor_rows = 5
 
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
@@ -1649,23 +1639,23 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
         fact_detail_prefix parts (kept - 1)
-        @ [ Printf.sprintf (if state.ui_language = Lang_ko then "      [사실 %s · Enter:전체 사실]" else "      [fact %s · Enter for the whole fact]")
-              (Masc_tui_scroll.window_text ~scroll:0
-                 ~height:(kept - 1) total_detail_lines) ]
+        @ [ "      "
+            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
+                (total_detail_lines - (kept - 1))
+            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
+               else " · Enter for the whole fact") ]
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)
   let detail_rows =
     match detail_lines with [] -> 0 | lines -> 1 + List.length lines
   in
-  let room = max 1 (room_below_chrome - detail_rows) in
-  let overflowing = total > room in
-  let height = if overflowing then max 1 (room - 1) else room in
+  let height = max 1 (room_below_chrome - detail_rows) in
   let scroll =
     Masc_tui_scroll.normalize ~count:total ~height state.memory_facts_scroll
     |> Masc_tui_scroll.ensure_visible ~cursor ~height
   in
-  (detail_lines, height, overflowing, scroll)
+  (detail_lines, height, scroll)
 
 let memory_facts_pane_cols state cols =
   if state.memory_facts_categories_open && cols >= Masc_tui_roster_pane.threshold_cols then
@@ -1673,12 +1663,13 @@ let memory_facts_pane_cols state cols =
   else cols
 
 let memory_facts_content_height ~cols ~budget ~cursor state =
-  let _, height, _, _ =
+  let _, height, _ =
     memory_facts_layout ~cols:(memory_facts_pane_cols state cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
 
 let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~(push_selected : string -> unit)
@@ -1773,7 +1764,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
-  let detail_lines, content_height, overflowing, scroll =
+  let detail_lines, content_height, scroll =
     memory_facts_layout ~cols ~budget ~cursor state rows
   in
   if total = 0 then
@@ -1818,9 +1809,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
-    if overflowing then
-      push_styled ~style:(Theme.recede ())
-        (Printf.sprintf (if ko then "  [사실 %s]" else "  [facts %s]") (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
   end;
   (match detail_lines with
    | [] -> ()
@@ -1829,10 +1818,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
-    ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+    ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
   if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
-      ~push ~push_styled ~push_selected ~push_divider ~push_empty
+      ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
@@ -1840,6 +1829,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
+      ~hand_position
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->

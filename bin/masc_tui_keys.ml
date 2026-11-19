@@ -2227,11 +2227,9 @@ let cancels_two_press ~input_seen ~key ~second_press =
   | None -> true
   | Some pressed -> not (List.exists (String.equal pressed) second_press)
 
-(* The Fusion detail view: the keys table owns the key list; the renderer
-   owns the live scroll numbers it appends after them. ([view] stays
-   [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
-   [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
-   so the footer agrees with what is on screen.
+(* The Fusion detail view: the keys table owns the key list. ([view] stays
+   [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.) Where
+   the window stands is on the title row, not in the footer.
 
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body

@@ -105,6 +105,10 @@ let render_system_log_detail (state : state) seq =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = max 0 (min (system_logs_page state).lp_detail_scroll max_scroll) in
   box_top buf cols;
   box_line buf cols
     (here_row ~cols state
@@ -112,12 +116,10 @@ let render_system_log_detail (state : state) seq =
        ~readings:
          [ System_logs_view.source_label
              (System_logs_view.source state.system_logs) ]
-       ~position:None);
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:(List.length lines)));
   box_divider buf cols;
-  let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
-  let content_height = max 1 (rows - 5) in
-  let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = max 0 (min (system_logs_page state).lp_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
@@ -127,7 +129,6 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~position:(Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
        ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
@@ -260,7 +261,7 @@ let render_system_logs (state : state) =
     | None, None -> []
     | _ -> filter_pieces
   in
-  let header =
+  let header ~cols =
     match (system_logs_page state).lp_snapshot with
     | None ->
         let reading_note =
@@ -289,7 +290,15 @@ let render_system_logs (state : state) =
              @ filter_pieces)
   in
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols
+    (zone_two_title ~cols state ~title:header
+       ~position:
+         (if total_entries = 0 then None
+          else
+            Some
+              (Masc_tui_value.Position.row
+                 ~selected:(Some (system_logs_page state).lp_cursor)
+                 ~total:total_entries)));
   box_divider buf cols;
   (* The message takes what the named columns leave, asked of the columns. *)
   let log_layout =
@@ -312,13 +321,11 @@ let render_system_logs (state : state) =
              | Some _ -> ui_text state ~ko:"이전 관측 · " ~en:"Last read · ")
           ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* The scroll row is a frame row while the page holds more entries than
-     fit, and only then; the layout the keypress reads says so. *)
   let content_height =
     match scrolled_surface state ~cols System_logs with
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
-          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+          ~preview_keep:s.sc_preview_keep
     | None -> max 1 (rows - listing_chrome ~error:(system_logs_page state).lp_error)
   in
   let max_scroll = max 0 (total_entries - content_height) in
@@ -388,11 +395,6 @@ let render_system_logs (state : state) =
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;
-  if total_entries > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf
-         (if state.ui_language = Lang_ko then "  [줄 %s]" else "  [entries %s]")
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -421,10 +423,12 @@ let render_keeper_calls (state : state) =
     | Some keeper -> Terminal_text.single_line keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let heading ~readings =
+  (* The title row names where the reader is, known only once the rows are
+     laid out, so it is drawn after them. *)
+  let heading ~readings ~position =
     here_row ~cols state
       ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
-      ~readings ~position:None
+      ~readings ~position
   in
   let header =
     match state.keeper_calls with
@@ -484,9 +488,6 @@ let render_keeper_calls (state : state) =
                 (List.length snapshot.Masc.Tui_decode.kcs_entries)
             ; freshness ]
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
   let col_hdr =
     ui_text state ~ko:"  j/k 줄 단위 · 원문 필드: tool | input | output"
       ~en:"  j/k rows · exact fields: tool | input | output"
@@ -520,7 +521,7 @@ let render_keeper_calls (state : state) =
   let shown = List.length entries in
   (* The error row and the mismatch row are drawn above; counting the buffer
      asks what was drawn rather than restating the two conditions. *)
-  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
+  let chrome_rows = boxed_head_rows cols + count_frame_lines buf + listing_rows_below_the_body in
   let content_height = max 1 (rows - chrome_rows) in
   (* The scroll unit is one rendered row, not one call. A canonical proposal
      identity plus its input and output cannot fit a two-row short viewport;
@@ -662,27 +663,18 @@ let render_keeper_calls (state : state) =
       box_empty buf cols
     done
   end;
-  if scroll > 0 || total_rows > content_height then
-    let window =
-      Masc_tui_scroll.window_text ~scroll ~height:content_height total_rows
-    in
-    let detailed_footer =
-      Printf.sprintf "[%s · %s]" (count_reading state Masc_tui_value.Count.Call shown) window
-    in
-    let compact_footer = "[" ^ window ^ "]" in
-    let footer =
-      if Message_layout.display_width detailed_footer <= framed_inner_width cols
-      then detailed_footer
-      else compact_footer
-    in
-    box_line_styled buf cols ~style:(Theme.recede ())
-      footer
-  else box_empty buf cols;
   box_bottom buf cols;
-  Buffer.add_string buf
+  let framed = Buffer.create (Buffer.length buf + 512) in
+  boxed_head framed cols
+    (header
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:total_rows));
+  Buffer.add_buffer framed buf;
+  Buffer.add_string framed
     (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
-  finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols framed
 
 (* The runtime's event feed, newest first, for watching every keeper act at
    once. Rows are built from the events the TUI holds; the filter decides
@@ -726,14 +718,6 @@ let render_acting_evidence (state : state) entry =
   let intro = acting_evidence_intro state in
   (* A field the event did not carry, as opposed to one it carried empty. *)
   let not_carried = ui_text state ~ko:"실려 오지 않음" ~en:"not carried" in
-  box_top buf cols;
-  box_line buf cols
-    (here_row ~cols state
-       ~path:[ acting_tab_label ~ko:(state.ui_language = Lang_ko)
-             ; ui_text state ~ko:"증거" ~en:"evidence" ]
-       ~readings:[] ~position:None);
-  List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
-  box_divider buf cols;
   let lines =
     detail_section_lines ~first:true
       (ui_text state ~ko:"1. 이벤트 식별 · 실행 컨텍스트"
@@ -793,16 +777,23 @@ let render_acting_evidence (state : state) entry =
   let content_height = acting_evidence_content_height ~rows ~intro in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = min max_scroll (max 0 state.acting_detail_scroll) in
+  box_top buf cols;
+  box_line buf cols
+    (here_row ~cols state
+       ~path:[ acting_tab_label ~ko:(state.ui_language = Lang_ko)
+             ; ui_text state ~ko:"증거" ~en:"evidence" ]
+       ~readings:[]
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:(List.length lines)));
+  List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
+  box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for i = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + i) with
     | None -> box_empty buf cols
     | Some line -> box_line buf cols line
   done;
-  box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  [증거 줄 %s]" else "  [evidence rows %s]")
-       (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
       ~hints:(Masc_tui_keys.acting_evidence_hints ~lang:state.ui_language));
@@ -878,7 +869,7 @@ let acting_notices (state : state) ~trace_unavailable =
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
-  (* Top/title/divider, column heading, then overflow/bottom/footer. *)
+  (* Top/title/divider, column heading, then bottom/footer. *)
   max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
 
 let acting_page_rows state ~terminal_rows =
@@ -980,7 +971,7 @@ let render_acting (state : state) =
     | Some rows -> List.nth_opt rows idx
     | None -> Option.map row_of (List.nth_opt visible idx)
   in
-  let header =
+  let header ~cols =
     activity_heading state ~cols ~on_logs:false
       ~reading:
         (("  " ^ Acting.filter_label ~ko:(state.ui_language = Lang_ko) state.acting_filter)
@@ -997,8 +988,31 @@ let render_acting (state : state) =
                 ^ count_reading state Masc_tui_value.Count.Event held
                 ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
+  let content_height = acting_content_height ~rows ~notices in
+  let max_scroll = max 0 (shown - content_height) in
+  let cursor = max 0 (min state.acting_cursor (shown - 1)) in
+  let scroll =
+    let previous = max 0 (min state.acting_scroll max_scroll) in
+    match state.acting_filter with
+    | Acting.Turns -> previous
+    | Actions | Everything ->
+        if cursor < previous then cursor
+        else if cursor >= previous + content_height then cursor - content_height + 1
+        else previous
+  in
+  (* A Turns row is a fold with no cursor on it, so that reading names its
+     window; the other two name the row the cursor is on. *)
+  let position =
+    if shown = 0 then None
+    else
+      match state.acting_filter with
+      | Acting.Turns ->
+          Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:shown
+      | Actions | Everything ->
+          Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown)
+  in
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   List.iter
     (fun (style, notice) -> box_line_styled buf cols ~style ("  " ^ notice))
@@ -1037,18 +1051,6 @@ let render_acting (state : state) =
       ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
-  let content_height = acting_content_height ~rows ~notices in
-  let max_scroll = max 0 (shown - content_height) in
-  let cursor = max 0 (min state.acting_cursor (shown - 1)) in
-  let scroll =
-    let previous = max 0 (min state.acting_scroll max_scroll) in
-    match state.acting_filter with
-    | Acting.Turns -> previous
-    | Actions | Everything ->
-        if cursor < previous then cursor
-        else if cursor >= previous + content_height then cursor - content_height + 1
-        else previous
-  in
   if shown = 0 then begin
     let nothing_under_filter =
       ui_text state ~ko:"  (이 필터에 해당하는 것 없음 · f 로 전체 보기)"
@@ -1116,12 +1118,6 @@ let render_acting (state : state) =
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
           box_line_styled buf cols ~style:(if selected then Theme.selection else style) line
     done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf
-         (if state.ui_language = Lang_ko then "  [줄 %s]" else "  [rows %s]")
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
-  else box_empty buf cols;
   box_bottom buf cols;
   (* A Turns row is a fold with no cursor on it: "/" and n have no row to
      land on there, and the dispatcher refuses both. *)

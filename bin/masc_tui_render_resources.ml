@@ -219,11 +219,48 @@ let render_resources (state : state) =
   let buf = Buffer.create 4096 in
   let split = resource_split state ~cols in
   if not split then box_top buf cols;
+  let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
+  let rows_list =
+    match visible_resources state with Some rows -> rows | None -> []
+  in
+  let total = List.length rows_list in
+  let cursor = max 0 (min state.resources_cursor (total - 1)) in
+  (* The document is laid out once, here, because the focused pane's
+     position goes on the title row above both panes. *)
+  let document_cols = if split then cols - keeper_roster_pane_cols else cols in
+  let document =
+    lazy
+      (Option.map
+         (fun reading ->
+           ( reading,
+             Masc_tui_resource_document.layout_with_search ~cols:document_cols state
+               reading ))
+         (Masc_tui_resource_document.current state))
+  in
+  let document_scroll total_lines =
+    Masc_tui_scroll.Position.clamp ~count:total_lines ~height:pane_rows
+      state.resource_scroll
+  in
+  let position =
+    match state.resource_focus with
+    | Left_pane ->
+        if total = 0 then None
+        else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
+    | Right_pane -> (
+        match Lazy.force document with
+        | None -> None
+        | Some (_, (rendered, _)) ->
+            let total_lines = List.length rendered in
+            Masc_tui_value.Position.window
+              ~first:
+                (Masc_tui_scroll.Position.offset ~count:total_lines ~height:pane_rows
+                   (document_scroll total_lines))
+              ~shown:pane_rows ~total:total_lines)
+  in
   box_line buf cols
     (here_row ~cols state
        ~path:[ ui_text state ~ko:"리소스" ~en:"resources" ]
-       ~readings:[] ~position:None);
-  let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
+       ~readings:[] ~position);
   Option.iter (fun prompt ->
     let input = prompt.rsp_path in
     let text = Terminal_text.single_line (Masc_tui_message_input.contents input) in
@@ -248,11 +285,6 @@ let render_resources (state : state) =
              ~en:"Editing the path · this input has not been submitted") in
     box_line buf cols notice)
     state.resource_save_prompt;
-  let rows_list =
-    match visible_resources state with Some rows -> rows | None -> []
-  in
-  let total = List.length rows_list in
-  let cursor = max 0 (min state.resources_cursor (total - 1)) in
   let list_pane ~framed pane_buf pane_cols =
     (* Same rule as the code surface: beside the content pane the box is the
        pane separator; alone on a narrow terminal it is the redundant outer
@@ -352,7 +384,7 @@ let render_resources (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
-    let reading = Masc_tui_resource_document.current state in
+    let reading = Option.map fst (Lazy.force document) in
     let shown_resource = Option.map Masc_tui_resource_document.entry reading in
     let title =
       match shown_resource with
@@ -381,11 +413,14 @@ let render_resources (state : state) =
          let ko = state.ui_language = Lang_ko in
          draw_list_idle pane_buf pane_cols ~ko ~empty:(no_resources ~ko)
            ~height:content_height (inventory_idle state)
-     | Some reading ->
-         let rendered,pictures = Masc_tui_resource_document.layout_with_search ~cols:pane_cols state reading in
+     | Some _ ->
+         let rendered, pictures =
+           match Lazy.force document with
+           | Some (_, layout) -> layout
+           | None -> [], []
+         in
          let total_lines = List.length rendered in
-         let position = Masc_tui_scroll.Position.clamp ~count:total_lines
-             ~height:content_height state.resource_scroll in
+         let position = document_scroll total_lines in
          let scroll = Masc_tui_scroll.Position.offset ~count:total_lines
              ~height:content_height position in
          let rendered_window = Rows.of_list ~first:scroll ~height:content_height rendered in

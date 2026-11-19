@@ -1127,6 +1127,7 @@ let rebase_scroll_for_cards ~scroll ~previous_cards ~current_cards =
 
 let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     ~(report_scroll : int -> int -> int -> unit)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~push_selected:_
@@ -1163,9 +1164,7 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
   in
   let section_lines = scroll_cards @ section_lines @ suffix_lines in
   let total_lines = List.length section_lines in
-  let overflowing = total_lines > room in
-  let hint_rows = if overflowing && room >= 2 then 1 else 0 in
-  let available = max 0 (room - hint_rows) in
+  let available = room in
   let max_scroll = max 0 (total_lines - available) in
   let card_rows = List.length scroll_cards in
   let scroll =
@@ -1176,6 +1175,10 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
      keypress steps from it rather than from wherever the last one left the
      stored value. *)
   report_scroll scroll available card_rows;
+  (* Where the window stands is the title row's; the keys that move it are
+     the footer's. *)
+  Option.iter hand_position
+    (Masc_tui_value.Position.window ~first:scroll ~shown:available ~total:total_lines);
   let section_lines_window =
     Rows.of_list ~first:scroll ~height:available section_lines
   in
@@ -1184,11 +1187,4 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     match Rows.at section_lines_window idx with
     | Some line -> push line
     | None -> push_empty ()
-  done;
-  if hint_rows > 0 then
-    (* Where the window stands. The keys that move it are the footer's. *)
-    match Masc_tui_scroll.position_row ~ko ~scroll ~height:available total_lines with
-    | None -> push_empty ()
-    | Some row ->
-      let inner_width = max 20 (framed_inner_width cols) in
-      push_styled ~style:(Theme.recede ()) (Layout.truncate_end inner_width row)
+  done

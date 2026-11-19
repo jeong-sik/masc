@@ -5836,9 +5836,6 @@ let take_scoped_refresh_followup ~full_refresh_inflight
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
-  sc_overflow_takes_row : bool;
-      (** [true] when an overflow indicator is drawn from the remaining body
-          instead of already being reserved in [sc_chrome]. *)
   sc_preview_keep : int option;
       (** rows the list keeps when the surface draws a preview under it, or
           [None] when the list has the whole body. A surface that adds a
@@ -5848,9 +5845,9 @@ type scrolled = {
 }
 
 (* These seven draw the same fixed frame around their content, and spend two
-   more rows when a load error is on screen. A conditional overflow row is
-   declared separately in [sc_overflow_takes_row]; a surface whose chrome
-   moves has to move the typed layout in the same change. *)
+   more rows when a load error is on screen. A surface whose chrome moves has
+   to move the typed layout in the same change. Where the window stands is
+   on the title row, so no row under the list is kept for it. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 
 (* The verdict list also draws the newest recorded timestamp above its column
@@ -12195,13 +12192,12 @@ let queue_panel_fixed_rows ~items panel =
   1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
     + (match queue_panel_selection_note ~items panel with Some _ -> 1 | None -> 0)
 
-let queue_panel_window_height ~count ~budget =
-  let budget = max 0 budget in
-  if count > budget then max 0 (budget - 1) else budget
+(* Where the window stands is on the title row, so the list keeps every row
+   its budget has. *)
+let queue_panel_window_height ~budget = max 0 budget
 
 let queue_panel_list_height ~items ~budget panel =
-  queue_panel_window_height ~count:(List.length items)
-    ~budget:(budget - queue_panel_fixed_rows ~items panel)
+  queue_panel_window_height ~budget:(budget - queue_panel_fixed_rows ~items panel)
 
 let queue_panel_scroll ~items ~height panel =
   let count = List.length items in
@@ -23790,7 +23786,6 @@ let surface_body_rows (state : state) ~terminal_rows =
 let tools_scroll_layout state ~count =
   { sc_count = count
   ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
-  ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
   ; sc_preview_keep = None }
 ;;
 
@@ -23798,7 +23793,7 @@ let tools_content_rows state ~terminal_rows ~count =
   let layout = tools_scroll_layout state ~count in
   Masc_tui_scroll.content_height ~rows:(surface_body_rows state ~terminal_rows)
     ~chrome:layout.sc_chrome ~count:layout.sc_count
-    ~preview_keep:layout.sc_preview_keep ~overflow_takes_row:layout.sc_overflow_takes_row
+    ~preview_keep:layout.sc_preview_keep
 ;;
 
 (* Parameters split their body between the cursor-following list and the
@@ -23806,7 +23801,8 @@ let tools_content_rows state ~terminal_rows ~count =
    the full-surface page is taller than this document and skips unread lines. *)
 let runtime_params_viewport (state : state) ~terminal_rows =
   let rows = surface_body_rows state ~terminal_rows in
-  (* The document position has its own row; hints cannot hide it at 40 cells. *)
+  (* The row under the document counts the rows it leaves out; hints cannot
+     hide it at 40 cells. *)
   let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
   let content_height = max 1 (rows - chrome) in
   let list_height = min 8 (max 1 (content_height / 3)) in
@@ -24470,7 +24466,6 @@ let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : s
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows
-  ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
 
@@ -25208,7 +25203,6 @@ let lanes_scrolled (state : state) ~cols:_ =
            | None -> 0
            | Some runs -> List.length runs)
       ; sc_chrome = listing_chrome ~error:state.lane_runs_error
-      ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
   | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -25217,7 +25211,6 @@ let lanes_scrolled (state : state) ~cols:_ =
          dimensions and is counted by [lanes_overview_projection] below. *)
       { sc_count = 0
       ; sc_chrome = 0
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
@@ -25231,7 +25224,6 @@ type lanes_overview_projection = {
   lop_detail_width : int;
   lop_list_height : int;
   lop_detail_height : int;
-  lop_position : bool;
   lop_tail : string list option;
   lop_scroll : scrolled;
 }
@@ -25309,15 +25301,14 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     if split then pane_rows, pane_rows
     else (pane_rows + 1) / 2, pane_rows / 2 in
   let count = List.length (lane_inventory_entries state) in
-  let position = list_slots > 1 && count > list_slots in
-  let list_height = max 0 (list_slots - if position then 1 else 0) in
+  let list_height = list_slots in
   { lop_links = links; lop_observation = observation;
     lop_notices = notices; lop_boxed = boxed; lop_split = split;
     lop_list_width = list_width; lop_detail_width = detail_width;
     lop_list_height = list_height; lop_detail_height = detail_height;
-    lop_position = position; lop_tail = tail;
+    lop_tail = tail;
     lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
-      sc_overflow_takes_row = false; sc_preview_keep = None} }
+      sc_preview_keep = None} }
 
 (* The active name field or second-[D] confirmation owns the Runtime body. *)
 type runtime_lane_prompt =
@@ -25696,7 +25687,8 @@ type runtime_parent_projection =
   ; rpp_rows : runtime_parent_line list
   ; rpp_notices : int
   ; rpp_page : int
-  ; rpp_position : string option
+  ; rpp_position : Masc_tui_value.Position.t option
+      (** The selected slot among the call order, for the title row. *)
   }
 
 (* Drawing and page keys use this same current selection and physical budget.
@@ -25761,8 +25753,10 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
               if Some index = selected then Parent_focus line else Parent_text line) in
         { rpp_parent = parent; rpp_rows = context @ rows @ notice_rows;
           rpp_notices = List.length notices; rpp_page = height;
-          rpp_position = if Option.is_some selected && count > height then Some
-              (Masc_tui_scroll.window_text ~scroll:first ~height count) else None }
+          rpp_position =
+            (match selected with
+             | Some _ when count > 0 -> Some (Masc_tui_value.Position.row ~selected ~total:count)
+             | Some _ | None -> None) }
     | Runtime_prompt_parent prompt ->
         let input draft =
           let label = text "새 이름 › " "Name › " in
@@ -26737,7 +26731,6 @@ let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
            | Some s, Runtime_all ->
                List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
       ; sc_chrome = runtime_surface_listing_chrome ~rows ~cols state
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
@@ -26746,7 +26739,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
     Some
       { sc_count = count
       ; sc_chrome = listing_chrome ~error
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
   in
@@ -26768,7 +26760,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
         ; sc_chrome = listing_chrome ~error:(System_logs_view.current state.system_logs).lp_error
-        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
@@ -26779,11 +26770,8 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
            what the join could not read or resolve. They are frame rows too;
            a count without them puts the footer past the frame's last row.
 
-           The view row is unconditional, so it is counted here rather than
-           through [sc_overflow_takes_row]: that flag drops its row when the
-           list is not cut, and this row is drawn either way. It carries the
-           window text a cut page used to draw on its own line, so the two
-           are one row, not two. *)
+           The view row is unconditional, so it is counted here. Where the
+           window stands is on the title row, not on this one. *)
         (* Nothing is drawn under the list before a read answers, so the
            count is zero there rather than reserving a row the frame leaves
            blank. The view row is inside this match for the same reason. *)
@@ -26809,7 +26797,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
               + under_list
               + (if Option.is_some state.verification_verdict_armed then 1 else 0)
               + (if Option.is_some state.verification_verdict_error then 1 else 0)
-          ; sc_overflow_takes_row = false
           ; sc_preview_keep = None
           }
   | Lanes ->
@@ -26835,7 +26822,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
                | None -> 0
                | Some s -> List.length s.Tui_decode.hs_verdicts)
           ; sc_chrome = harness_listing_chrome ~error:state.harness_error
-          ; sc_overflow_takes_row = true
           ; sc_preview_keep = None
           }
   | Repositories ->
@@ -26865,7 +26851,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()
@@ -26901,7 +26886,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
               List.length
                 (Masc_tui_runtime_config_view.summary_lines
                    ~ko:(state.ui_language = Lang_ko) r.rcv_metadata))
-        ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
   | Config ->

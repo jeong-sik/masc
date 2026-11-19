@@ -467,6 +467,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
   let dynamic = Keeper_context_layers.text partition in
   let existing_override = "EXISTING_BASE_OVERRIDE" in
   let previous = ref None in
+  let first_issued = ref None in
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
       let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
@@ -478,11 +479,15 @@ let test_goal_survives_read_then_task_creation ~peer () =
           ~existing_extra_system_context:current_params.extra_system_context
           ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
                    Prompt_block_id.Temporal_summary, "INITIAL_CLOCK"] in
+      if Option.is_none !previous then first_issued := Some issued;
       previous := Some issued;
-      Keeper_prompt_capture.write ~config ~keeper:"goal-loop-wire" ~trace_id:"trace-goal-loop-wire"
-        ~absolute_turn:1 ~blocks:((Prompt_block_id.Keeper_instructions, existing_override)
-          :: Keeper_context_assembly.logical_blocks issued)
-        ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
+      (* The production hook's rule: only a request that does not follow this
+         turn's tool results writes the capture. *)
+      if not post_tool_round then
+        Keeper_prompt_capture.write ~config ~keeper:"goal-loop-wire" ~trace_id:"trace-goal-loop-wire"
+          ~absolute_turn:1 ~blocks:((Prompt_block_id.Keeper_instructions, existing_override)
+            :: Keeper_context_assembly.logical_blocks issued)
+          ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
       AdjustParams {current_params with extra_system_context = issued.extra_system_context;
         system_prompt_override = Keeper_context_assembly.system_prompt_override
           ~previous:current_params.system_prompt_override issued}
@@ -605,9 +610,11 @@ let test_goal_survives_read_then_task_creation ~peer () =
     (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
   let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
     | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
-  (* The capture is the last, post-tool round's: Agent Core issued no source. *)
-  let expected_blocks = [Prompt_block_id.Keeper_instructions; Active_goals] in
-  check int "capture contains exactly the issued stable producers"
+  (* The capture is the first request's: the two requests that follow tool
+     results do not write it. Agent Core issued no source block. *)
+  let expected_blocks =
+    [Prompt_block_id.Keeper_instructions; Active_goals; Dynamic_context; Temporal_summary] in
+  check int "capture contains exactly the first request's producers"
     (List.length expected_blocks) (List.length capture.blocks);
   List.iter (fun id -> check int ("capture attributes " ^ Prompt_block_id.to_string id ^ " exactly once") 1
       (List.length (List.filter (fun (block : Keeper_prompt_capture.block) ->
@@ -616,10 +623,12 @@ let test_goal_survives_read_then_task_creation ~peer () =
   let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
   check bool "capture and direct preparation identify the same actual fixture turn" true
     (Ids.Turn_ref.equal turn_ref captured_turn);
-  check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
-  check (option string) "capture records the physical stable system value"
+  check (option string) "capture keeps the first request's extra carrier"
+    (Option.bind !first_issued (fun issued -> issued.Keeper_context_assembly.extra_system_context))
+    capture.assembled;
+  check (option string) "capture records the first request's physical system value"
     (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
-      (Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt))) capture.system_prompt;
+      (Option.bind !first_issued (fun issued -> issued.Keeper_context_assembly.system_prompt))) capture.system_prompt;
   check bool "Goal snapshot carrier stays out of returned durable conversation" false
     (List.exists (fun (message : Agent_core.Types.message) ->
       List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text

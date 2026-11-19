@@ -621,6 +621,10 @@ type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
 Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #52986 의 자리 걷기 층 위에 놓인다.
 
 1. provider 오류가 `Context_overflow` 인 receipt 는 `http_status` 가 무엇이든 그 타입을 지킨다.
+   - 지금 코드가 이미 그렇다. 이 오류를 만드는 곳은 `Glm_chat` codec 하나다(`backend_glm.ml:240`).
+   - 그 codec 은 받은 본문과 성공이 아닌 status 에서만 불린다. 두 경우 모두 receipt 에 status 가 있다(`exact_output_execution.ml:189-222`).
+   - 그래서 status 가 없는 갈래(`exact_output.ml` 의 `None -> Completion_failed`)에는 닿지 않는다. L2 는 이 항목에 코드를 더하지 않는다.
+   - 닿지 않는 그 갈래를 타입에서 없애는 일은 이슈 #53260 에서 한다. Exact 경계의 오류 타입을 고치는 일이다.
 2. 창에 닿아 멈춘 응답은 내용이 있든 없든 자기 생성자다. 지금은 내용이 있으면 `Incomplete_output`, 없으면 `Context_overflow` 다. 뒤쪽은 쓴 생성을 「생성하지 않았다」로 읽게 한다.
 3. `Invalid_request` 는 400 과 422 만 뜻한다. 지금은 어느 갈래에도 들지 않은 status(3xx, 405, 408, 409)가 모두 여기로 떨어진다. 그것은 자기 생성자가 되고 `Silent Unavailable` 이다.
 4. `Incomplete_output` 이 stop reason 을 싣는다. 지금은 stop reason 열한 가지가 값 없는 생성자 하나로 접힌다(`exact_output.ml:961-973`). 그래서 모델이 내용을 거절한 것과 답이 중간에 끝난 것을 가를 수 없다. 칸 하나를 더하고 동작은 바꾸지 않는다.

@@ -1,7 +1,6 @@
 (** RFC-0267 Phase 2 — [Task.Goal_assignment.set_task_goal].
 
-    Pins the single validated backend shared by the MCP tool
-    [masc_task_set_goal] and the dashboard assign-goal HTTP route:
+    Pins the validated backend of the MCP tool [masc_task_set_goal]:
     - an unknown task or unknown goal is a typed error (never a silent no-op),
     - a goalless task links cleanly to an existing goal,
     - a task that already carries a link is rejected (reassignment is a

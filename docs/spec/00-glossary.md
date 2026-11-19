@@ -2895,13 +2895,13 @@ status: reference
 **Goal Measurement (목표 관측값)**
 : Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
   기록한 사람, 시각, 그 값을 잰 기준의 `criterion_revision`을 함께 적는다.
-  Keeper는 `masc_goal_measure`로, 운영자는 `POST /api/v1/dashboard/goals/measurements`로
-  남긴다. 증거는 **Evidence Reference** 형식(`artifact:`·`note:`·`board:`·`fusion:`)만
-  받고, 다른 글자는 `Invalid_request`로 거절한다.
+  Keeper가 `masc_goal_measure`로 남긴다. 증거는 **Evidence Reference**
+  형식(`artifact:`·`note:`·`board:`·`fusion:`)만 받고, 다른 글자는
+  `Invalid_request`로 거절한다.
   - 완료가 아니다: 관측은 Goal phase를 바꾸지 않고 목표 달성을 증명하지도 않는다.
     완료는 **Goal**의 verifier 증명과 사람 확인으로만 정해진다. 그래서 `Completed`·
     `Dropped` Goal도 관측을 받는다.
-  - 기록 영수증: MCP와 HTTP가 같은 `measurement_status: reported_only`,
+  - 기록 영수증: MCP가 `measurement_status: reported_only`,
     `measurement`, `goal_at_recording`, `completion_effect: unchanged`를 반환한다.
     `goal_at_recording`은 측정을 기록한 같은 잠금 트랜잭션의 실제 Goal이며,
     나중에 다시 읽은 값이나 완료 판정이 아니다. 이 Goal 사본은 측정 파일에 저장하지 않는다.

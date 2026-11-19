@@ -530,7 +530,7 @@ describe('ToolQualityPanel', () => {
   })
 })
 
-describe('errorHintFromClass (RFC-0154 PR-3 typed lookup)', () => {
+describe('errorHintFromClass (typed lookup)', () => {
   it('returns null for absent / unknown / empty class', () => {
     expect(errorHintFromClass(null)).toBeNull()
     expect(errorHintFromClass(undefined)).toBeNull()
@@ -538,16 +538,14 @@ describe('errorHintFromClass (RFC-0154 PR-3 typed lookup)', () => {
     expect(errorHintFromClass('unknown_class_name')).toBeNull()
   })
 
-  it('looks up RFC-0097 hint for fd_exhaustion', () => {
+  it('looks up the hint for fd_exhaustion', () => {
     const hint = errorHintFromClass('fd_exhaustion')
     expect(hint?.reason).toBe('fd_exhaustion')
-    expect(hint?.href).toContain('RFC-0097')
   })
 
-  it('looks up RFC-0122 hint for disk_exhaustion', () => {
+  it('looks up the hint for disk_exhaustion', () => {
     const hint = errorHintFromClass('disk_exhaustion')
     expect(hint?.reason).toBe('disk_exhaustion')
-    expect(hint?.href).toContain('RFC-0122')
   })
 })
 

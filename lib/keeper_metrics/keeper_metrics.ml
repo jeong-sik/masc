@@ -75,7 +75,6 @@ type t =
   | SessionCleanupFailures
   | ToolExecuteFailures
   | LifecycleDispatchRejections
-  | RecordingErrorDedup
   | PausedStatePersistErrors
   | Agent_coreTimeoutClassifications
   | ProactiveOutcome
@@ -263,7 +262,6 @@ let to_string = function
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
-  | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | Agent_coreTimeoutClassifications -> "masc_keeper_agent_core_timeout_classifications_total"
   | ProactiveOutcome -> "masc_keeper_proactive_outcome_total"
@@ -404,7 +402,7 @@ let collection = function
   | BoardSignalAttentionCandidateTotal | MetaJsonFailures | ToolsAgent_coreFailures
   | TurnUpUpdateFailures | AgentToolDispatchRuntimeFailures | PromptFailures | TagDispatchFailures
   | TraceEmitFailures | TransitionAuditFailures | ExecutionReceiptFailures | SessionCleanupFailures
-  | ToolExecuteFailures | LifecycleDispatchRejections | RecordingErrorDedup
+  | ToolExecuteFailures | LifecycleDispatchRejections
   | PausedStatePersistErrors | Agent_coreTimeoutClassifications | ProactiveOutcome
   | TaskLoadFailures | ToolSelectionFailures | ReconcileFailures | DecisionAuditFlushFailures
   | WorkspaceInitFailures | PresenceSyncFailures | CycleExceptions | SnapshotWriteFailures

@@ -961,7 +961,10 @@ let stores_of_place (place : Masc.Librarian_machine.place) : Masc.Librarian_unit
 let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
   let base_path = config.base_path in
   if Option.is_none (Masc.Keeper_memory_writers.find ~base_path)
-  then Masc.Keeper_memory_writers.start ~sw ~ask:never_asks ~config;
+  then
+    ignore
+      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks ~config
+       : Masc.Librarian_writers.t);
   if not (Masc.Keeper_registry.is_registered ~base_path name)
   then (
     match

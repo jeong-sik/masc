@@ -78,7 +78,65 @@ let op_kind_of_token token =
 ;;
 
 let op_field kind = field_op, `String (op_kind_token kind)
-let new_fact_fields = [ field_claim; field_category; field_basis; field_from ]
+
+(* The wire shape, once: each object is its fields with the schema of each
+   value. The decoder takes its closed field sets from these lists and
+   {!schema} is built from them, so the two name the same fields. Every
+   property is required, and Keep is a required null. What a schema does not
+   state here (a blank string, an empty or repeated [refs], a category token
+   the Memory types refuse) the decoder refuses. *)
+let string_schema = `Assoc [ "type", `String "string" ]
+let names_schema = `Assoc [ "type", `String "array"; "items", string_schema ]
+
+let closed_schema properties =
+  `Assoc
+    [ "type", `String "object"
+    ; "additionalProperties", `Bool false
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun (name, _) -> `String name) properties)
+    ]
+;;
+
+let field_names properties = List.map fst properties
+
+let new_fact_properties =
+  [ field_claim, string_schema
+  ; field_category, string_schema
+  ; field_basis, observed_basis_schema
+  ; field_from, names_schema
+  ]
+;;
+
+(* The fields of an op beside [op]. *)
+let op_properties = function
+  | Kind_add -> new_fact_properties
+  | Kind_drop -> [ field_ref, string_schema; field_reason, string_schema ]
+  | Kind_merge -> (field_refs, names_schema) :: new_fact_properties
+  | Kind_revise -> (field_ref, string_schema) :: new_fact_properties
+;;
+
+let op_schema kind =
+  closed_schema
+    (( field_op
+     , `Assoc [ "type", `String "string"; "enum", `List [ `String (op_kind_token kind) ] ]
+     )
+     :: op_properties kind)
+;;
+
+let answer_properties =
+  [ field_question, string_schema
+  ; field_question_end, string_schema
+  ; field_working_state, `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+  ; ( field_ops
+    , `Assoc
+        [ "type", `String "array"
+        ; "items", `Assoc [ "anyOf", `List (List.map op_schema op_kinds) ]
+        ] )
+  ]
+;;
+
+let schema = closed_schema answer_properties
+let new_fact_fields = field_names new_fact_properties
 
 let new_fact_to_fields (fact : new_fact) =
   [ field_claim, `String fact.claim
@@ -184,35 +242,32 @@ let op_of_json = function
     let* token = wire_string_field field_op fields in
     (match op_kind_of_token token with
      | None -> wire_fail [ Wire_field field_op ] (Unknown_token token)
-     | Some Kind_add ->
-       let* () = exact_field_names_result (field_op :: new_fact_fields) fields in
-       let* fact = new_fact_of_fields fields in
-       Ok (Add fact)
-     | Some Kind_drop ->
-       let* () = exact_field_names_result [ field_op; field_ref; field_reason ] fields in
-       let* ref_ = nonblank_field field_ref fields in
-       let* reason = nonblank_field field_reason fields in
-       Ok (Drop { ref_; reason })
-     | Some Kind_merge ->
+     | Some kind ->
        let* () =
-         exact_field_names_result (field_op :: field_refs :: new_fact_fields) fields
+         exact_field_names_result (field_op :: field_names (op_properties kind)) fields
        in
-       let* refs = names_field field_refs fields in
-       let* () =
-         match refs, first_repeated refs with
-         | [], _ -> wire_fail [ Wire_field field_refs ] Empty_list
-         | _ :: _, Some name -> wire_fail [ Wire_field field_refs ] (Duplicate_entry name)
-         | _ :: _, None -> Ok ()
-       in
-       let* into = new_fact_of_fields fields in
-       Ok (Merge { refs; into })
-     | Some Kind_revise ->
-       let* () =
-         exact_field_names_result (field_op :: field_ref :: new_fact_fields) fields
-       in
-       let* ref_ = nonblank_field field_ref fields in
-       let* into = new_fact_of_fields fields in
-       Ok (Revise { ref_; into }))
+       (match kind with
+        | Kind_add ->
+          let* fact = new_fact_of_fields fields in
+          Ok (Add fact)
+        | Kind_drop ->
+          let* ref_ = nonblank_field field_ref fields in
+          let* reason = nonblank_field field_reason fields in
+          Ok (Drop { ref_; reason })
+        | Kind_merge ->
+          let* refs = names_field field_refs fields in
+          let* () =
+            match refs, first_repeated refs with
+            | [], _ -> wire_fail [ Wire_field field_refs ] Empty_list
+            | _ :: _, Some name -> wire_fail [ Wire_field field_refs ] (Duplicate_entry name)
+            | _ :: _, None -> Ok ()
+          in
+          let* into = new_fact_of_fields fields in
+          Ok (Merge { refs; into })
+        | Kind_revise ->
+          let* ref_ = nonblank_field field_ref fields in
+          let* into = new_fact_of_fields fields in
+          Ok (Revise { ref_; into })))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;
@@ -242,10 +297,7 @@ let of_json ~(asked : Librarian_question_id.t) json =
   match json with
   | `Assoc fields ->
     let* () =
-      schema
-        (exact_field_names_result
-           [ field_question; field_question_end; field_working_state; field_ops ]
-           fields)
+      schema (exact_field_names_result (field_names answer_properties) fields)
     in
     let* front = schema (wire_string_field field_question fields) in
     let* back = schema (wire_string_field field_question_end fields) in

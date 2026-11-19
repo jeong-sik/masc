@@ -12,7 +12,7 @@ val start
   :  sw:Eio.Switch.t
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
   -> config:Workspace.config
-  -> unit
+  -> Librarian_writers.t
 (** The table of [config]'s workspace. Its writers run on [sw], in the
     domain that calls this, and stamp their lines with the wall clock. A
     Keeper's snapshot and commit log are in the workspace's Keeper config

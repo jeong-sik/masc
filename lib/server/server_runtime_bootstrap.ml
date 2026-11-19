@@ -1401,10 +1401,28 @@ let claim_and_start_keeper_persistence
      write. A writer's ask calls the Librarian lane with the server's network
      and clock. *)
   let workspace_config = Mcp_server.workspace_config state in
-  Keeper_memory_writers.start
-    ~sw
-    ~ask:(Librarian_ask.run { net; clock; base_dir = workspace_config.base_path })
-    ~config:workspace_config;
+  let memory_writers =
+    Keeper_memory_writers.start
+      ~sw
+      ~ask:(Librarian_ask.run { net; clock; base_dir = workspace_config.base_path })
+      ~config:workspace_config
+  in
+  (* The writers ask only once they hold a lane value, and the value carries
+     the question's prompt. The prompt is read here once: an edit to the file
+     is seen at the next start (§9.5). Without it no value is sent, the
+     writers stay Idle, and the reason is logged. *)
+  (match Prompt_registry.render_prompt_template Prompt_names.librarian_ask [] with
+   | Ok prompt ->
+     Keeper_memory_writers.follow_declaration
+       ~sw
+       ~prompt
+       ~answer_schema:Librarian_answer.schema
+       memory_writers
+   | Error reason ->
+     Log.Server.warn
+       "Librarian ask prompt %s unavailable: %s. Memory writers hold no lane value and do not ask."
+       Prompt_names.librarian_ask
+       reason);
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence

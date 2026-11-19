@@ -28,9 +28,12 @@ let decode_backlog ~path json =
     of the hottest paths in dashboard/keeper snapshot code, and the file is
     read many times between mutations. [write_backlog] invalidates this
     process's cache after persisting. Every writer replaces the file with a
-    rename, so a write in another process gives it a new inode even when it
-    keeps the size and the modification time; only a writer that rewrites
-    the same inode and restores both within one file-time tick goes unseen.
+    rename, and a rename gives the path another inode than the file it
+    replaces, so a write in another process is seen even when it keeps the
+    size and the modification time. A rewrite in place that sets the old
+    size and modification time back goes unseen, and so can a later
+    replacement that gets a freed inode number back within one file-time
+    tick at the same size.
     A Memory backend may use the same path for a different authoritative
     value, so it neither reads nor populates this filesystem cache. *)
 module Task_id_map = Map.Make (String)

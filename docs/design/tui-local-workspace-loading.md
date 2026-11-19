@@ -69,8 +69,8 @@ its explicit target. Metadata/input handlers do not wait for it. Same-owner
 context revalidation retains the previous observation and failure evidence.
 
 Keeper cache entries use the resolved metadata-file path and retain only the
-observed source inventory. The archive and the backlog are kept per file
-version (below). Different sources with equal names/stats cannot borrow one
+observed source inventory. Keeper metadata, the archive and the backlog are
+kept per file version (below). Different sources with equal names/stats cannot borrow one
 another's entries. Local cache entries are replaced
 individually. The write-lock callback captures
 read exceptions solely to unlock before re-raising their original backtraces,
@@ -88,11 +88,23 @@ modification time, and a replacement can keep both (#51439).
 
 A Work read now keeps each file's decoded value with the file's version: its
 device, inode, size and modification time. Writers replace both files with a
-rename, so every write gives a new inode, even inside one modification-time
-tick and at the same size. A read whose files kept their versions decodes
-neither. `r`, a backlog, goal or Keeper change event and an observer resume
-start the same read, and none of them drops a kept value. The read still
-projects the rows, the flow and the agenda from the kept values each time.
+rename, and a rename gives the path another inode than the file it replaces,
+even inside one modification-time tick and at the same size. A read whose
+files kept their versions decodes neither. `r`, a backlog, goal or Keeper
+change event and an observer resume start the same read, and none of them
+drops a kept value. The read still projects the rows, the flow and the agenda
+from the kept values each time.
+
+Two writes still go unseen until the next write. A rewrite in place that keeps
+the size and sets the old modification time back, as `rsync --inplace -t`
+does, keeps the inode. A file system that hands a freed inode number out
+again, as ext4 can, may give a later replacement the number of the file that
+was read, and within one modification-time tick at the same size it looks
+like that file. No MASC writer does the first, and the second needs
+three writes inside one tick. `r` used to drop both kept values and recovered
+from either; it no longer does. Adding the change time to the version would
+catch the first, at the cost of a decode after any permission or link change;
+it is not part of this change.
 
 The archive is kept as what the flow counts, not as tasks: for each archived
 task its id, its registration time and how it ended (still open, completed at,
@@ -105,12 +117,21 @@ JSON tree. A document that is not an object with one `tasks` list is an error
 the flow names, as `Workspace_task_id` already treats it; a missing file is an
 empty archive.
 
+Such a shape is what the bytes of that version say, so it is kept with the
+version like a reading and the file is not streamed again until it changes. A
+file that cannot be opened or read now is not kept, and the next read tries
+again. The channel lexer takes bytes as they are, while the whole-file readers
+repair invalid UTF-8 first, so an archived row whose id is not UTF-8 counts as
+one that does not decode rather than as a second copy of a restored task.
+
 The backlog is still decoded whole when its version moves. `Workspace_backlog`
 reads the file into a string, parses it into a generic tree and decodes the
-tree into `Masc_domain.backlog`. The string, the lexer's copy of it and the
-tree are garbage once the decode returns, but they are alive together during
-it. The server shares that reader, so a streaming backlog decoder is its own
-change.
+tree into `Masc_domain.backlog`. The parse (`Safe_ops.parse_json_safe`) no
+longer copies the string into the lexer, so the string and the tree are alive
+together during the decode, and both are garbage once it returns. The string
+stays because the UTF-8 repair reads the whole text before the parse. A
+channel or streaming decode would skip that repair, and the server reads the
+backlog through the same function, so it is its own change.
 
 ## Creation HTTP without blocking input
 

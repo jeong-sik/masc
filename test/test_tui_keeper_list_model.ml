@@ -135,13 +135,12 @@ let model_waiting = turn Masc.Keeper_turn_preview.Awaiting_response
 let tool_waiting = turn Masc.Keeper_turn_preview.Tool_observed
 
 let views =
-  [ Model.Plain; Model.By_state; Model.By_cause; Model.By_time; Model.By_memory; Model.By_age
-  ; Model.By_runtime; Model.Day_wall ]
+  [ Model.Plain; Model.By_state; Model.By_cause; Model.By_memory; Model.Day_wall ]
 
 let unread ~keeper_name:_ = Model.outside_unread
 
 let test_cycles () =
-  Alcotest.(check (list string)) "v walks the views in the RFC order and comes back"
+  Alcotest.(check (list string)) "v walks the core views in order and comes back"
     (List.map Model.view_label (List.tl views @ [ Model.Plain ]))
     (List.map (fun view -> Model.view_label (Model.next_view view)) views);
   Alcotest.(check (list string)) "the view list is the walk"
@@ -151,6 +150,16 @@ let test_cycles () =
       Alcotest.(check bool) ("view label reads back: " ^ Model.view_label view) true
         (Model.view_of_string (Model.view_label view) = Some view))
     views;
+  List.iter
+    (fun (legacy, mapped) ->
+      Alcotest.(check bool) ("legacy saved view maps to active tab: " ^ legacy) true
+        (Model.view_of_string legacy = Some mapped))
+    [ "time", Model.By_state; "age", Model.By_memory; "runtime", Model.By_cause ];
+  Alcotest.(check bool) "plain supports density" true (Model.supports_density Model.Plain);
+  Alcotest.(check bool) "state supports density" true (Model.supports_density Model.By_state);
+  Alcotest.(check bool) "cause supports density" true (Model.supports_density Model.By_cause);
+  Alcotest.(check bool) "memory hides density" false (Model.supports_density Model.By_memory);
+  Alcotest.(check bool) "24h hides density" false (Model.supports_density Model.Day_wall);
   Alcotest.(check bool) "one line to two" true (Model.next_density Model.One_line = Model.Two_lines);
   Alcotest.(check bool) "two lines to one" true (Model.next_density Model.Two_lines = Model.One_line);
   List.iter

@@ -13901,7 +13901,7 @@ let set_keeper_list_view state view =
 
 let open_keeper_world state =
   if not (Masc_tui_keeper_list_model.has_world state.keeper_list_view) then
-    set_keeper_list_view state Masc_tui_keeper_list_model.By_age;
+    set_keeper_list_view state Masc_tui_keeper_list_model.By_memory;
   place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world;
   state.keeper_story <- Some Masc_tui_keeper_story.World
 

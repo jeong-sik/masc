@@ -26,7 +26,8 @@ let browser_lane_source_hint view =
 (* Project a backend that could not start, then the selected connection's
    current metadata and activity, together, so drawing and available-room
    calculations consume the same ephemeral rows. *)
-let browser_lane_connection_rows (view : Browser_lane_view.t) =
+let browser_lane_connection_rows ?(ko = false) (view : Browser_lane_view.t) =
+  let say korean english = if ko then korean else english in
   let selected = match view.selected_client with
     | None -> []
     | Some (client : Browser_lane_view.client) ->
@@ -34,24 +35,28 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
           (Browser_lane_view.space_observation_row client)) in
         let pending = List.map (fun (work : Browser_lane.interaction_activity) ->
           let phase = match work.phase with
-            | Browser_lane.Interaction_queued -> "queued"
-            | Browser_lane.Interaction_running -> "working" in
-          Theme.info (), "  Agent "
+            | Browser_lane.Interaction_queued -> say "대기 중" "queued"
+            | Browser_lane.Interaction_running -> say "실행 중" "working" in
+          Theme.info (), say "  에이전트 " "  Agent "
             ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
             ^ " · " ^ Terminal_text.single_line work.action
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> "")
-            ^ " (at last connection read)") client.interactions in
+            ^ (match work.tab_id with
+               | Some id -> say " · 탭 " " · tab " ^ string_of_int id
+               | None -> "")
+            ^ say " (마지막 연결 조회 기준)" " (at last connection read)") client.interactions in
         let settled = List.map (fun (settled : Browser_lane.settled_activity) ->
           let work=settled.work in
           let outcome,style=match settled.outcome with
-            | Browser_lane.Activity_returned -> "returned",Theme.recede ()
-            | Activity_refused -> "not performed",Theme.warn ()
-            | Activity_partial -> "partly performed",Theme.warn ()
-            | Activity_unknown -> "outcome unknown",Theme.warn () in
-          style, "  Last · "
+            | Browser_lane.Activity_returned -> say "응답 완료" "returned", Theme.recede ()
+            | Activity_refused -> say "미실행" "not performed", Theme.warn ()
+            | Activity_partial -> say "일부 실행" "partly performed", Theme.warn ()
+            | Activity_unknown -> say "결과 알 수 없음" "outcome unknown", Theme.warn () in
+          style, say "  최근 · " "  Last · "
             ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC")
             ^ " · " ^ Terminal_text.single_line work.action ^ " · " ^ outcome
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> ""))
+            ^ (match work.tab_id with
+               | Some id -> say " · 탭 " " · tab " ^ string_of_int id
+               | None -> ""))
           client.last_activities in
         metadata @ pending @ settled in
   let inventory = match view.inventory_report with
@@ -59,11 +64,13 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
     | Inventory_reported issues -> List.map (fun issue -> Theme.warn (),
         "  " ^ Terminal_text.single_line (Masc.Browser_connection_inventory.issue_message issue)) issues
     | Inventory_report_unreadable detail -> [Theme.warn (),
-        "  Inventory report unreadable · " ^ Terminal_text.single_line detail] in
+        say "  연결 목록 보고서 읽기 불가 · " "  Inventory report unreadable · "
+        ^ Terminal_text.single_line detail] in
   let unavailable = Option.to_list (Option.map (fun message -> Theme.warn (),
     "  " ^ Terminal_text.single_line message) (Browser_lane_view.unavailable_notice view)) in
   unavailable @ selected @ Option.to_list (Option.map (fun detail -> Theme.warn (),
-    "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error) @ inventory
+    say "  활동 새로고침 실패 · " "  Activity refresh failed · "
+    ^ Terminal_text.single_line detail) view.activity_error) @ inventory
 
 let browser_lane_fixed_rows ~connection_rows view =
   (* Status, selection, tab, URL and divider are always drawn. Where the text
@@ -107,7 +114,7 @@ let browser_step state = ui_text state ~ko:"브라우저" ~en:"browser"
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
-  let connection_rows = browser_lane_connection_rows view in
+  let connection_rows = browser_lane_connection_rows ~ko:(state.ui_language = Lang_ko) view in
   let fixed_rows = browser_lane_fixed_rows ~connection_rows view in
   let picker_frame_rows = browser_picker_frame_rows connection_rows in
   let read_status = Browser_lane_view.read_status view in
@@ -121,7 +128,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     here_row ~cols state ~path:[ browser_step state ]
       ~readings:
         [ selection_label view ^ " · "
-          ^ Option.value (connection_label view) ~default:"no browser"
+          ^ Option.value (connection_label view)
+              ~default:(ui_text state ~ko:"브라우저 없음" ~en:"no browser")
         ; read_style ^ Browser_lane_view.read_status_label read_status ^ Ansi.reset ]
       ~position:None
   in

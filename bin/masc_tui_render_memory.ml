@@ -1024,7 +1024,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
    roster. If their wrapped rows do not fit, show both ends when there is room
    and say how many rows are hidden. A one-row slot shows only that omission,
    rather than pretending that a clipped alert is complete. *)
-let fold_memory_rows ~subject ~max_rows rows =
+let fold_memory_rows ~ko ~subject ~max_rows rows =
   let count = List.length rows in
   if count <= max_rows then rows
   else if max_rows <= 0 then []
@@ -1033,7 +1033,8 @@ let fold_memory_rows ~subject ~max_rows rows =
     let trailing = max_rows - 1 - leading in
     let hidden = count - leading - trailing in
     let note =
-      Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+      if ko then Printf.sprintf "  … %s %d행 생략됨 · 창을 늘려 주세요" subject hidden
+      else Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
     in
     List.filteri (fun index _ -> index < leading) rows
     @ [ note ]
@@ -1474,7 +1475,7 @@ let memory_overview_rows ~cols ~budget (state : state) =
     then max 1 desired else desired
   in
   let refused =
-    fold_memory_rows ~subject:"rejected Keeper"
+    fold_memory_rows ~ko ~subject:(if ko then "거절된 키퍼" else "rejected Keeper")
       ~max_rows:(if refused_available > 1 then refused_available - 1 else refused_available)
       all_refused
   in

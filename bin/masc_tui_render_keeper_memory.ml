@@ -230,10 +230,12 @@ let change_reading (state : Masc_tui_types.state) ~keeper_name =
       ~title:(text "기억 변화 · " "Memory change · " ^ kind_word ~ko event.kind) sections)
 
 let change_chart (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
   match selected_event state keeper_name, activity_view state keeper_name with
   | Some event, (Fetched.Ready activity | Fetched.Stale (activity, _)) ->
       let notes = match activity_view state keeper_name with
-        | Fetched.Stale (_, reason) -> ("Last observation: " ^ reason) :: activity.notes
+        | Fetched.Stale (_, reason) ->
+            ((if ko then "마지막 관측: " else "Last observation: ") ^ reason) :: activity.notes
         | Fetched.Ready _ | Fetched.Absent | Fetched.Loading | Fetched.Failed _ -> activity.notes in
       Masc_tui_memory_lineage.select ~event_id:event.identity {activity with notes}
   | (Some _ | None), (Fetched.Absent | Fetched.Loading | Fetched.Failed _)

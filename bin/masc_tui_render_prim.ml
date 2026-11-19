@@ -2974,7 +2974,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
         draw ~style:(Theme.Side_pane.recede ())
           (match state.keeper_roster_error with
            | Some error -> "  " ^ Terminal_text.single_line error
-           | None -> "  No Keepers listed")
+           | None -> ui_text state ~ko:"  조회된 키퍼 없음" ~en:"  No Keepers listed")
     | None -> draw ""
   done;
   List.iter (fun (style, text) -> draw ~style text) details;
@@ -6391,10 +6391,13 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                Ansi.reset)
           items
       in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let legend =
         ("  " ^ context_source_legend)
         :: (Context_bars.wrap ~width
-              "P system prompt (may include turn observations) · H history · N new this turn · S schema"
+              (say "P 시스템 프롬프트(턴 관측 포함 가능) · H 대화 이력 · N 이번 턴 신규 · S 스키마"
+                 "P system prompt (may include turn observations) · H history · N new this turn · S schema")
            |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
@@ -6411,16 +6414,16 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ "REQUEST ITEMS"
+           ^ "╭─ " ^ caret Left_pane ^ say "요청 항목" "REQUEST ITEMS"
            ^ Ansi.reset)
           :: (match rows left_width with
-              | [] -> [ Ansi.dim ^ "  (no retained items)" ^ Ansi.reset ]
+              | [] -> [ Ansi.dim ^ say "  (보존된 항목 없음)" "  (no retained items)" ^ Ansi.reset ]
               | rows -> rows)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match selected with
-          | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
+          | None -> [ Ansi.dim ^ say "  j/k로 항목을 선택하세요" "  Select an item with j/k" ^ Ansi.reset ]
           | Some item ->
               context_exact_item_detail_lines ~width:right_width ~scale
                 ~part:(context_part_view state input item) item
@@ -6432,7 +6435,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
            show. *)
         let right =
           (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ "SELECTED INPUT"
+           ^ "╭─ " ^ caret Right_pane ^ say "선택한 입력" "SELECTED INPUT"
            ^ Ansi.reset)
           :: selected_detail
         in
@@ -6620,6 +6623,8 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                Ansi.reset)
           rows
       in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
@@ -6630,22 +6635,22 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
         let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
-           ^ "╭─ " ^ caret Left_pane ^ "CONTEXT STACK"
+           ^ "╭─ " ^ caret Left_pane ^ say "컨텍스트 구성" "CONTEXT STACK"
            ^ Ansi.reset)
           :: (match mapped left_width with
-              | [] -> [ Ansi.dim ^ "  (no component attribution)" ^ Ansi.reset ]
+              | [] -> [ Ansi.dim ^ say "  (구성요소 정보 없음)" "  (no component attribution)" ^ Ansi.reset ]
               | mapped -> mapped)
         in
         let right_width = max 8 (framed_inner_width cols - left_width - 3) in
         let selected_detail =
           match List.nth_opt rows cursor with
-          | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
+          | None -> [ Ansi.dim ^ say "  j/k로 블록을 선택하세요" "  Select a block with j/k" ^ Ansi.reset ]
           | Some row ->
               context_input_map_detail_lines ~width:right_width ~scale ~part_of row
         in
         let right =
           (Ansi.bold
-           ^ "╭─ " ^ caret Right_pane ^ "SELECTED BLOCK"
+           ^ "╭─ " ^ caret Right_pane ^ say "선택한 블록" "SELECTED BLOCK"
            ^ Ansi.reset)
           :: selected_detail
         in
@@ -6725,43 +6730,59 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
    and a caller that guessed would scroll to the wrong row every time the
    header changed. *)
 let context_inspector_content_lines ~cols state : context_pane_body =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let runtime_details id =
     match state.runtime_catalog_reading with
     | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
       let notice = match state.runtime_catalog_reading with
         | Runtime_catalog_read -> []
         | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
-            [Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+            [Masc_tui_types.runtime_catalog_reading_suffix ~ko
                state.runtime_catalog_reading]
         | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
       notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
-       | None -> ["Connection/model configuration unavailable in the current catalogue"]
+       | None ->
+           [ say "현재 카탈로그에서 연결·모델 설정을 찾을 수 없습니다"
+               "Connection/model configuration unavailable in the current catalogue" ]
        | Some runtime ->
-         (* Every line of this block is English, so the scope fallback is too. *)
-         [ Printf.sprintf "Quota scope %s · %s" (runtime_quota_scope_label ~ko:false runtime) runtime.ro_provider
-         ; "Connection " ^ runtime.ro_provider_id
-         ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
-             runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model
-         ; "Last observed configuration; the captured turn above retains its own runtime and context." ])
-    | Runtime_catalog_loading -> ["Loading connection/model configuration…"]
-    | Runtime_catalog_unread | Runtime_catalog_failed _ -> ["Connection/model configuration unavailable; refresh to read it"] in
+         [ Printf.sprintf
+             (if ko then "쿼터 범위 %s · %s" else "Quota scope %s · %s")
+             (runtime_quota_scope_label ~ko runtime) runtime.ro_provider
+         ; say "연결 " "Connection " ^ runtime.ro_provider_id
+         ; Printf.sprintf
+             (if ko then "설정 컨텍스트 %d 토큰 (%s) · 모델 %s"
+              else "Configured context %d tokens (%s) · model %s")
+             runtime.ro_effective_max_context
+             (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
+             runtime.ro_model
+         ; say "마지막 관측 설정 · 위 캡처된 턴은 자체 런타임과 컨텍스트를 유지합니다"
+             "Last observed configuration; the captured turn above retains its own runtime and context." ])
+    | Runtime_catalog_loading ->
+        [ say "연결·모델 설정 불러오는 중" "Loading connection/model configuration" ]
+    | Runtime_catalog_unread | Runtime_catalog_failed _ ->
+        [ say "연결·모델 설정 미조회 · 새로고침으로 조회하세요"
+            "Connection/model configuration unavailable; refresh to read it" ] in
   match state.context_inspector_reading with
   | None ->
       Plain
         ( [ (if state.context_inspector_loading then
-                "  Loading provider-input evidence..."
-              else "  No context reading has been requested.")
+                say "  프로바이더 입력 근거 불러오는 중"
+                  "  Loading provider-input evidence"
+              else
+                say "  요청된 컨텍스트 관측이 없습니다"
+                  "  No context reading has been requested.")
           ]
         , None )
   | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
       Plain
-        ( context_error_lines ~cols ~label:"Context read failed" detail
+        ( context_error_lines ~cols ~label:(say "컨텍스트 조회 실패" "Context read failed") detail
         , None )
   | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
            Plain
-             ( context_error_lines ~cols ~label:"Composition unavailable" detail
+             ( context_error_lines ~cols ~label:(say "구성 조회 불가" "Composition unavailable") detail
                @ [ "" ]
                @ context_next_request_lines ~runtime_details ~cols
                    ~scale:Masc_tui_token_scale.fleet
@@ -6769,13 +6790,13 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            Plain
-             ( context_error_lines ~cols ~label:"Exact input unavailable" detail
+             ( context_error_lines ~cols ~label:(say "요청 입력 조회 불가" "Exact input unavailable") detail
              , None )
        | Masc_tui_context_inspector.Response ->
            context_response_lines ~cols state (Masc_tui_context_inspector.Observed (Error detail))
        | Masc_tui_context_inspector.Input_map ->
            Plain
-             ( context_error_lines ~cols ~label:"Input map unavailable" detail
+             ( context_error_lines ~cols ~label:(say "입력 구성 조회 불가" "Input map unavailable") detail
              , None ))
   | Some (_, Masc_tui_context_inspector.Exact_read reading) ->
       let module Inspector = Masc_tui_context_inspector in

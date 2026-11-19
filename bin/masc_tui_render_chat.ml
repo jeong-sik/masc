@@ -1326,6 +1326,8 @@ type tool_output =
 
 let keeper_message_tool_activity_details state ~keeper_name
     (activity : Keeper_chat_transcript.tool_activity) =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let association = keeper_call_association state ~keeper_name activity in
   let schedule_field, disposition_field, durable_input, output_field,
       result_field =
@@ -1334,7 +1336,7 @@ let keeper_message_tool_activity_details state ~keeper_name
         let schedule =
           match call.kc_schedule with
           | Some schedule -> keeper_call_schedule_label schedule
-          | None -> "not recorded"
+          | None -> say "기록되지 않음" "not recorded"
         in
         (* An Execute result read against the schema its descriptor
            declares, so the pane can lead with how the command ended and
@@ -1359,11 +1361,11 @@ let keeper_message_tool_activity_details state ~keeper_name
           match call.kc_disposition with
           | None -> None
           | Some Tui_decode.Keeper_call_completed ->
-              Some ("dispatch", "COMPLETED · SYNCHRONOUS", Theme.ok ())
+              Some (say "실행 방식" "dispatch", say "완료 · 동기" "COMPLETED · SYNCHRONOUS", Theme.ok ())
           | Some Tui_decode.Keeper_call_deferred ->
-              Some ("dispatch", "DEFERRED · ASYNC CONTINUATION", Theme.info ())
+              Some (say "실행 방식" "dispatch", say "지연 · 비동기 이어가기" "DEFERRED · ASYNC CONTINUATION", Theme.info ())
           | Some Tui_decode.Keeper_call_failed ->
-              Some ("dispatch", "FAILED", Theme.bad ())
+              Some (say "실행 방식" "dispatch", say "실패" "FAILED", Theme.bad ())
         in
         let result =
           match call.kc_result_bytes, call.kc_truncated_to with
@@ -1371,33 +1373,39 @@ let keeper_message_tool_activity_details state ~keeper_name
           | result_bytes, truncated_to ->
               let parts =
                 List.filter_map Fun.id
-                  [ Option.map (Printf.sprintf "%d bytes") result_bytes
-                  ; Option.map (Printf.sprintf "served through %d bytes")
+                  [ Option.map
+                      (Printf.sprintf (if ko then "%d바이트" else "%d bytes"))
+                      result_bytes
+                  ; Option.map
+                      (Printf.sprintf (if ko then "%d바이트까지 전달" else "served through %d bytes"))
                       truncated_to
                   ]
               in
-              Some ("result", String.concat " · " parts)
+              Some (say "결과" "result", String.concat " · " parts)
         in
         (schedule, disposition, call.kc_input, output, result)
     | Call_log_not_loaded ->
-        "open full calls to load durable schedule", None, activity.args, None,
-        None
+        say "전체 호출 열기로 영속 일정 조회" "open full calls to load durable schedule",
+        None, activity.args, None, None
     | Call_log_loading ->
-        "loading durable schedule…", None, activity.args, None, None
+        say "영속 일정 불러오는 중" "loading durable schedule", None, activity.args, None, None
     | Call_log_unavailable detail ->
-        "unavailable · " ^ detail, None, activity.args, None, None
+        say "조회 불가 · " "unavailable · " ^ detail, None, activity.args, None, None
     | Call_log_kept_back notice ->
         (* Not sent: the kept-back notice alone (RFC §2). *)
         notice, None, activity.args, None, None
     | Call_execution_unrecorded ->
-        "execution id not recorded", None, activity.args, None, None
+        say "실행 ID 기록되지 않음" "execution id not recorded", None, activity.args, None, None
     | Call_execution_missing ->
-        "no durable row for this execution id", None, activity.args, None, None
+        say "이 실행 ID의 영속 기록 없음" "no durable row for this execution id", None, activity.args, None, None
     | Call_execution_coverage_gap reason ->
-        "call log incomplete · " ^ Terminal_text.single_line reason,
+        say "호출 기록 일부 누락 · " "call log incomplete · " ^ Terminal_text.single_line reason,
         None, activity.args, None, None
     | Call_execution_ambiguous count ->
-        Printf.sprintf "%d durable rows share this execution id" count,
+        Printf.sprintf
+          (if ko then "이 실행 ID를 공유하는 영속 기록 %d건"
+           else "%d durable rows share this execution id")
+          count,
         None, activity.args, None, None
   in
   let provider_call_id =
@@ -1417,7 +1425,7 @@ let keeper_message_tool_activity_details state ~keeper_name
       ; Option.map (fun value -> "provider-call=" ^ value) provider_call_id
       ]
     |> function
-    | [] -> "not recorded"
+    | [] -> say "기록되지 않음" "not recorded"
     | parts -> String.concat " · " parts
   in
   (* Which fields are readings of state and which are payloads, said once
@@ -1437,7 +1445,7 @@ let keeper_message_tool_activity_details state ~keeper_name
   in
   let fields =
     [ Some
-        (said "state"
+        (said (say "상태" "state")
            (tool_outcome_label_with_call activity.outcome association)
            (tool_outcome_tone_with_call activity.outcome association))
     ; Option.map
@@ -1445,30 +1453,32 @@ let keeper_message_tool_activity_details state ~keeper_name
         disposition_field
       (* The tool's own name, in the colour the pane already gives a tool
          row's origin. Not a status: naming Execute is not a verdict on it. *)
-    ; Some (said "tool" activity.tool_name (Theme.tool_origin ()))
-    ; Some (said "schedule" schedule_field "")
+    ; Some (said (say "도구" "tool") activity.tool_name (Theme.tool_origin ()))
+    ; Some (said (say "일정" "schedule") schedule_field "")
     ; Some
-        (if String.equal durable_input "" then said "input" "(empty)" ""
-         else served "input" durable_input)
+        (if String.equal durable_input "" then
+           said (say "입력" "input") (say "(비어 있음)" "(empty)") ""
+         else served (say "입력" "input") durable_input)
     ]
     @ (match output_field with
        | None -> []
-       | Some (Served_output value) -> [ Some (served "output" value) ]
+       | Some (Served_output value) -> [ Some (served (say "출력" "output") value) ]
        | Some (Execute_output result) ->
            [ Some
-               (said "status"
+               (said (say "종료" "status")
                   (Masc_tui_execute_result.status_text result)
                   (if result.ok then Theme.ok () else Theme.bad ()))
            ; Option.map
                (function
-                 | Masc_tui_execute_result.Printed "" -> said "output" "(empty)" ""
-                 | Masc_tui_execute_result.Printed output -> served "output" output
+                 | Masc_tui_execute_result.Printed "" ->
+                     said (say "출력" "output") (say "(비어 있음)" "(empty)") ""
+                 | Masc_tui_execute_result.Printed output -> served (say "출력" "output") output
                  | Masc_tui_execute_result.Stored reference ->
-                     said "output" (Masc_tui_execute_result.stored_text reference) "")
+                     said (say "출력" "output") (Masc_tui_execute_result.stored_text reference) "")
                result.output
            ])
     @ [ Option.map (fun (label, value) -> said label value "") result_field
-      ; Some (said "identity" identity "")
+      ; Some (said (say "식별자" "identity") identity "")
       ]
     |> List.filter_map Fun.id
   in
@@ -1477,7 +1487,12 @@ let keeper_message_tool_activity_details state ~keeper_name
       { Tool_detail.fold_rows = tool_document_rows_shown
       ; fold_note =
           (fun hidden ->
-            let label = Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 open original result (/calls)" hidden in
+            let label =
+              Printf.sprintf
+                (if ko then "\xe2\x80\xa6 +%d줄 \xc2\xb7 원문 결과 열기 (/calls)"
+                 else "\xe2\x80\xa6 +%d lines \xc2\xb7 open original result (/calls)")
+                hidden
+            in
             match activity.execution_id with
             | None -> label
             | Some execution_id ->

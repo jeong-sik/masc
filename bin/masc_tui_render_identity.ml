@@ -25,7 +25,8 @@ type drawn =
    [Masc_tui_identity_model.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
-let draw ~cols (view : view) =
+let draw ?(ko = false) ~cols (view : view) =
+  let say korean english = if ko then korean else english in
   let providers = view.providers in
   (* Everything on this pane reads the filtered list: the rows drawn, the
      number beside each one, and the row the marker is on. A screen that
@@ -101,18 +102,20 @@ let draw ~cols (view : view) =
              Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset, ""
            | Identity_attached_without_tools ->
              ( Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset
-             , Theme.warn () ^ "attached, no tools" ^ Ansi.reset )
+             , Theme.warn () ^ say "연결됨, 도구 없음" "attached, no tools" ^ Ansi.reset )
            | Identity_switch_unreadable ->
              ( Theme.bad () ^ "\xe2\x97\x8f" ^ Ansi.reset
-             , Theme.bad () ^ "switch unreadable" ^ Ansi.reset )
+             , Theme.bad () ^ say "스위치 읽기 불가" "switch unreadable" ^ Ansi.reset )
            | Identity_switched_off ->
-             Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset, Theme.warn () ^ "off" ^ Ansi.reset
+             Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset,
+             Theme.warn () ^ say "꺼짐" "off" ^ Ansi.reset
            | Identity_attached tools ->
              ( Theme.ok () ^ "\xe2\x97\x8f" ^ Ansi.reset
              , Printf.sprintf
                  "%s%s%s"
                  (Theme.ok ())
-                 (Masc_tui_message_layout.count_noun tools "tool")
+                 (if ko then Printf.sprintf "도구 %d개" tools
+                  else Masc_tui_message_layout.count_noun tools "tool")
                  Ansi.reset )
          in
          (* The row the arrows are on is marked rather than merely numbered:
@@ -132,14 +135,15 @@ let draw ~cols (view : view) =
          let elsewhere =
            match also_on id with
            | [] -> ""
-           | names -> Ansi.dim ^ "  · also " ^ String.concat ", " names ^ Ansi.reset
+           | names ->
+               Ansi.dim ^ say "  · 공용: " "  · also " ^ String.concat ", " names ^ Ansi.reset
          in
          let app =
            match app_of id with
            | Some Masc_tui_identity_model.App_on_file ->
-             Ansi.dim ^ "  · your app" ^ Ansi.reset
+             Ansi.dim ^ say "  · 사용자 앱" "  · your app" ^ Ansi.reset
            | Some (Masc_tui_identity_model.App_problem _) ->
-             Theme.bad () ^ "  · app unreadable" ^ Ansi.reset
+             Theme.bad () ^ say "  · 앱 읽기 불가" "  · app unreadable" ^ Ansi.reset
            | Some Masc_tui_identity_model.App_none | None -> ""
          in
          (* A service that takes only a loopback redirect sends the browser
@@ -149,13 +153,13 @@ let draw ~cols (view : view) =
            | Some
                (Masc_tui_identity_model.Loopback_row
                   (Masc_tui_identity_model.Callback_url _)) ->
-             Ansi.dim ^ "  · loopback callback" ^ Ansi.reset
+             Ansi.dim ^ say "  · 로컬 콜백" "  · loopback callback" ^ Ansi.reset
            | Some
                (Masc_tui_identity_model.Loopback_row
                   (Masc_tui_identity_model.Callback_unknown _)) ->
-             Theme.bad () ^ "  · loopback callback unavailable" ^ Ansi.reset
+             Theme.bad () ^ say "  · 로컬 콜백 사용 불가" "  · loopback callback unavailable" ^ Ansi.reset
            | Some Masc_tui_identity_model.Row_callback_unreadable ->
-             Theme.bad () ^ "  · callback unreadable" ^ Ansi.reset
+             Theme.bad () ^ say "  · 콜백 읽기 불가" "  · callback unreadable" ^ Ansi.reset
            | None -> ""
          in
          let row =
@@ -299,7 +303,10 @@ let draw ~cols (view : view) =
   then
     { rows =
         preamble ()
-        @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
+        @ [ Ansi.dim
+            ^ say "  일치하는 항목이 없습니다. Esc로 전체 보기."
+                  "  Nothing here matches. esc to see them all."
+            ^ Ansi.reset ]
     ; cursor_row = None
     ; separator_rows = 0
     }
@@ -307,13 +314,20 @@ let draw ~cols (view : view) =
   then
     { rows =
         preamble ()
-        @ [ Ansi.dim ^ "  Nothing in this view. v to see the others." ^ Ansi.reset ]
+        @ [ Ansi.dim
+            ^ say "  이 보기에 항목이 없습니다. v로 다른 보기 전환."
+                  "  Nothing in this view. v to see the others."
+            ^ Ansi.reset ]
     ; cursor_row = None
     ; separator_rows = 0
     }
   else if numbered = [] && rejected = []
   then
-    { rows = [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
+    { rows =
+        [ Ansi.dim
+          ^ say "  config/identity/ 아래에 선언된 항목이 없습니다."
+                "  Nothing is declared under config/identity/."
+          ^ Ansi.reset ]
     ; cursor_row = None
     ; separator_rows = 0
     }

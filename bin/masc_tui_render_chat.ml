@@ -797,12 +797,46 @@ let keeper_message_clock at = clock_of_local_time (Unix.localtime at)
 
    A reading of state carries the colour this pane's status dictionary gives
    it, because the dictionary is the renderer's. *)
+let concise_runtime_label (state : state) runtime_id =
+  let find_in list =
+    List.find_opt
+      (fun (r : Tui_decode.runtime_option) -> String.equal r.ro_id runtime_id)
+      list
+  in
+  let found =
+    match find_in state.runtime_catalog with
+    | Some r -> Some r
+    | None ->
+        Option.bind state.runtime_surface (fun s ->
+          find_in s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
+  in
+  match found with
+  | Some r ->
+      let model = String.trim (Terminal_text.single_line r.ro_model) in
+      if String.equal model "" then fit_runtime_id 32 runtime_id
+      else
+        (match r.ro_declared_reasoning_effort with
+         | Some eff -> model ^ " (" ^ Tui_decode.runtime_reasoning_effort_label eff ^ ")"
+         | None -> model)
+  | None -> fit_runtime_id 32 runtime_id
+
+let keeper_gate_display_word ~ko word =
+  if not ko then Terminal_text.single_line word
+  else
+    match word with
+    | "allow-all" -> "모두 허용"
+    | "manual" -> "수동 승인"
+    | "Auto Judge" -> "자동 판단"
+    | "escalate_to_human" -> "사람 확인"
+    | other -> Terminal_text.single_line other
+
 let keeper_status_facts state keeper_name : string Chat_facts.t list =
   let ko = state.ui_language = Lang_ko in
+  let say k e = if ko then k else e in
   let fact = Chat_facts.fact in
   let who = fact Chat_facts.Who (Keeper_chat.terminal_safe_text keeper_name) in
   let context_unread =
-    fact ~label:(ui_text state ~ko:"컨텍스트 " ~en:"Context ") Chat_facts.Plain "\xe2\x80\x94"
+    fact ~label:(say "컨텍스트 " "Context ") Chat_facts.Plain "\xe2\x80\x94"
   in
   let registered = keeper_available_for_new_message state keeper_name in
   (* A Librarian that keeps failing is a state of this Keeper's memory. It
@@ -815,7 +849,7 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
     | Some failing ->
         [ fact
             (Chat_facts.Reading (Theme.warn ()))
-            (Masc_tui_types.librarian_failing_text
+            (Masc_tui_types.librarian_failing_text ~ko
                ~since:(Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
                          ~now:(Unix.gettimeofday ()) failing.lf_since)
                failing)
@@ -828,7 +862,7 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
   with
   | None ->
       [ who
-      ; fact (Chat_facts.Reading Ansi.dim) "\xc3\x97 unavailable"
+      ; fact (Chat_facts.Reading Ansi.dim) (say "\xc3\x97 사용 불가" "\xc3\x97 unavailable")
       ; fact (Chat_facts.Reading Ansi.dim) "\xe2\x80\x94"
       ]
       @ memory
@@ -871,23 +905,26 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
             ~workspace_gate_mode:
               (Option.map (fun modes -> modes.Tui_decode.glm_workspace) state.gate_modes)
         in
+        let gate_label = say "게이트: " "gate: " in
         [ fact (if yolo then Chat_facts.Reading (Theme.bad ()) else Chat_facts.Who) chat_mode
         ; (match gate_mode with
            | Some word ->
-               fact ~label:"gate: " Chat_facts.Who (Terminal_text.single_line word)
+               fact ~label:gate_label Chat_facts.Who (keeper_gate_display_word ~ko word)
            (* Nothing observed is said in the words every other surface uses
               for it. "?" beside a stance that decides what a send can do left
               the reader to guess whether it meant manual or unread. *)
            | None ->
-               fact ~label:"gate: " Chat_facts.Plain (Masc_tui_types.field_unread ~ko))
+               fact ~label:gate_label Chat_facts.Plain (Masc_tui_types.field_unread ~ko))
         ]
       in
+      (* Inside Keeper Chat itself, "next: direct message" is redundant noise;
+         keep actionable Recover/Probe prompts. *)
       let suggested =
         match Keeper_control.next_action reading with
-        | None -> []
-        | Some _ ->
+        | None | Some Masc.Keeper_status_runtime.Direct_message -> []
+        | Some (Masc.Keeper_status_runtime.Recover | Masc.Keeper_status_runtime.Probe) ->
             [ fact
-                ~label:(ui_text state ~ko:"다음: " ~en:"next: ")
+                ~label:(say "다음: " "next: ")
                 Chat_facts.Plain
                 (keeper_suggested_action ~ko reading)
             ]
@@ -907,15 +944,15 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
                      ~inspect_key:Masc_tui_keys.context_inspector_label observation
                | Masc_tui_fetched.Stale _ ->
                    [ fact Chat_facts.Plain
-                       (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
+                       (say "컨텍스트 새로 조회 실패" "Context refresh failed")
                    ]
                | Masc_tui_fetched.Failed _ ->
                    [ fact Chat_facts.Plain
-                       (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context read failed")
+                       (say "컨텍스트 조회 실패" "Context read failed")
                    ]
                | Masc_tui_fetched.Loading ->
                    [ fact Chat_facts.Plain
-                       (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
+                       (say "컨텍스트 조회 중" "Context reading")
                    ]
                | Masc_tui_fetched.Absent -> [ context_unread ]))
       in
@@ -934,13 +971,32 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
              Keeper_chat_transcript.runtime_identity ~keeper_name
                ~configured_runtime:row.kr_runtime_id transcript
            in
-           let observed =
+           let runtime_facts =
+             let configured = identity.Keeper_chat_transcript.configured in
+             let cfg_label = concise_runtime_label state configured in
              match identity.Keeper_chat_transcript.observed with
              | Some (Keeper_chat_transcript.Turn_runtime runtime) ->
-                 [ fact ~label:"turn: " Chat_facts.Who runtime ]
+                 if String.equal runtime configured then
+                   [ fact ~label:(say "실행: " "turn: ") Chat_facts.Who cfg_label ]
+                 else
+                   let obs_label = concise_runtime_label state runtime in
+                   (* When failover crosses two distinct runtimes that share the
+                      same model+effort display string, fall back to runtime ids
+                      so the failover stays visible. *)
+                   let obs_text, cfg_text =
+                     if String.equal obs_label cfg_label then
+                       fit_runtime_id 32 runtime, fit_runtime_id 32 configured
+                     else obs_label, cfg_label
+                   in
+                   [ fact ~label:(say "실행: " "turn: ") Chat_facts.Who obs_text
+                   ; fact ~label:(say "설정: " "configured: ") Chat_facts.Who cfg_text
+                   ]
              | Some (Keeper_chat_transcript.Stream_model model) ->
-                 [ fact ~label:"model: " Chat_facts.Who model ]
-             | None -> []
+                 [ fact ~label:(say "모델: " "model: ") Chat_facts.Who model
+                 ; fact ~label:(say "설정: " "configured: ") Chat_facts.Who cfg_label
+                 ]
+             | None ->
+                 [ fact ~label:(say "설정: " "configured: ") Chat_facts.Who cfg_label ]
            in
            (* What the answer now streaming has spent. Only counters the
               provider reported appear, and each is written out in full: a
@@ -958,29 +1014,31 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
                      value
                  in
                  List.filter_map Fun.id
-                   [ counter "tokens in: " usage.Masc_tui_keeper_chat_live.input_tokens
-                   ; counter "tokens out: " usage.Masc_tui_keeper_chat_live.output_tokens
-                   ; counter "cache read: "
+                   [ counter (say "입력: " "tokens in: ") usage.Masc_tui_keeper_chat_live.input_tokens
+                   ; counter (say "출력: " "tokens out: ") usage.Masc_tui_keeper_chat_live.output_tokens
+                   ; counter (say "캐시 읽기: " "cache read: ")
                        usage.Masc_tui_keeper_chat_live.cache_read_input_tokens
-                   ; counter "cache write: "
+                   ; counter (say "캐시 쓰기: " "cache write: ")
                        usage.Masc_tui_keeper_chat_live.cache_creation_input_tokens
                    ]
            in
            let stopped =
              match Keeper_chat_transcript.stream_stop_reason ~keeper_name transcript with
              | None -> []
-             | Some reason -> [ fact ~label:"stopped: " Chat_facts.Plain reason ]
+             | Some reason -> [ fact ~label:(say "종료: " "stopped: ") Chat_facts.Plain reason ]
+           in
+           let phase =
+             (* Running is the normal lifecycle and already covered by [status]. *)
+             if Tui_decode.keeper_phase_is_running row.kr_phase then []
+             else [ fact Chat_facts.Plain (Tui_decode.keeper_phase_to_string row.kr_phase) ]
            in
            [ who; status ]
            @ stance
-           @ [ fact Chat_facts.Plain (Tui_decode.keeper_phase_to_string row.kr_phase) ]
+           @ phase
            @ memory
            @ context
            @ suggested
-           @ observed
-           @ [ fact ~label:"configured: " Chat_facts.Who
-                 identity.Keeper_chat_transcript.configured
-             ]
+           @ runtime_facts
            @ spent
            @ stopped
        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ ->
@@ -4908,9 +4966,9 @@ let render_keeper_message (state : state) =
        [chat_tail_entries] -- so the conversation holds one time axis and
        these rows scroll with the lines they follow. *)
 
-    (* A schedule reading keeps its status colour; the job's title and the
-       keys around it are drawn plain, so the colour marks the state and not
-       the whole row. *)
+    (* A schedule reading keeps its status colour; the job's title stays plain
+       while settled headings and toggle hints recede so attention lands on
+       active or overdue runs rather than banner chrome. *)
     let schedule_palette =
       { Chat_facts.label_style = Theme.recede ()
       ; who_style = Theme.category Theme.Slot_1

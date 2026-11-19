@@ -546,7 +546,17 @@ let all_outcomes =
   [ Started; Awaiting_result; Returned; Native_running; Native_ended; Native_failed; Failed
   ; Never_returned; Outcome_unrecorded ]
 
-let compact_outcome_parts (activities : tool_activity list) =
+let native_completion_is_benign (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  match completion.outcome, completion.exit_code with
+  | (End_observed | Completion_unrecorded | Completion_reported
+     | Result_received { is_error = None | Some false }), (None | Some 0) -> true
+  | (Error_reported | Decline_reported | Unrecognized_status _
+     | Result_received { is_error = Some true }), _
+  | (End_observed | Completion_unrecorded | Completion_reported
+     | Result_received { is_error = None | Some false }), Some _ -> false
+
+let compact_outcome_parts ?(include_benign_native = true) (activities : tool_activity list) =
   let count outcome =
     List.fold_left
       (fun total activity ->
@@ -566,7 +576,13 @@ let compact_outcome_parts (activities : tool_activity list) =
              | [] -> Some counted
              | names -> Some (counted ^ ": " ^ String.concat ", " names)))
   in
-  ordinary @ List.map native_status_clause (group_native_statuses activities)
+  let native_statuses =
+    group_native_statuses activities
+    |> List.filter (fun group ->
+           include_benign_native
+           || not (native_completion_is_benign group.status_completion))
+  in
+  ordinary @ List.map native_status_clause native_statuses
   @ List.map native_progress_clause (group_native_progress activities)
 ;;
 
@@ -1179,7 +1195,7 @@ let project_tool_block mode (block : tool_block) =
         in
         ( Some
             (inventory_row
-               ~outcomes:(compact_outcome_parts inventory_activities)
+               ~outcomes:(compact_outcome_parts ~include_benign_native:false inventory_activities)
                activities)
         , trouble_rows
         , hidden_activity_rows

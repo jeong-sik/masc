@@ -7522,6 +7522,26 @@ let test_rm_rf_unlinks_symlinks () =
   Alcotest.(check bool) "the link target survived" true (Sys.file_exists kept);
   Alcotest.(check string) "the link target kept its contents" "kept" (read_file kept)
 
+(* The server's pool domains collect on the 4M-word heap ([Minor_heap.Tuned]);
+   a pool started from the plain manager would collect on the runtime's. *)
+let test_domain_pools_collect_on_the_server_heap env () =
+  let words () = (Gc.get ()).Gc.minor_heap_size in
+  let expected =
+    match Sys.getenv_opt "OCAMLRUNPARAM" with
+    | Some _ -> Domain.join (Domain.spawn words)
+    | None -> 4 * 1024 * 1024
+  in
+  Eio.Switch.run @@ fun sw ->
+  let shared, read =
+    Server_runtime_bootstrap.For_testing.create_domain_pools ~sw
+      ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~shared:1 ~read:1
+  in
+  Alcotest.(check int) "shared pool" expected
+    (Domain_pool.submit_cpu ~name:__FUNCTION__ shared words);
+  Alcotest.(check int) "read pool" expected
+    (Domain_pool.submit_cpu ~name:__FUNCTION__ read words)
+;;
+
 let () =
   install_suite_watchdog ();
   Eio_main.run @@ fun env ->
@@ -7532,6 +7552,10 @@ let () =
       ( "temp directory cleanup",
         [ Alcotest.test_case "rm_rf unlinks loop, live and dangling links" `Quick
             test_rm_rf_unlinks_symlinks
+        ] );
+      ( "minor heap",
+        [ Alcotest.test_case "the pools collect on the server's heap" `Quick
+            (test_domain_pools_collect_on_the_server_heap env)
         ] );
       ( "periodic task gc",
         [ Alcotest.test_case "archives only stale terminal tasks" `Quick

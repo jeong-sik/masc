@@ -280,6 +280,20 @@ let install_domain_pool_references ?read domain_pool =
     read
 ;;
 
+(* The minor heap of every domain the server starts for its own work: the
+   pools, the snapshot codec, the systhread host and the serving domain.
+   [main_eio.ml] gives the main domain the same. Agent Core's codec pool
+   starts from the plain manager and keeps the runtime's size. *)
+let minor_heap = Minor_heap.Tuned
+
+(* Both pools start through one manager that names the heap, so neither
+   pool can be created from the plain one. *)
+let create_domain_pools ~sw ~domain_mgr ~shared ~read =
+  let domain_mgr = Minor_heap.domain_mgr minor_heap domain_mgr in
+  ( Domain_pool.create ~sw ~domain_count:shared domain_mgr
+  , Domain_pool.create ~sw ~domain_count:read domain_mgr )
+;;
+
 let publish_exact_output_registry_from_file ~config_path =
   configure_exact_output_registry ~config_path ()
 ;;
@@ -292,13 +306,8 @@ module For_testing = struct
   let require_explicit_mandatory_exact_output_lanes =
     require_explicit_mandatory_exact_output_lanes
   let install_domain_pool_references = install_domain_pool_references
+  let create_domain_pools = create_domain_pools
 end
-
-(* The minor heap of every domain the server starts for its own work: the
-   pools, the snapshot codec, the systhread host and the serving domain.
-   [main_eio.ml] gives the main domain the same. Agent Core's codec pool
-   starts from the plain manager and keeps the runtime's size. *)
-let minor_heap = Minor_heap.Tuned
 
 (* Server GC parameters. They apply only when OCAMLRUNPARAM is unset, so an
    operator can override them at launch without code changes.
@@ -1143,12 +1152,9 @@ let initialize_owner_state_blocking
     | Ok budget -> budget
     | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
   in
-  let pool_domain_mgr = Minor_heap.domain_mgr minor_heap domain_mgr in
-  let domain_pool =
-    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool pool_domain_mgr
-  in
-  let read_pool =
-    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool pool_domain_mgr
+  let domain_pool, read_pool =
+    create_domain_pools ~sw ~domain_mgr ~shared:budget.Domain_budget.shared_pool
+      ~read:budget.Domain_budget.read_pool
   in
   install_domain_pool_references ~read:read_pool domain_pool;
   Server_pending_confirm_expiry.start ~sw ~clock ~mono_clock ~state;

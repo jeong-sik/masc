@@ -479,6 +479,37 @@ let test_snapshot_counts_unterminated_tail_separately () =
          (drop_value entry_error -. before_entry_error))
 ;;
 
+(* This executable never says [Fact_cell.keep_in_this_process]: it stands for
+   a process that does not write the decision record. Each read is of the
+   file, so a row that reached the file without this process's append is the
+   next answer. *)
+let test_a_process_that_does_not_write_the_record_reads_it_every_time () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-decision-unkept" in
+       let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let turn () =
+         K.latest_decision_json ~config ~keeper_name
+         |> Option.map (fun row -> Yojson.Safe.Util.(row |> member "turn_id" |> to_int))
+       in
+       let row turn = Yojson.Safe.to_string (`Assoc [ "turn_id", `Int turn ]) ^ "\n" in
+       write_file path (row 1);
+       Alcotest.(check (option int)) "the row in the file" (Some 1) (turn ());
+       write_file path (row 1 ^ row 2);
+       Alcotest.(check (option int))
+         "a row another hand wrote is the next answer"
+         (Some 2)
+         (turn ()))
+;;
+
 let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
   Eio_main.run
   @@ fun env ->
@@ -1404,6 +1435,10 @@ let () =
             "unknown completion-contract result remains visible"
             `Quick
             test_unknown_completion_contract_result_stays_visible
+        ; Alcotest.test_case
+            "a process that does not write the record reads it every time"
+            `Quick
+            test_a_process_that_does_not_write_the_record_reads_it_every_time
         ; Alcotest.test_case
             "no-visible-output no-work receipt does not mark attention"
             `Quick

@@ -206,8 +206,8 @@ type store_facts =
 
 val keep_store_facts : base_path_lease -> store_facts
 (** Say that this process holds the workspace's writer lease, so it may keep
-    in memory the facts of the stores only the lease holder writes
-    ([Dated_jsonl.keep_facts_in_this_process], [Dated_jsonl.Store.facts]).
+    in memory the facts of the files only the lease holder writes
+    ([Fact_cell.keep_in_this_process], [Dated_jsonl.Store.facts]).
     The server calls this once, with the lease it runs under, and does not
     release that lease before it exits or hands it to the image it execs. *)
 

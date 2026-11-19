@@ -158,7 +158,7 @@ let test_a_last_row_that_is_not_json () =
 ;;
 
 let () =
-  Dated_jsonl.keep_facts_in_this_process ();
+  Fact_cell.keep_in_this_process ();
   run
     "keeper_tool_call_log_kept"
     [ ( "the newest calls are the ledger's kept window"

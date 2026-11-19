@@ -2598,18 +2598,12 @@ let newest_parsed_row : Yojson.Safe.t option fact =
         | Malformed_json _ -> None)
   }
 
-(* Whether this process holds the workspace's writer lease. A cell is moved
-   by the appends of the process it lives in and by no other, so only that
-   process may keep facts. It says so once and does not take it back. *)
-let keeping_facts = Atomic.make false
-let keep_facts_in_this_process () = Atomic.set keeping_facts true
-
 (* The lease holder is the one writer of some stores and not of others
-   ([Store.facts]): being the lease holder is a fact about the process, and
-   who writes a store is a fact about the store. A fact is kept where both
-   hold. *)
+   ([Store.facts]): being the lease holder is a fact about the process
+   ([Fact_cell.keep_in_this_process]), and who writes a store is a fact about
+   the store. A fact is kept where both hold. *)
 let keeps_facts_of t =
-  Atomic.get keeping_facts
+  Fact_cell.kept_in_this_process ()
   &&
   match Store.facts (Store.of_location t.location) with
   | Store.Kept_by_the_lease_holder -> true

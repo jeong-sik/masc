@@ -22,7 +22,7 @@
 \* The cells are in one process, and every writer and remover here is in
 \* that process: a fact is kept only by the process that holds the
 \* workspace's writer lease, and only for a store whose files that process
-\* alone changes (keep_facts_in_this_process, Store.facts). A row from
+\* alone changes (Fact_cell.keep_in_this_process, Store.facts). A row from
 \* another process has rules of its own (n).
 \*
 \* The cells are made by the first reader. Writers and the remover go over

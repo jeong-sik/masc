@@ -11,6 +11,26 @@ val summary_observation :
     remains typed [Partial] beside the readable trust fields; other read
     exceptions propagate. Display-only causal ages create no timer. *)
 
+val latest_decision_result :
+  config:Workspace.config -> keeper_name:string ->
+  (Yojson.Safe.t option, Keeper_memory_recall_exn_class.t) result
+(** The newest JSON object row within the last
+    [Keeper_row_facts.decision_window_lines] lines and
+    [Keeper_row_facts.decision_window_bytes] bytes of the Keeper's decision
+    record, read from the file. [Ok None] when the window holds no such row
+    or there is no file ([ENOENT]); an [Error] when the file could not be
+    read. A row passed over (not JSON, or not an object) is reported as a
+    read drop. *)
+
+val latest_decision_json :
+  config:Workspace.config -> keeper_name:string -> Yojson.Safe.t option
+(** The decision row the trust snapshot shows: {!latest_decision_result}
+    through the row kept in memory ([Keeper_row_facts.newest_decision]). In
+    the process that writes the record the file is read once and the
+    record's writer moves the kept row after that; any other process reads
+    the file every time. A read that fails is reported and answers [None],
+    and nothing is kept. *)
+
 (** Trust fields for a row built without reading the Keeper, such as the
     dashboard row shown when a Keeper's row could not be built. The row needs
     attention. No receipt was read, so [operator_disposition] and

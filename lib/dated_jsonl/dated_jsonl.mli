@@ -345,23 +345,13 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     That holds for the appends of one process. A row another process appends
     moves nothing here, so a fact is kept only where two things hold: the
     process has said it holds the workspace's writer lease
-    ({!keep_facts_in_this_process}), and the store is one whose files only
-    the lease holder changes ({!Store.facts}). Anywhere else {!read_fact}
-    reads the files each time. *)
+    ({!Fact_cell.keep_in_this_process}), and the store is one whose files
+    only the lease holder changes ({!Store.facts}). Anywhere else
+    {!read_fact} reads the files each time: in the TUI or a command line
+    tool for every store, and in the lease holder for a store such as the
+    cost log, which [masc-cost] also appends to without a lease. *)
 
 type 'a fact
-
-val keep_facts_in_this_process : unit -> unit
-(** From now on {!read_fact} keeps what it reads from a store whose
-    {!Store.facts} is [Kept_by_the_lease_holder]. Said once by the process
-    that holds the workspace's writer lease: the server, through
-    [Server_startup_takeover.keep_store_facts], and a test executable that
-    stands for it. It is not taken back.
-
-    A process that has not said it (the TUI, a command line tool) reads the
-    files on every {!read_fact}, as it did before there were facts. So does
-    the lease holder for every other store: the cost log, for one, is also
-    appended to by [masc-cost], which takes no lease. *)
 
 val last_row : recent_entry option fact
 (** The store's newest physical row, as [read_recent_result t 1] reads it:
@@ -395,7 +385,7 @@ val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
     A store whose directory does not exist yet is asked about each time, as
     for a write.
 
-    In a process that has not said {!keep_facts_in_this_process} the strict
+    In a process that has not said {!Fact_cell.keep_in_this_process} the strict
     read runs on every call and nothing is kept: the answer is
     {!Fact_cell.Read_not_kept} or {!Fact_cell.Read_failed}.
 

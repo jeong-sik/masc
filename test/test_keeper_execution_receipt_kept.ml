@@ -189,7 +189,7 @@ let test_a_dot_file_is_not_the_stores () =
 ;;
 
 let () =
-  Dated_jsonl.keep_facts_in_this_process ();
+  Fact_cell.keep_in_this_process ();
   run
     "keeper_execution_receipt_kept"
     [ ( "the newest receipt is the store's kept fact"

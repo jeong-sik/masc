@@ -23781,11 +23781,8 @@ let agenda_chrome_rows (state : state) =
    is the footer. Every surface lost its key hints, version, base path and port
    the moment a wake put the strip on screen. *)
 let surface_body_rows (state : state) ~terminal_rows =
-  max
-    1
-    (terminal_rows
-     - Masc_tui_composer.rows_for ~terminal_rows
-     - agenda_chrome_rows state)
+  Masc_tui_render_schedule.Viewport.body_rows ~terminal_rows
+    ~agenda_rows:(agenda_chrome_rows state)
 ;;
 
 let tools_scroll_layout state ~count =

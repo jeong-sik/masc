@@ -1332,6 +1332,14 @@
   masc_tui_table masc_tui_theme masc_tui_keeper_list_model masc_tui_keeper_mark
   masc_tui_value))
 
+; The too-small screen's size line, as a typed choice the geometry harness
+; can check at the widths that once cut its count.
+(library
+ (name masc_tui_too_small_hint)
+ (wrapped false)
+ (modules masc_tui_too_small_hint)
+ (libraries masc_tui_message_layout masc_tui_render_schedule))
+
 ; The notation of a value a screen holds as a value: a moment today.
 (library
  (name masc_tui_value)
@@ -1634,7 +1642,6 @@
  (modules masc_tui_composer)
  (libraries
   masc_tui_local_read_observation
-  masc_tui_render_schedule
   masc_tui_value
   masc_tui_words))
 
@@ -2046,6 +2053,8 @@
   masc.runtime
   masc_tui_acting
   masc_tui_composer
+  ; Viewport owns the body's row budget that [surface_body_rows] reads.
+  masc_tui_render_schedule
   masc_tui_audio_device
   masc_tui_agenda
   masc_tui_ask_layout
@@ -3327,6 +3336,7 @@
   masc_tui_overview_tasks
   masc_tui_layout
   masc_tui_render_schedule
+  masc_tui_too_small_hint
   masc_tui_json
   masc_tui_render_tools
   masc_tui_render_metrics

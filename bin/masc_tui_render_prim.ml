@@ -292,12 +292,10 @@ let reader_after_wheel (reader : clamped_scroll)
   | Resource_scroll _ -> None
 
 
-let navigation_rows = 1
-
-
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
+  ( Render_schedule.Viewport.below_strip ~terminal_rows:rows
+  , max 1 (cols - !acting_pane_reserved_cols) )
 
 
 (* The lines a buffer has ended since [start]: how far down a frame the next
@@ -1391,8 +1389,9 @@ let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 
 
 (* The line [surface_strip] draws above every surface. A row a surface counts
-   in its own frame sits this many lines lower in the terminal's. *)
-let strip_rows = 1
+   in its own frame sits this many lines lower in the terminal's. Viewport
+   owns the count, because [get_terminal_size] takes the same rows off. *)
+let strip_rows = Render_schedule.Viewport.navigation_rows
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the

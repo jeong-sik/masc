@@ -9,16 +9,17 @@
 
     [Fs_compat]'s own blocking calls take the same route: the mechanism is
     [Fs_compat.Systhread_host], and {!start} here supplies its log, its
-    minor-heap tuning and which fibers are pool work. *)
+    minor heap and which fibers are pool work. *)
 
 val domain_count : int
 (** Domains {!start} adds to the process: 1. *)
 
-val start : unit -> unit
+val start : minor_heap:Minor_heap.t -> unit -> unit
 (** Spawn the host domain, once per process; later calls do nothing. The
     domain belongs to no switch and lives until the process exits, so a
     caller still running at shutdown, inside [Eio.Cancel.protect], is served.
-    It adds one domain to the process. *)
+    It adds one domain to the process, and that domain collects on
+    [minor_heap]. *)
 
 val run : ?label:string -> (unit -> 'a) -> 'a
 (** Run blocking work outside Eio on a system thread, as

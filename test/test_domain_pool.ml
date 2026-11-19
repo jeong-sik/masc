@@ -120,31 +120,31 @@ let test_submit_async_propagates_exception () =
 
 (* ── multi-domain dispatch ──────────────────────────────── *)
 
-(* [Gc.set]'s minor_heap_size is per-domain in OCaml 5, so tuning it on the
-   main domain leaves every later one at the 2 MB default. That is not only a
-   frequency: a minor collection is a stop-the-world barrier across all
-   domains, so a pool domain collecting eight times as often stops the whole
-   process that much more. *)
-let test_pool_work_runs_on_the_tuned_minor_heap () =
+(* [Gc.set]'s minor_heap_size is per-domain in OCaml 5, so a pool's domains
+   collect on the heap its domain manager starts them with, never on the
+   creator's. The creator tunes its own domain first: a pool started on the
+   plain policy must still show the runtime's size. *)
+let test_pool_work_runs_on_the_heap_its_manager_names () =
+  let runtime_words =
+    Domain.join (Domain.spawn (fun () -> (Gc.get ()).Gc.minor_heap_size))
+  in
+  Minor_heap.apply Minor_heap.Tuned;
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let dm = Eio.Stdenv.domain_mgr env in
-      let pool = D.create ~sw ~domain_count:2 dm in
-      let main_domain = (Domain.self () :> int) in
-      let where, words =
-        D.submit_cpu ~name:__FUNCTION__ pool (fun () ->
-          (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size)
+      let job_words policy =
+        let pool = D.create ~sw ~domain_count:1 (Minor_heap.domain_mgr policy dm) in
+        D.submit_cpu ~name:__FUNCTION__ pool (fun () -> (Gc.get ()).Gc.minor_heap_size)
       in
-      check bool "the job did run off the main domain" true (where <> main_domain);
-      (* A present runtime configuration owns the heap size. The default
-         floor is only the policy when no operator setting was supplied. *)
-      match Sys.getenv_opt "OCAMLRUNPARAM" with
-      | Some _ -> ()
-      | None ->
-        check bool
-          (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
-          true
-          (words >= 4 * 1024 * 1024)))
+      check int "a Runtime_default pool runs on the runtime heap"
+        runtime_words (job_words Minor_heap.Runtime_default);
+      (* A present runtime configuration owns the heap size. *)
+      let tuned_words =
+        match Sys.getenv_opt "OCAMLRUNPARAM" with
+        | Some _ -> runtime_words
+        | None -> 4 * 1024 * 1024
+      in
+      check int "a Tuned pool runs on the tuned heap" tuned_words (job_words Minor_heap.Tuned)))
 ;;
 
 let test_jobs_run_on_worker_domains () =
@@ -514,8 +514,8 @@ let () =
         test_jobs_run_on_worker_domains;
     ];
     "minor_heap", [
-      test_case "pool work runs on the tuned minor heap" `Quick
-        test_pool_work_runs_on_the_tuned_minor_heap;
+      test_case "pool work runs on the heap its manager names" `Quick
+        test_pool_work_runs_on_the_heap_its_manager_names;
     ];
     "escape_hatch", [
       test_case "executor_pool accessor" `Quick test_executor_pool_accessor;

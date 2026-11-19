@@ -43,7 +43,9 @@ val create :
   _ Eio.Domain_manager.t ->
   t
 (** [create ~sw ?domain_count dm] spawns worker domains via
-    [Eio.Executor_pool.create].
+    [Eio.Executor_pool.create]. They collect on the minor heap [dm] starts
+    them with: the runtime's size, or the one {!Minor_heap.domain_mgr}
+    names.
 
     [domain_count] defaults to {!recommended_domain_count}.  Raises
     [Invalid_argument] if an explicit value is [< 1].

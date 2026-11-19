@@ -122,6 +122,15 @@ module For_testing : sig
   (** Raises one [Env_config_core.Config_error] that names every violation. *)
 
   val install_domain_pool_references : ?read:Domain_pool.t -> Domain_pool.t -> unit
+
+  val create_domain_pools :
+    sw:Eio.Switch.t ->
+    domain_mgr:_ Eio.Domain_manager.t ->
+    shared:int ->
+    read:int ->
+    Domain_pool.t * Domain_pool.t
+  (** The shared and read pools as the server starts them, each domain on the
+      server's minor heap. *)
 end
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit

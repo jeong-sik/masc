@@ -45551,12 +45551,7 @@ Use relative paths for resources already held in the package. -->
     ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
-  (* The server's minor heap, for the same reason: every frame allocates the
-     rows it draws, and at the runtime's default size a held key meets a
-     collection every few frames. Measured on a live chat with PageUp/PageDown
-     held, the median key-to-output time fell about a quarter. A larger
-     OCAMLRUNPARAM setting is left alone. *)
-  Minor_heap.tune ();
+  Masc_tui_domains.use_ui_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -45575,14 +45570,8 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
-            (* One background worker keeps response decoding and local reads
-               off the UI domain. HTTP requests already have their own domain.
-               The server's core-sized default adds idle domains to every
-               stop-the-world collection while the chat allocates scroll rows;
-               the client has no Keeper actors to distribute over that pool. *)
-            let cpu_pool=Domain_pool.create ~sw ~domain_count:1
-                (Eio.Stdenv.domain_mgr env) in
-            Domain_pool_ref.set cpu_pool;
+            Domain_pool_ref.set
+              (Masc_tui_domains.start_worker_pool ~sw (Eio.Stdenv.domain_mgr env));
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

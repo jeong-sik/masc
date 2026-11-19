@@ -10,6 +10,7 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
 type open_turn =
   { opened : int
   ; baseline : Log.mark
+  ; reset_since : bool
   }
 
 type tail =
@@ -54,6 +55,7 @@ type walk =
   { mutable row_end : int (* Where the row before the one last visited ends. *)
   ; mutable last : Log.line option
   ; mutable point : Log.mark option
+  ; mutable reset_seen : bool (* A reset newer than the row being visited. *)
   ; mutable turn : turn_seen
   ; mutable failure : read_error option
   }
@@ -74,9 +76,10 @@ let visit walk row =
        walk.point <- Some mark
      | None, Moves_nothing | Some (_ : Log.mark), (Starts_at _ | Ends_unit _ | Moves_nothing) -> ());
     (match walk.turn, line with
-     | Not_yet, Opened { baseline; _ } -> walk.turn <- Open_turn { opened = offset; baseline }
+     | Not_yet, Opened { baseline; _ } ->
+       walk.turn <- Open_turn { opened = offset; baseline; reset_since = walk.reset_seen }
      | Not_yet, (Closed _ | Log_started _) -> walk.turn <- No_open_turn
-     | Not_yet, Reset _
+     | Not_yet, Reset _ -> walk.reset_seen <- true
      | (No_open_turn | Open_turn _), (Log_started _ | Opened _ | Closed _ | Reset _) -> ());
     (match walk.point, walk.turn with
      | Some (_ : Log.mark), (No_open_turn | Open_turn _) -> true
@@ -101,7 +104,15 @@ let read_tail path =
   | Fs_compat.Private_jsonl_window.Window_missing -> Ok Nothing_written
   | Window_present { rows_end = 0; _ } -> Ok Nothing_written
   | Window_present { rows_end; _ } ->
-    let walk = { row_end = rows_end; last = None; point = None; turn = Not_yet; failure = None } in
+    let walk =
+      { row_end = rows_end
+      ; last = None
+      ; point = None
+      ; reset_seen = false
+      ; turn = Not_yet
+      ; failure = None
+      }
+    in
     let* (_ : Fs_compat.Private_jsonl_window.t) =
       window path ~from:rows_end ~previous_row_wanted:(visit walk)
     in
@@ -129,10 +140,17 @@ type append_error =
       ; detail : string
       }
 
+type appended =
+  { new_end : int
+  ; last_at : int
+  }
+
 let row line = Yojson.Safe.to_string (Codec.to_json line) ^ "\n"
 
 let append ~path ~at_end (first, rest) =
-  let suffix = String.concat "" (List.map row (first :: rest)) in
+  let rows = List.map row (first :: rest) in
+  let suffix = String.concat "" rows in
+  let last_row_length = List.fold_left (fun (_ : int) row -> String.length row) 0 rows in
   let dir = Filename.dirname path in
   (* The offset-checked append does not create its directory. *)
   match Fs_compat.mkdir_p_memoized dir with
@@ -146,7 +164,8 @@ let append ~path ~at_end (first, rest) =
      (* The lines are on disk. A cleanup failure is about the descriptor, and
         calling it a write failure would invite a second append. *)
      | Fs_compat.Private_file_succeeded new_end
-     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = new_end; _ } -> Ok new_end
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = new_end; _ } ->
+       Ok { new_end; last_at = new_end - last_row_length }
      | Fs_compat.Private_file_failed (Fs_compat.End_offset_mismatch { expected; actual })
      | Fs_compat.Private_file_failed_with_cleanup_failure
          { error = Fs_compat.End_offset_mismatch { expected; actual }; _ } ->

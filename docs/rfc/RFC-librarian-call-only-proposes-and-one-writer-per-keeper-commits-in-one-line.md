@@ -241,10 +241,10 @@ type turn_line =
 | 받아들일 때 덧붙임이 실패한다 | 줄 없이 턴이 돈다. 카운터 `turn_log_append_failed` 가 오른다. 턴은 거절하지 않는다 |
 | 턴이 끝난다(완료, 오류, 취소, 예외) | 닫는 저장을 한 뒤 `Closed {outcome; after = 지금 끝자리}`. 저장이 실패하면 `Save_failed`, 이 턴의 메시지가 이력에 없으면 `Stale_save` 다 |
 | 끝날 때 덧붙임이 실패한다 | 더 하지 않는다. 다음 턴이나 다음 프로세스 시작이 닫는다 |
-| `Opened` 를 못 쓴 턴이 끝난다 | 쓰지 않는다. 이 턴이 닫은 것은 다음 단위가 싣는다 |
+| `Opened` 를 못 쓴 턴이 끝난다 | 쓰지 않는다. 이 턴이 닫은 것은 다음 단위가 싣는다. 턴은 받아들일 때 쓴 `Opened` 의 offset 을 끝까지 들고 간다. 꼬리의 열린 `Opened` 가 그 offset 이 아니면 쓰지 않는다 |
 | 프로세스가 시작한다. checkpoint 꼬리 복구가 끝났고 마지막 `Opened` 가 닫히지 않았다 | head 의 열린 메시지를 닫고(아래) `Closed {Process_exited}` 를 쓴다. Keeper 턴이 시작하기 전에 한다 |
 | 제품 경로가 head 를 줄이거나 바꾸려 한다 | 먼저 `Reset {Announced _; before; after; closed_before}` 를 쓴다. 덧붙임이 성공한 뒤에만 head 를 바꾼다 |
-| 줄을 쓰려는데 head 가 다른 trace 에 있거나, 마지막 끝자리보다 아래이거나, 해석되지 않는다 | 같은 덧붙임 안에서 자기 줄 앞에 `Reset {Unannounced; before = 그 끝자리; after = 지금 끝자리}`. 마지막 줄이 이미 같은 `after` 를 가진 `Unannounced` reset 이면 또 쓰지 않는다 |
+| 줄을 쓰려는데 head 가 다른 trace 에 있거나, 마지막 끝자리보다 아래이거나, 해석되지 않는다 | 같은 덧붙임 안에서 자기 줄 앞에 `Reset {Unannounced; before = 그 끝자리; after = 지금 head 의 빈 끝자리}`. 까닭은 표 아래에 적었다 |
 
 **턴 밖에서 줄을 쓰는 쪽은 head 의 열린 메시지를 먼저 닫는다.** 받아들임, 프로세스 시작 단계, head 를 줄이는 함수가 그렇다.
 head 에 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 열린 메시지가 없으면 저장하지 않는다.
@@ -261,6 +261,15 @@ head 에 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 �
 
 reset 줄의 `after` 는 앞 줄의 `after` 에서, 그 경로가 바꾼 저장소의 값만 지금 값으로 바꾼 것이다.
 
+**줄 쓰는 쪽이 본 `Unannounced` reset 의 `after` 는 지금 head 의 빈 끝자리다.** 그 trace 에 닫힌 메시지가 0 인 끝자리다. 다른 저장소의 값은 `before` 그대로다.
+
+- 다음 단위는 지금 head 가 가진 닫힌 메시지를 처음부터 싣는다. `Opened` 를 못 쓴 턴이 새 head 에서 닫은 것도, 받아들임이 닫은 것도 빠지지 않는다.
+- `after` 를 지금 끝자리로 두면 그 메시지들이 줄 없이 지나간다. 지우기 표의 「넣은 것은 다음 줄이 싣는다」와도 어긋난다.
+- 대가가 하나 있다. head 가 앞부분을 그대로 둔 채 줄어든 것이었으면 그 앞부분이 한 번 더 든다. 알리지 않은 변경은 어느 쪽인지 가릴 수 없어서 빠뜨리지 않는 쪽을 고른다.
+- 해석되지 않는 head 는 그 trace 의 빈 head 로 센다. checkpoint 버전이 바뀌어 옛 head 를 읽지 못하는 턴(`Saved_history_superseded`)이 여기 든다. 받아들일 때 이 줄이 쓰이고, 그 턴의 첫 저장이 head 를 새 이력으로 바꾼다. 그 턴이 닫은 것은 `own` 에 든다.
+- head 를 읽다가 I/O 가 실패한 것은 해석되지 않는 것이 아니다. 그때는 줄 없이 턴이 돈다.
+- 빈 끝자리 뒤에는 같은 head 가 그 아래일 수 없다. 그래서 이 줄은 되풀이되지 않는다.
+
 head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, 끊긴 곳 뒤를 버리는 purge, session 을 지우는 정지다. 셋 다 줄을 먼저 쓰고, 덧붙임이 성공한 뒤에만 head 를 건드린다.
 앞의 둘은 함수 하나를 지난다. 그 함수는 head 변경이 거절할 수 있는 조건을 먼저 다 보고, 줄을 쓰고, head 를 바꾼다.
 
@@ -275,7 +284,7 @@ head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, �
   | 바꿀 것이 없다 | 쓰지 않는다 |
 - 끊긴 곳 뒤를 버리는 purge(recovering purge). 규칙은 `keeper_checkpoint_purge.ml:391-428` 에 있다. dashboard(`server_dashboard_http_keeper_api_checkpoints.ml:612`)와 CLI(`bin/masc_checkpoint_purge.ml:251`) 두 군데서 들어온다. `Announced Recovered` 를 쓴다. 지금은 두 진입이 head 를 다르게 넣는다. dashboard 는 compare-and-swap 이고 CLI 는 watermark 저장이다. 함수 하나를 지나게 하면서 CLI 를 compare-and-swap 으로 옮긴다.
 - session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` 를 쓴다.
-  - 정지는 이 줄을 매번 쓴다. 「같은 `after` 의 줄이 이미 있으면 또 쓰지 않는다」(위 표)를 여기에는 쓰지 않는다. 그 규칙은 head 를 본 쪽의 것이고, 정지는 head 를 없애는 쪽이다.
+  - 정지는 이 줄을 매번 쓴다. 위 표의 줄은 head 가 마지막 끝자리 아래일 때만 쓰인다. 정지는 head 를 없애는 쪽이라 마지막 끝자리가 이미 비어 있어도 쓴다.
   - 덧붙임이 실패하면 지우지 않는다. 정지는 그 단계가 실패했다고 알린다.
   - 줄을 쓴 뒤에 지우지 못했거나 그사이 프로세스가 죽으면 head 가 남는다. 다음 단위는 빈 끝자리에서 시작해 그 이력을 한 번 더 싣는다.
   - 버리는 내용은 디렉터리와 함께 없어진다. 그래서 조각으로 가리키지 않는다. 읽는 쪽은 그 줄을 `Unknown_span` 으로 적는다(§5.4).
@@ -325,7 +334,7 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 - `Close_missing` 이나 `Process_exited` 로 닫힌 턴의 `own` 은 「이 턴이 닫았다」가 아니라 「이 턴을 받아들인 뒤에 닫혔다」는 뜻이다. 질문에 그렇게 적는다.
 
 이 규칙이면 어느 head 가 닫은 메시지든 빠지지 않고 단위에 든다. 줄을 못 쓴 턴이 닫은 것, 늦게 들어온 저장, 꼬리 복구가 닫은 것도 같다.
-두 번 드는 것은 둘뿐이다. 지우기가 남긴 System 메시지(§5.6), 그리고 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이다. 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
+두 번 드는 것은 셋뿐이다. 지우기가 남긴 System 메시지(§5.6)가 하나다. 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이가 둘이다. 알리지 않고 줄어든 head 가 그대로 둔 앞부분이 셋이다(§5.2). 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
 
 단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 메시지가 그다음이다.
 항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
@@ -1798,7 +1807,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a1 | 턴 기록의 줄: 줄 타입(자기 모듈 타입만, `Keeper_turn_log`), codec(`Keeper_turn_log_codec`), 줄이 단위를 어디서 끝내는가(§5.3 의 표), 받아들이는 줄 순서(§5.2 끝). 파일을 읽거나 쓰지 않는다. 턴을 깨운 것(`stimuli`)은 L3a3 이 event queue 를 바꾸는 함수와 함께 더한다 | 줄 모양마다 왕복 시험과 글로 박은 모양. 표의 세 행. 순서 규칙의 오류 다섯. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다 |
 | L3a2 | 턴 기록의 파일(`Keeper_turn_log_store`): 꼬리 읽기와 끝을 확인하는 덧붙임. 꼬리는 끝에서 뒤로 필요한 줄까지만 읽는다. 단위를 끝낸 마지막 줄과 마지막 `Opened` 나 `Closed` 다. 메모리에 두는 것은 없다 | 줄 종류마다 꼬리가 말하는 것. 한 번의 덧붙임에 두 줄. 낡은 끝으로 덧붙이면 아무것도 쓰지 않는다. 끊긴 조각은 줄이 아니고 다음 덧붙임이 잘라 낸다. 해석 안 되는 줄이 꼬리에 있으면 덧붙이지 않는다 |
 | L3a2b | 닫힌 메시지 세기와 slice(`Keeper_turn_log_marks`): head 의 segment 와 닫힌 턴이 가진 메시지 수, 그리고 메시지 번호 둘 사이를 bundle 조각으로 적는 함수. object 를 읽지 않는다. 범위가 head 앞에서 시작하면 부르는 쪽이 앞 segment 를 읽어 붙인다 | 열린 메시지는 세지 않는다. 턴 안에서 시작하고 끝나는 범위. 턴을 어떻게 나눠도 같은 범위가 같은 메시지를 가리킨다(purge 가 bundle 을 합친 뒤에도 같다) |
-| L3a3 | 끝자리 잡기(official-client 파일 둘의 마지막 줄바꿈, chat 바이트, 외부 행 수)와 Agent-Core 턴 경로에 걸기(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 속성 시험 T1(§13 F1). 끝나는 길마다 `Closed` 가 정확히 하나. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L3a3a | 턴 경로가 쓸 줄을 정하는 순수 함수(`Keeper_turn_log_writer.plan`): 읽은 꼬리, 지금 끝자리, 일어난 일(받아들임, 끝남, 프로세스 시작)에서 한 번에 덧붙일 줄을 낸다. 덧붙임은 마지막 줄의 offset 을 돌려주고 턴이 그것을 끝까지 든다 | 속성 시험 T1 의 턴 경로 부분(§13 F1). 받아들임, 끝남, 프로세스 재시작, 잃은 덧붙임, 실패한 저장, 바뀐 head 를 깊이 8 까지 모든 순서로 섞는다. 덧붙일 때마다 줄의 순서, 「닫힌 메시지가 한 번씩 순서대로 이름 붙는다」, 「`own` 은 그 턴이 열린 것으로 보였을 때 닫힌 것이다」를 본다. 수로 보이지 않는 head 교체는 세고 따라가지 않는다 |
+| L3a3b | 끝자리 잡기(official-client 파일 둘의 마지막 줄바꿈, chat 바이트, 외부 행 수)와 Agent-Core 턴 경로에 걸기(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 끝나는 길마다 `Closed` 가 정확히 하나. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |

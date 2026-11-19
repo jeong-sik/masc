@@ -82,9 +82,9 @@ let browser_lane_fixed_rows ~connection_rows view =
 let browser_picker_frame_rows connection_rows = 4 + List.length connection_rows
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
-  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
   let connection_rows = browser_lane_connection_rows view in
-  max 0 (framed_content_height ~rows:body_rows - browser_lane_fixed_rows ~connection_rows view)
+  max 0 (budget - browser_lane_fixed_rows ~connection_rows view)
 
 let browser_lane_scroll_limit state ~terminal_rows ~cols view =
   let room = browser_lane_visible_rows state ~terminal_rows view in
@@ -310,8 +310,8 @@ let browser_history_fixed_rows = 5
 
 let browser_history_scroll_limit state ~terminal_rows ~cols history =
   let view = Browser_history.page_view history in
-  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let room = max 0 (framed_content_height ~rows:body_rows - browser_history_fixed_rows) in
+  let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
+  let room = max 0 (budget - browser_history_fixed_rows) in
   max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
 
 let render_browser_history (state : state) (history : Browser_history.t) =

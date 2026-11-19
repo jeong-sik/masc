@@ -40653,7 +40653,8 @@ Use relative paths for resources already held in the package. -->
               && Option.is_some state.workspace_activity_context_scroll ->
            let terminal_rows, cols = get_terminal_size () in
            let count = List.length (workspace_activity_context_lines state ~cols) in
-           let height = workspace_activity_context_height state ~surface_rows:(surface_body_rows state ~terminal_rows) in
+           let height = workspace_activity_context_height state
+             ~budget:(Masc_tui_render_prim.surface_chrome_budget ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
            let maximum = max 0 (count - height) in
            let old = match state.workspace_activity_context_scroll with Some scroll -> max 0 (min maximum scroll) | None -> 0 in
            let next = match move with
@@ -40716,9 +40717,8 @@ Use relative paths for resources already held in the package. -->
                  | _ ->
                      let step = match key with
                        | "pageup" | "pagedown" ->
-                           (* Match the status surface's five chrome rows after
-                              composer/agenda space has been reserved. *)
-                           max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+                           Masc_tui_render_prim.surface_chrome_budget
+                             ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows
                        | _ -> 1
                      in
                      let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in

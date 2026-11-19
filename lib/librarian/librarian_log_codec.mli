@@ -21,9 +21,9 @@
 
     A fact is written as the snapshot writes it, a mark as a turn log line
     writes it, and the claim of an op that was left out as the answer writes
-    it. A basis is written by the fact codec, which raises [Invalid_argument]
-    on a derivation that {!Keeper_memory_os_types.derived} refuses. A write
-    the plan answered with [Writes] has none. *)
+    it. The fact codec raises [Invalid_argument] on a blank claim, a time that
+    is not finite, and a derivation {!Keeper_memory_os_types.derived} refuses.
+    A commit whose effects a plan made has none of them. *)
 
 val to_json : Librarian_log.line -> Yojson.Safe.t
 

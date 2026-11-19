@@ -558,7 +558,7 @@
  (name masc_tui_lane_standing)
  (wrapped false)
  (modules masc_tui_lane_standing)
- (libraries masc_tui_theme masc_tui_terminal_palette))
+ (libraries masc_tui_theme masc_tui_terminal_palette masc_tui_value))
 
 (library
  (name masc_tui_lane_records)

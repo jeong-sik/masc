@@ -2,15 +2,18 @@ type t = Ready | Configured | Waiting | Changing | Failing | Off | Not_set_up | 
 
 let all = [ Ready; Configured; Waiting; Changing; Failing; Off; Not_set_up; Unobserved ]
 
-(* The marks the rest of the TUI already draws: ● done, ◌ pending, ✗ failed,
-   ○ empty. *)
+(* The status marks of RFC tui-one-screen-grammar 7.2, one meaning each:
+   ● ready, ◐ changing, ○ waiting, ‖ turned off, ✕ failing. A lane with nothing
+   set up has no value, so it wears the confirmed-none mark [—], and one whose
+   state could not be read the unknown mark [?] (6.4). *)
 let mark = function
-  | Ready | Configured -> "●"
-  | Waiting -> "◌"
-  | Changing -> "◐"
-  | Failing -> "✗"
-  | Off | Not_set_up -> "○"
-  | Unobserved -> "?"
+  | Ready | Configured -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Changing -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Waiting -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
+  | Off -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Paused
+  | Failing -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+  | Not_set_up -> Masc_tui_theme.Glyph.no_value
+  | Unobserved -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let word ~korean standing =
   match standing with
@@ -21,14 +24,13 @@ let word ~korean standing =
   | Failing -> if korean then "실패" else "failing"
   | Off -> if korean then "꺼짐" else "off"
   | Not_set_up -> if korean then "미설정" else "not set up"
-  | Unobserved -> if korean then "미관측" else "unknown"
+  | Unobserved -> if korean then "못 읽음" else "not read"
 
 let status : t -> Masc_tui_theme.status = function
   | Ready -> Ok
-  | Waiting -> Warn
   | Configured | Changing -> Info
   | Failing -> Bad
-  | Off | Not_set_up | Unobserved -> Muted
+  | Waiting | Off | Not_set_up | Unobserved -> Muted
 
 let colour standing =
   Masc_tui_theme.status_readable ~surface:Masc_tui_theme.Page

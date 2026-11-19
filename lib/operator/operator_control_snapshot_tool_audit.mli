@@ -9,22 +9,20 @@ type tool_audit =
   }
 
 (** What one read of a Keeper's tool audit produced. An audit that was read
-    and holds no tool call is [Read] with empty fields; the other two cases
-    say nothing about what the Keeper called. *)
+    and holds no tool call is [Read] with empty fields; [Unreadable] says
+    nothing about what the Keeper called. *)
 type read =
   | Read of tool_audit
-  | Timed_out
-      (** The projection cache closed its compute window, or its timeout
-          circuit for this Keeper is open. Only a [Reuse] read can time out. *)
   | Unreadable of string
       (** The metrics store could not be read. The text is diagnostic data;
           consumers branch on the constructor. *)
 
-val read :
-  read_policy:Dashboard_projection_read.t ->
-  Workspace.config -> Keeper_meta_contract.keeper_meta -> read
-(** [Current] reads the actual metrics store; [Reuse] permits the existing
-    per-Keeper projection cache. *)
+val read : Workspace.config -> Keeper_meta_contract.keeper_meta -> read
+(** The audit the Keeper's metrics store holds now: two facts the store keeps
+    in memory in the process that writes it ({!Keeper_status_metrics.newest_metrics_lines_result},
+    {!Keeper_status_metrics.latest_tool_audit_snapshot_from_files}). A process
+    that does not keep them reads the store's files on each call. The read
+    has no cache of its own and takes no read policy. *)
 
 val row_fields : read -> (string * Yojson.Safe.t) list
 (** The audit fields of an operator snapshot Keeper row. {!Keeper_status_metrics.tool_audit_read_field} carries the read state and

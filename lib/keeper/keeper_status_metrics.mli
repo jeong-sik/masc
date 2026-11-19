@@ -28,11 +28,10 @@ val summarize_metrics_lines : string list -> metrics_summary
     as JSON are reported through the persistence read-drop surface; rows of an
     unknown record kind are skipped without counting. *)
 (** What a published tool audit says about its own read. An audit that was
-    read and holds no tool call is [Tool_audit_read]; the other two say
-    nothing about what the Keeper called. *)
+    read and holds no tool call is [Tool_audit_read]; [Tool_audit_unreadable]
+    says nothing about what the Keeper called. *)
 type tool_audit_read_state =
   | Tool_audit_read
-  | Tool_audit_timed_out
   | Tool_audit_unreadable
 
 val tool_audit_read_field : string
@@ -42,7 +41,7 @@ val tool_audit_read_error_field : string
 (** The JSON field that carries the diagnostic of an unreadable audit. *)
 
 val tool_audit_read_state_to_wire : tool_audit_read_state -> string
-(** ["read"], ["timed_out"] or ["unreadable"]. *)
+(** ["read"] or ["unreadable"]. *)
 
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :

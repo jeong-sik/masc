@@ -57,6 +57,13 @@ val recede : surface:surface -> Masc_tui_terminal_palette.t option -> string
     foreground, so callers must close an enclosing dim span before using it.
     Disabled colours produce [""] rather than a colour override. *)
 
+val border_muted : surface:surface -> Masc_tui_terminal_palette.t option -> string
+(** Non-text hairline colour for unfocused panel borders, card frames, and
+    horizontal rules. On Truecolor terminals, steps the foreground further
+    toward [surface]'s ground down to a 2.2:1 hairline floor so structural
+    chrome sits behind secondary text instead of competing with it. Falls back
+    to {!recede} on non-Truecolor capabilities and to [""] under NO_COLOR. *)
+
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is
     about a colour (a diff background) rather than a reading of state. *)
@@ -490,6 +497,24 @@ module For_testing : sig
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for {!val:selection_style}. *)
+
+  val border_muted_rgb
+    :  foreground:Masc_tui_terminal_palette.rgb
+    -> background:Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb option
+  (** Pure hairline blend: foreground stepped further toward background down
+      to the 2.2:1 non-text border floor. *)
+
+  val border_muted
+    :  colors_enabled:bool
+    -> default_foreground:string
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:border_muted}. *)
 end
 
 val selection : string

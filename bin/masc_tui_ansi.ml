@@ -142,6 +142,7 @@ module Theme = struct
        whole row is the quiet thing. Measured against the same ground as the
        hues above, because a quiet row on a side pane sits on that pane. *)
     ; recede : string
+    ; border_muted : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -226,6 +227,7 @@ module Theme = struct
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
         ; recede = Masc_tui_theme.recede ~surface palette
+        ; border_muted = Masc_tui_theme.border_muted ~surface palette
         }
       in
       if Atomic.compare_and_set cache previous (Some next) then next
@@ -303,6 +305,7 @@ module Theme = struct
      to focus, so it is [info] and goes through the same lift: a raw bright
      cyan reads under 4.5:1 in 11 of the 53 bundled themes. *)
   let border_focus () = (resolved ()).info
+  let border_muted () = (resolved ()).border_muted
 
   let recede () = (resolved ()).recede
 
@@ -370,6 +373,7 @@ module Theme = struct
     let bad () = (resolved ()).bad
     let info () = (resolved ()).info
     let recede () = (resolved ()).recede
+    let border_muted () = (resolved ()).border_muted
 
     (* The two next-action colours that are not a health reading. A keeper
        about to be probed is not unwell, and one a person just spoke to is not
@@ -403,7 +407,7 @@ module Theme = struct
     (* The rule between sections and the border of a fence divide a document
        the way a panel border divides a screen, so they take the panel
        border's colour. *)
-    let rule () = recede ()
+    let rule () = border_muted ()
 
     (* A served JSON payload has one role per thing a reader distinguishes,
        because a payload drawn in one colour is the wall of text the tool tree
@@ -963,12 +967,11 @@ let ctx_color ratio =
    side-by-side panes still need it: a border is what separates an overlay
    from the surface under it, and two panes from each other.
 
-   The border is drawn in [Theme.recede], the colour the pane borders and
-   rules beside it already use, and not in the flat grey SGR 90. On a terminal
-   that reports its palette that grey is the terminal's own bright black, which
-   is 1.69:1 against Nord's background; [recede] is projected onto the reported
-   palette and held at 4.5:1. On a terminal that reports none, [recede] is the
-   default foreground, as it is for every pane border. *)
+   The border is drawn in [Theme.border_muted], a Truecolor non-text hairline
+   held at a 2.2:1 contrast floor so structural chrome sits calmly behind
+   secondary text instead of competing with it. On non-Truecolor capabilities
+   it falls back to [Theme.recede] (4.5:1), and on a terminal that reports no
+   palette it falls back to the default foreground. *)
 
 (* The box's measurements live in [Masc_tui_frame] so the helpers that draw
    it and the callers that measure against it read one set. *)
@@ -979,15 +982,15 @@ let framed_content_height ~rows = Masc_tui_frame.content_height ~rows
 
 let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_tl_round (draw_hline (framed_rule_width cols)) Ansi.box_tr_round Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_tl_round (draw_hline (framed_rule_width cols)) Ansi.box_tr_round Ansi.reset)
 
 let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_bl_round (draw_hline (framed_rule_width cols)) Ansi.box_br_round Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_bl_round (draw_hline (framed_rule_width cols)) Ansi.box_br_round Ansi.reset)
 
 let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
+    (Theme.border_muted ()) Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
 
 (* What an overlay draws between its border glyph and the content, and what
    a borderless row draws in the border's place. Both come from the frame's
@@ -1005,7 +1008,7 @@ let add_row buf pieces =
 
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; fit_width content inner
@@ -1014,14 +1017,14 @@ let framed_line buf cols content =
 let framed_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
     ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
-  let edge = Theme.recede () in
+  let edge = Theme.border_muted () in
   add_row buf
     [ edge; Ansi.box_v; Ansi.reset; border_padding
     ; String.make inner ' '
@@ -1036,14 +1039,12 @@ let framed_empty buf cols =
 let box_top buf _cols = Buffer.add_char buf '\n'
 let box_bottom buf _cols = Buffer.add_char buf '\n'
 
-(* The receded colour, not a flat grey. [Theme.recede] projects onto the
-   probed palette and holds a 4.5:1 contrast floor. So on a terminal that
-   reports one, this rule used to sit at whatever grey the SGR table happened
-   to give -- which can be the background -- while the rules the surfaces
-   draw beside it were receded. *)
+(* The muted hairline colour, not a flat grey. [Theme.border_muted] projects
+   onto the active palette and holds a 2.2:1 non-text contrast floor on
+   Truecolor, falling back to [Theme.recede] otherwise. *)
 let box_divider buf cols =
   Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.recede ())
+    (Printf.sprintf "%s%s%s%s%s\n" frame_margin (Theme.border_muted ())
        (draw_hline (framed_inner_width cols)) Ansi.reset frame_margin)
 
 (* Rows keep the framed geometry -- the frame's margin each side, content

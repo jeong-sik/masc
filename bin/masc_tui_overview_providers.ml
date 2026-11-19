@@ -1142,7 +1142,7 @@ let group_heading ?note ~width section entries =
         note
   in
   if title_cells + 4 <= width then
-    [ heading ^ Theme.recede () ^ " " ^ draw_hline (width - title_cells - 1) ^ Ansi.reset ]
+    [ heading ^ Theme.border_muted () ^ " " ^ draw_hline (width - title_cells - 1) ^ Ansi.reset ]
   else if title_cells <= width then [ heading ]
   else
     wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section) title
@@ -1304,7 +1304,7 @@ let account_card ~tone ~layout entry =
    across the screen. *)
 let draw_card_rows ~ko ~width ~tone entries =
   let style =
-    { Masc_tui_card.border = Theme.recede ()
+    { Masc_tui_card.border = Theme.border_muted ()
     ; focused_border = Theme.border_focus ()
     ; title_style = Ansi.bold ^ tone
     ; reset = Ansi.reset

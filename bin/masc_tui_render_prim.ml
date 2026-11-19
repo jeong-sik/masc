@@ -2364,7 +2364,7 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
-       let edge = Theme.recede () in
+       let edge = Theme.border_muted () in
        Buffer.add_string buf
          (edge ^ Ansi.box_bl_round ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
           ^ edge ^ draw_hline remaining ^ Ansi.box_br_round ^ Ansi.reset ^ "\n"));
@@ -2891,7 +2891,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
             then (if ko then "현재 대화" else "Current conversation")
             else (if ko then "선택한 키퍼" else "Selected Keeper")
           in
-          [ Theme.Side_pane.recede (), rule
+          [ Theme.Side_pane.border_muted (), rule
           ; Theme.Side_pane.recede (), "  " ^ label
           ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
               (Terminal_text.single_line keeper.k_name)
@@ -3052,7 +3052,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
   draw ~style:(Theme.Side_pane.recede ())
     (sidebar_heading ~cols ~title
        ~count:(list_count_text ~loaded:(List.length labels) ~holding));
-  draw ~style:(Theme.Side_pane.recede ()) (sidebar_rule ~cols);
+  draw ~style:(Theme.Side_pane.border_muted ()) (sidebar_rule ~cols);
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     match selection with
@@ -7042,15 +7042,16 @@ let models_source_account_reading ~provider reading =
 let studio_panel ~width ~title ~lines =
   let inner = max 1 (width - 4) in
   let heading = Message_layout.truncate_middle inner title in
+  let edge = Theme.border_muted () in
   let border left right =
-    Theme.recede () ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
+    edge ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
   [ Theme.info () ^ "┌ " ^ heading ^ " "
     ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
     ^ "┐" ^ Ansi.reset ]
   @ List.map (fun line ->
-      Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
-      ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
+      edge ^ "│ " ^ Ansi.reset ^ fit_width line inner
+      ^ edge ^ " │" ^ Ansi.reset) lines
   @ [ border "└" "┘" ]
 
 let detail_heading_rows ~first lines =

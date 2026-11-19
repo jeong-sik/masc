@@ -1951,7 +1951,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
       ~push_selected:(fun text ->
         collect (Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
       ~push_divider:(fun () ->
-        collect (Theme.recede () ^ draw_hline fact_inner_cols ^ Ansi.reset))
+        collect (Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect "");
     let ko = state.ui_language = Lang_ko in
     let count category = Option.bind (memory_facts_snapshot state)
@@ -1959,7 +1959,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let header =
       [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
       ; Theme.recede () ^ (if ko then "c/C:이동 · 클릭:선택" else "c/C:move · click:select") ^ Ansi.reset
-      ; Theme.recede () ^ draw_hline width ^ Ansi.reset
+      ; Theme.border_muted () ^ draw_hline width ^ Ansi.reset
       ]
     in
     let height = max 0 (budget - List.length header) in
@@ -2017,7 +2017,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts_window = Rows.of_list ~first:0 ~height facts in
     for index = 0 to height - 1 do
       let cell window = Option.value (Rows.at window index) ~default:"" in
-      push (fit_width (cell rail_window) width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+      push (fit_width (cell rail_window) width ^ Theme.border_muted () ^ " │ " ^ Ansi.reset
         ^ fit_width (cell facts_window) fact_inner_cols)
     done
   end

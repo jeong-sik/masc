@@ -71,6 +71,16 @@ let recede_rgb ~foreground ~background =
     ~max_ratio:recede_max_ratio foreground
 ;;
 
+(* Non-text structural hairlines (unfocused card borders, overlay frames,
+   horizontal rules) sit behind secondary text so content leads the eye. *)
+let border_muted_max_ratio = 0.72
+let border_muted_contrast_floor = 2.2
+
+let border_muted_rgb ~foreground ~background =
+  Color.recede_toward ~background ~floor:border_muted_contrast_floor
+    ~max_ratio:border_muted_max_ratio foreground
+;;
+
 (* How far the reader's own row is set apart from the page behind it. A light
    page darkens by a little and a dark page lightens by more, because the same
    step reads as less against a dark ground. *)
@@ -123,6 +133,35 @@ let recede_for ~colors_enabled ~default_foreground ~project ~surface palette =
              >= recede_contrast_floor
           then projected_foreground ~colors_enabled (Some projected)
           else default_foreground
+;;
+
+let border_muted_for ~colors_enabled ~default_foreground ~project ~surface
+    palette =
+  if not colors_enabled then ""
+  else
+    match palette with
+    | None -> default_foreground
+    | Some pal ->
+      let background = surface_background surface pal in
+      let fallback () =
+        recede_for ~colors_enabled ~default_foreground ~project ~surface
+          palette
+      in
+      (match
+         border_muted_rgb ~foreground:(Terminal_palette.foreground pal)
+           ~background
+       with
+       | None -> fallback ()
+       | Some blended ->
+         (match project blended with
+          | Some projected ->
+            (match Terminal_palette.direct_rgb projected with
+             | Some rgb
+               when Color.contrast_ratio rgb background
+                    >= border_muted_contrast_floor ->
+               projected_foreground ~colors_enabled (Some projected)
+             | Some _ | None -> fallback ())
+          | None -> fallback ()))
 ;;
 
 let user_message_background_for ~colors_enabled ~project palette =
@@ -229,6 +268,11 @@ let side_pane_background palette =
 
 let recede ~surface palette =
   recede_for ~colors_enabled ~default_foreground:Sgr.default_fg
+    ~project:Terminal_palette.best_color ~surface palette
+;;
+
+let border_muted ~surface palette =
+  border_muted_for ~colors_enabled ~default_foreground:Sgr.default_fg
     ~project:Terminal_palette.best_color ~surface palette
 ;;
 
@@ -861,6 +905,8 @@ module For_testing = struct
   let meter_cell_readable = meter_cell_readable_for
   let ramp_style = ramp_style_for
   let selection_style = selection_style_for
+  let border_muted_rgb = border_muted_rgb
+  let border_muted = border_muted_for
 end
 
 let ansi_readable ~surface palette color =

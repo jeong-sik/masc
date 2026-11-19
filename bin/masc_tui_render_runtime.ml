@@ -1288,14 +1288,15 @@ let provider_history_lines ~cols ~rows (state : state) =
           @ daily
           @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
         let heading = Message_layout.truncate_middle inner name in
-        let line text = Theme.recede () ^ Ansi.box_v ^ Ansi.reset ^ " "
-          ^ Message_layout.fit_width text inner ^ " " ^ Theme.recede () ^ Ansi.box_v ^ Ansi.reset in
+        let edge = Theme.border_muted () in
+        let line text = edge ^ Ansi.box_v ^ Ansi.reset ^ " "
+          ^ Message_layout.fit_width text inner ^ " " ^ edge ^ Ansi.box_v ^ Ansi.reset in
         if bare then body else
           (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
            ^ " " ^ draw_hline (max 0 (card_width - Message_layout.display_width heading - 4))
            ^ Ansi.box_tr ^ Ansi.reset)
           :: List.map line body
-          @ [Theme.recede () ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
+          @ [edge ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
       in
       let prefix = String.make indent ' ' in
       let rec arrange = function

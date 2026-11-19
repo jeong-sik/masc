@@ -102,7 +102,8 @@ agent-core 도 그 요청을 보내지 않는다.
 
 - pi: 「one compact-and-retry recovery attempt」. 그것도 실패하면 다시 보내지 않는다.
 - OpenClaw: 줄여서 다시 보낸다. 그래도 안 들어가면 /reset, /new, 더 큰 창의 모델을 권한다.
-- Hermes: 「one bounded attempt」(`max_compression_attempts`). https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching
+- Hermes: provider 가 거절한 뒤에는 「one bounded attempt」(`max_compression_attempts`)만 다시 줄인다. https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching
+  - 보내기 전에 줄일 것이 없는데 창을 넘으면 보내지 않는다. 새 세션(`/new`)을 권하며 턴을 끝낸다. https://hermes-agent.nousresearch.com/docs/user-guide/configuration
 
 ## 5. 층
 

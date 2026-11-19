@@ -82,10 +82,17 @@ let starts_on_its_own (row : Masc_tui_keeper_list_model.row) =
       | Reading.Activation_manual | Reading.Activation_on_demand -> false)
   | None -> false
 
+let offline_unexpectedly row =
+  match Masc_tui_keeper_list_model.primary_activity_of_row row with
+  | Masc_tui_keeper_list_model.Offline -> starts_on_its_own row
+  | Paused | Held_call | Question | Confirmation | Attempt_failed | Preparing | Streaming
+  | Running | Async_working _ | Deferred | Tool_waiting | Model_waiting | Delegate_result
+  | Verifying | External_waiting | Idle | Unknown -> false
+
 let row_activity_mark row =
   let activity = Masc_tui_keeper_list_model.primary_activity_of_row row in
   match activity with
-  | Masc_tui_keeper_list_model.Offline when starts_on_its_own row -> Some Status.Caution
+  | Masc_tui_keeper_list_model.Offline when offline_unexpectedly row -> Some Status.Caution
   | Offline | Paused | Held_call | Question | Confirmation | Attempt_failed | Preparing
   | Streaming | Running | Async_working _ | Deferred | Tool_waiting | Model_waiting
   | Delegate_result | Verifying | External_waiting | Idle | Unknown ->

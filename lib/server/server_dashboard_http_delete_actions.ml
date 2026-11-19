@@ -943,6 +943,23 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
   in
+  (* The Keeper's Memory writer holds its commit log and the writer lock, and
+     writes the snapshot. It follows the Keeper registry, so it ends only for
+     a Keeper that is out of it (RFC librarian-call-only-proposes §9.5). *)
+  let memory_writer_ended () =
+    match Keeper_memory_writers.find ~base_path:config.Workspace.base_path with
+    | None -> Ok ()
+    | Some writers ->
+      (match Librarian_writers.retire writers keeper_name with
+       | Librarian_writer.Retired_now -> Ok ()
+       | Librarian_writer.Still_registered ->
+         Error
+           "the Keeper is in the Keeper registry, so its Memory writer goes on and its files \
+            are not removed")
+  in
+  match memory_writer_ended () with
+  | Error _ as registered -> registered
+  | Ok () ->
   (* The files go one by one, so a purge that stopped part way, by an error or
      an exception, has still changed the Keeper's memory health row
      (RFC-0487) and removed files of its dated JSONL stores and its decision

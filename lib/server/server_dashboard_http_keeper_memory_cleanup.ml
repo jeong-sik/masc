@@ -1,8 +1,8 @@
 (** Admin-only exact cleanup boundaries for Keeper-owned derived state. *)
 
 module Http = Http_server_eio
-module Current = Keeper_memory_os_current
 module Context = Keeper_librarian_context
+module Unwritable = Keeper_tool_memory_validation
 
 open Result.Syntax
 let permission = Masc_domain.CanAdmin
@@ -28,11 +28,14 @@ let route path =
     | _ -> None
 ;;
 
+type retraction =
+  { memory_id : string
+  ; reason : string
+  }
+
 type current_memory_request =
   { plan_id : string
-  ; expected_revision : int
-  ; expected_snapshot_sha256 : string
-  ; retractions : Current.retraction list
+  ; retractions : retraction list
   }
 
 type working_context_request =
@@ -115,18 +118,8 @@ let parse_json body =
 let parse_current_memory_request body =
   let* json = parse_json body in
   let* fields = object_fields "request" json in
-  let* () =
-    exact_fields
-      [ "expected_revision"
-      ; "expected_snapshot_sha256"
-      ; "plan_id"
-      ; "retractions"
-      ]
-      fields
-  in
+  let* () = exact_fields [ "plan_id"; "retractions" ] fields in
   let* plan_id = nonempty_trimmed_string "plan_id" fields in
-  let* expected_revision = positive_int "expected_revision" fields in
-  let* expected_snapshot_sha256 = snapshot_sha256 fields in
   let* rows = list_field "retractions" fields in
   if rows = []
   then Error "retractions must be a non-empty array"
@@ -149,10 +142,10 @@ let parse_current_memory_request body =
               (Set_util.StringSet.add memory_id seen)
               rest
           in
-          Ok (Current.{ memory_id; reason } :: tail)
+          Ok ({ memory_id; reason } :: tail)
     in
     let* retractions = decode 0 Set_util.StringSet.empty rows in
-    Ok { plan_id; expected_revision; expected_snapshot_sha256; retractions }
+    Ok { plan_id; retractions }
 ;;
 
 let parse_working_context_request body =
@@ -226,40 +219,103 @@ let respond_error request reqd ~status ~code detail =
        ])
 ;;
 
+type retraction_result =
+  | Retraction_committed of Librarian_log.commit
+  | Retraction_not_current
+
+type retractions_outcome =
+  { answered : (retraction * retraction_result) list
+  ; stopped : (retraction * Unwritable.memory_unwritable) option
+  }
+
+(* Each retraction is one direct write to the Keeper's Memory writer, in the
+   order of the request, on the trace [plan_id]. The first one the writer
+   does not take ends the request: the ones before it are committed, and
+   sending the request again finds them not current. *)
+let retract_through_writer ~base_path ~keeper ~actor (parsed : current_memory_request) =
+  let stopped_at retraction why answered =
+    { answered = List.rev answered; stopped = Some (retraction, why) }
+  in
+  match Keeper_memory_writers.find ~base_path with
+  | None ->
+    (match parsed.retractions with
+     | [] -> { answered = []; stopped = None }
+     | first :: _ -> stopped_at first Unwritable.No_writer_in_process [])
+  | Some writers ->
+    let rec next answered = function
+      | [] -> { answered = List.rev answered; stopped = None }
+      | ({ memory_id; reason } as retraction) :: rest ->
+        (match
+           Librarian_writers.write
+             writers
+             keeper
+             ~by:(Librarian_effects.Operator actor)
+             ~trace:parsed.plan_id
+             (Retract { id = memory_id; reason })
+         with
+         | Written commit -> next ((retraction, Retraction_committed commit) :: answered) rest
+         | Already_absent -> next ((retraction, Retraction_not_current) :: answered) rest
+         | Already_held | Already_done ->
+           stopped_at retraction Unwritable.Answer_of_another_write answered
+         | Refused refusal ->
+           stopped_at retraction (Unwritable.Refused_past_validation refusal) answered
+         | Not_a_snapshot refusal ->
+           stopped_at retraction (Unwritable.Not_a_snapshot refusal) answered
+         | Unavailable (Store_stopped stop) ->
+           stopped_at retraction (Unwritable.Store_stopped stop) answered
+         | Unavailable Keeper_retired ->
+           stopped_at retraction Unwritable.Keeper_not_registered answered)
+    in
+    next [] parsed.retractions
+;;
+
+(* A committed retraction says what left Memory in the two fields the
+   Keeper's retraction receipt uses. *)
+let retraction_json (({ memory_id; reason = (_ : string) } : retraction), result) =
+  match result with
+  | Retraction_not_current ->
+    `Assoc [ "memory_id", `String memory_id; "outcome", `String "not_current" ]
+  | Retraction_committed commit ->
+    `Assoc
+      ([ "memory_id", `String memory_id
+       ; "outcome", `String "retracted"
+       ; "revision", `Int commit.revision
+       ]
+       @ Keeper_tool_memory_runtime.removal_receipt commit.effects)
+;;
+
+(* A stopped store, a Keeper out of the registry and a process without
+   writers did not take the write. The rest cannot come from a retraction
+   this route parsed. *)
+let status_of_unwritable : Unwritable.memory_unwritable -> Httpun.Status.t = function
+  | Store_stopped _ | Keeper_not_registered | No_writer_in_process -> `Service_unavailable
+  | Refused_past_validation _ | Not_a_snapshot _ | Answer_of_another_write ->
+    `Internal_server_error
+;;
+
 let handle_current_memory state ~actor request reqd keeper_name body =
   match parse_current_memory_request body with
   | Error detail ->
     respond_error request reqd ~status:`Bad_request ~code:"invalid_request" detail
   | Ok parsed ->
     let config = Mcp_server.workspace_config state in
-    let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path
+    let outcome =
+      retract_through_writer
         ~base_path:config.Workspace.base_path
+        ~keeper:keeper_name
+        ~actor
+        parsed
     in
-    let now = Time_compat.now () in
-    (match
-       Current.retract_facts
-         ~pass:Keeper_memory_commit_pass.Operator_delete
-         ~keepers_dir
-         ~keeper_id:keeper_name
-         ~expected_revision:parsed.expected_revision
-         ~expected_snapshot_sha256:parsed.expected_snapshot_sha256
-         ~now
-         ~source:
-           { Current.kind = Current.Explicit_retract
-           ; trace_id = parsed.plan_id
-           }
-         parsed.retractions
-     with
-     | Ok snapshot ->
-       Log.Keeper.info
-         "admin current Memory retraction committed keeper=%s actor=%s plan_id=%s revision=%d direct=%d invalidated=%d"
-         keeper_name
-         actor
-         parsed.plan_id
-         snapshot.revision
-         (List.length parsed.retractions)
-         (List.length snapshot.change.invalidated);
+    let answered = "retractions", `List (List.map retraction_json outcome.answered) in
+    Log.Keeper.info
+      "admin current Memory retraction keeper=%s actor=%s plan_id=%s answered=%d of %d"
+      keeper_name
+      actor
+      parsed.plan_id
+      (List.length outcome.answered)
+      (List.length parsed.retractions);
+    (match outcome.stopped with
+     | None ->
        respond
          request
          reqd
@@ -267,107 +323,22 @@ let handle_current_memory state ~actor request reqd keeper_name body =
             [ "ok", `Bool true
             ; "keeper", `String keeper_name
             ; "plan_id", `String parsed.plan_id
-            ; "expected_revision", `Int parsed.expected_revision
-            ; ( "expected_snapshot_sha256"
-              , `String parsed.expected_snapshot_sha256 )
-            ; "revision", `Int snapshot.revision
-            ; "snapshot_sha256", `String (Current.snapshot_sha256 snapshot)
-            ; ( "retracted_memory_ids"
-              , `List
-                  (List.map
-                     (fun ({ Current.memory_id; _ } : Current.retraction) ->
-                        `String memory_id)
-                     parsed.retractions) )
-            ; ( "removed_memory_ids"
-              , `List
-                  (List.map
-                     (fun fact ->
-                        `String (Keeper_memory_os_types.memory_id fact))
-                     snapshot.change.removed) )
-            ; ( "support_invalidations"
-              , `List
-                  (List.map
-                     (fun (row : Current.support_invalidation) ->
-                        `Assoc
-                          [ ( "memory_id"
-                            , `String
-                                (Keeper_memory_os_types.memory_id row.fact) )
-                          ; ( "missing_premise_ids"
-                            , `List
-                                (List.map
-                                   (fun id -> `String id)
-                                   row.missing_premise_ids) )
-                          ])
-                     snapshot.change.invalidated) )
+            ; answered
             ])
-     | Error Current.Retract_batch_empty ->
-       respond_error request reqd ~status:`Bad_request ~code:"empty_retractions"
-         "retractions must be non-empty"
-     | Error (Current.Retract_batch_memory_id_invalid { index }) ->
-       respond_error request reqd ~status:`Bad_request ~code:"invalid_memory_id"
-         (Printf.sprintf "retractions[%d].memory_id is invalid" index)
-     | Error (Current.Retract_batch_reason_empty { index }) ->
-       respond_error request reqd ~status:`Bad_request ~code:"empty_reason"
-         (Printf.sprintf "retractions[%d].reason is empty" index)
-     | Error (Current.Retract_batch_duplicate_memory_id memory_id) ->
-       respond_error request reqd ~status:`Bad_request ~code:"duplicate_memory_id"
-         ("duplicate memory_id: " ^ memory_id)
-     | Error Current.Retract_batch_snapshot_sha256_invalid ->
-       respond_error request reqd ~status:`Bad_request
-         ~code:"invalid_expected_snapshot_sha256"
-         "expected_snapshot_sha256 is invalid"
-     | Error
-         (Current.Retract_batch_snapshot_conflict
-            { expected_revision
-            ; observed_revision
-            ; expected_snapshot_sha256
-            ; observed_snapshot_sha256
-            }) ->
+     | Some (({ memory_id; reason = (_ : string) } : retraction), why) ->
        respond
          request
          reqd
-         ~status:`Conflict
+         ~status:(status_of_unwritable why)
          (`Assoc
             [ "ok", `Bool false
-            ; "code", `String "snapshot_conflict"
-            ; "expected_revision", `Int expected_revision
-            ; ( "observed_revision"
-              , match observed_revision with
-                | None -> `Null
-                | Some value -> `Int value )
-            ; "expected_snapshot_sha256", `String expected_snapshot_sha256
-            ; ( "observed_snapshot_sha256"
-              , match observed_snapshot_sha256 with
-                | None -> `Null
-                | Some value -> `String value )
-            ])
-     | Error (Current.Retract_batch_fact_not_found memory_id) ->
-       respond_error request reqd ~status:`Conflict ~code:"memory_id_not_current"
-         ("memory_id is not current: " ^ memory_id)
-     | Error
-         (Current.Retract_batch_plan_evidence_pending
-            { plan_id
-            ; snapshot_revision
-            ; snapshot_sha256
-            ; detail
-            }) ->
-       respond
-         request
-         reqd
-         ~status:`Service_unavailable
-         (`Assoc
-            [ "ok", `Bool false
-            ; "code", `String "retraction_plan_evidence_pending"
-            ; "snapshot_committed", `Bool true
+            ; "code", `String "memory_unwritable"
+            ; "unwritable", `String (Unwritable.memory_unwritable_to_string why)
             ; "keeper", `String keeper_name
-            ; "plan_id", `String plan_id
-            ; "revision", `Int snapshot_revision
-            ; "snapshot_sha256", `String snapshot_sha256
-            ; "error", `String detail
-            ])
-     | Error (Current.Retract_batch_persistence_failed detail) ->
-       respond_error request reqd ~status:`Service_unavailable
-         ~code:"memory_store_unavailable" detail)
+            ; "plan_id", `String parsed.plan_id
+            ; "stopped_at_memory_id", `String memory_id
+            ; answered
+            ]))
 ;;
 
 let handle_working_context state ~actor request reqd keeper_name body =

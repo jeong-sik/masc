@@ -7,16 +7,26 @@
 
 open Keeper_memory_os_types
 
+(** Who made a direct write (RFC §8.5). *)
+type actor =
+  | Keeper (** The Keeper whose Memory it is, by its own tool call. *)
+  | Operator of string (** The operator's name. *)
+
 (** Why a fact left Memory. The fact itself stays on the commit line, so a
     removed claim can be found later together with what replaced it.
 
-    These are the removals an answer can cause. The two a Keeper's direct
-    write causes ([Superseded_by], [Retracted] in the RFC) are added with the
-    writer. *)
+    An answer causes [Dropped], [Merged_into] and [Revised_into]. A direct
+    write causes [Superseded_by] and [Retracted]. Either can cause
+    [Support_lost]. *)
 type removal =
   | Dropped of { reason : string }
   | Merged_into of string (** Memory id of the fact that now says it. *)
   | Revised_into of string
+  | Superseded_by of string (** Memory id of the claim written in its place. *)
+  | Retracted of
+      { by : actor
+      ; reason : string
+      }
   | Support_lost of { missing : string list }
   (** A derived fact whose premises are no longer in Memory. *)
 

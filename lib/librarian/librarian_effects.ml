@@ -1,10 +1,19 @@
 open Keeper_memory_os_types
 module Ids = Set_util.StringSet
 
+type actor =
+  | Keeper
+  | Operator of string
+
 type removal =
   | Dropped of { reason : string }
   | Merged_into of string
   | Revised_into of string
+  | Superseded_by of string
+  | Retracted of
+      { by : actor
+      ; reason : string
+      }
   | Support_lost of { missing : string list }
 
 type why_not =

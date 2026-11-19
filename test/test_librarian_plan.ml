@@ -64,6 +64,9 @@ let removal_text : Effects.removal -> string = function
   | Dropped { reason } -> "dropped: " ^ reason
   | Merged_into successor -> "merged into " ^ successor
   | Revised_into successor -> "revised into " ^ successor
+  | Superseded_by successor -> "superseded by " ^ successor
+  | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
+  | Retracted { by = Operator operator; reason } -> "retracted by " ^ operator ^ ": " ^ reason
   | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
 ;;
 

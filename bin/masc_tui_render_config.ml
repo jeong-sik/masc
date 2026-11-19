@@ -855,24 +855,28 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
   let name = Terminal_text.single_line receipt.psr_request.psp_name in
   let reason detail =
     P.detail (text "  원인 · " "  Reason · " ^ Terminal_text.single_line detail) in
+  (* Each outcome opens on its status mark (RFC tui-one-screen-grammar 7.2):
+     confirmed is settled, not sent and refused failed, an answer that never
+     came a caution. [✓] and [!] are not status marks. *)
+  let marked mark words = Masc_tui_value.Mark.glyph mark ^ " " ^ words in
   let outcome = match receipt.psr_result with
   | Ok _ ->
     [{ P.tone = P.Confirmed
-     ; text = text "✓ 프리셋 저장 확인 · " "✓ Preset save confirmed · " ^ name }]
+     ; text = marked Masc_tui_value.Mark.Settled (text "프리셋 저장 확인 · " "Preset save confirmed · ") ^ name }]
   | Error (Preset_save_not_sent detail) ->
-    [P.failure (text "! 프리셋 저장 미전송 · " "! Preset save not sent · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "프리셋 저장 미전송 · " "Preset save not sent · ") ^ name);
      reason detail]
   (* Kept back by the workspace guard: the notice alone, then the name. *)
   | Error (Preset_save_kept_back refusal) ->
     [P.failure (workspace_refusal_text ~ko ~request:Kept_request.Preset_save refusal ^ " · " ^ name)]
   | Error (Preset_save_refused detail) ->
-    [P.failure (text "! 프리셋 저장 거절 · " "! Preset save refused · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "프리셋 저장 거절 · " "Preset save refused · ") ^ name);
      reason detail]
   | Error (Preset_save_auth_retry_not_sent detail) ->
-    [P.failure (text "! 인증 거절 · 재시도 미전송 · " "! Authentication refused · retry not sent · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "인증 거절 · 재시도 미전송 · " "Authentication refused · retry not sent · ") ^ name);
      reason detail]
   | Error (Preset_save_unconfirmed detail) ->
-    [P.caution (text "! 프리셋 저장 결과 미확인 · " "! Preset save unconfirmed · " ^ name);
+    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 미확인 · " "Preset save unconfirmed · ") ^ name);
      P.caution (text "  다시 저장하기 전 내용을 확인하세요 · 같은 이름은 덮어씁니다"
        "  Check contents before saving again · the same name is overwritten");
      P.caution (text "  목록에 이름이 있어도 이번 저장의 성공을 뜻하지 않습니다"

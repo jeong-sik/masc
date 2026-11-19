@@ -107,7 +107,10 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
 let label = function
   | Unknown _ | Kept_back _ -> "? check unknown"
   | Known None | Known (Some {state=Check.Unchecked;_}) -> "○ unchecked"
-  | Known (Some {state=Check.Checked;_}) -> "✓ checked"
+  | Known (Some {state=Check.Checked;_}) ->
+      (* The settled status mark (RFC tui-one-screen-grammar 7.2); [✓] is not
+         one. Unchecked keeps the waiting mark it already wore. *)
+      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " checked"
 
 let description status = match status with
   | Unknown detail -> "Confirmation unknown: " ^ detail

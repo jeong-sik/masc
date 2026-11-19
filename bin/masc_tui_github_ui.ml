@@ -33,7 +33,9 @@ let token_saved (state : state) ~keeper_name ~report ~refresh result =
    | Ok json ->
      report "system" (keeper_name ^ ": github token saved");
      state.github_token_save_status
-     <- Some (Theme.ok () ^ "✓ Token saved successfully" ^ Ansi.reset);
+     <- Some
+          (Theme.ok () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " Token saved successfully"
+          ^ Ansi.reset);
      state.github_identity_view
      <- Some
           ( keeper_name
@@ -44,7 +46,9 @@ let token_saved (state : state) ~keeper_name ~report ~refresh result =
    | Error (Request_failed detail) ->
      report "error" (keeper_name ^ ": github token save: " ^ detail);
      state.github_token_save_status
-     <- Some (Theme.bad () ^ "✗ Token save failed: " ^ detail ^ Ansi.reset)
+     <- Some
+          (Theme.bad () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " Token save failed: " ^ detail
+          ^ Ansi.reset)
    | Error (Request_withdrawn refusal) ->
      (* Not sent: the kept-back notice alone, never a failed save (RFC §2). *)
      let notice =

@@ -7051,14 +7051,13 @@ let studio_panel ~width ~title ~lines =
   let border left right =
     edge ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
-  [ edge ^ "┌ " ^ Ansi.reset ^ Ansi.bold ^ heading ^ Ansi.reset
-    ^ edge ^ " "
+  [ edge ^ "╭ " ^ Ansi.reset ^ Ansi.bold ^ heading ^ Ansi.reset ^ edge ^ " "
     ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
-    ^ "┐" ^ Ansi.reset ]
+    ^ "╮" ^ Ansi.reset ]
   @ List.map (fun line ->
       edge ^ "│ " ^ Ansi.reset ^ fit_width line inner
       ^ edge ^ " │" ^ Ansi.reset) lines
-  @ [ border "└" "┘" ]
+  @ [ border "╰" "╯" ]
 
 let detail_heading_rows ~first lines =
   let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in

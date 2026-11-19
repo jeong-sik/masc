@@ -1130,8 +1130,10 @@ let render_acting (state : state) =
               ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
-          let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
-          box_line_styled buf cols ~style:(if selected then Theme.selection_style () else style) line
+          if selected then
+            let marked = "> " ^ String.sub line 2 (String.length line - 2) in
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr marked)
+          else box_line_styled buf cols ~style line
     done;
   box_bottom buf cols;
   (* A Turns row is a fold with no cursor on it: "/" and n have no row to

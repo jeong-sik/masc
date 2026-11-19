@@ -240,9 +240,9 @@ let render_fusion_list (state : state) =
       | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
           let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
               ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
-          let marker = if row_index = state.fusion_cursor then
-              Ansi.reverse ^ ">" ^ Ansi.reset else " " in
-          box_line buf cols (marker ^ " " ^ line)
+          if row_index = state.fusion_cursor then
+            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+          else box_line buf cols ("  " ^ line)
       | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
             fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
@@ -259,7 +259,7 @@ let render_fusion_list (state : state) =
               }
           in
           if row_index = state.fusion_cursor then
-            box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
+            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
     done;
   (match summary_clauses with

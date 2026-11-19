@@ -1163,7 +1163,7 @@ let render_tools (state : state) =
     (header
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
-  box_line_styled buf cols ~style:(Theme.selection_style ())
+  box_line_styled buf cols ~style:(Theme.recede ())
     (Render_tools.tools_selection_line ~cols state);
   box_divider buf cols;
   (match (selected_tools_error state) with
@@ -1177,10 +1177,14 @@ let render_tools (state : state) =
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
   Option.iter Masc_tui_value.Redraw.note_change_at
     (Render_tools.drawn_change display display_lines_window);
+  let sel_style = Theme.selection_style () in
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with
     | None -> box_empty buf cols
-    | Some (style, line) -> box_line_styled buf cols ~style line
+    | Some (style, line) ->
+        if String.equal style sel_style then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+        else box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
   Buffer.add_string buf
@@ -1514,10 +1518,12 @@ let render_metrics (state : state) =
   (* The section being read is marked on the strip under this row, so the
      title does not name it a second time. *)
   let heading =
-    screen_title
-      (if state.usage_telemetry_open then
-         ui_text state ~ko:" 운영 · 사용량 · 진단" ~en:" Operations · Usage · Telemetry"
-       else ui_text state ~ko:" 운영 · 사용량" ~en:" Operations · Usage")
+    here_path state
+      ~path:
+        (if state.usage_telemetry_open then
+           [ ui_text state ~ko:"사용량" ~en:"Usage"
+           ; ui_text state ~ko:"진단" ~en:"Telemetry" ]
+         else [ ui_text state ~ko:"사용량" ~en:"Usage" ])
   in
   let connection = connection_badge state in
   let full_title = Printf.sprintf "%s  %s" heading connection in

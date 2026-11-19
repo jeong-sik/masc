@@ -25,7 +25,7 @@ export const replacePath = removePath
     (lib/server/server_key_account.ml, `replace`). */
 const refusalCodes = [
   'unknown_account', 'not_a_key_account', 'invalid_request', 'not_a_key', 'account_call_running', 'removal_left',
-  'replacement_refused', 'internal_error', 'replacement_not_recorded', 'key_not_stored',
+  'replacement_refused', 'internal_error', 'files_not_reached', 'replacement_not_recorded', 'key_not_stored',
 ] as const
 
 /** Why the key of an account was not replaced. A code this console does not
@@ -159,6 +159,7 @@ function changedTheAccount(code: ReplacementStopped): boolean {
     case 'account_call_running':
     case 'replacement_refused':
     case 'internal_error':
+    case 'files_not_reached':
     case 'unrecognised':
       return false
   }

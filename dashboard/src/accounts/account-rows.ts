@@ -108,7 +108,7 @@ function keyWords(key: KeyState): string | null {
     case 'readable': return null
     case 'key_missing':
       return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣을 수 있어요.'
-    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. ${operatorWords}`
+    case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣어 보세요. 그래도 읽지 못하면 ${operatorWords}`
     case 'not_looked_at': return `이 서버가 이 계정의 key 파일을 확인하지 못했어요. ${operatorWords}`
     case 'unrecognised': return '서버가 이 계정의 key 상태를 알려 주지 않았어요.'
   }
@@ -243,7 +243,7 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
 function checkFailureWords(failure: CheckFailure): string {
   switch (failure) {
     case 'key_refused':
-      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 이 계정을 없애고 key 를 다시 넣어 주세요.'
+      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 「key 바꾸기」로 key 를 다시 넣어 주세요.'
     case 'rate_limited': return '구독 쪽이 요청 한도나 사용 시간대에 걸렸다며 막았어요. 한도가 풀린 뒤 다시 확인해 주세요.'
     case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
     case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'

@@ -1660,9 +1660,24 @@ let librarian_failing entries =
 (* The header item: the run first, so a narrow row cut from the right still
    says that the Librarian is failing and since when; the server's word for
    how comes last. *)
-let librarian_failing_text ~since failing =
-  Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
-    failing.lf_count since failing.lf_kind
+let librarian_failing_kind_word ~ko kind =
+  if not ko then kind
+  else
+    match kind with
+    | "lane_cancelled" -> "레인 취소됨"
+    | "timeout" -> "시간 초과"
+    | "rate_limited" -> "호출 한도 초과"
+    | "provider_unavailable" -> "공급자 응답 없음"
+    | _ -> kind
+
+let librarian_failing_text ?(ko = false) ~since failing =
+  let kind = librarian_failing_kind_word ~ko failing.lf_kind in
+  if ko then
+    Printf.sprintf "기억 정리 실패 \xc3\x97%d (%s~ \xc2\xb7 %s)"
+      failing.lf_count since kind
+  else
+    Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
+      failing.lf_count since kind
 
 (* Compact folds only a successfully settled approval. Its durable identity
    survives the continuation's new request id, so prose or a tool block between
@@ -28258,13 +28273,15 @@ let chat_schedule_open_entries = 3
 let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
   if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else
   let module Facts = Masc_tui_chat_facts in
+  let ko = state.ui_language = Lang_ko in
+  let say k e = if ko then k else e in
   let plain = Masc_tui_keeper_chat_projection.terminal_safe_text in
   let fact = Facts.fact in
   let lines ~lead ~rows_left facts =
     let lead_cells = Masc_tui_message_layout.display_width lead in
     let layout =
       Facts.layout ~max_cells:(max 1 (max_cells - lead_cells)) ~max_rows:rows_left
-        ~more:(Printf.sprintf "외 %d") facts in
+        ~more:(if ko then Printf.sprintf "외 %d" else Printf.sprintf "+%d more") facts in
     List.mapi
       (fun index pieces ->
         { csl_lead = (if index = 0 then lead else String.make lead_cells ' ')
@@ -28273,7 +28290,9 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
       layout.Facts.rows in
   let notice facts =
     lines ~lead:"  " ~rows_left:max_rows
-      (fact Facts.Plain "예약 Job" :: facts @ [fact Facts.Plain chat_schedule_toggle_label]) in
+      (fact (Facts.Reading Schedule_settled) (say "예약 작업" "Schedule")
+       :: facts
+       @ [fact (Facts.Reading Schedule_settled) chat_schedule_toggle_label]) in
   let unread text = notice [fact (Facts.Reading Schedule_unknown) text] in
   match state.msg_target_keeper_name with
   | None -> []
@@ -28289,9 +28308,14 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
         | None -> false in
       let reading = detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name in
       match snapshot with
-      | None -> unread (if failed then "조회 실패" else if reading then "조회 중" else "미조회")
+      | None ->
+          unread
+            (if failed then say "조회 실패" "read failed"
+             else if reading then say "조회 중" "reading"
+             else say "미조회" "unread")
       | Some snapshot when Option.is_some snapshot.scs_read_error
-                           || Option.is_none snapshot.scs_request_count -> unread "저장소 조회 불가"
+                           || Option.is_none snapshot.scs_request_count ->
+          unread (say "저장소 조회 불가" "store unavailable")
       | Some snapshot ->
           let entries = chat_schedule_entries ~keeper_name snapshot in
           let kept = failed || reading in
@@ -28303,15 +28327,21 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let observed = local_minute snapshot.scs_observed_at_iso in
           let freshness =
             if kept
-            then [fact ~label:"이전 관측 " Facts.Plain
-                    (observed ^ if failed then "/갱신 실패" else "/갱신 중")]
+            then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain
+                    (observed
+                     ^ if failed then say "/갱신 실패" "/refresh failed"
+                       else say "/갱신 중" "/refreshing")]
             else [] in
-          let partial = if snapshot.scs_truncated then [fact Facts.Plain "일부 목록"] else [] in
+          let partial =
+            if snapshot.scs_truncated then [fact Facts.Plain (say "일부 목록" "partial list")]
+            else [] in
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
-              | None -> "예정 시각 보고 안 됨"
-              | Some due -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due ^ " 예정" in
+              | None -> say "예정 시각 미보고" "due time unreported"
+              | Some due ->
+                  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due
+                  ^ say " 예정" " due" in
             let reason label = function
               | None -> [label]
               | Some reason -> [label ^ ": " ^ plain reason] in
@@ -28320,51 +28350,52 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             let tone, occurrence = match stage with
               | No_occurrence ->
                   (match Schedule_domain.schedule_status_of_string row.sch_status with
-                   | Ok Running -> Schedule_pending, ["예약 전달 중"]
-                   | Ok Failed -> Schedule_failed, ["예약 전달 실패"]
+                   | Ok Running -> Schedule_pending, [say "전달 중" "dispatching"]
+                   | Ok Failed -> Schedule_failed, [say "전달 실패" "dispatch failed"]
                    | Ok (Scheduled | Due) ->
                        (match proximity with
-                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "최근 회차 기록 없음"]
-                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, ["예약 대기"]
-                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, ["예약 대기"])
-                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["최근 회차 기록 없음"])
-              | Dispatching -> Schedule_pending, ["예약 전달 중"]
-              | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
-              | Queued -> Schedule_pending, ["예약 도착"; "처리 대기"]
-              | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
-              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 기록 없음"]
-              | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
+                        | Schedule_elapsed -> Schedule_pending, [say "예정 시각 지남" "overdue"; say "기록 없음" "no record"]
+                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, [say "대기 중" "scheduled"]
+                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, [say "대기 중" "scheduled"])
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, [say "기록 없음" "no record"])
+              | Dispatching -> Schedule_pending, [say "전달 중" "dispatching"]
+              | Dispatch_failed error -> Schedule_failed, reason (say "전달 실패" "dispatch failed") error
+              | Queued -> Schedule_pending, [say "도착 · 처리 대기" "queued"]
+              | Queued_at owner -> Schedule_pending, [say "인계됨" "handed off"; plain owner ^ say " 처리 대기" " queued"]
+              | Missing -> Schedule_pending, [say "큐 누락" "queue missing"; say "실행 기록 없음" "no run recorded"]
+              | Turn_started -> Schedule_running, [say "실행 중" "running"]
               | Turn_ended disposition ->
                 Schedule_pending,
-                [ "최근 회차 턴 종료: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
-                ; "결과 확인 중" ]
-              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 보고 안 됨"]
-              | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
-              | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
-              | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
-              | Settling _ -> Schedule_pending, ["최근 회차 결과 기록 중"]
-              | Transferring _ -> Schedule_pending, ["최근 회차 인계 기록 중"]
+                [ say "턴 종료: " "turn ended: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
+                ; say "결과 확인 중" "confirming result" ]
+              | Consumed -> Schedule_pending, [say "소비됨" "consumed"; say "결과 미보고" "result unreported"]
+              | Completed -> Schedule_settled, [say "최근 완료" "completed"]
+              | Receipt_is_the_record -> Schedule_settled, [say "전달 완료" "delivered"]
+              | Cancelled why -> Schedule_settled, reason (say "취소됨" "cancelled") why
+              | Settling _ -> Schedule_pending, [say "결과 기록 중" "settling"]
+              | Transferring _ -> Schedule_pending, [say "인계 기록 중" "transferring"]
               | Unknown why -> Schedule_pending, [plain why] in
             let hold = match row.sch_runner_hold with
               | None -> []
               | Some hold ->
                   let wording = match hold.Tui_decode.srh_reason with
-                    | Hold_previous_wake_untaken -> "이전 예약 미소비"
-                    | Hold_target_shutdown_fenced _ -> "Keeper 종료 처리 중" in
+                    | Hold_previous_wake_untaken -> say "이전 예약 미소비" "previous wake untaken"
+                    | Hold_target_shutdown_fenced _ -> say "Keeper 종료 처리 중" "Keeper shutting down" in
                   let freshness = if kept then Tui_decode.List_kept else Tui_decode.List_latest in
                   let as_of = match Tui_decode.schedule_hold_reading
                       ~freshness ~runner:snapshot.scs_runner_status hold with
                     | Hold_current -> ""
                     | Hold_as_of checked ->
-                        Printf.sprintf " (%s 관측)" (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now checked) in
-                  [fact ~label:"다음 회차 보류: " (Facts.Reading Schedule_pending) (wording ^ as_of)] in
+                        Printf.sprintf (if ko then " (%s 관측)" else " (observed %s)")
+                          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now checked) in
+                  [fact ~label:(say "다음 회차 보류: " "next run held: ") (Facts.Reading Schedule_pending) (wording ^ as_of)] in
             let title = match row.sch_payload_summary with
               | Some value -> value | None -> row.sch_schedule_id in
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                          | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) ->
-                  [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
+                  [fact ~label:(say "다음 " "next ") (Facts.Reading Schedule_settled) (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                       | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) -> [] in
@@ -28372,17 +28403,19 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             @ hold
             @ [fact Facts.Plain (plain title); fact (Facts.Reading proximity) clock]
             @ next in
-          let toggle = fact Facts.Plain
-              (chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기")) in
+          let toggle = fact (Facts.Reading Schedule_settled)
+              (chat_schedule_toggle_label
+               ^ (if state.msg_schedules_expanded then say " 접기" " collapse" else say " 펼치기" " expand")) in
           match entries with
-          | [] -> notice (freshness @ [fact (Facts.Reading Schedule_unknown) "관측된 예약 없음"] @ partial)
+          | [] -> notice (freshness @ [fact (Facts.Reading Schedule_unknown) (say "관측된 예약 없음" "no scheduled runs")] @ partial)
           | first :: _ ->
               let headed subject = lines ~lead:"  " ~rows_left:max_rows
                   (freshness @ subject @ partial @ [toggle]) in
-              let closed () = headed (fact Facts.Plain "예약 Job" :: describe first) in
+              let closed () = headed (fact (Facts.Reading Schedule_settled) (say "예약 작업" "Schedule") :: describe first) in
               if not state.msg_schedules_expanded then closed () else
               let header = headed
-                  [fact ~label:"예약 Job " Facts.Amount (Printf.sprintf "%d개" (List.length entries))] in
+                  [fact ~label:(say "예약 작업 " "Schedules ") Facts.Amount
+                     (if ko then Printf.sprintf "%d개" (List.length entries) else string_of_int (List.length entries))] in
               (* An open block whose heading leaves no row for a job would list
                  none. The closed row describes the next job in the same rows. *)
               if max_rows - List.length header <= 0 then closed () else
@@ -28398,8 +28431,10 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               let remaining = List.length entries - shown in
               if remaining > 0 && rows_left > 0
               then rows @ lines ~lead:"    " ~rows_left
-                  [ fact Facts.Plain (Printf.sprintf "외 %d개" remaining)
-                  ; fact Facts.Plain "Keeper Automation에서 전체 확인" ]
+                  [ fact (Facts.Reading Schedule_settled)
+                      (if ko then Printf.sprintf "외 %d개" remaining else Printf.sprintf "+%d more" remaining)
+                  ; fact Facts.Plain
+                      (say "작업 › 일정에서 전체 확인" "see Work › Schedules for all") ]
               else rows
 
 (* What the height of the fact blocks around the composer is held against

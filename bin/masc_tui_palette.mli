@@ -96,3 +96,8 @@ val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 
 val palette_typed_question : string -> (string * string option) option
+
+val action_description : ko:bool -> palette_action -> string
+(** One-line description of what executing [palette_action] will do, shown in
+    the lazygit-style live description pane at the bottom of the command
+    palette overlay. Plain single-line text in the requested language. *)

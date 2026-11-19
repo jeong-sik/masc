@@ -5810,14 +5810,19 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
                 Printf.sprintf "scale %d–%d tokens" minimum maximum in
+          (* A turn whose record carries no input count is a value read but
+             not reported, and a negative count is a reading that failed:
+             the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
+          let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+          let invalid = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
           let marks = List.map2 (fun sample bar -> match sample with
-            | Inspector.Input_unavailable -> "·"
-            | Inspector.Input_invalid _ -> "!"
+            | Inspector.Input_unavailable -> unreported
+            | Inspector.Input_invalid _ -> invalid
             | Inspector.Input_estimate _ -> "~"
             | Inspector.Input_count 0 -> "0"
             | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
           let legends =
-            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, "· unavailable")
+            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, unreported ^ " not reported")
             ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
             ; (List.exists (function Inspector.Input_estimate _ -> true
                        | Inspector.Input_count _ | Inspector.Input_invalid _
@@ -5826,7 +5831,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ; (List.exists (function Inspector.Input_invalid _ -> true
                        | Inspector.Input_count _ | Inspector.Input_estimate _
                        | Inspector.Input_unavailable -> false) inputs,
-               "! invalid negative count")
+               invalid ^ " invalid negative count")
             ]
             |> List.filter_map (fun (present, text) -> if present then Some text else None) in
           wrapped "" ("Input by turn: " ^ marks)

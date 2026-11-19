@@ -22,6 +22,9 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
     The artifact holds the pockets {!publish} would publish now. Readership
     can change while the revision stays, so the index is current only while
     it points at the bytes those pockets render to; otherwise it is rebuilt.
+    A rebuilt index is taken on the same condition: when another publication
+    of the revision replaced it with other bytes, the unavailable notice is
+    emitted and a later recall rebuilds it.
     When pockets are stored and none is readable, the unavailable notice is
     emitted.
     An absent or empty authoritative snapshot emits a stable empty-state

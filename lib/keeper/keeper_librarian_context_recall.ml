@@ -163,27 +163,35 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
     | Nothing_stored -> empty ()
     | Nothing_readable -> unavailable nothing_readable
     | Readable readable_context ->
-    match artifact_body readable_context with
-    | Error detail -> unavailable detail
-    | Ok body ->
+      (* The body is managed guidance over the readable pockets. Guidance that
+         does not render is an explicit Error, as it is for the notices, and
+         not unavailable context storage. *)
+      let* body = artifact_body readable_context in
       (* Which pockets are readable can change while the revision stays, so
          the revision alone does not say the index is current. It is current
          while it points at the bytes the readable pockets render to now. *)
       let readable_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
+      let names_readable_bytes (index : index) =
+        Context.version current = (index.generation, index.revision)
+        && String.equal index.artifact.sha256 readable_sha256
+      in
       let repair () =
         (* The index is a projection, not authority. Repair it without a new
            model pass, even when pending inputs have not changed. Publication
-           rechecks generation/revision under the owner lock. *)
+           rechecks generation/revision under the owner lock.
+           The index read back is taken on the condition a stored one is.
+           Another publication of this revision may have read the pockets
+           while a source that is unreadable now still was readable, and it
+           can write its index right after this one. *)
         Result.bind (publish ~base_path ~keepers_dir ~keeper_name current) (fun () ->
           after_repair_publish ();
           match read (path ~keepers_dir ~keeper_name) with
-          | Ok (Some repaired) when Context.version current = (repaired.generation, repaired.revision) -> Ok repaired
+          | Ok (Some repaired) when names_readable_bytes repaired -> Ok repaired
           | Ok _ -> Error "working context changed during artifact repair"
           | Error detail -> Error detail)
       in
       let current_index = match read (path ~keepers_dir ~keeper_name) with
-        | Ok (Some index) when Context.version current = (index.generation, index.revision)
-                               && String.equal index.artifact.sha256 readable_sha256 -> Ok index
+        | Ok (Some index) when names_readable_bytes index -> Ok index
         | Ok None | Ok (Some _) | Error _ -> repair ()
       in
       match current_index with

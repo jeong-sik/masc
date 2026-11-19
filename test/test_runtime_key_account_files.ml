@@ -316,6 +316,29 @@ let test_replaced_with_no_files =
       (read_name (key_file_at ~runtime_root account second)))
 ;;
 
+(* What a replacement whose key was not stored asks: the folder of the keys
+   goes with everything in it, the home stays, and the next write makes the
+   folder again. *)
+let test_keys_alone =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    made "the account" ~runtime_root account the_key "made";
+    let keys = keys_of ~runtime_root account in
+    let home = home_of ~runtime_root account in
+    put (Filename.concat home "history.jsonl") "{}\n";
+    put (key_file_at ~runtime_root account second) "sk-test-a-key-no-record-names";
+    (match F.remove_keys ~runtime_root ~account_id:account with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "the folder of the keys stays: %s" detail);
+    Alcotest.(check bool) "the folder of the keys is gone" false (there keys);
+    Alcotest.(check bool) "the home keeps what was in it" true (there (Filename.concat home "history.jsonl"));
+    key_state "a list reads no key" ~runtime_root account "key_missing";
+    replaced "the next key" ~runtime_root account second "sk-test-the-second-key" "replaced";
+    Alcotest.(check string)
+      "it reads back"
+      "key:sk-test-the-second-key"
+      (read_name (key_file_at ~runtime_root account second)))
+;;
+
 (* What the start of the server asks of a key account: the files of the
    generations its record does not name go. *)
 let test_other_keys =
@@ -543,6 +566,7 @@ let () =
         ; Alcotest.test_case "a FIFO in place of the folder of the keys" `Quick test_a_fifo
         ; Alcotest.test_case "the key that does not go" `Quick test_key_stays
         ; Alcotest.test_case "the home that does not go" `Quick test_home_stays
+        ; Alcotest.test_case "the folder of the keys alone" `Quick test_keys_alone
         ] )
     ; "list", [ Alcotest.test_case "what is said of the key" `Quick test_key_state ]
     ; ( "replace"

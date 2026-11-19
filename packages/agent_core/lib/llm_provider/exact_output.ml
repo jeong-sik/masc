@@ -165,6 +165,11 @@ type execution_error_cause =
       ; refusal : provider_refusal
       ; retry_after_s : float option
       }
+  | Provider_context_overflow of
+      { error : Http_client.http_error
+      ; http_status : int option
+      ; dispatch : generation_dispatch_fact
+      }
   | Output_limit_reached
   | Window_reached of { output : window_output }
   | Incomplete_output of { stop : incomplete_stop }
@@ -931,11 +936,7 @@ let execution_error_cause ~http_status ~dispatch = function
       }
   | Exec.Provider_error
       (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
-    (match http_status with
-     | Some http_status ->
-       Provider_response_refused
-         { http_status; refusal = Context_overflow; retry_after_s = None }
-     | None -> Completion_failed { error; dispatch })
+    Provider_context_overflow { error; http_status; dispatch }
   (* Empty OpenAI/GLM content is rejected by the provider parser before JSON
      normalization. Its typed stop reason still proves an output limit, or a
      stop at the window: a generation spent on an input that fit, so not a
@@ -989,6 +990,48 @@ let execution_error_cause ~http_status ~dispatch = function
   | Exec.Output_normalization_failed Exec.Unexpected_structured_content ->
     Unexpected_output_content
   | Exec.Output_normalization_failed (Exec.Invalid_json _) -> Invalid_json_output
+;;
+
+let%test "a typed context overflow keeps its type without an HTTP status" =
+  let error =
+    Http_client.ProviderFailure
+      { kind = Http_client.Context_overflow { limit = Some 8192 }
+      ; message = "typed overflow"
+      }
+  in
+  match
+    execution_error_cause
+      ~http_status:None
+      ~dispatch:Generation_dispatch_started
+      (Exec.Provider_error error)
+  with
+  | Provider_context_overflow { error = observed; http_status = None; dispatch } ->
+    observed == error && dispatch = Generation_dispatch_started
+  | Provider_context_overflow _ -> false
+  | Completion_failed _ | Response_body_deadline_exceeded | Provider_response_refused _
+  | Output_limit_reached | Window_reached _ | Incomplete_output _ | Missing_output
+  | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output -> false
+;;
+
+let%test "a typed context overflow keeps an observed HTTP status and dispatch" =
+  let error =
+    Http_client.ProviderFailure
+      { kind = Http_client.Context_overflow { limit = Some 8192 }
+      ; message = "typed overflow"
+      }
+  in
+  match
+    execution_error_cause
+      ~http_status:(Some 400)
+      ~dispatch:Generation_dispatch_started
+      (Exec.Provider_error error)
+  with
+  | Provider_context_overflow { error = observed; http_status = Some 400; dispatch } ->
+    observed == error && dispatch = Generation_dispatch_started
+  | Provider_context_overflow _ -> false
+  | Completion_failed _ | Response_body_deadline_exceeded | Provider_response_refused _
+  | Output_limit_reached | Window_reached _ | Incomplete_output _ | Missing_output
+  | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output -> false
 ;;
 
 let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
@@ -1126,6 +1169,7 @@ let provider_failure_is_binding_rest : Http_client.provider_failure_kind -> bool
 let execution_cause_is_binding_rest = function
   | Provider_response_refused { refusal; http_status = _ } ->
     provider_refusal_is_binding_rest refusal
+  | Provider_context_overflow _ -> false
   | Completion_failed { error = Http_client.ProviderFailure { kind; message = _ }; dispatch = _ }
     -> provider_failure_is_binding_rest kind
   | Completion_failed
@@ -1392,7 +1436,7 @@ let responses_uncertainty snapshot (execution_error : execution_error option) =
           | Other _ -> Some Response_status_unrecognized
           | Completed | Failed | Incomplete | Cancelled ->
             (match execution_error with
-             | Some { cause = Provider_response_refused _; _ } ->
+             | Some { cause = Provider_response_refused _ | Provider_context_overflow _; _ } ->
                Some Response_refusal_on_success_status
              | None
              | Some { cause = (Completion_failed _ | Response_body_deadline_exceeded
@@ -1672,6 +1716,11 @@ let execution_error_cause_to_string : execution_error_cause -> string = function
       "provider refused (http_status=%d refusal=%s)"
       http_status
       (provider_refusal_to_string refusal)
+  | Provider_context_overflow { http_status; dispatch; _ } ->
+    Printf.sprintf
+      "provider context overflow (http_status=%s, %s)"
+      (match http_status with Some status -> string_of_int status | None -> "none")
+      (generation_dispatch_fact_to_string dispatch)
   | Output_limit_reached -> "output limit reached"
   | Window_reached { output = No_output } -> "context window reached (no output)"
   | Window_reached { output = Partial_output } -> "context window reached (partial output)"

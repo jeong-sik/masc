@@ -37,7 +37,10 @@ type Uses =
   | { readonly kind: 'runs'; readonly choice: Choice }
   /** The Runtime is the person's, and a Keeper cannot run on it here now. */
   | { readonly kind: 'stopped'; readonly model: string | null }
-  /** The subscriptions are not read, or the Runtime is not among them. */
+  /** The subscriptions are not read, or the Runtime is not among them. The
+      server lists no Runtime of an account that was removed or that a
+      removal was left on (lib/auth_preview.ml, `provider_accounts`), so a
+      Keeper keeps such a Runtime and the list does not have it. */
   | { readonly kind: 'unknown' }
 
 function usesOf(keeper: Keeper, owned: Owned | null, choices: readonly Choice[] | null): Uses {
@@ -64,7 +67,8 @@ function usesWords(uses: Uses): string {
     case 'runs': return `쓰는 모델: ${uses.choice.label}`
     case 'stopped':
       return `쓰는 모델: ${uses.model ?? '알 수 없는 모델'}. 이 모델로는 지금 Keeper가 일할 수 없어요. 이유는 위 구독 카드에 있어요.`
-    case 'unknown': return '쓰는 모델을 불러오지 못했어요.'
+    // Said once the subscriptions are read: before that the card says they are not (`KeeperRow`).
+    case 'unknown': return '쓰는 모델이 내 구독 목록에 없어요. 그 모델의 계정을 없앴으면 이 Keeper는 일할 수 없어요. 다른 모델을 골라 주세요.'
   }
 }
 

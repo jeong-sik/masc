@@ -5,10 +5,11 @@
 // checks one in its card.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
+import type { RemovalRefusal, RemovalsModel, Removing } from './key-remove'
 import { Callout, ProblemNote, fell, idTail, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
@@ -108,6 +109,45 @@ function removalWords(removal: Removal): string {
     case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. key 는 지워졌고, 계정의 다른 파일이 이 서버에 남아 있어요. ${unused}`
     case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요. key 가 아직 이 서버에 있어요. ${unused}`
     case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요. ${unused}`
+  }
+}
+
+/** What a removal does not do, said before the second press: the server
+    takes its own copy of the key away, and the vendor still takes the key
+    (RFC, 3.8). */
+const keyStaysValidWords = '여기서 없애도 key 는 발급한 곳에서 계속 유효해요. 못 쓰게 하려면 그곳에서 폐기해 주세요.'
+
+/** What the line under the remove button says: what a second press does
+    once the first one asked, else what the removal is doing. A removal that
+    came to nothing is said in an alert under it. `again` when a removal was
+    left on the account, whose models the list already leaves out. */
+function removeLineWords(removing: Removing | undefined, sure: boolean, again: boolean): string {
+  if (sure) {
+    return again
+      ? `한 번 더 누르면 멈춘 없애기를 이어서 끝내요. 되돌릴 수 없어요. ${keyStaysValidWords}`
+      : `한 번 더 누르면 이 서버에서 이 계정과 key 를 지워요. 되돌릴 수 없어요. 이 계정으로 확인한 모델도 목록에서 없어져요. ${keyStaysValidWords}`
+  }
+  switch (removing?.kind) {
+    case undefined: return ''
+    case 'sending': return '없애고 있어요…'
+    case 'leaving': return sessionEndedWords
+    case 'refused':
+    case 'unknown':
+      return ''
+  }
+}
+
+/** Why the server did not remove an account, and what the person does next. */
+function removalRefusedWords(code: RemovalRefusal): string {
+  switch (code) {
+    case 'account_call_running': return '이 계정으로 호출이 돌고 있어요. 끝난 뒤 다시 없애 주세요.'
+    case 'removal_not_recorded': return '서버가 없애기를 기록하지 못했어요. 다시 없애 주세요.'
+    case 'key_not_removed': return '서버가 key 를 지우지 못했어요. key 가 아직 이 서버에 있어요. 다시 없애 주세요.'
+    case 'home_not_removed': return '서버가 key 는 지웠고, 계정의 다른 파일을 지우지 못했어요. 다시 없애 주세요.'
+    case 'removal_refused': return '내 계정이 지금 쓸 수 있는 상태가 아니라서 없애지 못했어요.'
+    case 'not_a_key_account': return '로그인으로 연결한 계정이라 여기서 없앨 수 없어요.'
+    case 'unknown_account': return '서버에 이 계정이 없어요.'
+    case 'unrecognised': return '이 화면이 모르는 까닭으로 없애지 못했어요.'
   }
 }
 
@@ -314,7 +354,65 @@ function InUse({ facts, name, checks, card }: {
   `
 }
 
-function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly checks: ChecksModel }): VNode {
+/** The button that removes a key account, which asks once more before it
+    does, with its line and what came of the latest removal. The button is
+    the same one before and after a removal that stopped, so the focus of
+    the person who pressed it stays on it. It is named with the card. */
+function RemoveArea({ accountId, removals, card, again }: {
+  readonly accountId: string
+  readonly removals: RemovalsModel
+  /** The ids of what names the card: its title and its account line. */
+  readonly card: string
+  /** A removal was left on the account: this one goes on from it. */
+  readonly again: boolean
+}): VNode {
+  const removing = removals.removing.value.get(accountId)
+  const [sure, setSure] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
+  const busy = removing?.kind === 'sending' || removing?.kind === 'leaving'
+  const press = (): void => {
+    if (busy) return
+    if (!sure) {
+      setSure(true)
+      return
+    }
+    setSure(false)
+    void removals.remove(accountId)
+  }
+  const back = (): void => {
+    setSure(false)
+    button.current?.focus()
+  }
+  const id = `remove-${accountId}`
+  const backId = `remove-back-${accountId}`
+  const line = `remove-line-${accountId}`
+  return html`
+    <p class="actions">
+      <button ref=${button} id=${id} type="button" aria-disabled=${busy} aria-labelledby=${`${id} ${card}`} aria-describedby=${line} onClick=${press}>
+        ${sure ? '정말 없애기' : again ? '다시 없애기' : '없애기'}
+      </button>
+      ${sure ? html`<button id=${backId} type="button" aria-labelledby=${`${backId} ${card}`} onClick=${back}>취소</button>` : null}
+    </p>
+    <p id=${line} class="hint" role="status">${removeLineWords(removing, sure, again)}</p>
+    ${removing?.kind === 'refused'
+      ? html`<${Callout} key=${removing.attempts} title="계정을 없애지 못했어요" lines=${[removalRefusedWords(removing.code)]}
+          reason=${removing.reason} attempts=${removing.attempts} />`
+      : null}
+    ${removing?.kind === 'unknown'
+      ? html`<${Callout} key=${removing.attempts} title="계정을 없앴는지 알 수 없어요" reason=${null} attempts=${removing.attempts}
+          lines=${[
+            removing.answer === 'none' ? '서버의 답을 받지 못했어요. 서버가 계정을 없앴을 수도 있어요.' : '서버의 답을 읽지 못했어요. 서버가 계정을 없앴을 수도 있어요.',
+            '이 계정이 그대로 보이면 다시 없애 주세요.',
+          ]} />`
+      : null}
+  `
+}
+
+function AccountRow({ facts, checks, removals }: {
+  readonly facts: AccountFacts
+  readonly checks: ChecksModel
+  readonly removals: RemovalsModel
+}): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
@@ -338,19 +436,23 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
       <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
       ${removal !== null ? html`<p class="hint">${removalWords(removal)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
+      ${account.held.kind === 'key'
+        ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${removal !== null} />`
+        : null}
     </li>
   `
 }
 
-export function AccountList({ integrations, owned, checks }: {
+export function AccountList({ integrations, owned, checks, removals }: {
   readonly integrations: readonly Integration[]
   readonly owned: Owned
   readonly checks: ChecksModel
+  readonly removals: RemovalsModel
 }): VNode {
   if (owned.accounts.length === 0) return html`<p>아직 연결한 구독이 없어요.</p>`
   return html`
     <ul class="rows">
-      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} />`)}
+      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} removals=${removals} />`)}
     </ul>
   `
 }

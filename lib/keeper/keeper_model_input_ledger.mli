@@ -96,6 +96,9 @@ type request =
   ; demote_before : int
         (** Atoms below this index went out with their aged tool results as
             markers; 0 when nothing was demoted. *)
+  ; working_state : string option
+        (** The Librarian working state the request carried ahead of its
+            atoms; [None] when it carried none. *)
   }
 
 type usage =

@@ -387,6 +387,7 @@ let ledger_with ~first_atom ~atom_count ends : Ledger.t =
       ; tail_bytes = 0
       ; turn_context = false
       ; demote_before = 0
+      ; working_state = None
       }
   ; last_usage = None
   ; growth = { ended_at = None; peak = None; largest = None; last_input = None }

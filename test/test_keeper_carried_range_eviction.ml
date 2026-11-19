@@ -60,6 +60,7 @@ let request ~digest_at ~first_atom ~atom_count : Ledger.request =
   ; tail_bytes = 0
   ; turn_context = false
   ; demote_before = 0
+  ; working_state = None
   }
 ;;
 
@@ -778,8 +779,8 @@ let test_markers_wait_only_while_the_size_signal_watches () =
   let history = exchanges ~from:0 10 in
   let held ?(opens_turn = true) ?(max_context = Some 400_000) ledger =
     Option.map
-      (fun (held : Try_provider.held_demotion) -> held.window_opened_at, held.markers_before)
-      (Try_provider.held_demotion ~opens_turn ~max_context
+      (fun (held : Try_provider.held_window) -> held.window_opened_at, held.markers_before)
+      (Try_provider.held_window ~opens_turn ~max_context
          ~history_digest_at:(Window.atom_opening_digest history) ledger)
   in
   let at = option (pair int int) in

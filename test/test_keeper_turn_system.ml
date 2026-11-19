@@ -643,7 +643,8 @@ let observe_request world ~runtime_id =
   in
   let request : Ledger.request =
     { prefix_digest = "turn-system-prefix"; first_atom = 0; atom_count = history_atoms; ends
-    ; tail_bytes = 0; turn_context = false; demote_before = 0 }
+    ; tail_bytes = 0; turn_context = false; demote_before = 0
+    ; working_state = None }
   in
   ignore
     (Ledger.Table.observe ~keeper_name:world.meta.name ~runtime_id ~session_id:world.trace_id

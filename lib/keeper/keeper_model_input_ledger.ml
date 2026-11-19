@@ -15,6 +15,7 @@ type request =
   ; tail_bytes : int
   ; turn_context : bool
   ; demote_before : int
+  ; working_state : string option
   }
 
 type usage =

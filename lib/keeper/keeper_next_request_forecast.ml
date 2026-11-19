@@ -142,8 +142,8 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_start
-      ~history_at_start ~counted_tokens ~atom_count ~digest_at messages =
+let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~accepted
+      ~turn_start ~history_at_start ~counted_tokens ~atom_count ~digest_at messages =
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~past_max_context
@@ -180,6 +180,7 @@ let carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_
     Keeper_turn_driver_try_provider.project_range_start
       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty
         ~some:Keeper_turn_driver_try_provider.request_unread continuity)
+      ~working_state:(Keeper_turn_driver_try_provider.carried_working_state ~held_window start)
       ~measure_message_bytes:measure
       ~atom_count
       start
@@ -207,11 +208,11 @@ let carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_
   }
 ;;
 
-let carry ?past_max_context ~measure ~continuity ~front ~accepted ~turn_start
+let carry ?past_max_context ?held_window ~measure ~continuity ~front ~accepted ~turn_start
       ~history_at_start ~counted_tokens messages =
   let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
-  carry_indexed ~measure ~past_max_context ~continuity ~front ~accepted ~turn_start
-    ~history_at_start ~counted_tokens ~atom_count ~digest_at messages
+  carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~accepted
+    ~turn_start ~history_at_start ~counted_tokens ~atom_count ~digest_at messages
 ;;
 
 (* The request in travel order. The system prompt and the tool array are
@@ -487,21 +488,24 @@ type first_request =
    A Librarian point weighs the seed alone, never the ledger: the driver reads
    the accepted start from the turn record, and only for a Librarian point. *)
 let first_request ~keeper_name ~trace_id ~runtime_id reads =
-  let ledger_front, front, counted_tokens, past_max_context =
+  let ledger_front, front, counted_tokens, past_max_context, held_window =
     match
       Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
     with
     | Some ledger when Keeper_model_input_ledger.holds ~digest_at:reads.digest_at ledger ->
       let front = Keeper_carried_front.of_ledger ledger in
+      (* The next request is a turn's first, where the driver reads the size
+         signal and the window it holds from the same ledger and the same
+         declaration. *)
+      let max_context = Option.map fst (Runtime.resolve_max_context_of_runtime_id runtime_id) in
       ( front
       , front
       , ledger.Keeper_model_input_ledger.total_tokens
-        (* The next request is a turn's first, where the driver reads the
-           size signal from the same ledger and the same declaration. *)
-      , Keeper_turn_driver_try_provider.past_max_context
-          ~max_context:(Option.map fst (Runtime.resolve_max_context_of_runtime_id runtime_id))
-          ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger) )
-    | Some _ | None -> None, Lazy.force reads.seed, None, None
+      , Keeper_turn_driver_try_provider.past_max_context ~max_context
+          ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
+      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~max_context
+          ~history_digest_at:reads.digest_at (Some ledger) )
+    | Some _ | None -> None, Lazy.force reads.seed, None, None, None
   in
   let accepted =
     match Keeper_turn_driver_try_provider.continuity_choice reads.continuity with
@@ -512,6 +516,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
       carry_indexed
         ~measure:(Keeper_context_core.message_measurer ())
         ~past_max_context
+        ~held_window
         ~continuity:(Some reads.continuity)
         ~front
         ~accepted

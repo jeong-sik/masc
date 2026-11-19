@@ -323,28 +323,31 @@ val past_max_context :
     or a boundary at or before the window: the signal moves a window early,
     and never moves it back or by a guess. Pure. *)
 
-(** Where a window that stays keeps its markers (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
-type held_demotion =
+(** What a window that stays keeps where it last sent it (RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §3.1, §3.3). *)
+type held_window =
   { window_opened_at : int
         (** Where the ledger's last request opened its range. *)
   ; markers_before : int
         (** The boundary that request demoted below. *)
+  ; working_state : string option
+        (** The working state that request carried; [None] when it carried
+            none. *)
   }
 
-val held_demotion :
+val held_window :
   opens_turn:bool ->
   max_context:int option ->
   history_digest_at:(int -> string option) ->
   Keeper_model_input_ledger.t option ->
-  held_demotion option
+  held_window option
 (** [Some] when the ledger still holds its positions in this history and,
     at a turn's first request ([opens_turn]), the size signal watches the
     window: [max_context] is declared and the ledger knows how much one turn
     grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
     a window that keeps its results whole grows until the provider refuses
     it, so that request demotes the turns that ended. Later in the turn the
-    markers stay where its first request put them, which the ledger's last
+    window holds where its first request opened it, which the ledger's last
     request records. Pure. *)
 
 val choose_range_start :
@@ -388,16 +391,26 @@ val choose_range_start :
 
 val range_start_origin : range_start -> Keeper_carried_front.origin
 
+val carried_working_state : held_window:held_window option -> range_start -> string option
+(** The working state a range opened at [start] carries ahead of its atoms.
+    A window that stays, opened where [held_window] says, carries the one it
+    carried when it opened, or none when it opened with none: the front of
+    the request changes only when the window moves (RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §3.3). Any
+    other start carries the working state of the snapshot it reads
+    ({!working_state_text}), and none without one. *)
+
 val project_range_start :
   unread:Keeper_librarian_request_unread.t ->
+  working_state:string option ->
   measure_message_bytes:(Agent_core.Types.message -> int) ->
   atom_count:int ->
   range_start ->
   Agent_core.Types.message list ->
   Runtime_model_input_tail_window.projection * int
 (** The range [start] opens over [messages] of [atom_count] atoms and its
-    bytes as [measure_message_bytes] counts them. A snapshot's working state
-    ({!working_state_text}) rides ahead of the atoms it does not cover. *)
+    bytes as [measure_message_bytes] counts them, with [working_state]
+    ({!carried_working_state}) ahead of the atoms it stands in for. *)
 
 type request_input =
   | Keeper_history of { trace_id : string; continuity : continuity }
@@ -803,7 +816,7 @@ type finished_turn_results =
           never the newest atom, goes as its externalized marker when its
           body is at least {!aged_result_min_bytes} bytes. The boundary is
           the one the window last sent while the window stays
-          ({!held_demotion}), and the turn boundary once it moves (RFC
+          ({!held_window}), and the turn boundary once it moves (RFC
           a-sent-request-prefix-changes-only-when-the-window-moves §3.1).
           The same result is the same marker on every later request, so it
           changes once, on the first request whose window moved after its
@@ -928,6 +941,9 @@ type composed =
             {!Finished_turns_as_markers} the held boundary while the window
             stays, else the last ended turn's end; the refused request's atom
             count under {!Current_turn_demoted}. *)
+  ; working_state : string option
+        (** The working state the range carried ahead of its atoms
+            ({!carried_working_state}). *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): under {!Current_turn_demoted}
@@ -1064,14 +1080,16 @@ module For_testing : sig
       demotion plan, on the range the checkpoint history chose.
       [past_max_context] goes to {!choose_range_start}; omitted, no window
       moves for size. The turn driver passes it at a turn's first request.
-      [held_demotion] keeps the markers and arguments of a window that stays
-      where they were last sent; omitted, they follow the turn boundary. *)
+      [held_window] keeps the markers, arguments and working state of a
+      window that stays where they were last sent; omitted, the markers and
+      arguments follow the turn boundary and the working state is the
+      snapshot's. *)
 
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
-    ?held_demotion:held_demotion ->
+    ?held_window:held_window ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->
@@ -1090,7 +1108,7 @@ module For_testing : sig
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?past_max_context:past_max_context ->
-    ?held_demotion:held_demotion ->
+    ?held_window:held_window ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?same_turn_result_as_pointer:(string -> bool) ->

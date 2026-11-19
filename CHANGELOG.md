@@ -387,7 +387,7 @@
 ### Added
 
 
-- The account server of a multi-account installation answers the console of a signed-in person at `/accounts/console`, its built files below `/accounts/console/assets/`, and the base of the sheet of its own pages at `/accounts/console/base.css`. The routes are open before a sign-in; the page and its files carry a policy that runs only scripts and sheets of the server. A bundle without the console gets a 503 page in place of it while the server starts and signs people in as before. Nothing links to the address yet. 가이드 없음(문서 없음) (#51718).
+- The account server of a multi-account installation answers the console of a signed-in person at `/accounts/console`, its built files below `/accounts/console/assets/`, and the base of the sheet of its own pages at `/accounts/console/base.css`. The routes are open before a sign-in; the page and its files carry a policy that runs only scripts and sheets of the server. A bundle without the console gets a 503 page in place of it while the server starts and signs people in as before. Nothing links to the address yet. (#51718).
 - A person reads the conversations of their own Keeper back: the
   current conversation, the list of the Keeper's conversations with the
   subscription each began on, and the turns of one of them with how
@@ -396,7 +396,7 @@
   `manage_own_keeper` and `read_state`. A Claude Code turn of a
   conversation that ends without an answer now says to start a new
   conversation when its turns keep failing (#51720).
-- The account server tells a signed-in person which subscriptions they may connect at `GET /api/v1/auth/integrations`: the runtime.toml providers they may log in to, the models of each, and whether a model of each is called on this server. In a multi-account process the models of Claude Code are called, and those of Codex and Muse are refused for their native tools. 가이드 없음(문서 없음) (#51754).
+- The account server tells a signed-in person which subscriptions they may connect at `GET /api/v1/auth/integrations`: the runtime.toml providers they may log in to, the models of each, and whether a model of each is called on this server. In a multi-account process the models of Claude Code are called, and those of Codex and Muse are refused for their native tools. (#51754).
 - The TUI Tools screen's Available section folds the runtime, digest and byte-budget rows under a Diagnostics heading. `Ctrl-S` unfolds and folds it, the digests and the selected Skill's revision show their first twelve characters, and `Y` copies the whole values. See [Tools keys](docs/guides/TUI-KEYS.md#features--plugins--tools) (#51758).
 - The refusals of a person's Keeper turn and conversation
   (`POST /api/v1/auth/keepers/turn`, `POST` and `GET
@@ -413,7 +413,7 @@
   `failed`, with what became of the copy of the vendor CLI. The state
   of the log holds the last of these for each conversation. Nothing
   writes the record yet: the deletion route comes next (#51774).
-- The account console of a signed-in person shows their subscriptions: a card for each connected account with the name of its subscription, whether a model was checked, and whether a Keeper may run on it on this server, with the reason when it may not. Above the cards, a line names the subscriptions a Keeper may run on here, or says that none can. An account whose subscription the server no longer offers, or whose login record is missing, says so and suggests nothing. Connecting a subscription and checking a model still happen on the page at `/`. 가이드 없음(문서 없음) (#51797).
+- The account console of a signed-in person shows their subscriptions: a card for each connected account with the name of its subscription, whether a model was checked, and whether a Keeper may run on it on this server, with the reason when it may not. Above the cards, a line names the subscriptions a Keeper may run on here, or says that none can. An account whose subscription the server no longer offers, or whose login record is missing, says so and suggests nothing. Connecting a subscription and checking a model still happen on the page at `/`. (#51797).
 - A person deletes one of their conversations with their Keeper:
   `DELETE /api/v1/auth/keepers/conversation/<id>` records the deletion in
   the authorization log, asks Claude Code to purge its copy of the
@@ -425,22 +425,22 @@
   conversation was deleted starts a new one at its next turn. A deletion
   whose files could not all be removed answers 503
   `conversation_not_deleted`, is listed with `"deletion": "failed"`, and
-  ends when the person asks again. 가이드 없음(문서 없음) (#51802).
+  ends when the person asks again. (#51802).
 - The account server and the localhost preview end, when they start, the
   conversation deletions a stopped server left: a pending deletion goes on
   from the copy of the vendor, and a deleted conversation whose directory a
   restore brought back is deleted again, with `claude purge` asked again
   when the copy had been removed or may remain. A deletion whose account
   has a call running at the start is left to the next start or to its
-  owner. 가이드 없음(문서 없음) (#51815).
+  owner. (#51815).
 - The `/mcp` endpoint of a person has `masc_my_keeper_conversation_delete`,
   which deletes one of their Keeper conversations as
   `DELETE /api/v1/auth/keepers/conversation/<id>` does: the token needs
   `manage_own_keeper`, and the answer is the JSON of the route. See
   [Conversations](docs/guides/account-server-mcp.md#conversations)
   (#51816).
-- Add `claude-fable-5-2` to the embedded model catalog (`packages/agent_core/models.toml`): 1M-token window, 128K output, $8/$40 per million tokens, cache reads at 0.025x, thinking and tool-choice rules copied from the Fable 5.1 row. The seed `config/runtime.toml` points the five `claude-code-fable-{low,medium,high,xhigh,max}` slots at it, and `config/model-releases.json` records the 2026-11-09 release. 가이드 없음(문서 없음) (#51822).
-- Add `gemini-4-carbon` and `gemini-4-hydrogen` to the embedded model catalog (`packages/agent_core/models.toml`): 1,048,576-token window, 65,536 default output, thinking levels `low`, `medium` and `high`, plus `xhigh` on Hydrogen. The seed `config/runtime.toml` binds seven Antigravity slots named as `agy models` lists them: `gemini-4-carbon-{low,medium,high}` and `gemini-4-hydrogen-{low,medium,high,xhigh}`. 가이드 없음(문서 없음) (#51824).
+- Add `claude-fable-5-2` to the embedded model catalog (`packages/agent_core/models.toml`): 1M-token window, 128K output, $8/$40 per million tokens, cache reads at 0.025x, thinking and tool-choice rules copied from the Fable 5.1 row. The seed `config/runtime.toml` points the five `claude-code-fable-{low,medium,high,xhigh,max}` slots at it, and `config/model-releases.json` records the 2026-11-09 release. (#51822).
+- Add `gemini-4-carbon` and `gemini-4-hydrogen` to the embedded model catalog (`packages/agent_core/models.toml`): 1,048,576-token window, 65,536 default output, thinking levels `low`, `medium` and `high`, plus `xhigh` on Hydrogen. The seed `config/runtime.toml` binds seven Antigravity slots named as `agy models` lists them: `gemini-4-carbon-{low,medium,high}` and `gemini-4-hydrogen-{low,medium,high,xhigh}`. (#51824).
 - A lane add-on package can declare row actions in `presentation.actions`: an action on the rows of one lane whose `fixed` members come from the package and whose `from_row` members are read from the row. The host judges each one against the advertised action schema and publishes the verdicts as the instance's `row_actions`; a package without row actions keeps its declaration revision. (#51843)
 - Claude Code 와 Codex Keeper 턴의 `turn composition` 로그 끝에 `upfront_tools=N upfront_bytes=M` 을 더해요. `Runtime_official_client_tool.upfront_tools` 가 `Upfront` 로 선언한 도구만 골라 총합과 같은 함수로 다시 세기 때문에, 도구 검색 뒤의 `On_demand` 도구까지 더한 `tool_surface_bytes` 에 이 몫을 더하면 합이 맞고, 모델이 처음부터 읽는 도구 크기를 로그로 잴 수 있어요 (#51869).
 - `Lane_addon_row_action` reads the host's `row_actions` verdicts back and fills a row action from a row's fields: each `from_row` member is read at its path and checked against the offered alternative's member schema under the package's action tool name. A row that cannot fill an action names every member it lacks, gives in the wrong shape, or gives a value its schema refuses. A presentation reading that has no value now says why as a typed reason. (#51874)
@@ -448,16 +448,16 @@
 - `operator-lesson` Lane Add-on package: a `compose {scenes}` action writes short lesson scenes
   from granted Board, repository, wiki and pull-request records, and drops a scene whose quote
   is not in its record. Guide: `docs/guides/operator-lesson.md` (#51896).
-- The account console of a signed-in person connects a subscription in the subscriptions panel: the person picks one the server offers, told before they pick whether a Keeper may run on it here, follows what its official client prints with each https address as a link, sends the login code or a key, and cancels. A login the page lost track of can be checked again, cancelled or closed, and each failure is said where a screen reader announces it. Once a login links an account the panel reads the subscriptions again. Keepers and tokens still happen on the page at `/`. 가이드 없음(문서 없음) (#51938).
-- The account console of a signed-in person checks a model of a connected account in the card of the account: a card of a subscription a Keeper may run on lists the models the server offers for it and checks the one picked, says while the check runs that it can take about two minutes, and says each failure code in words with what to do next. Once a check passes, the panel reads the subscriptions again and the card shows the new Runtime. A check whose answer did not come is said to have an unknown outcome, and the subscriptions are read again too. 가이드 없음(문서 없음) (#51958).
-- The account console of a signed-in person lists their Keepers in a Keepers panel, with the model each works with, and makes a new Keeper from a name and, if the person picks one, a model. Each card gives its Keeper another model. The models offered are the ones a Keeper can run on here: a model checked on an account whose subscription the server lets a Keeper run on. A Keeper that cannot work says so on its card before anything is pressed. A make or an assignment whose answer did not come, or that the server answered with a failure of its own, reads the list again, and each failure is said where a screen reader announces it. Talking to a Keeper and tokens still happen on the page at `/`. 가이드 없음(문서 없음) (#51981).
+- The account console of a signed-in person connects a subscription in the subscriptions panel: the person picks one the server offers, told before they pick whether a Keeper may run on it here, follows what its official client prints with each https address as a link, sends the login code or a key, and cancels. A login the page lost track of can be checked again, cancelled or closed, and each failure is said where a screen reader announces it. Once a login links an account the panel reads the subscriptions again. Keepers and tokens still happen on the page at `/`. (#51938).
+- The account console of a signed-in person checks a model of a connected account in the card of the account: a card of a subscription a Keeper may run on lists the models the server offers for it and checks the one picked, says while the check runs that it can take about two minutes, and says each failure code in words with what to do next. Once a check passes, the panel reads the subscriptions again and the card shows the new Runtime. A check whose answer did not come is said to have an unknown outcome, and the subscriptions are read again too. (#51958).
+- The account console of a signed-in person lists their Keepers in a Keepers panel, with the model each works with, and makes a new Keeper from a name and, if the person picks one, a model. Each card gives its Keeper another model. The models offered are the ones a Keeper can run on here: a model checked on an account whose subscription the server lets a Keeper run on. A Keeper that cannot work says so on its card before anything is pressed. A make or an assignment whose answer did not come, or that the server answered with a failure of its own, reads the list again, and each failure is said where a screen reader announces it. Talking to a Keeper and tokens still happen on the page at `/`. (#51981).
 - An `operator-quiz` installation may bind the `scenes` output of an `operator-lesson`
   installation in the same run; its new questions then come only from records the quiz read
   that a lesson cited, and `quiz/measures` reports what it received. Guide:
   `docs/guides/operator-quiz.md` (#52003).
-- Each Keeper card in the account console opens the Keeper's current conversation: what the person said and what the Keeper answered, as the server recorded it, with the model and the time of each answer. A turn with no answer says why, or that its end was not recorded, and says when the Keeper may have read the message anyway. Conversations the Keeper started before the current one are counted but not shown. A reading that failed says so where a screen reader announces it, and reads again on a press. Sending a message still happens on the page at `/`. 가이드 없음(문서 없음) (#52015).
-- The conversation of a Keeper in the account console has a form under it: a message goes to the Keeper and the conversation is read again once the turn ends, and a new conversation can start, also from a conversation the page could not read. A message the server would refuse (blank, or over 4096 bytes) is not sent, and a turn has no deadline on the page. What came of a request is shown after the conversation is read again: the answer, a refusal in words for each code of the route (saying when the message was already taken in), or that the page does not know what the server did. An answer the record does not keep (a Codex Runtime) is shown under the form only. Sending a message no longer needs the page at `/`. 가이드 없음(문서 없음) (#52063).
-- The account console lists the tokens (scoped PATs) of the person, each with its use or its scope, its status and its dates, and makes and revokes them. A token is made for one of two uses with a fixed scope, read only (whoami) or an MCP client (the scope `docs/guides/account-server-mcp.md` gives), and an expiry of 7, 30 or 90 days or none. The token is shown once, in a read-only field with a copy button, until the person says they took it or leaves the page, and it is kept out of web storage; no second token is made while one is shown. A revoke takes two presses. The list is read again after each make or revoke, however the request ended, and a request whose end the page did not hear says that it may have taken effect. Making a token no longer needs the page at `/`. 가이드 없음(문서 없음) (#52099).
+- Each Keeper card in the account console opens the Keeper's current conversation: what the person said and what the Keeper answered, as the server recorded it, with the model and the time of each answer. A turn with no answer says why, or that its end was not recorded, and says when the Keeper may have read the message anyway. Conversations the Keeper started before the current one are counted but not shown. A reading that failed says so where a screen reader announces it, and reads again on a press. Sending a message still happens on the page at `/`. (#52015).
+- The conversation of a Keeper in the account console has a form under it: a message goes to the Keeper and the conversation is read again once the turn ends, and a new conversation can start, also from a conversation the page could not read. A message the server would refuse (blank, or over 4096 bytes) is not sent, and a turn has no deadline on the page. What came of a request is shown after the conversation is read again: the answer, a refusal in words for each code of the route (saying when the message was already taken in), or that the page does not know what the server did. An answer the record does not keep (a Codex Runtime) is shown under the form only. Sending a message no longer needs the page at `/`. (#52063).
+- The account console lists the tokens (scoped PATs) of the person, each with its use or its scope, its status and its dates, and makes and revokes them. A token is made for one of two uses with a fixed scope, read only (whoami) or an MCP client (the scope `docs/guides/account-server-mcp.md` gives), and an expiry of 7, 30 or 90 days or none. The token is shown once, in a read-only field with a copy button, until the person says they took it or leaves the page, and it is kept out of web storage; no second token is made while one is shown. A revoke takes two presses. The list is read again after each make or revoke, however the request ended, and a request whose end the page did not hear says that it may have taken effect. Making a token no longer needs the page at `/`. (#52099).
 - An Admin's browser session reads three lists on the account server,
   with no CSRF token: `GET /api/v1/auth/allowlist`
   (`{"registrations": [...]}`), `GET /api/v1/auth/invites`
@@ -513,8 +513,7 @@
   read of a month folds every day file. An answer with an unknown schema,
   a missing field, a negative or fractional count, or a time no Date holds
   fails the read and names the field. The panel that draws it comes in the
-  next layer.
-  가이드 없음(문서 없음) (#52316).
+  next layer. (#52316).
 - `Keeper_same_turn_result_stub.apply`, the pure function of RFC-0510 §1.1: within one turn, a tool result whose text is byte-equal to an earlier result of an enabled tool becomes `[masc:same-result first_tool_use_id="…" bytes=N sha256=…]` naming the first one. Nothing calls it yet, so no Keeper request changes (#52326).
 - A tool file may declare `same_turn_result_stub = true` (RFC-0510 D6). Request assembly then sends that tool's result as `[masc:same-result …]` when its text is byte-equal to an earlier result of the same turn, and sends the same pointer after the turn ended. No shipped tool file declares it, so no Keeper request changes (#52335).
 - The Status tab of the dashboard's Keeper detail draws the Keeper's month
@@ -529,8 +528,7 @@
   and a tile too narrow for a number with the fleet's beside it puts the
   fleet's below. The button is on the page in every state and is never
   disabled, so it keeps keyboard focus while a read runs and while the page
-  confirms the workspace again. Cost is not drawn.
-  가이드 없음(문서 없음) (#52338).
+  confirms the workspace again. Cost is not drawn. (#52338).
 - A PTY test runs masc-tui against a fixture that answers `/health` as the
   account server of a multi-account installation does. Through the
   navigation trace it checks that the TUI draws the account server's screen
@@ -3579,9 +3577,9 @@
   memory; see "What a pass leaves" in
   `docs/guides/KEEPER-VM-BUILD-CLEANUP.md` (#51288, #51271).
 - The TUI Tools surface has a sixth pane, `저장 공간` (`p` moves between panes). It draws the host disk as the server measured it, how long the server has been up, the latest storage cleanup pass and each Keeper's latest attempt. A Keeper whose declaration could not be read and a failed attempt come first, then an attempt that ran to its end and left entries behind; a summary or row this build cannot read is drawn as its reason. The pane only reads: it reloads the envelope when opened and on `r`, and reclaiming stays the catalog's two presses. See [the cleanup guide](../docs/guides/KEEPER-VM-BUILD-CLEANUP.md) (#51306).
-- `masc_schedule_create` and `masc_schedule_update` take `until_github_checks`, a commit URL. The schedule becomes due when every returned run of a push, pull_request or workflow_run event across all pages has completed, and the wake message lists each run with its conclusion. Checks outside GitHub Actions and downstream runs not registered yet are not covered. 가이드 없음(문서 없음) (#51340)
+- `masc_schedule_create` and `masc_schedule_update` take `until_github_checks`, a commit URL. The schedule becomes due when every returned run of a push, pull_request or workflow_run event across all pages has completed, and the wake message lists each run with its conclusion. Checks outside GitHub Actions and downstream runs not registered yet are not covered. (#51340)
 - The host cycle logs one INFO line when a Lane Add-on exact attempt ends: installation id, output, result, elapsed milliseconds and how many exact attempts of that cycle were running when it started. The line carries no request body (#51352).
-- The hourly trend of the tool quality panel draws one bar per hour of the bytes its tool results returned, under the success rate chart, and `hourly_trend` in `GET /api/v1/dashboard/tool-quality` carries `result_bytes` per hour. 가이드 없음(문서 없음) (#51354)
+- The hourly trend of the tool quality panel draws one bar per hour of the bytes its tool results returned, under the success rate chart, and `hourly_trend` in `GET /api/v1/dashboard/tool-quality` carries `result_bytes` per hour. (#51354)
 - `GET /api/v1/diagnostics/memprof` returns a fourth table,
   `starting_domain_allocated`, with `starting_domain_allocated_samples` and
   `starting_domain_allocated_bytes`: of the sampled allocations, those made
@@ -3591,9 +3589,9 @@
   (#51370).
 - A Lane Add-on installation declaration reads `max_exact_in_flight`, the number of exact requests of that installation the host runs side by side; it is an integer of 1 or more, defaults to 1, and is outside the declaration revision (#51376).
 - The host cycle runs the exact requests of one Lane Add-on installation side by side, up to the `max_exact_in_flight` the installation declares; an installation that declares nothing keeps running them one at a time (#51377).
-- The hourly and daily tool-call series on the Tools screen and `/api/v1/tool-metrics/series` carry the result bytes of the calls: a total, the largest result, and how many calls have a size. A call stored before sizes were kept counts as a call and adds no bytes. The sizes live in a new table `tool_metric_result_sizes` that the store creates on open; no stored row is changed (#51380). 가이드 없음(문서 없음)
-- A chat task can end its turn to wait for a background request's receipt in the Keeper chat operation store and Owner. The semantic execution gains `Await_receipt` and `Resolve_receipt`, `defer_direct_checkpoint` takes `receipt_wait`, and a new `Receipt_arrived` Owner command resolves the entry for a request. A task with a pending entry is not claimable until its receipt arrives. Nothing ends a turn this way yet, so Keeper behavior is unchanged. 가이드 없음(문서 없음) (#51424).
-- A Keeper can end a chat turn to wait for the receipt of a background `Execute` run with the new `keeper_receipt_wait` tool. Several calls in one turn wait for all of their runs, and each request a call accepted is recorded with the turn. The next run of the same conversation starts with those receipts once all of them have arrived, and no other run reads or deletes them while the wait is pending. A request whose run ended without leaving a receipt is settled with one `Unfinished` receipt and a `Source_lost` resolution; the receipt echoes the arguments its request record kept, or marks them `Unknown` when the record holds none. The tool is offered only to runs that serve a chat execution. A request that another conversation of the Keeper already waits for is refused when the tool is called, with a message the model reads, and the owner's record stays as it was. 가이드 없음(문서 없음) (#51429).
+- The hourly and daily tool-call series on the Tools screen and `/api/v1/tool-metrics/series` carry the result bytes of the calls: a total, the largest result, and how many calls have a size. A call stored before sizes were kept counts as a call and adds no bytes. The sizes live in a new table `tool_metric_result_sizes` that the store creates on open; no stored row is changed (#51380).
+- A chat task can end its turn to wait for a background request's receipt in the Keeper chat operation store and Owner. The semantic execution gains `Await_receipt` and `Resolve_receipt`, `defer_direct_checkpoint` takes `receipt_wait`, and a new `Receipt_arrived` Owner command resolves the entry for a request. A task with a pending entry is not claimable until its receipt arrives. Nothing ends a turn this way yet, so Keeper behavior is unchanged. (#51424).
+- A Keeper can end a chat turn to wait for the receipt of a background `Execute` run with the new `keeper_receipt_wait` tool. Several calls in one turn wait for all of their runs, and each request a call accepted is recorded with the turn. The next run of the same conversation starts with those receipts once all of them have arrived, and no other run reads or deletes them while the wait is pending. A request whose run ended without leaving a receipt is settled with one `Unfinished` receipt and a `Source_lost` resolution; the receipt echoes the arguments its request record kept, or marks them `Unknown` when the record holds none. The tool is offered only to runs that serve a chat execution. A request that another conversation of the Keeper already waits for is refused when the tool is called, with a message the model reads, and the owner's record stays as it was. (#51429).
 - The runtime list reports a refused credential: a runtime whose provider
   answered that its credential is not valid (HTTP 401, an official client that
   is not logged in) carries `credential_refused_at` in
@@ -3601,10 +3599,10 @@
   It orders and holds nothing (#51457).
 - The TUI runtime list and runtime detail show a refused credential with the
   time it was seen, instead of "no refusal" (#51458).
-- The home page of a multi-account server shows an Admin a "Let someone join" form that registers an allowlist identity (a GitHub user id or a Google sub) and removes an entry by its registration id, through the existing allowlist routes. The form is hidden unless the session is an Admin's. The page cannot list existing entries, because no route reads the allowlist. 가이드 없음(문서 없음) (#51484)
-- The operator task list now carries every completion that was submitted and has no verdict yet, oldest submission first, in the TUI agenda and the dashboard attention section. It is read from the backlog and does not tell a running review from a stopped one. 가이드 없음(문서 없음) (#51525).
-- `/health?full=1` reports `request_not_delivered` in `provider_connection_cache.closed_total` and `closed_after_reuse`. 가이드 없음(문서 없음) (#51529).
-- `masc_keeper_delegate_status_many` reads up to 10 Keeper chat operations in one call. It takes a list of `{target, operation_id}` pairs, the targets may differ, and returns for each pair in order either `data`, the same result `masc_keeper_delegate_status` returns, or `error`. A pair that cannot be read does not stop the others; a malformed pair rejects the call and names its index (#51546). 가이드 없음(문서 없음)
+- The home page of a multi-account server shows an Admin a "Let someone join" form that registers an allowlist identity (a GitHub user id or a Google sub) and removes an entry by its registration id, through the existing allowlist routes. The form is hidden unless the session is an Admin's. The page cannot list existing entries, because no route reads the allowlist. (#51484)
+- The operator task list now carries every completion that was submitted and has no verdict yet, oldest submission first, in the TUI agenda and the dashboard attention section. It is read from the backlog and does not tell a running review from a stopped one. (#51525).
+- `/health?full=1` reports `request_not_delivered` in `provider_connection_cache.closed_total` and `closed_after_reuse`. (#51529).
+- `masc_keeper_delegate_status_many` reads up to 10 Keeper chat operations in one call. It takes a list of `{target, operation_id}` pairs, the targets may differ, and returns for each pair in order either `data`, the same result `masc_keeper_delegate_status` returns, or `error`. A pair that cannot be read does not stop the others; a malformed pair rejects the call and names its index (#51546).
 - Each Keeper in the waiting inventory carries `state_sources`: the sources
   that put it in its state (the deferring ones for `deferred`, all of them
   for `waiting`, none for `idle` and `busy`) (#51590).
@@ -3629,8 +3627,8 @@
   conversation of another subscription or one whose session Claude
   Code no longer has. See "Conversations" in
   `docs/guides/account-server-mcp.md` (#51636).
-- `masc_schedule_create` and `masc_schedule_update` take `delivery` for a Keeper wake: `queue` (the default) puts a new message in the Keeper's queue, `receipt` writes a tool-result receipt whose call id is the schedule id and queues no wake message. A receipt delivery takes no `urgency` and needs a one-shot schedule. 가이드 없음(문서 없음) (#51663).
-- `keeper_receipt_wait` takes `schedule_id` as well as `request_id`. A Keeper that created a schedule with `delivery` `receipt` waits for that schedule's receipt in the same turn, and a wait whose schedule ended without a receipt is settled with an `unfinished` receipt. 가이드 없음(문서 없음) (#51673).
+- `masc_schedule_create` and `masc_schedule_update` take `delivery` for a Keeper wake: `queue` (the default) puts a new message in the Keeper's queue, `receipt` writes a tool-result receipt whose call id is the schedule id and queues no wake message. A receipt delivery takes no `urgency` and needs a one-shot schedule. (#51663).
+- `keeper_receipt_wait` takes `schedule_id` as well as `request_id`. A Keeper that created a schedule with `delivery` `receipt` waits for that schedule's receipt in the same turn, and a wait whose schedule ended without a receipt is settled with an `unfinished` receipt. (#51673).
 
 ### Changed
 
@@ -4557,7 +4555,7 @@
   bucket and tool row of `GET /api/v1/tool-metrics/series` carries
   `long_count` and `long_total_ms`, and the response carries the threshold as
   `long_call_ms` (60000). The Tools panel adds two tiles, a dashed line in the
-  time chart and a column in the tool table. 가이드 없음(문서 없음) (#50860).
+  time chart and a column in the tool table. (#50860).
 - `prompt_compare.py` decides whether a keeper-librarian prompt draft goes in, and `prompt_lines.json` fixes its comparison before any draft runs, as RFC-0517 §2.3 asks: the two Inkling baseline runs of the current prompt, the runs per side and the noise widths (worse below -2.5σ, better above +2σ). A draft goes in when no metric of Inkling or GLM gets worse and memory state accuracy, stale drop recall or judged merge recall improves on Inkling; absorb precision remains a non-degradation check. It refuses runs of different drafts on different models, and a run listed twice or copied from another run. A metric with chances on only one side now leaves the comparison incomplete; no chances on either side supplies no improvement (#50876)
 - Added an internal exact-original fence for Librarian history results whose worker and host outcome cannot be found, preserving the original evidence and unread source while blocking late Memory application. This foundation does not submit a replacement or expose an HTTP mutation. (#50947)
 - Count every Keeper Memory commit that rewrites the snapshot.
@@ -4577,7 +4575,7 @@
   not asked). `masc_keeper_librarian_absorb_copy_checks_total` moves once per
   reverse copy check, labelled with its verdict. A captured judgment counts
   when its terminal is stored, so a resume after a failed publication counts
-  it once. Replaying a retained judgment counts nothing. 가이드 없음(문서 없음)
+  it once. Replaying a retained judgment counts nothing.
   (#51059)
 - The Keeper memory health row carries `changes_since_start` and
   `facts_by_hour`. `changes_since_start` holds, for every pass and change, the
@@ -4585,8 +4583,7 @@
   the server started: the values of `masc_keeper_memory_changes_total`.
   `facts_by_hour` holds one point per clock hour of the last 168 hours: the
   facts after that hour's last commit and the time it was recorded. It is read
-  from the memory journal, so it covers commits made before this change.
-  가이드 없음(문서 없음) (#51142)
+  from the memory journal, so it covers commits made before this change. (#51142)
 - Add a fleet Keeper queue cancellation panel with exact row selection, reason and confirmation, guarded workspace/auth ownership, row-level outcomes and pending-state readback. Retain uncertain requests across panel navigation without automatic replay. ([#51258](https://github.com/jeong-sik/masc/pull/51258))
 
 ### Changed
@@ -5350,18 +5347,18 @@
 
 ### Added
 
-- Browser ego connection supports page touch via `tap_at` and `swipe` wire commands (RFC ego CDP L4). Single `page.touch` step maps each gesture to CDP coordinates. 가이드 없음(문서 없음) (#49295).
-- Browser ego connection tab list (`list_tabs`) now includes `windowId`, and the `list_windows` wire command is available on the ego connection (RFC ego CDP L5). 가이드 없음(문서 없음) (#49320).
-- Browser ego connection supports blocking page sub-requests to specified hosts via `block_requests` and `unblock_requests` wire commands; the `intercept_network` live capability is enabled (RFC ego CDP L6). 가이드 없음(문서 없음) (#49379).
-- Browser ego connection reads cookie and storage names visible to the tab without values via `masc_browser_read mode=cookies`; the `read_storage` live capability is enabled (RFC ego CDP L7). 가이드 없음(문서 없음) (#49561).
-- Browser ego connection reads tab request lists without values via `masc_browser_read mode=network`; the `read_network` live capability is enabled (RFC ego CDP L8). 가이드 없음(문서 없음) (#49642).
-- Browser ego connection reads console lines and uncaught errors written by the tab document via `masc_browser_read mode=console`; the `read_console` live capability is enabled (RFC ego CDP L9). 가이드 없음(문서 없음) (#49657).
+- Browser ego connection supports page touch via `tap_at` and `swipe` wire commands (RFC ego CDP L4). Single `page.touch` step maps each gesture to CDP coordinates. (#49295).
+- Browser ego connection tab list (`list_tabs`) now includes `windowId`, and the `list_windows` wire command is available on the ego connection (RFC ego CDP L5). (#49320).
+- Browser ego connection supports blocking page sub-requests to specified hosts via `block_requests` and `unblock_requests` wire commands; the `intercept_network` live capability is enabled (RFC ego CDP L6). (#49379).
+- Browser ego connection reads cookie and storage names visible to the tab without values via `masc_browser_read mode=cookies`; the `read_storage` live capability is enabled (RFC ego CDP L7). (#49561).
+- Browser ego connection reads tab request lists without values via `masc_browser_read mode=network`; the `read_network` live capability is enabled (RFC ego CDP L8). (#49642).
+- Browser ego connection reads console lines and uncaught errors written by the tab document via `masc_browser_read mode=console`; the `read_console` live capability is enabled (RFC ego CDP L9). (#49657).
 - The AGENT_CORE catalog has a `tinker` provider row and a `thinkingmachines/Inkling-2-Small` model row: a 65,536-token window, the `minimal` to `xhigh` effort ladder without `none`, reasoning on `reasoning_content`, and neither JSON mode nor native schema, because the endpoint accepts both and applies neither. An exact-output lane can name `tinker.tinker-inkling-2-small` as a slot; the schema travels in the prompt and the reply is validated locally — `docs/guides/tinker-integration.md`, "Using Inkling-2-Small on an exact-output lane" (#49702).
 - A scoped PAT and a Service credential have ids and a token text: `mpat_<id>.<secret>` and `msvc_<id>.<secret>`, with a labelled SHA-256 of the secret for their records. A bearer with neither prefix reads as no token of these kinds (#49709).
 - The authorization log has the body of an authorization scope: its runtimes, channels and effects, each `"all"` or a list of labels in ascending order. A body that repeats a label, names an unknown one, or lists another order is refused (#49712).
 - The authorization log has the body of a scoped PAT record: an issued PAT with its Human, a labelled SHA-256 of its secret, its scope and an optional expiry, or a revoked PAT. A record whose scope does not read is refused (#49716).
 - The authorization log has the body of a Service credential record: an issued credential with its service and a labelled SHA-256 of its secret, or a revoked credential. A credential has no expiry (#49721).
-- Browser ego connection supports cookie write and delete on the operator's ego profile via `set_cookie` and `delete_cookie` wire commands (RFC ego CDP L11). Requires `tabId` for writes; operator-tab scripts are refused. 가이드 없음(문서 없음) (#49723).
+- Browser ego connection supports cookie write and delete on the operator's ego profile via `set_cookie` and `delete_cookie` wire commands (RFC ego CDP L11). Requires `tabId` for writes; operator-tab scripts are refused. (#49723).
 - `Runtime_vibe_headless` decodes Mistral Vibe headless output: the session entries `vibe -p` writes to stdout (`--output json` or `streaming`) and the `export.json` it writes to `--output-dir`. Outcomes, stop reasons, roles, effect statuses and effect error codes decode to closed variants that keep an unknown wire value as itself; `schema_version` other than 1 and missing required fields are errors (#49724).
 - An intent of the authorization log can name a scoped PAT or a Service credential as its subject, so their revocations survive a log cut back to before them (#49729).
 - The Keepers list draws the next dispatch target or resting path at the end of the DETAIL column. Resting paths distinguish whether the reset time was provider-stated (`제공자`) or MASC-bounded (`상한`), use relative durations, and prefix with `▹` only when the previous turn failed (#49730).
@@ -5411,12 +5408,12 @@
   - Usage: `ssh <endpoint> python3 - --root <keeper root> --retention-sec 172800 < config/scripts/keeper-remote-workspace-cleanup.py` 처럼 돌려요. `--retention-sec` 는 필수예요. `--apply` 가 없으면 보고만 하고, 붙이면 그 기준 시각 넘게 아무 파일도 안 바뀐 항목을 지워요. 점으로 시작하는 항목(`.config/gh` 등)·symlink·살아 있는 프로세스가 있는 항목·원격에 없는 커밋이나 stash 가 있는 git 저장소·밖 worktree 의 본 저장소·판단에 필요한 사실을 하나라도 못 읽은 항목은 남겨요. 커밋 안 한 변경과 untracked 파일은 보호되지 않아요. 끄는 법: `--apply` 를 빼면 아무것도 지우지 않아요.
 - The Keepers list's Detailed second row ends with a 12-hour turn pulse: one mark per hour, newest on the right, drawn from the roster's `recent_turns` (ok, rested, failed, no turn, unknown). Hours the server no longer holds read `?`; the server counts autonomous turns only. See the Keeper columns table of `docs/guides/TUI-KEYS.md` (RFC-0511 D1, #50001).
 - The server's hourly cleanup pass now sweeps each idle remote_ssh Keeper's workspace root on its endpoint. An entry goes when nothing in it changed for `keeper_remote_workspace_cleanup_retention_sec` (two days), no live process uses it, and removing it loses no commit or stash. `keeper_remote_workspace_cleanup_enabled` (default true) turns it off. Guide: `docs/guides/KEEPER-VM-BUILD-CLEANUP.md` (#50013).
-- The Memory screen draws the memory server's age ladder: an `Ordinary:` row in the fleet header sums the Keepers' ordinary facts by time since first seen (7 days or older, 1 to 7 days, 1 hour to 1 day, under 1 hour) and counts the Keepers the server did not measure and the rows this build refused, and the selected Keeper's detail draws its own ladder under the facts line. A ladder the server did not measure is drawn as `?`, not as zeros. 가이드 없음(문서 없음) (#50017).
+- The Memory screen draws the memory server's age ladder: an `Ordinary:` row in the fleet header sums the Keepers' ordinary facts by time since first seen (7 days or older, 1 to 7 days, 1 hour to 1 day, under 1 hour) and counts the Keepers the server did not measure and the rows this build refused, and the selected Keeper's detail draws its own ladder under the facts line. A ladder the server did not measure is drawn as `?`, not as zeros. (#50017).
 - The Keepers list Detailed second row ends with a `facts` cell: the Keeper's ordinary fact count and a four-mark strip of the same ladder (a bar is relative to the tallest bin of the strip, `0` is an empty bin), or `facts ?` when the server did not measure it. Guide: `docs/guides/TUI-KEYS.md`, Keeper columns (#50017).
 - Memory 개요 화면 머리에 `World:` 줄을 더해요. `GET /api/v1/dashboard/workspace-memory-inventory` 로 curator 장부의 공유 주장·충돌 건수와 브리핑 상태를 읽어요. Memory 개요가 열려 있는 동안만, 서버 캐시(60초)보다 잦지 않게 읽어요. 아직 안 읽었거나 읽기가 실패하면 0 이 아니라 `?` 를 그려요. 도움말 시트 Memory marks 에 낱말 여섯 줄이 늘어요. (#50060)
-- Generate labelled synthetic keeper-librarian admission requests on Tinker with `scripts/tinker/librarian/synth_generate.py`, in an evaluation split and a training split with disjoint Keepers. 가이드 없음(docs/guides/tinker-integration.md) (#50066)
-- Measure models on the keeper-librarian admission sets and apply gates G1-G5 with `scripts/tinker/librarian/eval_admission.py`, and remove synthetic requests whose labels a blind judge does not confirm with `e_synth_audit.py`. 가이드 없음(docs/guides/tinker-integration.md) (#50067)
-- Sample teacher answers that match the synthetic labels and train an answer-only (A) and a teacher-thinking (B) LoRA branch on the 256K Inkling 2 Small ID with `scripts/tinker/librarian/teacher_sample.py` and `train_sft.py`; training refuses to start unless the fixed pass lines are unchanged. 가이드 없음(docs/guides/tinker-integration.md) (#50069)
+- Generate labelled synthetic keeper-librarian admission requests on Tinker with `scripts/tinker/librarian/synth_generate.py`, in an evaluation split and a training split with disjoint Keepers. (#50066)
+- Measure models on the keeper-librarian admission sets and apply gates G1-G5 with `scripts/tinker/librarian/eval_admission.py`, and remove synthetic requests whose labels a blind judge does not confirm with `e_synth_audit.py`. (#50067)
+- Sample teacher answers that match the synthetic labels and train an answer-only (A) and a teacher-thinking (B) LoRA branch on the 256K Inkling 2 Small ID with `scripts/tinker/librarian/teacher_sample.py` and `train_sft.py`; training refuses to start unless the fixed pass lines are unchanged. (#50069)
 - The multi-account log reads `runtime` records: a person makes a Runtime on a provider account they own, and the same record names its Self grant. A Runtime keeps its owner, account and grant for good; a Runtime on an account no one linked or another person owns, one made for another person (an Admin's included), a Runtime made twice, a grant id named twice, and a Runtime by a service, the local operator or a system author are refused. A Runtime takes no intent, so a log restored from before it has neither the Runtime nor its grant (#50084).
 - The multi-account log reads `keeper` records: a person makes a Keeper and is its owner (`made`), and the owner gives it one of their Runtimes (`assigned`); a later assignment replaces the Runtime. In multi-account mode the assignment of a Keeper lives in the log, not in `[runtime.assignments]` of `runtime.toml`. A Keeper made twice (by anyone), one made for another person (an Admin's included), an assignment to a Keeper no record made or of another person, a Runtime no record made or of another person (an Admin's included), and a record by an inactive person, a service, the local operator or a system author are refused. A Keeper with no assignment has no Runtime (#50177).
 - The localhost multi-account preview lets a person make a Keeper (`POST /api/v1/auth/keepers`), give it one of their Runtimes (`POST /api/v1/auth/keepers/assign`) and list their Keepers (`GET /api/v1/auth/keepers`), under the new route kind `Manage_own_keeper`: open to every active person, a PAT needs `manage_own_keeper` in its scope, and a service is refused. A Keeper or a Runtime of another person is answered as not there (404), and a name another person took is a 409. The home page shows My Keepers. No Keeper TOML is written and no turn runs (#50178).
@@ -5424,16 +5421,16 @@
 - Add a manual auth-route transport parity workflow that distinguishes ordinary
   WebSocket discovery requests from WebSocket-only endpoints and reports
   incomplete runs and missing responses (#50242).
-- The Keeper tool `keeper_pull_requests_list` lists the open pull requests of the registered repositories from the server's last reading and does not call GitHub. A row carries the placement of the pull request (checks failing, changes requested, conflicting, not reviewed on the head commit, reviewed on the head commit while the review decision still waits for an approval, and the placements that need no work), its checks, review and mergeable state, whether an account's last review is on the head commit, and the last review of each account. The default rows are the five placements that need work; the other placements are counted. The tool declares `defer_loading = true`, so a Keeper finds it through tool search. 가이드 없음(docs/rfc/RFC-keeper-world-state-shows-open-work.md) (#50259).
+- The Keeper tool `keeper_pull_requests_list` lists the open pull requests of the registered repositories from the server's last reading and does not call GitHub. A row carries the placement of the pull request (checks failing, changes requested, conflicting, not reviewed on the head commit, reviewed on the head commit while the review decision still waits for an approval, and the placements that need no work), its checks, review and mergeable state, whether an account's last review is on the head commit, and the last review of each account. The default rows are the five placements that need work; the other placements are counted. The tool declares `defer_loading = true`, so a Keeper finds it through tool search. (#50259).
 - Enable GitHub Auto-merge by default for ordinary Ready PRs targeting main, requiring two distinct account approvals, and merge Native Stacks whole through their top PR. Review events run metadata-only workers from trusted default-branch code; see docs/guides/NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge (#50267).
 - RFC-0516: 반복 예약(`masc.keeper_wake`)과 Task가 이어 쓸 게시 아티팩트 id를 `continues_artifact` 타입 필드로 가리키는 설계를 문서화했다. 필드가 있으면 wake가 대상 id를 구조화로 전달·기록하고(발행 강제는 없음), 없으면 오늘 동작 그대로, 대상 문서가 지워졌으면 발행이 저장소 `Missing`으로 거절되어 새 문서가 만들어지지 않는다. 11-06 운영자 임시 조치(예약 문구에 고정 문서 id)의 이행 순서와 운영자 재검토 세 반론에 대한 답을 본문 §4·§5에 적었다 (#50299)
 - Add a source-checked map of TUI screens, nested views, overlays, and music workspaces. #50332
 - Review Goal criterion feasibility asynchronously with retained original judgments, exact revision binding and Dashboard/TUI observations. Guide: [Goal criterion review](../docs/design/goal-criterion-review.md) (#50341).
-- A tool result that an official client (Claude Code, Codex, Antigravity, Muse) receives from a Keeper now ends with the queue rows that arrived since the turn began, once each, oldest first, up to 8 a result with the rest counted. Results that end the turn, results the block would take past the tool's declared size ceiling, and an unreadable queue go out unchanged. The rows stay queued and start their own turn after the run. Each appended block is recorded in the run's RAW trace as the `arrived_stimuli_projection` hook, and `measure_runs_and_arrivals.py` reports the rows shown, their wait to the first block, and the block bytes. 가이드 없음(docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md) (#50365)
+- A tool result that an official client (Claude Code, Codex, Antigravity, Muse) receives from a Keeper now ends with the queue rows that arrived since the turn began, once each, oldest first, up to 8 a result with the rest counted. Results that end the turn, results the block would take past the tool's declared size ceiling, and an unreadable queue go out unchanged. The rows stay queued and start their own turn after the run. Each appended block is recorded in the run's RAW trace as the `arrived_stimuli_projection` hook, and `measure_runs_and_arrivals.py` reports the rows shown, their wait to the first block, and the block bytes. (#50365)
 - Enforce recorded Direct Board readership across reads, aggregates, queued delivery and public observations, preserving unresolved original signals for recovery. Guide: [Direct Board readers](../docs/design/board-direct-readers.md) (#50387).
-- `masc_keeper_delegate_targets` reads the chat queue and the live turn of up to 16 named Keepers, so a Keeper can compare delegate targets before it calls `masc_keeper_delegate`. Each row carries `queued_count`, `oldest_queued_age_s` while work waits, and `turn_age_s` while the Keeper is inside a turn. The `target_turn_age_s` in the delegate result comes from the same read. The tool is deferred, so a request carries its schema only after the model asks for it by name. 가이드 없음(문서 없음) (#50447).
+- `masc_keeper_delegate_targets` reads the chat queue and the live turn of up to 16 named Keepers, so a Keeper can compare delegate targets before it calls `masc_keeper_delegate`. Each row carries `queued_count`, `oldest_queued_age_s` while work waits, and `turn_age_s` while the Keeper is inside a turn. The `target_turn_age_s` in the delegate result comes from the same read. The tool is deferred, so a request carries its schema only after the model asks for it by name. (#50447).
 - The keeper-librarian verdict asks a blind judge, for every memory an E-synth answer absorbs, the question MASC's absorb gate asks its judgment model, in the gate's words from `config/prompts/librarian.md` and with the state the gate sends, and reports absorb precision and judged merge recall per target. Each case shows the claim of the call its row names, and the verdict reads the decisions only for the run the cases came from. An absorbed planted stale fact is wrong without a case (#50458)
-- In the multi-account preview, a person sends their Keeper a message and the Runtime they gave it answers once on their own Claude Code subscription (`POST /api/v1/auth/keepers/turn`, a Run button under My Keepers); a Codex Runtime is refused until plan D2-6 (multi-account plan D2-8). 가이드 없음(문서 없음) (#50467).
+- In the multi-account preview, a person sends their Keeper a message and the Runtime they gave it answers once on their own Claude Code subscription (`POST /api/v1/auth/keepers/turn`, a Run button under My Keepers); a Codex Runtime is refused until plan D2-6 (multi-account plan D2-8). (#50467).
 - The keeper-librarian harness measures admission prompts on GLM: `eval_admission.py run --provider glm` sends Z.AI's coding endpoint the request MASC's GLM slot sends, reads GLM's error code before the HTTP status, stops on auth and quota codes with GLM's message, resumes from the same `--out`, and caps the requests under one `--out` with `--max-calls`. `run --template <librarian.md>` draws every prompt with another template from the same request data (#50509)
 - 카탈로그 발행 때 최근 7일 내 활성 이력이 있으나 디스크·카탈로그 원천이 없는 스킬을 `skill_missing_on_disk` 경고(WARN 로그·감사 행·SSE 런타임 옵저버 이벤트)로 기록한다(RFC-0506, #49178). 스킬 발행 성공마다 Board 에 짧은 영수증(이름·원천·게시자·상태)을 남긴다 (#50531).
 - The Keepers fleet line ends with `proactive every <interval>` (`5m`, `1h`,
@@ -5441,7 +5438,7 @@
   `keeper.keepalive_interval_sec` setting the heartbeat loop reads for
   periodic turns, carried in the fleet stream and in the `keeper_fleet_safety`
   health section as `proactive_interval_sec`. A narrow screen drops it before
-  the counts and the blocker. 가이드 없음(docs/guides/TUI-KEYS.md) (#50579).
+  the counts and the blocker. (#50579).
 - The server runs `masc_sandbox_volume_gc` as a report, without `execute`, one maintenance pulse after it starts and every six hours after that. The pass deletes nothing, keeps its outcome in server memory and writes one log line. A host without Apple Container records the pass as skipped before any volume command runs. The `/api/v1/dashboard/tools` envelope carries the last pass as `sandbox_volume_gc_report`, and the TUI Tools catalog pane shows its time and reclaim candidates under the `V` line (#50580).
 - Read completed direct native execution history through token-bound Admin endpoints, with stored batch-leader identity, original trace directories, bounded call/event pages and Core cursor validation (#50592).
 - Keep canonical recursive event identities separate from redacted display content, without recovering execution or falling back to trajectory logs (#50592).
@@ -6465,11 +6462,11 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - `keeper_artifact_read` takes `contains`, `ignore_case` and `max_matches` and
   returns the matching lines of a stored artifact as `<byte offset><TAB><line>`
   instead of requiring every 16 KB page to be read. The result stays under the
-  16 KB wire ceiling and `next_offset` says where to continue. 가이드 없음(문서 없음)
+  16 KB wire ceiling and `next_offset` says where to continue.
   (#48282).
 - `masc_schedule_notes_list` takes `contains` and returns only the notes whose
   body has that text. With `contains` the response carries `matched_count`, the
-  number of such notes in the whole schedule. 가이드 없음(문서 없음) (#48291).
+  number of such notes in the whole schedule. (#48291).
 - The TUI terminal title leads with `(N)` when the server reports N things that need the operator, the count the footer's ACTION NEEDED row carries, so a tab that is not on screen still shows someone is waiting. With nothing waiting, or a server that cannot say, the title is unchanged (#48292).
 - The TUI Dashboard lists every reason the server gives for needing the operator in an `Action needed` card under the Status card, where the footer's ACTION NEEDED row names only the first one. The footer, the terminal title and the Dashboard read the list through one function (#48327).
 - The keeper config system prompt preview in the dashboard lists the constitution ledger lines the prompt left out, with each line's number, its decode error and whether it is the file's last line without a newline. The keeper config response carries them as `prompt.system_prompt.constitution_ledger` (#48420).
@@ -6479,7 +6476,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - `GET /api/v1/dashboard/keeper-memory-health?keeper=<k>` answers one Keeper's memory health row, the element the fleet answer carries for it, or `null` for a Keeper the fleet does not list; an empty name is a 400. The fleet totals and alert summary are counted by one module that the server answer and the TUI decoder's check both use, and an alert keeps the severity it was made with instead of reading it back from its JSON (RFC-0487 L1, #48544).
 - `masc auth bootstrap --external-store PATH` activates multi-account use on a workspace where no server runs and `config.json` asks for `Multi_account`. It takes the workspace lease, writes the bootstrap and one Admin invitation from the host-local operator, and prints the invitation link `<MASC_HTTP_BASE_URL>/accounts/invite#<token>` once. Only a digest of the token is written, and the invitation expires after 24 hours. On any other state of the workspace it writes nothing and says why. This build does not serve multi-account yet, so a server stops at boot on an activated workspace, and no command undoes the activation (#48799).
 - `masc auth invite` writes one more Admin invitation on an activated workspace while no server runs, for a first invitation that expired or whose link was lost, and prints its link once. It revokes no earlier invitation, so a lost link stays usable until it is spent or expires (#48800).
-- `masc_schedule_create` and `masc_schedule_update` accept `until_github_run`, the URL of a GitHub Actions run. A one-shot Keeper wake schedule that carries it fires when that run completes, with any conclusion, or at its due time, whichever comes first. The server reads each watched run every 30 seconds with the `[repositories] pr_reader` account, moves the due time to now, and starts the wake message with the outcome and the run URL. A run the reader account cannot read wakes the schedule early and the message says why. 가이드 없음(문서 없음) (#48864).
+- `masc_schedule_create` and `masc_schedule_update` accept `until_github_run`, the URL of a GitHub Actions run. A one-shot Keeper wake schedule that carries it fires when that run completes, with any conclusion, or at its due time, whichever comes first. The server reads each watched run every 30 seconds with the `[repositories] pr_reader` account, moves the due time to now, and starts the wake message with the outcome and the run URL. A run the reader account cannot read wakes the schedule early and the message says why. (#48864).
 - `Http_client.cache_stats` reports `closed_total`: connections a request
   ended with a `Close` verdict, by reason (#48898).
 - The server installs one provider connection cache at startup. A Keeper's
@@ -6491,17 +6488,17 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   connections in all and on the origin holding the most, reuses, new
   connections, and closes by reason, or `null` when no cache is installed.
   It does not name provider origins (#48919).
-- `masc_dos_step`, `masc_dos_press`, `masc_dos_click` and `masc_dos_type` take `include_frame` (default false). With true the answer also carries the PNG that `masc_dos_screen` returns, so a read after an input needs no second call. The DOS worker image has to be rebuilt before a Keeper sees the parameter. 가이드 없음(addons/dos-machine/skills/dos-play/SKILL.md) (#48923).
+- `masc_dos_step`, `masc_dos_press`, `masc_dos_click` and `masc_dos_type` take `include_frame` (default false). With true the answer also carries the PNG that `masc_dos_screen` returns, so a read after an input needs no second call. The DOS worker image has to be rebuilt before a Keeper sees the parameter. (#48923).
 - The `/health?full=1` section `provider_connection_cache` gains
   `closed_after_reuse`: the connections closed by reason that had been
   parked before, so a reused connection's failures can be compared with a
   new one's (#48936).
-- After tool results, a Keeper's next request lists the queue rows that arrived since its run began (the `Arrived_stimuli` prompt block): once each, oldest first, up to 8 a request with the rest counted. The rows stay queued and start their own turn after the run. 가이드 없음(docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md) (#48959)
+- After tool results, a Keeper's next request lists the queue rows that arrived since its run began (the `Arrived_stimuli` prompt block): once each, oldest first, up to 8 a request with the rest counted. The rows stay queued and start their own turn after the run. (#48959)
 - The server counts unreferenced tool blobs once a day and deletes nothing.
   Each scan writes `<base>/.masc/tool_blob_maintenance/candidates-v2` and logs
   one `tool blob sweep:` line with the scan time, the live digest, blob and
   candidate counts, and how many blobs and bytes a deleting sweep would remove
-  (RFC-0499 layer one). 가이드 없음(docs/rfc/RFC-0499-tool-blobs-are-swept-inside-the-server.md) (#48968).
+  (RFC-0499 layer one). (#48968).
 - `scripts/tool-efficiency-chart.py` draws the hourly and daily series of `scripts/measure-tool-efficiency.py` as one SVG: identical re-reads, results spilled to a blob and Execute blocked time per day, and the last hours of result bytes split into the spilled and inline parts, with labelled marks for instants such as a server boot. `docs/evidence/tool-efficiency-days-2026-11/` holds the 2026-11-01 to 2026-11-05 picture with the numbers behind each bar (#48972).
 - `docs/evidence/aged-tool-results-2026-11/measure_aged_tool_results.py` replays one rule on the stored requests under `keepers/*/provider-inputs`: tool results before the current turn become markers. Over 4,344 requests of 2026-11-01 to 11-05 those results are 50.3 percent of the prompt bytes, and replacing the ones of 2 KB or more with a 596 B marker would shrink the prompt by 33.7 percent (22.1 percent without the image keeper). `RFC-tool-results-age-out-of-context` carries the numbers and the two questions that the RFC-0363 section 3.4.1 revision raises (#48998).
 - The server counts, at startup, the settled original records no live record names and the archived bodies, and logs them on one `[Startup] settled original census:` line. It moves and deletes nothing; a later layer deletes what this line counts (RFC-0498, #49025).
@@ -6513,7 +6510,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   ends, and `queued_count` does not count the running operation. The field is
   absent when the target is between turns. Over 2026-11-01..05 (UTC), 41 of the
   47 delegations that waited 600 s or more had `queued_count` 1 in their submit
-  result. 가이드 없음(문서 없음) (#49039).
+  result. (#49039).
 - The TUI Keepers Info tab shows the Keeper's month of efficiency beside the
   fleet's per-turn figures: turns, tool calls per turn, tool seconds per turn,
   output tokens per turn and failed calls, read once per visit from
@@ -6523,16 +6520,16 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   catalog, and when the report lists reclaim candidates the next `V` asks
   the server to reclaim them. Any other key takes that second press back
   (#49070).
-- After tool results, a Keeper's next request also says how many chat requests are queued behind the running turn, each time that count rises (the `Arrived_stimuli` prompt block, Agent Core turns only). The count comes from the owner's in-memory operation projection: nothing is started or ended, and no store is read. 가이드 없음(docs/rfc/RFC-backlog-never-preempts-a-running-turn.md) (#49091)
+- After tool results, a Keeper's next request also says how many chat requests are queued behind the running turn, each time that count rises (the `Arrived_stimuli` prompt block, Agent Core turns only). The count comes from the owner's in-memory operation projection: nothing is started or ended, and no store is read. (#49091)
 - docs: RFC-0502 — Keeper 합성 노드 집합에 Execute와 게시를 허용하는 초안 RFC(#49279)
 - docs: RFC-0506 — 유령 스킬 감지 skill_missing_on_disk 채택 초안 RFC(#49280)
 - Add Mistral Large 4 (v26.10) to the embedded model catalog: `mistral-large-4` under the existing `mistral` provider with 1M context, image input, tools, structured outputs, list-rate pricing, and effort `["none"]` while the chunk-list response parser stays unverified (#38564) (#49283).
 - The Code pane colours a Markdown file (`.md`, `.markdown`) line by line: headings, list and quote markers, rules, table rule rows, fences, inline code, HTML comments, YAML front matter, and the body of a fence in the language its info string names. A Markdown fence inside Markdown keeps its body plain, so a file of unclosed fences is read in linear time. A chat fence tagged `md` or `markdown` uses the same lexer (#49288)
 - A multi-account login with no invitation joins through the open allowlist entry of its identity, as a Member. With no entry it is refused and nothing is written. A person deleted after joining comes back only through a new entry, marked as previously deleted (#49443).
 - `Authz_allowlist.register` and `remove` let an Admin write the allowlist through the writer zone. A registration says whether a deleted principal had the identity; a removal writes its `Revoke` intent to the external store first. The routes of a later layer call them (#49449).
-- The operator's Lane Add-on configuration inventory counts the retained instances a newer binding of the same owner supersedes, the ones kept, and the ones kept because their visibility or runtime differs; nothing is deleted yet. 가이드 없음(docs/rfc/RFC-0497-released-lane-instances-leave-when-superseded.md) (#49480)
+- The operator's Lane Add-on configuration inventory counts the retained instances a newer binding of the same owner supersedes, the ones kept, and the ones kept because their visibility or runtime differs; nothing is deleted yet. (#49480)
 - The authorization log has the body of a browser session record: an issued session with its user, a labelled SHA-256 of its secret, and the session of the same browser it ends, or a revoked session (#49551).
-- After startup, a maintenance task logs one `[Startup] superseded Lane census:` line with the bytes held by the retained Lane instances a newer binding of the same owner supersedes, by the ones kept, and under `observations` as a whole. It reads file sizes on a worker domain and moves or deletes nothing. 가이드 없음(docs/rfc/RFC-0497-released-lane-instances-leave-when-superseded.md) (#49552)
+- After startup, a maintenance task logs one `[Startup] superseded Lane census:` line with the bytes held by the retained Lane instances a newer binding of the same owner supersedes, by the ones kept, and under `observations` as a whole. It reads file sizes on a worker domain and moves or deletes nothing. (#49552)
 - The authorization log has a `session` record kind, written by the authenticated principal whose browser session it is; the state refuses it until it reads sessions (#49555).
 - A browser session can be the subject of an intent: the external store and the cancel body write it as `{"type":"session","id":...}`, and the design says a sign-out and a new sign-in that ends the old session write a `Revoke` intent (#49557).
 - The Keepers list in the TUI shows a running or failing Keeper whose next
@@ -6540,8 +6537,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   (<runtime>)`. The roster row's `runtime_path_rest` now carries
   `release_at`, the Unix time the walk releases, and `release_basis`
   (`stated_by_provider` or `bounded_by_masc`) for a resting walk; both are
-  fixed when the rest is noted, so the row does not change between reads.
-  가이드 없음(docs/rfc/RFC-turn-failure-visible-stop.md) (#49568).
+  fixed when the rest is noted, so the row does not change between reads. (#49568).
 - The browser sessions that session records add up to: one session per id, written only by its own human principal, ended by a sign-out or by a new sign-in of the same browser, and expired 7 days after issue with no extension (#49570).
 - In multi-account mode the authorization state reads session records: a sign-out, and a sign-in that ends the session its browser held, write a `Revoke` intent on the ended session, and nobody cancels a blocked sign-out because a later sign-out or sign-in closes it (#49573).
 - Browser sessions are issued at sign-in with a 32-byte secret that only the cookie carries, and a cookie acts while its session is open, younger than 7 days, not pending a revocation, and its principal is active; the CSRF token is a digest of the secret under its own domain (#49579).
@@ -6714,8 +6710,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   of `lane-addons/` and of the config `keepers/` directory before it counts
   candidates. An entry it does not classify is listed under `unclassified` in
   `candidates-v2`, that record marks no blob deletable, and the scan logs one
-  warning naming those entries. Nothing is deleted (RFC-0499 scope layer).
-  가이드 없음(docs/rfc/RFC-0499-tool-blobs-are-swept-inside-the-server.md) (#49226).
+  warning naming those entries. Nothing is deleted (RFC-0499 scope layer). (#49226).
 - The Keepers list shows what a failing Keeper does now instead of `failure`, and puts Keepers whose last turn or heartbeat failed in a `FAILING` group between `ATTENTION` and `ACTIVE`. A failed attempt in the open turn reads `try failed`. This is layer 2 of RFC-0503 and changes no server code (#49256).
 - A Goal under proof no longer changes the Keeper System prompt: the proof-pending mark leaves the Active Goals rows for a Goals Awaiting Proof end-context block that every round and resume carries, and System lists Goals by priority, creation time and id (#49257)
 - The daily tool blob scan also reads the Librarian working context
@@ -6727,7 +6722,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   candidate record. The recall index (`<keeper>.working-context-recall.json`)
   is classified as excluded: the recall pin and the dated recall history
   own the context it names. Both files leave the `unclassified` list.
-  Nothing is deleted (RFC-0499 scope layer). 가이드 없음(docs/rfc/RFC-0499-tool-blobs-are-swept-inside-the-server.md) (#49294).
+  Nothing is deleted (RFC-0499 scope layer). (#49294).
 - The `keeper_artifact_transfer` description says what each action does:
   export returns `{"artifact": "<sha256>"}` for `masc_keeper_delegate`
   `artifacts` or `keeper_skill_validate` `artifact`, and materialize writes
@@ -6738,8 +6733,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   counted as no value (#49313).
 - `masc auth` activation names a refused invite or workspace id with the
   same words as the other authorization refusals, for example "the
-  workspace id was refused: empty" instead of "…: it is empty".
-  가이드 없음(문서 없음) (#49354).
+  workspace id was refused: empty" instead of "…: it is empty". (#49354).
 - A Ctrl-G search answer row starts the matched line at its first character that is not a space, so the indentation of the line no longer takes cells from the text (#49355)
 - The Keepers list sentence for a failing Keeper now says when its last failure ended, why in one of eleven groups an operator acts on, which runtime ended it and how many candidates were tried, and the `FAILING` group reads the same value. It no longer repeats the NOW activity. A failure that ends no turn, such as a heartbeat failure, shows the server's cause word. This is layer 3 of RFC-0503 and changes no server code (#49361).
 - The next-request forecast is `masc.keeper.next-request-forecast.v7`: a
@@ -7368,7 +7362,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   record. A private JSONL lock holds one ready marker byte, and the scan
   ended on `gate/late-approval.log.jsonl.lock` with "tool blob sweep
   recorded nothing". The scan still ends on the execution journals in
-  `keepers/` and `traces/`, which a later change reads. 가이드 없음(문서 없음) (#49297).
+  `keepers/` and `traces/`, which a later change reads. (#49297).
 - An empty `client_id`, `redirect_uri` or `client_secret_env` in the `google` member of `auth_config` is refused; the decoder accepted it although its interface says each is a non-empty string (#49302).
 - The Code pane draws a tab as the spaces up to the next tab stop in the draft comparison and in the rows of a Ctrl-G search answer, as it already does in an opened file and in a diff, instead of the four characters of \x09 (#49312)
 - An Antigravity login names its account by its email alone. masc reads the
@@ -7399,25 +7393,25 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   reads "the server restarted before this request finished." instead of
   "The operation was cancelled.", and `interrupted_operation_count`
   counts these operations. Operator interrupts still fail as
-  `Turn_cancelled`. 가이드 없음(문서 없음) (#49333).
+  `Turn_cancelled`. (#49333).
 - The `mistral-large-4` catalog row carries the effort ladder the live API measures (`low`/`medium`/`high`) and stops declaring native streaming: the API rejects `none` (code 3051) and a captured streamed turn delivered the whole answer inside list-shaped `delta.content`, which the streaming consumer cannot read, so streamed answers would silently vanish (#49352 covers the delta parser). Deploying this build to a workspace whose runtime.toml carries an operator-side `accepted-reasoning-efforts` override must delete that block — it replaces the catalog ladder, so the row's effort stays refused until it is gone (#49350).
 - When Keepers on one account are refused at the same moment, a Keeper
   whose usage read found a sibling's read running now waits for that
   read and rests until the window it records. It no longer waits the
   60 s floor and sends once more into the spent window. The wait is one
-  read, at most 20 s. 가이드 없음(문서 없음) (#49358).
+  read, at most 20 s. (#49358).
 - The daily tool blob scan no longer reads a Finder `.DS_Store` below a
   store as a record. The scope excluded it only as a direct entry, and
   twelve of them inside `keepers/`, `traces/` and
   `skill-composition-evidence-v1/` each ended the scan with "tool blob
   sweep recorded nothing". The scan still ends on the execution journals,
-  which a later change reads. 가이드 없음(문서 없음) (#49368).
+  which a later change reads. (#49368).
 - A tab in a Board post, a resource document or another Markdown body is drawn as the spaces up to the next tab stop, as the Code pane does, instead of the four characters of \x09 inside a code fence (#49381)
 - The workspace memory briefing no longer keeps a claim after the facts
   that made it are gone. A claim or conflict that loses any member is
   dropped, and its other members are classified again as new facts, so a
   later joiner no longer keeps an unsupported claim text in front of
-  Keepers. 가이드 없음(docs/rfc/RFC-workspace-curator-curates-changed-facts.md) (#49383).
+  Keepers. (#49383).
 - A GLM (Z.AI) refusal whose error code names a spent usage window (1308,
   1310, 1314, 1316 to 1321) is a hard quota on the sync, stream and exact
   completion paths, and keeps the wait the response states; 1302, unknown
@@ -7435,7 +7429,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - `keeper_artifact_read` now says, when an artifact does not exist, that a
   stored result's marker names its artifact in `sha256=` and that its
   `answer_sha256=` value names no artifact. Keepers passed the second value
-  in 299 of 17,299 reads from 2026-11-01 to 11-06. 가이드 없음(문서 없음) (#49420).
+  in 299 of 17,299 reads from 2026-11-01 to 11-06. (#49420).
 - The footer keeps the outcome of the last key readable beside a standing action notice: when the outcome does not fit next to the notice's full reason, the notice shows its shorter form so the outcome keeps the room instead of drawing as two cells (#49421)
 - The Code footer names `h/l:pane` on the file tree only while a file read is current; with no file open the keys do nothing and the footer no longer lists them (#49430)
 - The offline tool-blob maintenance (BasePath lease helper) refuses to delete while the scan scope leaves entries unclassified: deletable stays empty and the names ride on the report (#49436).
@@ -7476,7 +7470,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   MASC could not read still leaves the effects unknown (#49515).
 - `masc start` now makes the workspace root its working directory once startup has re-executed. A server launched from a git worktree that was later removed failed every `Sys.getcwd` with `Sys_error("No such file or directory")`, so Lane Add-on configuration failed every minute and keeper-librarian stayed failed until the next restart (#49550)
 - The `mistral-large-4` trace now survives the whole loop: the parser types ThinkChunk reasoning as a `Thinking` block, replay resends the assistant trace as the endpoint's own chunk list (the API answers 422 to a `reasoning_content` member, probed live), and streaming reads list-shaped `delta.content` so native streaming is back on the row — the recorded 12-chunk capture is the fixture (#38564, #49352) (#49554).
-- Anthropic 레인과 다른 레인을 같이 쓰는 Keeper 가 GLM·OpenAI 호환·Ollama·Gemini·Kimi 레인으로 넘어가도, 그 요청에 지난 Anthropic 턴의 context 를 다시 싣지 않아요. Anthropic 요청은 지금처럼 지난 context 를 제자리에 둬요. 가이드 없음(packages/agent_core/docs/rfc/RFC-AC-041-anthropic-append-only-request-prefix.md) (#49562)
+- Anthropic 레인과 다른 레인을 같이 쓰는 Keeper 가 GLM·OpenAI 호환·Ollama·Gemini·Kimi 레인으로 넘어가도, 그 요청에 지난 Anthropic 턴의 context 를 다시 싣지 않아요. Anthropic 요청은 지금처럼 지난 context 를 제자리에 둬요. (#49562)
 - A provider quota refusal that states when it resets now ends the Keeper
   turn as resting instead of failed: the failure streak, health and failure
   cause stay as they were, the log line is INFO, and a scheduled autonomous
@@ -8047,7 +8041,6 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - Moved the memory transition experiment record from the root `experiments/` directory to `docs/evidence/2026-10-09-memory-transition-evidence`. (#48734)
 - Removed two viewer DOM source files that no Rust module declares. (#48735)
 - The authorization state reads `principal` records: an Admin that acts disables, enables again, or deletes a human principal. A disable is a `disable` intent and a deletion a `delete` intent in the external store, and an enable has none. A deletion frees the identity for a new principal and keeps the user id and the namespace given. A disabled or deleted principal writes nothing, and the last Admin check counts only Admins that are active and not blocked (#48741).
-- Removed the output folders of three `count-guideless-added.py` release runs from `docs/audits`. (#48744)
 - Removed the raw output of the 2026-09-07 six-hour runtime audit from `docs/audits`. (#48745)
 - Removed `docs/screenshots` and pointed the screenshot capture scripts at `artifacts/screenshots`. (#48746)
 - Removed two audit notes that only listed what earlier pull requests deleted. (#48747)
@@ -8628,7 +8621,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   #47862, fragment missing; usage guide: `docs/SKILLS-FLOW.md`) (#47968).
 - `Keeper_types_support.append_keeper_metrics` announces `keeper_metrics_appended` with the Keeper's name to the workspace's observers after each metrics row is written (#48002).
 - A committed runtime.toml text announces `runtime_config_changed` to the workspace's observers once it is visible on disk; catalogue publications that write no text announce nothing (#48036).
-- `MASC_TUI_ALLOC_PROFILE=<file>` samples where the TUI's UI domain allocates and appends the allocation sites, ranked by estimated words, to that file at exit. 가이드 없음(docs/evidence/tui-keeper-list-held-key-20261104/alloc/README.md) (#48056).
+- `MASC_TUI_ALLOC_PROFILE=<file>` samples where the TUI's UI domain allocates and appends the allocation sites, ranked by estimated words, to that file at exit. (#48056).
 - Each published skill catalog snapshot drops the full-health snapshot and announces `skill_catalog_published` to the workspace's observers (#48059).
 - A lane add-on that exports tools announces `lane_addon_exports_changed` to the workspace's observer sessions whenever its exports move, beside the owner event and the MCP `tools/list_changed` (#48060).
 - The server announces `gate_connector_changed {connector}` to runtime observers, one per changed connector from a batching fiber, after a committed connector binding change and after a new or changed connector name is recorded, through a hook the gate library exposes (`Gate_connector_announce`) and the server installs at boot (#48090).
@@ -8964,7 +8957,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - Rebuild both feed indexes after complete/partial projection, and keep unknown posts effects unsettled without further source IO. (#47511)
 - Retain ordered filesystem diagnostics and reserved cleanup causes across Board locks; report the actual built-in live policy in offline tooling. (#47511)
 - Preserve state-mutex poisoning for uncertain model projection, count observed reserved diagnostics before propagation, and stop snapshot batches at the first reserved settlement while retaining unattempted retry work. (#47511)
-- Bind Board detail and comment-page reads to the observed server workspace so a different workspace cannot replace their content. 가이드 없음(문서 없음) (#47518)
+- Bind Board detail and comment-page reads to the observed server workspace so a different workspace cannot replace their content. (#47518)
 - Redraw open colour-cell image previews after terminal resize and preserve their observed source across partial refreshes. (#47560)
 - Let deployment preflight inspect a retained Librarian answer using its original consumer shape when strict decoding rejects an extra working-context field, while still requiring the gate proposal to match (#47567).
 - Keep workspace admission for HTTP/2 artifact-byte reads after the shared helper is renamed. (#47574)
@@ -9582,7 +9575,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 
 - Preview Mermaid diagrams from Board posts and comments, and inspect verified image attachments in the terminal. (#47181)
 
-- Support an opt-in fresh Keeper roster snapshot for event-driven consumers. 가이드 없음(문서 없음) (#47331)
+- Support an opt-in fresh Keeper roster snapshot for event-driven consumers. (#47331)
 
 - Add a pure decoder for native Ego input completion windows bound to a command,
   generation and canonical Page. Raw typing remains disabled pending integration. (#47404)
@@ -9610,15 +9603,15 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - Added `Keeper_memory_recall_turn`, the recall judgment of one turn: it asks whether the Keeper is judged, runs the judgment through the evaluation record, saves the outcome and counts it (`masc_keeper_memory_recall_total`, `masc_keeper_memory_recall_selected_total`, `masc_keeper_memory_recall_judgment_seconds`). A memo the turn owns gives the same judgment back to later calls of the turn, unless it was unavailable. Nothing calls it yet and the switch is off by default, so behavior does not change (#46751).
 - Added `Keeper_memory_recall_render`, the text of the two recall blocks: a status line (selected, none found, none needed, unavailable, and unavailable because the turn question failed after candidates were judged) that says how many candidates were judged when only some were and points to `keeper_memory_search` when the tool exists, and a body that lists the carried memories with id, category, both days, origin and the claim in full, the original location `board:<post_id>` for a fact read from a Board post, and a note when a value is tied to its recorded time or its time was not judged. A carried id whose fact is gone is named after the items. The sentences are the `recall.*` fragments of `config/prompts/keeper.md`. Nothing calls it yet, so behavior does not change (#46759).
 - Added `Keeper_memory_recall_candidates.utc_day`, the day format the candidate line already used (#46759).
-- Added `Keeper_memory_recall_blocks`, the one call the context assembly makes once per turn to get a judged turn's two recall texts. It asks whether the Keeper is judged (the kill switch `MASC_KEEPER_MEMORY_OS_RECALL` of the older recall notice first, then the recall gate), reads the Keeper's current facts on the IO pool, runs `Keeper_memory_recall_turn.judge` on them and words the result with `Keeper_memory_recall_render`. A Keeper that is not judged reads no facts and sends nothing. A failure in the call (an unreadable store, a request that cannot be built, an exception, a missing clock) is logged at warn and gives no texts, so it cannot end the turn; a cancellation still passes. Nothing calls it yet, so behavior does not change. 가이드 없음(docs/guides/keeper-memory-recall.md) (#46779).
+- Added `Keeper_memory_recall_blocks`, the one call the context assembly makes once per turn to get a judged turn's two recall texts. It asks whether the Keeper is judged (the kill switch `MASC_KEEPER_MEMORY_OS_RECALL` of the older recall notice first, then the recall gate), reads the Keeper's current facts on the IO pool, runs `Keeper_memory_recall_turn.judge` on them and words the result with `Keeper_memory_recall_render`. A Keeper that is not judged reads no facts and sends nothing. A failure in the call (an unreadable store, a request that cannot be built, an exception, a missing clock) is logged at warn and gives no texts, so it cannot end the turn; a cancellation still passes. Nothing calls it yet, so behavior does not change. (#46779).
 - A Keeper whose memory recall judgment is switched on now receives two more prompt blocks in the first round of each turn: `recalled_memory_status`, the line that says what the judgment came to, and `recalled_memory`, the memories it chose with their id, category, days and origin. A Keeper whose switch is off gets neither block and its context does not change. The body is not sent again to an official-client session that already holds the same bytes, the status line is sent on every resume, and neither block is injected on the rounds that follow tool results. See `docs/guides/keeper-memory-recall.md` (#46780).
 - The turn record decoder list of the dashboard, its prompt block name tables and the context chart label map know `recalled_memory` and `recalled_memory_status`, and a test keeps the decoder list equal to the block ids the server writes (#46780).
 - Config > runtime.toml in the TUI has an `m` form for memory recall: the range (off, picked Keepers only, every Keeper) and, for picked Keepers, a list of the Keepers the TUI knows. Enter hands the new text to the raw-edit save that `e` ends in, so the preview, the revision check and the conflict handling are the same, and the server reads `[typesafeai]` when the save lands. The form reads its own text back with the loader and refuses a `[typesafeai]` it cannot change instead of writing it (#46796). Guide: `docs/guides/keeper-memory-recall.md`, section "From the TUI".
-- Added `Recipient_resolution` to the `board_addressing` library. `Candidate.of_string` keeps only name-shaped `@` tokens (letters, digits, `_` and `-`), so a token such as `types/node` or `../x` never reaches a lookup that builds file names from its candidate. `resolve` sorts candidates into recipients and unresolved names with a caller-supplied declaration, asks once per spelling, and returns the first lookup failure without a partial result. `Board_addressing.is_routable_target` is exported for it. Nothing calls it yet, so behavior does not change. 가이드 없음(문서 없음) (#46798).
-- Added `tools/recipient_replay`, which runs the stored board posts through the same code and lists the posts whose recorded addressees change. 가이드 없음(문서 없음) (#46798).
+- Added `Recipient_resolution` to the `board_addressing` library. `Candidate.of_string` keeps only name-shaped `@` tokens (letters, digits, `_` and `-`), so a token such as `types/node` or `../x` never reaches a lookup that builds file names from its candidate. `resolve` sorts candidates into recipients and unresolved names with a caller-supplied declaration, asks once per spelling, and returns the first lookup failure without a partial result. `Board_addressing.is_routable_target` is exported for it. Nothing calls it yet, so behavior does not change. (#46798).
+- Added `tools/recipient_replay`, which runs the stored board posts through the same code and lists the posts whose recorded addressees change. (#46798).
 - `GET /api/v1/runtime/config/memory-recall` (admin token) says, for every Keeper that has a declaration file, whether the memory recall judgment reaches it now (`judged`) or why not (`environment_switch_off`, `memory_recall_disabled`, `keeper_excluded`, `lane_disabled`, `no_armed_destination`), and whether the lane has a key (`lane`). The answer is the one a turn gets: `Keeper_memory_recall_blocks` and the route both call `Keeper_memory_recall_standing.of_keeper`. A declaration directory that cannot be read is an error, not an empty list (#46808). Guide: `docs/guides/keeper-memory-recall.md`, "Watch it".
 - The Keeper detail view has a Terminal tab, one `[` back from Info. It follows a Keeper's Execute output the way a terminal draws it: oldest row first, `$ ` before a command, stderr in the warning colour, an `exit N` row when a command ends, and tabs moved to the next stop. The TUI reads the newest 500 rows once a second while the tab is open. Scrolling back holds the screen still while new output arrives, and `End` follows again. (#46837) Usage: [사용 가이드](docs/TUI-GUIDE.md#keeper-detail).
-- `masc config set KEY=VALUE ... --base-path P` writes keys of `runtime.toml`. KEY is a dotted key the settings registry names, such as `autonomous.enabled`; a key it does not name is refused. VALUE is read as the key's kind (boolean, integer, float or text) and refused when it is not. A workspace with no `runtime.toml` is seeded the way server start seeds it. Several assignments are written in one commit or not at all; unrelated lines and tables are kept. A line with the requested value stays unchanged, while changing a string, integer or float may remove its trailing comment. What a value means is not checked here: the server refuses a blank wake prompt or an unusable DNS address when it starts. 가이드 없음(docs/ENV-CONTRACT.md) (#46873).
+- `masc config set KEY=VALUE ... --base-path P` writes keys of `runtime.toml`. KEY is a dotted key the settings registry names, such as `autonomous.enabled`; a key it does not name is refused. VALUE is read as the key's kind (boolean, integer, float or text) and refused when it is not. A workspace with no `runtime.toml` is seeded the way server start seeds it. Several assignments are written in one commit or not at all; unrelated lines and tables are kept. A line with the requested value stays unchanged, while changing a string, integer or float may remove its trailing comment. What a value means is not checked here: the server refuses a blank wake prompt or an unusable DNS address when it starts. (#46873).
 - `test_browser_lane` exercises the TUI viewport redraw decision after cadence responses: equal bytes and metadata skip a redraw, while changed PNG bytes, ownership, title, URL or viewport geometry require one. Capture duration alone is ignored, and cadence respects busy or input-owned views. This is unit coverage, not a terminal-byte measurement. (#46875)
 - `viewport-cadence-bytes` workflow and `measure-viewport-cadence-bytes.py` measure raw PTY-master bytes for three 15-second sessions per pin, including screenshot-response windows, for the Before (`11749bf34f`, parent of the #46832 merge `eb39c50f33`) and After (default `eb39c50f33`) pins. The experiment requires the expected poll counts, ordered responses, a per-run random control title and image bytes in both control windows, and fewer constant windows with title and image bytes after. Unrelated or delayed asynchronous frames can share a window, so co-occurrence does not establish what caused the image output. Run manually through Actions → viewport-cadence-bytes → Run workflow (optionally override `before_sha` and `after_ref`). The `viewport-cadence-bytes` artifact contains `viewport-cadence-bytes.json`, `capture-*.bin`, `capture-*.fixture.json`, `source-heads.txt`, `binary-sha256.txt`, `harness-sha256.txt`, and both `masc_tui_*` binaries when those files have been produced. (#46905)
 - Add a scoped weekly core audit matrix with sanitized runtime measurements and
@@ -10094,7 +10087,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 
 - Preserve Unicode context when showing operator approval JSON. (#47499)
 
-- Keep older Keeper roster reads from repopulating the cache after a newer result is published or pruned, so later reads retain newly observed Keepers. 가이드 없음(문서 없음) (#47504)
+- Keep older Keeper roster reads from repopulating the cache after a newer result is published or pruned, so later reads retain newly observed Keepers. (#47504)
 
 - Refresh the TUI Work list when execution events arrive. (#47508)
 
@@ -10108,7 +10101,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 
 - Let Terminal and Presence clients detect closed SSE streams promptly. (#47523)
 
-- Distinguish incomplete Keeper OAuth credential storage from token exchange failure, retaining confirmed writes and uncertainty for the interrupted write. 가이드 없음(문서 없음) (#47524)
+- Distinguish incomplete Keeper OAuth credential storage from token exchange failure, retaining confirmed writes and uncertainty for the interrupted write. (#47524)
 
 - Reconnect the TUI Observer after a stream closes without waiting for the refresh cadence. (#47528)
 
@@ -10127,7 +10120,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 
 - Accept a head-only review footer backed by the existing binding line while retaining current receipts, and bind Release approvals to the selected run in the same review (#47543).
 
-- Keep disconnected Keeper identities detached when an earlier OAuth exchange, token renewal or tool catalog request finishes later. 가이드 없음(문서 없음) (#47544)
+- Keep disconnected Keeper identities detached when an earlier OAuth exchange, token renewal or tool catalog request finishes later. (#47544)
 
 - Resume TUI streams from a ready, workspace-bound Observer during an identity outage. (#47549)
 
@@ -10551,7 +10544,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   weekly audit's Harbor environment evidence. (#46985)
 - Clarify Skill discovery, instruction-body limits, and design-token guidance (#47087).
 - Correct DOS/MSX Skill triggers, tool names, observation requirements, and game-step evidence; distinguish an exhausted settling budget from a settled screen (#47100).
-- RFC-0479 proposes the keeper conversation resources list: a pure projection of the existing tool-call log scoped to the current task, listing only identities verified against their authority store, with a keeper context layer and a TUI panel as two renders of one derivation. 가이드 없음(docs/rfc/RFC-0479-conversation-resources-list-only-verified.md) (#47261)
+- RFC-0479 proposes the keeper conversation resources list: a pure projection of the existing tool-call log scoped to the current task, listing only identities verified against their authority store, with a keeper context layer and a TUI panel as two renders of one derivation. (#47261)
 - Align browser screenshot examples and Keeper instructions with native image admission, document live prompt and Skill update boundaries, and retain bounded GLM/Codex image observations with Claude limitations (#47263).
 - Clarify that Keeper image artifact handles are SHA-256 content hashes and that
   attachment IDs or unrelated digests do not establish image availability in the
@@ -10715,12 +10708,11 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - The built-in OAuth server names its issuer in every authorization response
   it redirects to the client, approvals and denials alike, and advertises
   `authorization_response_iss_parameter_supported` (RFC 9207, MCP 2026-07-28)
-  (#46336). 가이드 없음(문서 없음)
+  (#46336).
 - MCP clients can sign in to the built-in OAuth server with an OAuth Client
   ID Metadata Document: an https `client_id` is fetched, checked, and its
   loopback redirect URIs match whatever the port. The server advertises
   `client_id_metadata_document_supported` (MCP 2026-07-28) (#46343).
-  가이드 없음(문서 없음)
 - `/health` `scheduler.pool_wait` reports, for HTTP reads and for all other work, how long pool submissions waited for a worker, how long they then ran, and how long submissions waited before their caller gave up with no worker taking them. The histograms are cumulative since the server started. GET and HEAD handlers mark their fibers as reads until the handler returns; a submission takes the lane its fiber has when it submits. Where work runs is unchanged. (#46351)
 - `masc start --wait-for-previous-owner` waits on the workspace lease until the current owner exits instead of refusing, signals nothing, and lets only one process wait per workspace. `/health/ready` reports the answering `pid`. See the "Replacing the running server" chapter of docs/guides/server-startup-ownership.md. (#46366)
 - `masc restart` asks this workspace's running server to stop gracefully, starts the installed build in the background with a log file, and waits until it answers ready. Another workspace, a non-MASC listener, or a `--host` that is not an IP address or that loopback cannot reach is refused untouched. See the "Replacing the running server" chapter of docs/guides/server-startup-ownership.md. (#46367)
@@ -10742,7 +10734,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   Goal without a binding is left unchanged. Goal Space binding is experimental.
   See [Goal-bound Space](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md#goal-bound-space).
 - `/health` `scheduler.pool_wait` counts each lane's pool waits by how many workers' worth of weight the lane's running jobs held when the job was submitted (`wait_by_in_flight_workers`: 0, 1, 2, 3 or more), and its run times by the weight the job declared (`run_declared_io` below 0.5, `run_declared_cpu` at 0.5 and above). `in_flight_workers` shows the weight running now. Eio's executor stops admitting work once a worker's jobs reach a weight of 1.0 whether they use the CPU or wait, and this tells waits caused by full workers from other waits before any default weight changes (RFC-0474 L4a, #46483).
-- A published artifact can be shared outside the workspace through an opt-in, capability-addressed link: the Dashboard has an external-sharing toggle, the TUI Resources detail turns sharing on with the `P` key, `POST /api/v1/published-artifact-shares` creates the share and `GET /api/v1/published-artifacts/artifact-<32hex>` reads it without a token (#46490). 가이드 없음(대상 문서: docs/design/report-artifacts.md)
+- A published artifact can be shared outside the workspace through an opt-in, capability-addressed link: the Dashboard has an external-sharing toggle, the TUI Resources detail turns sharing on with the `P` key, `POST /api/v1/published-artifact-shares` creates the share and `GET /api/v1/published-artifacts/artifact-<32hex>` reads it without a token (#46490).
 - After loopback endpoint admission, a valid MCP `tools/call` for an available public tool
   made with an OAuth access token whose role lacks the tool's permission is
   refused with HTTP 403, an `insufficient_scope` challenge naming the needed
@@ -10754,11 +10746,11 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
   present-but-broken item fails the read, and the list ends the block when
   present so the presented-frame receipt that arms [a] still covers
   everything shown.
-- `/health` `scheduler.pool_wait.<lane>.by_name` lists the 20 kinds of pool work with the longest run time in all, each with its entered count, wait and run sum and maximum, and abandoned submissions. Every pool submit names its work (the call site's `__FUNCTION__`; a `Dated_jsonl` read is named by its store, such as `dated_jsonl:keeper/metrics`), and the job runs inside an Eio trace span of that name, so the runtime-events fiber trace labels it too (RFC-0474 L4c, #46579). 가이드 없음(docs/rfc/RFC-0474-gc-stop-budget.md)
+- `/health` `scheduler.pool_wait.<lane>.by_name` lists the 20 kinds of pool work with the longest run time in all, each with its entered count, wait and run sum and maximum, and abandoned submissions. Every pool submit names its work (the call site's `__FUNCTION__`; a `Dated_jsonl` read is named by its store, such as `dated_jsonl:keeper/metrics`), and the job runs inside an Eio trace span of that name, so the runtime-events fiber trace labels it too (RFC-0474 L4c, #46579).
 - The Keeper roster can show recorded Keeper senders for the selected Keeper's first page of queued requests (#46620).
-- `masc_keeper_status` carries a `next_request` section: per candidate runtime the carried range (first atom, kept atoms, transmitted bytes, origin), so a Keeper whose request keeps being refused shows how large that request is. 가이드 없음(문서 없음) (#46652).
+- `masc_keeper_status` carries a `next_request` section: per candidate runtime the carried range (first atom, kept atoms, transmitted bytes, origin), so a Keeper whose request keeps being refused shows how large that request is. (#46652).
 - `GET /api/v1/stream/fleet` streams the keeper fleet reading as Server-Sent Events: a `snapshot` event on connect (an `unavailable_snapshot` event when the first scan has failed), then `changed` and `degraded` events whose frame id is the revision number, and a `: keepalive` comment after 30 s without an event. A connection is closed when its queue of 64 events fills up or when it accepts no frame for 90 s, and the client reconnects for a new snapshot. The server publishes an event only when the `keeper_fleet_safety` section of `/health?full=1` differs between two scans, and it adds no scan
-  (#46659). 가이드 없음(docs/rfc/RFC-0477-keepers-screen-reads-typed-changes-not-polls.md)
+  (#46659).
 - Add agent history content types that hold media as stored references, with a caller-supplied media store and a strict JSON codec. (#46728)
 
 ### Changed
@@ -10986,7 +10978,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - Run browser guard scripts through named targeted and full test aliases and
   keep interrupted drag release unconfirmed without extra input (#46325).
 - The saved Ego Fetch integration check now identifies pinned files through typed descriptors, preserving the before-retirement and after-abandon assertions on macOS where `/dev/fd` path metadata describes a different device. (#46326)
-- At HTTP and stdio startup, collect Lane Add-on original request bodies that no active record, successor intent or settled record can name. The sweep validates complete inventories before deleting and preserves bodies needed to retry interrupted archive settlement (#45320) (#46331). 사용 가이드 없음
+- At HTTP and stdio startup, collect Lane Add-on original request bodies that no active record, successor intent or settled record can name. The sweep validates complete inventories before deleting and preserves bodies needed to retry interrupted archive settlement (#45320) (#46331).
 - Keep the Keeper scale guide link valid after changelog assembly (#46332).
 - `masc browser-lane-setup --mode ego` refuses a `[browser.live.ego]` table whose task space name a space the operator made in ego lite already has, whether the table is new, changed or kept as it is, and writes nothing when ego lite does not list its spaces. ego refuses such a space to the browser worker, whose start then failed and took every browser connection down with it. (#46333)
 - Clarify scheduled request scope across autonomous Keeper continuation while preserving explicit cross-target work and historical entry boundaries. (#46334)
@@ -11872,7 +11864,7 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - Reuse Apple Keeper guests whose images supply an OCI entrypoint by comparing the complete image-applied command against descriptor- and platform-bound metadata, preserving the original plan label and refusing unknown or tampered commands. (#46213)
 - Retry failed schedule startup recovery before dispatching due work, and retain active runner ownership after recovery succeeds. (#46229)
 - Main minimal build: qualify the two bare `operation.operation_id` accesses in the `scheduled_source_handoff` test's `execute` callback as `operation.Chat_operation.operation_id`, the same established pattern every other callback in the file already uses, so type inference no longer leaves `operation` unresolved. (#46257)
-- main `@check`이 `test/test_schedule_consumer_dispatch.ml:3955`의 모호한 레코드 필드로 빨갛던 것(#46292). `seed_unsettled_running`의 바깥 `request` 인자에 `Schedule_domain.schedule_request` 주석을 붙여 두 읽기가 같은 레코드를 가리키게 했어요. 사용 가이드 없음
+- main `@check`이 `test/test_schedule_consumer_dispatch.ml:3955`의 모호한 레코드 필드로 빨갛던 것(#46292). `seed_unsettled_running`의 바깥 `request` 인자에 `Schedule_domain.schedule_request` 주석을 붙여 두 읽기가 같은 레코드를 가리키게 했어요.
 
 ### Performance
 
@@ -11998,31 +11990,29 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 
 ### Added
 
-가이드 확인 기록: 작성자가 2026-10-23 PO의 컷 head `2a9f660f086e9cb8e9b0b423694d0fc83c5ad94c` 검색 보고를 확인했습니다. 보고의 범위는 전체 git tree 경로와 Markdown 경로 키워드(open_window, cookie, storage, ump, alphatex, vst, role, portrait, prompt, fleet, accessory), main의 관련 Markdown code search, 후보 문서 본문입니다. ‘가이드 없음’은 이 범위에서 사용 가이드를 찾지 못했다는 뜻입니다. 설계 설명만 있는 항목은 사용 가이드로 세지 않습니다. 검색 원문: MASC Board `p-ac45c699902228e98776559f2ac96584`, PO 댓글 `c-2b014ac505346d7d78b7e97ca391f082`(2026-10-23 10:40 UTC).
-
 - Librarian Addon의 명시 후보 실행을 위해 원래 Keeper·Memory·후보·prompt·schema를 보존하고, host의 판단과 Gate 평가를 같은 원본으로 복원하는 포트를 추가합니다 (#45094).
-- `masc_browser_act` takes `open_window`: it opens a new browser window and returns its tab's `tabId`. It works on the owned Gecko browser and on a connected BiDi Firefox (a background window the connection owns); the extension and Stagehand refuse it. ([#45271](https://github.com/jeong-sik/masc/pull/45271)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- `masc_browser_act` takes `open_window`: it opens a new browser window and returns its tab's `tabId`. It works on the owned Gecko browser and on a connected BiDi Firefox (a background window the connection owns); the extension and Stagehand refuse it. ([#45271](https://github.com/jeong-sik/masc/pull/45271))
 - `set_viewport` on `masc_browser_interact` works on the owned Firefox: the window is resized to the asked viewport plus the browser's own chrome, measured again and corrected, and a size below Firefox's smallest window is refused with the size the page kept. Giving neither `width` nor `height` restores the window's first size. ([#45276](https://github.com/jeong-sik/masc/pull/45276)) Usage: [사용 가이드](docs/design/browser-lane.md).
-- `masc_browser_read mode=cookies` on the owned Firefox also lists the page origin's `localStorage` and `sessionStorage` key names and its IndexedDB database names under `storage`, with counts (at most 100 names per area, each cut at 200 characters). No value is read. ([#45278](https://github.com/jeong-sik/masc/pull/45278)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조. 참고: [설계 설명](docs/design/browser-capability-parity.md).
-- `masc_browser_act` takes `set_cookie` and `delete_cookie` on the owned Firefox. A cookie is set for the tab's own page host (the domain is not an argument), lives at most 7 days (a session cookie without a lifetime), and holds at most 4096 bytes; the value is never returned. Live BiDi, the extension and Stagehand refuse it. ([#45279](https://github.com/jeong-sik/masc/pull/45279)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조. 참고: [설계 설명](docs/design/browser-capability-parity.md).
+- `masc_browser_read mode=cookies` on the owned Firefox also lists the page origin's `localStorage` and `sessionStorage` key names and its IndexedDB database names under `storage`, with counts (at most 100 names per area, each cut at 200 characters). No value is read. ([#45278](https://github.com/jeong-sik/masc/pull/45278)) 참고: [설계 설명](docs/design/browser-capability-parity.md).
+- `masc_browser_act` takes `set_cookie` and `delete_cookie` on the owned Firefox. A cookie is set for the tab's own page host (the domain is not an argument), lives at most 7 days (a session cookie without a lifetime), and holds at most 4096 bytes; the value is never returned. Live BiDi, the extension and Stagehand refuse it. ([#45279](https://github.com/jeong-sik/masc/pull/45279)) 참고: [설계 설명](docs/design/browser-capability-parity.md).
 - `masc_browser_act` takes `set_emulation` and `clear_emulation` on the owned Firefox: a tab's reported location (latitude and longitude, with its geolocation permission), language tag and IANA time zone. They go over the session's BiDi connection. Firefox 158 cannot reset a locale or time zone with null, so clearing sets back the values the tab had before. Clearing restores overrides only and preserves existing permissions; a location grant remains for the owned session. Live BiDi, the extension and Stagehand refuse it. ([#45283](https://github.com/jeong-sik/masc/pull/45283)) Usage: [사용 가이드](docs/design/browser-lane.md).
 - Phrase and imported MIDI projects can save ordered VST effect inserts with frozen presets, edit/reorder/remove them with undo, and use the same verified chain for WAV rendering, arrangement backing and live MIDI monitoring. Residual buffered output is refused explicitly. (#45312) Usage: [사용 가이드](tools/vst/README.md).
 - Edit native UMP event times and explicit note lengths in decimal source seconds with exact host-tick rounding, fixed source zero and read-only clock inspection. (#45381) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
 - Explain decimal-second native UMP time editing, fixed source clocks and quantization, with independent numeric and source TUI save/reopen evidence. (#45382) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
-- Carry an explicit optional product role through Addon configuration, catalog, runtime inventory and TUI decoding while preserving worker execution identity across display-only category edits. (#45385) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
-- Declare primary product roles for all seventeen shipped Addon packages and document current declaration versus original worker categories. (#45386) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Carry an explicit optional product role through Addon configuration, catalog, runtime inventory and TUI decoding while preserving worker execution identity across display-only category edits. (#45385)
+- Declare primary product roles for all seventeen shipped Addon packages and document current declaration versus original worker categories. (#45386)
 - Capture the immutable original of one verifier review attempt — subject, question and lookup grants fixed as data, so a worker can only answer the review and cannot reapply another verification's evidence. (#45390)
 - Edit native UMP event positions and explicit note lengths in fractional quarter-note beats using the opening arrangement tempo, with exact source-clock rounding. (#45393) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
-- Group Addon inventory, installations, workers and package discovery by explicit product role; preserve the original management target across filtering, reclassification and same-path installation replacement. (#45394) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
-- Group TUI All Lanes by product role with nonselectable headers, stable original installation/incarnation targets and safe keyboard, search, refresh and stale-frame mouse selection. (#45395) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Group Addon inventory, installations, workers and package discovery by explicit product role; preserve the original management target across filtering, reclassification and same-path installation replacement. (#45394)
+- Group TUI All Lanes by product role with nonselectable headers, stable original installation/incarnation targets and safe keyboard, search, refresh and stale-frame mouse selection. (#45395)
 - Support native zero-duration pointer drags on agent-owned ego pages through the shared browser pointer plan; see the [browser lane guide, What each live connection serves](docs/design/browser-lane.md#what-each-live-connection-serves). #45399
-- Show external Task owners the public completion submission tool, authenticated owner and lifecycle actions in fleet health advisory rows. (#45409) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Show external Task owners the public completion submission tool, authenticated owner and lifecycle actions in fleet health advisory rows. (#45409)
 - `BrowserAct` `block_requests` makes every request from a tab and its frames to the listed hosts fail as a network error on an automation Firefox, through a WebDriver BiDi intercept on that tab. `unblock_requests` lifts that tab's blocks, and closing the session lifts them all. Live BiDi, ego and Stagehand refuse both actions before any effect (#45413) Usage: [사용 가이드](docs/design/browser-lane.md)..
 - `BrowserAct` `back`, `forward` and `reload` work on an ego connection, on the pages an agent opened in its task space. Reload is ego's `page.reload()`; back and forward read the tab's history through `page.cdp`, are refused before any effect when there is no entry that way, and answer once the tab is on that entry and its document has loaded. The receipt matches the live BiDi connection's (#45429). Guide: `skills/browser-lanes/references/connection.md`.
 - Document an eight-bar TUI experiment connecting phrase composition, close and
   drop-2 voicings, candidate harmony analysis, independent bass/drum lanes,
   stored SoundFont instruments, and full arrangement MIDI/WAV export (#45434) Usage: [사용 가이드](tools/alphatex/MUSICAL-LAB.md)..
-- Expose invalid prompt surface values and source paths in catalog authoring diagnostics, including file-only group slots. (#45439) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Expose invalid prompt surface values and source paths in catalog authoring diagnostics, including file-only group slots. (#45439)
 - Exercise HTTP client lease cancellation and partial handoff failures with deterministic Eio mutex and promise scenarios. (#45446)
 - Verify strict delivery-specific frontier records across durable settlement, reread, stale-owner rejection and resume. (#45459)
 - `BrowserRead` `mode=snapshot` returns ego lite's own accessibility snapshot on an ego connection, for a page an agent opened in its task space: the tree with the ref (`ref=12`) ego's element actions accept on each actionable node. `snapshotScope` is `viewport` (default), `full_page`, or `subtree` with `root`, a ref an earlier snapshot of the same page printed. The text is cut at `maxChars` without splitting a surrogate pair, with `truncated` and the full length in `chars`. Other connections refuse it before any effect (#45461). Guide: `skills/browser-lanes/references/connection.md`.
@@ -12031,8 +12021,8 @@ test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_lis
 - An optional `hitl-auto-judge` Add-on package declaration retains original HITL judgment Exact requests (output `judgment`, tool `judge`). Nothing dispatches to it yet, so the in-process HITL judge and the host-owned decision, terminalisation and consumption are unchanged (#45484) Usage: [사용 가이드](addons/hitl-auto-judge/README.md)..
 - An ego connection reads and answers the JavaScript dialogs of the pages an agent opened in its task space. A listed row of a managed page carries the dialog blocking it, as a live BiDi row does; `BrowserAct` `accept_dialog` (with `text` for a prompt) and `dismiss_dialog` answer it with the dialog in the receipt, and are refused before any effect when none is open. A click or key input that opens a dialog answers with it, and a DOM input the dialog stopped is a partial effect with it. While one is open, reads, moves and input on that page are refused before any effect; closing the tab is not (#45486). Guide: `skills/browser-lanes/references/advanced.md`.
 - Exercise a committed Board post and failed Activity Graph storage through MCP and Agent-Core result consumers. (#45490)
-- Decode prompt authoring diagnostics in the Dashboard catalog, distinguishing absent reports, clean reports and malformed diagnostic payloads. (#45496) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
-- Show prompt metadata authoring errors, authored values and source files in the Dashboard list and editor while preserving body overrides. (#45497) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Decode prompt authoring diagnostics in the Dashboard catalog, distinguishing absent reports, clean reports and malformed diagnostic payloads. (#45496)
+- Show prompt metadata authoring errors, authored values and source files in the Dashboard list and editor while preserving body overrides. (#45497)
 
 ### Changed
 
@@ -14258,7 +14248,6 @@ The full regression Test run [39907019462](https://github.com/jeong-sik/masc/act
 - Distinguish executed history/store suites from adjacent unexecuted checks in the OCaml refactoring inventory, and record the exact media validation request and its later focused result (#43528).
 - Refine the evidence refactoring candidate around the complete reviewer input, distinguish stored snapshot checks from transport projections, and specify the missing authority-loop reproduction before implementation (#43538).
 - Synchronize markdown documentation with v0.51.0-v0.58.0 runtime contracts and remove stale command, env, and configuration claims. (#43599)
-- The glossary now has an entry for the `가이드 없음(...)` guideless marker that release notes leave at the end of Added bullets: it names the target document when one is known (`가이드 없음(대상 문서: <path>)`) or says `가이드 없음(문서 없음)` when no document is planned, and `scripts/release/count-guideless-added.py` counts the marker into `guide-metrics-<tag>.md` so the gate decision has the number (#43850).
 
 ### Internal
 
@@ -15350,20 +15339,20 @@ promoted in a later release once a live run on that path is recorded.
 - Experimental: Read the JSONL day-file retention window from runtime.toml `[maintenance].jsonl_retention_days` when `MASC_JSONL_RETENTION_DAYS` is unset, so operators can set retention per workspace; the startup prune log names the window source (#42625).
 - Experimental: Allow Lane Addons to use an Apple `container` microVM with verified image identity, isolated networking, read-only root and owned persistent state; keep Docker as the default for existing Lane Addons. (#42764)
 - Experimental: Retain the runtime for recovery and refuse runtime changes that would silently replace an installation's persistent state. (#42764)
-- Experimental: Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42766).
-- Experimental: `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42767).
-- Experimental: The TUI board read pane lists a post's attachments by kind, name and size No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42769).
-- Experimental: TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42775).
-- Experimental: The TUI highlights `alphatex` code blocks No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42777).
-- Experimental: The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42779).
+- Experimental: Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download (#42766).
+- Experimental: `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size (#42767).
+- Experimental: The TUI board read pane lists a post's attachments by kind, name and size (#42769).
+- Experimental: TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read (#42775).
+- Experimental: The TUI highlights `alphatex` code blocks (#42777).
+- Experimental: The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason (#42779).
 - Experimental: `/queue clear` in the Keeper chat cancels, in one command, the waiting messages this TUI is tracking for the Keeper on screen: it drops unsent ones, takes back one handed over for sending but not yet posted, and asks the server to cancel each one it holds in its queue. See `docs/guides/tui-chat-queue.md` (#42780).
 - Experimental: `resources/list` carries one `masc://wiki/<topic>` entry per wiki page, titled and described by the page's own title and summary, and `masc://wiki/log` once the wiki has a log, so a client that only lists resources, the TUI Resources screen among them, can open a page (#42851).
 - Experimental: The page listing carries only files whose name is a valid page topic: a file like notes.json.md, whose URI would read back as a different page or as nothing, stays in the masc://wiki index with its reason instead of becoming a dead listing row (#42851).
 - Experimental: Usage: in the TUI, open the System / Resources screen and select a `masc://wiki/<topic>` row to read that page, or `masc://wiki/log` for the append-only log of page creations and updates. (#42851).
 - Experimental: `AGENT_CORE_ANTHROPIC_DROP_BLOCK=false` stops adaptive Sonnet 5.5 and Haiku 5.5 completions from sending `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`. It is an experiment switch for measuring the output-token cost of `drop_block` (RFC-AC-041 Q15); unset keeps the current behavior. Whether that default stays is not decided yet; its effect on output tokens has not been measured in MASC (#42713, #42852).
-- Experimental: The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42858).
-- Experimental: The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42858).
-- Experimental: The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42859).
+- Experimental: The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on (#42858).
+- Experimental: The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader (#42858).
+- Experimental: The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline (#42859).
 
 ### Changed
 
@@ -15819,8 +15808,7 @@ promoted in a later release once a live run on that path is recorded.
   host rows, instead of a bare browser line (#42250, with #42235's start
   record and #42227's refusal-reason note underneath it). When the host
   selector cannot tell whether the clock passed, the row says that rather
-  than inventing a start time (#42227). 가이드 없음(대상 문서:
-  docs/design/browser-bidi-live-host.md).
+  than inventing a start time (#42227).
 
 - HITL late-approvals gained an authenticated HTTP restore endpoint with
   health fields, so a deflected approval can be restored after the fact

@@ -1271,7 +1271,7 @@
  (name masc_tui_tool_table)
  (wrapped false)
  (modules masc_tui_tool_table)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_table))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_say masc_tui_table))
 
 (library
  (name masc_tui_fleet_summary)
@@ -1347,6 +1347,13 @@
  (name masc_tui_words)
  (wrapped false)
  (modules masc_tui_words))
+
+; Screen text in both languages (RFC tui-one-screen-grammar section 7.1).
+; Depends on nothing, like the words table, so every renderer can use it.
+(library
+ (name masc_tui_say)
+ (wrapped false)
+ (modules masc_tui_say))
 
 (library
  (name masc_tui_alloc_profile)
@@ -1455,13 +1462,13 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc yojson))
+ (libraries masc masc_tui_say yojson))
 
 (library
  (name masc_tui_storage)
  (wrapped false)
  (modules masc_tui_storage)
- (libraries masc))
+ (libraries masc masc_tui_say))
 
 (library
  (name masc_tui_keeper_mark)
@@ -2430,6 +2437,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_say
   masc_tui_nested_result
   masc_tui_pick_list
   masc_tui_fetched

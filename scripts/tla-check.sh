@@ -273,6 +273,10 @@ run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-live-without-bad-lines.cfg" "live-without-bad-lines"
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-purge-trim-at-end-live.cfg" "purge-trim-at-end-live"
+# LibrarianBottom's second clean cfg adds a silent slot and an unadmitted
+# slot to the lane. It names no way to be wrong, so no glob above takes it.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianBottom.tla" \
+  "LibrarianBottom-silent.cfg" "silent"
 # The stall cfg (masc#37061) was a buggy cfg until the fix landed; it is the
 # live reader now and expects no violation.
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \

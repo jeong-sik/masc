@@ -2652,7 +2652,43 @@ let test_tools_footer_says_what_j_k_and_esc_do () =
     (pane_back = list_back);
   let footer keys = K.footer_hints_tools ~lang:Lang_en ~pane:Tools_surface ~keys in
   Alcotest.(check bool) "the footer changes when Enter turns the keys" false
-    (String.equal (footer K.Tools_walks_list) (footer K.Tools_reads_skill_page))
+    (String.equal (footer K.Tools_walks_list) (footer K.Tools_reads_skill_page));
+  (* Esc leaves an open request for the request list and its original Task for
+     the request, so the footer names that place. "features" is where Esc goes
+     from the request list, which is not where it goes from an open request. *)
+  let request_moves, request_back = K.tools_footer_moves_and_back K.Tools_reads_request in
+  let task_moves, task_back = K.tools_footer_moves_and_back K.Tools_reads_original_task in
+  Alcotest.(check bool) "an open request scrolls as the page does" true (request_moves = page_moves);
+  Alcotest.(check bool) "the original Task scrolls as the page does" true (task_moves = page_moves);
+  check str "an open request's Esc names the list" "list" request_back.label;
+  check str "the original Task's Esc names the request" "request" task_back.label;
+  let contains text word =
+    let length = String.length word in
+    let rec from index =
+      index + length <= String.length text
+      && (String.equal (String.sub text index length) word || from (index + 1))
+    in
+    from 0
+  in
+  let says lang keys word =
+    contains (K.footer_hints_tools ~lang ~pane:Tools_async ~keys) word
+  in
+  Alcotest.(check bool) "the request list says Esc:features" true
+    (says Lang_en K.Tools_walks_list "Esc:features");
+  Alcotest.(check bool) "an open request says Esc:list" true
+    (says Lang_en K.Tools_reads_request "Esc:list");
+  Alcotest.(check bool) "an open request does not say Esc:features" false
+    (says Lang_en K.Tools_reads_request "Esc:features");
+  Alcotest.(check bool) "the original Task says Esc:request" true
+    (says Lang_en K.Tools_reads_original_task "Esc:request");
+  Alcotest.(check bool) "the original Task does not say Esc:features" false
+    (says Lang_en K.Tools_reads_original_task "Esc:features");
+  Alcotest.(check bool) "an open request says Esc:목록 in Korean" true
+    (says Lang_ko K.Tools_reads_request "Esc:목록");
+  Alcotest.(check bool) "the original Task says Esc:요청 in Korean" true
+    (says Lang_ko K.Tools_reads_original_task "Esc:요청");
+  Alcotest.(check bool) "an open request does not say Esc:기능 in Korean" false
+    (says Lang_ko K.Tools_reads_request "Esc:기능")
 
 let () =
   Alcotest.run "masc_tui_keys"

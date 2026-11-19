@@ -2779,6 +2779,8 @@ again.
 
 In async requests, `j/k` selects an original request and `Enter` opens its
 detail. `r` refreshes that exact request; `Esc` returns to the active list.
+The footer says where `Esc` goes: `Esc:features` on the request list,
+`Esc:list` on an open request and `Esc:request` on its original Task.
 The selection stays on the original submitter, request ID and target Keeper
 when a terminal request disappears from the active list. `o` opens an editor
 with those three JSON fields, so a known terminal request can also be read

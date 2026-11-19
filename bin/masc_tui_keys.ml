@@ -573,6 +573,8 @@ let tools_bracket_binding ~pane =
 type tools_keys =
   | Tools_walks_list
   | Tools_reads_skill_page
+  | Tools_reads_request
+  | Tools_reads_original_task
   | Tools_reads_page
 
 (* The sheet's j/k says every pane at once. A footer says the one on screen. *)
@@ -593,10 +595,15 @@ let tools_back_features =
            Features & plugins"
 
 let tools_back_list = b ~role:Moves ~ko:"목록" Act "Esc" "list"
+let tools_back_request = b ~role:Moves ~ko:"요청" Act "Esc" "request"
 
+(* The word is the place Esc goes: an open request returns to the request
+   list, and the original Task opened from it returns to the request. *)
 let tools_footer_moves_and_back = function
   | Tools_walks_list -> tools_move, tools_back_features
   | Tools_reads_skill_page -> tools_scroll, tools_back_list
+  | Tools_reads_request -> tools_scroll, tools_back_list
+  | Tools_reads_original_task -> tools_scroll, tools_back_request
   | Tools_reads_page -> tools_scroll, tools_back_features
 
 let tools_bindings ~moves ~back ~bracket =

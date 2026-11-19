@@ -237,9 +237,15 @@ type tools_keys =
   | Tools_reads_skill_page
       (** after Enter or f on Available: j/k scroll the page of the chosen
           Skill, and Esc returns to the Skill list *)
+  | Tools_reads_request
+      (** an open request in async runs: j/k scroll it, and Esc returns to
+          the request list *)
+  | Tools_reads_original_task
+      (** the original Task opened from a request: j/k scroll it, and Esc
+          returns to the request *)
   | Tools_reads_page
-      (** j/k scroll a pane that has no list, an open request, or a list
-          with nothing in it; Esc keeps the sheet's word *)
+      (** j/k scroll a pane that has no list, or a list with nothing in it;
+          Esc keeps the sheet's word *)
 
 val tools_footer_moves_and_back : tools_keys -> binding * binding
 (** The j/k binding and the Esc binding the Tools footer names for [keys]. *)

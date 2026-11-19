@@ -44,8 +44,9 @@ val choose_skill_again : Masc_tui_types.state -> bool
 
 val tools_keys : Masc_tui_types.state -> Masc_tui_keys.tools_keys
 (** What the Tools footer says j/k and Esc do, from the same state
-    {!tools_list} and {!choose_skill_again} read: a list walked, the chosen
-    Skill's page read, or a page with no list. *)
+    {!tools_list} and {!choose_skill_again} read, and the original Task and
+    open request Esc's arm reads: a list walked, the chosen Skill's page read,
+    an open request or its original Task read, or a page with no list. *)
 
 val show_tools_pane : Masc_tui_types.state -> Masc_tui_types.tools_pane -> unit
 (** Change the Tools pane. A page read on Available belongs to that visit,

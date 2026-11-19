@@ -558,6 +558,8 @@ let test_tools_keys_say_what_the_keys_do () =
           (match value with
            | Keys.Tools_walks_list -> "walks the list"
            | Keys.Tools_reads_skill_page -> "reads the Skill's page"
+           | Keys.Tools_reads_request -> "reads the open request"
+           | Keys.Tools_reads_original_task -> "reads the original Task"
            | Keys.Tools_reads_page -> "reads the page"))
       ( = )
   in
@@ -577,8 +579,27 @@ let test_tools_keys_say_what_the_keys_do () =
     [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list ];
   let async = tools_async [ "a"; "b" ] in
   Alcotest.check keys "the request list" Keys.Tools_walks_list (Moves.tools_keys async);
+  (* Esc steps out one layer at a time -- original Task, request, list -- and
+     the footer names the layer Esc goes to. *)
   async.tools_async_detail_open <- true;
-  Alcotest.check keys "an open request scrolls" Keys.Tools_reads_page (Moves.tools_keys async)
+  Alcotest.check keys "an open request scrolls and Esc returns to the list"
+    Keys.Tools_reads_request (Moves.tools_keys async);
+  let target : Masc.Tui_decode_async_request.target =
+    { submitted_by = "operator"; request_id = "a"; keeper_name = "keeper" }
+  in
+  let source : tools_async_task_source =
+    { ats_request = { target; request_context = `Assoc [ "composition_run_id", `String "run-1" ] }
+    ; ats_run_id = "run-1"; ats_task_id = "task-1"; ats_observed_at = 1.; ats_retained = false }
+  in
+  async.tools_async_task_source <- Some source;
+  Alcotest.check keys "the original Task scrolls and Esc returns to the request"
+    Keys.Tools_reads_original_task (Moves.tools_keys async);
+  async.tools_async_task_source <- None;
+  Alcotest.check keys "closing the Task leaves the request open" Keys.Tools_reads_request
+    (Moves.tools_keys async);
+  async.tools_async_detail_open <- false;
+  Alcotest.check keys "closing the request gives the keys back to the list" Keys.Tools_walks_list
+    (Moves.tools_keys async)
 
 (* The frame finds the selection where it is drawn now, so the follow runs
    after the key moved it. A follow that ran first would hold the window on

@@ -431,41 +431,97 @@ let render_overview (state : state) home =
             | Masc_tui_home.Every_source_read requests -> Masc_tui_card.Whole requests
             | Masc_tui_home.Some_source_unread requests -> Masc_tui_card.At_least requests
           in
+          let ko = state.ui_language = Lang_ko in
+          let toggle_tag index =
+            Option.bind (Masc_tui_card.superscript_digit index) key
+          in
+          let collapsed index = List.mem index state.overview_collapsed_cards in
+          let collapsed_status =
+            Some
+              { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Paused
+              ; word = if ko then "접힘" else "collapsed"
+              ; tone = Theme.recede ()
+              }
+          in
+          let expand_keys index =
+            [ { Masc_tui_card.key = string_of_int index
+              ; label = if ko then "펼치기" else "expand"
+              } ]
+          in
           let edges : Masc_tui_overview_cards.edges =
             { decisions =
                 { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-                ; key = key "p"; status = None; count = Some decisions_count
+                ; key = toggle_tag 1
+                ; status = (if collapsed 1 then collapsed_status else None)
+                ; count = Some decisions_count
                 ; focus = Masc_tui_card.Unfocused
-                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_attention) }
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_attention)
+                ; footer_keys =
+                    if collapsed 1 then expand_keys 1
+                    else
+                      [ { Masc_tui_card.key = "p"; label = if ko then "승인·질문" else "requests" }
+                      ; { Masc_tui_card.key = "Enter"; label = if ko then "열기" else "open" }
+                      ] }
             ; continuation =
                 { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
-                ; key = None; status = None; count = rows_of continuation
+                ; key = toggle_tag 2
+                ; status = (if collapsed 2 then collapsed_status else None)
+                ; count = rows_of continuation
                 ; focus = Masc_tui_card.Unfocused
-                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage) }
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage)
+                ; footer_keys =
+                    if collapsed 2 then expand_keys 2
+                    else
+                      [ { Masc_tui_card.key = "Enter"; label = if ko then "채팅" else "chat" } ] }
             ; capacity =
                 { Masc_tui_card.name = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
-                ; key = key "m"; status = Some (overview_capacity_status state); count = None
+                ; key = toggle_tag 3
+                ; status =
+                    if collapsed 3 then collapsed_status
+                    else Some (overview_capacity_status state)
+                ; count = None
                 ; focus = Masc_tui_card.Unfocused
-                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_fleet) }
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_fleet)
+                ; footer_keys =
+                    if collapsed 3 then expand_keys 3
+                    else
+                      [ { Masc_tui_card.key = "m"; label = if ko then "사용량" else "Usage" } ] }
             ; actions =
                 { Masc_tui_card.name =
                     ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
-                ; key = key "v"; status = None; count = rows_of operator_rows
+                ; key = toggle_tag 4
+                ; status = (if collapsed 4 then collapsed_status else None)
+                ; count = rows_of operator_rows
                 ; focus = Masc_tui_card.Unfocused
-                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_memory) }
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_memory)
+                ; footer_keys =
+                    if collapsed 4 then expand_keys 4
+                    else
+                      [ { Masc_tui_card.key = "v"; label = if ko then "조치 원인" else "action reasons" } ] }
             }
           in
-          let status ~cells = overview_capacity_lines ~cells ~mark:Mark_on_card_edge state in
-          Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
+          let status ~cells =
+            if collapsed 3 then []
+            else overview_capacity_lines ~cells ~mark:Mark_on_card_edge state
+          in
+          Masc_tui_overview_cards.draw ~ko ~edges
             ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
-            ~decisions:all_decisions ~decisions_whole:true ~continuation ~status
+            ~decisions:all_decisions
+            ~decisions_whole:true
+            ~continuation
+            ~status
+            ~keep_actions_card:(collapsed 4)
             ~actions:operator_rows in
       (match card_rows with
        | Some rows ->
            List.iter c.push rows;
            if available > List.length rows then c.push (tool_calls_line ~cells:inner_cols)
        | None ->
+           if state.overview_collapsed_cards <> [] then
+             c.push_styled ~style:(Theme.warn ())
+               (ui_text state ~ko:" 접힌 카드 있음 · 1-4: 펼치기"
+                  ~en:" Cards folded · 1-4 to expand");
            if body.hb_spare > 0 then
              c.push_styled ~style:Ansi.bold
                (ui_text state ~ko:" 바로가기" ~en:" Destinations");

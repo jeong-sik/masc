@@ -313,7 +313,7 @@ let style =
   }
 
 let edge ?key ?status ?count ?(focus = Card.Unfocused) name =
-  { Card.name; key; status; count; focus; border_accent = None }
+  { Card.name; key; status; count; focus; border_accent = None; footer_keys = [] }
 
 let failed = { Card.symbol = Card.Mark Masc_tui_value.Mark.Failed; word = "실패"; tone = "\027[31m" }
 let unreported =
@@ -533,7 +533,8 @@ let overview_cards_fit () =
                  match
                    Masc_tui_overview_cards.draw ~ko:true ~edges:overview_edges
                      ~inner ~rows ~is_selected:(fun action -> action = 1)
-                     ~decisions ~decisions_whole:true ~continuation ~status ~actions
+                     ~decisions ~decisions_whole:true ~continuation ~status
+                     ~keep_actions_card:false ~actions
                  with
                  | None -> ()
                  | Some lines ->

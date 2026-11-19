@@ -426,7 +426,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:card_height
       { Masc_tui_card.edge =
           { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused
-          ; border_accent = Some (Theme.panel_border role) }
+          ; border_accent = Some (Theme.panel_border role); footer_keys = [] }
       ; body = (fun ~cells:_ -> lines) }
   in
   let gc_opt =

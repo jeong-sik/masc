@@ -36,8 +36,8 @@ let occurrences ~needle haystack =
   in
   if n = 0 then 0 else loop 0 0
 
-let edge ?key ?status ?count ?(focus = Card.Unfocused) ?border_accent name =
-  { Card.name; key; status; count; focus; border_accent }
+let edge ?key ?status ?count ?(focus = Card.Unfocused) ?border_accent ?(footer_keys = []) name =
+  { Card.name; key; status; count; focus; border_accent; footer_keys }
 
 let card ?(title = "Needs your decision") body =
   { Card.edge = edge title; body = (fun ~cells:_ -> body) }
@@ -1122,6 +1122,37 @@ let test_border_accent_applies_only_when_unfocused () =
        check bool "focused card drops unfocused border_accent" false
          (contains ~needle:accent row))
     focused
+let test_footer_keys_and_superscript_digit () =
+  check (option string) "superscript 1" (Some "\xc2\xb9") (Card.superscript_digit 1);
+  check (option string) "superscript 4" (Some "\xe2\x81\xb4") (Card.superscript_digit 4);
+  check (option string) "superscript out of range" None (Card.superscript_digit 0);
+  check (option string) "superscript 10 out of range" None (Card.superscript_digit 10);
+  let footer_keys =
+    [ { Card.key = "p"; label = "work" }
+    ; { Card.key = "Enter"; label = "open" }
+    ]
+  in
+  List.iter
+    (fun (width, body) ->
+       let rows =
+         Card.render ~ko:true ~style:styled ~width ~height:4
+           { Card.edge = edge ~footer_keys "Title"
+           ; body = (fun ~cells:_ -> body) }
+       in
+       List.iter
+         (fun row ->
+            check int (Printf.sprintf "footer_keys row width at %d" width)
+              width (Layout.display_width row))
+         rows)
+    [ (5, [ "a" ])
+    ; (10, [ "a"; "b" ])
+    ; (16, [ "a"; "b" ])
+    ; (16, [ "a"; "b"; "c"; "d" ])
+    ; (24, [ "a"; "b" ])
+    ; (24, [ "a"; "b"; "c"; "d" ])
+    ; (36, [ "a"; "b"; "c"; "d" ])
+    ; (60, [ "a"; "b"; "c"; "d" ])
+    ]
 let () =
   run "tui card"
     [ ( "geometry"
@@ -1163,6 +1194,8 @@ let () =
     ; ( "bottom edge"
       , [ test_case "the bottom edge keeps the number whole" `Quick
             test_the_bottom_edge_keeps_the_number_whole
+        ; test_case "footer_keys and superscript_digit keep width invariants" `Quick
+            test_footer_keys_and_superscript_digit
         ] )
     ; ( "columns"
       , [ test_case "columns and gaps add up to the screen" `Quick

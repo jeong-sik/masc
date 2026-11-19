@@ -5218,6 +5218,11 @@
  (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (test
+ (name test_tui_table)
+ (modules test_tui_table)
+ (libraries alcotest masc_tui_table masc_tui_message_layout))
+
+(test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
  (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout

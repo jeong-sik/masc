@@ -69,14 +69,48 @@ its explicit target. Metadata/input handlers do not wait for it. Same-owner
 context revalidation retains the previous observation and failure evidence.
 
 Keeper cache entries use the resolved metadata-file path and retain only the
-observed source inventory. Archive cache identity includes its actual path as
-well as the existing mtime/size checks. Different sources with equal names/stats
-cannot borrow one another's entries. Local cache entries are replaced
+observed source inventory. The archive and the backlog are kept per file
+version (below). Different sources with equal names/stats cannot borrow one
+another's entries. Local cache entries are replaced
 individually. The write-lock callback captures
 read exceptions solely to unlock before re-raising their original backtraces,
 including cancellation. A cancelled/failed read cannot poison that source's Eio
 mutex and thereby refuse every later refresh. This does not claim actual runtime
 recovery was executed.
+
+## Work files are decoded only when they change
+
+A live TUI logged 1,722 Work reads in 7.75 h. Each one parsed
+`tasks-archive.json` (7.9 MB) and `backlog.json` (5.3 MB) whole, because a
+refresh dropped both kept values, and each `r` cost about 0.23 s of CPU.
+Refresh dropped them because the backlog was kept under its size and
+modification time, and a replacement can keep both (#51439).
+
+A Work read now keeps each file's decoded value with the file's version: its
+device, inode, size and modification time. Writers replace both files with a
+rename, so every write gives a new inode, even inside one modification-time
+tick and at the same size. A read whose files kept their versions decodes
+neither. `r`, a backlog, goal or Keeper change event and an observer resume
+start the same read, and none of them drops a kept value. The read still
+projects the rows, the flow and the agenda from the kept values each time.
+
+The archive is kept as what the flow counts, not as tasks: for each archived
+task its id, its registration time and how it ended (still open, completed at,
+cancelled at), with the times already parsed. Titles, descriptions, assignees
+and notes are not kept. The ids stay because a task restored to the backlog
+counts once, as live, and the backlog moves. The times stay, not per-day
+counts, because the 24-hour window moves with the clock. The reader streams
+the file: the lexer reads the channel, and one archived task at a time is a
+JSON tree. A document that is not an object with one `tasks` list is an error
+the flow names, as `Workspace_task_id` already treats it; a missing file is an
+empty archive.
+
+The backlog is still decoded whole when its version moves. `Workspace_backlog`
+reads the file into a string, parses it into a generic tree and decodes the
+tree into `Masc_domain.backlog`. The string, the lexer's copy of it and the
+tree are garbage once the decode returns, but they are alive together during
+it. The server shares that reader, so a streaming backlog decoder is its own
+change.
 
 ## Creation HTTP without blocking input
 
@@ -221,8 +255,8 @@ Explicit post-action directory reloads and selected-live-context reads now use
 owned observations. Creation HTTP now has its own operation owner and explicit
 uncertainty. Selected Keeper metrics now use owned executor reads and retained
 observations. Other synchronous paths, including other editor-form HTTP writes,
-remain. Source refresh demand is now coalesced, and metadata/archive cache
-keys include their actual file paths. These source changes do not establish
+remain. Source refresh demand is now coalesced, metadata cache keys include
+their actual file paths, and Work files are kept per file version. These source changes do not establish
 sustained-load fairness or matched timing. Reduce unneeded preparation/discovery work
 without weakening identity,
 request ownership, original Task/Ask continuity or retained input control.

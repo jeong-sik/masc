@@ -476,7 +476,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
-| `Esc` | roster focused: return to the composer; chat focused: back, and during a turn interrupt it |
+| `Esc` | roster focused: return to the composer; chat focused: back without interrupting |
+| `Ctrl-C` | chat focused during a turn: interrupt it; otherwise arm quit |
 
 ## Keepers / Logs
 

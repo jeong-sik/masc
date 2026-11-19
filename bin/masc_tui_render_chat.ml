@@ -5378,11 +5378,10 @@ let render_keeper_message (state : state) =
       | Keeper_chat_return_list -> say "Esc:목록" "Esc:list"
       | Keeper_chat_return_detail -> say "Esc:상세" "Esc:detail"
     in
-    (* The hint is the dispatch's own table, not a retelling of it: both read
-       Masc_tui_esc_interrupt.action, so the footer cannot advertise an
-       interrupt Esc will not spend itself on, nor say "interrupt sent" after
-       the grace window when Esc would leave. *)
+    (* The hint mirrors RFC §3.4: Ctrl-C interrupts an active turn (through
+       Masc_tui_esc_interrupt's grace window), while Esc always leaves chat. *)
     let escape_hint =
+      let leave = return_hint () in
       let action = Option.bind state.msg_target_keeper_name (fun keeper_name ->
         match Masc_tui_types.working_chat_for_keeper state keeper_name with
         | Some entry -> Some (Masc_tui_types.working_chat_interrupt_action
@@ -5390,18 +5389,18 @@ let render_keeper_message (state : state) =
         | None -> Masc_tui_types.keeper_observed_interrupt_action state keeper_name) in
       match action with
       | Some Masc_tui_esc_interrupt.Launch_interrupt ->
-          say "Esc:지금 턴 멈춤" "Esc:stop current turn"
-      | Some Swallow -> say "Esc:멈춤 요청함" "Esc:interrupt requested"
-      | Some Leave -> return_hint ()
+          say "Ctrl-C:지금 턴 멈춤" "Ctrl-C:stop current turn" ^ "  " ^ leave
+      | Some Swallow -> say "Ctrl-C:멈춤 요청함" "Ctrl-C:interrupt requested" ^ "  " ^ leave
+      | Some Leave -> leave
       | None ->
         match state.msg_live with
         | Some live ->
           (match Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
             (Keeper_chat_transcript.interrupt live.tl_transcript) with
-           | Launch_interrupt -> say "Esc:턴 멈춤" "Esc:interrupt turn"
-           | Swallow -> say "Esc:멈춤 보냄" "Esc:interrupt sent"
-           | Leave -> return_hint ())
-        | None -> return_hint ()
+           | Launch_interrupt -> say "Ctrl-C:턴 멈춤" "Ctrl-C:interrupt turn" ^ "  " ^ leave
+           | Swallow -> say "Ctrl-C:멈춤 보냄" "Ctrl-C:interrupt sent" ^ "  " ^ leave
+           | Leave -> leave)
+        | None -> leave
     in
     (* Match the visible composer's key predicate, including staged media
        and whether a turn is active. Ctrl-Q remains available while typing. The compact footer omits this hint for width, but the

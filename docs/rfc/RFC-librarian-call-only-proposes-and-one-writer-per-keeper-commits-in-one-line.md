@@ -497,14 +497,19 @@ type op =
   | Drop of { ref_ : string; reason : string }
   | Merge of { refs : string list; into : new_fact }
   | Revise of { ref_ : string; into : new_fact }
+  | Seen of { ref_ : string; from_units : string list }   (* 단위가 그 fact 를 다시 말했다. 단위는 하나 이상 *)
 type answer = { question : Question_id.t; ops : op list; working_state : Keep | Set of string }
 type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Empty_or_partial
 ```
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
+- 다시 본 것은 이름으로 적는다(`Seen`). 단위가 Memory 의 fact 와 같은 것을 다시 말했으면, 답은 그 fact 의 이름과 그 단위들을 적는다. claim 은 옮겨 적지 않는다.
+  - 옮겨 적으면 글자가 조금 다른 새 fact 가 생긴다. 옛 반영에서 답이 글로 가리킨 기억 27개 가운데 18개가 입력 기억과 1~19자 달랐다(`docs/research/2026-11-16-librarian-dated-records-and-pass-time.md` §0).
+  - 단위를 하나도 적지 않은 `Seen` 은 질문이 보여 준 Memory 를 되읽은 것이다. 관측이 아니라서 `Schema_violation` 이다.
+  - 11-19 운영 Memory 의 fact 3,584개는 모두 `last_seen` 이 `first_seen` 과 같았다. 다시 본 기억이 단단해지는 길이 없었다.
 - 답 전체를 버리는 이유는 `rejection` 넷뿐이다. op 하나의 흠은 그 op 만 반영하지 않고 줄에 적는다(§8.2).
   - 그 op 만 빼는 흠은 이름과 상태의 흠이다. 표에 없는 이름, 앞의 op 가 이미 쓴 이름, 그사이 지워진 fact 다. 계획이 본다.
-  - 모양의 흠은 다르다. 모르는 op 이름, 빈 claim, 모르는 category, 파생 basis, `Merge` 하나의 `refs` 안에 두 번 적은 이름은 `Schema_violation` 이고 답 전체를 버린다. 모양이 틀린 답의 나머지를 믿을 근거가 없다.
+  - 모양의 흠은 다르다. 모르는 op 이름, 빈 claim, 모르는 category, 파생 basis, `Merge` 하나의 `refs` 안에 두 번 적은 이름, 단위가 없는 `Seen` 은 `Schema_violation` 이고 답 전체를 버린다. 모양이 틀린 답의 나머지를 믿을 근거가 없다.
 - 답의 새 fact 는 관측한 것만이다. 대화에서 읽었거나 Board 에서 읽었다. 파생 fact 는 Keeper 의 직접 쓰기(§8.5)만 만든다. 지금과 같다.
 - wire 모양은 `lib/librarian/librarian_answer.mli` 가 정한다. object 마다 field 집합이 정확히 맞아야 한다. 새 fact 의 `basis` 는 Memory 에 실린 fact 의 `basis` 와 같은 모양이다. 모델은 읽은 모양대로 쓴다.
 - 답 글은 JSON 문서 하나다. code fence 나 앞뒤의 말이 붙으면 `Not_json` 이다. 고쳐서 읽지 않는다. slot 이 그렇게 답하는 비율은 채점기가 알린다.
@@ -879,10 +884,11 @@ type log_line =
 계획의 규칙이다.
 
 - 답의 `m3` 같은 이름은 질문의 표로 fact id 가 된다. 표에 없는 이름은 `Unknown_ref` 다. 두 op 가 같은 이름을 쓰면 둘째가 `Ref_used_twice` 다. op 하나에 흠이 둘이면 검사 순서에서 먼저 걸린 것을 적는다. 순서는 `librarian_plan.mli` 에 있다. op 번호는 0부터 센다.
-- `Add` 한 claim 을 이미 갖고 있으면 `last_seen` 만 옮긴다(`touched`). fact id 는 claim 의 sha256 이다.
+- `Add` 한 claim 을 이미 갖고 있으면, 그 op 가 단위를 하나 이상 적었을 때만 `last_seen` 을 옮긴다(`touched`). 단위 없이 다시 적은 claim 은 질문의 Memory 를 되읽은 것이라 아무것도 바꾸지 않는다. fact id 는 claim 의 sha256 이다.
   - basis 는 올리지 않는다. 지금 코드는 올린다(`merge_basis`). 글자까지 같은 claim 은 질문이 보여 준 fact 를 되읽은 것일 수 있어서 새 근거로 치지 않는다.
+- `Seen` 도 그 fact 의 `last_seen` 만 옮긴다(`touched`). 그 단위들은 그 fact 의 출처로 줄에 남는다. fact 를 이름으로 가리키므로 이름을 쓰는 op 와 같은 검사를 받는다. 그 fact 가 같은 답에서 근거를 잃어 지워지면 그 `Seen` 은 `Successor_unsupported` 로 거둔다.
 - `Drop` 은 `Dropped` 로 지운다. `Merge` 는 원본들을 `Merged_into` 로 지우고 새 fact 를 더한다. `Revise` 는 옛 fact 를 `Revised_into` 로 지우고 새 fact 를 더한다.
-- `Merge` 와 `Revise` 가 더한 fact 의 `first_seen` 은 그 op 가 지운 원본 가운데 가장 이른 `first_seen` 이고, 반영 시각보다 늦지 않다. 합친 문장은 원본들이 말한 것을 말하므로 Memory 는 그것을 가장 오래된 원본 때부터 알았다. 그 밖의 새 fact 는 반영 시각에 처음 보인다. `last_seen` 은 모두 반영 시각이다.
+- `Merge` 와 `Revise` 가 더한 fact 의 `first_seen` 은 그 op 가 지운 원본 가운데 가장 이른 `first_seen` 이고, 반영 시각보다 늦지 않다. 합친 문장은 원본들이 말한 것을 말하므로 Memory 는 그것을 가장 오래된 원본 때부터 알았다. 그 밖의 새 fact 는 반영 시각에 처음 보인다. 새 fact 의 `last_seen` 은 그 op 가 단위를 하나 이상 적었으면 반영 시각이고, 적지 않았으면 그 op 가 지운 원본 가운데 가장 늦은 `last_seen` 이다. 단위를 적지 않은 합치기와 고쳐 쓰기는 Memory 가 이미 가진 것을 다시 말했을 뿐 새 근거가 아니다. 그래서 `last_seen` 은 근거, 곧 단위를 적은 op 가 있을 때만 옮겨 간다. 다시 본 기억이 단단해졌는지를 읽는 값이 말 바꾸기로 흐려지지 않는다.
 - 지운 fact 는 줄에 통째로 남는다. `memory_search source=dropped|absorbed` 가 반영 기록에서 찾아 준다.
 - 반영하지 않은 op 는 번호, 이유, 새 claim 을 줄에 남긴다. 멈춘 `Revise` 나 `Merge` 의 새 claim 을 `Add` 로 바꿔 넣지는 않는다. 그러면 방금 철회한 것을 되살릴 수 있다.
 - op 의 흠은 답 전체를 버리지 않는다. 지금은 흠 하나에 답 전체가 거절됐다.

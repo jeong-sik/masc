@@ -53,18 +53,6 @@ val prepare : memory_keepers_dir:string -> runtime_keepers_dir:string -> keeper_
     cursor. The caller serializes this Keeper. *)
 val acknowledge : runtime_keepers_dir:string -> keeper_name:string -> (unit, string) result
 
-val release_pending : runtime_keepers_dir:string -> keeper_name:string ->
-  expected:observation -> (unit, string) result
-(** Drop a prepared claim without advancing [after]: save the [expected]
-    observation's offset with no pending. For a replacement drain whose last
-    live original has just archived its terminal ending, so the next fresh
-    selection observes the same claim state that original observed. Refuses
-    unless the complete current observation still equals [expected], so a
-    concurrent preparation, acknowledgement or recovery is never overwritten.
-    The caller serializes this Keeper and verifies no live original still
-    holds the claim; Memory receipts, committed coverage and the offset stay
-    untouched. *)
-
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val inspect : keepers_dir:string -> keeper_id:string -> (bool, string) result
 (** Read-only durable-store validation; false means absent. Never reconciles a

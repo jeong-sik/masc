@@ -146,10 +146,10 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
   check int "seventeen entries fold to three turns" 3 (List.length rows);
   check (list string)
     "newest first: 51 running, 50 and 49 settled with ledger durations"
-    [ "\xe2\x96\xb6 kpr-07 turn 51 | running"
-    ; "\xe2\x96\xa0 kpr-07 turn 50 | keeper_artifact_read 6ms \xc2\xb7 in \
+    [ "\xe2\x97\x90 kpr-07 turn 51 | running"
+    ; "\xe2\x97\x8f kpr-07 turn 50 | keeper_artifact_read 6ms \xc2\xb7 in \
        39.2k out 76 \xc2\xb7 $0.0102"
-    ; "\xe2\x96\xa0 kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
+    ; "\xe2\x97\x8f kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
        39.0k out 70 \xc2\xb7 $0.0100"
     ]
     (List.map text rows)
@@ -172,7 +172,7 @@ let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
   check int "one turn, not two" 1 (List.length rows);
   check (list string)
     "the keeper's number, settled, with the ledger call on the same row"
-    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2.0k out 40 \xc2\xb7 $0.0040" ]
+    [ "\xe2\x97\x8f kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2.0k out 40 \xc2\xb7 $0.0040" ]
     (List.map text rows)
 
 let turn_input =
@@ -662,7 +662,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
      call; [turn N] on this surface is a keeper turn, so the row leaves the
      ordinal to the event evidence. *)
   check string "the call names its tool, batch slot, and task"
-    "\xe2\x96\xb6 analyst call | read_file [1/2] \xc2\xb7 task-494"
+    "\xe2\x97\x90 analyst call | read_file [1/2] \xc2\xb7 task-494"
     (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None started));
   let duration =
     Acting.duration_of_completion ~before:[ heartbeat "x"; started ] completed
@@ -670,7 +670,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
   check (option (float 0.5)) "the return is paired with its start by tool-use id"
     (Some 32.) duration;
   check string "and the row carries the pairing"
-    "\xe2\x9c\x93 analyst returned | read_file \xc2\xb7 32ms [1/2] \xc2\xb7 task-494"
+    "\xe2\x97\x8f analyst returned | read_file \xc2\xb7 32ms [1/2] \xc2\xb7 task-494"
     (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:duration (Observer.Agent_core completed)))
 
 let test_a_return_with_no_start_held_has_no_duration () =
@@ -697,13 +697,13 @@ let test_a_return_with_no_start_held_has_no_duration () =
        ~before:[ agent_core ~tool_use_id:"tu-9" "someone-else" ]
        completed);
   check string "the row then shows the tool alone"
-    "\xe2\x9c\x93 analyst returned | read_file"
+    "\xe2\x97\x8f analyst returned | read_file"
     (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None (Observer.Agent_core completed)));
   (* A negative duration is a clock that disagreed with itself. The row it
      leaves is the row a missing one leaves, not "read_file \xc2\xb7 0ms" and
      not a dash the missing row does not draw. *)
   check string "a negative duration reads as no duration"
-    "\xe2\x9c\x93 analyst returned | read_file"
+    "\xe2\x97\x8f analyst returned | read_file"
     (text
        (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:(Some (-4.))
           (Observer.Agent_core completed)))

@@ -955,7 +955,9 @@ let session_event_collapse_key event =
    ordinary rows keep every cell for their text. A shape and not a colour
    alone: under NO_COLOR the mark is still there. *)
 let session_event_mark event =
-  if String.equal event.event_type "error" then Some "\xe2\x9c\x97" else None
+  if String.equal event.event_type "error" then
+    Some (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed)
+  else None
 ;;
 
 (** Keeper metadata (from Tui_decode) *)

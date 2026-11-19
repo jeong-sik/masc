@@ -202,8 +202,13 @@ val footer_line_keys :
   Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
 (** {!footer_line} for a row of typed keys: a key that does not answer on the
     screen as drawn keeps its place in the row's dim when every key fits, and
-    is the first to go when the row is cut. The navigation trace hears only
-    the keys that answer. *)
+    is the first to go when the row is cut. With colours off the dim marks
+    nothing, so such a key is left out at every width. The navigation trace
+    hears only the keys that answer.
+
+    {!footer_line} stays for rows still written by hand. Each goes when its
+    screen builds zone 5 from its action list (RFC tui-one-screen-grammar
+    3.5); then this is the only entry. *)
 
 val keeper_split_threshold_cols : int
 
@@ -724,10 +729,15 @@ val harness_detail_heading :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+(** Which Keeper row the keys are for. The roster names the keys that act
+    (RFC tui-one-screen-grammar section 2); the detail keeps [j/k], its way
+    back, [r] and [q] until it is drawn from the action list. *)
+type keeper_keys = Roster_keys | Detail_keys
+
 val keeper_control_hints :
   ?offers_chat:bool ->
-  ?offers_back:bool ->
   ?taken:string list ->
+  keys:keeper_keys ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
 (** The Keeper keys alone, less any whose single keys are in [taken] -- the
     keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).

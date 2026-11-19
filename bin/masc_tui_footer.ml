@@ -546,6 +546,14 @@ let prepare_hints row =
          else None)
     }
 
+(* Whether a refused key can stand in its place on a whole row. The row's dim
+   is its only mark. With colours off the dim is nothing, so a refused key
+   would be drawn exactly like one that acts and say it acts; the row then
+   leaves every refused key out, as a cut row does. *)
+type refused_keys =
+  | Shown_dim
+  | Left_out
+
 let is_key_token key =
   let len = String.length key in
   len > 0
@@ -980,9 +988,10 @@ type question_place =
 
     [ko] picks the language of the status facts. The hints arrive written.
     A [Keys] row draws a refused key in [dim] in its place when the whole row
-    fits; a row that has to be cut leaves every refused key out first. *)
+    fits and [refused_keys] is [Shown_dim]; a row that has to be cut, or one
+    whose dim marks nothing, leaves every refused key out. *)
 let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port
-    ?(help_key_answers = true) ?(key_style = "") ~ko ~dim ~reset
+    ?(help_key_answers = true) ?(key_style = "") ~ko ~dim ~reset ~refused_keys
     ~max_cells ~hints () =
   let max_cells = max 0 max_cells in
   let more_key = if help_key_answers then more_key else "" in
@@ -994,7 +1003,12 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
   let raw_hints = hints in
   let style row = prepare_hints (styled_row ~key_style ~dim ~reset row) in
   let style_choices s = (style (Written s)).full_text in
-  let hints = style raw_hints in
+  let hints =
+    let prepared = style raw_hints in
+    match refused_keys with
+    | Shown_dim -> prepared
+    | Left_out -> { prepared with whole = None }
+  in
   let statuses =
     List.filter_map (status_item_projection ~ko)
       (status @ Option.to_list (Option.map (fun port -> Port port) port))

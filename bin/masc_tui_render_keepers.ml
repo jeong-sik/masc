@@ -2556,7 +2556,7 @@ let render_keeper_plain (state : state) =
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~status:(keeper_action_status state) ~max_cells:cols
-       ~hints:(keeper_control_hints ~offers_back:false state projection.kpp_selected_reading));
+       ~hints:(keeper_control_hints ~keys:Roster_keys state projection.kpp_selected_reading));
   finish_surface state ~clamped:(Keeper_list_scroll projection.kpp_scroll)
     ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
@@ -3144,7 +3144,7 @@ let render_keeper_axes (state : state) =
     (footer_line state
        ~status:(keeper_action_status state)
        ~max_cells:cols
-       ~hints:(keeper_control_hints ~offers_back:false state selected_reading));
+       ~hints:(keeper_control_hints ~keys:Roster_keys state selected_reading));
 
   finish_surface state ~clamped:(Keeper_list_scroll scroll_offset)
     ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
@@ -5132,7 +5132,7 @@ let render_keeper_detail (state : state) =
       Masc_tui_keys.keeper_detail_tab_hint
         ~ko:(state.ui_language = Lang_ko) state.detail_tab
       ^ "  "
-      ^ keeper_control_hints
+      ^ keeper_control_hints ~keys:Detail_keys
           ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
           state (Some (keeper_reading state k))
     in

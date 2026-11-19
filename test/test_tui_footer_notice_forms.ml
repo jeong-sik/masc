@@ -19,7 +19,7 @@ let max_width = 200
 
 let row_at ~status width =
   let line =
-    Masc_tui_footer.line ~ko:false ~status ~dim:"" ~reset:"" ~max_cells:width ~port:8935
+    Masc_tui_footer.line ~ko:false ~status ~dim:"" ~reset:"" ~refused_keys:Masc_tui_footer.Shown_dim ~max_cells:width ~port:8935
       ~hints:(Masc_tui_footer.Written hints) ()
     |> Masc_tui_theme.strip_sgr
   in
@@ -136,7 +136,7 @@ let fallback = "Resize to confirm quit"
 (* The row as drawn, and the same row without its colour marks. *)
 let marked_and_plain_row_with ~preferred_action ~status width =
   let line =
-    Masc_tui_footer.line ~ko:false ~preferred_action ~action_text:fallback ~status ~dim:""
+    Masc_tui_footer.line ~ko:false ~preferred_action ~action_text:fallback ~status ~dim:"" ~refused_keys:Masc_tui_footer.Shown_dim
       ~reset:"" ~max_cells:width ~port:8935 ~hints:(Masc_tui_footer.Written hints) ()
   in
   match String.split_on_char '\n' line with

@@ -48,7 +48,6 @@ let empty_metrics_summary =
 
 type tool_audit_read_state =
   | Tool_audit_read
-  | Tool_audit_timed_out
   | Tool_audit_unreadable
 
 let tool_audit_read_field = "tool_audit_read"
@@ -56,7 +55,6 @@ let tool_audit_read_error_field = "tool_audit_read_error"
 
 let tool_audit_read_state_to_wire = function
   | Tool_audit_read -> "read"
-  | Tool_audit_timed_out -> "timed_out"
   | Tool_audit_unreadable -> "unreadable"
 
 let empty_tool_audit_snapshot =
@@ -229,3 +227,46 @@ let latest_tool_audit_snapshot_from_files config ~keeper_name =
       ~path:(Dated_jsonl.base_dir store)
       ~detail:(Dated_jsonl.read_error_to_string error);
     Error error
+
+(* How many of a Keeper's newest metrics rows the Keeper list's recent tools
+   and the metrics chart look at. One number, so the two share one fact. *)
+let recent_metrics_row_count = 120
+
+(* Those rows as text, oldest first. The store keeps them in memory in the
+   process that writes the store, as it keeps the tool audit: every row
+   appended moves the window by one. They are text and not JSON because 120
+   parsed rows of 2.8 kB took four times the memory of their text. *)
+let newest_metrics_lines : string list Dated_jsonl.fact =
+  Dated_jsonl.last_lines
+    ~name:"keeper_metrics_newest_lines"
+    ~count:recent_metrics_row_count
+
+let newest_metrics_lines_result config ~keeper_name =
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  match Dated_jsonl.read_fact store newest_metrics_lines with
+  | Fact_cell.Held lines
+  | Fact_cell.Read_and_kept lines
+  | Fact_cell.Read_not_kept lines -> Ok lines
+  | Fact_cell.Read_failed error -> Error error
+
+(* How many of those rows the recent activity of a Keeper row shows. *)
+let recent_activity_row_count = 5
+
+(* The rows the recent activity shows, oldest first: the end of the kept
+   lines. This reader shows the rows it can, so a store the strict read
+   refuses is read as it was read before the lines were kept: its newest
+   [recent_activity_row_count] rows, passing over a directory entry that is
+   not the store's.
+
+   That read asks for no more rows than are shown. It opens day files from
+   the newest back until it has them, and a day file it cannot read raises.
+   Asking for all [recent_metrics_row_count] rows took it back to the very
+   file the strict read had refused, and the raise lost the Keeper's whole
+   row. *)
+let recent_activity_lines config ~keeper_name =
+  match newest_metrics_lines_result config ~keeper_name with
+  | Ok lines -> List.drop (max 0 (List.length lines - recent_activity_row_count)) lines
+  | Error (_ : Dated_jsonl.read_error) ->
+    Dated_jsonl.read_recent_lines
+      (Keeper_types_support.keeper_metrics_store config keeper_name)
+      recent_activity_row_count

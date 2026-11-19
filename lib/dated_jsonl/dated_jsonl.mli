@@ -302,32 +302,6 @@ val find_latest_entry_result :
     match. Malformed rows are delivered to the callback. Missing stores return
     [Ok None]; layout and I/O failures remain explicit. *)
 
-type 'a latest_view
-(** A strict latest projection over one store. It keeps each visited file's
-    selected value (including [None]) and verified regular-file identity,
-    size and timestamps. Outside the selected value it retains no parsed rows
-    or source bytes. Its lifetime belongs to the caller. *)
-
-val latest_view : t -> f:(recent_entry -> 'a option) -> 'a latest_view
-(** Fix the store and projection for a reusable strict latest read. The
-    callback runs newest first on rows that need decoding; cached results do
-    not replay its effects. *)
-
-val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
-(** Walk fresh strict month/day order, opening verified regular handles before
-    reuse, and stop at the first selected value. Unchanged files reuse their
-    result. A same-inode append after a newline-complete cached extent scans
-    only its new suffix; replacement, shrinkage, same-size metadata changes
-    and appends to an incomplete tail rescan that file. In-place prefix edits
-    combined with growth are outside the append-only contract.
-
-    Missing stores yield [Ok None]. Removed paths cannot supply a cached
-    result. A same-inode append during a scan preserves the result through
-    the captured end; the next read inspects the appended bytes. Replacement,
-    shrinkage, same-size metadata changes and storage errors remain explicit
-    failures. Only files visited by a successful read remain in the view;
-    no full retained row count is taken. *)
-
 (** {1 Facts kept in memory}
 
     A fact is one value read from a store's files that this module also keeps
@@ -370,6 +344,20 @@ val last_rows : name:string -> count:int -> Yojson.Safe.t option list fact
     labels its reads in [masc_dated_jsonl_fact_reads_total].
 
     @raise Invalid_argument when [count] is less than 1. *)
+
+val last_lines : name:string -> count:int -> string list fact
+(** A fact: the lines of the store's newest [count] physical rows, oldest
+    first, as [read_recent_lines_result t count] reads them: each row's text
+    without its newline, whether or not it is JSON. As {!last_rows}, with the
+    rows left as text for a reader that decodes the few it needs: 120 rows of
+    2.8 kB took four times the memory as parsed JSON that they take as text.
+
+    @raise Invalid_argument when [count] is less than 1. *)
+
+val parse_line : string -> (Yojson.Safe.t, string) result
+(** One row's text as the strict reads decode it: its JSON, or what the
+    parser said of a row that is not JSON ({!Malformed_json}). For a reader
+    of {!last_lines}. *)
 
 val newest_parsed_row : Yojson.Safe.t option fact
 (** The store's newest row that is JSON, as {!find_latest_entry_result} finds
@@ -725,6 +713,7 @@ module For_testing : sig
 
   val after_row :
     ?base_dir:string ->
+    ?line:string ->
     'a fact ->
     value:'a ->
     newest:(string * string) option ->
@@ -737,5 +726,7 @@ module For_testing : sig
       value after the row with the newest day file it saw, or [None] when the
       append forgets the fact instead. It reads no file and no clock.
       [base_dir] is the store's directory as a {!newest_selected} selection
-      is told it; the current directory's name when left out. *)
+      is told it; the current directory's name when left out. [line] is the
+      row's text, which only {!last_lines} looks at; the empty text when left
+      out. *)
 end

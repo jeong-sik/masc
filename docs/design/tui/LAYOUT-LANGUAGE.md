@@ -15,13 +15,9 @@ stay at the bottom. Each area answers one question.
 
 - Use the terminal's own foreground for names and content. Recede separators,
   counts, metadata and hints through the existing theme tokens.
-- A body with two or more independent readings divides them into
-  rounded cards: Dashboard's readings, a list beside its detail, one card per
-  account in plan usage. The Activity pane is always a card. The top edge
-  carries the card's title, status and count; the bottom edge carries its
-  `N more`. The card holds data only. A body with one other reading has no box,
-  and overlays keep their frame so they remain recognisable
-  ([one-screen grammar](../../rfc/RFC-tui-one-screen-grammar.md) §2).
+- Dashboard and plan usage can use cards to group related readings. Card
+  edges can carry labels and status, leaving the body for the readings. Keep
+  overlays distinguishable from the underlying content.
 - Only the row that owns keyboard focus gets a full selection band. With a
   known palette it is a quiet neutral tint; without colours or a usable palette
   it uses reverse video. Keep a caret on the open selection in both modes.
@@ -144,7 +140,8 @@ distinct from the wall clock removed from Dashboard, Work and Task titles.
 `write_list_sidebar_selection`. The latter reaches the Tasks, Work, Schedules,
 Task Review, Verdicts, Board, Approvals and Fusion detail indexes. The change
 preserves their row budgets and label-folding width, while aligning labels and
-moving counts right. A list beside its detail now follows the card rule above.
+moving counts right. A list and its detail can use separate cards when the
+viewport has room.
 
 The seven-screen preview records the wider direction. Bespoke Code, Resources,
 Usage and System panels keep their own implementations in this change; this

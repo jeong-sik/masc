@@ -48,7 +48,7 @@ Type `/features` in any composer and the feature sheet lists what this TUI
 can do — one sentence per feature, beside the command, key or name that
 opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
 names, so a row can be copied and typed as it is printed. The key-level
-reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
+reference is `?` in the TUI; `/help` lists the slash commands.
 
 Opening `:` with no search shows the six main destinations. Type a screen,
 Keeper, Task, post or setting name to find other actions. Detail screen names

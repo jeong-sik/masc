@@ -258,7 +258,9 @@ let state_json ?observation = function
 (* This is display metadata only. Selection and state retain their independent
    contracts; clients must not reconstruct a role from their technical names. *)
 let builtin_category = function
-  | Exact (Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser) ->
+  | Exact
+      ( Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser
+      | Librarian_memory ) ->
       Some Lane_addon_category.Memory_and_judgment
   | Browser _ -> Some Lane_addon_category.Browser
   | Machine _ -> Some Lane_addon_category.Execution_environment

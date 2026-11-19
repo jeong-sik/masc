@@ -1247,7 +1247,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Candle_appraiser -> false
+        | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
       in
       let expected =
         if is_verifier && not judges
@@ -1276,14 +1276,19 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Candle_appraiser -> false
+           | Runtime.Candle_appraiser | Runtime.Librarian_memory -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
-    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
-      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
-         config.exact_output_lane_decls)
+    List.iter
+      (fun (lane, what) ->
+         Alcotest.(check bool) (what ^ " is explicitly configured") false
+           (List.exists (fun (decl : Runtime_schema.exact_output_lane_decl) ->
+              String.equal (Runtime_schema.exact_lane_key decl.owner) (Standalone_lane.to_id lane))
+              config.exact_output_lane_decls))
+      [ Standalone_lane.Candle_appraiser, "Candle appraisal"
+      ; Standalone_lane.Librarian_memory, "The Librarian's Memory lane"
+      ]
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =
@@ -4476,7 +4481,7 @@ let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
   | Ok _ -> ()
 ;;
 
-(* The design boundary [verifier_exact_slot_references]'s comment documents:
+(* The design boundary [runtime_slot_references]'s comment documents:
    a sibling lane's [slots] (unlike its [cli_slots]) is consumed exclusively
    through [Runtime_exact_output_registry], which admits an id against the
    AGENT_CORE catalog rather than [runtime.toml]'s runtime list -- a
@@ -4494,6 +4499,40 @@ let test_a_sibling_lane_slots_entry_may_be_catalog_only () =
   match load_lane_config config with
   | Error msg -> Alcotest.failf "a catalog-only slots id on a sibling lane must load: %s" msg
   | Ok _ -> ()
+;;
+
+(* The other side of that boundary: [librarian_memory] reads each [slots] id's
+   window from its runtime, so a catalog-only id there refuses to load instead
+   of leaving the lane without a value on every pass. *)
+let test_a_librarian_memory_slots_entry_must_name_a_runtime () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_memory]\n\
+       slots = [\"catalog.only\"]\n\
+       max_output_tokens = 4096\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "a catalog-only slots id on librarian_memory loaded"
+  | Error msg ->
+    Alcotest.(check bool) "the refusal names the lane's slots" true
+      (string_contains msg "[runtime.exact_output_lanes.librarian_memory].slots");
+    Alcotest.(check bool) "the refusal names the id" true (string_contains msg "catalog.only")
+;;
+
+(* Each slot's size fact holds for the output reserve its requests carry, so
+   an enabled [librarian_memory] table must declare one. *)
+let test_a_librarian_memory_table_must_declare_its_reserve () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_memory]\n\
+       slots = [\"runpod_mtp.qwen\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "librarian_memory without max_output_tokens loaded"
+  | Error msg ->
+    let names text = Alcotest.(check bool) (Printf.sprintf "%S names %S" msg text) true (string_contains msg text) in
+    names "runtime.exact_output_lanes.librarian_memory.max_output_tokens";
+    names "librarian_memory must declare max_output_tokens"
 ;;
 
 let test_an_assignment_names_a_lane_of_its_own_name () =
@@ -4926,6 +4965,14 @@ let () =
             "a sibling lane's slots entry may be catalog-only"
             `Quick
             test_a_sibling_lane_slots_entry_may_be_catalog_only
+        ; Alcotest.test_case
+            "a librarian_memory slots entry must name a runtime"
+            `Quick
+            test_a_librarian_memory_slots_entry_must_name_a_runtime
+        ; Alcotest.test_case
+            "a librarian_memory table must declare its reserve"
+            `Quick
+            test_a_librarian_memory_table_must_declare_its_reserve
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

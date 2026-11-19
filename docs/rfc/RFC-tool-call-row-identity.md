@@ -172,7 +172,7 @@ type keeper_calls_snapshot = {
 | L3 TUI cursor | Calls 목록은 호출마다 한 줄, cursor 는 `record_id`, Enter 는 고른 호출을 자르지 않고 읽기 문서로 연다, 읽기에서 Esc 는 목록으로, 목록에서 Esc 는 지금처럼 Keeper 상세로 | 상태 시험: j/k 가 cursor 의 `record_id` 를 옮긴다. Enter 가 그 `record_id` 의 호출을 연다. 새 호출이 들어와도 cursor 가 같은 `record_id` 다. 고른 행이 100건 창 밖으로 밀리면 「창 밖」 갈래다. 같은 `record_id` 두 행이면 「모호함」 갈래다. 화면 문구·배치는 시험하지 않는다 |
 
 - L3 의 cursor 상태는 닫힌 합타입으로 둔다. 고른 것이 없음 / 고른 `record_id` / 창 밖으로 밀린 `record_id` / 모호한 `record_id` 넷이다. 창 밖이나 모호함이 되어도 다른 행으로 옮기지 않는다.
-- L3 의 키는 대화 화면 call reader(`bin/masc_tui_chat_call_reader.ml:38-51`)와 같다. 새 키 규칙을 만들지 않는다. 키 표를 바꾸면 `docs/guides/TUI-KEYS.md` 를 생성기로 다시 만든다.
+- L3 의 키는 대화 화면 call reader(`bin/masc_tui_chat_call_reader.ml:38-51`)와 같다. 새 키 규칙을 만들지 않는다.
 - L3 는 #37517 본문대로 1~4 KB 출력 100건 합성 기록에서, 바꾸기 전과 뒤의 렌더 시간을 잰다. 두 번째 자르기 상한은 넣지 않는다.
 - 세 층은 native stack 하나로 쌓는다. L1 만 먼저 병합할지는 §6 에서 정한다.
 

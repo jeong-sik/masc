@@ -184,7 +184,6 @@ let keepers_json
               Threshold 300ms — lower than outer 500ms for more data. *)
             let dt_meta = ref 0.0 in
             let dt_audit = ref 0.0 in
-            let dt_profile = ref 0.0 in
             let dt_phase = ref 0.0 in
             let dt_trust = ref 0.0 in
             let dt_activity = ref 0.0 in
@@ -193,12 +192,11 @@ let keepers_json
             then
               Log.Dashboard.info
                 "[keepers_json:%s] sub-op: meta=%.0fms \
-                 audit=%.0fms profile=%.0fms phase=%.0fms trust=%.0fms activity=%.0fms \
+                 audit=%.0fms phase=%.0fms trust=%.0fms activity=%.0fms \
                  total=%.0fms"
                 name
                 (!dt_meta *. 1000.0)
                 (!dt_audit *. 1000.0)
-                (!dt_profile *. 1000.0)
                 (!dt_phase *. 1000.0)
                 (!dt_trust *. 1000.0)
                 (!dt_activity *. 1000.0)
@@ -327,9 +325,7 @@ let keepers_json
                     let diagnostic = diagnostic_observation.json in
                     let t_audit = Time_compat.now () in
                     let tool_audit =
-                      Operator_control_snapshot_tool_audit.read ~read_policy
-                        config
-                        meta
+                      Operator_control_snapshot_tool_audit.read config meta
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let status =
@@ -432,10 +428,11 @@ let keepers_json
                                let result =
                                  if include_recent_activity
                                  then (
-                                   let store =
-                                     Keeper_types_support.keeper_metrics_store config name
+                                   let lines =
+                                     Keeper_status_metrics.recent_activity_lines
+                                       config
+                                       ~keeper_name:name
                                    in
-                                   let lines = Dated_jsonl.read_recent_lines store 5 in
                                    let parsed, _ =
                                      Fs_compat.parse_jsonl_lines
                                        ~source:"operator_recent_keeper_metrics"

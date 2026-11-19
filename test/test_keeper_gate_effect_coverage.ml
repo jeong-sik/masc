@@ -474,6 +474,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
   in
   expect_refusal "verifier_exact";
   expect_refusal "candle_appraiser";
+  expect_refusal "librarian_memory";
   match
     ( Keeper_exact_lane_preference.all ~base_path:config.base_path
     , Keeper_exact_lane_preference.set
@@ -490,7 +491,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
          "unknown exact-output lane %S; expected one of %s"
          "verifier_made_up"
          "librarian_exact, hitl_auto_judge, board_attention_exact, \
-          verifier_exact, candle_appraiser")
+          verifier_exact, candle_appraiser, librarian_memory")
       detail;
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"

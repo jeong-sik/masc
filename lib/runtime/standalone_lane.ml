@@ -6,6 +6,7 @@ type t =
   | Board_attention
   | Verifier
   | Candle_appraiser
+  | Librarian_memory
 [@@deriving enumerate]
 
 let run_identity = function
@@ -14,6 +15,7 @@ let run_identity = function
   | Board_attention -> Lane_run_identity.Board_attention
   | Verifier -> Lane_run_identity.Verifier
   | Candle_appraiser -> Lane_run_identity.Candle_appraiser
+  | Librarian_memory -> Lane_run_identity.Librarian_memory
 ;;
 
 let to_id lane = Lane_run_identity.to_id (run_identity lane)
@@ -33,7 +35,7 @@ type obligation =
    in the code (RFC every-lane-is-one-row-in-one-registry, decision d3). *)
 let obligation = function
   | Board_attention | Hitl_auto_judge -> Required
-  | Librarian | Verifier | Candle_appraiser -> Optional
+  | Librarian | Verifier | Candle_appraiser | Librarian_memory -> Optional
 ;;
 
 (* Other work waits on these three verdicts: a task's completion on the
@@ -44,7 +46,7 @@ let obligation = function
    bounded by the provider's declared run limit. *)
 let admission_class : t -> Llm_provider.Admission_class.t = function
   | Verifier | Hitl_auto_judge | Board_attention -> Priority
-  | Librarian -> Background
+  | Librarian | Librarian_memory -> Background
   | Candle_appraiser -> Standard
 ;;
 

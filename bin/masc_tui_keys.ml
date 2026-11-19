@@ -2597,13 +2597,12 @@ let help_surfaces : (string * surface) list =
   ; "Connectors", Connectors
   ]
 
-(* The paragraphs docs/guides/TUI-KEYS.md prints under a section's table, in
-   the order they read there. A key whose behaviour outgrows its one-line
-   help cell -- what an asynchronous save keeps, what a retained observation
-   means -- is explained here because that document is generated from this
-   module: a paragraph written into it by hand fails [test_tui_keys_doc], and
-   regenerating deletes it. Each paragraph is Markdown, with the line breaks
-   the document prints.
+(* The paragraphs the key reference ([Masc_tui_keys_doc]) prints under a
+   section's table, in the order they read there. A key whose behaviour
+   outgrows its one-line help cell -- what an asynchronous save keeps, what a
+   retained observation means -- is explained here because that reference is
+   generated from this module. Each paragraph is Markdown, with the line
+   breaks the reference prints.
 
    Keyed by surface, the same key as the section, so a paragraph cannot land
    under a title that merely reads alike. Reference only: the [?] sheet lists

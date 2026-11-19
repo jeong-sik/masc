@@ -3401,6 +3401,7 @@ let test_a_held_http_lane_settles_without_a_request () =
              , { Runtime_exact_output_registry.candidate =
                    runtime.Runtime_instance.candidate_backpressure
                ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime
+               ; window = None
                } ) ]
          [ held_slot ]
          (F.resolver_snapshot ~source:"hitl held http lane"

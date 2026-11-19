@@ -10,6 +10,7 @@ import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
 import { laneTargetFor, laneTargetParams, sameLaneTarget, type LaneNavigationTarget } from '../lib/lane-navigation'
+import { isLaneRunIdentity } from '../api/dashboard-exact-lane-runs'
 import { categoryGroup, categoryLabel, groupAddonCategories, inventoryCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
 import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
 
@@ -112,7 +113,9 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
       <${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
-      <${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>
+      ${isLaneRunIdentity(selection.lane_id)
+        ? html`<${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>`
+        : null}
       <${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Lane candidates<//>
     </div>` : selection.kind === 'declaration' || selection.kind === 'manual_instance' ? html`<div class="space-y-2">
       ${selection.kind === 'declaration' ? html`<p class="break-all">${selection.source_path}</p>` : html`<p>Incarnation: ${selection.incarnation}</p>`}

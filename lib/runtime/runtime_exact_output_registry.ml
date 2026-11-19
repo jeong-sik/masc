@@ -62,6 +62,7 @@ let classify_rejected_slot (slot : rejected_slot) ~declared_target_rejected ~con
 type runtime_observation =
   { candidate : Runtime_candidate_backpressure.candidate
   ; quota_scope : Runtime_quota_window.scope
+  ; window : int option
   }
 
 type t =

@@ -28,11 +28,10 @@ val summarize_metrics_lines : string list -> metrics_summary
     as JSON are reported through the persistence read-drop surface; rows of an
     unknown record kind are skipped without counting. *)
 (** What a published tool audit says about its own read. An audit that was
-    read and holds no tool call is [Tool_audit_read]; the other two say
-    nothing about what the Keeper called. *)
+    read and holds no tool call is [Tool_audit_read]; [Tool_audit_unreadable]
+    says nothing about what the Keeper called. *)
 type tool_audit_read_state =
   | Tool_audit_read
-  | Tool_audit_timed_out
   | Tool_audit_unreadable
 
 val tool_audit_read_field : string
@@ -42,7 +41,7 @@ val tool_audit_read_error_field : string
 (** The JSON field that carries the diagnostic of an unreadable audit. *)
 
 val tool_audit_read_state_to_wire : tool_audit_read_state -> string
-(** ["read"], ["timed_out"] or ["unreadable"]. *)
+(** ["read"] or ["unreadable"]. *)
 
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :
@@ -60,3 +59,34 @@ val latest_tool_audit_snapshot_from_files :
     files each time. Code that removes the store's files without going through
     [Dated_jsonl] tells it with {!Dated_jsonl.directories_removed}, as the
     Keeper's purge does. *)
+
+val recent_metrics_row_count : int
+(** How many of a Keeper's newest metrics rows the Keeper list's recent tools
+    and the metrics chart look at. *)
+
+val newest_metrics_lines_result :
+  Workspace.config -> keeper_name:string -> (string list, Dated_jsonl.read_error) result
+(** The text of the Keeper's newest {!recent_metrics_row_count} metrics rows,
+    oldest first, as [Dated_jsonl.read_recent_lines_result] reads them: a row
+    that is not JSON keeps its place. Decode a row with
+    {!Dated_jsonl.parse_line}.
+
+    A fact of the Keeper's metrics store ({!Dated_jsonl.last_lines}), kept and
+    forgotten as {!latest_tool_audit_snapshot_from_files} is. *)
+
+val recent_activity_row_count : int
+(** How many of a Keeper's newest metrics rows the recent activity of a
+    Keeper row shows. *)
+
+val recent_activity_lines : Workspace.config -> keeper_name:string -> string list
+(** The text of the Keeper's newest {!recent_activity_row_count} metrics
+    rows, oldest first: the end of {!newest_metrics_lines_result}.
+
+    The recent activity shows the rows it can. When the strict read refuses
+    the store, those rows are read with [Dated_jsonl.read_recent_lines],
+    which passes over a directory entry that is not the store's and answers
+    no row for a directory it cannot list. It asks for
+    {!recent_activity_row_count} rows and no more, so it opens no day file
+    older than the ones that hold them.
+
+    @raise Sys_error when one of those day files cannot be read. *)

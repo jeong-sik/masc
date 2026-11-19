@@ -32,7 +32,7 @@ settings, `u` twice to confirm restoration, and `r` to reread. The selected save
 snapshot's details and the result explain preserved settings and skipped lanes.
 The chat commands also support `/preset`, `/preset show <name>`,
 `/preset save <name> [description]` and `/preset restore <name>`.
-See the [canonical TUI key reference](TUI-KEYS.md) for navigation and deletion.
+Press `?` in the TUI for the keys that navigate and delete presets.
 
 The existing TUI/API save can replace a preset of the same name. Use a new name
 when retaining an earlier snapshot. The web create-only save has different

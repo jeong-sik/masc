@@ -3044,6 +3044,8 @@
 (include stanzas/test_keeper_decision_row_kept.inc)
 (include stanzas/test_masc_test_workspace_names.inc)
 (include stanzas/test_keeper_turn_tool_audit_kept.inc)
+(include stanzas/test_keeper_metrics_lines_kept.inc)
+(include stanzas/test_keeper_tail_read.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -5511,7 +5513,6 @@
 (include stanzas/test_tui_evidence_picture.inc)
 (include stanzas/test_tui_evidence_link.inc)
 (include stanzas/test_tui_render_evidence.inc)
-(include stanzas/test_tui_keys_doc.inc)
 (include stanzas/test_tui_features.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_chat_portrait.inc)
@@ -7026,6 +7027,7 @@
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 (include stanzas/test_runtime_exact_lane_backpressure.inc)
+(include stanzas/test_librarian_memory_lane.inc)
 
 (include stanzas/test_exact_output_binding_wire.inc)
 

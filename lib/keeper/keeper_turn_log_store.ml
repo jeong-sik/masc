@@ -36,6 +36,7 @@ type read_error =
       ; reason : undecodable
       }
   | Log_start_missing
+  | Moved_while_reading
 
 let decode row =
   match Yojson.Safe.from_string row with
@@ -113,17 +114,30 @@ let read_tail path =
       ; failure = None
       }
     in
-    let* (_ : Fs_compat.Private_jsonl_window.t) =
-      window path ~from:rows_end ~previous_row_wanted:(visit walk)
-    in
-    (match walk.failure, walk.last, walk.point, walk.turn with
-     | Some failure, _, _, _ -> Error failure
-     | None, Some last, Some point, No_open_turn ->
-       Ok (Written { rows_end; point; open_turn = None; last })
-     | None, Some last, Some point, Open_turn open_turn ->
-       Ok (Written { rows_end; point; open_turn = Some open_turn; last })
-     | None, None, _, _ | None, Some _, None, _ | None, Some _, Some _, Not_yet ->
-       Error Log_start_missing)
+    let* second = window path ~from:rows_end ~previous_row_wanted:(visit walk) in
+    (match second with
+     | Window_missing -> Ok Nothing_written
+     | Window_present { from_starts_row = false; _ } -> Error Moved_while_reading
+     | Window_present { from_starts_row = true; previous_row; _ } ->
+       (* The walk counted its own offsets down from the end. The reader says
+          where the row it stopped at starts, or that it reached the first
+          row. The two must agree before an offset is given out. *)
+       let stopped_at =
+         match previous_row with
+         | Some (offset, (_ : string)) -> offset
+         | None -> 0
+       in
+       if not (Int.equal stopped_at walk.row_end)
+       then Error Moved_while_reading
+       else (
+         match walk.failure, walk.last, walk.point, walk.turn with
+         | Some failure, _, _, _ -> Error failure
+         | None, Some last, Some point, No_open_turn ->
+           Ok (Written { rows_end; point; open_turn = None; last })
+         | None, Some last, Some point, Open_turn open_turn ->
+           Ok (Written { rows_end; point; open_turn = Some open_turn; last })
+         | None, None, _, _ | None, Some _, None, _ | None, Some _, Some _, Not_yet ->
+           Error Log_start_missing))
 ;;
 
 type append_error =
@@ -170,17 +184,22 @@ let append ~path ~at_end (first, rest) =
      | Fs_compat.Private_file_failed_with_cleanup_failure
          { error = Fs_compat.End_offset_mismatch { expected; actual }; _ } ->
        Error (End_moved { expected; actual })
+     (* The helper says this when the offset it was given is the file's
+        length and the file ends in a fragment. The tail that was read ended
+        at a line break, so the file is not the one that was read. *)
+     | Fs_compat.Private_file_failed Fs_compat.Incomplete_jsonl_tail
+     | Fs_compat.Private_file_failed_with_cleanup_failure
+         { error = Fs_compat.Incomplete_jsonl_tail; _ } ->
+       Error (End_moved { expected = at_end; actual = at_end })
      | Fs_compat.Private_file_failed
-         (( Fs_compat.Incomplete_jsonl_tail
-          | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+         (( Fs_compat.Incomplete_jsonl_tail_truncate_failed _
           | Fs_compat.Existing_jsonl_refused _
           | Fs_compat.Invalid_jsonl_suffix
           | Fs_compat.Negative_expected_end_offset _
           | Fs_compat.Durable_jsonl_append_failed _ ) as error)
      | Fs_compat.Private_file_failed_with_cleanup_failure
          { error =
-             ( Fs_compat.Incomplete_jsonl_tail
-             | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+             ( Fs_compat.Incomplete_jsonl_tail_truncate_failed _
              | Fs_compat.Existing_jsonl_refused _
              | Fs_compat.Invalid_jsonl_suffix
              | Fs_compat.Negative_expected_end_offset _

@@ -42,14 +42,16 @@ let opened ?(task = Log.No_task) () =
   Log.Opened { at = 101.0; turn_ref; runtime = "glm-main"; task; baseline = mark 5 }
 ;;
 
-let closed ?(outcome = Log.Completed) turn =
+let own_slices : Log.slice list = [ { bundle = bundle 'c'; skip = 1; take = 3 } ]
+
+let closed ?(outcome = Log.Completed) ?(own = own_slices) turn =
   Log.Closed
     { turn
     ; at = 102.5
     ; outcome
     ; after = mark 9
     ; unattributed = [ { bundle = bundle 'b'; skip = 0; take = 1 } ]
-    ; own = [ { bundle = bundle 'c'; skip = 1; take = 3 } ]
+    ; own
     }
 ;;
 
@@ -197,6 +199,32 @@ let test_rejections () =
   expect_rejected "an unknown cause" ~path:[ Wire_field "cause" ]
     ~reason:(Unknown_token "announced")
     (replace_once ~old:{|"cleared"|} ~by:{|"announced"|} reset_text);
+  let task_text =
+    List.assoc
+      (opened
+         ~task:
+           (Log.Task
+              { task; goals = Some [ { goal = "goal-12"; shown = "Review: the probe is green" } ] })
+         ())
+      golden
+  in
+  expect_rejected "a turn ref that is not one" ~path:[ Wire_field "turn_ref" ]
+    ~reason:(Not_a_turn_ref "seven")
+    (replace_once ~old:(Ids.Turn_ref.to_string turn_ref) ~by:"seven" task_text);
+  expect_rejected "a task id that is not one"
+    ~path:[ Wire_field "task"; Wire_field "task" ]
+    ~reason:(Unknown_token "")
+    (replace_once ~old:{|"task":"task-3718"|} ~by:{|"task":""|} task_text);
+  expect_rejected "goals that are neither a list nor null"
+    ~path:[ Wire_field "task"; Wire_field "goals" ]
+    ~reason:Expected_array
+    (replace_once
+       ~old:{|"goals":[{"goal":"goal-12","shown":"Review: the probe is green"}]|}
+       ~by:{|"goals":"goal-12"|} task_text);
+  expect_rejected "a turn offset below zero" ~path:[ Wire_field "turn" ] ~reason:Negative
+    (replace_once ~old:{|"turn":512|} ~by:{|"turn":-1|} closed_text);
+  expect_rejected "a field given twice" ~path:[] ~reason:(Duplicate_field "at")
+    (replace_once ~old:{|"at":100.0|} ~by:{|"at":100.0,"at":100.0|} started_text);
   expect_rejected "a task kind with another kind's fields" ~path:[ Wire_field "task" ]
     ~reason:(Field_set_mismatch { missing = []; unexpected = [ "goals"; "task" ] })
     (replace_once ~old:{|"kind":"task"|} ~by:{|"kind":"no_task"|}
@@ -236,7 +264,8 @@ let test_boundary () =
 let position_text : Log.position -> string = function
   | Nothing_written -> "nothing written"
   | Between_turns -> "between turns"
-  | Turn_open { opened } -> Printf.sprintf "turn open at %d" opened
+  | Turn_open { opened; reset_since } ->
+    Printf.sprintf "turn open at %d%s" opened (if reset_since then " after a reset" else "")
 ;;
 
 let order_error_text : Log.order_error -> string = function
@@ -246,6 +275,7 @@ let order_error_text : Log.order_error -> string = function
   | Closed_without_open -> "closed without open"
   | Closed_another_turn { opened; closed } ->
     Printf.sprintf "closed %d while %d is open" closed opened
+  | Own_after_reset { opened } -> Printf.sprintf "turn %d names its own after a reset" opened
 ;;
 
 (* Lines at offsets 0, 100, 200, ... *)
@@ -266,9 +296,16 @@ let test_order () =
   check string "an empty file" "nothing written" (walk []);
   check string "a started log" "between turns" (walk [ started ]);
   check string "a whole turn with resets on both sides and inside" "between turns"
-    (walk [ started; reset (); opened (); reset (); reset (); closed 200; reset () ]);
+    (walk [ started; reset (); opened (); reset (); reset (); closed ~own:[] 200; reset () ]);
   check string "a file that ends in a running turn" "turn open at 300"
+    (walk [ started; opened (); closed 100; opened () ]);
+  check string "a reset inside the running turn is remembered" "turn open at 300 after a reset"
     (walk [ started; opened (); closed 100; opened (); reset () ]);
+  check string "a reset before the turn does not count against it" "between turns"
+    (walk [ started; reset (); opened (); closed 200 ]);
+  check string "after a reset the turn has nothing of its own"
+    "turn 100 names its own after a reset"
+    (walk [ started; opened (); reset (); closed 100 ]);
   check string "a line before the log started" "not started" (walk [ opened () ]);
   check string "a reset before the log started" "not started" (walk [ reset () ]);
   check string "a second start" "started twice" (walk [ started; started ]);

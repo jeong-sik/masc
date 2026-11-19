@@ -25,10 +25,15 @@ type case =
   ; shown : Librarian_plan.shown
   ; facts : fact list (** Memory when the answer arrives. *)
   ; planted : string list
-  (** What the units said that Memory should hold afterwards. *)
+  (** What the units said that Memory should hold afterwards. A token is
+      looked for as a case-sensitive substring of a claim, so it must not be
+      part of another word or number: ["8935"] is found in ["89350"]. It must
+      not be in a claim of [facts] either, or an answer that does nothing
+      counts as having recovered it. *)
   ; must_keep : (string * string list) list
   (** Memory id of a fact, and what a claim that replaces it by a merge has
-      to keep. *)
+      to keep. A fact a merge removes that is not listed here adds to neither
+      merge count. *)
   }
 
 (** What one answer that was read did. *)
@@ -53,7 +58,7 @@ type tally =
   ; ops : int
   ; not_applied : (string * int) list (** By reason, sorted. *)
   ; changed : int
-  ; planted : int
+  ; planted : int (** Of every answer, the thrown away ones included. *)
   ; recovered : int
   ; merge_expected : int
   ; merge_kept : int

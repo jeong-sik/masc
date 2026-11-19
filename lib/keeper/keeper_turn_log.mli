@@ -141,13 +141,24 @@ val boundary : line -> boundary
     and the file may end in [Opened · Reset*], a turn that is running. The
     writing rules produce no other order. An unclosed [Opened] is closed by
     the next admission in the same append, so two [Opened] never lie
-    together. *)
+    together.
+
+    A [Reset] after a turn's [Opened] is remembered until its [Closed]: what
+    was closed since is then not the turn's, so that [Closed] names nothing
+    as [own] (RFC §5.3).
+
+    The order is all {!step} checks. That a [Reset] starts at the mark the
+    line before it left is the writer's rule; a reader takes the marks as
+    they are written. *)
 
 (** What the lines so far leave open. *)
 type position =
   | Nothing_written
   | Between_turns
-  | Turn_open of { opened : int (** Byte offset of the [Opened] line. *) }
+  | Turn_open of
+      { opened : int (** Byte offset of the [Opened] line. *)
+      ; reset_since : bool (** A [Reset] follows that [Opened]. *)
+      }
 
 type order_error =
   | Not_started (** A line before any [Log_started]. *)
@@ -158,6 +169,8 @@ type order_error =
       { opened : int
       ; closed : int
       }
+  | Own_after_reset of { opened : int }
+  (** The turn's [Closed] names messages as its own after a [Reset]. *)
 
 (** [offset] is the byte offset at which [line] starts. *)
 val step : position -> offset:int -> line -> (position, order_error) result

@@ -7,7 +7,12 @@
     caller reads the tail again. So two writers cannot both append after the
     same line, and a writer never decides from a tail that has moved.
 
-    Nothing is kept in memory between calls. *)
+    Nothing is kept in memory between calls.
+
+    The tail is taken in two locked reads: where the rows end, then the rows
+    before that end. Another append may land between them or after them. The
+    tail is then older than the file, and the append at its end is refused
+    as {!End_moved}. *)
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
@@ -47,18 +52,27 @@ type read_error =
   (** A line the tail needs does not decode. The writer does not guess what it
       was: it appends nothing until the line is dealt with. *)
   | Log_start_missing (** There are lines and none of them starts the log. *)
+  | Moved_while_reading
+  (** The second read did not find the rows the first one ended at: the file
+      was cut or replaced in between, or the rows were not handed over one by
+      one from the end. No offset from this read is to be trusted. *)
 
 (** Reads back from the end only as far as it must: to the last line that
     ends a unit and to the last [Opened] or [Closed]. In a file the writing
     rules produced that is a few lines. *)
 val read_tail : string -> (tail, read_error) result
 
+(** Only {!End_moved} is worth reading the tail again for at once. After the
+    other two the caller writes no line for this event; whoever writes next
+    reads the tail afresh. *)
 type append_error =
   | End_moved of
       { expected : int
       ; actual : int
       }
-  (** Another append landed first. Nothing was written. Read the tail again. *)
+  (** The rows no longer end where the caller read them to end. Nothing was
+      written. [actual] is the length of the file. It equals [expected] when
+      the file was replaced by one of that length that ends in a fragment. *)
   | Directory_unavailable of
       { path : string
       ; detail : string

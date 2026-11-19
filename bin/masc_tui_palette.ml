@@ -601,3 +601,162 @@ let command_enter_has_nothing state =
       && (match palette_matches state with [] -> true | _ :: _ -> false)
   | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
   | Palette_worktrees _ | Palette_search _ -> false
+
+let surface_description_name ~ko (surface : surface) =
+  let english =
+    match List.assoc_opt surface surface_ring with
+    | Some label -> label
+    | None -> (
+        match surface with
+        | Overview -> "Operations"
+        | Planning -> "Work"
+        | Keepers _ -> "Keepers"
+        | Lanes -> "Features & plugins"
+        | Metrics -> "Usage"
+        | Board -> "Board"
+        | Repositories -> "Workspace"
+        | Config -> "System"
+        | Acting -> "Activity"
+        | Memory -> "Memory"
+        | Clients -> "Clients"
+        | Approvals -> "Requests"
+        | Schedules -> "Schedules"
+        | Verification -> "Task Review"
+        | Harness -> "Task Verdicts"
+        | Fusion -> "Fusion"
+        | Code -> "Code"
+        | Changes -> "Changes"
+        | Connectors -> "Channels"
+        | Runtime -> "Runtime"
+        | Resources -> "Resources"
+        | Tools -> "Tools & Skills"
+        | System_logs -> "Logs")
+  in
+  let lang = if ko then Lang_ko else Lang_en in
+  surface_ring_display_label ~lang surface english
+
+let config_pane_description_name ~ko pane =
+  let english =
+    match List.assoc_opt pane config_panes with
+    | Some label -> label
+    | None -> "Settings"
+  in
+  let lang = if ko then Lang_ko else Lang_en in
+  config_pane_display_label ~lang pane english
+
+let single_line_description text =
+  String.map (function '\n' | '\r' | '\t' -> ' ' | ch -> ch) text
+
+let action_description_raw ~ko = function
+  | Palette_browser_lane ->
+      if ko then "Connectors 안의 Browser Lane 화면을 엽니다"
+      else "Open Browser Lane inside Connectors"
+  | Palette_hide_browser_lane ->
+      if ko then "Browser Lane을 닫고 Connectors 목록으로 돌아갑니다"
+      else "Close Browser Lane and return to the Connectors list"
+  | Palette_connectors ->
+      if ko then "외부 채널·전송 커넥터 목록을 엽니다"
+      else "Open the Connectors transport list"
+  | Palette_collab ->
+      if ko then "협업 링크(Play / Links) 화면을 엽니다"
+      else "Open Play / Links collaboration view"
+  | Palette_msx ->
+      if ko then "MSX 플레이 화면을 엽니다"
+      else "Open the MSX play view"
+  | Palette_dos ->
+      if ko then "DOS 플레이 화면을 엽니다"
+      else "Open the DOS play view"
+  | Palette_lane_addons ->
+      if ko then "설치된 플러그인·Lane 애드온 목록을 엽니다"
+      else "Open installed plugins and Lane Add-ons"
+  | Palette_lane_history lane ->
+      let label = Lane_run_identity.label lane in
+      if ko then Printf.sprintf "%s 실행 이력을 읽기 전용으로 확인합니다" label
+      else Printf.sprintf "Inspect retained %s run history (read-only)" label
+  | Palette_addon_results id ->
+      if ko then Printf.sprintf "애드온 %s의 보존된 실행 결과를 엽니다" id
+      else Printf.sprintf "Open retained results for add-on %s" id
+  | Palette_goto surface ->
+      let name = surface_description_name ~ko surface in
+      if ko then Printf.sprintf "%s 화면으로 바로 이동합니다" name
+      else Printf.sprintf "Jump directly to the %s screen" name
+  | Palette_usage_scope (Some account) ->
+      if ko then Printf.sprintf "사용량·비용 집계를 %s 계정으로 필터링합니다" account
+      else Printf.sprintf "Filter Usage metrics to account %s" account
+  | Palette_usage_scope None ->
+      if ko then "사용량·비용 집계를 전체 계정 합산으로 표시합니다"
+      else "Show combined Usage metrics across all accounts"
+  | Palette_config pane ->
+      let name = config_pane_description_name ~ko pane in
+      if ko then Printf.sprintf "시스템 설정의 %s 탭을 엽니다" name
+      else Printf.sprintf "Open the %s pane in System settings" name
+  | Palette_ui_language Lang_ko ->
+      if ko then "TUI 표시 언어를 한국어로 전환합니다"
+      else "Switch the TUI interface language to Korean"
+  | Palette_ui_language Lang_en ->
+      if ko then "TUI 표시 언어를 영어(English)로 전환합니다"
+      else "Switch the TUI interface language to English"
+  | Palette_gate_mode (lane, mode) ->
+      let lane_text = gate_lane_label lane in
+      let mode_text = gate_mode_label mode in
+      if ko then Printf.sprintf "%s 게이트 정책을 %s 모드로 변경합니다" lane_text mode_text
+      else Printf.sprintf "Set %s gate policy to %s" lane_text mode_text
+  | Palette_chat keeper ->
+      if ko then Printf.sprintf "%s 키퍼와의 실시간 채팅 화면을 엽니다" keeper
+      else Printf.sprintf "Open live chat with keeper %s" keeper
+  | Palette_task id ->
+      if ko then Printf.sprintf "태스크 %s의 상세 내용과 상태를 확인합니다" id
+      else Printf.sprintf "Inspect details and status of task %s" id
+  | Palette_task_creation _ ->
+      if ko then "완료된 태스크 생성 기록을 읽기 전용으로 확인합니다"
+      else "Inspect this completed task creation record (read-only)"
+  | Palette_board_hearth (Some hearth) ->
+      if ko then Printf.sprintf "보드 글을 %s 하스만 모아 봅니다" hearth
+      else Printf.sprintf "Filter Board posts to hearth %s" hearth
+  | Palette_board_hearth None ->
+      if ko then "보드 전체 하스의 글을 모두 표시합니다"
+      else "Show Board posts across all hearths"
+  | Palette_board_post id ->
+      if ko then Printf.sprintf "보드 게시글 %s 본문과 댓글을 엽니다" id
+      else Printf.sprintf "Open Board post %s and its thread" id
+  | Palette_lsp (question, symbol) ->
+      if ko then Printf.sprintf "Code에서 심볼 %s에 대해 %s 질의를 실행합니다" symbol question
+      else Printf.sprintf "Run %s query for symbol %s in Code" question symbol
+  | Palette_code_file path ->
+      if ko then Printf.sprintf "Code 뷰어에서 %s 파일을 엽니다" path
+      else Printf.sprintf "Open %s in the Code viewer" path
+  | Palette_code_location (_, location) ->
+      let open Masc.Tui_decode in
+      if location.ll_inside then
+        if ko then
+          Printf.sprintf "Code에서 %s:%d 위치로 바로 이동합니다"
+            location.ll_path location.ll_line
+        else
+          Printf.sprintf "Jump to %s:%d in Code"
+            location.ll_path location.ll_line
+      else
+        if ko then
+          Printf.sprintf "워크스페이스 외부 위치(%s:%d)입니다 — Code에서 직접 열리지 않습니다"
+            location.ll_path location.ll_line
+        else
+          Printf.sprintf "Outside workspace (%s:%d) — cannot open directly in Code"
+            location.ll_path location.ll_line
+  | Palette_code_branch branch ->
+      let open Masc.Tui_decode in
+      if ko then Printf.sprintf "Git 브랜치 %s 상태를 확인합니다 (읽기 전용 · Enter: 닫기)" branch.gb_name
+      else Printf.sprintf "Inspect Git branch %s (read-only; Enter closes)" branch.gb_name
+  | Palette_code_worktree worktree ->
+      let open Masc.Tui_decode in
+      if ko then Printf.sprintf "Git 워크트리 %s 상태를 확인합니다 (읽기 전용 · Enter: 닫기)" worktree.gw_name
+      else Printf.sprintf "Inspect Git worktree %s (read-only; Enter closes)" worktree.gw_name
+  | Palette_code_search_match found ->
+      let open Masc.Tui_decode in
+      if ko then
+        Printf.sprintf "검색 결과가 나온 %s:%d 줄을 Code에서 엽니다"
+          found.wsm_path found.wsm_line
+      else
+        Printf.sprintf "Open search match at %s:%d in Code"
+          found.wsm_path found.wsm_line
+
+let action_description ~ko action =
+  single_line_description (action_description_raw ~ko action)

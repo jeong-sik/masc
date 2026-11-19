@@ -579,14 +579,47 @@ let render_palette (state : state) =
             | Palette_worktrees _ | Palette_locations _ -> []
           in
           List.iter (fun note -> c.push_styled ~style:(Theme.recede ()) ("   " ^ note)) context;
-          let list_rows = max 0 (budget - List.length context - List.length finder_notes) in
-          let first = max 0 (cursor - list_rows + 1) in
-          matches
-          |> List.filteri (fun i _ -> i >= first && i < first + list_rows)
-          |> List.iteri (fun visible_index (label, _) ->
+          let selected_description =
+            let ko = state.ui_language = Lang_ko in
+            match state.palette_mode, Masc_tui_palette.search_enter state with
+            | Palette_search _, Masc_tui_palette.Enter_searches ->
+                Some
+                  (if ko then "Enter를 눌러 입력한 검색어로 워크스페이스를 검색합니다"
+                   else "Press Enter to search the workspace for the typed query")
+            | (Palette_search _, Masc_tui_palette.Enter_opens _)
+            | ((Palette_jump | Palette_choice _ | Palette_files _
+                | Palette_locations _ | Palette_branches _ | Palette_worktrees _),
+               (Masc_tui_palette.Enter_opens _ | Masc_tui_palette.Enter_searches)) ->
+                (match List.nth_opt matches cursor with
+                 | Some (_, action) ->
+                     Some (Masc_tui_palette.action_description ~ko action)
+                 | None -> None)
+          in
+          let header_rows = List.length context + List.length finder_notes in
+          let show_description =
+            Option.is_some selected_description && budget - header_rows >= 4
+          in
+          let desc_rows = if show_description then 2 else 0 in
+          let list_rows = max 0 (budget - header_rows - desc_rows) in
+          let first = max 0 (cursor - max 1 list_rows + 1) in
+          let visible =
+            matches
+            |> List.filteri (fun i _ -> i >= first && i < first + list_rows)
+          in
+          List.iteri
+            (fun visible_index (label, _) ->
                if first + visible_index = cursor then
                  c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ Terminal_text.single_line label)
-               else c.push ("   " ^ Terminal_text.single_line label));
+               else c.push ("   " ^ Terminal_text.single_line label))
+            visible;
+          (match show_description, selected_description with
+           | true, Some desc ->
+               let pad_rows = max 0 (list_rows - List.length visible) in
+               for _ = 1 to pad_rows do c.push_empty () done;
+               c.push_divider ();
+               c.push_styled ~style:(Theme.recede ())
+                 ("   " ^ Terminal_text.single_line desc)
+           | false, (Some _ | None) | true, None -> ());
           if total = 0 then
             (match state.palette_mode, code_finder_catalog state with
              | Palette_search _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading

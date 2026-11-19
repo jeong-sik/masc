@@ -368,6 +368,18 @@ val last_row : recent_entry option fact
     [None] for a store without rows, and a row that is not JSON is
     {!Malformed_json}. *)
 
+val last_rows : name:string -> count:int -> Yojson.Safe.t option list fact
+(** A fact: the store's newest [count] physical rows, oldest first, as
+    [read_recent_result t count] reads them. A row is its JSON; a row that is
+    not JSON is [None] and keeps its place among the [count]. The value names
+    no file, so a size rotation leaves it as it is.
+
+    Each call makes a fact of its own, with its own kept value in every
+    store. Make it once, where the count is defined, and keep it. [name]
+    labels its reads in [masc_dated_jsonl_fact_reads_total].
+
+    @raise Invalid_argument when [count] is less than 1. *)
+
 val newest_parsed_row : Yojson.Safe.t option fact
 (** The store's newest row that is JSON, as {!find_latest_entry_result} finds
     it when it selects every {!Parsed} row: rows that are not JSON are passed

@@ -2611,6 +2611,43 @@ let last_row : recent_entry option fact =
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
   }
 
+(* The newest [count] physical rows, oldest first. An appended row goes to
+   the end and the row before the window falls out. Each call makes a fact of
+   its own: a count is defined in one place, and the fact is made there.
+
+   A row is its JSON, or [None] when it is not JSON. The file it is in is no
+   part of the value: a size rotation renames the current day file under the
+   rows a window still holds, and a kept name would be the old one. *)
+let last_rows ~name ~count : Yojson.Safe.t option list fact =
+  if count < 1 then invalid_arg (Printf.sprintf "Dated_jsonl.last_rows: count %d" count);
+  let json_of = function
+    | Parsed json -> Some json
+    | Malformed_json _ -> None
+  in
+  let rec drop excess rows =
+    match rows with
+    | _ :: rest when excess > 0 -> drop (excess - 1) rest
+    | [] | _ :: _ -> rows
+  in
+  { id = Type.Id.make ()
+  ; name
+  ; read =
+      (fun t ->
+        read_recent_using_result t count ~decode:(fun ~path line ->
+          path, json_of (recent_entry_of_line ~path line))
+        |> Result.map (fun rows ->
+          { value = List.map snd rows
+          ; newest =
+              (match List.rev rows with
+               | [] -> None
+               | (path, _) :: _ -> Some (place_of_day_file_path path))
+          }))
+  ; step =
+      (fun held written ->
+        let rows = held @ [ json_of (Lazy.force written.row) ] in
+        Some (drop (List.length rows - count) rows))
+  }
+
 (* The newest row that is JSON. A row the fact passes over tells it nothing,
    so [newest] is the day file of the value's own row: a row appended to that
    file or a later one is the newest JSON row, whatever the files in between

@@ -243,7 +243,7 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
 function checkFailureWords(failure: CheckFailure): string {
   switch (failure) {
     case 'key_refused':
-      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 이 계정을 없애고 key 를 다시 넣어 주세요.'
+      return '키가 거절됐어요. 구독 쪽이 이 계정의 API key 를 받지 않았어요. key 를 폐기했거나 잘못 넣었다면, 「key 바꾸기」로 key 를 다시 넣어 주세요.'
     case 'rate_limited': return '구독 쪽이 요청 한도나 사용 시간대에 걸렸다며 막았어요. 한도가 풀린 뒤 다시 확인해 주세요.'
     case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
     case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'

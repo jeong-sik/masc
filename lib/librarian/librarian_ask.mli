@@ -18,10 +18,14 @@ type input =
   { place : Librarian_machine.place
   ; stores : Librarian_unit_content.stores
   ; tail : unit -> Librarian_log.line option
-  (** The writer's tail now: the line of {!Librarian_writer.status}'s
-      [Open]. [None] when the writer is no longer open. That writer cancels
-      this ask in the same event, so the ask ends as [Ask_failed Flow_stopped]
-      and its result is a late answer. *)
+  (** The writer's tail: the line of {!Librarian_writer.status}'s [Open],
+      as the writer shows it while it waits for its next event. A read
+      during an event waits for the event to end: the status names a
+      commit's line only after the commit replaced the snapshot file, so a
+      read in between would pair the old line with the new bytes. [None]
+      when the writer is no longer open. That writer cancels this ask in
+      the same event, so the ask ends as [Ask_failed Flow_stopped] and its
+      result is a late answer. *)
   ; lane : Librarian_memory_lane.t (** The lane value the walk starts with. *)
   ; resolved : Runtime_exact_output_registry.resolved_lane
   (** The lane's slots, from the publication [lane] was resolved under. *)

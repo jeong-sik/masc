@@ -62,6 +62,10 @@ type t =
   ; ask : Librarian_ask.input -> Librarian_read_result.t
   ; mailbox : event Eio.Stream.t
   ; status : status Atomic.t
+  ; between : status option Atomic.t
+  (* The status while the fiber waits for its next event; [None] while it
+     takes one. *)
+  ; settled : Eio.Condition.t (* Broadcast when [between] is set. *)
   ; gone : unit Eio.Promise.t
   ; ended : unit Eio.Promise.u
   }
@@ -160,11 +164,18 @@ let take_lock t ~sw =
      | Error error -> refused (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
-(* The tail an open writer shows: what an ask reads Memory under. *)
+(* The tail an open writer shows while it waits for its next event: what an
+   ask reads Memory under (§7.1). A read while it takes an event waits for
+   the event to end. A commit appends its line and then replaces the
+   snapshot file, and the status names the new line only after both: read
+   in between, the old line would name the new bytes, and the ask would end
+   as [Memory_diverged]. *)
 let tail t () =
-  match Atomic.get t.status with
-  | Open line -> Some line
-  | Booting | Stopped (_ : Store.stop) | Retired -> None
+  Eio.Condition.loop_no_mutex t.settled (fun () ->
+    match Atomic.get t.between with
+    | None -> None
+    | Some (Open line) -> Some (Some line)
+    | Some (Booting | Stopped (_ : Store.stop) | Retired) -> Some None)
 ;;
 
 (* [sw] lives as long as the writer does and owns the lock. The loop returns
@@ -229,7 +240,11 @@ let live t ~sw =
        | Ok (_ : Store.t) -> ());
       opened)
   in
-  let rec loop state =
+  let rec loop (state : Machine.t) =
+    Atomic.set t.between (Some (status_of state.state));
+    Eio.Condition.broadcast t.settled;
+    let event = Eio.Stream.take t.mailbox in
+    Atomic.set t.between None;
     (* The caller has its answer before anyone is told to read Memory. *)
     let settle next reply answer =
       publish t ~was:state next;
@@ -248,7 +263,7 @@ let live t ~sw =
       announce t ~was:(revision state) next;
       loop next
     in
-    match Eio.Stream.take t.mailbox with
+    match event with
     | Turn_closed -> decided Machine.Turn_closed
     | Pulse -> decided Machine.Pulse
     | Declaration_changed -> decided (Machine.Declaration_changed (t.declared ()))
@@ -298,6 +313,8 @@ let create ~now ~registered ~declared ~stores ~ask place =
   ; ask
   ; mailbox
   ; status = Atomic.make Booting
+  ; between = Atomic.make None
+  ; settled = Eio.Condition.create ()
   ; gone
   ; ended
   }

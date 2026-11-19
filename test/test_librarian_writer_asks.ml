@@ -585,6 +585,60 @@ let test_a_restart_during_the_call_asks_once_more () =
   check (list string) "one commit: the second answer" [ "read" ] (causes fixture)
 ;;
 
+(* §7.1: an ask reads the tail only while the writer waits for its next
+   event. A commit appends its line and then replaces the snapshot file,
+   and the writer names the new line after both, so a tail read in between
+   would pair the old line with the new bytes and end as [Memory_diverged].
+   Here the writer is held inside an event while the ask reads. *)
+let test_an_ask_reads_the_tail_between_events () =
+  with_fixture ~reply:echo
+  @@ fun fixture ->
+  ignore (close_turn fixture 1 chat_text : int);
+  let lane = declared () in
+  let inside, now_inside = Eio.Promise.create () in
+  let let_go, go = Eio.Promise.create () in
+  let takes = Atomic.make 0 in
+  (* The writer takes the declaration as its first event, and is held when
+     it takes it again. *)
+  let declaration () =
+    if Atomic.fetch_and_add takes 1 > 0
+    then (
+      Eio.Promise.resolve now_inside ();
+      Eio.Promise.await let_go);
+    Some lane
+  in
+  let asked, now_asked = Eio.Promise.create () in
+  let may_read, read_now = Eio.Promise.create () in
+  let reading, now_reading = Eio.Promise.create () in
+  let read, now_read = Eio.Promise.create () in
+  let ask (input : Ask.input) : Librarian_read_result.t =
+    Eio.Promise.resolve now_asked ();
+    Eio.Promise.await may_read;
+    Eio.Promise.resolve now_reading ();
+    Eio.Promise.resolve now_read (input.tail ());
+    No_answer { slots = [] }
+  in
+  let writer =
+    Writer.create ~now:Unix.gettimeofday ~registered:(fun () -> true) ~declared:declaration
+      ~stores:fixture.stores ~ask fixture.place
+  in
+  Eio.Fiber.fork_daemon ~sw:fixture.sw (fun () ->
+    Writer.run writer;
+    `Stop_daemon);
+  Eio.Promise.await asked;
+  Writer.declaration_changed writer;
+  Eio.Promise.await inside;
+  Eio.Promise.resolve read_now ();
+  Eio.Promise.await reading;
+  check bool "the tail is not read while the writer takes an event" true
+    (Option.is_none (Eio.Promise.peek read));
+  Eio.Promise.resolve go ();
+  check bool "it is read once the event ended" true
+    (match Eio.Promise.await read with
+     | Some (Started _) -> true
+     | Some (Committed _) | None -> false)
+;;
+
 (* §16, as one line: what a store that has passed [prior] lines does for
    one new turn, and then for [ticks] pulses with nothing new. *)
 let costs prior =
@@ -724,6 +778,8 @@ let () =
             test_a_write_does_not_wait_for_a_ten_minute_call
         ; test_case "a restart during the call asks once more" `Quick
             test_a_restart_during_the_call_asks_once_more
+        ; test_case "an ask reads the tail between events" `Quick
+            test_an_ask_reads_the_tail_between_events
         ] )
     ; ( "ticks"
       , [ test_case "a tick costs nothing, a turn the same after many lines" `Quick

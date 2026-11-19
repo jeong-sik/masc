@@ -10,7 +10,9 @@
     An ask runs in a fiber of its own, on the writer's switch, and its
     result comes back through the mailbox. After every event the writer
     starts or cancels that fiber as {!Librarian_machine.fiber_change} says.
-    A commit is not cancelled. A writer that ends cancels its ask.
+    A commit is not cancelled. A writer that ends cancels its ask. The ask
+    reads the tail the writer shows while it waits for its next event, so
+    it never reads a commit halfway.
 
     A reader does not go through the mailbox. {!status} is a value the
     writer replaces after every event.

@@ -16,7 +16,7 @@ let librarian_failure_words ~ko kind =
   let text korean english = if ko then korean else english in
   match kind with
   | Masc.Tui_decode_memory_health.Failure_prompt_render -> text "프롬프트 구성 실패" "prompt could not be built"
-  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> text "실행 시계 미확인" "no clock to run on"
+  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> text "실행 시계 없음" "no clock to run on"
   | Masc.Tui_decode_memory_health.Failure_exact_setup -> text "모델 호출 준비 실패" "model call could not be set up"
   | Masc.Tui_decode_memory_health.Failure_exact_execution -> text "모델 호출 실패" "model call failed"
   | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> text "모델 응답 사용 불가" "model answer was not usable"
@@ -133,7 +133,7 @@ let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
               | Memory_store_absent | Memory_store_present _ -> [])
            @ (match snapshot.mfs_events_read_error with
               | None -> []
-              | Some detail -> [text "조회·수정 기록 미확인: " "Retrieval/change history unreadable: " ^ Terminal_text.single_line detail])) in
+              | Some detail -> [text "조회·수정 기록 조회 실패: " "Retrieval/change history unreadable: " ^ Terminal_text.single_line detail])) in
   let width = max 1 (framed_inner_width cols - 2) in
   List.concat_map (fun line ->
     (if full then Message_layout.wrap_words ~max_cells:width line
@@ -295,7 +295,7 @@ let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
       | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> text "턴 기록 읽기 실패" "turn records unreadable"
       | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> text "턴 경계 읽기 실패" "turn boundaries unreadable"
       | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> text "연속성 스냅샷 읽기 실패" "continuity snapshot unreadable"
-      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> text "읽은 위치 미확인" "read position unreadable"
+      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> text "읽은 위치 읽기 실패" "read position unreadable"
     in
     [ Printf.sprintf (if ko then "  Librarian 처리 지연 · 미측정, %s · %s" else "  Librarian stalled · not measured, %s · %s") cause
         (Terminal_text.preview_line mls_detail) ]
@@ -310,7 +310,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       clause_rows ~full ~cols
         [ text "저장 " "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
         ; (match unit with Memory_usage.Tokens -> text "저장 지식 추정량" "estimated knowledge size" | Memory_usage.Bytes -> text "저장된 지식" "rendered knowledge") ]
-    | Some _, _ | _, Some _ -> clause_rows ~full ~cols [text "저장량 미확인" "Stored: unreadable"]
+    | Some _, _ | _, Some _ -> clause_rows ~full ~cols [text "저장량 읽기 실패" "Stored: unreadable"]
   in
   let current_line =
     Printf.sprintf (if ko then "  %s · %s · 저장 r%d · 저장량 %s · 갱신 %s" else "  %s · %s · snapshot r%d · stored %s · updated %s")
@@ -1077,7 +1077,7 @@ let memory_refused_keeper_lines (state : state) =
         Printf.sprintf (if ko then "  행 읽기 실패 · %s: %s" else "  row not read · %s: %s")
           (match refusal.mkr_keeper_id with
            | Some keeper_id -> Terminal_text.single_line keeper_id
-           | None -> if ko then "키퍼 ID 미확인" else "keeper id not read")
+           | None -> if ko then "키퍼 ID 보고 안 됨" else "keeper id not reported")
           (Terminal_text.single_line refusal.mkr_reason))
       refused
 
@@ -1089,8 +1089,8 @@ let memory_world_axis (state : state) ~room =
   let provenance = match reading with
     | Masc_tui_memory_world.Not_read -> [ui_text state ~ko:"미조회" ~en:"not read"]
     | Masc_tui_memory_world.Reading -> [ui_text state ~ko:"조회 중" ~en:"reading"]
-    | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미확인" ~en:"current value unknown"]
-    | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패 · 현재 값 미확인" ~en:"read failed; current value unknown"]
+    | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미조회" ~en:"current value not read"]
+    | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패" ~en:"read failed"]
     | Masc_tui_memory_world.Loaded { refresh_failure = Some (Kept_back _); _ } ->
         [ui_text state ~ko:"마지막 관측" ~en:"last observation"]
     | Masc_tui_memory_world.Loaded { refresh_failure = Some (Suspended | Request_failed _); _ } ->
@@ -1110,7 +1110,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     | None, true -> Masc_tui_keeper_age_ladder.keeper_clauses ~ko keeper.mkh_age_bins
   in
   let saved = match keeper.mkh_read_error, keeper.mkh_snapshot_present with
-    | Some _, _ -> [text ~ko:"저장 시각 미확인" ~en:"save time unavailable"]
+    | Some _, _ -> [text ~ko:"저장 시각 읽기 실패" ~en:"save time unreadable"]
     | None, false -> [text ~ko:"일반 기억 스냅샷 없음" ~en:"no ordinary memory snapshot"]
     | None, true ->
         [memory_updated_text keeper.mkh_updated_at;
@@ -1134,7 +1134,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     | Some atoms -> Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind %d atoms") atoms
   in
   let pass = match librarian.mlh_state with
-    | None -> text ~ko:"처리 결과 미관측" ~en:"pass not observed"
+    | None -> text ~ko:"처리 결과 보고 안 됨" ~en:"pass not reported"
     | Some ending -> text ~ko:"처리 " ~en:"pass " ^ memory_pass_text ~ko ending
   in
   let axes =
@@ -1237,7 +1237,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
   in
   let target_notice = match original, keeper with
     | Some {Masc.Operator_action_reason.cause=Memory_attention {keeper;_};_}, None ->
-        [section (if ko then "대상 기억 미관측" else "Target memory unobserved")
+        [section (if ko then "대상 기억 미조회" else "Target memory not read")
           [Terminal_text.single_line keeper;
            (if ko then "이 Keeper의 기억 상태는 이 조회에서 확인하지 못했습니다."
             else "This reading did not establish this Keeper's memory state.")]]
@@ -1319,7 +1319,7 @@ let memory_compact_fleet_row ~cols (state : state) =
           @ (if snapshot.mhs_total_librarian_continuity_unread_atoms > 0 then
                [Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind: %d atoms") snapshot.mhs_total_librarian_continuity_unread_atoms] else [])
           @ (match snapshot.mhs_total_librarian_unread_turns with
-             | None -> [if ko then "미읽은 턴 미관측" else "unread turns unobserved"]
+             | None -> [if ko then "미읽은 턴 보고 안 됨" else "unread turns not reported"]
              | Some turns when turns > 0 -> [Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns]
              | Some _ -> [])
         in
@@ -1640,7 +1640,7 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note ~ko:false
+      | Page_failed -> if ko then "  (조회 실패)" else page_failed_note ~ko:false
       | Page_unread -> if ko then
           (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
@@ -1889,7 +1889,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패 · 현재 사실 미확인)" (page_failed_note ~ko:false)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패)" (page_failed_note ~ko:false)
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
            text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
@@ -1905,7 +1905,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                (Terminal_text.single_line filter)
            else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
              memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
-             text "  (읽힌 사실 없음 · 일부 저장소 미확인)" "  (no facts read; a store is unavailable)"
+             text "  (읽힌 사실 없음 · 일부 관측)" "  (no facts read; partial reading)"
            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
            else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
        | Page_empty, filt ->

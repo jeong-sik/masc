@@ -1803,6 +1803,7 @@ let test_official_client_declarations_load () =
       ; "antigravity_subscription.antigravity-gemini-4-argon-high"
       ; "antigravity_subscription.antigravity-gemini-4-carbon-high"
       ; "antigravity_subscription.antigravity-gemini-4-hydrogen-xhigh"
+      ; "antigravity_subscription.antigravity-gemini-4-neon-xhigh"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
       ]
 ;;

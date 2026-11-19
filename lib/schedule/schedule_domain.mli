@@ -227,6 +227,12 @@ val recurrence_summary : recurrence -> string
 (** Stable, human-readable recurrence summary for dashboard and keeper tool
     outputs. This is presentation-only; schedule eligibility still uses the
     typed [recurrence] value. *)
+
+val timezone_offset_seconds : string -> int option
+(** The fixed offset east of UTC a daily recurrence's timezone names, or
+    [None] for a name this domain does not accept. Daily recurrences use
+    fixed offsets only. *)
+
 val wake_status_to_string : wake_status -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t

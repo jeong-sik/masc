@@ -1745,7 +1745,7 @@ let dialog_receipt ~id ~verb ~unknown value =
 (* How long a cleared viewport is waited for. On ego lite 0.6.2.7 a read right
    after Emulation.clearDeviceMetricsOverride saw the old size 13 times in 100;
    the size moved after at most 1,074 ms (p90 63 ms), polled every 10 ms
-   (docs/evidence/ego-cdp-capabilities-2026-11-06/l2-viewport). *)
+   (2026-11-06). *)
 let viewport_restore_wait_ms = 2000
 
 let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~receipt ~input ~lines ~fields =

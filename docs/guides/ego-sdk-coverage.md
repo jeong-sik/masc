@@ -5,7 +5,6 @@ This inventory compares all **74 entries** printed by the installed
 native workflow. Entries include properties and returned handles, not just
 independent operations. Source integration, SDK execution, installed MASC and
 actual Keeper/UI behavior are separate evidence layers.
-The retained [installed help inventory](../evidence/2026-10-28-ego-sdk-help/README.md) records the complete command output and its digest.
 
 The installed `ego-browser skill` guide is v2.1.0; the live browser reports Ego
 0.6.1.11. The
@@ -174,7 +173,7 @@ and actual temporary bytes, plus the actual request/receipt codecs. These do
 not prove real browser CORS/auth, the full worker/host artifact route or installed
 Keeper/UI behavior.
 
-An [isolated real-model Keeper metadata probe](../evidence/ego-keeper-native-metadata/README.md)
+An isolated real-model Keeper metadata probe
 at source `d840b7978ce01ca0afdb1f4fcdedce0d4596e991` completed one exact-client
 `BrowserAct(space_status)` against installed Ego and published the actual Keeper
 caller in a retained host observation. Main chat completion and this individual
@@ -202,8 +201,7 @@ SDK existence and a rendered Page screenshot do not establish visible UI access.
 
 The options/selection workflow source has standalone codec and Node forwarding
 checks. After the first attempt stopped because Space 27 was absent, Space 32
-executed 22 option/selection steps and five mouse/state-wait steps. See the
-[captured SDK receipts and explicit limits](../evidence/2026-10-26-ego-options/README.md).
+executed 22 option/selection steps and five mouse/state-wait steps.
 This is primitive SDK evidence; installed MASC/Keeper and visible UI results
 remain unverified. It does not cover every SDK option combination.
 

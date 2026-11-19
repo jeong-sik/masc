@@ -7037,8 +7037,6 @@
  (modules test_server_setup_account_login)
  (libraries masc_test_deps))
 
-(include stanzas/test_candle_baseline_collector.inc)
-
 (include stanzas/test_candle_appraisal_flow.inc)
 
 (include stanzas/test_verifier_review_worker.inc)
@@ -7079,13 +7077,6 @@
 (include stanzas/test_play_current_credential_authority.inc)
 
 (include stanzas/test_librarian_preflight_report.inc)
-
-(rule
- (alias runtest-test_candle_evidence_audits)
- (deps test_candle_evidence_audits.py
-       (source_tree ../docs/evidence/2026-09-30-candle-grade-explicit-outcome)
-       (source_tree ../docs/evidence/2026-09-30-candle-grade-scope-survey))
- (action (run python3 %{dep:test_candle_evidence_audits.py})))
 
 (test
  (name test_server_keeper_build_maintenance)

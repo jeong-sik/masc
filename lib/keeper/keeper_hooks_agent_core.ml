@@ -281,8 +281,7 @@ type tool_result_commit_policy = Require_commit | Observe_commit
    never entered [Tool_dispatch] and no dispatch observer saw it. The dashboard
    series ([Tool_metrics_persist]) is written by one of those observers, so it
    counted the call in neither its calls nor its failures.
-   docs/evidence/tool-metrics-refused-calls-2026-11 compares the series with the
-   tool-call ledger per tool and day. The result names the rejection class and
+   The result names the rejection class and
    says no effect began, the shape [handle_validation_error] gives a
    descriptor-level rejection, under the internal tool name the other observers
    receive. Keep the validation duration Agent Core already measured. *)

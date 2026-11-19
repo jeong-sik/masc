@@ -1,2 +1,0 @@
-test_tui_lane_addons
-test_lane_addon_application

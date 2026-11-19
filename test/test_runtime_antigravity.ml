@@ -1620,7 +1620,7 @@ let test_unstreamed_text_before_a_refusal_is_not_replayed () =
 ;;
 
 (* agy's closing stderr sentence for a refused read. Its opening is the
-   sentence docs/evidence/2026-11-05-antigravity-mcp-tool-budget recorded and
+   sentence recorded on 2026-11-05 and
    its last 200 bytes are the tail #50291 quoted from a Keeper turn on
    2026-11-09; the two overlap at "for, so it was auto-denied". *)
 let refused_read_stderr =

@@ -1233,8 +1233,8 @@ let test_tool_row_missing_name_dropped () =
         (drop_value invalid_payload -. before))
 
 let test_retired_kind_row_dropped () =
-  (* docs/evidence/godfiles-20261008/kind-contract.md: the store has no row-level
-     `kind` or optional `assistant_kind`, and that contract has no
+  (* The store has no row-level `kind` or optional `assistant_kind`, and the
+     row shape has no
      compatibility or migration path — a row that still carries the retired
      label is refused rather than read as assistant speech.  [validate_row_fields]
      therefore omits `kind` from its allowed list on purpose, so this test pins

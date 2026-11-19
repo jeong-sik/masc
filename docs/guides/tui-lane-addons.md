@@ -110,7 +110,6 @@ Links와 `f`의 연결 보기에서는 현재 Add-on의 의존 관계를 층으�
 근거 영수증에는 보존 주체의 instance ID와 선택한 행 ID가 함께 표시된다.
 특정 Keeper에게 전달한 경우 대상 이름은 성공·실패·결과 미확정 상태에도 남는다.
 Keeper의 `accepted`와 Broadcast의 `committed`는 읽기·활용을 뜻하지 않는다.
-상세 설계와 검증 항목은 [TUI Lane 경험 설계](../design/tui-lane-experience.md)를 참고한다.
 
 ## 설치된 항목 사용하기
 
@@ -222,10 +221,6 @@ observation counts. This is not a complete list of previous owners of a reused
 file path. A replacement does not inherit the selected worker's action menu.
 Retained or unknown-presence workers cannot receive a fresh Observe or action;
 original action receipt reads remain available.
-
-The [reconnection evidence](../evidence/2026-10-21-addon-reconnect/README.md)
-separates actual Dashboard/worker execution from the TUI candidate validation
-that remains pending.
 
 ## Reading multiline results
 

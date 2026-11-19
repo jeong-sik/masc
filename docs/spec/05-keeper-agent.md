@@ -444,7 +444,7 @@ Keeper work budget.
 
 ### 9.2 TOML Configuration & Sandbox Profiles
 
-`<basepath>/.masc/config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/code-reviewer.toml`.
+`<basepath>/.masc/config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화.
 
 - **Sandbox profile (`sandbox_profile`)**: `docker`, `microvm`, `remote_ssh` 세 가지만 허용한다. `docker`와 `microvm` 프로필은 비어 있지 않은 `sandbox_image` 선언을 필수로 요구하며, microVM DNS 설정은 `[sandbox] microvm_dns` 키로 지정한다.
 
@@ -558,4 +558,3 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 | Trajectory | `lib/trajectory/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
-| TOML Example | `config/keepers/code-reviewer.toml` |

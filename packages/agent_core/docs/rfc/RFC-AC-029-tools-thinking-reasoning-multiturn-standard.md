@@ -274,9 +274,7 @@ implemented and must not be repeated as unfinished work.
 The inline carrier repair #45772 and native Chat activation #45859 are merged.
 Original scalar content has a typed wire witness across sync/SSE, persistence,
 projection and matching Chat serialization. The native M3.1 Chat depth/default
-control repair #45972 is also merged. Historical
-[inline gap evidence](../../../../docs/evidence/2026-10-24-minimax-inline-replay-gap/README.md)
-records the earlier failure, not the current implementation state.
+control repair #45972 is also merged.
 
 The official documentation index now links a Responses OpenAPI schema. Its
 request `tool_choice` enum contains only `auto`; the Chat schema does not list
@@ -289,14 +287,7 @@ as is the [configuration guide](../../../../docs/guides/minimax-responses.md)
 from #46035. The current decoder preserves content-only reasoning; the shipped
 `minimax_responses` binding declares plaintext replay for M3 and M3.1-Flash.
 
-The [2026-10-25 source/schema comparison](../../../../docs/evidence/2026-10-25-minimax-responses-contract/README.md)
-retains exact official-source hashes, selected schemas, current source hashes
-and the earlier public-codec execution requirements. The
-[binding run](../../../../docs/evidence/2026-10-25-minimax-responses-binding/README.md)
-records 42 selected cases on its executed source, not vendor HTTP or a full
-Agent restart. The [2026-11-01 refresh](../../../../docs/evidence/2026-11-01-minimax-contract-refresh/README.md)
-records integration on main and distinguishes the vendor's configurable M3
-provider-verifier expectations from native endpoint observations. Chat
-tool-choice support and exact M2 Responses availability still need endpoint
-evidence. These residuals keep #27924 open; they are not missing sync/SSE
+The 2026-10-25 binding run covered 42 selected cases on its executed source, not
+vendor HTTP or a full Agent restart. Chat tool-choice support and exact M2
+Responses availability still need endpoint evidence. These residuals keep #27924 open; they are not missing sync/SSE
 implementations to recreate.

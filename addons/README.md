@@ -85,8 +85,7 @@ leave room for the host's instance/sequence identity prefixes. A reply that
 fits the worker wire limit can therefore be explicitly refused before storage
 if namespacing exceeds that observation envelope; relation counts do not
 grant extra host storage capacity. Raising it raises every one of those
-limits together. [RFC-0471](../docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md)
-proposes narrowing it to the worker message.
+limits together.
 
 Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
 frame-progress and value-difference examples use half a CPU, 128 MiB memory,

@@ -1,2 +1,0 @@
-[TRACE] START tool_exec/closed-channel-probe (agent=source-review turn=1)
-tool_exec/closed-channel-probe ok=false elapsed=0.000s

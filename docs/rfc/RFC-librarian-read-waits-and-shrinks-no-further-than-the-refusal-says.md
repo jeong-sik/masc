@@ -30,8 +30,6 @@ related: ["librarian-lifecycle", "host-cycle-runs-exact-requests-side-by-side", 
 
 ### 1.1 운영 서버에서 잰 값
 
-스크립트와 실행 기록은 `docs/evidence/librarian-lag-20261117/` 에 있다.
-
 안 읽은 턴(11-17 00:09 KST). Keeper 의 `turn-boundaries.jsonl` 과 읽은 위치 파일 둘을 비교해 셌다.
 
 | Keeper | atom 턴 | official 턴 | 가장 오래된 안 읽은 턴 |
@@ -346,7 +344,7 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 
 ### 7.2 배포 뒤 측정
 
-`docs/evidence/librarian-lag-20261117/collect.py` 로 같은 길이의 창을 전후로 잰다.
+같은 길이의 창을 전후로 잰다.
 
 | 층 | 재는 것 | 기대 |
 |---|---|---|
@@ -365,7 +363,6 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 - `docs/rfc/RFC-librarian-lifecycle.md`: §4.3 의 "두 턴 이상을 읽다 실패했으면…" 문단(314행), 연속성 문단 안의 durable 설명(315행), "durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라…" 문단(317행), §4.4 표의 3a(434행). 한 턴으로 좁힌다는 설명을 절반 접기와 풀기로 바꾼다. "실패 종류를 보지 않는다"는 "거절의 종류를 보지 않는다. 거절 없이 끝난 회차는 폭을 바꾸지 않는다"로 바꾼다.
 - `lib/lane_addon/lane_addon_types.mli` 의 `host_requests_tool` 설명: §3.1 의 계약 문장.
 - `docs/guides/lane-addon-toml.md` 의 `[world]` 키 목록과 `lane_host_requests` 문단.
-- `docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md` 130행: 접수 조건과 `capacity_wait` 설명.
 - `docs/rfc/RFC-librarian-ends-waiting-requests-of-a-replaced-declaration.md` 3.4: "지금처럼 좁힌다"가 가리키는 폭.
 - `addons/workspace-curator/README.md`, `addons/candle-appraiser/README.md` 의 `capacity_wait` 문장.
 - `lib/keeper/keeper_librarian_range.mli` 의 `extent` 설명.

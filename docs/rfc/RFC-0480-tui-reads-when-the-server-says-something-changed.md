@@ -260,7 +260,7 @@ PR 열의 번호 중 #47994·#47997 만 병합됐고 나머지(#48003 부터 #48
 
 - TUI 시험은 보낸 요청과 저장한 상태만 본다(constitution `build_and_ci`). 화면 문구 시험은 만들지 않는다.
 - 층마다 알림 하나가 요청 하나를 만드는지 시험한다. 지운 2초 읽기가 없다는 것은 시험하지 않는다. 없어진 기능의 회귀 시험을 만들지 않는다는 constitution `testing` 규칙을 따른다. 시험 픽스처는 `--refresh` 를 시험 시간보다 길게 줘서, 알림이 아닌 tick 이 요청을 만들지 못하게 한다.
-- 실제 화면에서는 키퍼 40명 workspace 의 TUI 로그에서 `tui_surface_read_started` 수를 층 전후로 센다. 증거는 `docs/evidence/` 아래에 둔다.
+- 실제 화면에서는 키퍼 40명 workspace 의 TUI 로그에서 `tui_surface_read_started` 수를 층 전후로 센다. 센 값은 PR 본문에 적는다.
 
 ## 7. 트레이드오프와 한계
 

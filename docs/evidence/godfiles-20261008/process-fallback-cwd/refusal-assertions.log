@@ -1,9 +1,0 @@
-ASSERT refusal names requested directory
-ASSERT refusal preserves directory errno
-ASSERT refusal names requested directory
-ASSERT refusal preserves directory errno
-ASSERT refusal names requested directory
-ASSERT refusal preserves directory errno
-ASSERT refusal names requested directory
-ASSERT refusal preserves directory errno
-ASSERT valid cwd preserves executable refusal

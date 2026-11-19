@@ -211,8 +211,8 @@ sedi -E "s/Release baseline \| [0-9]+\.[0-9]+\.[0-9]+/Release baseline | $NEW_VE
   "$ROOT_DIR/docs/spec/SPEC-INDEX.md"
 echo "  SPEC-INDEX.md updated"
 
-# 8) Install pins — the copy-paste block in README, INSTALL and the site
-# quickstart names the release being cut. Nothing else moves them, and they
+# 8) Install pins — the copy-paste block in README and INSTALL names the
+# release being cut. Nothing else moves them, and they
 # sat on v0.35.14 while five later releases went out. Until the tag exists
 # the pins name a release readers cannot download yet; the README's "check tag
 # availability" line moves with them.
@@ -224,12 +224,6 @@ for readme in README.md README.ko.md; do
 done
 for install_doc in README.md README.ko.md docs/INSTALL.md docs/INSTALL.ko.md; do
   sedi -E "s/^TAG=v[^ ]+$/TAG=v$NEW_VERSION/" "$ROOT_DIR/$install_doc"
-done
-# The site pages name the release version in prose, a heading and the pin.
-for site_doc in \
-  docs-site/src/content/docs/getting-started/quickstart.md \
-  docs-site/src/content/docs/ko/getting-started/quickstart.md; do
-  sedi -E "s/[0-9]+\.[0-9]+\.[0-9]+/$NEW_VERSION/g" "$ROOT_DIR/$site_doc"
 done
 echo "  install pins updated"
 
@@ -243,5 +237,5 @@ echo ""
 echo "Next:"
 echo "  scripts/check-version-truth.sh"
 echo "  # Build and installed-release smoke run in CI."
-echo "  git add dune-project README.md README.ko.md CHANGELOG.md changelog.d masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md docs/INSTALL.md docs/INSTALL.ko.md docs-site/src/content/docs/getting-started/quickstart.md docs-site/src/content/docs/ko/getting-started/quickstart.md"
+echo "  git add dune-project README.md README.ko.md CHANGELOG.md changelog.d masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md docs/INSTALL.md docs/INSTALL.ko.md"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

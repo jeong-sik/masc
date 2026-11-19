@@ -6,8 +6,7 @@
     "Errors detected" state bit and records the first and last error. This
     module reads that record from the host, without running anything in the
     guest, and while a guest may still have the volume mounted: the kernel
-    writes the record as the errors happen (measured 2026-10-22,
-    docs/evidence/2026-10-22-keeper-volume-fsck/).
+    writes the record as the errors happen (measured 2026-10-22).
 
     Field offsets follow
     https://www.kernel.org/doc/html/latest/filesystems/ext4/super.html *)

@@ -92,5 +92,3 @@ also does not infer who sent a shutdown signal from a breadcrumb file; the
 ordinary shutdown path still records the signal it received.
 
 The design is in [masc restart](../rfc/RFC-masc-restart-replaces-the-workspace-server.md).
-The connection-publication changes proposed in
-[RFC-0447](../rfc/RFC-0447-port-bind-or-refuse.md) are separate and remain a draft.

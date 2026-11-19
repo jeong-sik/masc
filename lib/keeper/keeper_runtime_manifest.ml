@@ -571,8 +571,6 @@ include Keeper_runtime_manifest_housekeeping
 
 let append_to_path path manifest =
   try
-    let dir = Filename.dirname path in
-    let (_ : string) = Keeper_fs.ensure_dir dir in
     Keeper_types_support.append_jsonl_line path (to_json manifest);
     Ok ()
   with

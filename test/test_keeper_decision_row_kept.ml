@@ -224,10 +224,20 @@ let turns_of_a_fiber_beside read =
   during
 ;;
 
+(* The server turns the Eio mutex guards on ([bin/main_eio.ml]), and then a
+   store's handle is fetched under an [Eio.Mutex]. The reads below go the way
+   the server's do. *)
+let with_the_servers_guards f =
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable f
+;;
+
 (* The record's path used to look whether the keepers directory was there,
    through Eio, each time a reader asked for it. *)
 let test_a_kept_row_is_answered_without_waiting () =
   with_workspace (fun config ->
+    with_the_servers_guards
+    @@ fun () ->
     append config (row 1);
     check string "read and kept" "turn 1" (shown config);
     check string "kept" "kept: turn 1" (kept config);

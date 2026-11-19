@@ -210,7 +210,7 @@ Keeper별 effective tool surface에는 전체 schema 바이트와 그중 Skill �
 
 ### 2d. TUI 편집 — Tools › Skills
 
-Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDITOR`에 원문을
+Tools 화면에서 `j/k`로 published Skill을 고르고 `e`를 누르면 `$EDITOR`에 원문을
 넘긴다. 파일 경로는 클라이언트에 노출하지 않는다. TUI는 exact reference로
 `/api/v1/skills/editor/read` → `/preview` → `/save`를 호출하고 서버가 다음을 순서대로
 강제한다.

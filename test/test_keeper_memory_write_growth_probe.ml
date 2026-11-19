@@ -32,6 +32,7 @@ let run_probe () =
       let input_sha256 = Agent_core_sha256.(digest_string
         (Yojson.Safe.to_string (`List inputs)) |> to_hex) in
       let receipts = Hashtbl.create 4 in
+      Masc_test_deps.Memory_tool_case.writer ~config keeper_id;
       List.iteri (fun index args ->
         let result = Runtime.keeper_memory_write_with_outcome ~config ~meta ~args in
         let receipt = Yojson.Safe.from_string result.Masc.Keeper_tool_execution.raw_output in
@@ -73,4 +74,4 @@ let run_probe () =
 let () = Alcotest.run "explicit memory admission growth probe"
   ["isolated storage experiment",[
     Alcotest.test_case "exact repeats, redundant receipts and independent branches through 200 writes"
-      `Quick run_probe]]
+      `Quick (Masc_test_deps.Memory_tool_case.run run_probe)]]

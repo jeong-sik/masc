@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Merge ordinary main-targeted scopes with two current-head account approvals.
+"""Merge ordinary main-targeted scopes with the main ruleset's required
+current-head account approvals.
 
 Only trusted default-branch Actions code executes this worker. The downloaded
 request is an untrusted PR number, never executable code or merge evidence.
@@ -37,7 +38,8 @@ CLIENT = GET.Client(
     clock=lambda: time.time(), sleep=lambda seconds: time.sleep(seconds),
     on_quota=lambda failure: emit(dict(failure.details, status='rate_limited',
                                        retry_at=failure.retry_at)))
-REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
+REQUIRED_APPROVALS = 1  # Operator decision 2026-11-18 (c2 on ask894f7f704c77e60a):
+# follow the main ruleset's required_approving_review_count, which is 1.
 # One worker run follows its own receipt for at most this long. A longer
 # queue is reported as still_pending with the receipt; a rerun observes the
 # same request (HTTP 409) instead of submitting another.
@@ -181,7 +183,8 @@ def require_server_reviews(repo):
                rule['parameters']['required_approving_review_count'] >= REQUIRED_APPROVALS and
                rule['parameters']['dismiss_stale_reviews_on_push'] is True
                for rule in rules):
-        raise Hold('main must enforce two reviews and dismiss stale approvals on GitHub')
+        raise Hold(f'main must enforce {REQUIRED_APPROVALS} review(s) and dismiss '
+                   f'stale approvals on GitHub')
 
 
 def disable_reservation(repo, current):

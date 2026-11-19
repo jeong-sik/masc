@@ -336,7 +336,12 @@ let test_keys_alone =
     Alcotest.(check string)
       "it reads back"
       "key:sk-test-the-second-key"
-      (read_name (key_file_at ~runtime_root account second)))
+      (read_name (key_file_at ~runtime_root account second));
+    let no_root = Filename.concat (Filename.dirname runtime_root) "namespace-of-nobody" in
+    (match F.remove_keys ~runtime_root:no_root ~account_id:account with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "under a runtime root that is not there: %s" detail);
+    Alcotest.(check bool) "no runtime root was made" false (there no_root))
 ;;
 
 (* What the start of the server asks of a key account: the files of the

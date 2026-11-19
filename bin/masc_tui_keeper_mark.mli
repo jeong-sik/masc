@@ -33,6 +33,10 @@ val activity_mark : Masc_tui_keeper_list_model.activity -> Masc_tui_value.Mark.t
     failed stands under the failing group while its activity keeps its own
     mark. [None] is an activity that was not read. *)
 
+val offline_unexpectedly : Masc_tui_keeper_list_model.row -> bool
+(** The row is offline, and its Keeper starts on its own and is not paused:
+    it should be running. *)
+
 val row_activity_mark : Masc_tui_keeper_list_model.row -> Masc_tui_value.Mark.t option
 (** {!activity_mark} of the row's activity, except that an offline Keeper
     which starts on its own and is not paused is a caution: it should be

@@ -645,7 +645,17 @@ let test_an_offline_keeper_that_starts_on_its_own_asks_for_a_look () =
   Alcotest.(check bool) "manual and offline is paused" true
     (mark Decode.Activation_manual = Some Masc_tui_value.Mark.Paused);
   Alcotest.(check bool) "on demand and offline is paused" true
-    (mark Decode.Activation_on_demand = Some Masc_tui_value.Mark.Paused)
+    (mark Decode.Activation_on_demand = Some Masc_tui_value.Mark.Paused);
+  let unexpected activation =
+    Masc_tui_keeper_mark.offline_unexpectedly
+      (row ~health:(health "offline")
+         ~edit:(fun runtime -> { runtime with Decode.kr_activation_mode = activation })
+         "offline")
+  in
+  Alcotest.(check bool) "autonomous and offline is unexpected" true
+    (unexpected Decode.Activation_autonomous);
+  Alcotest.(check bool) "manual and offline is expected" false
+    (unexpected Decode.Activation_manual)
 
 let test_confirmation_and_inventory_errors_need_attention () =
   let confirmation =

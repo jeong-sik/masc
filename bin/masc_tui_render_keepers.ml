@@ -218,7 +218,15 @@ let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   | Idle -> text "대기 중" "idle"
   | Paused -> text "일시정지" "paused"
   | Offline -> text "오프라인" "offline"
-  | Unknown -> text "미확인" "unknown"
+  (* An activity that was not read has no word: the not-read-yet mark says it
+     (RFC tui-one-screen-grammar §6.4), and the row's detail says why. *)
+  | Unknown -> ""
+
+(* The row's activity word. An offline Keeper that starts on its own wears the
+   caution mark, and its word says why, in the NOW cell's ten cells. *)
+let keeper_row_activity_word ~ko (row : Keeper_list_model.row) =
+  if Masc_tui_keeper_mark.offline_unexpectedly row then (if ko then "자율 꺼짐" else "auto off")
+  else keeper_activity_word ~ko (Keeper_list_model.primary_activity_of_row row)
 
 (* The row's activity colour is its mark's (RFC tui-one-screen-grammar §7.2). *)
 let keeper_activity_style (row : Keeper_list_model.row) =
@@ -467,7 +475,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   let status_word =
     match operator_disposition with
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
-    | None -> keeper_activity_word ~ko activity
+    | None -> keeper_row_activity_word ~ko row
   in
   status_color ^ glyph ^ " "
   ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
@@ -1863,11 +1871,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
 (* The Keeper's name and current activity mark + word, embedded on the left of
    the Story window's top rule. *)
 let keeper_story_lead ~ko (row : Keeper_list_model.row) =
-  let activity = Keeper_list_model.primary_activity_of_row row in
   Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
   ^ keeper_activity_style row
   ^ Masc_tui_keeper_mark.row_activity_glyph row ^ " "
-  ^ keeper_activity_word ~ko activity ^ Ansi.reset
+  ^ keeper_row_activity_word ~ko row ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
@@ -2212,10 +2219,9 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
             ]
         ]
       in
-      let activity = Keeper_list_model.primary_activity_of_row row in
       let badge_plain =
         Masc_tui_keeper_mark.row_activity_glyph row ^ " "
-        ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
+        ^ keeper_row_activity_word ~ko:(state.ui_language = Lang_ko) row
       in
       let badge_cells = Message_layout.display_width badge_plain in
       let heading =

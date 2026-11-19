@@ -15,6 +15,7 @@ type t =
   | Board_attention
   | Verifier
   | Candle_appraiser
+  | Librarian_memory
 [@@deriving enumerate]
 
 val to_id : t -> string

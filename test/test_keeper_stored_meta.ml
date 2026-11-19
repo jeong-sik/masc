@@ -9,7 +9,10 @@
     These cases compare the two sources through the Board address and the
     Keeper list, and at the read each of the three consumers makes. The
     operator snapshot row is compared in test_operator_control_snapshot.ml,
-    which owns the fixture that row needs. *)
+    which owns the fixture that row needs.
+
+    The operator snapshot also walks every configured Keeper to name the ones
+    meant to keep running (#53113). That walk is compared here too. *)
 
 module Workspace = Masc.Workspace
 module Meta = Masc.Keeper_meta_contract
@@ -680,6 +683,50 @@ let test_row_of_an_owned_keeper_needs_no_meta_file () =
     keepers
 ;;
 
+(* The operator snapshot walks every configured Keeper to name the ones meant
+   to keep running, for every snapshot it builds
+   ([Keeper_meta_store.persistent_agent_names_with_unread]). [persistent] is
+   that walk's answer for the read it is given: the names, and the Keepers
+   whose stored meta did not read. *)
+let persistent config ~read_meta =
+  let names, unread = Store.persistent_agent_names_with_unread config ~read_meta in
+  names, List.map (fun (unread : Masc.Keeper_snapshot_unread.t) -> unread.name) unread
+;;
+
+(* The read the snapshot gives the walk. *)
+let asking_the_owners config name =
+  Stored_meta.read config name ~read_file:(fun () -> Store.read_meta config name)
+;;
+
+(* With the Owners standing for the meta files the walk answers from them:
+   its answer is the same with every file unreadable. Given the file read
+   alone, as it read before, the same walk then names no Keeper. *)
+let test_the_walk_of_owned_keepers_needs_no_meta_file () =
+  with_three_keepers
+  @@ fun config ->
+  let walk = Alcotest.(pair (list string) (list string)) in
+  let with_the_files = persistent config ~read_meta:(asking_the_owners config) in
+  Alcotest.check
+    walk
+    "the walk that asks the Owners answers what the files give"
+    (persistent config ~read_meta:(Store.read_meta config))
+    with_the_files;
+  Alcotest.(check (list string))
+    "every Keeper of the fixture is meant to keep running"
+    (List.sort String.compare keepers)
+    (List.sort String.compare (fst with_the_files));
+  List.iter (fun name -> write_file (meta_path config name) "not a snapshot") keepers;
+  Alcotest.check
+    walk
+    "with every meta file unreadable"
+    with_the_files
+    (persistent config ~read_meta:(asking_the_owners config));
+  Alcotest.(check (list string))
+    "the file read alone names no Keeper: the answer above did not come from the files"
+    []
+    (fst (persistent config ~read_meta:(Store.read_meta config)))
+;;
+
 (* {1 The file is read} *)
 
 let check_the_file_answer_is_handed_out config name =
@@ -988,6 +1035,10 @@ let () =
             "the row of an owned Keeper needs no meta file"
             `Quick
             test_row_of_an_owned_keeper_needs_no_meta_file
+        ; Alcotest.test_case
+            "the walk of owned Keepers needs no meta file"
+            `Quick
+            test_the_walk_of_owned_keepers_needs_no_meta_file
         ] )
     ; ( "the read-back is kept"
       , [ Alcotest.test_case

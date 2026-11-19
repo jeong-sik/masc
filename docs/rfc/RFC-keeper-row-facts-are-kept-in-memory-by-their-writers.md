@@ -178,11 +178,11 @@ Current 는 10초 trust 캐시(`operator_control_snapshot_trust.ml:5`)를 일부
 
 ### 3.1 meta 는 Owner 를 읽는다
 
-`keepers_json`, board address, `masc_keeper_list` 는 meta 파일을 열기 전에 `Keeper_owner_projection.lookup` 을 본다. 이 함수는 잠금 없이 `Atomic` map 을 읽는다(`keeper_owner_projection.ml:31-36`). 그래서 system thread 에서 도는 board address 에서도 부를 수 있다. Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:936-957`). 새로 저장하는 상태는 없다.
+`keepers_json`, board address, `masc_keeper_list`, 그리고 snapshot 이 계속 떠 있어야 하는 Keeper 를 고르는 훑기는 meta 파일을 열기 전에 `Keeper_owner_projection.lookup` 을 본다. 이 함수는 잠금 없이 `Atomic` map 을 읽는다(`keeper_owner_projection.ml:31-36`). 그래서 system thread 에서 도는 board address 에서도 부를 수 있다. Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:936-957`). 새로 저장하는 상태는 없다.
 
-세 소비자는 Owner 값을 그대로 쓰지 않는다. Owner 값의 설정 필드에는 TOML 값이 있고, 파일을 읽은 값에는 자리 채움 값이 있다(§1.1). 그대로 쓰면 `keepers_json` 의 `activation_mode` 와 trust 의 sandbox 값이 지금과 달라진다. profile 을 덮는 두 소비자도 달라진다. TOML 에서 key 를 뺀 뒤에는 덮기가 받은 값을 남긴다(§1.1). 그 값이 자리 채움 값이 아니라 Owner 가 든 옛 TOML 값이 된다.
+네 소비자는 Owner 값을 그대로 쓰지 않는다. Owner 값의 설정 필드에는 TOML 값이 있고, 파일을 읽은 값에는 자리 채움 값이 있다(§1.1). 그대로 쓰면 `keepers_json` 의 `activation_mode` 와 trust 의 sandbox 값이 지금과 달라진다. profile 을 덮는 두 소비자도 달라진다. TOML 에서 key 를 뺀 뒤에는 덮기가 받은 값을 남긴다(§1.1). 그 값이 자리 채움 값이 아니라 Owner 가 든 옛 TOML 값이 된다.
 
-세 소비자는 파일 읽기 한 걸음만 바꾼다. Owner 값을 파일과 같은 길로 한 번 돌린 값을 그 자리에 넣는다. 파일에 쓰는 encoder(`meta_to_json`, `keeper_meta_store.ml:34-35`)로 바꾸고, 파일을 읽는 함수의 '글자 → meta' 부분(`:192-250`)으로 되읽는다. 둘 다 메모리에서 한다. `Keeper_meta_store` 가 이 왕복을 함수 하나로 내놓는다. 그 뒤의 일은 그대로 둔다. profile 덮기도 지금 자리에서 지금처럼 돈다.
+네 소비자는 파일 읽기 한 걸음만 바꾼다. Owner 값을 파일과 같은 길로 한 번 돌린 값을 그 자리에 넣는다. 파일에 쓰는 encoder(`meta_to_json`, `keeper_meta_store.ml:34-35`)로 바꾸고, 파일을 읽는 함수의 '글자 → meta' 부분(`:192-250`)으로 되읽는다. 둘 다 메모리에서 한다. `Keeper_meta_store` 가 이 왕복을 함수 하나로 내놓는다. 그 뒤의 일은 그대로 둔다. profile 덮기도 지금 자리에서 지금처럼 돈다.
 
 왕복한 값이 파일을 읽은 값과 같은 까닭은 때에 따라 다르다.
 
@@ -209,7 +209,14 @@ Owner 의 meta 가 파일과 어긋난 채 남는 때가 둘 있다.
 
 서버가 도는 동안 밖에서 meta 파일을 고치면 보이는 값이 지금과 달라진다(`scripts/migrate-keeper-meta-sandbox.sh`, §1.4). 지금 행은 Owner 의 다음 커밋 전까지 고친 파일 값을 보인다. L1 뒤에는 처음부터 Owner 값을 보인다. 고친 파일 값은 어느 쪽이든 Owner 의 다음 커밋이 덮는다.
 
-snapshot 은 Keeper 행과 따로 Keeper 마다 meta 파일을 한 번 더 연다(#53113). L1 은 그 읽기를 옮기지 않았다.
+snapshot 은 Keeper 행과 따로, 계속 떠 있어야 하는 Keeper 를 고르려고 설정된 Keeper 마다 저장된 meta 를 읽는다(`Keeper_meta_store.persistent_agent_names_with_unread`, #53113). 이 훑기도 행과 같은 읽기(`Keeper_stored_meta.read`)를 쓴다. `Keeper_meta_store` 는 `Keeper_stored_meta` 아래 모듈이라, 훑는 함수가 읽는 함수를 인자로 받는다(`~read_meta`). snapshot 의 행과 훑기는 같은 함수 하나(`stored_meta`)로 읽는다.
+
+그래서 Owner 가 대신하는 Keeper 의 meta 파일을 서버 밖에서 읽을 수 없게 만들어도 snapshot 은 partial 이 되지 않는다. 전에는 이 훑기가 그 파일을 읽다 실패했고, snapshot 이 partial 이 되면서 그 Keeper 가 `persistent_agents` 에서 빠졌다. 행은 L1 부터 이미 Owner 값이었다. supervisor sweep 은 지금도 파일을 읽는다. 그 상태를 카운터(`masc_keeper_meta_read_failures_total`, `site="keepalive_read"`)와 WARN 으로 남기고, 그 Keeper 를 keepalive 에서 뺀다. snapshot 은 Owner 값대로 그 Keeper 를 계속 떠 있어야 하는 Keeper 로 보인다. 두 답이 갈라지는 것은 #53426 에 적었다.
+
+옮기지 않은 읽기가 둘 있다.
+
+- supervisor 의 keepalive reconcile(`keepalive_keeper_names`)은 지금처럼 meta 파일을 읽는다. supervisor sweep 이 끝날 때마다 돈다(`keeper_supervisor.ml` 의 `sweep_and_recover`). sweep 간격은 설정값이고 기본 30초다(`env_config_keeper_supervisor.ml`).
+- 이 훑기는 Keeper TOML 을 읽는다. 설정된 이름을 찾을 때 Keeper 마다 한 번 읽는다. meta 가 있고 멈추지 않은 Keeper 는 autoboot 를 정할 때 한 번 더 읽는다. 풀이는 내용이 같으면 다시 하지 않는다(`keeper_types_profile_toml_io.ml` 의 `parsed_toml_cache`). TOML 은 서버 밖에서 고치는 파일이라 '쓰는 곳이 메모리에도 고친다'에 들지 않는다.
 
 ### 3.2 칸과 사실
 
@@ -394,7 +401,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 
 | 층 | 무엇 | 확인 |
 |---|---|---|
-| L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
+| L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). snapshot 의 훑기는 그 뒤에 같은 읽기로 옮겼다(#53113). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
 | W | 줄 쓰기 함수가 규칙 11 을 지킨다. 병합됐다(#52991). 그 리뷰의 후속은 #53017 이다 | `test_fs_compat_fd_cache`, `test_fs_compat_append_jsonl_atomicity` |
 | L2 | 먼저 깔 것이 셋이다. 저장소 선언의 곁 파일 이름(§3.4), file system 이 부르는 이름으로 만든 등록부 key(§3.2), 따로 만든 잠금 handle 의 읽기 전용 타입(§3.2). 그 위에 칸(`Fact_cell`)과 `Dated_jsonl` 의 사실, 값 넷(최근 TurnRecord, 가장 새 온전한 receipt, 도구 호출 16줄, 결정 기록 마지막 행)을 둔다. `Dated_jsonl` 의 쓰는 함수 둘이 등록부 항목의 칸을 맞춘다. 결정 기록 칸의 표(`Keeper_row_facts`). 결정 기록 tail 의 결과 읽기(§3.4). 지우는 쪽이 끝나는 모든 경로의 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 칸 정체 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, 취소 시험, 지우다 실패하는 시험, `step` 단위 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다. 채우기 시도 수와 들어간 수를 칸마다 적는다. 어느 칸의 들어간 수가 늘 0 이면 그 칸은 채워지지 않는 것이다 |
 | L3a | 가장 최근 Turn tool audit 행 칸(`Dated_jsonl.newest_selected`). metrics 저장소를 쓰는 곳을 따라가 보고 kept 로 적는다. 읽는 쪽은 Keeper 행·briefing·Keeper 상세의 tool audit 다. `Tool_audit_cache` 를 지운다 | 차분 시험(회전, 날짜 prune, 쓰기 뒤의 바이트 prune 포함), heartbeat 시험, purge 뒤 heartbeat 만 쓴 후계 시험 |

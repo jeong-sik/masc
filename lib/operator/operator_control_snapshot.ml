@@ -123,6 +123,16 @@ let keeper_runtime_trust_observation ~read_policy ~config ~meta =
       {Dashboard_projection_read.json = `Null; next_deadline_unix = None;
        completeness = Partial detail}
 
+(* The stored meta of a Keeper, as the snapshot reads it: from the Keeper's
+   Owner when the Owner stands for the meta file, and from the file
+   otherwise ([Keeper_stored_meta.read] says when that is). The Keeper rows
+   and the walk that names the Keepers meant to keep running both read it
+   here, so the two go by one meta within a snapshot. *)
+let stored_meta config name =
+  Keeper_stored_meta.read config name ~read_file:(fun () ->
+    Keeper_meta_store.read_meta config name)
+;;
+
 (* What one Keeper name became in [keepers_json]. *)
 type keeper_row_outcome =
   | Keeper_row of Dashboard_projection_read.observation
@@ -205,10 +215,7 @@ let keepers_json
           results.(idx)
           <- (try
                 let t0 = Time_compat.now () in
-                match
-                  Keeper_stored_meta.read config name ~read_file:(fun () ->
-                    Keeper_meta_store.read_meta config name)
-                with
+                match stored_meta config name with
                 | Error detail ->
                   Keeper_unread
                     { Keeper_snapshot_unread.name
@@ -668,7 +675,10 @@ let snapshot_read
     let keeper_names = Result.value keeper_names_listing ~default:[] in
     let persistent_keeper_names, persistent_unread =
       if initialized && include_keepers
-      then Keeper_meta_store.persistent_agent_names_with_unread config
+      then
+        Keeper_meta_store.persistent_agent_names_with_unread
+          config
+          ~read_meta:(stored_meta config)
       else [], []
     in
     completeness := Dashboard_projection_read.combine_completeness !completeness
@@ -751,8 +761,7 @@ let snapshot_read
                   in
                   persistent_agents_json
                     ~keeper_names:persistent_keeper_names
-                    ~keeper_rows
-                    config)
+                    ~keeper_rows)
                 else empty_section)
             in
             [ "keepers", keepers_json_value

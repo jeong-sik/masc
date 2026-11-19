@@ -815,7 +815,11 @@ let test_current_partial_rows_recover_after_actual_metadata_repair () =
       let broken = Lib.Keeper_types_profile.keeper_meta_path config "unread-metadata" in
       (match Fs_compat.save_file_atomic broken "{" with
        | Ok () -> () | Error detail -> fail detail);
-      let names, unread = Lib.Keeper_meta_store.persistent_agent_names_with_unread config in
+      let names, unread =
+        Lib.Keeper_meta_store.persistent_agent_names_with_unread
+          config
+          ~read_meta:(Lib.Keeper_meta_store.read_meta config)
+      in
       check (list string) "failed persistent metadata is not an eligible name" [] names;
       (match unread with
        | [row] ->

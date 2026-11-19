@@ -836,7 +836,7 @@ type hole =
 type cause =
   | Read of { question : Question_id.t; shown_memory : bool; slot : string; missing : missing_part list }
   | Make_room of { question : Question_id.t; after : item_ref; slot : string }
-  | Direct of { by : actor; write : write }
+  | Direct of { by : actor; trace : string; write : write }
   | Skip of { hole : hole }
   | Adopt of { by : string; observed : Sha256.t }
 
@@ -867,6 +867,9 @@ type log_line =
 3. **인코딩.** 지금 쓰는 스냅샷 codec 으로 새 envelope 을 만든다. `revision + 1` 이고 `after = sha256 bytes` 다. `Skip` 이나 효과 없는 답은 바이트를 그대로 두고 `after = basis` 다. 읽은 자리가 움직였으므로 줄은 쓴다.
    - envelope 은 `revision`, `updated_at`, `source`, `facts`, `change` 다. 지운 이유(`removal`)는 담지 않는다. 그것은 줄에만 있다.
    - `source.kind` 는 `Read` 와 `Make_room` 에서 `librarian`, `Remember` 와 `Supersede` 에서 `explicit_write`, `Retract` 에서 `explicit_retract` 다. `change` 는 `effects` 에서 만든다.
+   - `source.trace_id` 는 줄이 싣는 trace 다. 직접 쓰기에서는 그 쓰기가 온 trace 다(`Direct.trace`). Keeper 의 턴이거나, 운영자 route 가 자기 요청에 붙인 이름이다.
+   - envelope 의 다섯 칸이 모두 줄에서 나온다. 그래서 boot 가 5단계를 줄에서 다시 해도 바이트가 같다(§8.6). 함수 하나가 한다(`Librarian_envelope.after`).
+   - 첫 boot 가 쓰는 빈 envelope 은 revision 1 이고 fact 가 없다. `source` 는 `librarian` 이고 trace 는 그 턴 기록의 id 다.
    - 바이트는 `test_keeper_memory_snapshot_golden` 이 고정한다.
 4. **덧붙이기.** 아는 끝 offset 에서 `Committed` 줄을 덧붙이고 fsync 한다. **여기가 반영된 시점이다.**
 5. **스냅샷.** `memory-current.json.tmp` 를 쓰고 fsync, rename, 디렉터리 fsync 를 한다. `after = basis` 면 건너뛴다.
@@ -937,6 +940,7 @@ type write =
 | `Remember`, `Supersede` | 새 claim 이 파생인데 쓴 뒤에 그 근거가 Memory 에 없다 | `Refused (Premises_missing _)`. 없는 근거의 id 를 싣는다. 바꾸지 않는다 |
 | `Remember`, `Supersede` | 파생 basis 의 모양이 틀렸다 | `Refused Malformed_derivation` |
 | `Remember`, `Supersede` | 새 claim 이 비었다 | `Refused Blank_claim`. 스냅샷 codec 이 빈 claim 을 쓰지 않는다 |
+| 모든 쓰기 | 쓰기가 온 trace 가 비었다 | `Refused Blank_trace`. 스냅샷 codec 이 trace 없는 `source` 를 읽지 않는다 |
 
 - 표는 순수 함수 하나다(`Librarian_direct.plan`). 지금 Memory 와 쓰기에서 답을 낸다.
 - 쓴 뒤에 근거를 본다. 근거를 잃은 파생 fact 는 같은 줄에서 `Support_lost` 로 지운다. 철회한 fact 에 기댄 fact 가 그렇게 같이 나간다.
@@ -1882,6 +1886,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5a | 직접 쓰기의 계획(`Librarian_direct.plan`, §8.5 의 표). 순수 함수다. `removal` 에 직접 쓰기의 둘(`Superseded_by`, `Retracted`)과 쓴 이(`actor`)를 더한다. 부르는 곳은 L5 의 쓰는 쪽이다 | 표의 행마다 시험. 줄을 쓰는 답마다 효과를 적용한 Memory 에 같은 fact 가 둘 없고 근거 없는 파생 fact 가 없다. 철회가 그 fact 에 기댄 fact 를 같은 계획에서 지운다. 같은 쓰기를 두 번 하면 둘째는 줄을 쓰지 않는다 |
 | L5b | 반영 기록의 줄: 줄 타입(`Librarian_log`)과 codec(`Librarian_log_codec`, §8.1). 파일을 읽거나 쓰지 않는다. `cause` 는 전환이 만드는 둘(`Direct`, `Adopt`)만 넣는다. `Read`, `Make_room`, `Skip` 과 그것이 싣는 타입은 그것을 만드는 층(L6, L7)이 더한다. fact 는 스냅샷 codec 으로, 끝자리는 턴 기록 codec 으로 쓴다 | 생성자마다 왕복 시험과 글로 박은 모양. object 마다 field 집합이 정확히 맞아야 한다. 읽기는 쓰기가 실은 글(claim, 이유, 이름)을 거절하지 않는다. 쓰는 쪽이 쓴 줄을 읽는 쪽이 거절하면 저장소가 선다 |
 | L5c | 반영 기록의 파일(`Librarian_log_store`): 꼬리 줄 읽기와 끝을 확인하는 덧붙임. 꼬리 줄 하나만 읽는다. 메모리에 두는 것은 없다. 파일은 스냅샷 옆에 있다(`<k>.memory-log.jsonl`) | 덧붙인 줄이 꼬리가 된다. 꼬리 앞의 줄은 읽지 않는다. 끊긴 조각은 줄이 아니고 다음 덧붙임이 잘라 낸다. 해석 안 되는 꼬리는 그 offset 과 함께 오류다. 낡은 끝으로 덧붙이면 아무것도 쓰지 않는다 |
+| L5d | 줄에서 스냅샷을 만드는 순수 함수(`Librarian_envelope.after`, §8.2 의 3단계)와 첫 boot 의 빈 envelope. 직접 쓰기의 줄이 그 쓰기가 온 trace 를 싣는다(`Direct.trace`). 계획이 빈 trace 를 거절한다 | 만든 스냅샷마다 스냅샷 codec 으로 다시 읽는다. 같은 줄에서 두 번 만들면 바이트가 같다. 철회가 지운 fact 와 근거를 잃은 fact 가 `change` 에 실린다. 맡김은 바이트를 바꾸지 않는다. 다음 revision 이 아닌 줄은 거절한다 |
 | L5 | **전환.** 반영 기록의 boot 표, 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기의 반영), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |

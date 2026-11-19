@@ -313,7 +313,8 @@ let jsonl_row (json : Yojson.Safe.t) = utf8_repair_string (Yojson.Safe.to_string
    the same write. That write makes the file's directory, inside its job on
    a system thread, so no caller makes it first: a caller that did paid an
    Eio [stat] on its fiber for every row. The rotation before it still asks
-   for the file's size once a row. *)
+   for the file's size once a row, unless rotation is turned off (a size
+   limit of zero). *)
 let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   Fs_compat.append_jsonl_rows path (jsonl_row json ^ "\n")

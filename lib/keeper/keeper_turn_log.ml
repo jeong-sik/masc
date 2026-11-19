@@ -65,6 +65,68 @@ type task_evidence =
       ; goals : goal_shown list option
       }
 
+type board_event =
+  | Post_created
+  | Post_updated
+  | Comment_added of { comment : string }
+  | Reaction_changed of { by : string }
+  | Vote_cast of { by : string }
+
+type board_item =
+  { post : string
+  ; author : string
+  ; event : board_event
+  }
+
+type completion_judge =
+  | Human_operator of { operator : string }
+  | System_agent of { run : string }
+
+type stimulus =
+  | Board of board_item
+  | Board_routing_pending of board_item
+  | Board_attention of
+      { candidate : string
+      ; item : board_item
+      }
+  | Bootstrap
+  | Tool_result of { receipt : string }
+  | Fusion of { run : string }
+  | Schedule of
+      { schedule : string
+      ; occurrence : string
+      }
+  | Connector of { event : string }
+  | Hitl of { approval : string }
+  | Ask of { ask : string }
+  | Completion_rejected of
+      { task : string
+      ; verification : string
+      ; judge : completion_judge
+      }
+  | Completion_approved of
+      { task : string
+      ; verification : string
+      ; judge : completion_judge
+      }
+  | Task_cancelled of
+      { task : string
+      ; by : string
+      }
+  | Workspace_message of
+      { request : string
+      ; from : string
+      }
+  | Delegate of
+      { operation : string
+      ; keeper : string
+      }
+  | Composition of
+      { request : string
+      ; tool : string
+      }
+  | Owned_job of { job : string }
+
 type line =
   | Log_started of
       { id : Log_id.t
@@ -76,6 +138,7 @@ type line =
       ; turn_ref : Ids.Turn_ref.t
       ; runtime : string
       ; task : task_evidence
+      ; stimuli : stimulus list
       ; baseline : mark
       }
   | Closed of

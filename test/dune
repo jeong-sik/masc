@@ -631,6 +631,7 @@
   test_keeper_memory_snapshot_golden
   test_librarian_answer
   test_librarian_plan
+  test_librarian_scoring
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
@@ -972,6 +973,7 @@
   test_keeper_memory_snapshot_golden
   test_librarian_answer
   test_librarian_plan
+  test_librarian_scoring
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page

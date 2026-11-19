@@ -25,6 +25,15 @@ type t =
 
 let empty = { added = []; touched = []; removed = []; not_applied = []; sources = [] }
 
+let why_not_kind = function
+  | Unknown_ref -> "unknown_ref"
+  | Ref_used_twice -> "ref_used_twice"
+  | Source_outside_question -> "source_outside_question"
+  | Removed_during_flight _ -> "removed_during_flight"
+  | Not_valid_alone -> "not_valid_alone"
+  | Successor_unsupported -> "successor_unsupported"
+;;
+
 let apply ~at facts effects =
   let removed =
     List.fold_left

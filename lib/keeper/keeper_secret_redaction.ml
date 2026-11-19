@@ -212,6 +212,31 @@ let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction
        | Whole_lines_and_mapping_scalars ->
            add_mapping_scalar_values ~redact_identity_scalars value acc)
 
+(* Tool-call arguments are JSON text wherever an operator reads them: a
+   provider streams them as JSON and the approval gate prints the parsed
+   value. Inside a JSON string a double quote, a backslash, a line break and
+   the other control characters are written as backslash escapes, and the
+   passes below compare bytes, so a value holding one of those was masked in
+   plain text and readable in a tool call (#53444). The short lines of a
+   multi-line value had the same gap: a line shorter than [min_secret_len] is
+   covered by the whole value alone, and the whole value did not match where
+   its line breaks were escaped.
+
+   The spelling is taken from [Yojson.Safe.to_string], the printer the gate
+   uses, so the two cannot drift. Not covered: a value quoted a second time
+   inside that string (a JSON body in a shell command), and an escape this
+   printer does not write (a quote as its code point). *)
+let json_string_spelling value =
+  let printed = Yojson.Safe.to_string (`String value) in
+  String.sub printed 1 (String.length printed - 2)
+
+let with_json_string_spellings values =
+  List.concat_map
+    (fun value ->
+       let spelling = json_string_spelling value in
+       if String.equal spelling value then [ value ] else [ value; spelling ])
+    values
+
 let dedupe values =
   List.sort_uniq
     (fun a b ->
@@ -237,6 +262,7 @@ let build ~redact_identity_scalars sources =
       (fun acc source -> values_of_source ~redact_identity_scalars source acc)
       []
       sources
+    |> with_json_string_spellings
     |> dedupe
   in
   compile_exact_values values

@@ -156,7 +156,9 @@ val decode_codex_rate_limits_updated : Yojson.Safe.t -> (report, decode_error) r
     length is {!Duration_minutes}; no length keeps the slot name as
     {!Provider_label}. A [credits] object can also add a Credit row: unlimited
     is explicit, a finite [balance] is retained in credit units, and disabled
-    or unavailable balances add no row. *)
+    or unavailable balances add no row. A [credits] object that is out of shape
+    does not fail the decode: it counts as an unavailable balance and is
+    logged, so the plan windows of the same snapshot stand. *)
 
 val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) result
 (** The result of an [account/rateLimits/read] request, which the app-server
@@ -206,7 +208,9 @@ val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
     Credit row. [amount] and optional [amountLeft] are fixed-point values in
     units of 10^-6 cents; absent [amountLeft] means zero. The currency comes
     from [monthlyChargeLimit], then [monthlyUsed], then the official client's
-    USD fallback. Empty and other balance types add no row. *)
+    USD fallback. Empty and other balance types add no row. A wallet that is
+    out of shape adds no row and is logged; the limits and the [usage] window
+    are still decoded, because the wallet is shown and gates nothing. *)
 
 val decode_ollama_balance : Yojson.Safe.t -> (report, decode_error) result
 (** Ollama [GET https://ollama.com/api/balance]. [included] and [purchased]

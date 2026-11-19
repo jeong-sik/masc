@@ -648,23 +648,30 @@ let test_codex_credits () =
     [ "limit=codex label \"credit balance\" credit_retracted resets=- role=other" ]
     (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
        {|{"rateLimits":{"limitId":"codex","primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":null}},"rateLimitsByLimitId":null}|});
-  check string "a negative Codex balance is refused"
-    "account/rateLimits/read.rateLimits.credits.balance must be 0 or more"
-    (refused Usage.decode_codex_rate_limits_read
+  let retracted = [ "limit=- label \"credit balance\" credit_retracted resets=- role=other" ] in
+  check (list string) "a negative Codex balance revokes the earlier balance and does not fail the read"
+    retracted
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
        {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":"-1"}},"rateLimitsByLimitId":null}|});
-  check string "a numeric balance is kept as a string in the wire schema"
-    "account/rateLimits/read.rateLimits.credits.balance must be a string or null"
-    (refused Usage.decode_codex_rate_limits_read
+  check (list string) "a numeric balance is outside the wire schema and revokes the earlier balance"
+    retracted
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
        {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":25}},"rateLimitsByLimitId":null}|});
   List.iter
     (fun malformed ->
-      check string "non-JSON decimal forms are refused"
-        "account/rateLimits/read.rateLimits.credits.balance must be a decimal number string"
-        (refused Usage.decode_codex_rate_limits_read
+      check (list string) "non-JSON decimal forms revoke the earlier balance"
+        retracted
+        (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
            (Printf.sprintf
               {|{"rateLimits":{"primary":null,"credits":{"hasCredits":true,"unlimited":false,"balance":%S}},"rateLimitsByLimitId":null}|}
               malformed)))
-    [ "0x10"; "1_000" ]
+    [ "0x10"; "1_000" ];
+  check (list string) "credits out of shape keep the plan window of the same read"
+    [ "limit=codex five_hour percent 40 resets=1790200000 role=gates"
+    ; "limit=codex label \"credit balance\" credit_retracted resets=- role=other"
+    ]
+    (decoded_windows Usage.decode_codex_rate_limits_read ~source:"codex.account_rate_limits_read"
+       {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":40,"windowDurationMins":300,"resetsAt":1790200000},"credits":{"hasCredits":true,"unlimited":false,"balance":"-1"}},"rateLimitsByLimitId":null}|})
 ;;
 
 let test_codex_credit_retraction () =
@@ -944,10 +951,21 @@ let test_kimi_booster_wallet () =
   check (list string) "an empty wallet or another balance type adds no credit" []
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[],"booster_wallet":{"balance":{"type":"SUBSCRIPTION"}}}|});
-  check string "a non-currency fixed-point balance is refused"
-    "kimi-coding-usages.booster_wallet.balance.unit must be UNIT_CURRENCY"
-    (refused Usage.decode_kimi_coding_usages
-       {|{"limits":[],"booster_wallet":{"balance":{"type":"BOOSTER","amount":"100000000","amountLeft":"0","unit":"UNIT_TOKEN"}}}|})
+  List.iter
+    (fun (name, wallet) ->
+      check (list string) name
+        [ "limit=- label \"usage (provider resetTime)\" fraction 0.15 resets=1790763016 role=gates" ]
+        (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+           (Printf.sprintf
+              {|{"limits":[],"usage":{"limit":"100","used":"15","remaining":"85","resetTime":"2026-09-30T10:10:16.485718Z"},"booster_wallet":%s}|}
+              wallet)))
+    [ ( "a non-currency fixed-point balance adds no row and keeps the plan window"
+      , {|{"balance":{"type":"BOOSTER","amount":"100000000","amountLeft":"0","unit":"UNIT_TOKEN"}}|} )
+    ; ( "an amountLeft above amount adds no row and keeps the plan window"
+      , {|{"balance":{"type":"BOOSTER","amount":"100","amountLeft":"200","unit":"UNIT_CURRENCY"}}|} )
+    ; ( "a wallet that is not an object adds no row and keeps the plan window"
+      , {|"closed"|} )
+    ]
 ;;
 
 let test_ollama_balance () =

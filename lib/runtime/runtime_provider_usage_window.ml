@@ -256,6 +256,17 @@ let codex_decimal_number raw =
   | exception Yojson.Json_error _ -> None
 ;;
 
+(* The row that revokes a held balance: a read that states no balance, or
+   cannot state one, no longer supports the balance it replaces. *)
+let codex_credit_retraction ~limit_id =
+  { limit_id
+  ; kind = Provider_label "credit balance"
+  ; role = Counts_other_use
+  ; utilization = Credit_retracted
+  ; resets_at = None
+  }
+;;
+
 let codex_credit_window ~path ~limit_id fields =
   match List.assoc_opt "credits" fields with
   | None | Some `Null -> Ok None
@@ -267,15 +278,7 @@ let codex_credit_window ~path ~limit_id fields =
     let* unlimited = required ~path "unlimited" credit_fields in
     let* unlimited = codex_boolean ~path:(member_path path "unlimited") unlimited in
     let* balance = optional_string ~path "balance" credit_fields in
-    let retracted =
-      Some
-        { limit_id
-        ; kind = Provider_label "credit balance"
-        ; role = Counts_other_use
-        ; utilization = Credit_retracted
-        ; resets_at = None
-        }
-    in
+    let retracted = Some (codex_credit_retraction ~limit_id) in
     if unlimited
     then
       Ok
@@ -308,6 +311,20 @@ let codex_credit_window ~path ~limit_id fields =
                 })))
 ;;
 
+(* The credits object is a display row beside the plan windows of the same
+   snapshot, so one that is out of shape must not take them with it. It
+   revokes the balance held for this limit, which a read that cannot state
+   it no longer supports, and the log says why. *)
+let codex_credit_row ~path ~limit_id fields =
+  match codex_credit_window ~path ~limit_id fields with
+  | Ok credit -> credit
+  | Error error ->
+    Log.Runtime.warn
+      "Codex credits not read, the held balance is revoked: %s"
+      (decode_error_to_string error);
+    Some (codex_credit_retraction ~limit_id)
+;;
+
 (* One [RateLimitSnapshot]: the [rateLimits] of an update or a read, or one
    bucket of a read's [rateLimitsByLimitId]. *)
 let codex_snapshot ?keyed_by ~path snapshot =
@@ -318,7 +335,7 @@ let codex_snapshot ?keyed_by ~path snapshot =
   let limit_id = match stated with Some _ -> stated | None -> keyed_by in
   let* primary = codex_window ~path ~limit_id ~slot:"primary" snapshot_fields in
   let* secondary = codex_window ~path ~limit_id ~slot:"secondary" snapshot_fields in
-  let* credit = codex_credit_window ~path ~limit_id snapshot_fields in
+  let credit = codex_credit_row ~path ~limit_id snapshot_fields in
   Ok (List.filter_map Fun.id [ primary; secondary; credit ])
 ;;
 
@@ -844,6 +861,29 @@ let kimi_booster_window ~path fields =
                }))
 ;;
 
+let kimi_wallet_window ~path fields =
+  match List.assoc_opt "booster_wallet" fields with
+  | None | Some `Null -> Ok None
+  | Some wallet ->
+    let wallet_path = member_path path "booster_wallet" in
+    let* wallet_fields = fields_at ~path:wallet_path wallet in
+    if wallet_fields = [] then Ok None else kimi_booster_window ~path:wallet_path wallet_fields
+;;
+
+(* The wallet is a display row beside the limits. The limits gate model calls
+   and the wallet does not, so a wallet that is out of shape adds no row and
+   takes no limit with it: a report the decode refused would leave the
+   recorded limits stale. The log says why there is no row. *)
+let kimi_wallet_row ~path fields =
+  match kimi_wallet_window ~path fields with
+  | Ok booster -> booster
+  | Error error ->
+    Log.Runtime.warn
+      "Kimi booster wallet not read, no credit row: %s"
+      (decode_error_to_string error);
+    None
+;;
+
 (* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
    [usages.*.used_ratio] is not read: on the same response it contradicts
    the top-level [usage] (used 100 of 100 with [limit_7d] ratio 0, while the
@@ -872,14 +912,7 @@ let decode_kimi_coding_usages json =
       in
       Ok [ window ]
   in
-  let* booster =
-    match List.assoc_opt "booster_wallet" fields with
-    | None | Some `Null -> Ok None
-    | Some wallet ->
-      let wallet_path = member_path path "booster_wallet" in
-      let* wallet_fields = fields_at ~path:wallet_path wallet in
-      if wallet_fields = [] then Ok None else kimi_booster_window ~path:wallet_path wallet_fields
-  in
+  let booster = kimi_wallet_row ~path fields in
   distinct_windows
     ~path
     { source = Kimi_coding_usages_read

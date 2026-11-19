@@ -221,7 +221,7 @@ type turn_line =
 - `runtime` 은 runtime 선언의 id 글(`string`)이다.
 - `Closed.turn` 은 `int` 다. 그 턴의 `Opened` 가 시작하는 바이트 offset 이다.
 - `slice.bundle` 은 `Agent_core.Checkpoint_objects.digest` 다.
-- `Opened` 는 `admission` 묶음 대신 `task` 하나를 싣는다. `stimuli` 는 턴 경로에 거는 층(L3a3b4)이 더한다.
+- `Opened` 는 `admission` 묶음 대신 `task` 하나를 싣는다. `stimuli` 는 턴 경로에 거는 층(L3a3b4d)이 더한다.
 
 **줄은 이 모듈이 가진 타입, id, 글만 담는다.** 다른 저장소가 가진 타입의 값은 담지 않는다.
 쓰는 쪽이 줄을 쓸 때 남의 값을 이 모듈의 타입으로 바꾼다. 바꾸는 함수는 모든 경우를 다룬다.
@@ -621,6 +621,10 @@ type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
 Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #52986 의 자리 걷기 층 위에 놓인다.
 
 1. provider 오류가 `Context_overflow` 인 receipt 는 `http_status` 가 무엇이든 그 타입을 지킨다.
+   - 지금 코드가 이미 그렇다. 이 오류를 만드는 곳은 `Glm_chat` codec 하나다(`backend_glm.ml:240`).
+   - 그 codec 은 받은 본문과 성공이 아닌 status 에서만 불린다. 두 경우 모두 receipt 에 status 가 있다(`exact_output_execution.ml:189-222`).
+   - 그래서 status 가 없는 갈래(`exact_output.ml` 의 `None -> Completion_failed`)에는 닿지 않는다. L2 는 이 항목에 코드를 더하지 않는다.
+   - 닿지 않는 그 갈래를 타입에서 없애는 일은 이슈 #53260 에서 한다. Exact 경계의 오류 타입을 고치는 일이다.
 2. 창에 닿아 멈춘 응답은 내용이 있든 없든 자기 생성자다. 지금은 내용이 있으면 `Incomplete_output`, 없으면 `Context_overflow` 다. 뒤쪽은 쓴 생성을 「생성하지 않았다」로 읽게 한다.
 3. `Invalid_request` 는 400 과 422 만 뜻한다. 지금은 어느 갈래에도 들지 않은 status(3xx, 405, 408, 409)가 모두 여기로 떨어진다. 그것은 자기 생성자가 되고 `Silent Unavailable` 이다.
 4. `Incomplete_output` 이 stop reason 을 싣는다. 지금은 stop reason 열한 가지가 값 없는 생성자 하나로 접힌다(`exact_output.ml:961-973`). 그래서 모델이 내용을 거절한 것과 답이 중간에 끝난 것을 가를 수 없다. 칸 하나를 더하고 동작은 바꾸지 않는다.
@@ -1810,7 +1814,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L1a | 답의 타입과 codec(§6.2), 질문 id 의 반쪽 둘, 스냅샷 codec 의 golden fixture | 네 op 의 왕복. 글로 고정한 wire 모양. 답 전체를 버리는 이유 넷과 op 하나의 흠. fixture 가 지금 codec 과 바이트로 같다 |
 | L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기. `removal` 은 답이 만드는 넷만 넣는다. 직접 쓰기의 둘(`Superseded_by`, `Retracted`)은 L5 가 더한다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
 | L1c | 채점기. 프롬프트보다 먼저 고정한다. slot 별로 센다: 버린 답(이유별), 뺀 op(이유별), Memory 를 바꾼 답, 단위가 말한 것 가운데 Memory 에 든 것, merge 가 지킨 것. case 가 기대하는 것은 case 에 token 으로 적고, 채점기는 세기만 한다 | 고정한 답 일곱의 점수표가 시험에 글로 박혀 있다(`test_librarian_scoring`). 채점기를 고치면 그 표가 바뀐다. 아무것도 바꾸지 않은 답은 회수 수가 0 이다. 처음 Memory 가 이미 가진 token 은 세지 않는다 |
-| L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
+| L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다. 기존 소비처는 새 생성자를 전과 같은 분류로 받는다. 새 분류는 slot 결과를 분류하는 층(L6)이 읽는다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
 | L3a1 | 턴 기록의 줄: 줄 타입(자기 모듈 타입만, `Keeper_turn_log`), codec(`Keeper_turn_log_codec`), 줄이 단위를 어디서 끝내는가(§5.3 의 표), 받아들이는 줄 순서(§5.2 끝). 파일을 읽거나 쓰지 않는다. 턴을 깨운 것(`stimuli`)은 L3a3 이 event queue 를 바꾸는 함수와 함께 더한다 | 줄 모양마다 왕복 시험과 글로 박은 모양. 표의 세 행. 순서 규칙의 오류 다섯. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다 |
 | L3a2 | 턴 기록의 파일(`Keeper_turn_log_store`): 꼬리 읽기와 끝을 확인하는 덧붙임. 꼬리는 끝에서 뒤로 필요한 줄까지만 읽는다. 단위를 끝낸 마지막 줄과 마지막 `Opened` 나 `Closed` 다. 메모리에 두는 것은 없다 | 줄 종류마다 꼬리가 말하는 것. 한 번의 덧붙임에 두 줄. 낡은 끝으로 덧붙이면 아무것도 쓰지 않는다. 끊긴 조각은 줄이 아니고 다음 덧붙임이 잘라 낸다. 해석 안 되는 줄이 꼬리에 있으면 덧붙이지 않는다 |
 | L3a2b | 닫힌 메시지 세기와 slice(`Keeper_turn_log_marks`): head 의 segment 와 닫힌 턴이 가진 메시지 수, 그리고 메시지 번호 둘 사이를 bundle 조각으로 적는 함수. object 를 읽지 않는다. 범위가 head 앞에서 시작하면 부르는 쪽이 앞 segment 를 읽어 붙인다 | 열린 메시지는 세지 않는다. 턴 안에서 시작하고 끝나는 범위. 턴을 어떻게 나눠도 같은 범위가 같은 메시지를 가리킨다(purge 가 bundle 을 합친 뒤에도 같다) |
@@ -1818,7 +1822,10 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b1 | 저장된 Agent-Core 이력의 head 읽기(`Keeper_turn_log_head`). 닫힌 메시지 수, 열린 메시지 수, head 가 가진 턴을 낸다. message object 는 읽지 않는다. checkpoint 가 없거나 이 빌드가 바꿔 쓰는 옛 버전이면 빈 이력으로 읽는다. 범위가 head 의 턴보다 앞에서 시작하면 앞 segment 를 그 이름으로 읽어 붙인다 | 저장소의 저장 함수로 만든 이력에서 센다. segment 하나를 넘는 이력에서 segment 안에서 시작하는 범위를 가리킨다. 「빈 이력으로 읽는다」와 「그 상태에서 턴이 새로 시작한다」가 네 상태에서 같다. 네 상태는 checkpoint 없음, 옛 버전, 새 버전, head 가 아닌 바이트다. 옛 버전 뒤의 첫 저장은 같은 session 의 이력이다. segment 가 없거나 다른 바이트면 오류다 |
 | L3a3b2 | 나머지 저장소의 끝 읽기(`Keeper_turn_log_ends`). official-client 파일 둘과 chat 파일은 마지막 줄바꿈 바로 뒤의 offset 이다. 외부 저장소는 온전한 행의 수다. 저장소마다 그 저장소가 쓰는 잠금 아래에서 읽는다. 아직 없는 파일의 끝은 0 이다 | 반만 쓰인 행은 끝 밖이다. 그 행이 다 쓰이면 끝이 행 하나만큼 옮겨 간다. 파일이 아닌 것이 그 자리에 있으면 0 이 아니라 오류이고, 어느 저장소인지 말한다 |
 | L3a3b3 | 기록하기 한 번: 꼬리 읽기, head 읽기, 끝자리 잡기, `plan`, 앞 segment 읽기, 덧붙임을 잇는다. 끝이 달라졌으면 꼬리부터 다시 한다 | 실제 파일과 저장소의 저장 함수로 시험한다. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). head 가 가진 턴보다 긴 범위는 segment 를 읽어 가리킨다. 줄어든 head 는 reset 뒤에 처음부터 실린다. 수로 보이지 않는 head 교체는 옛 수까지의 메시지를 싣지 않는다(§22.4). 끊긴 덧붙임이 남긴 조각 뒤에도 다음 줄이 써진다. 읽지 못한 head 로는 줄을 쓰지 않는다 |
-| L3a3b4 | Agent-Core 턴 경로에 걸기(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 끝나는 길마다 `Closed` 가 정확히 하나. 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L3a3b4a | 턴이 자기 줄을 쓴다. 받아들일 때 `Opened`, 끝날 때 `Closed` 다. 두 줄을 쓰는 곳은 하나다(`Keeper_turn_log_turn.around`). 옛 경계 파일 옆에 쓴다. 닫는 저장이 한 일을 턴이 끝까지 들고 간다. 카운터 `turn_log_append_failed` | 끝나는 길마다 `Closed` 가 정확히 하나다. 길은 돌려줌, 예외, 취소다. 줄을 못 써도 턴의 답과 예외가 그대로다. 실패한 저장은 `Save_failed`, 쓰지 않은 저장은 `Stale_save` 로 실린다 |
+| L3a3b4b | 받아들임은 head 의 열린 메시지를 닫지 않는다. §5.2 와 모델(`LibrarianTurnLog`)을 그렇게 고친다. 코드는 L3a3b4a 그대로다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다. Keeper 만들기의 첫 저장, 멈춘 턴을 잇는 저장(gate, checkpoint, runtime), 입력을 기다린 답의 저장이다. 받아들임이 닫으면 이어 가는 턴의 메시지가 Task 없이 실린다 | 모델의 정상 설정이 모두 통과한다. 받아들임이 닫는다는 규칙에 기대던 설정과 속성이 없어진다. 열린 메시지는 그것을 닫은 저장의 단위에 든다 |
+| L3a3b4c | 프로세스 시작 단계. checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 돈다. 열린 메시지를 닫고 `Closed {Process_exited}` 나 `Log_started` 를 쓴다 | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 줄을 못 써도 프로세스 시작이 그대로 간다 |
+| L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다 | payload 갈래마다 줄 타입이 하나다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |

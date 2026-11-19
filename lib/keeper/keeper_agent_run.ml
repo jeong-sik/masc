@@ -698,6 +698,25 @@ let run_turn
     ~execution_scope:schema_execution_scope
     ~cause:None @@ fun () ->
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:manifest_keeper_turn_id in
+  (* From here to the end of the function is the turn the log names. Its
+     [Opened] is written once the turn's context is prepared and before
+     the turn dispatches, and its [Closed] on every way out of what
+     follows. A turn whose context could not be prepared returned above
+     and is in no line. *)
+  Keeper_turn_log_turn.around
+    ~place:
+      { keepers_dir = Workspace.keepers_runtime_dir config
+      ; base_path = config.base_path
+      ; keeper_name = meta.name
+      ; session_dir = session.session_dir
+      ; session_id = trace_id
+      }
+    ~turn_ref
+    ~runtime:runtime_id_string
+    ~task:(Keeper_turn_log_turn.task_evidence ctx.task_context)
+    ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
+      Result.is_ok settlement.result)
+  @@ fun turn_log ->
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =
@@ -1932,6 +1951,7 @@ let run_turn
                                !last_persisted_checkpoint_ref
                              ~final_agent_core_turn_ordinal
                              ~checkpoint_persistence_error
+                             ~turn_log
                              ~post_turn_t0
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context

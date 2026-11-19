@@ -24,6 +24,9 @@ module Log_id : sig
 
   val to_string : t -> string
   val equal : t -> t -> bool
+
+  (** A new id from the process's random source. *)
+  val fresh : unit -> t
 end
 
 (** Where each input store ended at one moment. *)

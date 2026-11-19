@@ -778,7 +778,7 @@ let acknowledge_broadcast view receipt =
         (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
   | (Ok _ | Error _), (Ok _ | Error _) -> view
 let evidence_rows ~width prompt =
-  let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
+  let choice index label = (if prompt.choice=index then "› " else "  ") ^ label in
   let wrap = List.concat_map (document_rows ~width) in
   wrap [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
           (if prompt.row_count=1 then "" else "s") prompt.owner_title;
@@ -905,7 +905,7 @@ let timeline_lines ~instances ?selected ~width rows =
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
-          (match selected with Some (row : Row.row) when row.lane_id=lane -> ">" | _ -> " ")
+          (match selected with Some (row : Row.row) when row.lane_id=lane -> "›" | _ -> " ")
           ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
       @ ["o event · v value · * relation"]
       @ List.filter_map (fun instance ->
@@ -960,7 +960,7 @@ let configuration_lines view snapshot = match snapshot.configuration with
   | Some config ->
       ["TOML installations · " ^ config.directory ^ (if config.complete then " · inventory complete" else " · inventory partial")]
       @ List.concat (List.mapi (fun index (declaration : declaration) ->
-        [Printf.sprintf "%s %s · %s" (if view.configuration_cursor=index then ">" else " ")
+        [Printf.sprintf "%s %s · %s" (if view.configuration_cursor=index then "›" else " ")
            (Option.value ~default:"unresolved installation" declaration.installation_id) declaration.source_path;
          (match declaration.enabled with
           | Some false -> "   Configured off"
@@ -1005,7 +1005,7 @@ let technical_rows ~width = function
 let instance_parts view instances =
   List.concat (List.mapi (fun i item ->
     technical_text [Printf.sprintf "%s %s · %s · %s · run %s · rev %s · seq %d · rows %d"
-       (if view.instance_cursor=i then ">" else " ") item.id item.title (phase_label item.phase)
+       (if view.instance_cursor=i then "›" else " ") item.id item.title (phase_label item.phase)
        item.run_id item.revision item.observation_seq item.rows_count;
      "   TOML " ^ Option.value ~default:"manual attachment" item.source_path;
      "   binding"]
@@ -1897,7 +1897,7 @@ let overview_lines ~width view =
              | Retained_runs -> [history; "h:current installations"]))]
         @ texts [""] @ [Overview_drawn empty]
         @ List.concat_map (fun (index,item) ->
-            let marker = if index=view.instance_cursor then "> " else "  " in
+            let marker = if index=view.instance_cursor then "› " else "  " in
             let role_header = match view.overview_mode with
               | Retained_runs -> []
               | Current_installations ->
@@ -2258,7 +2258,7 @@ let result_list_spans (item : instance) ~(selected : Row.row option) rows =
     Option.fold ~none:false ~some:(fun (chosen : Row.row) -> String.equal chosen.id row.id) selected in
   let entry (row : Row.row) =
     let title = Masc.Tui_terminal_text.sanitize_terminal_text row.title in
-    if is_selected row then Span.text (bold_style ()) ("> " ^ title)
+    if is_selected row then Span.text (bold_style ()) ("› " ^ title)
     else Span.text Span.plain ("  " ^ title) in
   let rec groups = function
     | [] -> []
@@ -2400,7 +2400,7 @@ let detail_lines ~height ~width view =
           if record_rows=[] then empty_result_rows ~width view item
           else List.concat_map (fun (row : Row.row) ->
             technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
-                 selected then "> " else "  ")
+                 selected then "› " else "  ")
              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
              "Row " ^ row.id]
             @ [Technical_json {value=`Assoc row.fields;indent=0}]
@@ -2559,7 +2559,7 @@ let flow_rows ?(embedded=false) view =
          @ [Fact_text ""; Fact_heading "Declared inputs and outputs"]
          @ List.map text (List.concat_map (fun instance ->
            let target = name instance in
-           [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
+           [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "› " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
            @ (match flow_inputs instance.binding with
               | Error detail -> ["  Invalid source binding: " ^ detail]
               | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
@@ -2631,12 +2631,12 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
                  @ diagnostic_lines view)
            @ key_rows ~width ["Up/Down:choose"; "Enter:open"; "Esc:cancel"]
            @ wrap (List.mapi (fun position (entry : row_entry) ->
-               (if position=menu.cursor then "> " else "  ") ^ entry.label
+               (if position=menu.cursor then "› " else "  ") ^ entry.label
                ^ (match entry.filled with
                   | Ok _ -> ""
                   | Error unfilled ->
                       " · unavailable: " ^ String.concat "; " (List.map unfilled_text unfilled))) entries
-             @ [(if menu.cursor=List.length entries then "> " else "  ") ^ "Other action"])
+             @ [(if menu.cursor=List.length entries then "› " else "  ") ^ "Other action"])
        | Some (Row_form {label;_}) ->
            (* One sentence for what sending does: which instance receives
               which action. *)

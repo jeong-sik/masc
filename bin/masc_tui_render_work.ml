@@ -1304,13 +1304,15 @@ let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
     ~after:phase ^ phase in
   header :: planning_stale_notice_rows state ~cols
 
+let planning_detail_chrome_rows = max 0 (framed_chrome_rows - 2)
+
 let planning_detail_height ~rows ~header_rows ~action_rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)
+  Masc_tui_scroll.content_height ~rows ~chrome:(planning_detail_chrome_rows + max 0 (header_rows - 1) + action_rows)
     ~count ~preview_keep:None
 
 let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
   let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
-  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
+  planning_detail_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
 
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1319,7 +1321,7 @@ let planning_detail_viewport (state : state) =
   match state.planning_mode, state.planning with
   | Planning_detail goal_id, Some snapshot ->
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
-       | None -> 0, max 1 (rows - framed_chrome_rows)
+       | None -> 0, max 1 (rows - planning_detail_chrome_rows)
        | Some goal ->
            let action_rows = List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed:(goal_action_armed_for state goal_id)
              ~drop_reason:(goal_drop_reason_for state goal_id) goal) in
@@ -1329,7 +1331,7 @@ let planning_detail_viewport (state : state) =
            if planning_detail_fits ~rows ~header_rows ~action_rows ~count
            then count, planning_detail_height ~rows ~header_rows ~action_rows ~count
            else 0, 1)
-  | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - framed_chrome_rows)
+  | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - planning_detail_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
   let headers = planning_detail_header_rows state ~cols goal in
@@ -1343,7 +1345,6 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | Planning_scroll_offset value -> value
     | Planning_scroll_candle _ -> candle_scroll in
   let scroll = Masc_tui_scroll.normalize ~count ~height requested_scroll in
-  box_top buf cols;
   (match headers with
    | [] -> ()
    | title :: rest ->
@@ -1359,7 +1360,6 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | None -> box_empty buf cols
     | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
   done;
-  box_bottom buf cols;
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
@@ -1415,7 +1415,7 @@ let render_planning_detail (state : state)
       in
       (* The goal filter narrows to a phase; the goals it leaves out are on
          the other side of a filter, not behind a page boundary. *)
-      write_list_sidebar_selection left_buf ~rows ~cols:left_cols
+      write_list_sidebar_selection ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"목표" ~en:"Goals")
         ~holding:None
         ~focused:false

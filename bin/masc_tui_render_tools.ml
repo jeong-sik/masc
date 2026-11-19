@@ -350,10 +350,11 @@ let async_request_inventory_lines (state : state) =
                Say.as_received (Terminal_text.single_line request.ar_keeper_name);
                status; elapsed; ownership ]
       in
+      let row_style = if selected then Theme.selection_style () else tone in
       List_entry
         [ (match changes_at with
-           | Some at -> Timed (tone, text, at)
-           | None -> Row (tone, text)) ]) requests
+           | Some at -> Timed (row_style, text, at)
+           | None -> Row (row_style, text)) ]) requests
     in
     let recovery_lines = match recovery with
       | None ->
@@ -1247,8 +1248,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           (skill_source_picker_prefix (Say.of_ko_flag (fun ~ko -> Masc_tui_pick_list.summary ~ko view))
            @ (if view.rows = [] then [Theme.warn (), Say.both ~ko:" 맞는 출처 없음" ~en:" No matching source"] else
                List.mapi (fun index source ->
-                 (if view.selected_row = Some index then Theme.selection_style () else Ansi.dim),
-                 Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
+                 let selected = view.selected_row = Some index in
+                 (if selected then Theme.selection_style () else Ansi.dim),
+                 Say.code (if selected then " › " else "   ")
+                 ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
     ; cursor = None
     ; card = None
     ; row_changes = []

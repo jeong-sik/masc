@@ -103,7 +103,7 @@ let reachable_large_list () =
   let snapshot=Catalog.{directory="/workspace";parent=None;entries=List.init 100 (fun i -> Folder (Printf.sprintf "/workspace/folder-%03d" i))} in
   let state=Browser.receive (Catalog.to_json snapshot) (Browser.create ()) |> ok |> move "end" in
   let lines=Browser.lines ~height:12 ~render:(fun s->[s]) state in
-  check bool "selected last row visible in short frame" true (List.exists ((=) "> Folder  folder-099") (List.take 12 lines));
+  check bool "selected last row visible in short frame" true (List.exists ((=) "› Folder  folder-099") (List.take 12 lines));
   (match Browser.handle ~key:"enter" state |> ok with Browse (Some path) -> check string "last folder opens" "/workspace/folder-099" path | _ -> fail "last row unreachable");
   check bool "root cannot navigate above workspace" true (match Browser.handle ~key:"left" state |> ok with Updated _ -> true | _ -> false)
 

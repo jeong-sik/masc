@@ -171,7 +171,7 @@ let viewport_and_receipt () =
   (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
   List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> [ ] model " ^ string_of_int cursor) (List.map Login.row_text (fst (Login.visible_lines ~height:6 ~width t)))))
+      (List.mem ("› [ ] model " ^ string_of_int cursor) (List.map Login.row_text (fst (Login.visible_lines ~height:6 ~width t)))))
     [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
@@ -831,7 +831,8 @@ let account_emails_beside_providers () =
       let t = Login.create requested in
       ok (Login.inventory t json);
       List.filter_map (fun row ->
-        let text = String.sub row 2 (String.length row - 2) in
+        let prefix_len = if String.starts_with ~prefix:"› " row then String.length "› " else 2 in
+        let text = String.sub row prefix_len (String.length row - prefix_len) in
         if String.equal text "+ 새 계정" then None else Some text)
         (List.map Login.row_text (List.tl (Login.lines t))))
       ["codex"; "claude"; "muse"; "antigravity"] in
@@ -871,7 +872,7 @@ let account_emails_beside_providers () =
   check bool "rows for no listed integration are counted, not shown" true
     (String.ends_with ~suffix:" 어느 공급자 것인지 모르는 계정 이메일 2개는 보여 주지 않습니다." t.notice);
   check (list string) "the clients list each client once with its account count"
-    [ "> Codex · 계정 1"; "  Claude Code · 계정 1"; "  Antigravity · 계정 1"; "  Muse · 계정 1" ]
+    [ "› Codex · 계정 1"; "  Claude Code · 계정 1"; "  Antigravity · 계정 1"; "  Muse · 계정 1" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
   let t = Login.create "" in
@@ -964,10 +965,10 @@ let clients_then_accounts () =
   let rows t = List.map Login.row_text (List.tl (Login.lines t)) in
   let t = Login.create "" in ok (Login.inventory t json);
   check (list string) "one row per client; a catalog entry is not an account"
-    ["> Codex · 계정 2"; "  Claude Code"] (rows t);
+    ["› Codex · 계정 2"; "  Claude Code"] (rows t);
   check bool "Enter opens the client's accounts" true (Login.key t "\r" = Login.Nothing);
   check (list string) "a new-account row, then the accounts"
-    ["> + 새 계정"; "  codex_one"; "  codex_two"] (rows t);
+    ["› + 새 계정"; "  codex_one"; "  codex_two"] (rows t);
   (match Login.key t "\r" with
    | Login.Start {provider; existing = false} -> check string "a new account goes through the catalog entry" "codex" provider.id
    | _ -> fail "Enter on + 새 계정 did not start a new login");
@@ -991,7 +992,7 @@ let clients_then_accounts () =
   check bool "Esc on the clients closes" true (Login.key t "esc" = Login.Close);
   let t = Login.create "codex_two" in ok (Login.inventory t json);
   check (list string) "/login <account> opens its client on that account"
-    ["  + 새 계정"; "  codex_one"; "> codex_two"] (rows t)
+    ["  + 새 계정"; "  codex_one"; "› codex_two"] (rows t)
 (* The server leaves a client's catalog entry out when runtime.toml declares a
    provider with the same id. The new-account row is still there and logs in
    through one of the client's accounts, without its account reference. *)

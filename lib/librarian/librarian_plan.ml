@@ -114,14 +114,38 @@ let screen ~shown ~current ~removed_since ~named_before number op =
   Ok ({ number; removes; states }, named)
 ;;
 
-let observed_fact ~at ~trace_id (fact : Answer.new_fact) : fact =
+let observed_fact ~first_seen ~at ~trace_id (fact : Answer.new_fact) : fact =
   { claim = fact.claim
   ; category = fact.category
-  ; first_seen = at
+  ; first_seen
   ; last_seen = at
   ; origin = { kind = Injected; trace_id }
   ; basis = Observed fact.observation
   }
+;;
+
+(* For each claim a live op states, the earliest [first_seen] of the facts
+   the ops stating it replace. A merge or a revision says what those facts
+   said, so Memory has known it since the oldest of them was first seen. A
+   claim that replaces nothing has no entry: it is first seen at the commit. *)
+let replaced_since ~by_id live =
+  List.fold_left
+    (fun earliest op ->
+       match op.states with
+       | None -> earliest
+       | Some (successor, (_ : Answer.new_fact), (_ : int list)) ->
+         List.fold_left
+           (fun earliest (replaced, (_ : Effects.removal)) ->
+              match By_id.find_opt replaced by_id with
+              | None -> earliest
+              | Some (fact : fact) ->
+                (match By_id.find_opt successor earliest with
+                 | Some seen when seen <= fact.first_seen -> earliest
+                 | Some _ | None -> By_id.add successor fact.first_seen earliest))
+           earliest
+           op.removes)
+    By_id.empty
+    live
 ;;
 
 (* Offsets of one fact from every op that stated it: ascending, none twice. *)
@@ -145,6 +169,7 @@ let sources_of stated =
 
 let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   let current = ids_of facts in
+  let by_id = List.fold_left (fun by_id fact -> By_id.add (memory_id fact) fact by_id) By_id.empty facts in
   let removed_since =
     List.fold_left
       (fun by_id (id, seq) -> By_id.add id seq by_id)
@@ -174,6 +199,7 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
     in
     let kept = List.filter (fun fact -> not (By_id.mem (memory_id fact) removal_of)) facts in
     let kept_ids = ids_of kept in
+    let replaced_since = replaced_since ~by_id live in
     let touched, added, (_ : Ids.t) =
       List.fold_left
         (fun (touched, added, added_ids) op ->
@@ -184,7 +210,15 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
              then Ids.add id touched, added, added_ids
              else if Ids.mem id added_ids
              then touched, added, added_ids
-             else touched, observed_fact ~at ~trace_id fact :: added, Ids.add id added_ids)
+             else (
+               let first_seen =
+                 match By_id.find_opt id replaced_since with
+                 | Some seen -> Float.min seen at
+                 | None -> at
+               in
+               ( touched
+               , observed_fact ~first_seen ~at ~trace_id fact :: added
+               , Ids.add id added_ids )))
         (Ids.empty, [], Ids.empty)
         live
     in

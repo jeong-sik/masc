@@ -319,21 +319,25 @@ let top_edge ~ko ~style ~width ~shape edge =
   in
   let opening = start ^ glyphs.h in
   let closing = glyphs.h ^ finish in
+  let meta =
+    match edge.focus with
+    | Unfocused -> style.border
+    | Focused_list | Focused_other -> style.focused_border
+  in
   match left_cells > 0, count with
   | false, None -> paint border (start ^ repeat glyphs.h (width - 2) ^ finish)
   | true, None ->
       paint border (opening ^ " ") ^ left
       ^ paint border (" " ^ repeat glyphs.h (width - left_cells - left_only_cells) ^ finish)
   | false, Some count ->
-      paint border
-        (opening
-         ^ repeat glyphs.h (width - cells count - count_only_cells)
-         ^ " " ^ count ^ " " ^ closing)
+      paint border (opening ^ repeat glyphs.h (width - cells count - count_only_cells) ^ " ")
+      ^ paint meta count ^ paint border (" " ^ closing)
   | true, Some count ->
       (* [fits] left at least one rule cell between the two. *)
       let rule = width - left_cells - cells count - left_and_count_cells + 1 in
       paint border (opening ^ " ") ^ left
-      ^ paint border (" " ^ repeat glyphs.h rule ^ " " ^ count ^ " " ^ closing)
+      ^ paint border (" " ^ repeat glyphs.h rule ^ " ")
+      ^ paint meta count ^ paint border (" " ^ closing)
 
 let bottom_fit ~ko ~width ~hidden =
   let room = width - bottom_text_cells in
@@ -342,17 +346,20 @@ let bottom_fit ~ko ~width ~hidden =
   else if cells (Value.Count.grouped hidden) <= room then Number_only
   else Plain
 
-let format_footer_keys ~glyphs ~style ~border ~room keys =
+let format_footer_keys ~glyphs ~style ~border ~meta ~room keys =
   if room <= 0 || keys = [] then ("", 0)
   else
     let sep = border ^ " " ^ glyphs.h ^ " " ^ style.reset in
     let sep_cells = 3 in
+    let paint_meta text =
+      if String.equal meta "" then text else meta ^ text ^ style.reset
+    in
     let render_one { key; label } =
       let k = Masc_tui_theme.strip_sgr key in
       let l = Masc_tui_theme.strip_sgr label in
       let text =
-        if String.equal l "" then style.title_style ^ k ^ style.reset
-        else style.title_style ^ k ^ style.reset ^ border ^ " " ^ l ^ style.reset
+        if String.equal l "" then k
+        else k ^ " " ^ paint_meta l
       in
       let width = cells k + (if String.equal l "" then 0 else 1 + cells l) in
       (text, width)
@@ -368,9 +375,11 @@ let format_footer_keys ~glyphs ~style ~border ~room keys =
     let kept, used = collect [] 0 keys in
     (String.concat sep kept, used)
 
-let bottom_edge ~ko ~glyphs ~style ~border ~width ~footer_keys hidden =
+let bottom_edge ~ko ~glyphs ~style ~border ~meta ~width ~footer_keys hidden =
   let reset = style.reset in
-  let paint text = border ^ text ^ reset in
+  let paint code text =
+    if String.equal code "" then text else code ^ text ^ reset
+  in
   let right_text =
     match bottom_fit ~ko ~width ~hidden with
     | Says_more -> Some (Value.Count.more ~ko hidden)
@@ -387,23 +396,25 @@ let bottom_edge ~ko ~glyphs ~style ~border ~width ~footer_keys hidden =
     | None -> width - 6
   in
   let left_text, left_cells =
-    format_footer_keys ~glyphs ~style ~border ~room:key_room footer_keys
+    format_footer_keys ~glyphs ~style ~border ~meta ~room:key_room footer_keys
   in
   match left_cells > 0, right_text with
-  | false, None -> paint (glyphs.bl ^ repeat glyphs.h (width - 2) ^ glyphs.br)
+  | false, None -> paint border (glyphs.bl ^ repeat glyphs.h (width - 2) ^ glyphs.br)
   | false, Some text ->
-      paint
+      paint border
         (glyphs.bl
          ^ repeat glyphs.h (width - right_cells - bottom_text_cells + 1)
-         ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
+         ^ " ")
+      ^ paint meta text ^ paint border (" " ^ glyphs.h ^ glyphs.br)
   | true, None ->
       let rule = max 0 (width - left_cells - 5) in
-      paint (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
-      ^ paint (" " ^ repeat glyphs.h rule ^ glyphs.br)
+      paint border (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
+      ^ paint border (" " ^ repeat glyphs.h rule ^ glyphs.br)
   | true, Some text ->
       let rule = max 1 (width - left_cells - right_cells - 8) in
-      paint (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
-      ^ paint (" " ^ repeat glyphs.h rule ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
+      paint border (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
+      ^ paint border (" " ^ repeat glyphs.h rule ^ " ")
+      ^ paint meta text ^ paint border (" " ^ glyphs.h ^ glyphs.br)
 
 let scrollbar_cells ~rows { offset; visible; total } =
   if rows <= 0 || visible <= 0 || total <= visible then None
@@ -487,8 +498,13 @@ let render_body ?scrollbar ~ko ~style ~width ~height edge body =
              ~scroll_cell content)
         (shown @ filler)
     in
+    let meta =
+      match edge.focus with
+      | Unfocused -> style.border
+      | Focused_list | Focused_other -> style.focused_border
+    in
     (top_edge ~ko ~style ~width ~shape:Full edge :: body_rows)
-    @ [ bottom_edge ~ko ~glyphs ~style ~border ~width ~footer_keys:edge.footer_keys hidden ]
+    @ [ bottom_edge ~ko ~glyphs ~style ~border ~meta ~width ~footer_keys:edge.footer_keys hidden ]
   end
 
 let render ?scrollbar ~ko ~style ~width ~height card =

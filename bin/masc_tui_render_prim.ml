@@ -5976,7 +5976,8 @@ let context_retained_body_lines ~width text =
 let section_rule_text = Masc_tui_ansi.Section.rule_text
 let section_heading_style = Masc_tui_ansi.Section.style
 
-let section_heading_line title = section_heading_style ^ section_rule_text title ^ Ansi.reset
+let section_heading_line title =
+  Masc_tui_ansi.Section.styled_heading ~rule_style:(Theme.recede ()) title
 
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
@@ -5990,16 +5991,16 @@ let context_exact_item_detail_lines ~width ~scale ~part
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ section_heading_line "RETAINED ITEM"
+  [ section_heading_line "Retained item"
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
-  ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+  ; Theme.recede () ^ Masc_tui_token_scale.note scale ^ Ansi.reset
   ; ""
-  ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
+  ; Theme.recede () ^ "Retained pre-dispatch content" ^ Ansi.reset
   ]
   @ body
 
@@ -7050,7 +7051,8 @@ let studio_panel ~width ~title ~lines =
   let border left right =
     edge ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
-  [ Theme.info () ^ "┌ " ^ heading ^ " "
+  [ edge ^ "┌ " ^ Ansi.reset ^ Ansi.bold ^ heading ^ Ansi.reset
+    ^ edge ^ " "
     ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
     ^ "┐" ^ Ansi.reset ]
   @ List.map (fun line ->

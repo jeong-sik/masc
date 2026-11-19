@@ -1,4 +1,5 @@
 module Context = Keeper_librarian_context
+module Readership = Keeper_librarian_context_readership
 module References = Set.Make (String)
 
 let execution_basis ~base_path ~keeper_name =
@@ -16,29 +17,22 @@ let execution_basis ~base_path ~keeper_name =
   | None, _ | Some _, (Owner_absent | Owner_projection {meta = None; _}
       | Owner_projection {stopping = true; _}) -> None
 
+let board_source_withheld = "Board queue source withheld pending authorized routing/readership"
+
+let withheld_failure = function
+  | Readership.Board_source_unreadable -> board_source_withheld
+  | Readership.Event_source_undecodable -> "Retained event source unavailable"
+
 let capture ~base_path ~keepers_dir ~keeper_name =
   let before = execution_basis ~base_path ~keeper_name in
   let failures = ref [] in
-  (* Queue observers do not run through the Owner's profile refresh. Resolve
-     the effective TOML aliases here rather than using its cached projection. *)
-  let meta = Keeper_meta_store.read_effective_meta
-    (Workspace.default_config base_path) keeper_name in
-  let can_project stimulus =
-    let allowed = match meta with
-      | Ok (Some meta) -> Keeper_board_audience.can_project_queued_stimulus ~meta stimulus
-      | Ok None | Error _ ->
-        (match stimulus.Keeper_event_queue.payload with
-         | Keeper_event_queue.Board_routing_pending _ | Board_signal _ | Board_attention _ -> false
-         | Keeper_event_queue.Bootstrap | Fusion_completed _ | Schedule_due _
-         | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-         | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
-         | Workspace_message _ | Delegate_completed _ | Composition_completed _
-         | Tool_result_ready _ | Owned_job_completed _ -> true) in
-    if not allowed then failures := "Board queue source withheld pending authorized routing/readership" :: !failures;
-    allowed in
+  let reader = Readership.reader ~base_path ~keeper_name in
   let events = match Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name with
     | Ok selections -> selections
-      |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) -> can_project selection.source)
+      |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        let shown = Readership.can_project reader selection.source in
+        if not shown then failures := board_source_withheld :: !failures;
+        shown)
       |> List.map Context.source_of_event
     | Error detail -> failures := ("events: " ^ detail) :: !failures; [] in
   let path = Keeper_chat_operation_store.path_for_keeper
@@ -53,20 +47,9 @@ let capture ~base_path ~keepers_dir ~keeper_name =
   let previous = match Context.read_for_update ~keepers_dir ~keeper_id:keeper_name with
     | Ok snapshot ->
       Option.map (fun (snapshot : Context.snapshot) ->
-        let sources = List.filter (fun (source : Context.source) ->
-          if not (String.starts_with ~prefix:"event:" source.reference) then true
-          else match Keeper_event_queue.stimulus_of_yojson source.content with
-            | Ok stimulus -> can_project stimulus
-            | Error _ -> failures := "Retained event source unavailable" :: !failures; false)
-          snapshot.sources in
-        let allowed = List.fold_left (fun set (source : Context.source) -> References.add source.reference set)
-          References.empty sources in
-        (* A merged context may contain any of its sources. Withhold the whole
-           pocket if one source is private/unresolved; keep stored data intact. *)
-        let pockets = List.filter (fun (pocket : Context.pocket) ->
-          List.for_all (fun reference -> References.mem reference allowed) pocket.sources)
-          snapshot.pockets in
-        { snapshot with sources; pockets }) snapshot
+        let shown, withheld = Readership.shown reader snapshot in
+        List.iter (fun reason -> failures := withheld_failure reason :: !failures) withheld;
+        shown) snapshot
     | Error detail -> failures := ("previous context: " ^ detail) :: !failures; None in
   let _, reversed_sources = List.fold_left (fun (seen, acc) (source : Context.source) ->
     if References.mem source.reference seen then seen, acc

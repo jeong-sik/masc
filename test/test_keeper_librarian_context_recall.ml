@@ -475,47 +475,164 @@ let test_missing_guidance_precedes_artifact_publication () =
      = Some (Context.version next))
 
 
-let test_unresolved_board_context_withholds_existing_artifact () =
+let board_stimulus : Keeper_event_queue.board_stimulus =
+  {kind=Post_created;author="actor";title="PRIVATE_TITLE";content="PRIVATE_BODY";
+   hearth=None;updated_at=Some 10.;audience=Audience_targets ["reader"]}
+
+(* A Board row whose routing is not resolved may never be shown, and a Board
+   signal may not be shown to a Keeper whose meta cannot be read. Both stand
+   for a source this Keeper cannot read now, with no Board to set up. *)
+let unreadable_board_payloads =
+  [Keeper_event_queue.Board_routing_pending board_stimulus;
+   Keeper_event_queue.Board_signal board_stimulus]
+
+let board_source payload : Context.source =
+  {reference="event:unreadable-board";
+   content=Keeper_event_queue.stimulus_to_yojson
+     {post_id="private-parent";urgency=Normal;arrived_at=10.;payload}}
+
+let private_pocket (source : Context.source) : Context.pocket =
+  {id="private";merge_contexts=[];sources=[source.reference];context="PRIVATE_RETAINED_CONTEXT";
+   next_steps=["PRIVATE_NEXT_STEP"];completeness=Context.Current}
+
+(* Two stored pockets: one over a source every Keeper may read, one over an
+   unreadable Board source. *)
+let commit_mixed ~keepers_dir payload =
+  let independent = commit ~keepers_dir ~previous:None "INDEPENDENT_CONTEXT" in
+  let source = board_source payload in
+  ok (Context.commit ~keepers_dir ~keeper_id:"keeper"
+    ~expected_version:(Some (Context.version independent)) ~sources:[source]
+    [private_pocket source])
+
+let artifact_body ~base_path (reference : Tool_output.artifact_ref) =
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.sha256 with
+  | Ok (Some body) -> body
+  | Ok None -> fail "the index names an artifact that is not stored"
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+
+let index_count ~keepers_dir field =
+  Yojson.Safe.from_file (Recall.path ~keepers_dir ~keeper_name:"keeper")
+  |> Yojson.Safe.Util.member field |> Yojson.Safe.Util.to_int
+
+let stored_context ~keepers_dir =
+  Fs_compat.load_file (Context.path ~keepers_dir ~keeper_id:"keeper")
+
+let test_unreadable_board_pocket_is_left_out () =
+  List.iter (fun payload -> with_store @@ fun ~base_path ~keepers_dir ->
+    let mixed = commit_mixed ~keepers_dir payload in
+    check int "both pockets are stored" 2 (List.length mixed.pockets);
+    let stored = stored_context ~keepers_dir in
+    ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" mixed);
+    let published = artifact_of_index ~keepers_dir in
+    let body = artifact_body ~base_path published in
+    check bool "the independent pocket is published" true
+      (String_util.contains_substring body "INDEPENDENT_CONTEXT");
+    check bool "the pocket over the unreadable Board source is not" false
+      (String_util.contains_substring body "PRIVATE_RETAINED_CONTEXT");
+    check int "the index counts the published pocket" 1 (index_count ~keepers_dir "pocket_count");
+    check int "and the source of that pocket" 1 (index_count ~keepers_dir "source_count");
+    let recall = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+    check bool "recall names the published artifact" true
+      (String_util.contains_substring recall published.sha256);
+    check string "the stored context is not changed" stored (stored_context ~keepers_dir))
+    unreadable_board_payloads
+
+(* Which pockets are readable can change while the revision stays. An index
+   published while the Board pocket was readable names the same revision and
+   points at bytes that hold its text. *)
+let test_index_holding_an_unreadable_pocket_is_rebuilt () =
   with_store @@ fun ~base_path ~keepers_dir ->
-  let first = commit ~keepers_dir ~previous:None "PRIVATE_RETAINED_CONTEXT" in
+  let mixed = commit_mixed ~keepers_dir (Keeper_event_queue.Board_routing_pending board_stimulus) in
+  let whole = Option.get (ok (Context.render {Context.empty with previous = Some mixed})) in
+  let earlier = Tool_blob_store.put_durable_reuse (Tool_blob_store.create ~base_path)
+      ~bytes:whole ~mime:"text/plain" in
+  Fs_compat.save_file (Recall.path ~keepers_dir ~keeper_name:"keeper")
+    (Yojson.Safe.to_string (`Assoc
+      ["generation", `String mixed.generation; "revision", `Int mixed.revision;
+       "pocket_count", `Int 2; "source_count", `Int 2;
+       "artifact", Tool_output.normalized_artifact_ref_to_json earlier]));
+  check bool "the earlier artifact holds the Board pocket" true
+    (String_util.contains_substring (artifact_body ~base_path earlier) "PRIVATE_RETAINED_CONTEXT");
+  let recall = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  check bool "recall does not name the earlier artifact" false
+    (String_util.contains_substring recall earlier.sha256);
+  let rebuilt = artifact_of_index ~keepers_dir in
+  check bool "recall names the rebuilt artifact" true
+    (String_util.contains_substring recall rebuilt.sha256);
+  let body = artifact_body ~base_path rebuilt in
+  check bool "the rebuilt artifact leaves the Board pocket out" false
+    (String_util.contains_substring body "PRIVATE_RETAINED_CONTEXT");
+  check bool "and keeps the independent pocket" true
+    (String_util.contains_substring body "INDEPENDENT_CONTEXT");
+  check int "the index counts what it points at" 1 (index_count ~keepers_dir "pocket_count")
+
+let test_no_readable_pocket_is_unavailable () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "RECOVERABLE_CONTEXT" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
   let reference = artifact_of_index ~keepers_dir in
-  let source : Context.source =
-    {reference="event:pending-board";
+  let pin = librarian_pin ~base_path in
+  let published = Fs_compat.load_file pin in
+  let index = Fs_compat.load_file (Recall.path ~keepers_dir ~keeper_name:"keeper") in
+  let source = board_source (Keeper_event_queue.Board_routing_pending board_stimulus) in
+  (* The readable source left the queue, so the Board pocket is all that is stored. *)
+  let only_private = ok (Context.commit ~observed_sources:[source] ~keepers_dir ~keeper_id:"keeper"
+    ~expected_version:(Some (Context.version first)) ~sources:[source] [private_pocket source]) in
+  check int "only the Board pocket is stored" 1 (List.length only_private.pockets);
+  let stored = stored_context ~keepers_dir in
+  ignore (check_notice ~base_path ~keepers_dir ~status:"working context is unavailable");
+  check bool "a snapshot with no readable pocket is not published" true
+    (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" only_private));
+  check string "the earlier index stays" index
+    (Fs_compat.load_file (Recall.path ~keepers_dir ~keeper_name:"keeper"));
+  check string "the earlier publication keeps its pin" published (Fs_compat.load_file pin);
+  check bool "and its bytes" true (artifact_present ~base_path reference);
+  check string "the stored context is not changed" stored (stored_context ~keepers_dir)
+
+let withheld_label = function
+  | Keeper_librarian_context_readership.Board_source_unreadable -> "board"
+  | Keeper_librarian_context_readership.Event_source_undecodable -> "undecodable"
+
+let test_readership_shows_whole_pockets_of_readable_sources () =
+  with_store @@ fun ~base_path ~keepers_dir:_ ->
+  let readable : Context.source =
+    {reference="event:readable";
      content=Keeper_event_queue.stimulus_to_yojson
-       {post_id="private-parent";urgency=Normal;arrived_at=10.;
-        payload=Board_routing_pending
-          {kind=Post_created;author="actor";title="PRIVATE_TITLE";content="PRIVATE_BODY";
-           hearth=None;updated_at=Some 10.;audience=Audience_targets ["reader"]}}} in
-  let pocket : Context.pocket =
-    {id="private";merge_contexts=[];sources=[source.reference];context="PRIVATE_RETAINED_CONTEXT";
-     next_steps=["PRIVATE_NEXT_STEP"];completeness=Context.Current} in
-  let current = ok (Context.commit ~keepers_dir ~keeper_id:"keeper"
-    ~expected_version:(Some (Context.version first)) ~sources:[source] [pocket]) in
-  (* Simulate an old derived index which is current by generation/revision:
-     its bytes were published before this parent/readership gate existed. *)
-  let file = Recall.path ~keepers_dir ~keeper_name:"keeper" in
-  let old = Yojson.Safe.from_file file in
-  let fields = Yojson.Safe.Util.to_assoc old in
-  let fields = List.map (fun (key,value) -> key,
-    if key="generation" then `String current.generation
-    else if key="revision" then `Int current.revision else value) fields in
-  Fs_compat.save_file file (Yojson.Safe.to_string (`Assoc fields));
-  let before = Fs_compat.load_file (Context.path ~keepers_dir ~keeper_id:"keeper") in
-  ignore (check_notice ~base_path ~keepers_dir ~status:"unavailable");
-  (match Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" current with
-   | Error _ -> () | Ok () -> fail "unresolved Board context was published");
-  check string "stored context is preserved" before
-    (Fs_compat.load_file (Context.path ~keepers_dir ~keeper_id:"keeper"));
-  check bool "historical artifact bytes remain intact" true (artifact_present ~base_path reference)
-;;
+       {post_id="readable";urgency=Normal;arrived_at=0.;payload=Bootstrap}} in
+  let board = board_source (Keeper_event_queue.Board_routing_pending board_stimulus) in
+  let undecodable : Context.source =
+    {reference="event:undecodable"; content=`String "no stimulus"} in
+  let chat : Context.source = {reference="chat:operation:digest"; content=`Assoc []} in
+  let pocket id sources : Context.pocket =
+    {id;merge_contexts=[];sources=List.map (fun (source : Context.source) -> source.reference) sources;
+     context=id;next_steps=[];completeness=Context.Current} in
+  let snapshot : Context.snapshot =
+    {generation="generation";revision=1;execution_basis=None;
+     sources=[readable;board;undecodable;chat];
+     pockets=[pocket "readable-only" [readable]; pocket "mixed" [board;chat];
+              pocket "undecodable-only" [undecodable]]} in
+  let shown, withheld = Keeper_librarian_context_readership.shown
+      (Keeper_librarian_context_readership.reader ~base_path ~keeper_name:"keeper") snapshot in
+  check (list string) "the sources that may be shown stay, in stored order"
+    ["event:readable"; "chat:operation:digest"]
+    (List.map (fun (source : Context.source) -> source.reference) shown.sources);
+  check (list string) "a pocket is shown only when every source of it may be"
+    ["readable-only"] (List.map (fun (pocket : Context.pocket) -> pocket.id) shown.pockets);
+  check (list string) "each withheld source is reported once, in stored order"
+    ["board"; "undecodable"] (List.map withheld_label withheld)
 
 let () =
   Prompt_registry.set_markdown_dir (prompts_dir ());
   run "working context recall"
   ["progress", [
-    test_case "unresolved Board context withholds an existing artifact" `Quick
-      test_unresolved_board_context_withholds_existing_artifact;
+    test_case "a pocket over an unreadable Board source is left out of recall" `Quick
+      test_unreadable_board_pocket_is_left_out;
+    test_case "an index holding an unreadable pocket is rebuilt" `Quick
+      test_index_holding_an_unreadable_pocket_is_rebuilt;
+    test_case "no readable pocket is unavailable and keeps the publication" `Quick
+      test_no_readable_pocket_is_unavailable;
+    test_case "readership shows whole pockets of readable sources" `Quick
+      test_readership_shows_whole_pockets_of_readable_sources;
     test_case "managed guidance preserves actual artifact payload and reference" `Quick test_managed_guidance_preserves_artifact_payload;
     test_case "missing guidance precedes artifact publication" `Quick test_missing_guidance_precedes_artifact_publication;
     test_case "failed publication recovers on recall" `Quick test_failed_publication_recovers_on_recall;

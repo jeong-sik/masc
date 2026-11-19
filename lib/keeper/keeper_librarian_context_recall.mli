@@ -10,12 +10,20 @@ val publish : base_path:string -> keepers_dir:string -> keeper_name:string ->
   Keeper_librarian_context.snapshot -> (unit, string) result
 (** Publish after a successful context commit, on the Librarian IO worker.
     The artifact is historical context: sources and execution progress must be
-    revalidated before acting. Failure never changes original input authority. *)
+    revalidated before acting. Failure never changes original input authority.
+    The artifact and the counts in the index hold the pockets the Keeper may
+    read now ({!Keeper_librarian_context_readership.shown}); a pocket that
+    names a Board source the Keeper cannot read, or an event source that no
+    longer decodes, is left out. When pockets are stored and none is readable
+    this is [Error] and the previous index stays. *)
 val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:string -> keeper_name:string -> unit -> (string option, string) result
 (** Reads the fixed-shape index and injects its artifact only when its exact
     generation and revision still match a nonempty authoritative snapshot.
-    A retained Board source must also pass current Named readership; unresolved
-    routing or unreadable authority withholds the artifact reference.
+    The artifact holds the pockets {!publish} would publish now. Readership
+    can change while the revision stays, so the index is current only while
+    it points at the bytes those pockets render to; otherwise it is rebuilt.
+    When pockets are stored and none is readable, the unavailable notice is
+    emitted.
     An absent or empty authoritative snapshot emits a stable empty-state
     notice. A missing, corrupt or stale derived index is rebuilt from the
     current authoritative snapshot. An unavailable authority or failed repair
@@ -28,8 +36,9 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
     sessions observe disappearance and can deduplicate an unchanged status.
     [artifact_reader_available] defaults to true; callers pass the observed
     availability of [keeper_artifact_read]. When false, no store is read and
-    the unavailable notice retires previous pointers until capability returns. No
-    source revalidation or queue traversal occurs here. The IO worker validates
+    the unavailable notice retires previous pointers until capability returns.
+    Apart from that readership check, no source revalidation or queue
+    traversal occurs here. The IO worker validates
     the blob and retains its structured reference before returning recall. Missing or
     damaged bytes are republished from the matching authoritative snapshot;
     failed repair emits unavailable. Historical pins use dated Keeper retention.

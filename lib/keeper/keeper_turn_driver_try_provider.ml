@@ -135,32 +135,66 @@ let covered_messages ~end_atom messages =
    nothing: a request whose range it opens says so
    ([Keeper_carried_front.warn_range_opens_on_newest_atom]), and the
    dispatches that read it but start from a seed or a Librarian point, or the
-   forecast that only looks, have nothing to report. *)
-let turn_start ~config ~keeper_name ~trace_id ~messages =
+   forecast that only looks, have nothing to report.
+
+   Where this turn began is read from the same tail (§11.2, the third step;
+   RFC librarian-lifecycle §4.10, rules 7 and 8): the baseline of the log's
+   open [Opened], turned into an atom the same way and checked the same way.
+   No open turn, a [Reset] after its [Opened] (the baseline then counts the
+   history the reset replaced), a baseline of another trace, or a history
+   shorter than the baseline names no start: rule 8 then has nothing to
+   resend from, and rule 7 bounds by the boundary alone. *)
+type this_turn_opening =
+  | Opened_before_its_input
+  | Opened_after_its_input
+
+type turn_starts =
+  { boundary : Keeper_carried_front.turn_start
+  ; this_turn : int option
+  }
+
+let turn_starts ~config ~keeper_name ~trace_id ~messages =
   let unknown reason = Keeper_carried_front.Turn_boundary_unknown { reason } in
   let path =
     Keeper_turn_log_store.path_for_keepers_dir
       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
   in
+  let in_hand = List.length messages in
+  let atom_after closed_messages =
+    Runtime_model_input_tail_window.first_atom_at_or_after messages ~message_index:closed_messages
+  in
   match Keeper_turn_log_store.read_tail path with
   | Error error ->
-    unknown (Keeper_turn_log_recorder.not_recorded_to_string (Keeper_turn_log_recorder.Tail_unread error))
-  | Ok Keeper_turn_log_store.Nothing_written -> Keeper_carried_front.Turn_boundary { end_atom = 0 }
-  | Ok (Keeper_turn_log_store.Written { point; _ }) ->
-    let in_hand = List.length messages in
-    if not (String.equal point.Keeper_turn_log.trace trace_id)
-    then unknown (Printf.sprintf "the turn log's last unit ends on trace %s" point.trace)
-    else if in_hand < point.closed_messages
-    then
-      unknown
-        (Printf.sprintf "the turn log's last unit ends after %d closed messages; the history holds %d"
-           point.closed_messages in_hand)
-    else
-      Keeper_carried_front.Turn_boundary
-        { end_atom =
-            Runtime_model_input_tail_window.first_atom_at_or_after messages
-              ~message_index:point.closed_messages
-        }
+    { boundary =
+        unknown
+          (Keeper_turn_log_recorder.not_recorded_to_string
+             (Keeper_turn_log_recorder.Tail_unread error))
+    ; this_turn = None
+    }
+  | Ok Keeper_turn_log_store.Nothing_written ->
+    { boundary = Keeper_carried_front.Turn_boundary { end_atom = 0 }; this_turn = None }
+  | Ok (Keeper_turn_log_store.Written { point; open_turn; rows_end = _; last = _ }) ->
+    let boundary =
+      if not (String.equal point.Keeper_turn_log.trace trace_id)
+      then unknown (Printf.sprintf "the turn log's last unit ends on trace %s" point.trace)
+      else if in_hand < point.closed_messages
+      then
+        unknown
+          (Printf.sprintf
+             "the turn log's last unit ends after %d closed messages; the history holds %d"
+             point.closed_messages in_hand)
+      else Keeper_carried_front.Turn_boundary { end_atom = atom_after point.closed_messages }
+    in
+    let this_turn =
+      match open_turn with
+      | None | Some { Keeper_turn_log_store.reset_since = true; _ } -> None
+      | Some { Keeper_turn_log_store.baseline; reset_since = false; opened = (_ : int) } ->
+        if String.equal baseline.Keeper_turn_log.trace trace_id
+           && in_hand >= baseline.closed_messages
+        then Some (atom_after baseline.closed_messages)
+        else None
+    in
+    { boundary; this_turn }
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
@@ -421,7 +455,7 @@ type try_provider_ctx =
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; request_input : request_input
   ; turn_boundary : Keeper_carried_front.turn_start
-  ; history_at_start : Keeper_turn_boundaries.history_at_start
+  ; this_turn_start : int option
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -1220,21 +1254,6 @@ let librarian_point_of (continuity : continuity option) =
   | Some Without_snapshot | None -> None
 ;;
 
-(* Where this turn began on the history in hand (RFC librarian-lifecycle
-   §4.10, rules 7 and 8): the atom count the turn started from, as its start
-   state names it, while this history still opens the atom before it with the
-   same message. [Fresh_history] began at 0. [Continued_history] names no
-   position, and a digest this history does not hold names none it can use. *)
-let this_turn_start ~history_digest_at (history_at_start : Keeper_turn_boundaries.history_at_start) =
-  match history_at_start with
-  | Keeper_turn_boundaries.Fresh_history -> Some 0
-  | Keeper_turn_boundaries.Continued_history -> None
-  | Keeper_turn_boundaries.Continued_history_from { start_atom; start_atom_digest } ->
-    (match history_digest_at (start_atom - 1) with
-     | Some digest when String.equal digest start_atom_digest -> Some start_atom
-     | Some (_ : string) | None -> None)
-;;
-
 (* What a front rule 8 moved to where this turn began is called (RFC
    librarian-lifecycle §4.10): a label of its own on each continuity, so a
    log line, the continuity request record and rule 7 tell it from rule 1's
@@ -1255,7 +1274,7 @@ let this_turn_front_source (continuity : continuity) =
    as too large, so pulling its front back would send that range again. An
    unknown boundary bounds nothing, and the projection still carries the
    newest atom ({!Keeper_carried_front.clamp}). *)
-let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
+let within_turn_boundary ~history_digest_at ~turn_boundary ~this_turn_start
       (seed : Keeper_carried_front.seed) =
   match seed.front, turn_boundary with
   | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom } ->
@@ -1263,8 +1282,7 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
       match seed.source with
       | Keeper_carried_front.This_turn_start_after_seed_refusal
       | Keeper_carried_front.This_turn_start_after_librarian_refusal ->
-        Option.fold ~none:end_atom ~some:(Int.max end_atom)
-          (this_turn_start ~history_digest_at history_at_start)
+        Option.fold ~none:end_atom ~some:(Int.max end_atom) this_turn_start
       | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
       | Keeper_carried_front.Turn_start_after_seed_refusal
       | Keeper_carried_front.Turn_start_after_librarian_refusal
@@ -1291,7 +1309,7 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
    moves the window only when the window moves, so the prefix the provider
    cached stays. [window_held_at] is where the held window opened. *)
 let from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boundary
-      ~history_at_start point =
+      ~this_turn_start point =
   let at_point =
     match point with
     | At_snapshot snapshot -> From_snapshot snapshot
@@ -1301,7 +1319,7 @@ let from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boun
     Option.bind accepted (fun seed ->
       match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
       | Error (_ : Keeper_carried_front.dropped_front) -> None
-      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start seed)
+      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary ~this_turn_start seed)
   in
   match past_point with
   | Some seed
@@ -1416,7 +1434,7 @@ let stays_at ~opened_at start =
 ;;
 
 let choose_range_start ~past_max_context ~held_window ~continuity ~front ~accepted
-      ~history_digest_at ~turn_boundary ~history_at_start =
+      ~history_digest_at ~turn_boundary ~this_turn_start =
   let window_held_at =
     Option.map (fun (held : held_window) -> held.window_opened_at) held_window
   in
@@ -1426,7 +1444,7 @@ let choose_range_start ~past_max_context ~held_window ~continuity ~front ~accept
     | Some point ->
       chosen
         (from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boundary
-           ~history_at_start point)
+           ~this_turn_start point)
     | None ->
       (match front with
        | None -> chosen (From_turn_boundary turn_boundary)
@@ -1558,7 +1576,7 @@ let compose_carried_model_input
       ?past_max_context
       ?held_window
       ?(finished_turn_results = Finished_turns_verbatim)
-      ?(history_at_start = Keeper_turn_boundaries.Continued_history)
+      ?this_turn_start
       ?(same_turn_result_as_pointer = fun (_ : string) -> false)
       ~measure_message_bytes
       ~measure_wire_bytes
@@ -1579,7 +1597,7 @@ let compose_carried_model_input
      keeps the position. *)
   let { start; outlived_seed; moved_at_max_context } =
     choose_range_start ~past_max_context ~held_window ~continuity ~front ~accepted
-      ~history_digest_at ~turn_boundary ~history_at_start
+      ~history_digest_at ~turn_boundary ~this_turn_start
   in
   (* A result whose text repeats an earlier result of its own turn leaves as
      a pointer to that turn's first one, for the tools that declare it
@@ -1713,7 +1731,7 @@ let materialize_request_history
       ?past_max_context
       ?held_window
       ?finished_turn_results
-      ?history_at_start
+      ?this_turn_start
       ?same_turn_result_as_pointer
       ~measure_message_bytes
       ~measure_wire_bytes
@@ -1730,7 +1748,7 @@ let materialize_request_history
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
         ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
-        ?history_at_start ?same_turn_result_as_pointer
+        ?this_turn_start ?same_turn_result_as_pointer
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1803,14 +1821,14 @@ let carried_source_indices ~messages (view : request_view) =
 
 let request_view
       ?continuity ?completed_arguments ?past_max_context ?held_window ?finished_turn_results
-      ?history_at_start ?same_turn_result_as_pointer
+      ?this_turn_start ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
   let materialized ?(materialize = materialize) completed_arguments =
     materialize_request_history ?continuity ?completed_arguments ?past_max_context
-      ?held_window ?finished_turn_results ?history_at_start ?same_turn_result_as_pointer
+      ?held_window ?finished_turn_results ?this_turn_start ?same_turn_result_as_pointer
       ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -2257,7 +2275,7 @@ let bounded_model_input_projection
         ?past_max_context
         ?held_window
         ~finished_turn_results
-        ~history_at_start:ctx.history_at_start
+        ?this_turn_start:ctx.this_turn_start
         ~same_turn_result_as_pointer
         ~tools:prefix_tools
         ~provider_config
@@ -2334,7 +2352,7 @@ let bounded_model_input_projection
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
                  ?past_max_context
                  ?held_window
-                 ~history_at_start:ctx.history_at_start
+                 ?this_turn_start:ctx.this_turn_start
                  ~same_turn_result_as_pointer
                  ~measure_message_bytes
                  ~measure_wire_bytes
@@ -3779,8 +3797,7 @@ let run_try_provider_with_history_recovery
   in
   let this_turn_front () =
     Option.bind !(state.last_request) (fun (sent : sent_request) ->
-      Option.bind
-        (this_turn_start ~history_digest_at:sent.digest_at ctx.history_at_start)
+      Option.bind ctx.this_turn_start
         (fun start_atom ->
            let first_atom =
              Keeper_carried_front.clamp
@@ -4154,7 +4171,6 @@ module For_testing = struct
   let aged_result_min_bytes = aged_result_min_bytes
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
-  let this_turn_start = this_turn_start
   let this_turn_front_source = this_turn_front_source
   let current_turn_demotion = current_turn_demotion
   let offload_model_input_cpu = offload_model_input_cpu

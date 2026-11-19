@@ -92,19 +92,53 @@ val absorbed_history :
     be used ({!continuity_for_request}) (RFC keeper-context-window-in-tokens
     section 13.6). *)
 
-val turn_start :
+(** Whether the [Opened] this run wrote comes before this turn's input
+    (RFC librarian-lifecycle §4.10, rules 7 and 8). The driver reads where
+    this turn began from that line's baseline only for
+    [Opened_before_its_input]. *)
+type this_turn_opening =
+  | Opened_before_its_input
+      (** This run put the turn's input into the history after its
+          [Opened]: the line's baseline is where the turn began. *)
+  | Opened_after_its_input
+      (** A resumed checkpoint (native resume, direct resume, HITL) already
+          holds this turn's input and maybe its progress, and an earlier run
+          closed them. This run's [Opened] is written after them, so its
+          baseline names no start: resending from it would leave the turn's
+          own request out. *)
+
+type turn_starts =
+  { boundary : Keeper_carried_front.turn_start
+        (** Where a request with no absorbed point starts (RFC
+            keeper-context-window-in-tokens §13.4): the end of the last unit
+            of the Keeper's turn log (RFC librarian-call-only-proposes
+            §11.2). A log with no line is [Turn_boundary 0]. A log this
+            process cannot read, a mark of another trace, or a history shorter
+            than the mark is [Turn_boundary_unknown]: a request it decides
+            then opens on the newest atom alone and its origin says so,
+            rather than on the whole history. *)
+  ; this_turn : int option
+        (** Where this turn began: the baseline of the log's open [Opened],
+            for a run that wrote it before the turn's input
+            ({!this_turn_opening}; the driver decides). Rule 8 resends from
+            it, and rule 7 bounds the front rule 8 held by it (RFC
+            librarian-lifecycle §4.10). When this run's admission line was
+            not written, the open [Opened] is the unclosed one of an earlier
+            run: its baseline is earlier, so the start comes out earlier,
+            never past this turn's input. [None] with no open turn,
+            a [Reset] after its [Opened], a baseline of another trace, or a
+            history shorter than the baseline. *)
+  }
+
+val turn_starts :
   config:Workspace.config -> keeper_name:string -> trace_id:string ->
-  messages:Agent_core.Types.message list -> Keeper_carried_front.turn_start
-(** Where a request with no absorbed point starts (RFC
-    keeper-context-window-in-tokens §13.4): the end of the last unit of the
-    Keeper's turn log (RFC librarian-call-only-proposes §11.2), as the atom of
-    [messages] that the first message after its closed messages opens. A log
-    with no line is [Turn_boundary 0]. A log this process cannot read, a mark
-    of another trace, or [messages] shorter than the mark is answered
-    [Turn_boundary_unknown]: a request it decides then opens on the newest
-    atom alone and its origin says so, rather than on the whole history. No
-    digest is compared. Reading it logs nothing; the request whose range it
-    opens warns ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
+  messages:Agent_core.Types.message list -> turn_starts
+(** Both starts from one read of the turn log's tail, each a count of closed
+    messages turned into the atom of [messages] that the next message opens.
+    No digest is compared: a purge that rewrites a closed message keeps its
+    number (RFC librarian-call-only-proposes §5.6). Reading it logs nothing;
+    the request whose range it opens warns
+    ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
 
 val prepare_continuity :
   trace_id:string ->
@@ -363,7 +397,7 @@ val choose_range_start :
   accepted:Keeper_carried_front.seed option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
-  history_at_start:Keeper_turn_boundaries.history_at_start ->
+  this_turn_start:int option ->
   start_choice
 (** The one rule for where a request starts: a snapshot that fits, else the
     Librarian's read position, else [front] when [history_digest_at] opens
@@ -382,8 +416,8 @@ val choose_range_start :
     ({!Keeper_carried_front.This_turn_start_after_seed_refusal},
     {!Keeper_carried_front.This_turn_start_after_librarian_refusal}) is
     bounded instead by the later of [turn_boundary] and where this turn
-    began ({!For_testing.this_turn_start} of [history_at_start]), and by
-    [turn_boundary] when that start is not known.
+    began ([this_turn_start], {!turn_starts}), and by [turn_boundary] when
+    that start is not known.
     [accepted] is not read
     without a Librarian point, and [front] is not read with one.
     [past_max_context] moves only a window that stays: when the start these
@@ -445,13 +479,11 @@ type try_provider_ctx =
             it. *)
   ; request_input : request_input
   ; turn_boundary : Keeper_carried_front.turn_start
-  ; history_at_start : Keeper_turn_boundaries.history_at_start
-        (** Where this turn began, as the turn computed it from the history
-            it started from. Rule 8 resends from it, and rule 7 bounds the
-            front rule 8 held by it (RFC librarian-lifecycle §4.10). A
-            resumed checkpoint already holds the turn's input, so its run
-            and a caller that does not know the start pass
-            [Continued_history]. *)
+  ; this_turn_start : int option
+        (** Where this turn began, read once per turn from the turn log
+            ({!turn_starts}). Rule 8 resends from it, and rule 7 bounds the
+            front rule 8 held by it (RFC librarian-lifecycle §4.10). [None]
+            when the log names no start for this history. *)
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -1000,15 +1032,6 @@ type request_view =
     runtime whatever reasoning each replays or deletes. *)
 
 module For_testing : sig
-  val this_turn_start :
-    history_digest_at:(int -> string option) ->
-    Keeper_turn_boundaries.history_at_start ->
-    int option
-  (** Where this turn began on the history [history_digest_at] reads: [0]
-      for [Fresh_history], the start atom of [Continued_history_from] while
-      the history opens the atom before it with the recorded digest, and
-      [None] otherwise. *)
-
   val this_turn_front_source : continuity -> Keeper_carried_front.source
   (** The source of a front rule 8 moves to where this turn began:
       {!Keeper_carried_front.This_turn_start_after_librarian_refusal} with a
@@ -1105,7 +1128,7 @@ module For_testing : sig
     ?past_max_context:past_max_context ->
     ?held_window:held_window ->
     ?finished_turn_results:finished_turn_results ->
-    ?history_at_start:Keeper_turn_boundaries.history_at_start ->
+    ?this_turn_start:int ->
     ?same_turn_result_as_pointer:(string -> bool) ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     measure_wire_bytes:(Agent_core.Types.message -> int option) ->
@@ -1124,7 +1147,7 @@ module For_testing : sig
     ?past_max_context:past_max_context ->
     ?held_window:held_window ->
     ?finished_turn_results:finished_turn_results ->
-    ?history_at_start:Keeper_turn_boundaries.history_at_start ->
+    ?this_turn_start:int ->
     ?same_turn_result_as_pointer:(string -> bool) ->
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->

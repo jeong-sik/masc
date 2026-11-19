@@ -37,7 +37,7 @@ let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 
     ~continuity:(Some Keeper_turn_driver_try_provider.without_snapshot)
     ~accepted:None ~front
     ~turn_start
-    ~history_at_start:Keeper_turn_boundaries.Continued_history
+    ~this_turn_start:None
     ~counted_tokens
     messages
 
@@ -170,9 +170,11 @@ let test_a_known_start_leaves_a_recorded_start_bounded_by_the_boundary () =
       ~measure:(Keeper_context_core.message_measurer ())
       ~continuity:(Some continuity) ~front:None ~accepted:(Some accepted)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 8 })
-      ~history_at_start:
-        (Keeper_turn_boundaries.history_at_start_of_messages
-           (List.filteri (fun index _ -> index < 14) messages))
+      ~this_turn_start:
+        (Some
+           (snd
+              (Runtime_model_input_tail_window.annotate
+                 (List.filteri (fun index _ -> index < 14) messages))))
       ~counted_tokens:None messages
   in
   Alcotest.(check int) "from the turn boundary" 8 c.first_atom;

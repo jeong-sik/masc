@@ -123,6 +123,7 @@ let notice key =
 
 
 let render_with ~before_retain ?(before_retire = fun () -> ())
+    ?(after_repair_publish = fun () -> ())
     ?(artifact_reader_available = true) ~base_path ~keepers_dir ~keeper_name () =
   let unavailable detail =
     Log.Keeper.warn ~keeper_name
@@ -174,6 +175,7 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
            model pass, even when pending inputs have not changed. Publication
            rechecks generation/revision under the owner lock. *)
         Result.bind (publish ~base_path ~keepers_dir ~keeper_name current) (fun () ->
+          after_repair_publish ();
           match read (path ~keepers_dir ~keeper_name) with
           | Ok (Some repaired) when Context.version current = (repaired.generation, repaired.revision) -> Ok repaired
           | Ok _ -> Error "working context changed during artifact repair"
@@ -225,7 +227,9 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
   | Unix.Unix_error (code, fn, arg) ->
     unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
 
-let render = render_with ~before_retain:(fun () -> ()) ~before_retire:(fun () -> ())
+let render =
+  render_with ~before_retain:(fun () -> ()) ~before_retire:(fun () -> ())
+    ~after_repair_publish:(fun () -> ())
 
 module For_testing = struct
   let render = render_with

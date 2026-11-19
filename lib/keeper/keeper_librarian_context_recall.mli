@@ -47,8 +47,10 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
 
 module For_testing : sig
   val render : before_retain:(unit -> unit) -> ?before_retire:(unit -> unit) ->
+    ?after_repair_publish:(unit -> unit) ->
     ?artifact_reader_available:bool ->
     base_path:string -> keepers_dir:string -> keeper_name:string -> unit -> (string option, string) result
-  (** Interleave a publication before retention or after confirming empty
-      authority and before retiring the previously observed pin. *)
+  (** Interleave a publication before retention, after confirming empty
+      authority and before retiring the previously observed pin, or between a
+      repair's publication and its read-back of the index. *)
 end

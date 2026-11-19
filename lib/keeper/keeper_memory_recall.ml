@@ -56,21 +56,19 @@ let tail_lines_of_fd fd ~max_bytes ~max_lines =
     pos := start
   done;
   let content = String.concat "" !chunks in
-  let lines =
-    content
-    |> String.split_on_char '\n'
-    |> List.filter (fun s -> String.trim s <> "")
-  in
-  let lines =
-    if Int64.compare !pos 0L > 0
-    then (match lines with _ :: rest -> rest | [] -> [])
-    else lines
-  in
+  (* The pieces between the newlines of what was read. A read that did not
+     reach the file's first byte may have cut its first piece, so that piece
+     goes. Blank lines are passed over only after that: passed over first, a
+     blank cut piece would leave the whole line behind it to be dropped in
+     its place. *)
+  let pieces = String.split_on_char '\n' content in
+  let pieces = if Int64.compare !pos 0L > 0 then List.drop 1 pieces else pieces in
+  let lines = List.filter (fun piece -> String.trim piece <> "") pieces in
   (* The read always ends at end-of-file, so the last byte of
      [content] tells whether the final line was terminated. A file
      whose last line is still being appended has no trailing
      newline yet. The symmetric case at the other end -- a first
-     line cut by the [max_bytes] window -- is already handled above
+     piece cut by the [max_bytes] window -- is already handled above
      by dropping it when [!pos > 0]. *)
   let completion =
     if String.length content > 0

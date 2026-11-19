@@ -32,8 +32,14 @@ val read_file_tail_lines_with_completion :
   -> (tail_lines, Keeper_memory_recall_exn_class.t) result
 (** As {!read_file_tail_lines_result}, and additionally reports both ends of
     the read: whether the final line was terminated, and whether the read
-    reached the file's start. The window's leading partial line is already
-    dropped by the reader. *)
+    reached the file's start.
+
+    A read that did not reach the file's start drops the first piece of what
+    it read, up to the first newline: the window may have cut it. The read
+    does not look at the byte before its window, so a window that starts at a
+    line's first byte drops that whole line. Blank lines are passed over
+    after the drop, so a line is in [lines] whenever the newline before it is
+    in the window (and [max_lines] reaches it). *)
 
 type tail_of_file =
   | No_file

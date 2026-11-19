@@ -916,9 +916,137 @@ let test_clear_journal_failure_recovers_after_owner_restart ~after_commit () =
   restart ();
   check_next_prepare ~config ~meta ~session load
 
+(* {1 The turn log line (RFC librarian-call-only-proposes §5.2)} *)
+
+let turn_log_place config (meta : Keeper_meta_contract.keeper_meta) : Keeper_turn_log_recorder.place =
+  { keepers_dir = Workspace.keepers_runtime_dir config
+  ; base_path = config.Workspace.base_path
+  ; keeper_name = meta.name
+  ; session_dir = session_dir_of config meta
+  ; session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+  }
+;;
+
+let turn_log_path config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config)
+    ~keeper_id:meta.name
+;;
+
+let turn_log_line_text : Keeper_turn_log.line -> string = function
+  | Log_started { mark; _ } -> Printf.sprintf "started at %d" mark.closed_messages
+  | Opened _ -> "opened"
+  | Closed _ -> "closed"
+  | Reset { cause; before; after; closed_before; _ } ->
+    Printf.sprintf "reset %s %d to %d, naming %d"
+      (match cause with
+       | Unannounced -> "unannounced"
+       | Announced Cleared -> "cleared"
+       | Announced Recovered -> "recovered")
+      before.closed_messages after.closed_messages
+      (List.fold_left (fun count (slice : Keeper_turn_log.slice) -> count + slice.take) 0 closed_before)
+;;
+
+let turn_log_text config meta =
+  let path = turn_log_path config meta in
+  if not (Sys.file_exists path)
+  then "no log"
+  else
+    String.split_on_char '\n' (Fs_compat.load_file path)
+    |> List.filter (fun row -> not (String.equal row ""))
+    |> List.map (fun row ->
+      match Keeper_turn_log_codec.of_json (Yojson.Safe.from_string row) with
+      | Ok line -> turn_log_line_text line
+      | Error error -> fail (Keeper_memory_os_types.wire_error_to_string error))
+    |> String.concat "\n"
+;;
+
+(* The log's first line, as a process start writes it. *)
+let start_turn_log config meta =
+  match
+    Keeper_turn_log_recorder.record ~at:1.0 ~new_log_id:(Keeper_turn_log.Log_id.fresh ())
+      (turn_log_place config meta) Keeper_turn_log_writer.Process_start
+  with
+  | Ok (Keeper_turn_log_recorder.Appended _) -> ()
+  | Ok Nothing_to_append -> fail "the log had started already"
+  | Error error -> fail (Keeper_turn_log_recorder.not_recorded_to_string error)
+;;
+
+let open_messages config meta =
+  match
+    Keeper_turn_log_head.read ~session_dir:(session_dir_of config meta)
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+  with
+  | Ok head -> head.open_messages
+  | Error error -> fail (Keeper_checkpoint_store_session.checkpoint_load_error_to_string error)
+;;
+
+(* The fixture's save leaves its messages open. The clear closes them with
+   one save, so its line names them before they go. *)
+let test_clear_announces_the_head_it_empties () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  start_turn_log config meta;
+  let open_count = open_messages config meta in
+  check bool "the saved messages are open" true (open_count > 0);
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load;
+  check_official_session_cleared official_session;
+  check string "the line names the open messages it drops"
+    (Printf.sprintf "started at 0\nreset cleared %d to 0, naming %d" open_count open_count)
+    (turn_log_text config meta)
+;;
+
+(* A head no turn can decode is dropped without the log reading it. *)
+let test_clear_drops_an_undecodable_head_unread () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
+  start_turn_log config meta;
+  let path = checkpoint_path config meta in
+  Unix.unlink path;
+  Fs_compat.save_file path "{broken-checkpoint";
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check bool "the canonical checkpoint is gone" true (is_absent path);
+  check_official_session_cleared official_session;
+  check string "the drop line" "started at 0\nreset unannounced 0 to 0, naming 0"
+    (turn_log_text config meta)
+;;
+
+(* No head: nothing for the log to name, so no line, not even a first one. *)
+let test_clear_with_no_head_writes_no_line () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
+  Unix.unlink (checkpoint_path config meta);
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_official_session_cleared official_session;
+  check string "no line" "no log" (turn_log_text config meta)
+;;
+
+(* The line goes before anything the clear changes: a log that takes no line
+   leaves the official-client session and the history as they were. *)
+let test_a_clear_whose_line_fails_changes_nothing () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  start_turn_log config meta;
+  let path = turn_log_path config meta in
+  let unreadable = Fs_compat.load_file path ^ "not a line\n" in
+  Fs_compat.save_file path unreadable;
+  let before = Context.messages_of_context (load ()) in
+  check_refused (clear ());
+  check bool "the official-client session is kept" true (Option.is_some (official_session ()));
+  check bool "the history is kept" true (before = Context.messages_of_context (load ()));
+  check string "the log is as it was" unreadable (Fs_compat.load_file path)
+;;
+
 let () =
   run "keeper clear admission"
-    [ "owner", [ test_case "equal-turn external write defeats a stale clear plan" `Quick test_clear_cas_refuses_equal_turn_external_change
+    [ "turn log", [ test_case "a decoded head is announced with its open messages" `Quick test_clear_announces_the_head_it_empties
+                  ; test_case "an undecodable head is dropped unread" `Quick test_clear_drops_an_undecodable_head_unread
+                  ; test_case "no head writes no line" `Quick test_clear_with_no_head_writes_no_line
+                  ; test_case "a line that fails changes nothing" `Quick test_a_clear_whose_line_fails_changes_nothing ]
+    ; "owner", [ test_case "equal-turn external write defeats a stale clear plan" `Quick test_clear_cas_refuses_equal_turn_external_change
                ; test_case "precommit clear failure permits fresh explicit recovery" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:false)
                ; test_case "uncertain clear commit preserves actual input across restart" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:true)
                ; test_case "restart marker follows owned input commit" `Quick test_clear_marker_follows_owned_commit

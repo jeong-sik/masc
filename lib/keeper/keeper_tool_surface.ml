@@ -372,8 +372,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
               ~base_dir:(Keeper_types_profile.session_base_dir config) in
             let path = Keeper_checkpoint_store.agent_core_checkpoint_path
               ~session_dir:session.session_dir ~session_id:trace_id in
-            match Keeper_history_clear.prepare ~authority ~session_dir:session.session_dir ~preserve_system with
-            | Error error ->
+            let prepare_refused error =
               let fields = match error with
                 | Keeper_history_clear.Canonical_unreadable
                     (Keeper_checkpoint_store.Ref_read_failed (Keeper_checkpoint_store.Newer_version {expected;got})) ->
@@ -399,10 +398,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                       | Superseded_version _ | Io_error _ | Agent_core_error _ | Objects_invalid _))
                 | Retained_unavailable _ | Installation_unconfirmed _ | Removal_unconfirmed _ ->
                   Tool_result.Runtime_failure,Tool_args.Internal_error in
-              before_effect ~class_ ~code (Keeper_history_clear.error_to_string error) (("checkpoint_path",`String path)::fields)
-            | Ok plan ->
-              (* No official-session mutation occurs until both owned input and
-                 canonical state have been checked by this immutable plan. *)
+              before_effect ~class_ ~code (Keeper_history_clear.error_to_string error) (("checkpoint_path",`String path)::fields) in
+            (* No official-session mutation occurs until both owned input and
+               canonical state have been checked by this immutable plan. *)
+            let change plan =
               match Keeper_official_client_session_store.clear_then ~base_path:config.base_path ~keeper_name:name (fun () ->
                 match Keeper_history_clear.execute plan with
                 | Error error -> after_effect (Keeper_history_clear.error_to_string error)
@@ -441,7 +440,30 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown
                   ~code:Tool_args.Internal_error
                   ~message:("history was left untouched, but the official-client session reset was not confirmed: " ^ detail)
-                  ["official_client_session_clear",`String "unknown"]
+                  ["official_client_session_clear",`String "unknown"] in
+            (* RFC librarian-call-only-proposes §5.2: the turn log line goes
+               before the official-client session clear, the first thing the
+               change touches. The cleared trace keeps no closed message. *)
+            let emptied (mark : Keeper_turn_log.mark) = { mark with trace = trace_id; closed_messages = 0 } in
+            let line plan : Keeper_turn_log_reset.line =
+              match Keeper_history_clear.head_change plan with
+              | Empties_head -> Announce { cause = Cleared; after = emptied }
+              | Removes_undecodable_head -> Drop { after = emptied }
+              | No_head -> No_line in
+            let place : Keeper_turn_log_recorder.place =
+              { keepers_dir = Workspace.keepers_runtime_dir config; base_path = config.base_path
+              ; keeper_name = name; session_dir = session.session_dir; session_id = trace_id } in
+            match Keeper_turn_log_reset.run ~at:(Time_compat.now ())
+              ~new_log_id:(Keeper_turn_log.Log_id.fresh ()) place
+              ~prepare:(fun () ->
+                Keeper_history_clear.prepare ~authority ~session_dir:session.session_dir ~preserve_system)
+              ~line ~change with
+            | Ok result -> result
+            | Error (Path_refused error) -> prepare_refused error
+            | Error ((Open_not_closed _ | Line_not_written _ | Line_not_planned) as refusal) ->
+              before_effect ~class_:Tool_result.Runtime_failure ~code:Tool_args.Internal_error
+                (Keeper_turn_log_reset.refusal_to_string Keeper_history_clear.error_to_string refusal)
+                ["checkpoint_path",`String path]
     in
     let result = match Keeper_owner_registry.run_maintenance_if_idle
       ~base_path:config.base_path ~keeper_name:name clear_idle with

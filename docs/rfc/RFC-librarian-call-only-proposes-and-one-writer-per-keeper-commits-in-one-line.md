@@ -465,6 +465,8 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
 - 답 전체를 버리는 이유는 `rejection` 넷뿐이다. op 하나의 흠은 그 op 만 반영하지 않고 줄에 적는다(§8.2).
+  - 그 op 만 빼는 흠은 이름과 상태의 흠이다. 표에 없는 이름, 두 번 쓴 이름, 그사이 지워진 fact 다. 계획이 본다.
+  - 모양의 흠은 다르다. 모르는 op 이름, 빈 claim, 모르는 category, 파생 basis 는 `Schema_violation` 이고 답 전체를 버린다. 모양이 틀린 답의 나머지를 믿을 근거가 없다.
 - 답의 새 fact 는 관측한 것만이다. 대화에서 읽었거나 Board 에서 읽었다. 파생 fact 는 Keeper 의 직접 쓰기(§8.5)만 만든다. 지금과 같다.
 - wire 모양은 `lib/librarian/librarian_answer.mli` 가 정한다. object 마다 field 집합이 정확히 맞아야 한다. 새 fact 의 `basis` 는 Memory 에 실린 fact 의 `basis` 와 같은 모양이다. 모델은 읽은 모양대로 쓴다.
 - 답 글은 JSON 문서 하나다. code fence 나 앞뒤의 말이 붙으면 `Not_json` 이다. 고쳐서 읽지 않는다. slot 이 그렇게 답하는 비율은 채점기가 알린다.
@@ -962,7 +964,7 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
 ## 9. 상태 기계
 
 쓰는 쪽은 Keeper 마다 fiber 하나다. mailbox 에서 사건을 하나씩 꺼내 다룬다. 이 절은 상태 일곱과 사건 열둘의 모든 쌍에서 쓰는 쪽이 무엇을 하는지 정한다.
-근거 폴더의 스크립트가 이 절의 표를 그대로 읽는다. 쌍 84개 가운데 행이 없는 쌍, 조건 없이 겹치는 행, 모르는 상태나 사건 이름이 있으면 실패한다. 묻기 결과 표의 32쌍도 같이 본다. 조건들이 모든 경우를 덮는지는 스크립트가 보지 않고 모델이 본다(§21).
+근거 폴더의 스크립트가 이 절의 표를 그대로 읽는다. 쌍 84개 가운데 행이 없는 쌍, 조건 없이 겹치는 행, 모르는 상태나 사건 이름이 있으면 실패한다. 묻기 결과 표의 32쌍도 같이 본다. 조건들이 모든 경우를 덮는지는 스크립트가 보지 않고 모델이 본다(§21). 다만 한 항목의 slot 별 판정에 기대는 행은 L7 전까지 모델도 보지 않는다(§21.5). 그 행들은 §7.4 의 표를 글로 읽은 것이 전부다.
 
 ### 9.1 상태와 사건
 
@@ -1145,7 +1147,7 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 | `Ask_ended` | 늦은 답 |
 | `Declaration_changed` | 저장하고 폭 기억을 비운다 → `Stopped s` |
 | `Resume` | `Booting`. 저장소 시작을 다시 한다. 턴 기록 모듈이 파일을 확인하고, 그다음 boot 다(§8.6) |
-| `Adopt`, s 가 `Log_diverged` 나 `Log_unreadable` 이고 조건이 맞다 | §8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기 |
+| `Adopt`, s 가 `Log_diverged` 나 `Log_unreadable` 이고, 파일의 sha 가 `observed` 와 같고 codec 으로 해석된다 | §8.7 의 줄을 쓴다. 폭 기억을 비운다 → 다음 묻기 |
 | `Adopt`, s 가 그 둘인데 파일의 sha 가 다르다 | `Refused Snapshot_mismatch` |
 | `Adopt`, s 가 그 둘이고 sha 는 같은데 파일이 해석되지 않는다 | `Refused Snapshot_unreadable` |
 | `Adopt`, s 가 `Memory_unreadable` 이나 `Store_unwritable` | `Refused (Store_stopped s)` |
@@ -1299,7 +1301,7 @@ builder 는 요청을 만들 때 자기 시작점을 메모리에 적어 둔다.
 `memory-source-current.json` 은 이 RFC 의 쓰는 쪽 밖에 있다.
 
 - 쓰는 곳 둘(`upsert_file_fact`, `revalidate`)은 자기 잠금을 그대로 쓴다. `revalidate` 를 부르는 곳은 셋이다. `memory_search`, 상태 도구, 턴마다의 recall 이다.
-- 이 저장소가 지워지는 코드를 부르던 곳만 고친다. `check_facts_budget`, `recover_publication`, `Keeper_memory_os_aggregate_lock` 이다. 잠금은 저장소 자신의 잠금으로 바꾼다.
+- 이 저장소가 지워지는 코드를 부르던 곳만 고친다. `check_facts_budget` 와 `Keeper_memory_os_aggregate_lock` 이다. 잠금은 저장소 자신의 잠금으로 바꾼다.
 - `check_facts_budget` 가 없어지면 이 파일을 바이트로 묶는 것이 없다. 어떤 client 에도 바이트 상한을 두지 않는다는 운영자 규칙(2026-10-06)을 따른 결과다(§22). 그 검사는 평범한 fact 와 이 파일의 줄을 함께 셌다. 환경 변수 `MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES` 를 읽는 코드도 같이 지운다.
 - 파일은 묶인 source 하나에 fact 하나를 갖는다. 무효가 된 경로마다 무효 행도 하나씩 갖는다. 무효 행은 그 경로에 새 fact 를 묶을 때만 없어지고, 턴마다 recall 에 실린다. 11-18 에 파일 21개에 fact 28개, 무효 행 164개였다. 이 RFC 는 그 규칙을 바꾸지 않는다(#53031). 바이트 수와 행 수는 화면에 보인다.
 
@@ -1468,7 +1470,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I14 | metric 이 무엇도 막지 않는다. 갈래는 타입으로 나눈다. 모양은 하드컷으로 바꾼다 | 경보와 카운터는 아무것도 막지 않는다. 갈래는 닫힌 생성자 위에 있다 | 타입 검사. L9 의 해석 시험 |
 | I15 | 지식 하나에 맞는 fact 하나. 낡았는지는 Librarian 이 판단한다. 시간이나 TTL 이 아니다 | Librarian 이 `Drop`, `Merge`, `Revise` 로 판단한다. TTL 도 크기 예산도 fact 를 지우지 않는다. 자리 내기는 Librarian 에게 하는 질문이다 | L1 채점기(merge 뒤 보존, 변화율) |
 
-I15 에는 이 설계가 지키지 못하는 때가 있다. Memory 가 어느 항목과도 함께 들어가지 않는 동안에는 항목만 읽는다. 그동안은 더하기만 하고 합치거나 고치지 못한다(§7.4). 그 상태는 경고로 보인다(§12).
+I15 에는 이 설계가 지키지 못하는 때가 있다. Memory 가 어느 항목과도 함께 들어가지 않는 동안에는 항목만 읽는다. 그동안은 더하기만 하고 합치거나 고치지 못한다(§7.4). 그 상태는 warn 으로, Memory 가 어느 slot 에도 안 들어가면 error(E5)로 보인다(§12.2).
 
 ## 15. 처리량
 
@@ -1687,15 +1689,29 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 ### 19.2 코드
 
-**a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 64개, 20,334줄이다.
+**a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 63개를 지우고 하나는 이름을 바꾼다. 64개가 20,334줄이다.
 
-- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_*`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
+- 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
 - 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. `submit_durable`(`keeper_librarian_queue_refresh`)과 그것을 부르는 곳 다섯은 지운다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
+- 이름을 바꾼다: `keeper_librarian_input_refusal` → `keeper_exact_input_refusal`. 생성자 셋짜리 타입이고 Librarian 것이 아니다. Exact 걷기가 쓴다(`keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure`). 그 걷기와 그것을 쓰는 HITL 요약은 이 RFC 가 고치지 않는다. 새 Librarian 은 이 타입을 쓰지 않고 §7.2 의 slot 결과를 쓴다.
 
 **b. Memory 저장소 장치.** 5,138줄이다.
 
 - 지운다: `keeper_memory_os_current_{update, read_anchor, range_codec, receipt_store, publication, revision_evidence, journal, program_apply, retraction_plan}`, `keeper_memory_os_program{,_publication,_types}`, `keeper_memory_os_journal_codec`, `keeper_memory_os_receipt_selection`, `keeper_memory_absorbed`, `check_facts_budget`, `facts_max_bytes`.
-- 남긴다: fact 타입, 스냅샷 codec, 경로 배치, 변화 metric, 파일에 묶인 저장소, `Keeper_memory_os_events`.
+- 남긴다: fact 타입, 스냅샷 codec, 파일에 묶인 저장소, `Keeper_memory_os_events`.
+- 고쳐 쓴다(남는 것만 추린다). 지우는 모듈을 직접 부르는 단위들이다.
+
+  | 단위 | 남는 것 | 없어지는 것 |
+  |---|---|---|
+  | `keeper_memory_os_current_types` | 스냅샷 envelope 의 타입(`source`, `change`, `support_invalidation`, `t`) | `journal_entry`, range id 둘, `successor_program_*`, `revision_evidence`. 옛 직접 쓰기의 오류 타입은 §8.5 의 표가 대신한다 |
+  | `keeper_memory_os_current_change_metrics` | `of_change` | publication 과 stage 로 세던 것 |
+  | `keeper_memory_os_current_layout` | 스냅샷 경로 | journal, receipt, epoch, unread ledger 의 경로 |
+  | `keeper_memory_os_current` | 스냅샷 읽기 | 쓰기, 복구, journal 읽기. 쓰는 쪽(§8)이 대신한다 |
+  | `keeper_memory_os_current_fact_ops` | 스냅샷 파일을 옆으로 치우는 일(`move_aside_for_keepers_dir`). boot 의 저장소 맞춤이 부른다 | 직접 쓰기 넷과 journal 꼬리 읽기. 쓰는 쪽이 대신한다 |
+  | `keeper_memory_os_successor_recall` | 뒤이은 fact 후보를 내는 일(§11.5) | 입력이 journal 에서 반영 기록으로 바뀐다 |
+  | `keeper_memory_activity`, `keeper_memory_journal_outcome` | 화면에 내는 값 | 입력이 journal 에서 반영 기록과 쓰는 쪽 view 로 바뀐다(§12) |
+
+  golden fixture 시험(`test_keeper_memory_snapshot_golden`)이 envelope 타입의 첫 소비자다. 타입 파일을 추릴 때 그 시험의 바이트가 그대로여야 한다.
 
 **c. admission 과 cleanup.** 682줄이다. `keeper_memory_admission_{queue, judgment, worker}`, `keeper_memory_cleanup`, admission 바이트 상한이다.
 
@@ -1704,7 +1720,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `librarian_continuity_snapshot`, `librarian_continuity_report`, `keeper_continuity_{request, evidence, observation}`, `keeper_external_read_cursor`.
 - `keeper_turn_boundaries` 와 그 줄을 만들고 읽는 코드 전부. `Keeper_turn_task_context` 는 턴 기록의 `task_evidence` 로 바뀐다(§5.1).
 - `keeper_carried_front` 의 Librarian 출처 다섯(§11.2).
-- `turn-boundaries.jsonl` 을 읽던 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층에서 옮기고, 그 뒤에 옛 파일 쓰기를 멈춘다. 옮기는 곳은 `keeper_carried_front.ml`, `keeper_turn_driver_try_provider.ml`, `keeper_next_request_forecast.ml`, `keeper_agent_run_turn_helpers.ml`, `keeper_checkpoint_purge.ml`, `bin/masc_checkpoint_purge.ml`, `server_dashboard_http_keeper_api_checkpoints.ml`, `keeper_durable_store.ml`, `server_dashboard_http_delete_actions.ml`, `server_tool_blob_scope.ml` 이다.
+- `turn-boundaries.jsonl` 을 읽던 곳은 지우지 않고 턴 기록으로 옮긴다. 한 층에서 옮기고, 그 뒤에 옛 파일 쓰기를 멈춘다. 옮기는 곳은 `Keeper_turn_boundaries` 를 부르는 단위 전부다. 목록은 아래 k 의 표에 있다. 줄을 쓰는 곳(`keeper_agent_run_finalize_response`, `keeper_history_clear`)과 `Keeper_turn_boundaries_artifact` 생성자를 가진 `keeper_shutdown_types` 도 든다.
 
 **e. 반영 경로의 판정자.** `Typesafeai_librarian_preflight`, `bin/masc_librarian_preflight_eval.ml`, TUI 의 preflight 표시, `absorb_gate` 와 `librarian_preflight` 키.
 
@@ -1727,6 +1743,18 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 - `keeper.md` 와 `keeper_memory_write.toml` 의 Librarian 줄은 지금 일어나는 일을 평서문으로 다시 쓴다. 쓰기는 바로 저장된다는 것이다. 무엇이 없어졌는지는 적지 않는다.
 
 층마다 확인하는 것은 같다. 지운 이름을 부르는 곳이 `lib/`, `bin/`, `test/` 에 없고, 타입 검사가 통과하고, 새 기능 시험이 통과한다.
+
+**k. 지우는 모듈을 부르는 바깥 코드.** 지우거나 이름을 바꾸는 모듈은 93개다. 그것을 직접 부르는 바깥 단위는 62개다(`lib/`, `bin/`). 목록은 근거 폴더의 `cut-callers/callers.tsv` 이고, 같은 폴더의 스크립트가 다시 만든다. 컷 층은 이 목록이 빌 때까지 간다.
+
+| 처분 | 단위 |
+|---|---|
+| 같이 지운다. 하는 일이 전부 옛 경로다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake`, `server_dashboard_http_keeper_memory_history_resolution` |
+| 이름만 따라 바꾼다 | `keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure` (위 a) |
+| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12), purge(§5.6) |
+
+- 이 목록은 이름을 직접 부르는 단위만 잡는다. `keeper_memory_os_current` 를 거쳐 부르는 곳(`recover_publication` 을 부르는 `keeper_store_boot_reconcile` 등)은 그 단위를 추릴 때 드러난다. 추린 뒤에 목록을 다시 만든다.
+- `server_settled_archive_sweep` 은 Librarian 의 gate 모듈로 기록을 가른다. Librarian scope 가 없어지면 그 갈래를 지운다. 다른 add-on 의 기록이 남으므로 pass 는 남는다.
+- 처분은 단위의 머리말과 부르는 이름을 읽고 정했다. 컷 층이 단위를 열어 보고 바꾸면 이 표를 같이 고친다.
 
 ### 19.3 지우는 층에서 다시 확인할 것
 
@@ -1962,12 +1990,12 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 어느 client 에도 바이트 상한을 두지 않는다(10-06) | `facts_max_bytes` 와 `check_facts_budget` 를 지운다. 쓰기를 크기로 거절하지 않는다. 파일에 묶인 저장소도 바이트로 묶지 않는다 | Memory 는 Librarian 이 줄이거나 창에 닿을 때까지 자란다. 크기는 화면에 보인다 |
 | Librarian 은 같이 도는 수를 정하지 않는다(11-18) | 묻기가 턴 도착을 따른다. Keeper 마다 하나이고 provider 자리가 묶는다 | 하루 생성이 지금의 12~16배다. GLM 요금제 한도와는 견주지 못했다(§23) |
 | 바깥 판정자는 반영 경로 밖에 둔다(11-17) | 답을 받으면 바로 반영한다. gate 와 preflight 를 지운다 | 잘못된 merge 가 누가 보기 전까지 Memory 에 있다. 원본은 줄에 남는다 |
-| heuristic 을 두지 않는다. masc 는 자기 판단으로 slot 을 쉬게 하지 않는다(프로젝트 지침) | 매번 실패하는 slot 은 운영자가 lane 에서 뺀다. 설치 전에 하나를 빼야 한다. 11-18 20:13 의 runtime 파일에는 세 목록에 그대로 있다 | 그런 slot 이 다시 생기면 걷기가 끌려간다(§15.2). 운영자가 행에서 보고 빼야 한다 |
+| heuristic 을 두지 않는다. masc 는 자기 판단으로 slot 을 쉬게 하지 않는다(프로젝트 지침) | 매번 실패하는 slot 은 운영자가 lane 에서 뺀다. 설치 전에 하나를 빼야 한다. 11-18 20:13(KST)의 runtime 파일에는 세 목록에 그대로 있다. slot 의 id 는 여기에 적지 않는다. 공개 저장소이고 binding id 가 계정 이름을 싣는다. 컷 전에 운영자에게 따로 알린다(§18.1) | 그런 slot 이 다시 생기면 걷기가 끌려간다(§15.2). 운영자가 행에서 보고 빼야 한다 |
 | 건너뛰기를 400 으로 넓히지 않는다(11-12) | 바닥에서도 400 과 422 는 기억하지 않는다. 그 slot 에는 pulse 마다 다시 묻는다 | 400 이면 요청 하나씩이 들고 생성은 없다. 모델이 내용을 거절한 stop reason 이면 생성 하나씩이다. 선언한 slot 이 모두 그렇게 거절하면 E4 가 켜진다(§12.2) |
 | 기존 Gate 가 없어도 durable truth 가 유지되면 지운다(프로젝트 지침) | purge 가 Librarian 의 읽은 자리를 기다리던 거절을 지운다(§5.6). 안 읽은 줄은 bundle 로 자기 내용을 읽는다 | 안 읽은 줄이 가리키는 bundle 이 읽힐 때까지 디스크에 남는다 |
 | 새 Gate 는 없으면 durable truth 가 손상될 때만 더한다(같은 지침) | Keeper 의 턴을 Librarian 의 파일에 묶는 곳을 두지 않는다. 반영 기록이 없으면 언제나 첫 boot 로 읽어서, Keeper 가 쓰는 쪽보다 먼저 돌아도 안 읽고 지나가는 턴이 없다(§8.6) | 없어진 반영 기록은 「잃었다」로 보이지 않고 첫 boot 로 읽힌다. 턴 기록을 처음부터 한 번 더 읽는다. 철회한 claim 이 다시 들어올 수 있다 |
 | 재시도 간격은 고정 maintenance pulse 다. provider 가 시각을 말했으면 그때까지만 더 기다린다(constitution) | 쉬는 Keeper 는 pulse(60초, 코드 상수)마다 다시 묻는다. provider 가 잡아 둔 slot 은 부르지 않는다 | 반영 없이 끝난 Keeper 는 60초마다 질문을 다시 만든다 |
-| 지식 하나에 맞는 fact 하나(11-09) | Librarian 이 `Drop`, `Merge`, `Revise` 로 지킨다 | Memory 가 어느 항목과도 함께 들어가지 않는 동안은 지키지 못한다(§7.4). 경고로 보인다 |
+| 지식 하나에 맞는 fact 하나(11-09) | Librarian 이 `Drop`, `Merge`, `Revise` 로 지킨다 | Memory 가 어느 항목과도 함께 들어가지 않는 동안은 지키지 못한다(§7.4). Memory 없이 읽는 동안은 warn, Memory 가 어느 slot 에도 안 들어가면 error(E5)로 보인다(§12.2) |
 
 11-12 의 결정보다 넓힌 곳이 하나 있다. 그때의 건너뛰기는 입력 크기 거절만, HTTP slot 만, 쉬는 slot 이 있을 때만이었다.
 이 RFC 는 바닥에서 타입 있는 크기 사실 셋 모두에, CLI slot 에도, 같은 질문을 다시 보내게 되는 모든 때에 건너뛴다(§7.4).
@@ -2019,7 +2047,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | GLM 요금제 한도가 하루 생성 1,450~1,850번과 입력 약 1.4억~1.7억 token 을 받는지. 지금은 하루 118번이다(§15.2) | 받지 못하면 Librarian 이 quota 로 쉬는 시간이 늘고, 같은 계정을 쓰는 Keeper 턴도 같이 쉰다. lane 의 slot 구성을 바꿔야 한다 | 컷 전에 운영자가 요금제 숫자와 견준다(§18.1) |
 | ollama 가 Librarian 질문에 답하는 속도. 표본이 7개다 | tinker 가 없는 lane 에서 ollama 가 GLM 만큼 느리면 자리가 평균 도착에서 묶인다(§15.2 셋째 행) | 배포 뒤 slot 별 호출 시간 metric |
 | 질문 크기와 호출 시간의 관계 | 단위를 묶어 물을 때의 호출 시간을 지금 표본(단위 약 1.3~1.6개)으로 넘겨짚을 수 없다 | 배포 뒤 metric. 재생은 호출 시간을 크기와 무관하게 뽑았다 |
-| 턴 기록이 하루 약 1.4 MB, 반영 기록이 하루 약 27 MB 자란다는 추정 | 줄 크기 표본과 재생에서 나온 값이다. 실제 줄은 재지 않았다 | 배포 뒤 파일 크기 |
+| 턴 기록이 하루 약 1.4 MB, 반영 기록이 하루 약 27 MB 자란다는 추정 | 줄 크기 표본과 재생에서 나온 값이다. 실제 줄은 재지 않았다. 하루 2,960줄은 생성 수(1,450~1,850)보다 많다. 차이는 직접 쓰기와 건너뛰기의 줄이라고 보지만 그 비중을 따로 재지 않았다. 가장 바쁜 Keeper 의 1.15 GB 는 턴마다 한 줄을 쓴다고 본 상한이다 | 배포 뒤 파일 크기 |
 | 새 프롬프트에서 slot 별로 답이 얼마나 유효하고 얼마나 바꾸는지 | 「아무것도 바꾸지 않는다」가 다시 안전한 답이 되는지는 프롬프트를 써 봐야 안다 | 평가 틀(L1)의 채점 결과를 묻기 층 PR 에 붙인다 |
 | 운영 lane 의 slot 가운데 선언이나 probe 로 정한 입력 경계(`rejected_from`)가 있는 것이 있는지 | 있으면 그 slot 은 보내기 전에 `Input_too_large` 를 낸다. 없으면 provider 의 거절을 기다린다. 설계는 둘 다 다룬다 | 컷 전에 runtime 파일에서 읽는다 |
 
@@ -2041,10 +2069,14 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | slot 결과 표의 생성자 163개 가운데 실제로 Exact 경로에 닿는 것이 어느 것인지. 표는 타입에서 만들었고 호출 경로를 따라가지 않았다 | 닿지 않는 생성자의 행은 쓰이지 않을 뿐이다. 닿는데 갈래가 틀린 행은 폭을 잘못 줄이거나 줄이지 않는다 | 끝맺음 타입 층(L2)과 묻기 층(L6). 생성자마다 분류 시험 |
 | 계정별 Claude API provider 는 catalog 행이 없어 Exact slot 이 되지 못한다는 것. 다른 작업이 찾은 사실이고 여기서 확인하지 않았다(#53022) | Librarian lane 에 그런 provider 를 선언할 수 없다 | 그 작업의 RFC |
 
+본문이 줄 번호로 인용한 코드는 읽은 것이다. 그 가운데 그 코드가 바뀌면 설계가 깨지는 전제는 셋이다. 턴은 등록된 Keeper 에게만 돈다(`keeper_turn.ml:227-236`, §8.6). object sweep 은 프로세스가 시작할 때 쓰는 쪽이 생기기 전에 한 번 돈다(`bin/main_eio.ml:350`, §5.6). 주기 작업으로 바뀌면 깨진다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`, §9.3).
+
 ### 23.3 모델이 다루지 않은 것
 
 | 다루지 않은 것 | 대신 확인하는 것 |
 |---|---|
+| 한 항목에서의 slot 별 크기 사실, 그것을 접는 판단, E4 의 조건(§21.5) | L7 이 그 코드와 모델을 같이 넣는다. 그때까지 §9.3 의 그 행들은 모델 밖이다 |
+| 한 run 에 겹친 결함 넷(§21.5) | 결함 하나씩의 설정과 층마다의 crash 시험 |
 | provider 자리와 자리를 기다리는 시간. 모델에서 자리를 기다리는 묻기는 경보 행이 없는 `Asking` 이다 | 자리 걷기는 #52986 의 시험이 확인한다. 기다리는 묻기는 fleet 행에 보인다(§12.1) |
 | Memory 의 내용. 모델은 크기와 fact id 만 가진다 | 평가 틀(L1) |
 | 줄 codec 과 파일 쓰기 | 층마다의 crash 시험(§13) |

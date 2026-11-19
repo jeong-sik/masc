@@ -105,7 +105,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
         (if ko then "꺼짐 (신규 실행 중지) · %s" else "Off (no new runs) · %s")
         last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_degraded ->
-    Printf.sprintf (if ko then "주의 필요 — %s" else "Needs attention — %s") last_run
+    Printf.sprintf (if ko then "주의 필요 · %s" else "Needs attention · %s") last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_running ->
     let started_note =
       match lane.sl_last_started_at with
@@ -119,7 +119,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
         Printf.sprintf (if ko then "%d건 진행 중" else "%d running")
           lane.sl_running_count
     in
-    Printf.sprintf (if ko then "실행 중 — %s · %s" else "Running — %s · %s")
+    Printf.sprintf (if ko then "실행 중 · %s · %s" else "Running · %s · %s")
       started_note last_run
   | Tui_decode.Lane_ready, Tui_decode.Standalone_idle ->
     Printf.sprintf (if ko then "모델 설정됨 · %s" else "Models configured · %s")
@@ -935,8 +935,8 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  %s 의 후보 순서에 후보 추가 — %s — %s"
-             else "  adding a candidate to the candidate order of %s — %s — %s")
+            (if state.ui_language = Lang_ko then "  %s 의 후보 순서에 후보 추가 · %s · %s"
+             else "  adding a candidate to the candidate order of %s · %s · %s")
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane)
             picker.Masc_tui_types.rlp_summary
             (Masc_tui_types.runtime_picker_keys ~ko:(state.ui_language = Lang_ko)

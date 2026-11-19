@@ -956,6 +956,10 @@ val detail_page :
 (** A detail page of headed blocks: each block is its heading and the
     [Masc_tui_page_line] lines under it. One label column serves every block. *)
 
+val section_heading_line : string -> string
+(** A detail's section heading, [── title ─────] in bold on the reader's
+    foreground (RFC tui-one-screen-grammar §5.2, §7.3). *)
+
 val detail_section_lines : ?first:bool -> string -> string list
 (** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
 

@@ -463,6 +463,17 @@ let test_a_measurement_notes_nothing () =
   Alcotest.(check (option (float 1e-9))) "and a measurement that raises" (Some 1020.)
     (Redraw.next_change ())
 
+(* RFC tui-one-screen-grammar §6.2: a set interval reads in at most two
+   units and gives back the seconds it was set to; a day is [1d], never
+   [24h]. *)
+let test_a_set_interval_reads_its_exact_seconds () =
+  List.iter
+    (fun (seconds, expected) ->
+      Alcotest.(check string) (Printf.sprintf "%d seconds" seconds) expected
+        (Masc_tui_value.Interval.text seconds))
+    [ 45, "45s"; 90, "1m30s"; 300, "5m"; 3600, "1h"; 5400, "1h30m"; 21600, "6h"
+    ; 86400, "1d"; 93600, "1d02h"; 0, "0s" ]
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -509,6 +520,9 @@ let () =
         ] )
     ; ( "hash",
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )
+    ; ( "interval",
+        [ Alcotest.test_case "a set interval reads its exact seconds" `Quick
+            test_a_set_interval_reads_its_exact_seconds ] )
     ; ( "ongoing length",
         [ Alcotest.test_case "past a minute, at most once a minute" `Quick
             test_a_length_past_a_minute_changes_at_most_once_a_minute

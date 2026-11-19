@@ -1659,9 +1659,7 @@ let keeper_group_heading_text ~ko ~available_cells rows group count =
         | Keeper_list_model.Due_none -> "NO SCHEDULE"
         | Keeper_list_model.Due_unknown -> "SCHEDULE UNKNOWN"
       in
-      Printf.sprintf "%s %s %d"
-        (Masc_tui_keeper_mark.badge_glyph Keeper_list_model.Badge_schedule)
-        label count
+      Printf.sprintf "%s %s %d" (Masc_tui_keeper_mark.due_glyph due) label count
   | Keeper_list_model.Group_memory follow ->
       let label =
         match follow with
@@ -4823,7 +4821,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let recurrence_words =
                  List.map
                    (fun (row : schedule_row) ->
-                      Terminal_text.single_line row.sch_recurrence_summary)
+                      Terminal_text.single_line
+                        (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+                           ~summary:row.sch_recurrence_summary row.sch_recurrence))
                    rows
                in
                (* Every line carries a two-cell lead before the table, so the
@@ -4894,7 +4894,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ; krow_received =
                          occurrence_clock row.sch_stimulus_recorded_at_iso
                      ; krow_recurrence =
-                         Terminal_text.single_line row.sch_recurrence_summary
+                         Terminal_text.single_line
+                           (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+                              ~summary:row.sch_recurrence_summary row.sch_recurrence)
                      ; krow_by = Terminal_text.single_line row.sch_requested_by
                      ; krow_requested =
                          Terminal_text.column_timestamp row.sch_requested_at_iso

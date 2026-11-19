@@ -190,6 +190,15 @@ end
     a minute it has no seconds, so past a minute it changes at most once a
     minute. A finished length keeps the finer ladder
     ({!Masc_tui_message_layout.elapsed_text}). *)
+(** A span someone set, such as how often a schedule wakes. *)
+module Interval : sig
+  val text : int -> string
+  (** Whole seconds in at most two units, giving back the exact setting where
+      two units can say it: [45s], [1m30s], [5m], [6h], [1h30m], [1d],
+      [2d03h]. A setting that needs three units reads as {!Ongoing.text}. A
+      setting at or below zero reads [0s]. *)
+end
+
 module Ongoing : sig
   val text : float -> string
   (** [45s], [3m], [1h04m], [2d03h], [120d]: whole seconds below a minute,

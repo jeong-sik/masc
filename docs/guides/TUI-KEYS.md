@@ -476,7 +476,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
-| `Esc` | roster focused: return to the composer; chat focused: back, and during a turn interrupt it |
+| `Esc` | roster focused: return to the composer; chat focused: back without interrupting |
+| `Ctrl-C` | chat focused during a turn: interrupt it; otherwise arm quit |
 
 ## Keepers / Logs
 
@@ -961,7 +962,7 @@ or completion.
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL ▹ prefixes next candidate after turn failure |
-| `◷` | next scheduled run or hold status (Detailed second row; due in the views) |
+| `due` | the views' next scheduled run or hold status; DETAIL's schedule badge says the same |
 | `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row; its lag under lag in the views, and the memory and age views draw their own cells). mem ? is memory health not read yet, or a refused row that may be this keeper's; mem ! is this keeper's row, refused; — is a keeper with no memory snapshot |
 | `facts` | ordinary memory facts by time since first seen, one bar per group oldest first (over 7d, 1–7d, under 1d); bar height is relative to the largest group of the same strip, 0 is none, ? is not measured (Detailed second row; the age view draws the bins under facts by age ▸, · for an empty one) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |

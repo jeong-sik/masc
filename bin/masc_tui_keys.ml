@@ -806,8 +806,10 @@ let for_surface = function
            [Right / Esc:chat] and [Esc:back] side by side. *)
         b ~role:Acts ~ko:"채팅 / 뒤로" Act "Esc" "chat / back"
           ~help:
-            "roster focused: return to the composer; chat focused: back, and \
-             during a turn interrupt it"
+            "roster focused: return to the composer; chat focused: back \
+             without interrupting"
+      ; b ~role:Acts ~ko:"턴 멈춤" Act "Ctrl-C" "interrupt"
+          ~help:"chat focused during a turn: interrupt it; otherwise arm quit"
       ]
   | Keepers Keeper_runtime_pick ->
       (* The picker claims its own keys through [Masc_tui_pick_list], page and

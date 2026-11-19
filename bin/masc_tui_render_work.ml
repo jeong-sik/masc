@@ -450,7 +450,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
-  | Planning_detail.Heading -> Theme.info () ^ Ansi.bold
+  | Planning_detail.Heading -> Masc_tui_ansi.Section.style
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -1050,7 +1050,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
        | Some words -> " · " ^ words) in
   let _, next_text = planning_next_step ~ko goal in
   let section title =
-    Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+    Masc_tui_text_block.rows ~max_cells:width (Masc_tui_ansi.Section.rule_text title)
     |> List.map (fun line -> { Planning_detail.tone = Heading; text = "  " ^ line })
   in
   let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
@@ -1555,6 +1555,36 @@ let schedule_reaction_word ~ko = function
   | Schedule_contract_values.Reaction_invalid_stimulus_id -> if ko then "잘못된 자극 id" else "bad stimulus id"
   | Schedule_contract_values.Reaction_unrecognized_receipt -> if ko then "모르는 기록" else "unknown receipt"
 
+(* The last reaction the woken Keeper's ledger recorded, in the words the
+   Reaction row above already uses for the same steps. *)
+let schedule_reaction_kind_word ~ko = function
+  | Masc.Keeper_reaction_ledger_wire.Turn_started -> if ko then "턴 시작" else "turn started"
+  | Masc.Keeper_reaction_ledger_wire.Turn_finished -> if ko then "턴 끝남" else "turn finished"
+  | Masc.Keeper_reaction_ledger_wire.Event_queue_ack -> if ko then "받음 확인" else "acknowledged"
+  | Masc.Keeper_reaction_ledger_wire.Event_queue_cancelled -> if ko then "취소됨" else "cancelled"
+
+(* How the woken turn ended: the word and the colour of its status mark (RFC
+   tui-one-screen-grammar §7.2). A turn that ended asking the operator for
+   input is the operator's turn; a rest and a skip are waits; a cancel is a
+   stop. *)
+type schedule_turn_outcome_reading = { outcome_word : string; outcome_tone : string }
+
+let schedule_turn_outcome_reading ~ko disposition =
+  let reading korean english tone =
+    { outcome_word = (if ko then korean else english); outcome_tone = tone } in
+  match disposition with
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Completed -> reading "완료" "completed" (Theme.ok ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Checkpointed ->
+      reading "중간 저장" "checkpointed" (Theme.ok ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Input_required ->
+      reading "입력 필요" "input required" (Theme.warn ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Cancelled ->
+      reading "취소됨" "cancelled" (Theme.recede ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Skipped ->
+      reading "건너뜀" "skipped" (Theme.recede ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Failed -> reading "실패" "failed" (Theme.bad ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Rested -> reading "쉼" "rested" (Theme.recede ())
+
 let schedule_queue_color = function
   | Schedule_contract_values.Queue_matched_pending
   | Schedule_contract_values.Queue_terminal_projection_pending
@@ -1997,7 +2027,9 @@ let render_schedule_list (state : state) =
                    ; srow_delivery =
                        Terminal_text.single_line (schedule_delivery_word ~ko row)
                    ; srow_recurrence =
-                       Terminal_text.single_line row.sch_recurrence_summary
+                       Terminal_text.single_line
+                         (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+                            ~summary:row.sch_recurrence_summary row.sch_recurrence)
                    }
                in
                let content =
@@ -2107,7 +2139,7 @@ let schedule_turn_rows ~ko
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ timestamp
+              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then t "예" "yes" else t "아니오" "no") ^ at)
@@ -2136,16 +2168,21 @@ let schedule_turn_rows ~ko
           row.sch_turn_started_recorded_at_iso
       ; step (t "턴 종료" "Turn finished") turn_finished_seen
           row.sch_turn_finished_recorded_at_iso
-      ; field (t "턴 결과" "Turn outcome")
-          (match row.sch_turn_finished with
-           | Some (Schedule_turn_finished disposition) ->
-               Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
-           | Some Schedule_turn_open | None -> Masc_tui_theme.Glyph.no_value)
+      ; (match row.sch_turn_finished with
+         | Some (Schedule_turn_finished disposition) ->
+             let outcome = schedule_turn_outcome_reading ~ko disposition in
+             field ~style:outcome.outcome_tone (t "턴 결과" "Turn outcome") outcome.outcome_word
+         | Some Schedule_turn_open | None ->
+             field (t "턴 결과" "Turn outcome") Masc_tui_theme.Glyph.no_value)
       ; step (t "큐 확인" "Queue ack") row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
       ; step ~bad_when_true:true (t "취소" "Cancelled") row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso
       ; field (t "반응 종류" "Reaction kind")
-          (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_kind)
+          (match row.sch_reaction_kind with
+           | Some (Ok kind) -> schedule_reaction_kind_word ~ko kind
+           (* A kind this build cannot read: the ledger's own token. *)
+           | Some (Error raw) -> Terminal_text.single_line raw
+           | None -> Masc_tui_theme.Glyph.no_value)
       ; field
           ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
           (t "사유" "Reason") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)
@@ -2255,10 +2292,12 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let t korean english = if ko then korean else english in
+  (* A moment reads on the operator's clock (RFC tui-one-screen-grammar §6.1);
+     the wire text stays in section 4's raw payload. *)
   let timestamp value =
     match value with
     | None -> Masc_tui_theme.Glyph.no_value
-    | Some iso -> iso
+    | Some iso -> Terminal_text.short_timestamp iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -2272,9 +2311,10 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> schedule_reaction_word ~ko status
-    | None, Some at -> at
+    | None, Some at -> Terminal_text.short_timestamp at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" (schedule_reaction_word ~ko status) at
+        Printf.sprintf "%s  %s" (schedule_reaction_word ~ko status)
+          (Terminal_text.short_timestamp at)
   in
   let summary =
     Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
@@ -2315,7 +2355,8 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
                       Render_schedule.schedule_fence_hold_as_of_reading
                         ~ko ~checked ~target ~fence_owner))
         ; field (t "보류 id" "Held id") hold.Tui_decode.srh_occurrence_id
-        ; field (t "보류 예정" "Held due") hold.Tui_decode.srh_due_at_iso
+        ; field (t "보류 예정" "Held due")
+            (Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
         ]
   in
   detail_section_heading ~first:true
@@ -2324,7 +2365,9 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
        field ~style:status.tone (t "상태" "Status") status.word)
     ; field (t "예정" "Due") (timestamp row.sch_due_at_iso)
     ; field (t "다음 예정" "Next due") (timestamp row.sch_next_due_at_iso)
-    ; field (t "반복" "Recurrence") row.sch_recurrence_summary
+    ; field (t "반복" "Recurrence")
+        (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+           ~summary:row.sch_recurrence_summary row.sch_recurrence)
     ; field (t "만료" "Expires") (timestamp row.sch_expires_at_iso)
     ]
   @ hold_rows
@@ -2372,7 +2415,7 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     ; field (t "출처" "Source") row.sch_source
     ; field (t "요청자" "Requested by") row.sch_requested_by
     ; field (t "등록자" "Scheduled by") row.sch_scheduled_by
-    ; field (t "요청 시각" "Requested") row.sch_requested_at_iso
+    ; field (t "요청 시각" "Requested") (Terminal_text.short_timestamp row.sch_requested_at_iso)
     ]
   @ detail_section_heading (t "4. 페이로드 원문" "4. Payload JSON & Digest")
   @ [ field "Digest" row.sch_payload_digest

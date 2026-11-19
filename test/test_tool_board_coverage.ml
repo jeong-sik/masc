@@ -37,7 +37,6 @@ let cleanup () =
   Board_dispatch.reset_for_test ();
   Board_curation.reset_for_test ();
   Fs_compat.reset_fd_cache_for_testing ();
-  Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Fs_compat.mkdir_p _test_base_path;
   Result.get_ok (Board_dispatch.init_jsonl

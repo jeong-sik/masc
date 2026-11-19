@@ -1296,9 +1296,7 @@ val unlink_if_exists : string -> bool
     other I/O failures propagate as [Sys_error]. *)
 
 (** Remove a file, symlink, or directory tree without invoking a shell.
-    Missing paths are ignored. Symlinks are unlinked, not followed.
-    Each removed directory is forgotten by {!mkdir_p_memoized}, so later
-    writers can recreate it. *)
+    Missing paths are ignored. Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit
 
 (** [subdirectory_names dir] names the entries of [dir] that are directories,
@@ -1323,24 +1321,6 @@ val realpath_lenient : string -> string
 
 (** Create directory recursively. *)
 val mkdir_p : string -> unit
-
-(** [mkdir_p_memoized path] is [mkdir_p] but skips the stat/mkdir
-    syscalls on every call after the first for the same [path].
-    Use on hot append paths (jsonl writers, ledger appends) where the
-    same dir is touched many times per second. RFC-0162 §3.1.
-
-    The cache caches only the *fact* of dir existence; no fd is held.
-    External processes that delete the dir after first call will see
-    silent skip — acceptable for [.masc/] (self-owned). *)
-val mkdir_p_memoized : string -> unit
-
-(** Forget the memoized existence of [path]. Use when application-owned code
-    removes a directory that a later memoized writer may recreate. *)
-val invalidate_mkdir_memo : string -> unit
-
-(** Reset the [mkdir_p_memoized] cache. Test-only — production code
-    relies on process-lifetime persistence. *)
-val reset_mkdir_memo_for_testing : unit -> unit
 
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)
@@ -2435,6 +2415,10 @@ val append_fd_durable_for_testing :
   (unit, durable_append_error) result
 
 (** Append JSON value as line to JSONL file.
+
+    The directory of [path] is made when it is not there. Nothing about it
+    is remembered between calls, so a directory removed after an earlier
+    append is made again by the next one.
 
     In an Eio fiber, directory preparation, encoding and the complete
     per-path writer critical section run on a joined system thread.

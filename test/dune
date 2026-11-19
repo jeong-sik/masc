@@ -7736,3 +7736,4 @@
 (include stanzas/test_keeper_media_reading_reply.inc)
 (include stanzas/test_keeper_media_reading_outcome.inc)
 (include stanzas/test_keeper_media_reading_producer.inc)
+(include stanzas/test_tui_task_archive.inc)

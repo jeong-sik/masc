@@ -188,6 +188,40 @@ let test_the_two_capture_keys_are_distinct_control_codes () =
     [ Composer.listen_key; Composer.continuous_key ]
 ;;
 
+let band_surface_testable =
+  Alcotest.testable
+    (fun fmt surface ->
+       Format.pp_print_string fmt
+         (match surface with
+          | Composer.Plain -> "plain"
+          | Composer.Tinted -> "tinted"
+          | Composer.Focused_tinted -> "focused_tinted"))
+    ( = )
+
+let test_band_surface_tracks_focus_and_reachability () =
+  Alcotest.(check band_surface_testable) "focused ready target"
+    Composer.Focused_tinted
+    (Composer.band_surface (make ~focus:Composer.Focused ()));
+  Alcotest.(check band_surface_testable) "unfocused ready target"
+    Composer.Tinted
+    (Composer.band_surface (make ~focus:Composer.Unfocused ()));
+  List.iter
+    (fun focus ->
+       List.iter
+         (fun target ->
+            Alcotest.(check band_surface_testable) "no tint without ready target"
+              Composer.Plain
+              (Composer.band_surface (make ~focus ~target ())))
+         [ Composer.No_target
+         ; Composer.Unreachable
+             { keeper = "beta"; reason = Composer.Workspace_unread }
+         ; Composer.Unreachable
+             { keeper = "beta"; reason = Composer.Workspace_differs }
+         ; Composer.Unreachable
+             { keeper = "beta"; reason = Composer.Keeper_unavailable "offline" }
+         ])
+    [ Composer.Focused; Composer.Unfocused ]
+
 let () =
   Alcotest.run "tui-composer"
     [ ( "what the row says"
@@ -227,5 +261,7 @@ let () =
             test_the_two_capture_keys_are_distinct_control_codes
         ] )
     ; ( "layout"
-      , [] )
+      , [ Alcotest.test_case "band surface tracks focus and reachability" `Quick
+            test_band_surface_tracks_focus_and_reachability
+        ] )
     ]

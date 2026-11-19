@@ -914,17 +914,19 @@ let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~
    around it is drawn in, so a painted span hands that back rather than
    resetting it. *)
 
-let slash_hint_text ~restore draft =
+let slash_hint_text_with ~accent ~bad ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
-    | Masc_tui_command.Typed text ->
-        Theme.accent () ^ text ^ restore
-    | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
+    | Masc_tui_command.Typed text -> accent ^ text ^ restore
+    | Masc_tui_command.Wrong text -> bad ^ text ^ restore
     | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
   in
   match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
+
+let slash_hint_text ~restore draft =
+  slash_hint_text_with ~accent:(Theme.accent ()) ~bad:(Theme.bad ()) ~restore draft
 
 (* One synchronous frame owns the recipient, prompt and fitted draft used by
    both its row and caret. Nothing survives to the next frame or key handler. *)
@@ -963,12 +965,20 @@ let composer_row state ~rows ~cols =
     Message_layout.input_window ~max_cells:(max 0 (cols - prompt_cells))
       ~cursor:(String.length before) draft
   in
+  let band_surface = Composer.band_surface composer in
+  let ground =
+    match band_surface with
+    | Composer.Plain -> ""
+    | Composer.Tinted | Composer.Focused_tinted ->
+        (Chat_theme.snapshot ()).Chat_theme.user_background
+  in
   let tone =
-    match (composer.Composer.focus, composer.Composer.target) with
-    | Composer.Focused, _ -> Ansi.default_fg
-    | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
-    | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
-        Ansi.dim
+    match composer.Composer.focus with
+    | Composer.Focused -> Ansi.default_fg
+    | Composer.Unfocused -> Ansi.dim
+  in
+  let restore =
+    if String.equal ground "" then tone else Ansi.reset ^ ground ^ tone
   in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
@@ -986,18 +996,63 @@ let composer_row state ~rows ~cols =
      placed after the draft, does not move. *)
   let slash_hint =
     match composer.Composer.focus with
-    | Composer.Focused -> slash_hint_text ~restore:tone composer.Composer.draft
+    | Composer.Focused ->
+        let accent =
+          if String.equal ground "" then Theme.accent ()
+          else Theme.Side_pane.info ()
+        in
+        let bad =
+          if String.equal ground "" then Theme.bad ()
+          else Theme.Side_pane.bad ()
+        in
+        slash_hint_text_with ~accent ~bad ~restore composer.Composer.draft
     | Composer.Unfocused -> None
+  in
+  (* Match the chat pane's Codex-style tinted input band: when focused on a
+     ready target, let only the prompt recede (measured against Side_pane when
+     tinted) while typed text keeps the terminal foreground on top of the
+     low-contrast surface ground. Under NO_COLOR, skip mid-line resets. *)
+  let styled_prompt =
+    match band_surface with
+    | Composer.Focused_tinted ->
+        let prompt_recede =
+          if String.equal ground "" then Theme.recede ()
+          else Theme.Side_pane.recede ()
+        in
+        if String.equal prompt_recede "" then prompt
+        else prompt_recede ^ prompt ^ Ansi.reset ^ ground ^ tone
+    | Composer.Tinted | Composer.Plain -> prompt
   in
   let body =
     match String.equal draft "", slash_hint with
-    | true, _ -> prompt
-    | false, None -> prompt ^ draft
-    | false, Some line -> prompt ^ draft ^ "   " ^ line
+    | true, _ -> styled_prompt
+    | false, None -> styled_prompt ^ draft
+    | false, Some line -> styled_prompt ^ draft ^ "   " ^ line
   in
   let body=match Composer.row_note ~ko composer with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
+  (* Fit a row onto the tinted band without letting [fit_width]'s bare reset
+     punch an untinted cutout behind trailing wide-char padding or "…". *)
+  let fit_band text width =
+    if width <= 0 then ""
+    else if String.equal ground "" then fit_width text width
+    else
+      match Message_layout.take_cells text width with
+      | Message_layout.Whole kept ->
+          kept
+          ^ String.make (max 0 (width - Message_layout.display_width kept)) ' '
+      | Message_layout.Cut _ ->
+          let room = max 0 (width - Message_layout.cut_mark_cells) in
+          let kept =
+            match Message_layout.take_cells text room with
+            | Message_layout.Whole kept | Message_layout.Cut kept -> kept
+          in
+          let pad =
+            String.make (max 0 (room - Message_layout.display_width kept)) ' '
+          in
+          kept ^ Ansi.reset ^ ground ^ tone ^ pad ^ Message_layout.cut_mark
+  in
   (* The key that opens the row sits at the right end, one cell in from the
      edge as the prompt is one cell in from the left. After the recipient it
      moved with the length of every name the cursor passed. It is drawn only
@@ -1009,8 +1064,8 @@ let composer_row state ~rows ~cols =
     let body_cells = cols - hint_cells - edge_cells in
     if String.equal hint "" || not (String.equal draft "")
        || Message_layout.display_width body + composer_hint_gap_cells > body_cells
-    then fit_width body cols
-    else fit_width body body_cells ^ hint ^ String.make edge_cells ' '
+    then fit_band body cols
+    else fit_band body body_cells ^ hint ^ String.make edge_cells ' '
   in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
@@ -1020,7 +1075,7 @@ let composer_row state ~rows ~cols =
      where it is unambiguous which keeper and which call it is for. *)
   let line = match awaiting_approval_notice state with
     | Some notice -> (Theme.warn ()) ^ fit_width notice cols ^ Ansi.reset
-    | None -> tone ^ fit_width body cols ^ Ansi.reset
+    | None -> ground ^ tone ^ body ^ Ansi.reset
   in
   let cursor = match composer.Composer.focus with
     | Composer.Unfocused -> Frame_presenter.Hidden

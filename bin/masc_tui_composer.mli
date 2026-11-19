@@ -106,6 +106,18 @@ val accepts_input : t -> bool
     unfocused, and false when there is nothing to send to, so a draft cannot
     be typed into a row that has no recipient. *)
 
+(** Surface ground treatment for the shared 1-line composer band (Codex-style
+    borderless tinted input strip when a recipient is ready, plain when no
+    recipient is reachable). *)
+type band_surface =
+  | Plain
+  | Tinted
+  | Focused_tinted
+
+val band_surface : t -> band_surface
+(** Decide whether the shared composer row draws a tinted background band and
+    whether the prompt should recede against active draft text. *)
+
 (** What a keypress does to the composer. *)
 type key_outcome =
   | Take_focus of string

@@ -1,13 +1,17 @@
 module Check = Masc.Published_artifact_check
 module Catalog = Masc_tui_resource_catalog
 module Fetched = Masc_tui_fetched
+module Gap = Masc_tui_value.Unknown
 
 type inventory =
   { checks : Check.t list
   ; diagnostics : (string * string) list
   ; received_at : float }
 type read_failure = Read_failed of string | Read_kept_back of string
-type status = Known of Check.t option | Unknown of string | Kept_back of string
+type status =
+  | Known of Check.t option
+  | Unknown of Gap.t * string
+  | Kept_back of string
 
 open Result.Syntax
 let fields names = function
@@ -45,18 +49,19 @@ let of_json ~received_at json =
   | _ -> Error "invalid confirmation inventory"
 
 let resolve inventory (report : Catalog.report) =
-  if Fetched.in_flight inventory then Unknown "confirmation query in progress"
+  if Fetched.in_flight inventory then Unknown (Gap.Unread, "confirmation query in progress")
   else match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
-    | Absent -> Unknown "confirmation inventory has not been read"
-    | Loading -> Unknown "confirmation query in progress"
-    | Stale (_, Read_failed detail) | Failed (Read_failed detail) -> Unknown detail
+    | Absent -> Unknown (Gap.Unread, "confirmation inventory has not been read")
+    | Loading -> Unknown (Gap.Unread, "confirmation query in progress")
+    | Stale (_, Read_failed detail) | Failed (Read_failed detail) -> Unknown (Gap.Read_failed, detail)
     | Stale (_, Read_kept_back notice) | Failed (Read_kept_back notice) -> Kept_back notice
-    | Ready { diagnostics = _ :: _; _ } -> Unknown "some confirmation records could not be read"
+    | Ready { diagnostics = _ :: _; _ } ->
+      Unknown (Gap.Read_failed, "some confirmation records could not be read")
     | Ready { checks; diagnostics = []; _ } ->
       match List.find_opt (fun (check : Check.t) ->
         check.target.id = report.id && check.target.revision = report.revision.revision) checks with
       | Some check when check.target.body_sha256 <> report.revision.body.sha256 ->
-        Unknown "confirmation record refers to a different report body"
+        Unknown (Gap.Unreported, "confirmation record refers to a different report body")
       | (Some _ | None) as check -> Known check
 
 let unchecked_on_day ~reports_complete ~day ~entries inventory =
@@ -95,7 +100,7 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
   let* candidates = traverse (fun (index, entry) -> match entry with
     | Catalog.Mcp _ -> Ok None
     | Report report -> match resolve inventory report with
-      | Unknown detail | Kept_back detail -> Error detail
+      | Unknown (_, detail) | Kept_back detail -> Error detail
       | Known None | Known (Some {state=Check.Unchecked;_}) -> Ok (Some index)
       | Known (Some {state=Check.Checked;_}) -> Ok None)
     (List.mapi (fun index entry -> index, entry) entries) in
@@ -104,16 +109,38 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
     | Some _ as next -> next
     | None -> List.nth_opt candidates 0)
 
+(* A confirmation the TUI cannot answer wears the 6.4 mark of why (RFC
+   tui-one-screen-grammar): not read yet or reading, a read that failed, or
+   a record that does not answer for this exact body. A kept-back read was
+   never sent, so it is not read. The column is headed CHECK, so the cell
+   does not say "check" again. *)
+let gap_word = function
+  | Gap.Unread -> "not read"
+  | Gap.Read_failed -> "read failed"
+  | Gap.Unreported -> "not reported"
+
+let gap_label gap = Gap.glyph gap ^ " " ^ gap_word gap
+
+let unchecked_label = "○ unchecked"
+
+(* The settled status mark (RFC tui-one-screen-grammar 7.2); [✓] is not one.
+   Unchecked keeps the waiting mark it already wore. *)
+let checked_label = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " checked"
+
 let label = function
-  | Unknown _ | Kept_back _ -> "? check unknown"
-  | Known None | Known (Some {state=Check.Unchecked;_}) -> "○ unchecked"
-  | Known (Some {state=Check.Checked;_}) ->
-      (* The settled status mark (RFC tui-one-screen-grammar 7.2); [✓] is not
-         one. Unchecked keeps the waiting mark it already wore. *)
-      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " checked"
+  | Unknown (gap, _) -> gap_label gap
+  | Kept_back _ -> gap_label Gap.Unread
+  | Known None | Known (Some {state=Check.Unchecked;_}) -> unchecked_label
+  | Known (Some {state=Check.Checked;_}) -> checked_label
+
+let widest_label_cells =
+  List.fold_left (fun widest text ->
+    max widest (Masc_tui_message_layout.display_width text)) 0
+    [ gap_label Gap.Unread; gap_label Gap.Read_failed; gap_label Gap.Unreported
+    ; unchecked_label; checked_label ]
 
 let description status = match status with
-  | Unknown detail -> "Confirmation unknown: " ^ detail
+  | Unknown (gap, detail) -> "Confirmation " ^ gap_word gap ^ ": " ^ detail
   | Kept_back notice -> notice
   | Known None -> "No confirmation for this exact report revision."
   | Known (Some check) -> label status ^ " · " ^ check.changed_by ^ " · " ^ check.changed_at

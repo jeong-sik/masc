@@ -657,7 +657,8 @@
  (name masc_tui_artifact_checks)
  (wrapped false)
  (modules masc_tui_artifact_checks)
- (libraries masc_tui_resource_catalog masc_tui_fetched masc masc_tui_value yojson))
+ (libraries masc_tui_resource_catalog masc_tui_fetched masc masc_tui_message_layout
+   masc_tui_value yojson))
 
 (library
  (name masc_tui_artifact_check_action)

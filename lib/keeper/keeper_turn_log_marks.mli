@@ -7,7 +7,8 @@
     counted in messages survives a purge, and a run of messages is named by
     the bundles that hold it when the line is written.
 
-    This module counts and cuts. It reads no object. *)
+    This module counts and cuts. It reads no object: the caller's [load]
+    does. *)
 
 module Objects := Agent_core.Checkpoint_objects
 
@@ -27,30 +28,35 @@ val of_head : Objects.history -> covered
 (** The number of the first message covered. Messages are numbered from 0. *)
 val first : covered -> int
 
-(** The segment to read when a run starts before {!first}. [None] when the
-    covered turns start at message 0. *)
-val segment_before : covered -> Objects.digest option
-
-type segment_error =
+type 'error segment_error =
   | Nothing_before (** The covered turns already start at message 0. *)
+  | Not_read of 'error (** What [load] answered. *)
   | Does_not_fit of
       { first : int
       ; segment_messages : int
       ; has_previous : bool
       }
-  (** This is not the segment just before: it holds more messages than there
-      are before {!first}, or it reaches message 0 and names a segment before
-      it, or it stops short of message 0 and names none. *)
+  (** What [load] gave is not the segment just before: it holds more
+      messages than there are before {!first}, or it reaches message 0 and
+      names a segment before it, or it stops short of message 0 and names
+      none. *)
 
-(** The turns of the segment {!segment_before} names, put in front. *)
-val with_segment_before : Objects.segment -> covered -> (covered, segment_error) result
+(** The turns of the segment just before, put in front. [load] is called
+    once, with the name the covered turns hold for that segment. The caller
+    never chooses which segment is read, so it cannot hand in another one
+    that happens to hold as many messages. *)
+val with_segment_before
+  :  load:(Objects.digest -> (Objects.segment, 'error) result)
+  -> covered
+  -> (covered, 'error segment_error) result
 
 type range_error =
   | Starts_before_covered of
       { from : int
       ; first : int
       }
-  (** Read the segment before and ask again. *)
+  (** Put the segment before in front with {!with_segment_before} and ask
+      again. *)
   | Ends_after_covered of
       { through : int
       ; last : int

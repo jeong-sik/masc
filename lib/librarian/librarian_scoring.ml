@@ -37,6 +37,12 @@ type tally =
 
 let count predicate items = List.length (List.filter predicate items)
 let said_in claim token = String_util.string_contains_substring ~needle:token claim
+let held_in facts token = List.exists (fun (fact : fact) -> said_in fact.claim token) facts
+
+(* What the units said and Memory did not hold yet. A token Memory holds
+   already is nothing an answer can recover: counting it would give an
+   answer that does nothing a share of the score. *)
+let to_recover case = List.filter (fun token -> not (held_in case.facts token)) case.planted
 
 (* A score does not depend on when it is taken: the plan stamps new facts
    with this time and the scorer reads no time back. *)
@@ -51,7 +57,7 @@ let score case text =
       Librarian_plan.of_answer ~shown:case.shown ~facts:case.facts ~removed_since:[]
         ~at:scoring_time ~trace_id:scoring_trace answer
     in
-    let held_after token = List.exists (fun (fact : fact) -> said_in fact.claim token) plan.facts in
+    let held_after token = held_in plan.facts token in
     let claim_of id =
       List.find_map
         (fun (fact : fact) -> if String.equal (memory_id fact) id then Some fact.claim else None)
@@ -82,7 +88,7 @@ let score case text =
           (match plan.effects.added, plan.effects.removed with
            | [], [] -> false
            | _ :: _, _ | _, _ :: _ -> true)
-      ; recovered = count held_after case.planted
+      ; recovered = count held_after (to_recover case)
       ; merge_expected
       ; merge_kept
       }
@@ -104,7 +110,7 @@ let tally scored =
          let total =
            { total with
              answers = total.answers + 1
-           ; planted = total.planted + List.length case.planted
+           ; planted = total.planted + List.length (to_recover case)
            }
          in
          match scored with

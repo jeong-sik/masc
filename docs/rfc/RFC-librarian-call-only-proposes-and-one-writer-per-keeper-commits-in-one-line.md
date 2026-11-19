@@ -1394,7 +1394,7 @@ provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당�
 
 | 단계 | 지금 읽는 곳 | 바뀐 뒤 읽는 곳 |
 |---|---|---|
-| 턴 경계로 | `turn-boundaries.jsonl` 의 마지막 `Turn_ended` | 턴 기록의 마지막 단위 줄의 끝자리(`Closed.after` 나 `Reset.after`). 단위 줄이 없으면 `Log_started.mark` |
+| 턴 경계로 | `turn-boundaries.jsonl` 의 마지막 `Turn_ended` | 턴 기록의 마지막 단위 줄의 끝자리(`Closed.after` 나 `Reset.after`). 단위 줄이 없으면 `Log_started.mark`. 턴 기록에 줄이 없으면 시작점은 0 이다. 꼬리를 읽지 못했거나, 끝자리가 다른 trace 의 것이거나, 이력이 끝자리보다 짧으면 턴 경계는 모르는 것이다(`Turn_boundary_unknown`). 0 으로 바꾸지 않는다 |
 | 이 턴의 tool 결과를 표시로 | 바뀌지 않는다 | 바뀌지 않는다 |
 | 이 턴이 시작한 곳으로 | `history_at_start` 의 atom 번호와 digest | `Opened.baseline.closed_messages` 를 atom 번호로 바꾼 값. digest 대신 「그 trace 의 head 가 닫힌 메시지를 그만큼은 갖고 있다」를 본다 |
 

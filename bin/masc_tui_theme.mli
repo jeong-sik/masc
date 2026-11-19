@@ -152,6 +152,15 @@ module Box : sig
   val tr_round : string
   val bl_round : string
   val br_round : string
+  val h_heavy : string
+  val v_heavy : string
+  val tl_heavy : string
+  val tr_heavy : string
+  val bl_heavy : string
+  val br_heavy : string
+  val scroll_up : string
+  val scroll_down : string
+  val scroll_thumb : string
   val l : string
   val r : string
 end

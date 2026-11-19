@@ -281,6 +281,13 @@ type provider_refusal =
   | Authorization_refused
   | Payment_required
   | Invalid_request
+      (** HTTP 400 or 422: the provider refused the request without naming a
+          size. *)
+  | Unclassified_status
+      (** A status no other constructor names (3xx, 405, 408, 409, ...). The
+          provider did not refuse the request as 400 or 422 do, so it is kept
+          apart from {!Invalid_request}. Consumers older than this constructor
+          read it as they read {!Invalid_request}. *)
   | Not_found
   | Context_overflow
   | Input_capacity

@@ -77,7 +77,8 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   | Exact.Provider_response_refused
       { refusal =
           ( Exact.Request_body_refused | Exact.Refusal_body_not_received | Exact.Overloaded
-          | Exact.Server_error | Exact.Invalid_request | Exact.Not_found
+          | Exact.Server_error | Exact.Invalid_request | Exact.Unclassified_status
+          | Exact.Not_found
           | Exact.Context_overflow | Exact.Input_capacity | Exact.Network_error
           | Exact.Connect_failed | Exact.Timeout )
       ; _

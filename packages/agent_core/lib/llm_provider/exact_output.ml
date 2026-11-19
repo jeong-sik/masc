@@ -105,6 +105,7 @@ type provider_refusal =
   | Authorization_refused
   | Payment_required
   | Invalid_request
+  | Unclassified_status
   | Not_found
   | Context_overflow
   | Input_capacity
@@ -122,6 +123,7 @@ let provider_refusal_to_string = function
   | Authorization_refused -> "authorization_refused"
   | Payment_required -> "payment_required"
   | Invalid_request -> "invalid_request"
+  | Unclassified_status -> "unclassified_status"
   | Not_found -> "not_found"
   | Context_overflow -> "context_overflow"
   | Input_capacity -> "input_capacity"
@@ -879,6 +881,7 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
           | Retry.Unknown_invalid_request )
       ; _
       } -> Invalid_request
+  | Retry.InvalidRequest { reason = Retry.Unclassified_status _; _ } -> Unclassified_status
   | Retry.RateLimited _ -> Rate_limited
   | Retry.Overloaded _ -> Overloaded
   | Retry.ServerError _ -> Server_error
@@ -1090,6 +1093,7 @@ let provider_refusal_is_binding_rest = function
   | Auth_failed
   | Authorization_refused
   | Invalid_request
+  | Unclassified_status
   | Not_found
   | Context_overflow
   | Input_capacity

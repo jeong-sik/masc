@@ -2072,7 +2072,8 @@ let official_client_error_dispatch (error : Agent_core.Error.t) =
              ( Llm_provider.Retry.Json_parse_error
              | Llm_provider.Retry.Request_body_refused_by_provider _
              | Llm_provider.Retry.Refusal_body_not_received
-             | Llm_provider.Retry.Unknown_invalid_request )
+             | Llm_provider.Retry.Unknown_invalid_request
+             | Llm_provider.Retry.Unclassified_status _ )
          ; _
          })
   | Agent_core.Error.Api
@@ -2163,7 +2164,8 @@ let provider_attempt_dispatch ~request_serialized result =
                   ( Llm_provider.Retry.Json_parse_error
                   | Llm_provider.Retry.Request_body_refused_by_provider _
                   | Llm_provider.Retry.Refusal_body_not_received
-                  | Llm_provider.Retry.Unknown_invalid_request )
+                  | Llm_provider.Retry.Unknown_invalid_request
+                  | Llm_provider.Retry.Unclassified_status _ )
               ; _
               })) )
   | ((true | false), Error (Agent_core.Error.Provider _))

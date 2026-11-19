@@ -45,6 +45,7 @@ let test_provider_refusals () =
     ; Exact.Payment_required, F.Configuration_refused; Exact.Not_found, F.Configuration_refused
     ; Exact.Request_body_refused, F.Input_refused F.Request_body
     ; Exact.Invalid_request, F.Input_refused F.Invalid_request
+    ; Exact.Unclassified_status, F.Input_refused F.Invalid_request
     ; Exact.Context_overflow, F.Input_refused F.Context_overflow
     ; Exact.Input_capacity, F.Input_refused F.Input_capacity ];
   (* A 402 that states a window holds its account's slots until then

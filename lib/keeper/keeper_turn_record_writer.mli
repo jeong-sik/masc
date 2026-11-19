@@ -1,4 +1,4 @@
-(** RFC-0233 §2.2 — append one TurnRecord per keeper turn, at the same
+(** Append one TurnRecord per keeper turn, at the same
     cadence as the execution receipt. A committed autonomous record emits
     [keeper_chat_appended] so an open dashboard transcript re-reads its
     authoritative history without waiting for a page reload. Direct turns

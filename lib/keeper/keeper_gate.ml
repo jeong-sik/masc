@@ -202,7 +202,7 @@ let decide_after_observation request ~observe =
           channel cannot see attempts after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
           logs, a separate observation path). Until that path exists the
           main-line rule holds: every refused observe keeps the judge, and
-          the refusal travels to the judge for weighing (RFC-0422 §3.3). *)
+          the refusal travels to the judge for weighing. *)
        let () =
          Log.Keeper.info
            ~keeper_name:request.keeper_name
@@ -340,13 +340,7 @@ let decide_without_cycle_grant ~intent ~read_mode ?shell_ir ?observe ~keeper_alw
     in
     allow request source [ audit_receipt ])
   else
-    (* Both lanes resolve through the Keeper override (#31128): an operator
-       who singled a Keeper out for a higher bar meant it for everything
-       that Keeper does, outside services included. *)
-    let mode =
-      read_mode ~base_path:request.base_path
-        ~keeper_name:request.keeper_name
-    in
+    let mode = read_mode ~base_path:request.base_path in
     (match mode with
      | Ok Keeper_gate_mode.Always_allow ->
        let source = Workspace_always_allow in
@@ -433,7 +427,7 @@ let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode
 
 let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?shell_ir ?observe ~keeper_always_allow request =
   decide_with_mode
-    ~read_mode:Keeper_gate_mode.resolve
+    ~read_mode:Keeper_gate_mode.read
     ~intent
     ?cycle_grant
     ?shell_ir
@@ -444,7 +438,7 @@ let decide ?(intent = Keeper_tool_execute_typed_input.Auto) ?cycle_grant ?shell_
 
 let decide_external_service ?cycle_grant ~keeper_always_allow request =
   decide_with_mode
-    ~read_mode:Keeper_gate_mode.resolve_external
+    ~read_mode:Keeper_gate_mode.read_external
     ?cycle_grant
     ~keeper_always_allow
     request

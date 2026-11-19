@@ -146,7 +146,7 @@ let test_the_redirect_advice_does_not_forbid_what_bash_takes () =
 ;;
 
 (* The eval refusal is the one [`Shell_builtin] case with a corpus behind it
-   (RFC-shell-ir-typed-command-substitution §1: 16 [eval $(opam env)] calls).
+   (16 [eval $(opam env)] calls).
    The advice must say why the wrapper can simply go away. *)
 let test_the_eval_advice_says_to_drop_the_wrapper () =
   let sentence = Rewrite.to_string (rewrite_of (`Shell_builtin "eval")) in

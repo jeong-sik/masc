@@ -1,4 +1,4 @@
-(** RFC-0474 L4f: [Audit.read_recent] answers from an index it advances over
+(** [Audit.read_recent] answers from an index it advances over
     appended bytes, and must give the answer the backward scan it replaced
     gave. [scan] below is that scan: newest row first, stop at the [n]-th
     match, refuse a malformed row, or for a Keeper-scoped read a row that does

@@ -1,4 +1,4 @@
-(** RFC-0108: system_log writer atomicity stress (in-line Stdlib.Mutex fix).
+(** system_log writer atomicity stress (in-line Stdlib.Mutex fix).
 
     Drives [Log.Ring.push] from many concurrent OCaml threads against a
     real file sink, then re-reads the file and asserts every line is

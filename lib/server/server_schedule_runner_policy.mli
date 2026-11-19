@@ -1,4 +1,4 @@
-(** Server-owned policy constants for the RFC-0234 schedule runner loop. *)
+(** Server-owned policy constants for the schedule runner loop. *)
 
 val interval_sec : float
 (** Production runner cadence in seconds. *)

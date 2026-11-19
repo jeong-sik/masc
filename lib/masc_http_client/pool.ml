@@ -958,7 +958,7 @@ let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
     let uri = Uri.of_string url in
     do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
 
-(* ── RFC-0129: idle-timeout request with streaming progress ────── *)
+(* ── idle-timeout request with streaming progress ────── *)
 
 type body_progress = {
   first_byte_at_sec : float option;

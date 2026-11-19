@@ -1,7 +1,6 @@
 // MASC Dashboard — G2 · Stale-claim alert variant
 //
-// Phase 2 spec (`design-system/preview/cb-group-d.jsx:TaskStaleAlert`)
-// surfaces tasks whose claim has gone cold so the operator can nudge,
+// TaskStaleAlert surfaces tasks whose claim has gone cold so the operator can nudge,
 // force-release, or reassign. Backend `Task` does not expose
 // `claim_age` directly, so the frontend derives it for tasks in `claimed` or
 // `in_progress` whose `updated_at` is older than the stale threshold.

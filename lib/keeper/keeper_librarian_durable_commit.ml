@@ -285,7 +285,7 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
          ~original:(Owner.listed record) ~exact ~captured:(Request.destination request) in
        if released then Settled else Unfinished
      | Retained_unknown Exact.Raised -> Ok Unfinished
-     (* RFC-0500. The process that started the attempt stopped before it
+     (* The process that started the attempt stopped before it
         ended. The original settles and the next pass selects its range. *)
      | Retained_unknown Exact.Interrupted
      | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)

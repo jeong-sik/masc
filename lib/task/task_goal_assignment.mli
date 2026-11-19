@@ -1,10 +1,8 @@
-(** RFC-0267 Phase 2 — explicit, validated task->goal assignment.
+(** Explicit, validated task->goal assignment.
 
-    Single backend entry point shared by the MCP tool [masc_task_set_goal]
-    and the dashboard HTTP route (POST /api/v1/dashboard/tasks/assign-goal),
-    so the precondition checks are written once instead of duplicated at each
-    surface. The link is persisted in the [goal_task_links] registry
-    ([Workspace_goal_index]); the task record carries no goal_id field.
+    Backend entry point of the MCP tool [masc_task_set_goal]. The link is
+    persisted in the [goal_task_links] registry ([Workspace_goal_index]); the
+    task record carries no goal_id field.
 
     Lives in the task domain: a task->goal reference is the allowed direction,
     whereas hosting it in the goal leaf domain would be a goal->task coupling

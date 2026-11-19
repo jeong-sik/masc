@@ -21,7 +21,7 @@ let default_intents : Gw.intent list =
 let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 (* Default trigger policy when none is configured (empty/unset). The
-   "quiet, mention-triggered bot" baseline per RFC-0203. *)
+   "quiet, mention-triggered bot" baseline. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
 (* The TOML walk lives in [Connector_trigger_policy]: this module and the
@@ -679,7 +679,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
          (its bot user), so the persisted user line carries an explicit
          mention even when the text has no "@name" token (Discord
          renders mentions as <@snowflake>, invisible to the token
-         parser).  RFC-0232 §3.3. *)
+         parser). *)
       @ metadata_bool "mentions_bound_keeper" mentions_bot
       @ metadata_opt "discord.message_reference_channel_id"
           message_reference_channel_id
@@ -851,7 +851,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
   | Gw.Ignored _ ->
     None
 
-(* RFC-0226 ambient lane recording: a bound-channel message that failed
+(* Ambient lane recording: a bound-channel message that failed
    the trigger policy is still conversation the keeper sits in. Persist
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
@@ -936,7 +936,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       (match attention_event_id with
        | Some event_id ->
          let channel =
-           (* RFC-0320: carry the originating Discord channel+author so a woken
+           (* Carry the originating Discord channel+author so a woken
               keeper replies into the same thread, not its own state. *)
            match
              Keeper_continuation_channel.discord

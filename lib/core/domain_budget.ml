@@ -21,7 +21,7 @@ type error =
    keep two codec jobs in parallel. *)
 let execution_codec_domains = 2
 
-(* HTTP reads (RFC-0204 L3). On the live server, 2026-10-27 14:16-14:18Z with
+(* HTTP reads. On the live server, 2026-10-27 14:16-14:18Z with
    a shared pool of 6 and load 15-21, 173 read jobs ran in 120 s at 73.8 ms
    mean, so reads keep about 0.11 workers busy. As an M/M/c queue that makes
    about 11% of reads wait with one worker and about 0.5% with two. Read run

@@ -4,7 +4,7 @@ open Keeper_chat_store_redaction
 open Keeper_chat_store_row_codec
 open Keeper_chat_store_append_primitives
 
-(* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
+(* The append IS the parse boundary.  Mentions are
    derived from the content that is actually persisted (post-redaction),
    so an offline re-parse of the stored line reproduces the field;
    connectors with structured mention data add [extra_mentions]. *)
@@ -151,7 +151,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
       (report_store_failure ~operation:Keeper_chat_store_operation.Append
          ~keeper_name ~what:"tool-only append" exn)
 
-(* RFC-0223 P4: keeper-initiated message on one lane. A single
+(* keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.
 
    [append_assistant_message_result] surfaces a write failure as [Error msg] so

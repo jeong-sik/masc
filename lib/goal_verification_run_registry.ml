@@ -32,7 +32,7 @@ type run =
   ; status : run_status
   }
 
-(* RFC-0444 §2.3 row 7: a verifier scan the goal store refused is a row of
+(* A verifier scan the goal store refused is a row of
    this registry too. It reviews nothing — no goal, no request, no criterion,
    no model — so it is not a [run] with blanks in those members but its own
    arm, carrying the whole [Goal_store.unavailable] value the scan saw. *)

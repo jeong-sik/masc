@@ -436,8 +436,8 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
     ]
 
 (* A Goal store this build cannot read is answered with the one wire
-   projection the MCP goal tools also send, [Goal_unavailable_envelope]
-   (RFC-0444 §2.3 row 4); the dashboard renders no line of its own. The
+   projection the MCP goal tools also send, [Goal_unavailable_envelope];
+   the dashboard renders no line of its own. The
    Goal–Task link registry is a different source and keeps its own envelope. *)
 let goal_task_links_unavailable_json detail =
   `Assoc

@@ -346,8 +346,6 @@ type _ command =
   | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option;
       priority_predecessors : Operation_id.t list option } ->
       (run_next_result, error) result command
-  | Interrupt_running_operation :
-      Operation_id.t -> (operation_interrupt_result, error) result command
   | Submit_operation :
       { operation_id : Operation_id.t
       ; source : Yojson.Safe.t
@@ -763,7 +761,6 @@ let answer : type response. response command -> answer = function
   | Resume_direct_gate _ -> In_its_drain_step
   | Pause_and_interrupt _ -> In_its_drain_step
   | Run_next_operation _ -> In_its_drain_step
-  | Interrupt_running_operation _ -> In_its_drain_step
   | Submit_operation _ -> In_its_drain_step
   | Submit_interactive_operation _ -> In_its_drain_step
   | List_queued_operations _ -> In_its_drain_step
@@ -861,7 +858,7 @@ let notify t command =
    the projection; the detail resurfaces later as a rejected meta commit and
    reads as if that commit were the cause. Log the onset once, at the source. *)
 (* The memory health row measures the Librarian gap on the meta's trace and
-   has none to measure without a meta (RFC-0487). *)
+   has none to measure without a meta. *)
 let memory_health_moved ~base_path ~keeper_name =
   Keeper_memory_health_input.written
     ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
@@ -2884,21 +2881,6 @@ let start
              Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; interrupt_error }));
              start_child_if_needed state shutdown_operation_id;
              loop state)
-        | Command (Interrupt_running_operation expected, resolve) ->
-          let response = match exact_interrupt (Direct_operation expected) with
-            | Error _ as error -> error
-            | Ok Interrupt_not_current ->
-              Ok (Operation_not_current
-                {running_operation_id = (Atomic.get t.operation_projection).running_operation_id})
-            | Ok Interrupt_settling -> Ok Operation_settling
-            | Ok Interrupt_maintenance_running -> Ok Operation_maintenance_running
-            | Ok Interrupt_held_by_autonomous_turn -> Ok Operation_slot_held_by_autonomous_turn
-            | Ok (Interrupt_now interrupt) ->
-              Ok (try interrupt (); Operation_interrupt_signalled with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
-          Eio.Promise.resolve resolve response;
-          loop state
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -3432,9 +3414,6 @@ let interrupt_turn = pause_and_interrupt
 let run_next_operation ?priority_predecessors t ~operation_id ~observed =
   request t (Run_next_operation { operation_id; observed; priority_predecessors })
 
-let interrupt_running_operation t operation_id =
-  request t (Interrupt_running_operation operation_id)
-;;
 let wake_operation_drain t = request t Wake_operation_drain
 
 let submit_interactive_operation t ~operation_id ~source ~input ~intent =

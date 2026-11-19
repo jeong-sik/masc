@@ -472,7 +472,7 @@ let log_resolution ?(context = "ConfigDir") () =
   if claim_new_signature last_logged_resolution_signature signature
   then Log.Config.info "[%s] resolved: %s" context signature
 
-(* RFC-0121 — .masc/<sub> sub-directory accessors.
+(* .masc/<sub> sub-directory accessors.
 
    Layout SSOT: callers stop computing base_path plus .masc child paths
    and instead route through these helpers. The directory structure decision

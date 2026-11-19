@@ -867,7 +867,7 @@ let disposition_testable =
     ( = )
 
 (* Slack answers logical refusals with HTTP 200 and [{ok:false,error}]
-   (Slack_rest_client, RFC-0317), so a refused post never happened.
+   (Slack_rest_client), so a refused post never happened.
    Keeper_tools_agent_core_handler skips mark_terminal_effect_failed on
    Proven_pre_effect, so this mapping is what keeps an invalid_blocks refusal
    correctable inside the provider turn instead of ending it. *)

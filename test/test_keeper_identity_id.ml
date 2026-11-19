@@ -1,8 +1,8 @@
-(* RFC-0393: Keeper_identity.Keeper_id structural self-identity.
+(* Keeper_identity.Keeper_id structural self-identity.
    (Distinct from test_keeper_id.ml, which covers the registry-level
    Keeper_id.Uid/Trace_id runtime identifier wrappers.)
 
-   The contract pinned here replaces the RFC-0232 canonicalizer goldens:
+   The contract pinned here replaces the canonicalizer goldens:
    an author id is its own trimmed, case-folded string. No wrapper or
    prefix spelling denotes a keeper any more — [keeper-alice-agent] and
    [alice] are two different identities, and whether a string names a

@@ -86,7 +86,7 @@ type pull_request =
   ; mergeable : mergeable
   ; author : string option
       (** The git author name of the newest commit with one parent among
-          the pull request's latest commits (RFC-0465 §2.1): a merge commit
+          the pull request's latest commits: a merge commit
           is skipped because its author brought the base in. [None] when
           that window holds no such commit, or GitHub gives its author or
           name as [null]. *)

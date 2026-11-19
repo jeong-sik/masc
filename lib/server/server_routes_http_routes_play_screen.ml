@@ -1,5 +1,5 @@
 (** The shared DOS machine's screen as a PNG, for a player that reads images
-    rather than a canvas (RFC play-link-for-the-shared-machine §2.7).
+    rather than a canvas.
 
     [GET /api/v1/play/screen.png] needs [CanPlayMachine] from a bearer, so an
     invite's token reads it: an external agent with only a shell does

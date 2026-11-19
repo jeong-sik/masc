@@ -66,5 +66,5 @@ val dispatch_keeper_msg_stream_admitted :
   message:Keeper_invocation_contract.direct_message ->
   input_speaker:Keeper_input_speaker.t ->
   Keeper_turn.dispatch option
-(** The typed failure travels with the tool result (RFC-0454 D2): the server
+(** The typed failure travels with the tool result: the server
     reads the cause as a value instead of re-reading the message it wrote. *)

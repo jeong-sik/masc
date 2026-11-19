@@ -45,7 +45,6 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 이 셋은 재시작 2~4분 뒤에 다시 보고가 왔다.
 
 셈 범위: `provider_usage_history/2026-10/*`, `2026-11/*` 의 창 행 중 `observed_at` 이 재시작 시각보다 앞인 것. 계정·source·창 종류마다 최신 행을 봤다.
-셈 스크립트와 결과: `docs/evidence/2026-11-12-usage-reports-at-restart/`.
 
 ### 1.2 코드
 

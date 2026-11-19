@@ -193,6 +193,7 @@ val waiting_group_layout :
     The compact decision never drops a nonzero summary segment. *)
 
 val waiting_group_heading_detail :
+  ?ko:bool ->
   available_cells:int ->
   group_count:int ->
   Masc_tui_keeper_list_model.waiting_summary ->

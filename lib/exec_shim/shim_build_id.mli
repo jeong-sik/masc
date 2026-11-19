@@ -3,7 +3,7 @@ val release : string
     from [dune-project] through the generating rule in this directory, so a
     build never carries a version somebody forgot to stamp. The server
     compares it with its own {!Build_version.current} and names a difference
-    [remote_shim_outdated] (RFC-0427 B-3): the 2026-09-05 skew was a shim one
+    [remote_shim_outdated]: the 2026-09-05 skew was a shim one
     release behind, and nothing on the wire said so.
 
     The protocol major stays in the probe's [version] field; this is a

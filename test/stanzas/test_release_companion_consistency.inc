@@ -17,7 +17,6 @@
   ../.github/workflows/release-build.yml
   ../scripts/install.sh
   ../scripts/release-dashboard-bundle.py
-  ../.github/workflows/lane-addon-native.yml
   ../.github/workflows/linux-x64-probe.yml
   ../lib/lane_addon/native_addon_program.ml
   (source_tree ../addons/browser))
@@ -31,7 +30,6 @@
    --release-workflow %{dep:../.github/workflows/release-build.yml}
    --installer %{dep:../scripts/install.sh}
    --bundle %{dep:../scripts/release-dashboard-bundle.py}
-   --lane-addon-probe %{dep:../.github/workflows/lane-addon-native.yml}
    --runtime-probe %{dep:../.github/workflows/linux-x64-probe.yml}
    --native-programs %{dep:../lib/lane_addon/native_addon_program.ml}
    --browser-packages ../addons/browser)))

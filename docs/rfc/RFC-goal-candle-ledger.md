@@ -95,7 +95,7 @@ Dashboard 의 이 조회가 받은 401 은 공통 토큰 자동 복구에 전달
 - **[사실]** Worker 역할은 `masc_goal_upsert`, `masc_goal_transition`(CanBroadcast)과 `masc_task_set_goal`(CanCompleteTask)을 쓸 수 있다(`lib/types/types_auth.ml:341-345`, `lib/tool/tool_catalog.ml:354-360`). 세 도구는 keeper 에게 노출되어 있고(`lib/keeper/keeper_tool_descriptor.ml:2860, 2940, 2944`), keeper 가 호출한 기록이 있다(`<base-path>/.masc/keepers/tool_usage/`).
 - **[사실]** `set_task_goal` 은 Goal 이 없는 Task 를 아무 Goal 에나 붙인다. 호출자, Task 상태, Goal phase 를 보지 않는다(`Task_goal_assignment.set_task_goal`). Task 와 Goal 의 연결에는 시각이 없다.
   - 이미 있는 Task 를 나중에 Goal 에 붙이는 길은 `set_task_goal` 하나다. Task 를 만들면서 Goal 에 연결하는 길은 따로 있다(`lib/workspace/workspace_task_create.ml`).
-  - 연결한 시각은 알 수 없어서 두 가지로 어림했다(`docs/evidence/2026-09-29-candle-baseline/link-timing.json`, 2026-09-29T07:26Z). Goal 에 연결된 Task 45개 중 43개는 Goal 보다 나중에 만들어졌다. 먼저 만들어진 2개는 끝나지 않았다(`in_progress` 1, `todo` 1). keeper 가 `masc_task_set_goal` 을 부른 횟수는 지금까지 6번이다(성공 5, 실패 1). 이름이 canary 인 keeper 둘이 2번, `analyst` 가 3번(마지막 2026-09-11), `wkbl-web-leader` 가 1번(2026-09-28)이다. 운영자가 대시보드로 연결한 횟수는 기록에 없다.
+  - 연결한 시각은 알 수 없어서 두 가지로 어림했다(2026-09-29T07:26Z). Goal 에 연결된 Task 45개 중 43개는 Goal 보다 나중에 만들어졌다. 먼저 만들어진 2개는 끝나지 않았다(`in_progress` 1, `todo` 1). keeper 가 `masc_task_set_goal` 을 부른 횟수는 지금까지 6번이다(성공 5, 실패 1). 이름이 canary 인 keeper 둘이 2번, `analyst` 가 3번(마지막 2026-09-11), `wkbl-web-leader` 가 1번(2026-09-28)이다. 운영자가 대시보드로 연결한 횟수는 기록에 없다.
 - **[사실]** Goal 을 `Drop` 하거나 `Reopen` 할 때 호출자는 이벤트에 기록될 뿐 owner 와 비교하지 않는다(`lib/workspace_goals.ml:1060-1182`). `Awaiting_confirmation` 에서도 누구나 `Reopen` 과 `Drop` 을 할 수 있다(`lib/goal/goal_phase.ml:198-199`). `goal_events.jsonl` 에 keeper 가 Goal 을 drop 한 기록이 7건 있다(`e-masc-the-leader` 6건, `indie-geek-blue` 1건).
 - **[사실]** Goal 에는 `owner` 하나뿐이고 기여자 기록이 없다(`goal_store.mli:33-38`, 레코드는 `:43-66`). 새 Goal 은 만든 에이전트가 owner 로 기록되고(`lib/workspace_goals.ml:324`), owner 는 만들 때만 정해진다(`goal_store.ml:796`, 갱신 경로에는 owner 를 바꾸는 줄이 없다). 지금 있는 Goal 18개는 전부 `Unknown_owner` 다.
 - **[사실]** Goal 스키마는 닫혀 있다. 모르는 필드가 있는 행은 읽히지 않는다(`goal_store.mli` 머리 주석). Goal 레코드에 Candle 필드를 넣지 않는다.
@@ -170,7 +170,7 @@ Dashboard 의 이 조회가 받은 401 은 공통 토큰 자동 복구에 전달
 - 지수 감소를 고른 이유: 잔액을 지급 시점별로 나눠 각각 깎으면 구매할 때 어느 지급분부터 쓸지 정해야 한다. 지수 감소는 잔액 하나에만 적용하고 구매 순서가 결과에 영향을 주지 않는다(정수 내림 때문에 이벤트마다 1 milli 이내의 차이는 생긴다). Goal 보상의 감액은 선형이다. 사람이 얼마나 깎였는지 바로 계산할 수 있어야 하기 때문이다.
 - 계산은 정수 연산이다. 부동소수 `exp` 를 쓰면 실행 환경마다 잔액이 달라질 수 있다. 고정소수점 자릿수와 내림 규칙은 구현 전에 정한다.
   - 설정 키는 최상위 `half_life = "off"` 또는 양의 정수 시간이다. 누락·알 수 없는 문자열·0·음수는 설정 오류다. 조회와 금전 변경은 현재 설정을 CAS 안에서 다시 읽고, 변경된 정책 사실을 내구적으로 덧붙인 뒤 그 잔액을 반환한다. 지급·구매와 함께 바뀌면 한 번의 append로 기록한다. 첫 금전 기록 전에 명시적 정책 사실이 있어야 하며 과거 금액에 현재 설정을 끼워 넣지 않는다. 금전·정책 시각이나 관찰 시각이 앞선 금전·정책 시각보다 이르면 거절한다. 장비 선택과 반복 조회는 금전 내림 구간을 만들지 않는다.
-  - 구현 계산 계약: Q128 coefficient, fractional exponent는 128 binary bits로 올림, 정수 sqrt와 coefficient 곱은 내림, 원래 금액과 coefficient를 곱한 뒤 whole half-life와 Q128 scale을 한 번에 내려 정수 금액으로 만든다. Whole half-life는 정확한 정수 나눗셈이며 fractional 값은 보수적 근사다. 최종 내림 전 오차는 public 금액 범위에서 `641 * 2^-66` milli 미만이다. 최종 결과가 이상적인 실수 지수의 내림보다 1 milli 낮을 수 있다. typed whole-second 입력에서의 단조성·오차 증명과 반올림 규칙은 [Candle decay arithmetic contract](../design/candle-decay-arithmetic.md)를 따른다.
+  - 구현 계산 계약: Q128 coefficient, fractional exponent는 128 binary bits로 올림, 정수 sqrt와 coefficient 곱은 내림, 원래 금액과 coefficient를 곱한 뒤 whole half-life와 Q128 scale을 한 번에 내려 정수 금액으로 만든다. Whole half-life는 정확한 정수 나눗셈이며 fractional 값은 보수적 근사다. 최종 내림 전 오차는 public 금액 범위에서 `641 * 2^-66` milli 미만이다. 최종 결과가 이상적인 실수 지수의 내림보다 1 milli 낮을 수 있다.
 - 효과: 장신구를 다 사도 Candle 이 계속 줄어서 잔액이 끝없이 쌓이지는 않는다. 유통 총량은 지급 속도와 줄어드는 속도가 맞는 지점으로 수렴한다. 3.5 에서 물가를 유통량에 연동하게 되면 이 총량이 그 입력이 된다.
 - 부작용: 감소를 켠 뒤에는 keeper 가 오래 쉬면 잔액이 줄고, Candle 을 아는 keeper 에게는 빨리 쓰게 만드는 압박이 생긴다. 살 수 있는 것이 장신구뿐이라 일에는 영향이 없다(3.7).
 - 값을 고르는 기준: keeper 한 명이 Candle 을 받는 간격을 Δ, 1회 지급액을 A, 반감기를 T 라고 하자. 오래 지나 잔액이 안정되면 평균 잔액은 A·T ÷ (Δ·ln 2) 이고, 지급 직후의 최고점은 A ÷ (1 − 2^(−Δ/T)) 다. 아이템을 살 수 있는지는 최고점으로 본다. Δ 와 T 가 같으면 최고점은 2A 이고, Δ 가 T 보다 훨씬 길면 최고점이 A 에 가까워서 모을 수 있는 한도가 1회 지급액 정도다. 가장 비싼 아이템 가격이 최고점보다 크면 아무도 못 산다. Δ 는 keeper 전체의 지급 간격이 아니라 한 명이 받는 간격이다(3.8). 감소를 켜기 전에 가격표가 이 최고점 아래인지 다시 본다(5장 8번). `Off` 동안 모은 keeper 는 비싼 아이템을 살 수 있지만, 켠 뒤 드물게 받는 keeper 는 최고점이 A 근처라 못 살 수 있다.
@@ -322,7 +322,7 @@ price : item -> milli_candle
 
 ### 3.8 실제 데이터로 본 어림 (2026-09-29)
 
-`<base-path>/.masc/goals.json` 의 Goal 18개, Task 1,634개(`tasks/backlog.json` 865개와 `tasks-archive.json` 769개), `tasks/goal_task_links.json` 을 2026-09-29 05:59Z 에 읽었다(`docs/evidence/2026-09-29-candle-baseline/`). 지급 근거는 끝난 Task 의 담당자다. `Snapshot` 이 아직 없어서 지금 연결 상태로 어림했다. archive 를 빼면 Goal 에 연결된 Task 41개 중 12개가 빠진다.
+`<base-path>/.masc/goals.json` 의 Goal 18개, Task 1,634개(`tasks/backlog.json` 865개와 `tasks-archive.json` 769개), `tasks/goal_task_links.json` 을 2026-09-29 05:59Z 에 읽었다. 지급 근거는 끝난 Task 의 담당자다. `Snapshot` 이 아직 없어서 지금 연결 상태로 어림했다. archive 를 빼면 Goal 에 연결된 Task 41개 중 12개가 빠진다.
 
 | 구분 | 개수 |
 |---|---|
@@ -358,14 +358,14 @@ Candle 조회는 `Off`, `Enabled`, `Disabled { reason }` 을 반환한다. `Disa
 
 헌법은 이미 잘 설계된 사례를 찾아 참고하라고 한다(`docs/constitution.xml:312`). 이 RFC 가 기대는 것과 기대지 않는 것을 적는다.
 
-- **RFC-0435(같은 저장소).** keeper 에게 재화 규칙을 줬을 때 행동이 바뀌는지를 재려는 설계다. 그 문서가 초록을 직접 확인한 문헌 둘이 여기에 영향을 준다. persona 가 payoff 를 누를 수 있다(arXiv:2601.10102, 7B~32B 모델 기준). 큰 모델일수록 평가받는다는 것을 더 잘 알아챈다(arXiv:2509.13333). 이 RFC 는 두 문헌을 RFC-0435 가 확인한 수준을 넘어 확인하지 않았다. 그래서 Candle 이 keeper 행동을 바꾼다고도, 안 바꾼다고도 전제하지 않는다. 3.11 에서 켜기 전 값을 재 두고 켠 뒤에 비교한다. RFC-0435 는 잔고 필드, 소비 게이트, 강제 장치를 만들지 않는 실험이고(§7), 이 RFC 는 원장과 구매가 있는 운영 기능이다. 그 문서의 파일럿은 별도 base path 여섯 개에서 돌리도록 설계됐고 아직 돌리지 않았다(§5.4, §5.7). `docs/design/world-presets.md` 는 세계를 재화 하나로 정의해서, keeper 가 아는 전역 화폐는 그 실험의 변수가 된다. 두 가지가 같은 base path 에서 겹치게 되면 그 base path 에서는 Candle 을 켜지 않는다.
+- **RFC-0435(같은 저장소).** keeper 에게 재화 규칙을 줬을 때 행동이 바뀌는지를 재려는 설계다. 그 문서가 초록을 직접 확인한 문헌 둘이 여기에 영향을 준다. persona 가 payoff 를 누를 수 있다(arXiv:2601.10102, 7B~32B 모델 기준). 큰 모델일수록 평가받는다는 것을 더 잘 알아챈다(arXiv:2509.13333). 이 RFC 는 두 문헌을 RFC-0435 가 확인한 수준을 넘어 확인하지 않았다. 그래서 Candle 이 keeper 행동을 바꾼다고도, 안 바꾼다고도 전제하지 않는다. 3.11 에서 켜기 전 값을 재 두고 켠 뒤에 비교한다. RFC-0435 는 잔고 필드, 소비 게이트, 강제 장치를 만들지 않는 실험이고(§7), 이 RFC 는 원장과 구매가 있는 운영 기능이다. 그 문서의 파일럿은 별도 base path 여섯 개에서 돌리도록 설계됐고 아직 돌리지 않았다(§5.4, §5.7). World preset 설계는 세계를 재화 하나로 정의해서, keeper 가 아는 전역 화폐는 그 실험의 변수가 된다. 두 가지가 같은 base path 에서 겹치게 되면 그 base path 에서는 Candle 을 켜지 않는다.
 - **Board karma(같은 저장소).** 점수(delta)를 이벤트에 적어 규칙이 바뀌어도 과거 값을 유지하는 계약이 있다. 그러나 karma 원장은 파일로 남지 않고 `vote_log` 에서 다시 만든다(`docs/constitution.xml:164-171`). Candle 원장은 파일이 사실의 기록이라 다르다. 받는 쪽이 사람을 포함한 모든 작성자이고 쓸 곳이 없어서 저장소와 코드는 재사용하지 않는다. 가져오는 것은 다시 만든 값이 조회 값과 같은지 보는 시험 모양이다(`lib/board/board_votes.mli:261-262`). 잔액도 원장에서 계산해 보여 준다(RFC-0435 §5.7 이 karma 를 서빙하는 방식).
 - **감가 화폐(demurrage).** 시간이 지나면 가치가 줄어 돌려 쓰게 만드는 화폐다. 1932~1934년 오스트리아 Wörgl 에서 지역 화폐로 시험됐고, 중앙은행이 1933-09-01 에 보완 화폐를 금지해서 끝났다(Wikipedia, "Demurrage currency", 2026-09-29 확인). 그 문서는 이차 자료라서 효과 수치를 인용하지 않는다. 이 RFC 는 "쌓아 두지 않게 만든다"는 발상만 가져온다.
 - **게임 경제의 발행(faucet)과 소각(sink).** EVE Online 은 월간 경제 보고서에서 ISK 의 발행과 소각을 나눠 공개한다(2026-05 보고서에 `sinks_and_faucets` 차트가 있다). 이 RFC 는 `Paid` 를 발행, 잔액 감소와 `Purchased` 를 소각으로 보고, TUI·대시보드 표시(5장 7번)에서 둘의 합과 유통 총량을 보인다. 보고서의 정의와 분류는 페이지에서 확인하지 못해서 따르지 않는다.
 
 ### 3.11 켜기 전 기준선과 켠 뒤 비교
 
-Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전 값이 있어야 알 수 있다. 그래서 켜기 전에 아래를 재 뒀다(`docs/evidence/2026-09-29-candle-baseline/`, 2026-09-29 05:59Z 의 라이브 값).
+Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전 값이 있어야 알 수 있다. 그래서 켜기 전에 아래를 재 뒀다(2026-09-29 05:59Z 의 라이브 값).
 
 | 항목 | 값 |
 |---|---|
@@ -402,7 +402,7 @@ Candle 을 켜면 keeper 행동이 바뀔 수 있다. 바뀌는지는 켜기 전
 | 2 | 잘못된 입력 막기. 서로 의존하지 않아서 PR 셋으로 나눈다. (가) `masc_goal_upsert` 가 형식이 틀린 기한을 거절하고 기한·priority 변경을 이벤트로 남긴다(#39878). (나) `set_task_goal` 이 끝난 Task(`done`·`cancelled`)를 Goal 에 연결하지 않는다(Draft PR #39910, 7장의 운영자 승인 항목). (다) 기한을 읽는 함수를 하나로 합친다. overdue 알림과 TUI 카운트다운이 같은 함수를 쓴다(3.3) | 없음 | (가) 틀린 기한이 거절되는 로그. (나) 끝난 Task 를 연결하려 할 때 거절되는 로그. (다) 알림과 카운트다운이 바뀌는 시각을 보여 주는 시험 |
 | 3 | 원장과 `Snapshot`. 원장 읽기·쓰기(3.1), `Snapshot` 이벤트, 서버 시작 때 복구 읽기, `candle.toml` 의 `Enabled`·`Disabled` 와 이 PR 이 읽는 키, 검증기가 통과 결과를 커밋하기 직전에 쓰기 | 2 (다) | 실제 원장 줄, 잘못된 설정에서도 서버가 뜨는 로그, Goal 을 통과시켜 `Snapshot` 줄이 남는 로그, `Snapshot` 쓰기가 실패하면 검증기가 커밋을 거절하는 로그 |
 | 4 | `Candle_appraiser` lane 과 표면. 등급, 관계 판정, 분배 요청의 프롬프트와 시험 세트 하네스를 함께 넣는다. 서버, TUI, 대시보드, Python fixture 가 같은 PR 이다. 먼저 Python fixture 정리 PR 을 따로 낸다 | `RFC-exact-lane-walks-one-slot-list` 의 `cli_slots` 제거 | lane 이 서버·TUI·대시보드에 같이 보이는 시험 |
-| 5 | 확정 때 `PayoutOwed` 쓰기, 지급 일꾼, `Candidates`·`Paid`·`Unattributed`·`PayoutFailed`, 엄격한 archive reader. 20k 를 넘으면 (가) `PayoutOwed` 와 archive reader, (나) 일꾼과 지급으로 나눈다 | 3, 4 | 아래 시험 세트의 결과 표(결과는 `docs/evidence/<날짜>-candle-appraiser/`). Goal 을 완료시켜 `PayoutOwed`, `Paid` 줄이 남고 재오픈해도 한 번만 지급되는 로그 |
+| 5 | 확정 때 `PayoutOwed` 쓰기, 지급 일꾼, `Candidates`·`Paid`·`Unattributed`·`PayoutFailed`, 엄격한 archive reader. 20k 를 넘으면 (가) `PayoutOwed` 와 archive reader, (나) 일꾼과 지급으로 나눈다 | 3, 4 | 아래 시험 세트의 결과 표(결과는 PR 본문에 남긴다). Goal 을 완료시켜 `PayoutOwed`, `Paid` 줄이 남고 재오픈해도 한 번만 지급되는 로그 |
 | 6 | 잔액 계산(감소 제외), 가격, 구매·착용 도구, 초상화(서버 그림 캐시·ETag, 착용 상태 wire 필드와 디코더, TUI 그림 캐시) | 5 | 구매 도구 호출 로그, 같은 keeper 의 전후 초상화 PNG(서버 응답과 원격 TUI 둘 다) |
 | 7 | TUI·대시보드 표시. 발행, 소각, 유통 총량 요약을 함께 보인다 | 5, 6 | TUI 캡처, 대시보드 브라우저 스크린샷 |
 | 8 | 잔액 감소: `HalfLifeSet`, `Hours n`. 1번이 들어간 뒤에만. 켜기 전에 가격표가 지급 직후 최고 잔액(3.1.1)보다 낮은지 다시 확인한다 | 6, 1 | 감소 전후 원장 계산 예, 반감기 변경 이벤트 |

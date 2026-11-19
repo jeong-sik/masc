@@ -15,7 +15,7 @@ type tail_lines = {
   from_file_start : bool;
 }
 
-(* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "no memory"
+(* Typed Result entry point.  Distinguishes "no memory"
    ([Ok []] for missing file or zero-line request) from "IO/parse fault"
    ([Error class]).  The catch-all classifies the exception through the
    closed sum {!Keeper_memory_recall_exn_class.t} so the caller can

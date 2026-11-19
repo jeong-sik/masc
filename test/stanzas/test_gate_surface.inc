@@ -1,4 +1,4 @@
-; RFC-0223 P2 — Gate_surface (typed connector surface + presence).
+; Gate_surface (typed connector surface + presence).
 ; Minimal-deps stanza, same insulation rationale as
 ; test_channel_gate_discord_state_in_process.
 (test

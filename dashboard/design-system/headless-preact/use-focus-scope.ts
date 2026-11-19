@@ -1,7 +1,7 @@
 /**
  * useFocusScope — Preact adapter over headless-core/FocusScope.
  *
- * Per RFC 0001 §"directory layout". Activates a focus trap + restore
+ * Activates a focus trap + restore
  * scope around a container element while `active` is true. On
  * deactivation (or unmount), restores focus to whatever was focused
  * before the scope took over.

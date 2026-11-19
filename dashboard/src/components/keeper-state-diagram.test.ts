@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest"
 import { transitionType, badgeTone } from "./keeper-state-diagram"
 
-// RFC-0135 PR-2: the local `normalizePhase` export was removed; phase
+// The local `normalizePhase` export was removed; phase
 // normalization now flows through `toKeeperPhase` (keeper-store-normalize)
 // which is covered by `keeper-store-normalize.test.ts`. The two unmapped
 // cases this file previously asserted (passthrough of unknown phase, null

@@ -122,7 +122,7 @@ export const keeperTraceState = computed<KeeperTraceState>(() => {
  * coalesces with the latest matching entry (incrementing its count) or starts
  * a fresh entry with `count: 1`.
  *
- * Coalescing rule (RFC-0028 §4):
+ * Coalescing rule:
  *   if the existing entry with the largest tsMs has the same trace bucket
  *   (source + keeperName, and for line-anchored sources also filePath + line)
  *   AND `(input.tsMs - existing.tsMs) <= COALESCE_WINDOW_MS`,

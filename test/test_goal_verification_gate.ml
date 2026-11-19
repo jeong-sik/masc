@@ -1802,7 +1802,7 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
   (* The subject here is how a [Verifying] goal renders, not which goals a
      turn is given: the summary is stated so the proof-pending mark is what
      the check depends on. The mark rides the Goals Awaiting Proof layer, not
-     the Active Goals row (RFC-0491 §3.3). *)
+     the Active Goals row. *)
   let summaries =
     [ { Keeper_unified_prompt.summary_goal_id = goal_id
       ; summary_title = "Goal under proof"

@@ -28,8 +28,8 @@
 | [#35986](https://github.com/jeong-sik/masc/pull/35986) | 후보 실패를 Event_error로 전송해 다음 후보의 답 수신을 중단 | 실패 범위는 후보이며 최종 턴 판정 전까지 소비자가 계속 읽는다. |
 | [#36169](https://github.com/jeong-sik/masc/pull/36169) | reasoning이 계속 와도 본문이 없어 진행 없음 timeout | watchdog의 생산 신호와 최종 답 수락 조건을 구분한다. ping·빈 carrier는 생산 증거가 아니다. |
 | [#45995](https://github.com/jeong-sik/masc/pull/45995) → [#51935](https://github.com/jeong-sik/masc/pull/51935) → [#52494](https://github.com/jeong-sik/masc/issues/52494) | 종료 기록, 중간 기록, 시작 기록 순서로 진단 실패의 실행 전파가 발견됨 | 개별 write만 고치지 말고 시작부터 종료까지 본다. trace 가용성과 관계없이 실행·예외 정산 경로는 하나다. 현재 실행 ID와 다른 완료 trace를 결과에 붙이지 않는다. |
-| [2026-11-16 tracer 후속 수리](../evidence/tracer-observer-authority-20261116/README.md) | Fmt 출력 채널 실패가 본문 실행을 막거나 성공값·원래 예외를 덮음 | preferred `Tracing.with_span`은 본문 진입 여부와 결과·예외/backtrace를 보존한다. 본문 진입 뒤에는 효과를 재실행하지 않는다. trace-context 조회의 일반 실패는 빈 관측이며, `Reserved_exn`은 cleanup·parallel wrapper 안의 취소도 원래 outer 예외 전체로 전파한다. |
-| [L3: canonical cleanup 진단 수리](../evidence/runner-cleanup-diagnostic-20261116/README.md) | abort·terminal receipt 실패 뒤의 Eio debug 출력 오류가 선택된 reserved 원본 예외를 덮음 | 실행 journal의 정산과 예외 선택은 `Agent_execution_runner`가 소유한다. 일반 진단 실패는 그 선택을 바꾸지 않고, 새 reserved 진단 예외는 기존 `Reserved_exn`으로 전파한다. HostStop의 모든 원인 판정과 Reserved의 한 원인 포함 판정을 합치지 않는다. 연결된 helper 캡처의 범위와 public Agent 실행 검증을 구분한다. 실제 SDK 실행의 head·환경·결과는 [별도 검증 기록](../evidence/continuity-sdk-20261116/README.md)에서 확인한다. |
+| 2026-11-16 tracer 후속 수리 | Fmt 출력 채널 실패가 본문 실행을 막거나 성공값·원래 예외를 덮음 | preferred `Tracing.with_span`은 본문 진입 여부와 결과·예외/backtrace를 보존한다. 본문 진입 뒤에는 효과를 재실행하지 않는다. trace-context 조회의 일반 실패는 빈 관측이며, `Reserved_exn`은 cleanup·parallel wrapper 안의 취소도 원래 outer 예외 전체로 전파한다. |
+| L3: canonical cleanup 진단 수리 | abort·terminal receipt 실패 뒤의 Eio debug 출력 오류가 선택된 reserved 원본 예외를 덮음 | 실행 journal의 정산과 예외 선택은 `Agent_execution_runner`가 소유한다. 일반 진단 실패는 그 선택을 바꾸지 않고, 새 reserved 진단 예외는 기존 `Reserved_exn`으로 전파한다. HostStop의 모든 원인 판정과 Reserved의 한 원인 포함 판정을 합치지 않는다. 연결된 helper 캡처의 범위와 public Agent 실행 검증을 구분한다. |
 | [#47097](https://github.com/jeong-sik/masc/pull/47097) → [#52487](https://github.com/jeong-sik/masc/pull/52487) | 누락된 최신 답의 거짓 성공을 막는 history 검증이 정상 압축을 거짓 실패로 처리 | 정확한 최종 답 검증을 유지하면서 압축된 앞부분과 훼손된 범위를 typed coverage로 구분한다. |
 
 이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Muse의 압축 count와
@@ -79,7 +79,7 @@ production progress probe·stall 판정·완료 응답 accept까지 잇는 시�
 `test_keeper_turn_driver_accept`에 있다. fixture의 stream과 제어 시계가 실제 provider
 호출·watchdog fiber 실행을 대신 증명하지는 않는다.
 
-[native Muse 압축·세션 재적재 실측](../evidence/muse-compaction-native-20261116/README.md)은
+native Muse 압축·세션 재적재 실측은
 완료 턴 수 3→1과 같은 마지막 턴 ID, release 후 reload·다음 턴 완료를 확인한다.
 같은 host 프로세스에서 측정했으며 MASC adapter 실행·서버 재시작 복구 증거는 아니다.
 
@@ -101,12 +101,9 @@ User 본문에 중복하지 않으며, Completion Authority 같은 턴별 관측
 native compaction용 developerInstructions는 현재 전체 System을 그대로 유지한다.
 알려진 compaction의 재구성 계약과 단순 token estimate/window-fill 관측은 구분한다.
 
-이력 조사의 [기존 projection 증거 설명 정정](../evidence/2026-10-24-goal-stable-system/official-resume-repair.md#native-adapter-boundary-clarification--2026-11-16)은
-이 범위를 분명히 한다. Goal·승인 관측의 권위와 순서, 관측 제거와 미확정 ACK를 보존하는
+Goal·승인 관측의 권위와 순서, 관측 제거와 미확정 ACK를 보존하는
 전달 계약 없이 `base_text`만 해시하거나 지시문 주입을 없애는 수리를 하지 않는다.
 그 최적화가 필요하면 기존 receipt와 provider별 실제 갱신·압축 계약에서 출발한다.
 
-이번 trace 시작·귀속 수리의 직접 기록은
-[trace-start-authority 증거](../evidence/trace-start-authority-20261116/README.md)에 있다.
-tracer 후속 수리의 [실제 Fmt 반례와 후보 복구 캡처](../evidence/tracer-observer-authority-20261116/README.md)는
+tracer 후속 수리의 실제 Fmt 반례와 후보 복구 캡처는
 모듈 경계 실행만 증명하며 Agent 통합 시험이나 SDK suite 결과를 대신하지 않는다.

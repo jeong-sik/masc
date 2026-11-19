@@ -1,5 +1,4 @@
-(** Round-trip + topic-stability tests for [Session_lifecycle_event.t]
-    (RFC-0099 PR-2).
+(** Round-trip + topic-stability tests for [Session_lifecycle_event.t].
 
     Pins down the JSON encoding so dashboards / consumers can pattern
     match on a stable shape. Adding a new variant requires touching
@@ -119,7 +118,7 @@ let test_close_reason_kind_labels () =
     (fun (r, expected) -> check string expected expected (E.close_reason_kind r))
     cases
 
-(* RFC-0099 PR-3 publisher injection tests *)
+(* Publisher injection tests *)
 
 let test_publisher_default_is_noop () =
   E.reset_publisher () ;

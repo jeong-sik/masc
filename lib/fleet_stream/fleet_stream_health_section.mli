@@ -1,5 +1,5 @@
 (** Reads the fleet scan's section of the full health snapshot as a
-    {!Fleet_stream.fleet} (RFC-0477).
+    {!Fleet_stream.fleet}.
 
     The section is the server's own JSON, written for several readers, and it
     holds fields this stream does not carry. So this reader takes the fields

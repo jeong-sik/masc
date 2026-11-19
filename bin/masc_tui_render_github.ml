@@ -24,7 +24,7 @@ let lines (view : view) ~base =
       in
       [ Theme.ok () ^ "  ┌─ Set GitHub Personal Access Token (PAT) ─" ^ Ansi.reset
       ; "  │ Token: " ^ masked ^ "█"
-      ; "  │ " ^ Ansi.dim ^ "(Enter: save, Esc: cancel)" ^ Ansi.reset
+      ; "  │ " ^ Ansi.dim ^ "Enter:save  Esc:cancel" ^ Ansi.reset
       ; "  └─────────────────────────────────────────"
       ; ""
       ]

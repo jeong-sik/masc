@@ -80,9 +80,9 @@ type dashboard_auth_state =
 (** Dashboard handshake state for a session.  Set once by [dashboard_hello],
     read on the SSE forward hot path and the dashboard RPC auth gates.  Held
     in an [Atomic.t] field so the single write and many reads are tear-free if
-    dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
+    dashboard serving moves off the main Eio domain. *)
 
-(* RFC-0287: inbound reassembly + UTF-8 validation live in the ws-direct
+(* Inbound reassembly + UTF-8 validation live in the ws-direct
    Connection layer, which delivers complete messages to the Endpoint
    [on_message] handler. The [max_inbound_*] size knobs are fed to
    [Endpoint.create]. *)
@@ -127,10 +127,10 @@ type ws_session = {
     the main domain (keeper / refresh broadcasts) and serving
     handlers; and [dashboard_route], written under concurrent
     per-session dispatch.  Plain mutable fields would race once
-    serving moves to its own domain (RFC-0204 Phase 3).  The writer of
+    serving moves to its own domain.  The writer of
     the connection is not in the session: a send from any domain queues a
     frame in [outbound], and a fiber of the connection's own scope writes
-    it (RFC http-transport-runs-on-its-own-domain §3.6). *)
+    it. *)
 
 val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
 (** [true] once [dashboard_hello] has authenticated the session. *)
@@ -450,8 +450,7 @@ val __test_missed_pong_threshold : unit -> int
 
 val __test_next_dashboard_seq : ws_session -> int
 (** Test-only seam: the per-session dashboard seq allocator.  Exposed so the
-    cross-domain delivery-state gate can drive two Eio domains through it
-    (RFC-0204 Phase 3 prerequisite). *)
+    cross-domain delivery-state gate can drive two Eio domains through it. *)
 
 val __test_dashboard_seq_value : ws_session -> int
 (** Test-only seam: reads the current per-session dashboard seq counter so the

@@ -1589,10 +1589,10 @@ let render_memory_body ~cols ~budget (state : state)
        rows up already counts through the helper that declines the plural. *)
     if query <> "" then
       if ko then
-        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %s[Esc:해제]%s"
+        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %sEsc:해제%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query) shown (Theme.recede ()) Ansi.reset
       else
-        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s"
           Ansi.bold Ansi.reset (Terminal_text.single_line query)
           (Masc_tui_message_layout.count_noun shown "matching keeper")
           (Theme.recede ()) Ansi.reset
@@ -1640,7 +1640,7 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> if ko then "  (조회 실패)" else page_failed_note ~ko:false
+      | Page_failed -> page_failed_note ~ko
       | Page_unread -> if ko then
           (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
@@ -1834,7 +1834,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           else text "  d:분류 펼치기" "  d:show categories"
         in
         let pills =
-          if not show_category_strip then text "  c/C:분류 · Enter:사실 상세" "  c/C:category · Enter:fact detail"
+          if not show_category_strip then text "  c/C:분류  Enter:사실 상세" "  c/C:category  Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
@@ -1861,7 +1861,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        applied one drew the old word above rows the new one had left. *)
     let filter = memory_search_query state in
     if String.trim filter <> "" then
-      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %s[Esc:해제]%s" else "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s")
+      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %sEsc:해제%s" else "  %sFilter [/]:%s \"%s\" (%s)  %sEsc:clear%s")
         Ansi.bold Ansi.reset (Terminal_text.single_line filter)
         (if ko then Printf.sprintf "일치 %d개" total else Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
@@ -1889,7 +1889,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패)" (page_failed_note ~ko:false)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note ~ko
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
            text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
@@ -1909,7 +1909,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
            else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
        | Page_empty, filt ->
-           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s — c/C cycles)")
+           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s · c/C cycles)")
              (memory_category_filter_text ~ko filt)
      in
      push_styled ~style:(Theme.recede ()) empty)
@@ -1958,7 +1958,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         (fun snapshot -> category_count state snapshot category) in
     let header =
       [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
-      ; Theme.recede () ^ (if ko then "c/C:이동 · 클릭:선택" else "c/C:move · click:select") ^ Ansi.reset
+      ; Theme.recede () ^ (if ko then "c/C:이동  클릭:선택" else "c/C:move  click:select") ^ Ansi.reset
       ; Theme.border_muted () ^ draw_hline width ^ Ansi.reset
       ]
     in

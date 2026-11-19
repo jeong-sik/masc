@@ -1,4 +1,4 @@
-(* RFC play-link-for-the-shared-machine §2.4 and §5: issuing, listing and
+(* Issuing, listing and
    revoking invites against a real credential store in a temp workspace. *)
 
 open Alcotest

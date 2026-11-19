@@ -1178,10 +1178,9 @@ let tool_mode_effect ~ko mode =
 (* The chat header shows the effective stances, including their defaults. A
    blank label here is worse than repetition: this is the surface where the
    operator decides whether to send work, and AUTO/YOLO plus the Gate mode
-   change what can happen after that send. A Keeper with no override of its
-   own follows the workspace lane, so the header draws the workspace stance. *)
+   change what can happen after that send. Every Keeper follows the workspace
+   lane, so the header draws the workspace stance. *)
 let keeper_chat_mode_labels ~yolo
-    ~(keeper_gate_mode : Masc.Tui_decode.gate_mode option)
     ~(workspace_gate_mode : Masc.Tui_decode.gate_mode option) =
   let chat_mode =
     String.uppercase_ascii
@@ -1189,12 +1188,7 @@ let keeper_chat_mode_labels ~yolo
          (if yolo then Masc.Keeper_tool_approval_mode.Yolo
           else Masc.Keeper_tool_approval_mode.Auto))
   in
-  let gate_mode =
-    match keeper_gate_mode with
-    | Some _ as own -> own
-    | None -> workspace_gate_mode
-  in
-  chat_mode, Option.map gate_mode_reading_word gate_mode
+  chat_mode, Option.map gate_mode_reading_word workspace_gate_mode
 ;;
 
 type chat_turn_phase =
@@ -5895,11 +5889,12 @@ type paged_list =
 (* One list a frame drew: which, and the rows of it the frame drew. *)
 type drawn_list = { dl_list : paged_list; dl_height : int }
 
-(* These seven draw the same fixed frame around their content, and spend two
-   more rows when a load error is on screen. A surface whose chrome moves has
-   to move the typed layout in the same change. Where the window stands is
-   on the title row, so no row under the list is kept for it. *)
-let listing_chrome ~error = if Option.is_some error then 9 else 7
+(* These listings draw the same fixed frame around their content without a
+   blank top spacer (putting Zone 2 on row 2, matching [Chrome_screen]), and
+   spend two more rows when a load error is on screen. A surface whose chrome
+   moves has to move the typed layout in the same change. Where the window
+   stands is on the title row, so no row under the list is kept for it. *)
+let listing_chrome ~error = if Option.is_some error then 8 else 6
 
 (* The verdict list also draws the newest recorded timestamp above its column
    heading, including when the page is empty or has not been observed. *)
@@ -6939,7 +6934,7 @@ let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_
   let text korean english = if ko then korean else english in
   let pass () = match keeper.mkh_librarian.mlh_state with
     | Some ending -> memory_pass_text ~ko ending
-    | None -> text "처리 결과 미관측" "pass not observed" in
+    | None -> text "처리 결과 보고 안 됨" "pass not reported" in
   match memory_state keeper with
   | Memory_ordinary -> text "기억 관측됨" "memory observed"
   | Memory_warning -> text "보고된 주의" "warning reported"
@@ -11031,11 +11026,6 @@ type state = {
   mutable keeper_yolo_names: string list;
   mutable keeper_tool_modes_observed: bool;
   mutable keeper_tool_modes_error: string option;
-  (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
-     somebody singled out are here, so absence means "follows the workspace"
-     rather than "unknown". Distinct from [keeper_yolo_names], which is the
-     in-memory stance a restart clears. *)
-  mutable keeper_gate_modes: (string * Masc.Tui_decode.gate_mode) list;
   (* Runtime_params registry rows, as the surface reads them: key, current,
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes
@@ -11050,11 +11040,6 @@ type state = {
   mutable runtime_params_cursor: int;
   mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: runtime_params_notice option;
-  mutable keeper_exact_lane_firsts: Tui_decode.keeper_exact_lane_first list;
-  mutable keeper_gate_settings_unread: string option;
-      (** [Some reason] until the per-Keeper Gate settings are read, and after
-          a read fails. The last known settings stay on screen beside it, so a
-          pane never passes the defaults off as a reading. *)
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* One per background listing that replaces a whole set: the held-call
      queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
@@ -13905,7 +13890,7 @@ let set_keeper_list_view state view =
 
 let open_keeper_world state =
   if not (Masc_tui_keeper_list_model.has_world state.keeper_list_view) then
-    set_keeper_list_view state Masc_tui_keeper_list_model.By_age;
+    set_keeper_list_view state Masc_tui_keeper_list_model.By_memory;
   place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world;
   state.keeper_story <- Some Masc_tui_keeper_story.World
 
@@ -14939,9 +14924,9 @@ let resource_inventory_status state =
 
 let resource_check_status state report =
   if Option.is_some state.artifact_check_pending then
-    Masc_tui_artifact_checks.Unknown "saving confirmation; a fresh query is required"
+    Masc_tui_artifact_checks.Unknown (Masc_tui_value.Unknown.Unread, "saving confirmation; a fresh query is required")
   else if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
-  else Masc_tui_artifact_checks.Unknown "workspace identity is unconfirmed"
+  else Masc_tui_artifact_checks.Unknown (Masc_tui_value.Unknown.Unread, "workspace identity is unconfirmed")
 
 let resource_unchecked_today state ~day =
   if not (server_authority_ready state) || Option.is_some state.artifact_check_pending then None
@@ -21811,9 +21796,6 @@ let create_state
   runtime_params_cursor = 0;
   runtime_param_edit = None;
   runtime_params_notice = None;
-  keeper_gate_modes = [];
-  keeper_exact_lane_firsts = [];
-  keeper_gate_settings_unread = Some "not read yet";
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approvals_order = Masc_tui_operator_projection.Listing_order.initial;
   tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;
@@ -22362,7 +22344,7 @@ let surface_reads_pending (state : state) =
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
 let page_failed_note ~ko =
-  if ko then "  (조회 실패 · 현재 값 미확인)" else "  (nothing here is a reading)"
+  if ko then "  (조회 실패)" else "  (nothing here is a reading)"
 
 (* The row the Browser Lane picker draws when it has no connection to offer,
    and [None] when it has one. A discovery that failed used to leave an empty
@@ -24145,7 +24127,7 @@ let surface_body_rows (state : state) ~terminal_rows =
 
 let tools_scroll_layout state ~count =
   { sc_count = count
-  ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
+  ; sc_chrome = if Option.is_some (selected_tools_error state) then 8 else 6
   ; sc_preview_keep = None }
 ;;
 
@@ -24163,7 +24145,7 @@ let runtime_params_viewport (state : state) ~terminal_rows =
   let rows = surface_body_rows state ~terminal_rows in
   (* The row under the document counts the rows it leaves out; hints cannot
      hide it at 40 cells. *)
-  let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
+  let chrome = if Option.is_some state.runtime_param_edit then 10 else 7 in
   let content_height = max 1 (rows - chrome) in
   let list_height = min 8 (max 1 (content_height / 3)) in
   list_height, max 0 (content_height - list_height - 1)
@@ -24220,7 +24202,7 @@ let keeper_log_rows (state : state) ~cols =
         if reading.kes_active_count > 0 then
           Printf.sprintf "%d active" reading.kes_active_count
         else if reading.kes_closed then "closed"
-        else "state unknown" in
+        else "state not reported" in
       let status = match reading.kes_status with
         | `Null -> "" | status -> " · " ^ Yojson.Safe.to_string status in
       let header = text_rows Keeper_log_notice ("Execute output · " ^ state_text ^ status) in
@@ -25107,11 +25089,11 @@ let runtime_quota_scope_label ~ko (runtime : Tui_decode.runtime_option) =
   | Some scope_id -> scope_id
   | None -> (match runtime.ro_quota_scope with
       | Some scope ->
-          (if ko then "미확인; 이 응답에서만 쓰는 범위 "
-           else "unavailable; response-local scope ") ^ scope
+          (if ko then "구독 ID 보고 안 됨 · 이 응답에서만 쓰는 범위 "
+           else "subscription id not reported; response-local scope ") ^ scope
       | None ->
-          if ko then "미확인 (응답에 쿼터 범위 없음)"
-          else "unavailable (no quota scope reported)")
+          if ko then "보고 안 됨 (응답에 쿼터 범위 없음)"
+          else "not reported (no quota scope in the response)")
 
 type runtime_picker_projection = {
   rlp_lane : string;
@@ -25412,13 +25394,13 @@ let runtime_picker_empty_note ~ko picker =
 let runtime_picker_keys ~ko enter = function
   | None ->
       Printf.sprintf
-        (if ko then "j/k 이동, PgUp/PgDn 쪽 넘김, %s, e 취소"
-         else "j/k move, PgUp/PgDn page, %s, e cancel")
+        (if ko then "j/k:이동  PgUp/PgDn:페이지  %s  e:취소"
+         else "j/k:move  PgUp/PgDn:page  %s  e:cancel")
         enter
   | Some _ ->
       Printf.sprintf
-        (if ko then "\xe2\x86\x91/\xe2\x86\x93 이동, %s, Esc 필터 지우기"
-         else "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter")
+        (if ko then "\xe2\x86\x91/\xe2\x86\x93:이동  %s  Esc:필터 해제"
+         else "\xe2\x86\x91/\xe2\x86\x93:move  %s  Esc:clear filter")
         enter
 
 let runtime_picker_choice_height = function
@@ -25589,7 +25571,7 @@ type lanes_overview_projection = {
 }
 
 let lanes_overview_projection (state : state) ~rows ~cols =
-  let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
+  let budget = max 0 (rows - (Masc_tui_frame.chrome_rows - 1)) in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   let links = lanes_overview_link_rows state ~cols in
   let notices = lane_inventory_notice_lines ~cols state in
@@ -26097,7 +26079,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
         let rows =
           if count = 0 then
             [Parent_focus (match state.runtime_surface with
-              | None -> text "슬롯 미관측 · v 전체 읽기" "Slots unobserved · v reads all"
+              | None -> text "슬롯 미조회 · v 전체 읽기" "Slots not read · v reads all"
               | Some _ -> text "빈 순서 · a 추가" "Empty order · a adds a runtime")]
           else if Option.is_none selected then
             [Parent_focus (text "선택 없음 · j/k로 선택" "No selection · j/k selects")]
@@ -26840,8 +26822,8 @@ let runtime_cost_summary ~ko cost =
           cost.known_cost_usd cost.priced_readings cost.unpriced_readings
     | Cost.Unresolved ->
         let history = match cost.history with
-          | Cost.Complete -> "" | Cost.Unobserved -> "이력 미관측 · " in
-        Printf.sprintf "%s$%.4f 확인 · 가격 보고 %d / 미보고 %d / 미해결 %d건 · 시도 미관측 %d건"
+          | Cost.Complete -> "" | Cost.Unobserved -> "이전 이력 보고 안 됨 · " in
+        Printf.sprintf "%s$%.4f 확인 · 가격 보고 %d / 미보고 %d / 미해결 %d건 · 비용 보고 안 된 시도 %d건"
           history cost.known_cost_usd cost.priced_readings cost.unpriced_readings
           cost.unresolved_readings cost.unobserved_attempts
 
@@ -26851,7 +26833,7 @@ let runtime_fleet_summary state =
   | [] -> None
   | keepers ->
       let summary = match aggregate_keeper_stats keepers with
-        | None -> if ko then "활동 미관측" else "activity not observed"
+        | None -> if ko then "활동 합계 보고 안 됨" else "activity total not reported"
         | Some (turns, tokens, cost) ->
             Printf.sprintf (if ko then "턴 %d · 토큰 %s · %s" else "%d turns · %s tok · %s")
               turns (format_context_tokens tokens) (runtime_cost_summary ~ko cost)
@@ -26883,7 +26865,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
     | Some snapshot ->
         let summary_text =
           match snapshot.Tui_decode.rss_probe with
-          | None -> if ko then "프로브 미확인" else "probe unavailable"
+          | None -> if ko then "프로브 보고 안 됨" else "probe not reported"
           | Some probe ->
               let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
               Printf.sprintf
@@ -26924,7 +26906,7 @@ let runtime_default_route_lines ~cols state =
   let ko = state.ui_language = Lang_ko in
   let text =
     match state.runtime_surface with
-    | None -> if ko then "[runtime].default  미관측" else "[runtime].default  not observed"
+    | None -> if ko then "[runtime].default  미조회" else "[runtime].default  not read"
     | Some snapshot ->
         let resolved = snapshot.Tui_decode.rss_resolved in
         (match resolved.rrs_default_route, resolved.rrs_default_runtime_id with
@@ -28335,7 +28317,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
-              | None -> "시각 미확인"
+              | None -> "예정 시각 보고 안 됨"
               | Some due -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due ^ " 예정" in
             let reason label = function
               | None -> [label]
@@ -28349,21 +28331,21 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                    | Ok Failed -> Schedule_failed, ["예약 전달 실패"]
                    | Ok (Scheduled | Due) ->
                        (match proximity with
-                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "실행 상태 미확인"]
+                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "최근 회차 기록 없음"]
                         | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, ["예약 대기"]
                         | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, ["예약 대기"])
-                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["실행 상태 미확인"])
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["최근 회차 기록 없음"])
               | Dispatching -> Schedule_pending, ["예약 전달 중"]
               | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
               | Queued -> Schedule_pending, ["예약 도착"; "처리 대기"]
               | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
-              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 미확인"]
+              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 기록 없음"]
               | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
               | Turn_ended disposition ->
                 Schedule_pending,
                 [ "최근 회차 턴 종료: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
                 ; "결과 확인 중" ]
-              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
+              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 보고 안 됨"]
               | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
               | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why

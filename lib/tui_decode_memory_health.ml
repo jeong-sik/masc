@@ -719,7 +719,7 @@ let decode_memory_keeper_health json =
     }
 
 (* What a decoded row contributes to the fleet totals: the server counts its
-   own rows the same way, through the same module (RFC-0487 §2.5). *)
+   own rows the same way, through the same module. *)
 let memory_keeper_totals_row (keeper : memory_keeper_health) : Keeper_memory_health_totals.Row.t =
   { Keeper_memory_health_totals.Row.facts = keeper.mkh_facts
   ; observed_facts = keeper.mkh_observed_facts
@@ -1020,7 +1020,7 @@ let decode_memory_health_snapshot json =
     ; mhs_librarian_attention_required_keepers
     }
 
-(* One Keeper's row as [?keeper=] answers it (RFC-0487): the row, a refusal
+(* One Keeper's row as [?keeper=] answers it: the row, a refusal
    naming the Keeper asked for when this build cannot read the row (the way
    the fleet decoder keeps it), or no row because the fleet does not list the
    Keeper. *)

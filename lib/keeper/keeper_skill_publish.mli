@@ -1,4 +1,4 @@
-(** Keeper-authored Skill publication (RFC keeper-self-authored-skills).
+(** Keeper-authored Skill publication.
 
     Parses [package_id], exactly one of [source_text]/[draft_sha256] and a
     non-empty [evidence] list. Draft mode requires [capability_surface], the

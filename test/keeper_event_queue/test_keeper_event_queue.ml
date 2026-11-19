@@ -93,7 +93,7 @@ let test_dequeue_only_consumes_enqueued () =
   let _, rest = Option.get (dequeue q) in
   assert (Option.is_none (dequeue rest))
 
-(* Typed payload (RFC-0020): the kind is carried as a closed variant,
+(* Typed payload: the kind is carried as a closed variant,
    not classified from a JSON-prefixed string. *)
 let test_typed_payload_surface () =
   let board =

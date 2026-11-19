@@ -32,9 +32,7 @@
     패널 문법: 원래 preset 이 [\[\[...panels\]\]] 항목을 썼으면 항목으로, 평평한
     [panel = \[...\]] 을 썼으면 그룹이 하나인 동안 평평하게 쓴다. 새 preset 은 그룹이
     하나이고 라벨이 없을 때만 평평하게 쓴다. 두 문법은 {!Fusion_config} 가 같은
-    preset 으로 읽는다.
-
-    설계: docs/rfc/RFC-fusion-seat-routes.md §2.5, RFC-0306 §3.2 *)
+    preset 으로 읽는다. *)
 
 type error =
   | Preset_absent of string

@@ -1,5 +1,4 @@
-(** The keeper_skill tool, read from [config/tools/keeper_skill.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The keeper_skill tool, read from [config/tools/keeper_skill.toml].
 
     The tool this describes is built per workspace, because the list of
     instruction skills it can read is whatever the catalog found. Only that

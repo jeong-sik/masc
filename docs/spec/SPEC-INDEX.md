@@ -78,7 +78,6 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core.md` |
 | `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core.md` |
 
 ## Conventions
@@ -117,8 +116,7 @@ graph TB
 선언하지 않는다. 새 접두어는 해당 spec 파일이 실제로 불변식을 선언할 때 이 표에
 더한다.
 
-`docs/design/`의 RFC는 자신의 식별자를 자체 소유한다. 예를 들어
-`checkpoint-truth-and-replay-rfc.md`는 `INV-AC-CHK-001`–`005`를 선언한다. 이 표는
+`docs/design/`의 설계 문서는 자신의 식별자를 자체 소유한다. 이 표는
 `docs/spec/`의 접두어만 다루며, 설계 문서의 식별자는 해당 문서에서 찾는다.
 
 ### Cross-Reference Format

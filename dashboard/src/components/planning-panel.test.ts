@@ -79,7 +79,7 @@ describe('PlanningPanel', () => {
     render(html`<${PlanningPanel} />`)
     expect(screen.getByText('목표 관리자')).toBeTruthy()
     expect(screen.getByText('백로그')).toBeTruthy()
-    // RFC-0352: the goal-loop OODA view is retired.
+    // The goal-loop OODA view is retired.
     expect(screen.queryByText('목표 루프')).toBeNull()
   })
 

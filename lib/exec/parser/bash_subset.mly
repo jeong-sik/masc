@@ -27,9 +27,7 @@ let file_redirect fd target mode =
    The grammar emits a head pipeline plus connector-joined tails, each
    pipeline a list of raw (bin, args, redirects) triples. bash.ml adapts
    a lone stage to Shell_ir.Simple, several to Shell_ir.Pipeline, and a
-   non-empty tail to Shell_ir.Sequence.
-
-   See RFC v5 (docs/rfc/RFC-0005). */
+   non-empty tail to Shell_ir.Sequence. */
 
 %token <string * Masc_exec.Shell_ir.arg_meta> WORD
 %token <Masc_exec.Shell_ir.arg> MIXED_WORD

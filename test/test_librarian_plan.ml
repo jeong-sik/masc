@@ -188,6 +188,41 @@ let test_revise () =
     (removed result)
 ;;
 
+(* Memory that has known something for a month still has after the
+   Librarian folds it into one sentence. *)
+let seen_since first_seen claim : Types.fact = { (observed claim) with first_seen }
+
+let added_fact (result : Plan.t) claim =
+  match
+    List.find_opt (fun (fact : Types.fact) -> String.equal fact.claim claim) result.effects.added
+  with
+  | Some fact -> fact
+  | None -> failf "%S was not added" claim
+;;
+
+let test_merge_keeps_the_earliest_first_seen () =
+  let older = seen_since 40.0 "the deploy runs on friday" in
+  let newer = seen_since 90.0 "the deploy needs the release team" in
+  let facts = [ older; newer; probe ] in
+  let merged = "the release team runs the deploy on friday" in
+  let result =
+    plan ~facts [ Merge { refs = [ "m2"; "m1" ]; into = stated merged } ]
+  in
+  let fact = added_fact result merged in
+  check (float 0.0) "first seen when the oldest source was" 40.0 fact.first_seen;
+  check (float 0.0) "last seen at the commit" at fact.last_seen
+;;
+
+let test_revise_keeps_the_first_seen () =
+  let facts = [ seen_since 70.0 "the port is 8935"; owner ] in
+  let result =
+    plan ~facts [ Revise { ref_ = "m1"; into = stated "the port is 8936" } ]
+  in
+  let fact = added_fact result "the port is 8936" in
+  check (float 0.0) "first seen when the revised fact was" 70.0 fact.first_seen;
+  check (float 0.0) "last seen at the commit" at fact.last_seen
+;;
+
 let test_one_flawed_op_leaves_the_others () =
   let result =
     plan
@@ -404,6 +439,9 @@ let () =
         ; test_case "merge" `Quick test_merge
         ; test_case "merge into one of the sources" `Quick test_merge_into_one_of_the_sources
         ; test_case "revise" `Quick test_revise
+        ; test_case "a merge keeps the earliest first seen" `Quick
+            test_merge_keeps_the_earliest_first_seen
+        ; test_case "a revision keeps the first seen" `Quick test_revise_keeps_the_first_seen
         ; test_case "dropped and stated again" `Quick test_dropped_and_stated_again
         ; test_case "two ops state one claim" `Quick test_two_ops_state_one_claim
         ] )

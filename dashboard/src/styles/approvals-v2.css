@@ -198,7 +198,7 @@
 .wka-auto-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .wka-auto-lbl { display: flex; flex-direction: column; gap: 2px; color: var(--text-dim); font-size: var(--fs-11); }
 .wka-auto-lbl b { color: var(--text-bright); font-size: var(--fs-13); }
-/* RFC-0319: the switch is an interactive <button role="switch"> — reset the
+/* The switch is an interactive <button role="switch"> — reset the
    default button chrome so it renders identically to the former display span,
    and expose keyboard focus + a disabled affordance. */
 .wka-auto-stat { color: var(--text-primary); font-size: var(--fs-12); }

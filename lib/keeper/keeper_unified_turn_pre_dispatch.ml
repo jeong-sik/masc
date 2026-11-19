@@ -1,4 +1,4 @@
-(* Keeper_unified_turn_pre_dispatch — RFC-0136 PR-3.
+(* Keeper_unified_turn_pre_dispatch.
 
    Extracted from keeper_unified_turn.ml (L166-228) during the
    run_keeper_cycle stage decomposition. Owns the runtime-execution builder. *)

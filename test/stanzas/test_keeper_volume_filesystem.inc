@@ -1,4 +1,4 @@
-; RFC keeper-volume-filesystem-repair §3.1: ext4 superblock error state, read
+; ext4 superblock error state, read
 ; from the host image. The fixtures are real superblocks from 2026-10-22.
 (test
  (name test_keeper_volume_filesystem)

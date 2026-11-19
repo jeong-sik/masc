@@ -1,4 +1,4 @@
-(* RFC-0356: the replayed write must carry the approved payload, not a
+(* The replayed write must carry the approved payload, not a
    payload the model re-emits. These cases pin the reconstruction from a
    stored Gate input to the write tool arguments. *)
 

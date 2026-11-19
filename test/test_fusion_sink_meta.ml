@@ -1,4 +1,4 @@
-(* RFC-0252 §8 — judge_meta 가 board meta_json 에 구조화 5섹션을 보존하는지 핀한다.
+(* judge_meta 가 board meta_json 에 구조화 5섹션을 보존하는지 핀한다.
 
    프론트(FusionJudgeEvidence, keeper-v2 fusion.jsx)가 consensus/contradictions/
    partial_coverage/unique_insights/blind_spots + decision-variant 최상위
@@ -132,7 +132,7 @@ let test_error_branch () =
   check (option string) "error message" (Some "boom") (string_field a "error");
   check bool "no consensus on error" false (List.mem "consensus" (keys a))
 
-(* --- RFC-0278: panel_meta가 정체성(panelist)과 provider attribution을 분리 ---
+(* --- panel_meta가 정체성(panelist)과 provider attribution을 분리 ---
    failed_model = 패널 정체성("skeptic (claude)")이지만, reason_detail의 "Provider '...'"
    슬롯에는 raw provider model("claude")만 남아야 한다. sink가 panelist로 재-attribution
    하면 "skeptic (claude): Provider 'claude'..." 중복 prefix나 "Provider 'skeptic
@@ -208,7 +208,7 @@ let test_panel_meta_invalid_max_output_tokens_text () =
   check (option string) "invalid max tokens reason_code"
     (Some "invalid_max_output_tokens") (string_field a "reason_code")
 
-(* --- RFC-0284: judge_node_meta — 관측 record를 board [judges] 배열 원소로 직렬화 ---
+(* --- judge_node_meta — 관측 record를 board [judges] 배열 원소로 직렬화 ---
    role(위상 의미) + identity(First는 panelist_id) + judge_meta와 동일한 5섹션 스키마
    공유 + 노드별 usage 를 핀한다. 값-핀(value-blind coverage 회피): role/identity가
    정확히 무엇인지 박아 First id가 role로 새거나 정체성이 누락되는 회귀를 잡는다. *)

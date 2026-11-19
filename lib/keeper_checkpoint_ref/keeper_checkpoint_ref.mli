@@ -1,5 +1,5 @@
 (** Exact identity of one Keeper checkpoint: its trace, its turn and its
-    content digest (RFC-0476 §3.2), which a value and every head written for it
+    content digest, which a value and every head written for it
     share. The Keeper checkpoint store computes the digest. *)
 type t = private
   { trace_id : Keeper_id.Trace_id.t

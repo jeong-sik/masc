@@ -8,7 +8,7 @@
 
     This module is data only. The enqueue side is wired:
     [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
-    before the wakeup flag flips (RFC-0020 Rule 1). On the intake side,
+    before the wakeup flag flips. On the intake side,
     [keeper_heartbeat_stimulus_intake.ml] peeks at the earliest ready stimulus,
     validates that same immutable source immediately before dispatch, and
     removes it only through an exact ACK after the turn reaches an
@@ -91,7 +91,7 @@ type board_stimulus = {
   updated_at : float option;
   audience : board_audience;
 }
-(** Typed board-signal payload carried end-to-end (RFC-0020).
+(** Typed board-signal payload carried end-to-end.
 
     This is a [keeper_runtime]-owned boundary DTO. The queue is a low-level
     data module and must not depend on the [board] domain library, so the
@@ -192,7 +192,7 @@ type stimulus_payload =
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
     unrepresentable rather than silently downgraded to [Unsupported].
-    [Fusion_completed] (RFC-0266) wakes the calling keeper when an async
+    [Fusion_completed] wakes the calling keeper when an async
     [masc_fusion] deliberation finishes so the result arrives as actionable
     turn input rather than being discovered passively. *)
 
@@ -293,7 +293,7 @@ and connector_attention = {
   event_id : string;
   channel : Keeper_continuation_channel.t;
 }
-(** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
+(** Payload for [Connector_attention]:
     [event_id] is the pointer into [Keeper_external_attention] for the ambient
     message; content/surface are read from that store on the turn path. *)
 

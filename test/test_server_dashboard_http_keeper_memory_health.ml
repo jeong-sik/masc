@@ -1726,7 +1726,7 @@ let test_attention_retains_originals_and_clears_on_observation () =
 ;;
 
 (* The TUI reads one Keeper's row after its push and merges it into the fleet
-   answer it holds (RFC-0487). The merged answer is the fleet answer read
+   answer it holds. The merged answer is the fleet answer read
    after the write: the same rows, in the same order, with the same totals.
    A Keeper that left loses its row, and another Keeper's refused row, whose
    counts only the server has, stops the merge. *)

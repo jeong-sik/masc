@@ -1,4 +1,0 @@
-keepers/arbiter.toml
-keepers/maker.toml
-keepers/witness.toml
-keepers/dissenter.toml

@@ -286,7 +286,7 @@ let runtime_routes_detail_lines state ~width =
       let routes =
         fact (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
         @ fact (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
-        @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "미확인" "unavailable"))
+        @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "보고 안 됨" "not reported"))
         @ fact (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
         @ (match runtime_fleet_summary state with
            | None -> []
@@ -306,7 +306,7 @@ let runtime_routes_detail_lines state ~width =
                   (string_of_int snapshot.rss_unassigned_probe_count))
         @ (match snapshot.rss_probe with
            | None -> fact (text "프로브" "Probe")
-               (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
+               (text "보고 안 됨" "not reported")
            | Some probe ->
                fact (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
                @ runtime_items ~tone:Page_line.Attention (text "프로브 오류" "Probe error") probe.rps_errors
@@ -716,7 +716,7 @@ let render_runtime_reading (state : state) =
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> (Theme.warn ()) ^ (if ko then "프로브 미확인" else "probe unavailable") ^ Ansi.reset
+          | None -> (Theme.warn ()) ^ (if ko then "프로브 보고 안 됨" else "probe not reported") ^ Ansi.reset
           | Some probe ->
               runtime_overall_badge ~ko probe.rps_status ^ " / "
               ^ runtime_refresh_badge ~ko probe.rps_refresh_state
@@ -1158,12 +1158,11 @@ let render_tools (state : state) =
     {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
      ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
      ttf_cols=cols}) (tools_task_display_owner state);
-  box_top buf cols;
   box_line buf cols
     (header
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
-  box_line_styled buf cols ~style:(Theme.selection_style ())
+  box_line_styled buf cols ~style:(Theme.recede ())
     (Render_tools.tools_selection_line ~cols state);
   box_divider buf cols;
   (match (selected_tools_error state) with
@@ -1177,10 +1176,14 @@ let render_tools (state : state) =
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
   Option.iter Masc_tui_value.Redraw.note_change_at
     (Render_tools.drawn_change display display_lines_window);
+  let sel_style = Theme.selection_style () in
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with
     | None -> box_empty buf cols
-    | Some (style, line) -> box_line_styled buf cols ~style line
+    | Some (style, line) ->
+        if String.equal style sel_style then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+        else box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
   Buffer.add_string buf
@@ -1337,7 +1340,7 @@ let usage_lines ~cols ~rows (state : state) =
             ~now:(Unix.gettimeofday ()) ~width:(max 1 (framed_inner_width cols)) ~rows with
     | Some section -> section.lines
     (* [section] answers [None] only before the first read. *)
-    | None -> [ui_text state ~ko:" 계정 한도 미관측" ~en:" Plan usage · not observed"]
+    | None -> [ui_text state ~ko:" 계정 한도 미조회" ~en:" Plan usage · not read"]
   in
   let keepers () =
     match state.keeper_usage with
@@ -1479,7 +1482,7 @@ let usage_lines ~cols ~rows (state : state) =
           | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
           | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
         Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))
-          (String.concat "\n" (("Account · " ^ label ^ " · f:choose · a:all accounts") :: missing))
+          (String.concat "\n" (("Account · " ^ label ^ "  f:choose  a:all accounts") :: missing))
         @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
@@ -1514,10 +1517,12 @@ let render_metrics (state : state) =
   (* The section being read is marked on the strip under this row, so the
      title does not name it a second time. *)
   let heading =
-    screen_title
-      (if state.usage_telemetry_open then
-         ui_text state ~ko:" 운영 · 사용량 · 진단" ~en:" Operations · Usage · Telemetry"
-       else ui_text state ~ko:" 운영 · 사용량" ~en:" Operations · Usage")
+    here_path state
+      ~path:
+        (if state.usage_telemetry_open then
+           [ ui_text state ~ko:"사용량" ~en:"Usage"
+           ; ui_text state ~ko:"진단" ~en:"Telemetry" ]
+         else [ ui_text state ~ko:"사용량" ~en:"Usage" ])
   in
   let connection = connection_badge state in
   let full_title = Printf.sprintf "%s  %s" heading connection in

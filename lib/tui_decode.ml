@@ -432,7 +432,7 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
-(* RFC-0444 §2.3 row 5: the Goal store envelope as the TUI reads it. The wire
+(* The Goal store envelope as the TUI reads it. The wire
    carries constructor names (reason, mirror.status, reset_step), the refused
    member, the file and the mirror's row count; the payloads the store keeps
    beside them (the Unix error, the parse detail, the mirror stamp) do not
@@ -461,7 +461,7 @@ type goal_store_unavailable_view = {
 }
 
 (* A goal projection body that is a failure envelope instead of the
-   projection: the Goal store (RFC-0444) or the Goal–Task link registry,
+   projection: the Goal store or the Goal–Task link registry,
    which is a different source with its own one-line envelope. *)
 type goal_source_failure =
   | Goal_store_unavailable of goal_store_unavailable_view
@@ -1892,7 +1892,7 @@ type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   (* The server-minted codebase slug the IDE annotation routes scope by
-     (RFC-0378: clients carry this value, they do not re-derive it from the
+     (clients carry this value, they do not re-derive it from the
      url). [None] when the remote cannot canonicalize. *)
   rp_codebase : string option;
   (* The remote as registered, for building links to it. *)
@@ -4671,65 +4671,6 @@ let decode_gate_snapshot json =
          | _ -> Error "approval_rules_state.state must be a string")
   in
   Ok { gs_pending; gs_modes; gs_queue_unavailable; gs_rules; gs_rules_unavailable }
-
-(* The durable per-Keeper Gate settings, which are a different thing from the
-   in-memory YOLO stance above: this is what the Gate decides an external
-   effect under, and it survives a restart. Both lists carry only Keepers
-   somebody singled out, so an empty one means everybody follows the
-   workspace. *)
-type keeper_exact_lane_first = {
-  kel_keeper : string;
-  kel_lane_id : string;
-  kel_slot_id : string;
-  kel_offered : bool;
-      (** [false]: the published lane no longer offers [kel_slot_id], so the
-          lane walks its declared order and this row has no effect. *)
-}
-
-let decode_keeper_gate_settings json =
-  (* An unreadable store answers with an empty list beside
-     [state = "unavailable"]. Read as a list alone, that is "nobody singled
-     out", the looser reading, so it is an error here and the caller keeps
-     what it last knew. *)
-  let readable field =
-    match member (field ^ "_state") json with
-    | `Assoc _ as state ->
-      (match member "state" state with
-       | `String "ready" -> Ok ()
-       | `String "unavailable" ->
-         Error
-           (match member "error" state with
-            | `String detail -> Printf.sprintf "%s unavailable: %s" field detail
-            | _ -> field ^ " unavailable")
-       | _ -> Error (field ^ "_state.state must be ready or unavailable"))
-    | _ -> Error (field ^ "_state must be an object")
-  in
-  let rows field decode_row =
-    let* () = readable field in
-    let* items = required_list_field json field in
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        let* row = decode_row item in
-        loop (row :: acc) rest
-    in
-    loop [] items
-  in
-  let* modes =
-    rows "modes" (fun item ->
-      let* keeper = required_string_field item "keeper_name" in
-      let* mode = required_string_field item "mode" in
-      Ok (keeper, gate_mode_of_wire mode))
-  in
-  let* exact_lanes =
-    rows "exact_lanes" (fun item ->
-      let* kel_keeper = required_string_field item "keeper_name" in
-      let* kel_lane_id = required_string_field item "lane_id" in
-      let* kel_slot_id = required_string_field item "slot_id" in
-      let* kel_offered = required_bool_field item "offered" in
-      Ok { kel_keeper; kel_lane_id; kel_slot_id; kel_offered })
-  in
-  Ok (modes, exact_lanes)
 
 (* Keep the JSON spelling, including quotes around strings.  The Config pane
    now hands this exact spelling to its inline editor and sends the parsed

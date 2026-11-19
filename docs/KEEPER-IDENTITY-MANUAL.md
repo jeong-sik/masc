@@ -230,5 +230,4 @@ publishes, so none of it can go stale here.
 | Document | For |
 |---|---|
 | [`docs/KEEPER-USER-MANUAL.md`](KEEPER-USER-MANUAL.md) | making and running Keepers |
-| [`docs/rfc/RFC-0392-keeper-identity-for-oauth-services.md`](rfc/RFC-0392-keeper-identity-for-oauth-services.md) | why it is built this way |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | dashboard write access |

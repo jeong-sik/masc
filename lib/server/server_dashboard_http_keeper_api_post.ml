@@ -2007,7 +2007,7 @@ let handle_keeper_bulk_directive_post ~sw ~clock state _agent_name req reqd body
         Http.Response.json_value ~status:`Internal_server_error ~compress:true
           ~request:req response reqd
 
-(* RFC-0366. One sentence for one turn. The store rejects an oversized note
+(* One sentence for one turn. The store rejects an oversized note
    rather than truncating it, and this boundary passes that refusal through
    with the caller's own byte count so an operator can see what was rejected
    instead of guessing which half arrived. *)

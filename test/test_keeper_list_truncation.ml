@@ -19,7 +19,7 @@ let with_temp_dir prefix f =
 ;;
 
 (* keeper_list_row_json resolves the default runtime id per row, which fails
-   closed when no runtime is loaded (RFC-0206 §2.1). Minimal catalog, loaded
+   closed when no runtime is loaded. Minimal catalog, loaded
    once for the executable. *)
 let test_runtime_toml =
   {|
@@ -251,7 +251,7 @@ let test_fresh_roster_reads_lifecycle_transition () =
     (fun json -> check bool "the registered keeper starts offline" false (running json))
 ;;
 
-(* A change signal names one Keeper (RFC-0481 §3.1). [name] narrows the roster
+(* A change signal names one Keeper. [name] narrows the roster
    to that Keeper, so the reader replaces one row with the row a whole roster
    read would carry. *)
 let named_args ?(detailed = true) name =

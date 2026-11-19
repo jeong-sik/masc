@@ -12,7 +12,7 @@ val set : Eio.Executor_pool.t -> unit
 (** Install the pool reference. Idempotent overwrite. *)
 
 val set_read : Eio.Executor_pool.t -> unit
-(** Install the read pool (RFC-0204 L3). The submits below send work from a
+(** Install the read pool. The submits below send work from a
     {!Pool_lane.Read} fiber there and everything else to the pool of {!set}.
     Without a read pool, reads use the pool of {!set}. *)
 
@@ -66,7 +66,7 @@ val submit_strict :
 
 val submit_or_inline : ?weight:float -> name:string -> (unit -> 'a) -> 'a
 (** [name] names the work in {!Pool_wait} and the trace; callers pass
-    [__FUNCTION__] (RFC-0474 L4c).
+    [__FUNCTION__].
 
     Run [f] on an Executor_pool worker (a real Eio fiber under
     [Eio.Switch.run], so effect-based ops keep their handlers), or inline

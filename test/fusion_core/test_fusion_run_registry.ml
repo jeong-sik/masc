@@ -1,4 +1,4 @@
-(* RFC-0266 Phase 2 — fusion run registry (in-progress + recent visibility).
+(* Fusion run registry (in-progress + recent visibility).
    Pure in-memory state; tested on isolated [create ()] instances. *)
 
 open Alcotest

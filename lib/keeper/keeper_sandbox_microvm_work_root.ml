@@ -276,7 +276,7 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
       [ "mkdir"; "-p"; "-m"; work_root_dir_mode; keeper_work_root ~keeper_name ]
 ;;
 
-(** Boot invariant (RFC-0052): {!work_volume_guest_root} must be a real
+(** Boot invariant: {!work_volume_guest_root} must be a real
     mountpoint inside the guest, not a directory on the guest rootfs.
 
     The check exists because the two probes below cannot tell the difference:

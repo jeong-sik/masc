@@ -19,7 +19,7 @@ type add_task_success =
 
 type add_task_error =
   | Goal_source_unavailable of Goal_store_unavailable.t
-      (** RFC-0444: the goal store this build cannot read, as its own value. *)
+      (** The goal store this build cannot read, as its own value. *)
   | Goal_lock_failed of string
       (** The goal file lock could not be taken; no goal was read. *)
   | Unknown_goal of string
@@ -32,9 +32,9 @@ type add_task_error =
   | Backlog_write_failed of string
   | Unexpected_error of string
   | Unknown_predecessor of string
-      (** RFC-0323 W2: [predecessor_task_id] does not exist in the backlog *)
+      (** [predecessor_task_id] does not exist in the backlog *)
   | Predecessor_not_terminal of { predecessor_task_id : string; status : string }
-      (** RFC-0323 W2: a re-run link requires a terminal (Done/Cancelled)
+      (** A re-run link requires a terminal (Done/Cancelled)
           predecessor *)
 
 type batch_add_tasks_success =

@@ -61,7 +61,7 @@ let stream_idle_failsafe_floor_sec =
    to the inter-line idle value — a bound an order of magnitude below real
    silent prefill (measured: 152s mimo 1M-context turn 2026-07-20; ~200-525s
    local MLX 20.7K-token keeper prompts 2026-08-16, 9/9 canary failures at
-   the 120s idle cut). Same magnitude as the RFC-0345 idle floor: a single
+   the 120s idle cut). Same magnitude as the idle floor: a single
    universal liveness ceiling, NOT a per-provider tuned default
    (RFC-AC-037 §3). An explicit runtime.toml value overrides it verbatim. *)
 let first_event_failsafe_floor_sec =
@@ -92,7 +92,7 @@ let freeze_from_current () =
       }
     | None ->
       (* Unset: substitute the fail-safe liveness floor so a hung provider stream
-         cannot freeze the keeper chat lane forever (RFC-0345, #25128). Sourced
+         cannot freeze the keeper chat lane forever (#25128). Sourced
          as [Failsafe_floor] so telemetry and the boot log distinguish it from an
          operator-supplied value. *)
       {

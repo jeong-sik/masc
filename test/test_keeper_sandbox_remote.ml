@@ -1,4 +1,4 @@
-(* The [container exec] transport of the remote lane (RFC-0400).
+(* The [container exec] transport of the remote lane.
 
    A stub stands in for the [container] CLI: it records the argv it was
    given, reads the framed request off stdin, and answers by mode with the
@@ -68,7 +68,7 @@ let stub_main () =
     exit 1);
   (* [--probe] takes no frame: the shim answers its identity on stdout and
      exits. The two probe modes differ only in what the shim says it can
-     build, which is the one fact the observe stage reads (RFC-0422). *)
+     build, which is the one fact the observe stage reads. *)
   if List.exists
        (fun arg -> String.equal arg "--probe" || String.equal arg "masc-exec-shim --probe")
        args
@@ -588,7 +588,7 @@ let test_docker_relative_cwd_is_rejected () =
     (contains "docker_observe_cwd_requires_guest_absolute_path" stderr)
 ;;
 
-(* ── the box (RFC-0422) ─────────────────────────────────────────────── *)
+(* ── the box ────────────────────────────────────────────────────────── *)
 
 let decoded_mode frame_path =
   match Exec_ssh_protocol.decode_request (read_file frame_path) with
@@ -866,7 +866,7 @@ let test_a_v2_shim_is_spoken_to_in_v2 () =
   check bool "by name" true (contains "remote_ssh_version_error" stderr)
 ;;
 
-(* RFC-0427 D-1: the lane report is the last dispatch's own branch and the
+(* The lane report is the last dispatch's own branch and the
    probe's own answer, kept with the endpoint's shared state -- not a reading
    of the message text, and empty before anything has been asked. *)
 let test_the_lane_report_is_what_the_last_dispatch_said () =
@@ -1182,7 +1182,7 @@ let test_cancelled_probe_owner_releases_ownership () =
 ;;
 
 (* The tool's JSON names the operator action from the failure's class. *)
-(* RFC-0427 B-3. The shim names the release it came from, so the keeper reading
+(* The shim names the release it came from, so the keeper reading
    its own lane sees whether the endpoint runs this server's shim. A shim from
    this release asks nothing of anyone. An unequal reported release and a
    release that cannot be compared are distinct provenance observations. *)

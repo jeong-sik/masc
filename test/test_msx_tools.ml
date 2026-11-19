@@ -1,4 +1,4 @@
-(* MSX lane tools (RFC-0439 §6.1) — the five tools through the shared worker implementation.
+(* MSX lane tools — the five tools through the shared worker implementation.
 
    Most tests start a bare machine (no BIOS, bus reads 0xFF) and the load
    tests boot a zero-filled BIOS and blank images, so none needs a game image. What they pin: the no-machine refusal, that every refusal declares
@@ -1894,7 +1894,7 @@ let test_inventory_that_will_not_list () =
       (Tool_result.failure_class r = Some Tool_result.Runtime_failure))
 ;;
 
-(* RFC-0439 §5.3, through the tool path: with a BIOS and XSpelunker on this
+(* Through the tool path: with a BIOS and XSpelunker on this
    host, two Space presses take the game from "BRAIN GAMES PRESENTS" to the
    LEVEL 1-1 card, and each press changes what the name table shows. CI has
    no ROM images (they are not in the repository), so without MSX_ROMS and
@@ -1943,7 +1943,7 @@ let test_xspelunker_two_presses () =
     Printf.printf "not run: MSX_ROMS and MSX_CART are unset on this host\n%!"
 ;;
 
-(* RFC-0439 §3.1: the workspace has one shared [Msx.t], so two keepers drive it
+(* The workspace has one shared [Msx.t], so two keepers drive it
    together. Each press advances the same clock and appends to the same ledger
    under its own caller name — that is the workspace's co-play. keeper-b picks
    up the frame keeper-a left, a third caller reads that same clock, and the

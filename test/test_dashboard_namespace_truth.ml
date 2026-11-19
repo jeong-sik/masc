@@ -314,11 +314,11 @@ let test_dashboard_namespace_truth_execution_fixture () =
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/namespace-truth?fixture=execution_smoke")
+            (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
         (* top_queue is null when cache has no execution_queue entries *)
-        check bool "fixture top queue absent when no blockers"
+        check bool "top queue absent when no blockers"
           true
           (json |> member "execution" |> member "top_queue" = `Null);
       ))

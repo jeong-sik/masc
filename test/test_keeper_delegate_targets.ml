@@ -1,9 +1,8 @@
 (** [masc_keeper_delegate_targets] lets a Keeper read the queue and live turn of
     the Keepers it could delegate to before it submits. The submit result
     reports [queued_count] and [target_turn_age_s] only after the work is
-    queued; docs/evidence/delegate-target-load-2026-11 measures what that cost
-    the one Keeper that makes almost every delegation and chooses among five
-    reviewers without seeing either.
+    queued. That cost the one Keeper that makes almost every delegation: it
+    chose among five reviewers without seeing either.
 
     The registry cases drive the registry through its public mutators, as
     test_keeper_delegate_target_turn does. The queue counts need an installed

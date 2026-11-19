@@ -36,7 +36,6 @@ module Kind = struct
     | Trigger_evidence
     | Lease_terminal_evidence
     | Preauthorized_expiry
-    | Migration_diagnostic
     | Local_recovery
     | Mode_event
     | Invite
@@ -60,7 +59,6 @@ module Kind = struct
     ; Trigger_evidence
     ; Lease_terminal_evidence
     ; Preauthorized_expiry
-    ; Migration_diagnostic
     ; Local_recovery
     ; Mode_event
     ; Invite
@@ -86,7 +84,6 @@ module Kind = struct
     | Trigger_evidence -> "trigger_evidence"
     | Lease_terminal_evidence -> "lease_terminal_evidence"
     | Preauthorized_expiry -> "preauthorized_expiry"
-    | Migration_diagnostic -> "migration_diagnostic"
     | Local_recovery -> "local_recovery"
     | Mode_event -> "mode_event"
     | Invite -> "invite"
@@ -111,14 +108,12 @@ type writer =
   | Host_operator
   | Cron
   | Maintenance
-  | Migration
 
 let writer_of : Author.t -> writer = function
   | Author.Authenticated _ -> Authenticated_principal
   | Author.Local_operator -> Host_operator
   | Author.System_cron -> Cron
   | Author.System_maintenance -> Maintenance
-  | Author.System_migration -> Migration
 ;;
 
 (* Design 6.3. The local operator writes recovery records, mode events, and
@@ -146,7 +141,6 @@ let writers : Kind.t -> writer list = function
   | Kind.Keeper -> [ Authenticated_principal ]
   | Kind.Trigger_evidence -> [ Cron ]
   | Kind.Lease_terminal_evidence | Kind.Preauthorized_expiry -> [ Maintenance ]
-  | Kind.Migration_diagnostic -> [ Migration ]
   | Kind.Local_recovery | Kind.Mode_event | Kind.Internal_service_credential -> [ Host_operator ]
   | Kind.Invite -> [ Host_operator; Authenticated_principal ]
   | Kind.Purge -> [ Authenticated_principal; Maintenance ]
@@ -170,7 +164,6 @@ let author_text = function
   | Author.Local_operator -> {|{"type":"local_operator"}|}
   | Author.System_cron -> {|{"type":"system_cron"}|}
   | Author.System_maintenance -> {|{"type":"system_maintenance"}|}
-  | Author.System_migration -> {|{"type":"system_migration"}|}
 ;;
 
 let principal_of_json = function
@@ -187,7 +180,6 @@ let author_of_json = function
   | `Assoc [ ("type", `String "local_operator") ] -> Some Author.Local_operator
   | `Assoc [ ("type", `String "system_cron") ] -> Some Author.System_cron
   | `Assoc [ ("type", `String "system_maintenance") ] -> Some Author.System_maintenance
-  | `Assoc [ ("type", `String "system_migration") ] -> Some Author.System_migration
   | _ -> None
 ;;
 

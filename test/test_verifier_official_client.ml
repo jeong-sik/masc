@@ -356,7 +356,7 @@ let test_unsafe_slots_refused_before_spawn () =
    ever retry a failure it recorded. A client that exits before its result is
    a closed connection, which a fleet Keeper's walk records as a failed
    attempt; the review's walk must leave the slot without one
-   (RFC-0458 §3.4 rule 5, #38327). *)
+   (#38327). *)
 let test_failed_review_leaves_no_failed_attempt_mark () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;

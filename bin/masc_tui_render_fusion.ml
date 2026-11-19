@@ -154,7 +154,6 @@ let render_fusion_list (state : state) =
     Render_schedule.allocate_fusion_columns ~keeper_width
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
@@ -223,8 +222,8 @@ let render_fusion_list (state : state) =
       | Page_empty ->
           if Option.is_some replay_warning then
             ui_text state
-              ~ko:"  읽을 수 있는 보존 실행이 없습니다. 위의 시작 시 읽기 경고를 보세요"
-              ~en:"  No readable retained runs; see startup read warning above"
+              ~ko:"  읽을 수 있는 보존 실행 없음 · 상단 시작 읽기 경고 확인"
+              ~en:"  No readable retained runs · see startup read warning above"
           else ui_text state ~ko:"  (보존된 Fusion 실행 없음)" ~en:"  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -240,9 +239,9 @@ let render_fusion_list (state : state) =
       | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
           let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
               ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
-          let marker = if row_index = state.fusion_cursor then
-              Ansi.reverse ^ ">" ^ Ansi.reset else " " in
-          box_line buf cols (marker ^ " " ^ line)
+          if row_index = state.fusion_cursor then
+            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+          else box_line buf cols ("  " ^ line)
       | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
             fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
@@ -259,7 +258,7 @@ let render_fusion_list (state : state) =
               }
           in
           if row_index = state.fusion_cursor then
-            box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
+            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
     done;
   (match summary_clauses with
@@ -731,7 +730,8 @@ let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
     ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
     ~status ~stage ~panel_answered ~panel_expected ()
 
-let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
+let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
+  let t korean english = if ko then korean else english in
   let answered, failed, input_tokens, output_tokens =
     List.fold_left
       (fun (answered, failed, input_tokens, output_tokens) result ->
@@ -748,27 +748,30 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
   let panel_lines =
     evidence.fe_panel
     |> List.mapi (fun index result ->
-           match result with
-           | Fusion_panel_answered answer ->
-               [ ( (Theme.ok ())
-                 , Printf.sprintf
-                     "  Panel %d [answered] %s  (%d in / %d out)"
-                     (index + 1)
-                     (Terminal_text.single_line answer.fpa_model)
-                     answer.fpa_input_tokens answer.fpa_output_tokens )
-               ]
-               @ fusion_markdown_block ~width ~indent:"    "
-                   answer.fpa_answer
-           | Fusion_panel_failed failure ->
-               [ ( (Theme.bad ())
-                 , Printf.sprintf "  Panel %d [failed] %s  [%s]"
-                     (index + 1)
-                     (Terminal_text.single_line failure.fpf_model)
-                     (Terminal_text.single_line failure.fpf_reason_code) )
-               ; Ansi.dim, "    Token usage: not recorded"
-               ]
-               @ fusion_wrapped_block ~width ~indent:"    "
-                   failure.fpf_reason_detail)
+           let body =
+             match result with
+             | Fusion_panel_answered answer ->
+                 [ ( (Theme.ok ())
+                   , Printf.sprintf
+                       "  Panel %d [answered] %s  (%d in / %d out)"
+                       (index + 1)
+                       (Terminal_text.single_line answer.fpa_model)
+                       answer.fpa_input_tokens answer.fpa_output_tokens )
+                 ]
+                 @ fusion_markdown_block ~width ~indent:"    "
+                     answer.fpa_answer
+             | Fusion_panel_failed failure ->
+                 [ ( (Theme.bad ())
+                   , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                       (index + 1)
+                       (Terminal_text.single_line failure.fpf_model)
+                       (Terminal_text.single_line failure.fpf_reason_code) )
+                 ; Ansi.dim, "    Token usage: not recorded"
+                 ]
+                 @ fusion_wrapped_block ~width ~indent:"    "
+                     failure.fpf_reason_detail
+           in
+           if index = 0 then body else (Ansi.dim, "") :: body)
     |> List.concat
   in
   let panel_token_items =
@@ -802,6 +805,7 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
         ]
         @ fusion_labeled_markdown ~width ~label:"Resolved"
             judge.fj_resolved_answer
+        @ [ Ansi.dim, "" ]
         @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
     | Fusion_judge_failed failure ->
         [ ( (Theme.bad ())
@@ -855,39 +859,42 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
           nodes
           |> List.filter (fun node -> node.fjn_role = Judge_first)
           |> List.mapi (fun index node ->
-                 match node.fjn_outcome with
-                 | Judge_node_synthesized synthesized ->
-                     [ ( (Theme.info ())
-                       , Printf.sprintf
-                           "  First %d [synthesized] %s  (%d in / %d out)"
-                           (index + 1)
-                           (Terminal_text.single_line node.fjn_identity)
-                           synthesized.fjno_input_tokens
-                           synthesized.fjno_output_tokens )
-                     ]
-                     @ fusion_labeled_markdown ~width
-                         ~label:
-                           (Printf.sprintf "First %d %s" (index + 1)
-                              (Terminal_text.single_line node.fjn_identity))
-                         synthesized.fjno_resolved_answer
-                 | Judge_node_failed failed ->
-                     let clock =
-                       match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
-                       | true, _ -> "  (timed out)"
-                       | false, Some seconds ->
-                           Printf.sprintf "  (%.0fs)" seconds
-                       | false, None -> ""
-                     in
-                     [ ( (Theme.bad ())
-                       , Printf.sprintf
-                           "  First %d [failed] %s  [%s]%s"
-                           (index + 1)
-                           (Terminal_text.single_line node.fjn_identity)
-                           (Terminal_text.single_line failed.fjno_failure_code)
-                           clock )
-                     ]
-                     @ fusion_wrapped_block ~width ~indent:"    "
-                         failed.fjno_error)
+                 let card =
+                   match node.fjn_outcome with
+                   | Judge_node_synthesized synthesized ->
+                       [ ( (Theme.info ())
+                         , Printf.sprintf
+                             "  First %d [synthesized] %s  (%d in / %d out)"
+                             (index + 1)
+                             (Terminal_text.single_line node.fjn_identity)
+                             synthesized.fjno_input_tokens
+                             synthesized.fjno_output_tokens )
+                       ]
+                       @ fusion_labeled_markdown ~width
+                           ~label:
+                             (Printf.sprintf "First %d %s" (index + 1)
+                                (Terminal_text.single_line node.fjn_identity))
+                           synthesized.fjno_resolved_answer
+                   | Judge_node_failed failed ->
+                       let clock =
+                         match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                         | true, _ -> "  (timed out)"
+                         | false, Some seconds ->
+                             Printf.sprintf "  (%.0fs)" seconds
+                         | false, None -> ""
+                       in
+                       [ ( (Theme.bad ())
+                         , Printf.sprintf
+                             "  First %d [failed] %s  [%s]%s"
+                             (index + 1)
+                             (Terminal_text.single_line node.fjn_identity)
+                             (Terminal_text.single_line failed.fjno_failure_code)
+                             clock )
+                       ]
+                       @ fusion_wrapped_block ~width ~indent:"    "
+                           failed.fjno_error
+                 in
+                 (Ansi.dim, "") :: card)
           |> List.concat
         in
         [ Ansi.dim, "" ]
@@ -916,17 +923,34 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
     | Some routes ->
         List.concat_map
           (fun line ->
-            Message_layout.split_cells ~max_cells:(max 1 (width - 2)) line
-            |> List.map (fun line -> Ansi.reset, "  " ^ line))
+            let len = String.length line in
+            let rec count_indent i =
+              if i < len && Char.equal line.[i] ' ' then count_indent (i + 1) else i
+            in
+            let indent_len = count_indent 0 in
+            let avail = max 1 (width - 2) in
+            let wrapped =
+              if indent_len = len then [ "" ]
+              else if indent_len = 0 || indent_len >= avail then
+                Message_layout.wrap_words ~max_cells:avail line
+              else
+                let prefix = String.sub line 0 indent_len in
+                let body = String.sub line indent_len (len - indent_len) in
+                Message_layout.wrap_words ~max_cells:(max 1 (avail - indent_len)) body
+                |> List.map (fun row -> prefix ^ row)
+            in
+            List.map (fun row -> Ansi.reset, "  " ^ row) wrapped)
           (Masc_tui_fusion_seat_routes.lines routes)
   in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
-  @ detail_section_heading "1. 질문 · 최종 판정 (Question & Judge Synthesis)"
+  @ detail_section_heading ~width
+      (t "1. 질문 · 최종 판정" "1. Question & Judge Synthesis")
   @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
   @ [ Ansi.dim, "" ]
   @ judge_lines
   @ judges_lines
-  @ detail_section_heading "2. 패널 응답 · 토큰 분포 (Panel Responses)"
+  @ detail_section_heading ~width
+      (t "2. 패널 응답 · 토큰 분포" "2. Panel Responses & Tokens")
   @ [ ( Ansi.dim
       , let usage =
           if answered = 0 then "panel token usage: not recorded"
@@ -938,21 +962,24 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
         in
         Printf.sprintf "  %d answered / %d failed  \xc2\xb7  %s"
           answered failed usage )
-    ; Ansi.dim, ""
     ]
+  @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Ansi.dim, "" ])
   @ panel_chart_lines
   @ panel_lines
-  @ detail_section_heading "3. 도구 실행 추적 (Tool Executions)"
+  @ detail_section_heading ~width
+      (t "3. 도구 실행 추적" "3. Tool Executions")
   @ tool_lines
-  @ detail_section_heading "4. 시트 라우팅 · 기록 증거 (Seat Routes & Board Link)"
+  @ detail_section_heading ~width
+      (t "4. 시트 라우팅 · 기록 증거" "4. Seat Routes & Board Link")
   @ seat_route_lines
+  @ (if seat_route_lines = [] then [] else [ Ansi.dim, "" ])
   @ [ ( Ansi.dim
       , "  Board link: "
         ^ Link.reference Board_post
             (Terminal_text.single_line evidence.fe_post_id) )
     ]
 
-let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
+let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let now = Unix.gettimeofday () in
@@ -1030,7 +1057,7 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
-    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width ~frame_width evidence
+    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
@@ -1042,7 +1069,8 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
-let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_detail) =
+let fusion_historical_lines ~ko ~width ~frame_width (detail : fusion_historical_detail) =
+  let t korean english = if ko then korean else english in
   [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
   ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
   ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
@@ -1060,10 +1088,10 @@ let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_deta
          ; Ansi.reset, (match cost_usd with
              | None -> "  Observed cost: not recorded"
              | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost) ])
-  @ [ Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
+  @ [ Ansi.dim, t "  B:Board 원문  Y:링크 복사  Esc:목록" "  B:Board original  Y:copy link  Esc:back"
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
-     | Ok evidence -> fusion_evidence_lines ~width ~frame_width evidence
+     | Ok evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
      | Error error ->
          clear_fusion_trace_projection ();
          [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
@@ -1071,6 +1099,7 @@ let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_deta
   @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
 
 let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
+  let ko = state.ui_language = Lang_ko in
   let detail =
     match state.fusion_detail with
     | Some detail when String.equal detail.fud_run.fur_run_id run_id ->
@@ -1100,7 +1129,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if stale || Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
-             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4))
+             @ fusion_historical_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                  ~frame_width:(framed_inner_width cols) original
          | Some _ | None ->
              clear_fusion_trace_projection ();
@@ -1112,9 +1141,9 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
              [ Ansi.dim, "  (loading exact Fusion detail)" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, page_failed_note ~ko:(state.ui_language = Lang_ko) ]
+             [ Ansi.dim, page_failed_note ~ko ]
          | Some detail, (Some _ | None) ->
-             fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4))
+             fusion_detail_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                ~frame_width:(framed_inner_width cols) detail)
   in
   let total = List.length lines in

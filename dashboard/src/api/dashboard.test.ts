@@ -2406,10 +2406,6 @@ describe('fetchDashboardGate', () => {
         ...emptyResolvedHistory,
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2447,10 +2443,6 @@ describe('fetchDashboardGate', () => {
         recent_resolved_state: { state: 'ready' },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
@@ -2485,10 +2477,6 @@ describe('fetchDashboardGate', () => {
         recent_resolved_state: { state: 'ready' },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
@@ -2538,10 +2526,6 @@ describe('fetchDashboardGate', () => {
         recent_resolved_state: { state: 'ready' },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2583,10 +2567,6 @@ describe('fetchDashboardGate', () => {
         approval_queue_state: { state: 'ready' },
         ...emptyResolvedHistory,
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-1',
           keeper_name: 'keeper-a',
@@ -2616,155 +2596,6 @@ describe('fetchDashboardGate', () => {
     ])
   })
 
-  it('decodes per-keeper Gate settings', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        approval_queue_state: { state: 'ready' },
-        ...emptyResolvedHistory,
-        approval_rules: [],
-        approval_rules_state: { state: 'ready' },
-        keeper_modes: [
-          {
-            keeper_name: 'exampleorg',
-            mode: 'manual',
-            updated_by: 'vincent',
-            updated_at: '2026-08-27T05:00:00Z',
-          },
-        ],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [
-          {
-            keeper_name: 'exampleorg',
-            lane_id: 'hitl_auto_judge',
-            slot_id: 'glm-coding.glm-5-turbo',
-            updated_by: 'vincent',
-            updated_at: '2026-08-27T05:00:00Z',
-            offered: true,
-          },
-        ],
-        keeper_exact_lanes_state: { state: 'ready' },
-        hitl: gateHitl,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    const result = await fetchDashboardGate()
-
-    expect(result.keeper_modes).toEqual([
-      {
-        keeper_name: 'exampleorg',
-        mode: 'manual',
-        updated_by: 'vincent',
-        updated_at: '2026-08-27T05:00:00Z',
-      },
-    ])
-    expect(result.keeper_exact_lanes[0]).toMatchObject({
-      lane_id: 'hitl_auto_judge',
-      slot_id: 'glm-coding.glm-5-turbo',
-    })
-  })
-
-  it('rejects the retired Judge-only preference shape', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        approval_queue_state: { state: 'ready' },
-        ...emptyResolvedHistory,
-        approval_rules: [],
-        approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_judges: [],
-        keeper_judges_state: { state: 'ready' },
-        hitl: gateHitl,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    await expect(fetchDashboardGate()).rejects.toThrow(/keeper_exact_lanes_state/)
-  })
-
-  it('requires lane identity on every exact-lane preference', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        approval_queue_state: { state: 'ready' },
-        ...emptyResolvedHistory,
-        approval_rules: [],
-        approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [{
-          keeper_name: 'exampleorg',
-          slot_id: 'glm-coding.glm-5-turbo',
-          updated_by: 'vincent',
-          updated_at: '2026-08-27T05:00:00Z',
-          offered: true,
-        }],
-        keeper_exact_lanes_state: { state: 'ready' },
-        hitl: gateHitl,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    await expect(fetchDashboardGate()).rejects.toThrow(
-      /keeper_exact_lanes contains an invalid row/,
-    )
-  })
-
-  it('refuses per-keeper rows alongside an unavailable state', async () => {
-    // Unavailable means the file could not be read, so there was nothing to
-    // parse. Rows beside it would be two sources disagreeing about the same
-    // question, and the looser one would win by being the one on screen.
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        approval_queue_state: { state: 'ready' },
-        ...emptyResolvedHistory,
-        approval_rules: [],
-        approval_rules_state: { state: 'ready' },
-        keeper_modes: [
-          {
-            keeper_name: 'exampleorg',
-            mode: 'manual',
-            updated_by: 'vincent',
-            updated_at: '2026-08-27T05:00:00Z',
-          },
-        ],
-        keeper_modes_state: { state: 'unavailable', error: 'overrides unreadable' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
-        hitl: gateHitl,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    await expect(fetchDashboardGate()).rejects.toThrow(/unavailable keeper_modes must be empty/)
-  })
-
-  it('refuses a per-keeper mode the Gate does not define', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        approval_queue: [],
-        approval_queue_state: { state: 'ready' },
-        ...emptyResolvedHistory,
-        approval_rules: [],
-        approval_rules_state: { state: 'ready' },
-        keeper_modes: [
-          {
-            keeper_name: 'exampleorg',
-            mode: 'ask_nicely',
-            updated_by: 'vincent',
-            updated_at: '2026-08-27T05:00:00Z',
-          },
-        ],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
-        hitl: gateHitl,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-
-    await expect(fetchDashboardGate()).rejects.toThrow(/keeper_modes contains an invalid row/)
-  })
-
   it('preserves approval rule-store unavailability', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -2776,10 +2607,6 @@ describe('fetchDashboardGate', () => {
           state: 'unavailable',
           error: 'approval rules store unreadable',
         },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2799,10 +2626,6 @@ describe('fetchDashboardGate', () => {
         approval_queue_state: { state: 'ready' },
         ...emptyResolvedHistory,
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-invalid',
           keeper_name: 'keeper-a',
@@ -2831,10 +2654,6 @@ describe('fetchDashboardGate', () => {
         recent_resolved_state: { state: 'ready' },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -2909,10 +2728,6 @@ describe('fetchDashboardGate', () => {
         },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -2942,10 +2757,6 @@ describe('fetchDashboardGate', () => {
         ...emptyResolvedHistory,
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -3029,10 +2840,6 @@ describe('fetchDashboardGate', () => {
         ...emptyResolvedHistory,
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -3098,10 +2905,6 @@ describe('fetchDashboardGate', () => {
         recent_resolved_state: { state: 'ready' },
         approval_rules: [],
         approval_rules_state: { state: 'ready' },
-        keeper_modes: [],
-        keeper_modes_state: { state: 'ready' },
-        keeper_exact_lanes: [],
-        keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
       }), {
         status: 200,
@@ -3130,10 +2933,6 @@ describe('fetchDashboardGate', () => {
       ...emptyResolvedHistory,
       approval_rules: [],
       approval_rules_state: { state: 'ready' },
-      keeper_modes: [],
-      keeper_modes_state: { state: 'ready' },
-      keeper_exact_lanes: [],
-      keeper_exact_lanes_state: { state: 'ready' },
       hitl: {
         gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
         external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },

@@ -23,5 +23,3 @@ val markdown : Keeper_media_reading_reply.t -> (string, reply_error) result
     content order. An error result, malformed result, or nontext success block
     is not a successful reading. Optional structured content/metadata remain
     in the complete Reply; no SDK inverse is used. *)
-val catalog_error_to_string : catalog_error -> string
-val reply_error_to_string : reply_error -> string

@@ -3,7 +3,7 @@
     configuration, provider failure, prompt-render failure, and missing or
     malformed tool calls remain typed non-verdict outcomes. *)
 
-(** RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+(** A binary image artifact the judge receives as an attached
     image block. The body is a base64 copy read from the snapshot's filed body
     at assembly time; the hash and size recorded in the snapshot stay the
     authority the prompt text cites. *)
@@ -26,7 +26,7 @@ type review_request =
   }
 
 (** The read-only tools the evaluator holds besides the submitted evidence
-    snapshot (RFC-0361 D1). Every review is handed one: both lanes build the
+    snapshot. Every review is handed one: both lanes build the
     surface before the review runs and defer when they cannot, so there is no
     tool-less review to describe. This module deliberately does not build the
     surface itself: the tools that read a producer's tree belong above the
@@ -96,7 +96,7 @@ val verdict_constructor_name : verdict -> string
     advertise, owned by the {!verdict} variant. The TOML declaration in
     [config/tools/report_review_verdict.toml] carries it as a literal; the
     mirror test in [test_anti_rationalization_empty_reject] pins the two
-    together (RFC prompts-and-tool-definitions-outside-ocaml §2.2). *)
+    together. *)
 val valid_verdict_strings : string list
 
 type gate =
@@ -279,7 +279,7 @@ val review
     must not rediscover it from process-global environment state.
 
     Without [~evaluator_runtime], the evaluator slots come from the published
-    [verifier_exact] exact-output lane (RFC-0361 D7(a)) and are tried in frozen
+    [verifier_exact] exact-output lane and are tried in frozen
     declaration order: a slot that fails or returns no valid verdict tool call
     yields to the next slot, and the terminal result describes the last
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
@@ -290,7 +290,7 @@ val review
     an object with [evidence_lookup_succeeded = true] and the original payload
     under [lookup_result]. Failed and deferred lookups are unchanged. The judge
     owns the verdict; this projection is never parsed back into a local verdict
-    override (RFC-0417 section 4.3). *)
+    override. *)
 
 (** Render the review prompt {!Prompt_names.verification} with the sections
     the [question], the [lookup] surface and its [lookup_root] supply.

@@ -21,8 +21,6 @@ EDITED_FILES = (
     'docs/spec/SPEC-INDEX.md',
     'docs/INSTALL.md',
     'docs/INSTALL.ko.md',
-    'docs-site/src/content/docs/getting-started/quickstart.md',
-    'docs-site/src/content/docs/ko/getting-started/quickstart.md',
 )
 CHANGELOG = '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\n### Fixed\n- First.\n'
 

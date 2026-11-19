@@ -83,7 +83,7 @@ let host_root_rel_of_profile profile name =
         (Playground_paths.sanitize_keeper_name name)
   (* Host-side bookkeeping bundle (telemetry, workspace views) for both
      profiles whose tree lives on the endpoint: an OpenSSH host, or an Apple
-     [container] guest's work volume (RFC-0400). The keeper's working files
+     [container] guest's work volume. The keeper's working files
      never sit under this path; [Keeper_remote_path] translates between the
      bundle and the endpoint's spelling. *)
   | Micro_vm | Remote_ssh -> Playground_paths.bundle_root name

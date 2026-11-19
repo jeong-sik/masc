@@ -57,7 +57,14 @@ let load_segment ~session_dir digest =
 ;;
 
 type covering_error =
-  | Range of Marks.range_error
+  | Ends_after_covered of
+      { through : int
+      ; last : int
+      }
+  | Backwards of
+      { from : int
+      ; through : int
+      }
   | Segment of segment_unread Marks.segment_error
 
 (* Each round puts one more segment in front, and the segments behind a head
@@ -69,5 +76,7 @@ let rec with_segments_as_needed ~session_dir covered ask =
     (match Marks.with_segment_before ~load:(load_segment ~session_dir) covered with
      | Ok covered -> with_segments_as_needed ~session_dir covered ask
      | Error error -> Error (Segment error))
-  | Error ((Marks.Ends_after_covered _ | Marks.Backwards _) as error) -> Error (Range error)
+  | Error (Marks.Ends_after_covered { through; last }) ->
+    Error (Ends_after_covered { through; last })
+  | Error (Marks.Backwards { from; through }) -> Error (Backwards { from; through })
 ;;

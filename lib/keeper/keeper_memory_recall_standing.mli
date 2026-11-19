@@ -1,5 +1,4 @@
-(** Whether the recall judgment reaches a Keeper now, and if not, why
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md).
+(** Whether the recall judgment reaches a Keeper now, and if not, why.
 
     {!Keeper_memory_recall_blocks} asks it before it reads a Keeper's facts,
     and the server's reading of the gate ([Server_memory_recall_standing])

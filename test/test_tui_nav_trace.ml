@@ -1,4 +1,4 @@
-(* The navigation trace (RFC-0485) keeps what a key is and drops what a person
+(* The navigation trace keeps what a key is and drops what a person
    typed. These cases hold that to the decoder the TUI really reads keys with
    and to the footer text the trace asks what a screen announces, so the
    spellings the trace compares cannot drift apart without a case failing. *)

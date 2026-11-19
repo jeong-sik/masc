@@ -6,7 +6,7 @@ let get () = Atomic.get pool
 
 let set p = Atomic.set pool (Some p)
 
-(* RFC-0204 L3: see [Executor_pool_ref.selected]. *)
+(* See [Executor_pool_ref.selected]. *)
 let read_pool : Domain_pool.t option Atomic.t = Atomic.make None
 
 let set_read p = Atomic.set read_pool (Some p)

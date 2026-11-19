@@ -29,7 +29,7 @@
     scope clears it sooner (RFC-provider-path-rest §3.3, 2026-11-06).
     Coarse HTTP 429 / Provider.RateLimit does not establish credential
     ownership; it belongs to {!Runtime_candidate_backpressure}'s candidate-only
-    observation instead. RFC-0370 §3.3, RFC-0433. *)
+    observation instead. *)
 
 type scope
 (** A non-secret quota ownership key.  The representation is deliberately
@@ -84,11 +84,6 @@ val note_observed_exhausted_at : now:float -> scope:scope -> source:refusal -> u
     forced to re-read it.  Real provider paths keep calling
     {!note_observed_exhausted}; this entry point exists so a fixture can be
     dated deterministically. *)
-
-val note_read_without_reset_at : now:float -> scope:scope -> unit
-(** {!note_read_without_reset} with the moment of observation given as [now].
-    Same relation to its wall-clock sibling as
-    {!note_observed_exhausted_at}. *)
 
 val note_succeeded : scope:scope -> unit
 (** A call on [scope] got through, so an observation recorded by

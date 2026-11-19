@@ -1,4 +1,4 @@
-(** RFC-0297 Phase 1 (P0-1): the global lifecycle kill-switches actually
+(** The global lifecycle kill-switches actually
     suppress their turns, resolved through the single SSOT
     [Keeper_lifecycle_gate_env.enabled].
 

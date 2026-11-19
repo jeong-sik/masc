@@ -1,5 +1,4 @@
-(** The two texts a judged turn adds to its context
-    (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section 4.4).
+(** The two texts a judged turn adds to its context.
 
     The one call the context assembly makes, once per turn, before its first
     model request: it asks whether the Keeper is judged, reads the Keeper's

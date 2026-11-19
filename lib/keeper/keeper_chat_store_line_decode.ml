@@ -244,7 +244,7 @@ let parse_json_decoded ~file_path json : parsed_line =
         Some (Invalid_row_contract detail)
     in
     let turn_ref =
-      (* RFC-0233 §7: parse the join key; a malformed value is surfaced as
+      (* Parse the join key; a malformed value is surfaced as
          a read drop and reads as [None] — never repaired. *)
       match opt_string "turn_ref" with
       | None -> None
@@ -343,7 +343,7 @@ let parse_json_decoded ~file_path json : parsed_line =
         match contract_result, Role.of_label role_label with
         | Error _, _ -> None
         | Ok _, None ->
-            (* RFC-0232 P1: an unknown role cannot participate in any lane
+            (* An unknown role cannot participate in any lane
                semantics (watermark, pending, rendering); surface it
                instead of carrying an untyped row. *)
             report_persistence_read_drop

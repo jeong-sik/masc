@@ -157,7 +157,7 @@ val overlay_application_to_yojson :
       sleep_chunk_sec             = 1.5
 
       [turn]
-      # stream_idle_timeout_sec omitted: the RFC-0345 fail-safe floor applies.
+      # stream_idle_timeout_sec omitted: the fail-safe floor applies.
       [web_search]
       searxng_url                 = "http://127.0.0.1:8888"
       provider                    = "auto"

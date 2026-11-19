@@ -40,5 +40,6 @@ let close_open (place : Keeper_turn_log_recorder.place) =
 let not_closed_to_string = function
   | Head_unread error -> Keeper_checkpoint_store_session.checkpoint_load_error_to_string error
   | History_unread error -> Checkpoint.saved_history_ref_error_to_string error
-  | Save_not_installed (_ : Checkpoint.checkpoint_cas_error) -> "the closing save was not installed"
+  | Save_not_installed error ->
+    "the closing save was not installed: " ^ Checkpoint.checkpoint_cas_error_to_string error
 ;;

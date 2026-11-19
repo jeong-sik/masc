@@ -1,4 +1,4 @@
-(* test_keeper_lifecycle_gate.ml — RFC-0297 Phase 1 (P0-1).
+(* test_keeper_lifecycle_gate.ml.
 
    Pins the closed-variant gate truth table: a lifecycle activity is
    enabled iff BOTH the global (config) kill-switch and the per-keeper

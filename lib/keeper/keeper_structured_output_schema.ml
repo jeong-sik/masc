@@ -62,7 +62,7 @@ let librarian_evidence_schema =
    comment id, or null for the keeper's own transcript; when it corrects a
    dropped memory, that memory's short id in [supersedes], null otherwise; and
    the short ids of the current memories it now says in [absorbs], empty when
-   none (RFC-0456 §4.2). All are answered on every claim so strict schema modes
+   none. All are answered on every claim so strict schema modes
    accept the shape; the decoder treats null as absent. The field list is the
    same closed set the parser allows. *)
 let librarian_claim_schema =

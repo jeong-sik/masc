@@ -59,7 +59,7 @@ let kept_back t read notice =
 let notice t message = {t with message = Some message}
 let busy t =
   let mutation = Mutation (ref ()) in
-  {t with pending = Some mutation; form = Browsing; message = Some "Waiting for the server…"}, mutation
+  {t with pending = Some mutation; form = Browsing; message = Some "Waiting for the server"}, mutation
 let settled t mutation = match t.pending with
   | Some pending when pending == mutation -> {t with pending = None}
   | Some _ | None -> t
@@ -234,7 +234,7 @@ let lines ~height ~width t =
     ^ if Option.is_some (selected t) then " Enter opens the retained QR/link." else "") in
   let status =
     (match t.read, t.inventory with
-     | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> ["Reading invites…"]
+     | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> ["Reading invites"]
      | None, (Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _) -> [])
     @ (match t.inventory with
        | Fetched.Stale (_, Read_failed error) | Fetched.Failed (Read_failed error) ->

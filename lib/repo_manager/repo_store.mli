@@ -88,6 +88,6 @@ val register_discovered : base_path:string -> (repository list, string) result
 
 val find_url_by_id :
   base_path:string -> repository_id -> (string option, string) result
-(** RFC-0128 §4.5. [find_url_by_id ~base_path id] returns the raw [url]
+(** [find_url_by_id ~base_path id] returns the raw [url]
     field for the given repository, or [None] when the repository is
     not registered or has an empty URL. *)

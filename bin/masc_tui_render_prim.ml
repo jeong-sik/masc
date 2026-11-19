@@ -946,11 +946,11 @@ let composer_row state ~rows ~cols =
   if state.view = Overview && not state.composer_focused then
     let note=match Composer.reading_note ~ko (Composer_projection.source_reading state) with
       | None ->
-          ui_text state ~ko:"쓰기 전에 키퍼를 고르세요"
+          ui_text state ~ko:"키퍼 선택 후 입력"
             ~en:"Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    let choose = focus_hint (ui_text state ~ko:"고르기" ~en:"choose") in
-    (Theme.recede () ^ fit_width (" " ^ note ^ " · " ^ choose) cols ^ Ansi.reset,
+    let choose = focus_hint (ui_text state ~ko:"선택" ~en:"choose") in
+    (Theme.recede () ^ fit_width (" " ^ note ^ "  " ^ choose) cols ^ Ansi.reset,
      Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
@@ -4202,7 +4202,7 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | true, true -> "staged+worktree"
     | true, false -> "staged"
     | false, true -> "worktree"
-    | false, false -> "unknown"
+    | false, false -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 
 let box_line_span buf cols span =
@@ -5018,9 +5018,9 @@ let help_lines ~width (state : state) =
     in
     let nav_text =
       if ko then
-        dim "j/k 한 줄 · Enter 안으로 · Esc 밖으로 · [ ] 옆 항목 · v 보기 · Tab 화면 · / 찾기 · r 새로고침 · ? 전체"
+        dim "j/k:이동  Enter:열기  Esc:뒤로  [/]:옆 항목  v:보기  Tab:화면  /:찾기  r:새로고침  ?:전체"
       else
-        dim "j/k row · Enter open · Esc back · [ ] sibling · v view · Tab screen · / find · r refresh · ? all"
+        dim "j/k:row  Enter:open  Esc:back  [/]:sibling  v:view  Tab:screen  /:find  r:refresh  ?:all"
     in
     let mark_text =
       if ko then
@@ -5063,7 +5063,7 @@ let help_lines ~width (state : state) =
   | [] ->
       [ Masc_tui_help.Whole
           [ Printf.sprintf
-              (if ko then "%s  \"%s\" 와 일치하는 키나 명령이 없습니다.%s"
+              (if ko then "%s  \"%s\" 일치 항목 없음%s"
                else "%s  No key or command matches \"%s\".%s")
               (Theme.recede ()) (Terminal_text.single_line query) Ansi.reset ] ]
 
@@ -5810,14 +5810,19 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
                 Printf.sprintf "scale %d–%d tokens" minimum maximum in
+          (* A turn whose record carries no input count is a value read but
+             not reported, and a negative count is a reading that failed:
+             the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
+          let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+          let invalid = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
           let marks = List.map2 (fun sample bar -> match sample with
-            | Inspector.Input_unavailable -> "·"
-            | Inspector.Input_invalid _ -> "!"
+            | Inspector.Input_unavailable -> unreported
+            | Inspector.Input_invalid _ -> invalid
             | Inspector.Input_estimate _ -> "~"
             | Inspector.Input_count 0 -> "0"
             | Inspector.Input_count _ -> bar) inputs bars |> String.concat "" in
           let legends =
-            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, "· unavailable")
+            [ (List.exists (( = ) Inspector.Input_unavailable) inputs, unreported ^ " not reported")
             ; (List.exists (( = ) (Inspector.Input_count 0)) inputs, "0 recorded zero")
             ; (List.exists (function Inspector.Input_estimate _ -> true
                        | Inspector.Input_count _ | Inspector.Input_invalid _
@@ -5826,7 +5831,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ; (List.exists (function Inspector.Input_invalid _ -> true
                        | Inspector.Input_count _ | Inspector.Input_estimate _
                        | Inspector.Input_unavailable -> false) inputs,
-               "! invalid negative count")
+               invalid ^ " invalid negative count")
             ]
             |> List.filter_map (fun (present, text) -> if present then Some text else None) in
           wrapped "" ("Input by turn: " ^ marks)
@@ -5976,7 +5981,8 @@ let context_retained_body_lines ~width text =
 let section_rule_text = Masc_tui_ansi.Section.rule_text
 let section_heading_style = Masc_tui_ansi.Section.style
 
-let section_heading_line title = section_heading_style ^ section_rule_text title ^ Ansi.reset
+let section_heading_line title =
+  Masc_tui_ansi.Section.styled_heading ~rule_style:(Theme.recede ()) title
 
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
@@ -5990,16 +5996,16 @@ let context_exact_item_detail_lines ~width ~scale ~part
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ section_heading_line "RETAINED ITEM"
+  [ section_heading_line "Retained item"
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
-  ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+  ; Theme.recede () ^ Masc_tui_token_scale.note scale ^ Ansi.reset
   ; ""
-  ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
+  ; Theme.recede () ^ "Retained pre-dispatch content" ^ Ansi.reset
   ]
   @ body
 
@@ -6912,11 +6918,11 @@ let keeper_deletions_lines (state : state) ~cols =
           inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
       errors @ (match selected with
-        | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
+        | None -> [ say "저장된 키퍼 삭제 기록 없음" "No saved keeper deletion records." ]
         | Some row ->
           [Keeper_control.deletion_keeper_name row ^ " · " ^ Keeper_control.deletion_status ~ko row]
           @ (if row.Keeper_control.can_retry then []
-             else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
+             else [ say "정리 재시도 불가 단계" "This phase cannot retry cleanup." ])
           @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
                 "Shutdown ledger record (including cleanup failure causes):" ]
           @ String.split_on_char '\n'
@@ -7050,20 +7056,26 @@ let studio_panel ~width ~title ~lines =
   let border left right =
     edge ^ left ^ draw_hline (max 0 (width - 2)) ^ right ^ Ansi.reset
   in
-  [ Theme.info () ^ "┌ " ^ heading ^ " "
+  [ edge ^ "╭ " ^ Ansi.reset ^ Ansi.bold ^ heading ^ Ansi.reset ^ edge ^ " "
     ^ draw_hline (max 0 (width - Message_layout.display_width heading - 4))
-    ^ "┐" ^ Ansi.reset ]
+    ^ "╮" ^ Ansi.reset ]
   @ List.map (fun line ->
       edge ^ "│ " ^ Ansi.reset ^ fit_width line inner
       ^ edge ^ " │" ^ Ansi.reset) lines
-  @ [ border "└" "┘" ]
+  @ [ border "╰" "╯" ]
 
 let detail_heading_rows ~first lines =
   let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in
   if first then heading else (Ansi.dim, "") :: heading
 
-let detail_section_heading ?(first = false) title =
-  detail_heading_rows ~first [ section_rule_text title ]
+let detail_section_heading ?(first = false) ?width title =
+  let ruled = section_rule_text title in
+  let lines =
+    match width with
+    | Some w -> Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+    | None -> [ ruled ]
+  in
+  detail_heading_rows ~first lines
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
@@ -7135,8 +7147,18 @@ let runtime_config_status_lines state ~cols =
   in
   detail_page ~width:(framed_inner_width cols) blocks
 
-let detail_section_lines ?(first = false) title =
-  let heading = [ "  " ^ section_heading_line title ] in
+let detail_section_lines ?(first = false) ?width title =
+  let heading =
+    match width with
+    | None -> [ "  " ^ section_heading_line title ]
+    | Some w ->
+        let ruled = section_rule_text title in
+        if Message_layout.display_width ruled <= max 1 (w - 2) then
+          [ "  " ^ section_heading_line title ]
+        else
+          Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+          |> List.map (fun line -> "  " ^ section_heading_style ^ line ^ Ansi.reset)
+  in
   if first then heading else "" :: heading
 
 let wrap_summary_column_items ~width items =

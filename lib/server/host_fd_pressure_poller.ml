@@ -1,7 +1,7 @@
 (* Host_fd_pressure_poller — see .mli for contract.
 
-   RFC-0137 PR-2. Sunsets when RFC-0097 (sandbox container reuse)
-   reaches steady state. See RFC-0137 §9.
+   Sunsets when RFC-0097 (sandbox container reuse)
+   reaches steady state.
 
    Design choices worth noting:
    - [Keeper_fd_pressure.engage_external] records each exact (level, ts)
@@ -88,10 +88,10 @@ let parse_state_line line =
          Some { level; ts; reason }
        | _ -> None
      with
-     (* RFC-0145 — narrowed from a wildcard to the only exception the
+     (* Narrowed from a wildcard to the only exception the
         Yojson projection helpers raise on wrong-typed JSON. *)
      | Yojson.Safe.Util.Type_error _ -> None)
-  (* RFC-0145 — narrowed from a wildcard to the only exception
+  (* Narrowed from a wildcard to the only exception
      [Yojson.Safe.from_string] raises on malformed JSON.  An I/O or
      internal runtime exception bubbles to the caller. *)
   | exception Yojson.Json_error _ -> None

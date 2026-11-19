@@ -594,7 +594,7 @@ let parse_execution_receipt tail =
        | None -> Ok None
        | Some json -> Result.map Option.some (execution_receipt_of_json json))
 
-(* --- request acceptance frame (RFC exec-shim-reports-request-acceptance) --- *)
+(* --- request acceptance frame --- *)
 
 let render_acceptance_frame (v : major) : string =
   Printf.sprintf "%c%s%c" rs

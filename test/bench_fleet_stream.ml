@@ -1,4 +1,4 @@
-(* Not a test. Prints how long the fleet stream (RFC-0477) takes from a change
+(* Not a test. Prints how long the fleet stream takes from a change
    in the hub to the reader's view, over loopback, for several fleet sizes and
    subscriber counts, on two transports.
 

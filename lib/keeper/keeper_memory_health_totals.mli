@@ -3,7 +3,7 @@
 
     The server counts them when it answers the fleet, and the TUI counts them
     from the rows it holds, both through {!of_rows}: the two cannot disagree
-    on how a row is counted (RFC-0487 §2.5). *)
+    on how a row is counted. *)
 
 type alert_severity =
   | Alert_warn

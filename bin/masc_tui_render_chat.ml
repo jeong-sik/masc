@@ -868,7 +868,6 @@ let keeper_status_facts state keeper_name : string Chat_facts.t list =
         let yolo = List.mem keeper.k_name state.keeper_yolo_names in
         let chat_mode, gate_mode =
           keeper_chat_mode_labels ~yolo
-            ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
             ~workspace_gate_mode:
               (Option.map (fun modes -> modes.Tui_decode.glm_workspace) state.gate_modes)
         in
@@ -3527,7 +3526,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                             ~column:role_label_column ~style "STATUS";
                           role_label_mark_cells = Message_layout.role_label_mark_cells
                             ~column:role_label_column ~style ();
-                          body = "저널 갱신 불가 · 받은 기록을 유지합니다";
+                          body = "저널 갱신 불가 · 받은 기록 유지";
                           markdown_source = Message_layout.Markdown_streaming } }] }
                  in
                  Hashtbl.replace unavailable_block_memo key (block, with_status);
@@ -4888,8 +4887,8 @@ let render_keeper_message (state : state) =
       if history_height > 0 then
         box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
           (ui_text state
-             ~ko:"  (아직 메시지가 없습니다. 아래에 쓰고 Enter 를 누르세요)"
-             ~en:"  (no messages yet -- type below and press Enter)");
+             ~ko:"  (메시지 없음 · 아래에 입력 후 Enter)"
+             ~en:"  (no messages yet · type below and press Enter)");
       for _ = 1 to history_height - 1 do
         box_empty chat_buf chat_cols
       done
@@ -5257,18 +5256,18 @@ let render_keeper_message (state : state) =
       let unavailable_message =
         match state.keepers_error with
         | Some _ ->
-            if ko then "  키퍼 목록 조회 실패 · 초안 유지 · Esc 로 다른 키퍼 고르기"
-            else "  Keeper roster is unavailable; draft retained; Esc to choose another"
+            if ko then "  키퍼 목록 조회 실패 · 초안 유지  Esc:다른 키퍼 선택"
+            else "  Keeper roster unavailable · draft retained  Esc:choose another"
         | None ->
             Printf.sprintf
               (match keeper_creation_matches state keeper_name, ko with
                | true, true ->
-                   "  키퍼 %s 생성 접수됨 · 목록 확인 대기 · 초안 유지 · Esc 뒤 r 로 새로 고침"
+                   "  키퍼 %s 생성 접수됨 · 목록 확인 대기 · 초안 유지 · Esc 후 목록에서 r:새로고침"
                | true, false ->
-                   "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
-               | false, true -> "  키퍼 %s 등록 해제됨 · 초안 유지 · Esc 로 다른 키퍼 고르기"
+                   "  Keeper %s creation accepted · roster confirmation pending · draft retained · Esc to list, then r:refresh"
+               | false, true -> "  키퍼 %s 등록 해제됨 · 초안 유지  Esc:다른 키퍼 선택"
                | false, false ->
-                   "  Keeper %s is no longer registered; draft retained; Esc to choose another")
+                   "  Keeper %s no longer registered · draft retained  Esc:choose another")
               display_keeper_name
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message

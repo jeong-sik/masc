@@ -1,6 +1,6 @@
 (* Keeper_sandbox_remote's Agent_socket delivery: the runner and the probe
    reach the real agent relay and the real shim through the guest agent
-   socket (RFC microvm-guest-agent-over-socket).
+   socket.
 
    The agent here runs without root as this test's own uid and gid, and the
    Keeper ids below are ones it cannot have, so the production check refuses

@@ -46,8 +46,8 @@ type config =
     (** Finite bound for the post-spawn initialize exchange and callbacks
         before the user turn is written. *)
   ; native : Runtime_native_tools.posture
-    (** How much of the CLI's built-in tool surface this turn may use
-        (RFC-0390). Built-in calls run inside the client and never reach the
+    (** How much of the CLI's built-in tool surface this turn may use.
+        Built-in calls run inside the client and never reach the
         MASC approval gate, so the keeper layer admits [Native_full] only
         for Yolo keepers. *)
   ; timeout_s : float option
@@ -595,7 +595,7 @@ val command :
     requires a file; an unset prompt requires None. Prompt bytes never occupy argv.
     Exposed because the flag set is a
     contract with the installed client — tests pin how [config.native]
-    selects [--tools] and what [--allowedTools] pre-approves (RFC-0390). *)
+    selects [--tools] and what [--allowedTools] pre-approves. *)
 
 type context_frame =
   | System_prompt_file  (** The [--system-prompt-file] the child was started with. *)

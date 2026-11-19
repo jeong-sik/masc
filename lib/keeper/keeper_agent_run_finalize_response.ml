@@ -187,10 +187,10 @@ let finalize
     | Keeper_turn_outcome.Awaiting_gate_approval
     | Keeper_turn_outcome.No_visible_reply -> false
   in
-  (* RFC-0385: an internal turn's wake cue and final text are not conversation.
+  (* An internal turn's wake cue and final text are not conversation.
      The history source label is what the turn already carries, so the decision
      comes from it and not from the text. Direct turns keep [direct_assistant]
-     and are unaffected (RFC-0376 4.3). *)
+     and are unaffected. *)
   let exclude_thought_from_replay =
     Keeper_types_support.is_internal_history_source history_assistant_source
   in
@@ -266,7 +266,7 @@ let finalize
        | Ok (patched, replay_suffix_pruned) ->
          (* This save closes the turn: it writes the open messages as the
             turn's bundle, so it runs even when the pipeline already saved
-            these messages (RFC-0476 §3.2). *)
+            these messages. *)
          let save_outcome =
              let save_started_at = Time_compat.now () in
              let save_started_mono = Mtime_clock.now () in

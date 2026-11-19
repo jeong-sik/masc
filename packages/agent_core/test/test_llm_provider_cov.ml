@@ -511,7 +511,7 @@ let test_message_to_json_tool () =
   Alcotest.(check string) "tool -> user" "user" (json |> member "role" |> to_string)
 ;;
 
-(* RFC-0468 §3.2: the input speaker rides on User messages as host
+(* The input speaker rides on User messages as host
    attribution. A provider must receive the same bytes with or without it,
    including the tool-result follow-up merge that only folds a User message
    whose metadata does not change what the provider sees. *)

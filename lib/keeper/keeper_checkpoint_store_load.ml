@@ -80,7 +80,7 @@ let load_agent_core_for_save ~keeper_name ~session_dir ~session_id =
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;
-    otherwise from the head on disk, with no object read (RFC-0476 §3.5).
+    otherwise from the head on disk, with no object read.
     [Ok None] when there is no checkpoint. *)
 let canonical_message_count ~(session_dir : string) ~(session_id : string)
   : (int option, checkpoint_load_error) result =

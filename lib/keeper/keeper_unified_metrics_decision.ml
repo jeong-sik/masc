@@ -204,7 +204,7 @@ let append_decision_record
               ("active_goals", (match observation.active_goals with
                 | Ok ids -> `Int (List.length ids)
                 | Error _ -> `Null));
-              (* RFC-0444 §2.3 row 6: the unavailable source carries the
+              (* The unavailable source carries the
                  same members as the goal_store_unavailable envelope, so the
                  decision record names reason, field, file, mirror and reset
                  step instead of one rendered line. *)

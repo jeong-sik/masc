@@ -1,4 +1,4 @@
-(** The masc pad over HTTP (RFC play-link-for-the-shared-machine §2.9).
+(** The masc pad over HTTP.
 
     [GET /api/v1/play/pad] answers the layout of the program loaded now:
     [{saves_name, source, buttons: [{button, label, keys}]}]. It needs

@@ -102,7 +102,7 @@ let send t ~machine =
   else
     let sending, draft, notice = match t.retry with
       | Some sending -> sending, t.draft, "이전 전송을 확인하는 중이에요. 새 초안은 남겨 두어요."
-      | None -> {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "", "보내는 중…" in
+      | None -> {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "", "보내는 중" in
     start {t with draft; retry = Some sending; notice = Some notice} sending.machine (Say sending)
 let request_json request =
   let machine = match request.machine with Masc.Machine_lane.Msx -> "msx" | Dos -> "dos" in

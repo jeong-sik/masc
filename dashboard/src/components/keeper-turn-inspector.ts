@@ -1,7 +1,7 @@
 import { RequestObservationFacts } from './common/request-observation-facts'
 import { KeeperTurnFlow } from './keeper-turn-flow'
 import { isDismissEscape } from '../lib/keyboard'
-// Keeper Turn Inspector (RFC-0233 PR-4) — one row per keeper turn from
+// Keeper Turn Inspector — one row per keeper turn from
 // GET /api/v1/keepers/:name/turn-records, with the server-computed
 // block diff between consecutive turns of the same trace. Answers the
 // operator question "which instruction blocks entered, left, or changed
@@ -45,7 +45,7 @@ import { USAGE_SCOPE_LABELS } from './common/turn-usage-scope'
 
 const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
 
-// RFC-0233 §7: [turnRef] is "<trace_id>#<absolute_turn>" minted MASC-side
+// [turnRef] is "<trace_id>#<absolute_turn>" minted MASC-side
 // and carried on the originating chat row / board post. Split on the LAST
 // '#' (a trace_id may itself contain '#') and match both fields exactly.
 // Missing, malformed, or unavailable references never select another turn.
@@ -366,7 +366,7 @@ type TurnDetail = {
   traceId: string
   tokIn: number | null
   tokOut: number | null
-  // RFC-0233 §8: unknown when usage is not per-request or required facts are absent.
+  // Unknown when usage is not per-request or required facts are absent.
   ctxPct: number | null
   contextWindow: number | null
   contextLabel: string
@@ -418,7 +418,7 @@ function rawTraceRunRefLabel(record: TurnRecordEntry): string {
   return `${ref.worker_run_id} · seq ${ref.start_seq}-${ref.end_seq}`
 }
 
-// RFC-0233 §8 — compact "NNNK" form of the runtime's context window, or
+// Compact "NNNK" form of the runtime's context window, or
 // "미상" when the record has no context_window (render absence, not 200K).
 function formatCtxWindowK(cw: number | null | undefined): string {
   return cw != null ? `${Math.round(cw / 1000)}K` : '미상'
@@ -488,7 +488,7 @@ function buildTurnDetail(
   const traceId = record.turn_ref
   const tokIn = record.input_tokens ?? null
   const tokOut = record.output_tokens ?? null
-  // RFC-0233 §8: only per-request usage can describe this request's context fill and cost.
+  // Only per-request usage can describe this request's context fill and cost.
   // Preserve cumulative/unknown-scope counts without reinterpreting them.
   const perRequest = record.usage_scope === 'per_request'
   const context = turnContextWindow(record)
@@ -545,13 +545,13 @@ function buildTurnDetail(
   phases.push({
     label: '응답 생성',
     kind: 'gen',
-    // RFC-0233 §9 — ground the generation phase in Agent Core request_latency_ms
+    // Ground the generation phase in Agent Core request_latency_ms
     // (provider call wall-clock). Absent on the error path or before a
     // response existed → render "측정 없음" rather than fabricating a bar.
     durationMs: record.request_latency_ms ?? null,
     durationSource:
       record.request_latency_ms != null ? 'provider_telemetry' : 'not_recorded',
-    // RFC-0233 §10 — time-to-first-token. Populated on the streaming path for
+    // time-to-first-token. Populated on the streaming path for
     // every provider; null for non-streaming turns and on the error path.
     ttfrcMs: record.ttfrc_ms ?? null,
     meta: (() => {

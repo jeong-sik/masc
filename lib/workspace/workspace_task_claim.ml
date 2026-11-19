@@ -198,7 +198,7 @@ let claim_task_with_details_r
          match claim_state with
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
          | `Terminal status ->
-           (* RFC-0323: completed work is terminal — point the caller at the
+           (* Completed work is terminal — point the caller at the
               linked re-run path instead of a bare AlreadyClaimed. *)
            Error
              (Masc_domain.Task

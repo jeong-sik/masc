@@ -3,7 +3,7 @@
     Two observations are held side by side because they answer different
     questions: a rate limit can carry the provider's own time, which decides
     when a resting path is waited for, and a failed attempt carries none and
-    only moves the candidate back in the walk (RFC-0458 §3.4). One does not
+    only moves the candidate back in the walk. One does not
     replace the other. *)
 
 type rate_limit =

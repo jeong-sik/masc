@@ -277,8 +277,7 @@ let delivery_fanout_mutex = Stdlib.Mutex.create ()
     Sized to bound replay work for clients reconnecting with [Last-Event-Id]
     after a network blip; previously fixed at 100, which was too small to
     cover transient disconnects under 64+ keeper broadcast load and forced
-    operators to manually refresh the dashboard.  The upper bound matches
-    [test/test_sse_coverage.ml] expectations. *)
+    operators to manually refresh the dashboard. *)
 let max_buffer_size =
   let default = 1000 in
   let lower = 50 and upper = 1000 in

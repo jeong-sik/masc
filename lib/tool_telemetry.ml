@@ -1,4 +1,4 @@
-(* RFC-0084 §2.1 Tool dispatch telemetry 4-tuple emission SSOT.
+(* Tool dispatch telemetry 4-tuple emission SSOT.
    See tool_telemetry.mli for the contract. *)
 
 type trace_id = string

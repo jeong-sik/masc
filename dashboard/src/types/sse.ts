@@ -35,7 +35,7 @@ export type SSEEventType =
   | 'keeper_tool_call_evidence_committed'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
-  // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
+  // Fusion run-status transitions pushed to the dashboard.
   | 'fusion_run_status'
   | 'internal_agent_runs_changed'
   | 'runtime_param_changed'
@@ -221,7 +221,7 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
-  // Per-turn cache observability (RFC-0382). `cache_read_tokens` is
+  // Per-turn cache observability. `cache_read_tokens` is
   // usage-reported (cloud providers); `cache_n`/`prompt_n` are wire timings
   // (llama-server, Ollama): KV-reused vs freshly prefilled prompt tokens.
   cache_read_tokens?: number | null
@@ -255,7 +255,7 @@ export interface SSEEvent {
   audit_summary?: string
   audit_severity?: string
   audit_payload?: unknown
-  // RFC-0235 P1/P3: synthesized voice clip attached to keeper_chat_appended.
+  // Synthesized voice clip attached to keeper_chat_appended.
   // Backend emits `audio: { token, mime, message_text, audio_url?,
   // duration_sec?, device_id? }`. Optional; assistant transcript rows
   // render a user-gesture play button when present.
@@ -266,7 +266,7 @@ export interface SSEEvent {
   ag_ui_event?: unknown
 }
 
-// RFC-0235 P1: nested audio payload inside `keeper_chat_appended` events.
+// Nested audio payload inside `keeper_chat_appended` events.
 // Naming mirrors the backend JSON keys; normalizers map to camelCase on
 // the way into `KeeperConversationAudioClip`.
 export interface SSEAudioClip {

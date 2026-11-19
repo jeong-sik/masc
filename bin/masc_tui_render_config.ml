@@ -35,7 +35,6 @@ let binary_age_text ~ko = function
 let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
   (* The list has the cursor, so its selected row is the position. *)
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title state)
@@ -118,17 +117,19 @@ let render_runtime_params (state : state) =
     @
     match selected with
     | None ->
-      [ ui_text state ~ko:"  행을 선택하면 파라미터 명세와 허용 범위를 표시합니다"
+      [ ui_text state ~ko:"  행 선택 시 파라미터 명세·허용 범위 표시"
           ~en:"  Select a row to see its contract" ]
     | Some row ->
       let open Tui_decode in
-      detail_section_lines ~first:true
+      detail_section_lines
+        ~first:(Option.is_none state.runtime_params_notice)
+        ~width:panel_cells
         (ui_text state ~ko:"현재 값" ~en:"Current value")
       @ field (ui_text state ~ko:"키" ~en:"Key") row.rpr_key
       @ field (ui_text state ~ko:"설명" ~en:"Contract") row.rpr_description
       @ value_field (ui_text state ~ko:"현재 값" ~en:"Current") row.rpr_current_json
       @ value_field (ui_text state ~ko:"기본값" ~en:"Default") row.rpr_default_json
-      @ detail_section_lines
+      @ detail_section_lines ~width:panel_cells
           (ui_text state ~ko:"타입과 허용 범위" ~en:"Type and constraints")
       @ field (ui_text state ~ko:"타입" ~en:"Type")
           (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
@@ -139,7 +140,7 @@ let render_runtime_params (state : state) =
               value_field (Printf.sprintf (if state.ui_language = Lang_ko then "선택지 %d" else "Choice %d") (index + 1))
                 (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
-      @ detail_section_lines
+      @ detail_section_lines ~width:panel_cells
           (ui_text state ~ko:"적용 상태" ~en:"Source")
       @ field (ui_text state ~ko:"적용 상태" ~en:"Source")
           (if row.rpr_has_override
@@ -175,13 +176,13 @@ let render_runtime_params (state : state) =
    | None ->
      if state.runtime_params_loading && rows = []
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터를 읽는 중…" ~en:"  Loading parameters…" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터를 읽는 중" ~en:"  Loading parameters" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if Option.is_none state.runtime_params
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미확인 · 워크스페이스 접근을 확인하고 새로고침하세요"
-         ~en:"  Parameters unread · confirm workspace access and refresh" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미조회 · 워크스페이스 접근을 확인하고 새로고침하세요"
+         ~en:"  Parameters not read · confirm workspace access and refresh" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if rows = []
@@ -333,19 +334,19 @@ let render_runtime_params (state : state) =
        (Printf.sprintf (if state.ui_language = Lang_ko then "  %s 편집 · %s" else "  editing %s · %s")
           (Terminal_text.single_line edit.rpe_key)
           (match edit.rpe_mode with
-           | Advanced_json -> ui_text state ~ko:"고급 JSON · Enter 적용 · Esc 취소" ~en:"advanced JSON · Enter apply · Esc cancel"
+           | Advanced_json -> ui_text state ~ko:"고급 JSON  Enter:적용  Esc:취소" ~en:"advanced JSON  Enter:apply  Esc:cancel"
            | Friendly_value when friendly_bool ->
-             ui_text state ~ko:"←/→/Space 전환 · Enter 적용 · Esc 취소" ~en:"Left/Right/Space toggle · Enter apply · Esc cancel"
+             ui_text state ~ko:"←/→/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
            | Friendly_value when friendly_choice ->
              (* The set is spelled out: a reader walking it one key at a time
                 cannot otherwise see how many values there are, or that a form
                 they can type by hand exists beside them. *)
              Printf.sprintf
-               (if state.ui_language = Lang_ko then "←/→/Space 선택 (%s) · Enter 적용 · Esc 취소"
-                else "Left/Right/Space cycle (%s) · Enter apply · Esc cancel")
+               (if state.ui_language = Lang_ko then "←/→/Space:선택 (%s)  Enter:적용  Esc:취소"
+                else "Left/Right/Space:cycle (%s)  Enter:apply  Esc:cancel")
                (String.concat " · " edit.rpe_choices)
            | Friendly_value ->
-             ui_text state ~ko:"입력하여 교체 · Enter 적용 · Esc 취소" ~en:"type to replace · Enter apply · Esc cancel")));
+             ui_text state ~ko:"직접 입력  Enter:적용  Esc:취소" ~en:"type to replace  Enter:apply  Esc:cancel")));
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -380,7 +381,7 @@ let render_runtime_params (state : state) =
 let prompt_catalog_status_row state prompts =
   match prompts with
   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
-  | Masc_tui_fetched.Loading -> Some (Theme.recede (), ui_text state ~ko:"프롬프트 목록을 읽는 중…" ~en:"Loading prompt catalog…")
+  | Masc_tui_fetched.Loading -> Some (Theme.recede (), ui_text state ~ko:"프롬프트 목록을 읽는 중" ~en:"Loading prompt catalog")
   | Masc_tui_fetched.Stale (_, detail) ->
     Some
       ( Theme.bad ()
@@ -389,7 +390,7 @@ let prompt_catalog_status_row state prompts =
 ;;
 
 let prompts_detail_layout state ~rows ~error_rows ~list_count =
-  let fixed_rows = if state.prompts_show_runtime_assets then 8 else 7 in
+  let fixed_rows = if state.prompts_show_runtime_assets then 7 else 6 in
   let combined = max 1 (rows - fixed_rows - error_rows) in
   let list_height = min (max 1 list_count)
       (min (combined - 1) (min 8 (max 1 (combined / 3)))) in
@@ -452,13 +453,13 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                         (if state.ui_language = Lang_ko then "⊘ 적용 안 됨 · 저장된 재정의 %d바이트 보존"
                          else "⊘ Not applied · saved override of %d bytes retained") entry.hbo_bytes;
                       entry.hbo_reason;
-                      ui_text state ~ko:"해당 변수를 빼고 같은 키를 다시 저장하세요"
+                      ui_text state ~ko:"해당 변수 제거 후 같은 키로 재저장 필요"
                         ~en:"Remove that variable and save the same key again"]
              in
              let moved = if row.pr_override_default_moved then
                  wrap (ui_text state
-                   ~ko:"△ 기본 프롬프트가 바뀌었지만 재정의는 계속 적용 중입니다 · 현재 기본값과 대조하세요"
-                   ~en:"△ The default changed; the override remains active · compare it with the current default")
+                   ~ko:"▲ 기본 프롬프트 변경됨 · 재정의 유지 중 · 현재 기본값과 대조 필요"
+                   ~en:"▲ Default changed; override remains active · compare with current default")
                else []
              in
              let authoring =
@@ -466,12 +467,12 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                  (function
                    | Tui_decode.Invalid_operator_surface {value; source_file} ->
                        List.concat_map wrap
-                         ["△ invalid_operator_surface";
+                         ["▲ invalid_operator_surface";
                           field (ui_text state ~ko:"원문 값" ~en:"Value") (Printf.sprintf "operator_surface = %S" value);
                           field (ui_text state ~ko:"원본 파일" ~en:"Source file") source_file;
-                          ui_text state ~ko:"원본 마크다운의 operator_surface를 primary 또는 fragment로 고친 뒤 다시 등록하고 r로 새로 읽으세요"
-                            ~en:"Fix operator_surface to primary or fragment in the source Markdown, register it again, then reload with r";
-                          ui_text state ~ko:"본문 재정의 저장·해제는 이 작성 오류를 고치지 않습니다"
+                          ui_text state ~ko:"원본 MD의 operator_surface를 primary/fragment로 수정·재등록 후 r:새로고침"
+                            ~en:"Fix operator_surface to primary or fragment in source Markdown, re-register, then r:reload";
+                          ui_text state ~ko:"본문 재정의 저장·해제는 이 작성 오류를 고치지 않음"
                             ~en:"Saving or clearing a body override does not fix this authoring error"])
                  row.pr_authoring_issues
              in
@@ -481,7 +482,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                        && not (Option.exists
                             (fun (key, _) -> String.equal key row.pr_key)
                             state.prompts_librarian_input) then
-                 [ui_text state ~ko:"관리자 실행 상세를 읽는 중…" ~en:"Loading admin execution details…"]
+                 [ui_text state ~ko:"관리자 실행 상세를 읽는 중" ~en:"Loading admin execution details"]
                else match state.prompts_librarian_input_error with
                  | Some detail -> [ui_text state ~ko:"읽기 실패: " ~en:"Read failed: " ^ Terminal_text.single_line detail]
                  | None ->
@@ -500,8 +501,19 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                    ~en:"Input: Keeper instructions | current memory | bounded conversation | counterpart observations | fact byte limit")
                else []
              in
-             let has_notices = notices <> [] || moved <> [] || authoring <> [] in
-             notices @ moved @ authoring
+             let alert_blocks =
+               List.filter (fun block -> block <> []) [ notices; moved; authoring ]
+             in
+             let alert_rows =
+               let rec join = function
+                 | [] -> []
+                 | [ block ] -> block
+                 | block :: rest -> block @ ("" :: join rest)
+               in
+               join alert_blocks
+             in
+             let has_notices = alert_blocks <> [] in
+             alert_rows
              @ section ~first:(not has_notices) (ui_text state ~ko:"프롬프트 정보" ~en:"Prompt information")
              @ List.concat_map wrap
                  [field (ui_text state ~ko:"키" ~en:"Key") row.pr_key;
@@ -523,7 +535,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                     section (ui_text state ~ko:"최근 Librarian 입력" ~en:"Recent Librarian input")
                     @ List.concat_map wrap lines))
   in
-  status @ document
+  if status = [] then document else status @ ("" :: document)
 
 type prompt_detail_inputs = {
   prompt_source : (unit, Tui_decode.prompts_snapshot) Masc_tui_fetched.t;
@@ -655,7 +667,6 @@ let render_prompt_registry (state : state) =
     title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts ~count:(fun _ ->
         Printf.sprintf (if state.ui_language = Lang_ko then "%d/%d개" else "%d/%d prompts") total all_prompt_count)
   in
-  box_top buf cols;
   (* The count the registry answered, and -- before any decoration that can
      be cut -- how many overrides it held back. The row keeps a fixed floor
      for the tab strip, so at a hundred and twenty columns the reading can
@@ -716,7 +727,7 @@ let render_prompt_registry (state : state) =
         let authoring_mark, authoring_cells = match row.pr_authoring_issues with
           | [] -> "", 0
           | _ :: _ ->
-              let mark = "△ " in
+              let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " in
               Theme.warn () ^ mark ^ Ansi.reset, Message_layout.display_width mark
         in
         let label = mark ^ " "
@@ -725,7 +736,7 @@ let render_prompt_registry (state : state) =
                 (max 1 (framed_inner_width cols - 3 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
+          box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr label)
         else box_line buf cols (" " ^ label)
       end)
     prompt_rows;
@@ -764,7 +775,6 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts
       ~count:(fun _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d assets") total)
   in
-  box_top buf cols;
   let reading =
     Printf.sprintf "%s%s · %s%s" Ansi.dim count_text
       (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
@@ -799,11 +809,12 @@ let render_runtime_prompt_assets (state : state) =
     (fun index (asset : Tui_decode.runtime_prompt_asset) ->
        if index >= first && index < first + list_height then begin
          incr drawn;
-         let mark = if asset.pra_file_exists then " " else (Theme.bad ()) ^ "!" ^ Ansi.reset in
+         let mark = if asset.pra_file_exists then " "
+           else (Theme.bad ()) ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ Ansi.reset in
          let line = mark ^ " "
              ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                  (Terminal_text.single_line asset.pra_path) in
-         if index = cursor then box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset)
+         if index = cursor then box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr line)
          else box_line buf cols (" " ^ line)
        end)
     assets;
@@ -876,7 +887,7 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
     [P.failure (marked Masc_tui_value.Mark.Failed (text "인증 거절 · 재시도 미전송 · " "Authentication refused · retry not sent · ") ^ name);
      reason detail]
   | Error (Preset_save_unconfirmed detail) ->
-    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 미확인 · " "Preset save unconfirmed · ") ^ name);
+    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 보고 안 됨 · " "Preset save result not reported · ") ^ name);
      P.caution (text "  다시 저장하기 전 내용을 확인하세요 · 같은 이름은 덮어씁니다"
        "  Check contents before saving again · the same name is overwritten");
      P.caution (text "  목록에 이름이 있어도 이번 저장의 성공을 뜻하지 않습니다"
@@ -919,11 +930,11 @@ let preset_confirmation_rows (state : state) ~cols =
        P.plain (ui_text state ~ko:"  기준 경로 · " ~en:"  Base · " ^ Terminal_text.single_line workspace.wi_base_path);
        P.plain (ui_text state ~ko:"  MASC 경로 · " ~en:"  MASC root · " ^ Terminal_text.single_line workspace.wi_masc_root)]
       @ description
-      @ [P.detail (ui_text state ~ko:"  전체 확인 후 Enter: 진행 · Esc: 취소"
-           ~en:"  After reviewing all rows, Enter: continue · Esc: cancel")]
+      @ [P.detail (ui_text state ~ko:"  확인 후 Enter:진행  Esc:취소"
+           ~en:"  After reviewing, Enter:continue  Esc:cancel")]
     | Some (Save_armed name) ->
       [P.caution (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
-         ^ ui_text state ~ko:"이전 저장 결과 미확인 · " ~en:"Earlier save unconfirmed · "
+         ^ ui_text state ~ko:"이전 저장 결과 보고 안 됨 · " ~en:"Earlier save result not reported · "
          ^ Terminal_text.single_line name);
        P.caution (ui_text state ~ko:"  이전 저장은 성공했을 수 있습니다" ~en:"  The earlier save may have succeeded");
        P.caution (ui_text state ~ko:"  재저장하면 현재 설정으로 같은 이름을 덮어씁니다"
@@ -1068,9 +1079,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
 let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
-  (* Top, title, divider, list/detail divider, bottom, and footer. The error
+  (* Title, divider, list/detail divider, bottom, and footer. The error
      is outside the selection list, so a retained list keeps its full slot. *)
-  let combined_height = max 2 (rows - 6 - error_rows - entry_rows) in
+  let combined_height = max 2 (rows - 5 - error_rows - entry_rows) in
   let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
@@ -1113,7 +1124,6 @@ let render_presets (state : state) =
         | None -> ui_text state ~ko:"읽는 중" ~en:"reading"
         | Some _ -> ui_text state ~ko:"읽기 실패" ~en:"read failed")
   in
-  box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -1145,7 +1155,7 @@ let render_presets (state : state) =
    | None, None ->
        incr drawn;
        box_line_styled buf cols ~style:(Theme.recede ())
-         (ui_text state ~ko:"  프리셋을 읽는 중…" ~en:"  Loading presets…")
+         (ui_text state ~ko:"  프리셋을 읽는 중" ~en:"  Loading presets")
    | Some snapshot, (Some _ | None) ->
        Option.iter
          (fun line ->
@@ -1171,7 +1181,7 @@ let render_presets (state : state) =
                       ~max_cells:(max 1 (framed_inner_width cols - 3)) manifest)
             ~tail:""
         in
-        if index = cursor then box_line buf cols (Theme.selection_style () ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
+        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr label)
         else box_line buf cols label
       end)
     presets;
@@ -1278,22 +1288,26 @@ let render_themes (state : state) =
       0 entries
   in
   let show_sample = rows >= 20 in
-  let chrome_rows = if show_sample then 11 else 8 in
+  let chrome_rows = if show_sample then 10 else 7 in
   let content_height = max 1 (rows - chrome_rows) in
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
   in
   let scroll = max 0 (cursor - content_height + 1) in
   let name_width = theme_name_width ~cols in
-  box_top buf cols;
   box_line buf cols
-    (config_pane_title ~cols
-       ~reading:
-         (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
-            (List.length entries) native_count Ansi.reset)
-       state);
+    (zone_two_title ~cols state
+       ~title:
+         (config_pane_title
+            ~reading:
+              (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
+                 (List.length entries) native_count Ansi.reset)
+            state)
+       ~position:
+         (if entries = [] then None
+          else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:(List.length entries))));
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
      ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
@@ -1477,10 +1491,12 @@ let selected_model_reading (state : state) =
                [{Masc_tui_detail_reading.heading=
                    ui_text state ~ko:"1. 설정 출처 · 파일 경로" ~en:"1. Source";
                  body=reading.rcv_path}])
-        @ [{Masc_tui_detail_reading.heading=
-              ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼"
-                ~en:"2. Account / Model & Keepers";
-            body=String.concat "\n" (config_models_detail state row)}] in
+        @ (let section_num = if Option.is_some state.runtime_config_view then 2 else 1 in
+           [{Masc_tui_detail_reading.heading=
+               Printf.sprintf "%d. %s" section_num
+                 (ui_text state ~ko:"계정 · 모델 바인딩 및 배정 키퍼"
+                    ~en:"Account / Model & Keepers");
+             body=String.concat "\n" (config_models_detail state row)}]) in
       Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
         ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
 
@@ -1503,7 +1519,7 @@ type models_projection = {
 let config_models_projection state ~terminal_rows ~cols =
   let pane = max 1 (framed_inner_width cols - 2 - 2) in
   let rows = config_models_drawn_rows state in
-  let content_height = max 1 (surface_body_rows state ~terminal_rows - 5) in
+  let content_height = max 1 (surface_body_rows state ~terminal_rows - 4) in
   let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
   let account (row : Masc_tui_model_runtime_table.row) =
     let email, notes = models_source_account_reading
@@ -1564,7 +1580,6 @@ let render_config_models (state : state) =
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let projection = config_models_projection state ~terminal_rows ~cols in
-  box_top buf cols;
   let path_note = config_path_note state in
   (* The cursor walks bindings, so the selected binding among them is the
      position whether the table or the stacked items are drawn. *)
@@ -1590,7 +1605,7 @@ let render_config_models (state : state) =
             ~note:path_note state)
        ~position);
   box_divider buf cols;
-  let content_height = max 1 (rows_avail - 5) in
+  let content_height = max 1 (rows_avail - 4) in
   (match state.runtime_model_form with
    | Some form ->
        let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
@@ -1598,7 +1613,7 @@ let render_config_models (state : state) =
        List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
-       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings… Esc cancels" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ "  Loading selected account/model settings · Esc cancels" ^ Ansi.reset);
        for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
@@ -1661,12 +1676,11 @@ let render_config_models (state : state) =
          let index = scroll + i in
          match Rows.at table_window index with
          | Some line ->
-             let marked =
-               if table_mode && index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
-               else if index = marked_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
-               else "  " ^ line
-             in
-             box_line buf cols marked
+             if table_mode && index = 0 then
+               box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
+             else if index = marked_line then
+               box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+             else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
@@ -1693,7 +1707,7 @@ let config_models_scrolled (state : state) : scrolled =
       let terminal_rows, cols = get_terminal_size () in
       let projection = config_models_projection state ~terminal_rows ~cols in
       { sc_count = List.length projection.model_document
-      ; sc_chrome = 5 + List.length projection.model_prefix
+      ; sc_chrome = 4 + List.length projection.model_prefix
       ; sc_preview_keep = None
       }
 
@@ -1787,7 +1801,7 @@ let config_identity_rows ~cols (state : state) =
          the last confirmed identity and the configuration below it. The
          reason is cut in the middle so its start and its end stay readable. *)
       let max_cells = max 1 (width - 2) in
-      let lead = ui_text state ~ko:"(서버 식별 미확인: " ~en:"(server identity unconfirmed: " in
+      let lead = ui_text state ~ko:"(서버 식별 조회 실패: " ~en:"(server identity read failed: " in
       let trail = ui_text state ~ko:" · 마지막 확인은 아래)" ~en:"; last confirmed below)" in
       let reason = Terminal_text.single_line reason in
       let room =
@@ -1991,13 +2005,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
       | Voice_wizard.Model_is_blank -> "이 엔드포인트의 모델이 필요합니다 · 다른 엔드포인트의 모델은 유지됩니다"
       | Voice_wizard.Voice_is_blank -> "음성 출력의 기본 목소리가 필요합니다")
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols
        ~path:
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"설정" ~en:"setup" ]
        state);
+  box_divider head cols;
   voice_body_line buf cols "";
   voice_body_line buf cols
     (Printf.sprintf "  %s%s %s%s  %s" Ansi.dim (ui_text state ~ko:"단계" ~en:"step") position Ansi.reset step_prompt);
@@ -2132,13 +2146,13 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
     box_line head cols
       (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols
        ~path:
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"키퍼 목소리" ~en:"keeper voices" ]
        state);
+  box_divider head cols;
   (* Both selected owners stay above the scrolling document. Enter therefore
      acts on the displayed pair even after paging through long metadata. *)
   selector (ui_text state ~ko:"키퍼" ~en:"keeper") session.vas_agents session.vas_agent_cursor
@@ -2237,9 +2251,9 @@ let render_voice (state : state) =
     | [] -> ()
     | lines -> List.iter (fun line -> voice_body_line buf cols line) lines
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols state);
+  box_divider head cols;
   let voice_section ?(first = false) title =
     List.iter (fun row -> voice_body_line buf cols row)
       (detail_section_lines ~first title)
@@ -2265,7 +2279,7 @@ let render_voice (state : state) =
        voice_body_line_styled buf cols ~style:(Theme.warn ()) (ui_text state ~ko:"  음성 설정을 읽지 못했습니다" ~en:"  Voice settings did not load");
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
-       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (ui_text state ~ko:"읽는 중…" ~en:"Reading…") Ansi.reset)
+       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (ui_text state ~ko:"읽는 중" ~en:"Reading") Ansi.reset)
    | Some json, None ->
        field (ui_text state ~ko:"상태" ~en:"status")
          (Option.value (string_of [ "status" ] json)
@@ -2303,13 +2317,19 @@ let render_voice (state : state) =
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
   voice_section
     (ui_text state ~ko:"입력 장치와 설정 출처" ~en:"Input device and config source");
+  let device_missing =
+    match state.voice_setup_error, state.voice_setup with
+    | Some _, (Some _ | None) -> ui_text state ~ko:"조회 실패" ~en:"read failed"
+    | None, None -> ui_text state ~ko:"미조회" ~en:"not read"
+    | None, Some _ -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
+  in
   field (ui_text state ~ko:"장치" ~en:"device")
-    (Option.value state.voice_input_device ~default:(ui_text state ~ko:"미확인" ~en:"unknown"));
+    (Option.value state.voice_input_device ~default:device_missing);
   voice_body_line buf cols "";
   let source =
     match state.voice_setup_error, state.voice_setup with
     | Some _, (Some _ | None) -> `Read_failed
-    | None, None -> `Unobserved
+    | None, None -> `Unread
     | None, Some json ->
         (match member [ "source" ] json with
          | Some `Null -> `Absent
@@ -2320,9 +2340,9 @@ let render_voice (state : state) =
                   (match List.assoc_opt "path" fields with
                    | Some (`String path) when not (String.equal path "") ->
                        `Standalone_json (Terminal_text.single_line path)
-                   | Some _ | None -> `Unobserved)
-              | Some _ | None -> `Unobserved)
-         | Some _ | None -> `Unobserved)
+                   | Some _ | None -> `Unreported)
+              | Some _ | None -> `Unreported)
+         | Some _ | None -> `Unreported)
   in
   let source_line =
     match source with
@@ -2330,9 +2350,9 @@ let render_voice (state : state) =
     | `Standalone_json path -> path
     | `Absent -> ui_text state ~ko:"서버에 적용된 음성 설정 없음"
         ~en:"No active voice configuration on the server"
-    | `Read_failed -> ui_text state ~ko:"확인하지 못함 · 조회 실패"
-        ~en:"Unconfirmed · read failed"
-    | `Unobserved -> ui_text state ~ko:"미확인" ~en:"Unknown"
+    | `Read_failed -> ui_text state ~ko:"조회 실패" ~en:"Read failed"
+    | `Unread -> ui_text state ~ko:"미조회" ~en:"Not read"
+    | `Unreported -> ui_text state ~ko:"보고 안 됨" ~en:"Not reported"
   in
   voice_body_line buf cols
     (Printf.sprintf "  %s%s: %s%s" Ansi.dim

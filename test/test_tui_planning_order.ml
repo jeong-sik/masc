@@ -267,7 +267,7 @@ let test_studio_panel_top_border () =
    | top :: _ ->
      let plain_top = Masc_tui_theme.strip_sgr top in
      check string "top border embeds title and restores horizontal rule to top-right corner"
-       "┌ Workspace Studio ────┐" plain_top;
+       "╭ Workspace Studio ────╮" plain_top;
      check int "top border matches exact panel width" 24
        (Masc_tui_message_layout.display_width top)
    | [] -> fail "expected studio_panel rows");

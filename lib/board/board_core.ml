@@ -31,7 +31,7 @@ let read_post_for_evidence store ~post_id : (post, board_read_error) Result.t =
           | None -> Error (Read_post_not_found post_id)))
 ;;
 
-(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [read_post] by
+(* Exact O(1) index lookups, mirroring [read_post] by
    primary key. The index is keyed on the full join string (turn_ref =
    "trace#turn", or the fusion run_id) — never a meta_json substring or a
    time-window heuristic. A miss returns [None] (no scan, no false positive). *)

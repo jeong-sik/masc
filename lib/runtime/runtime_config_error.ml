@@ -37,7 +37,7 @@ type resolution_failure =
   }
 
 (* One exact-output lane slot whose HTTP provider declares no
-   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
+   [exact-body-timeout-s] (#38779). *)
 type exact_slot_body_deadline_gap =
   { owner : Runtime_schema.exact_lane_owner
   ; slot_id : string

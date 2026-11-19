@@ -3,7 +3,7 @@ open Masc
 module V = Keeper_volume_filesystem
 
 (* Superblocks the kernel wrote on 2026-10-22 for e-masc-the-leader's work
-   volume (docs/evidence/2026-10-22-keeper-volume-fsck/): one with the error
+   volume: one with the error
    record, and one read after e2fsck while the next guest had the volume
    mounted. The volume has no journal, so a mounted superblock has neither
    state bit set. The expected values are what dumpe2fs 1.47.4 printed for

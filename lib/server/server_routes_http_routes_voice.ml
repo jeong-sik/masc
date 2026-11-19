@@ -1,4 +1,4 @@
-(** Voice audio clip HTTP surface (RFC-0235 P1).
+(** Voice audio clip HTTP surface.
 
     Serves synthesized TTS clips to a connected dashboard browser by
     capability token, so the browser plays the utterance instead of relying
@@ -71,7 +71,7 @@ let serve_clip ~token request reqd =
       ~headers:(public_read_cors_headers request) body reqd)
 
 
-(* RFC-0301: serve a model-generated media file by deterministic store token.
+(* Serve a model-generated media file by deterministic store token.
    Unlike voice clips, this token is a content-derived locator, not a bearer
    capability, so the route is [CanReadState]-gated below. The file is resolved
    under the SAME workspace base_path the bridge persisted it with, so the write
@@ -110,7 +110,7 @@ let serve_media ~base_path ~token request reqd =
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
    this adds no public-read capability headers: the transcribe route is
-   owner-bearer-gated, not token-capability-gated (RFC-0236 §2.2/§3.4). *)
+   owner-bearer-gated, not token-capability-gated. *)
 let respond_json ?(status = `OK) ~request reqd json =
   Http.Response.json_value ~status ~compress:true ~request json reqd
 
@@ -118,7 +118,7 @@ let audio_temp_suffix request =
   Server_voice_probe.audio_suffix_of_content_type
     (Http.Request.header request "content-type")
 
-(** RFC-0236 P1 — transcribe browser-captured speech.
+(** Transcribe browser-captured speech.
 
     Raw audio bytes in the request body (audio/webm, audio/mp4, ...), Scribe
     v2 via [Voice_bridge.transcribe_audio], and the whole transcribe record
@@ -251,7 +251,7 @@ let add_routes router =
                     ; ("reason", `String "expected 32-char hex (128-bit)")
                     ])
            | Some token -> serve_clip ~token request reqd)
-  (* RFC-0301: model-generated media (image/audio/document) fetched by an
+  (* model-generated media (image/audio/document) fetched by an
      authenticated content locator. Content hashes are not capabilities. *)
   |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/media/" (fun state request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
@@ -267,7 +267,7 @@ let add_routes router =
                     ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
                     ])
            | Some token -> serve_media ~base_path ~token request reqd)
-  (* RFC-0236 P1: browser-captured speech -> text. Admin/owner-only
+  (* browser-captured speech -> text. Admin/owner-only
      ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
      the GET audio route this carries no public capability. *)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/transcribe" (fun state _agent_name request reqd ->

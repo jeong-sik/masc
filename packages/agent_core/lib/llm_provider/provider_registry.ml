@@ -80,33 +80,10 @@ let command_in_path ?path name =
     Updated by [refresh_llama_endpoints]. *)
 let llama_endpoints_ref : Discovery.endpoint array Atomic.t = Atomic.make [||]
 
-(** Round-robin counter for distributing calls across endpoints. *)
-let llama_rr_counter = Atomic.make 0
-
-(** Pick the next llama endpoint via round-robin.
-    Reads the current endpoint snapshot atomically.
-    Called by downstream callers when resolving "llama:*" provider. *)
-let next_llama_endpoint () =
-  let endpoints = Atomic.get llama_endpoints_ref in
-  let n = Array.length endpoints in
-  if n = 0
-  then None
-  else (
-    let idx = Atomic.fetch_and_add llama_rr_counter 1 mod n in
-    Some endpoints.(idx))
-;;
-
-(** Peek at the current llama endpoint without advancing the round-robin.
-    Used by context resolution to match the endpoint that will serve
-    the next request, without side effects. *)
+(** The first endpoint of the current snapshot, read atomically. *)
 let current_llama_endpoint () =
   let endpoints = Atomic.get llama_endpoints_ref in
-  let n = Array.length endpoints in
-  if n = 0
-  then None
-  else (
-    let idx = Atomic.get llama_rr_counter mod n in
-    Some endpoints.(idx))
+  if Array.length endpoints = 0 then None else Some endpoints.(0)
 ;;
 
 type endpoint_refresh_error =

@@ -121,7 +121,7 @@ let gateway_state_label = function
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
 
-(* The in-process gateway (RFC-0203) is the only Discord transport; its run
+(* The in-process gateway is the only Discord transport; its run
    loop publishes the typed connection state. *)
 let gateway_connected = function
   | Discord_gateway_state.Connected _ -> true
@@ -130,7 +130,7 @@ let gateway_connected = function
       false
 
 (* Bot identity captured from the gateway's READY dispatch; the in-process
-   gateway (RFC-0203) keeps it in memory. *)
+   gateway keeps it in memory. *)
 type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
@@ -440,7 +440,7 @@ let keeper_for_channel_result ~channel_id =
   |> Result.map
        (Option.map (fun resolution -> resolution.keeper_name))
 
-(* RFC-0223 P2: presence surface. Both recomputed per call — no cached
+(* Presence surface. Both recomputed per call — no cached
    presence state. *)
 
 let bound_channels_result ~keeper_name =

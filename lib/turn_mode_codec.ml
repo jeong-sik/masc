@@ -1,6 +1,6 @@
 (** See [turn_mode_codec.mli] for documentation.
 
-    RFC-0182 §3.1 cycle break: pure codec extracted from
+    Cycle break: pure codec extracted from
     [Keeper_unified_metrics_support] so [Tool_agent_timeline] can parse
     keeper turn payloads without importing [lib/keeper], which previously
     formed a cycle with [Keeper_tool_in_process_runtime]. *)

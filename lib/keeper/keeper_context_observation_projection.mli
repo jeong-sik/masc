@@ -25,8 +25,8 @@ val context_fields :
   current_trace_id:string ->
   (string * Yojson.Safe.t) list
 (** The fields of {!context_observation}, for display consumers. Context
-    occupancy is projected from the keeper's newest TurnRecord
-    (RFC-0233), the measurement SSOT: [context_tokens] is the
+    occupancy is projected from the keeper's newest TurnRecord,
+    the measurement SSOT: [context_tokens] is the
     provider-reported prompt total of the last completed turn with explicit
     [Measured_request] provenance. Estimates and absent provenance keep their
     raw count only in the typed unavailability diagnostic,

@@ -9,9 +9,7 @@
     keeper_memory_search advertises the source vocabulary [Keeper_tool_memory_runtime]
     owns; in TOML that is a literal, because nothing there reads an OCaml
     value. The owner stays the owner and [test_enum_mirror_sync] compares the
-    advertised array against it, which is what RFC §2.2 asks for.
-    [test_base_tool_toml_parity] keeps the publication order; the
-    descriptions and schemas it also pinned were copies of these values. *)
+    advertised array against it, which is what RFC §2.2 asks for. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

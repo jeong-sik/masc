@@ -105,7 +105,7 @@ let who_may_write_what () =
   List.iter
     (fun author ->
       check_refused "a system author" ~author I.empty (issued ()) "not an invite author")
-    [ Author.System_cron; Author.System_maintenance; Author.System_migration ]
+    [ Author.System_cron; Author.System_maintenance ]
 ;;
 
 let an_id_and_a_digest_name_one_invitation_for_good () =

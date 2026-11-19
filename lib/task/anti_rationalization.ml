@@ -14,7 +14,7 @@ open Printf
 (* Types                                                            *)
 (* ================================================================ *)
 
-(* RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+(* A binary image artifact the judge receives as an attached
    image block. The body is a base64 copy read from the snapshot's filed body
    at assembly time; the hash and size recorded in the snapshot stay the
    authority the prompt text cites, so a vision evaluator can see the image
@@ -646,7 +646,7 @@ let run_with_execution_policy ~execution_policy
       ~(log_info : string -> unit)
       ~(log_warn : string -> unit)
       ~(render_prompt : unit -> (string, string) result)
-      (* RFC-0436 §4.3: attached media blocks for the review turn. When
+      (* Attached media blocks for the review turn. When
          present, the reviewer runs on these blocks with the rendered prompt
          as the leading [Text] block; when absent, the prompt string stays
          the whole goal, as before. *)

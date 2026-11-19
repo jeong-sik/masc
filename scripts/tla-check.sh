@@ -220,7 +220,7 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
 run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"
 
-# RFC-0160 G6 — Shell IR carries decision invariant.
+# Shell IR carries decision invariant.
 run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
 run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
 

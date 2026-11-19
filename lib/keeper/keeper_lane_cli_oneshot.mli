@@ -1,6 +1,6 @@
 (** Run one declared [cli_slots] lane slot as an official-client one-shot.
 
-    RFC cli-runtimes-as-lane-slots: an exact-output lane may declare
+    An exact-output lane may declare
     official-client runtime ids that it walks after every catalog (HTTP) slot
     is exhausted. This module is the per-slot executor for that walk. It
     mirrors the HTTP contract deliberately:

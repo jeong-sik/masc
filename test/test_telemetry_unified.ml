@@ -673,7 +673,7 @@ let test_time_window_n_zero_is_bounded () =
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
-  (* RFC-0372: n=0 no longer opts out of truncation. It resolves to
+  (* n=0 no longer opts out of truncation. It resolves to
      [default_read_entries], which still covers these three entries, so the
      window contract holds — what changed is that a store larger than the
      limit is now truncated instead of scanned whole. *)
@@ -710,7 +710,7 @@ let test_n_zero_no_window_returns_bounded () =
   Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
     (List.length result.entries)
 
-(* RFC-0372 Phase 1: the request-level limit is a closed type. No input can
+(* The request-level limit is a closed type. No input can
    express "unbounded", which is what let one request materialise every store
    to its own 50k cap. These are the boundary values a caller can supply. *)
 let test_read_limit_has_no_unbounded_form () =

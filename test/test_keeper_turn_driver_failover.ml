@@ -600,7 +600,7 @@ let test_assignment_walk_order_is_the_declared_order () =
         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order)
 
 (* A head under 429 backpressure walks behind its sibling. The declaration
-   does not move; only the order does, and it says so (RFC-0457 §3). *)
+   does not move; only the order does, and it says so. *)
 let test_assignment_walk_order_demotes_a_resting_head () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     let head = Option.get (Runtime.get_runtime_by_id "primary.test_model") in
@@ -762,7 +762,7 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* RFC-0457: [runtime.assignments] targets name a declared lane or a runtime.
+(* [runtime.assignments] targets name a declared lane or a runtime.
    A lane target loads, and the pre-dispatch context budget resolves through
    the lane's entry binding ([entry_runtime_id_of_route]) — the failure the
    old contract refused this config for rather than hit at every turn. *)
@@ -2298,7 +2298,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
             | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading: blue circle]"
             | block -> block) blocks
       ; delegated_images = image_count_in_blocks blocks } in
-    (* RFC-0468 §3.2: AGENT_CORE stamps the input speaker on the dispatched
+    (* AGENT_CORE stamps the input speaker on the dispatched
        User message. The restored canonical input must carry the same entry,
        or the replay prefix would no longer equal what was persisted. *)
     let goal_metadata =
@@ -3098,7 +3098,7 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
            candidate_leads (now +. release_after +. 1.0) "after its release")))
     rests
 
-(* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
+(* A 402 belongs to the candidate's account, so the walk moves to
    the next candidate in the same turn and does not call the first one again. *)
 let test_attempt_loop_moves_past_payment_required () =
   let attempts = ref [] in
@@ -4112,7 +4112,7 @@ let walk_once ?provider_answered ?read_usage_after_account_refusal ?on_attempt_e
     ids
 ;;
 
-(* RFC-0458 §3.4: a timeout, a server error and a network failure leave the
+(* A timeout, a server error and a network failure leave the
    same kind of evidence a 429 does, carry no time and make no dispatch wait,
    and an answer from that candidate clears it. Before, the driver recorded
    only 429, 402 and HardQuota, and the next turn led with the dead head. *)
@@ -4248,7 +4248,7 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
       Alcotest.(check bool) "the undated quota observation is cleared" false
         (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))))
 ;;
-(* RFC-0458 §3.4, §6: a credential denial (401) rotates to the next candidate
+(* A credential denial (401) rotates to the next candidate
    within the turn and leaves no evidence. The next turn tries the head first,
    so a head whose credential works again answers without waiting for a
    restart. A 403 refuses the account instead; the test after this one covers
@@ -7220,7 +7220,7 @@ let progress_label = function
   | Try_provider.Assistant_checkpoint_saved {tool_result_saves=None;_} -> "assistant checkpoint saved"
 ;;
 
-(* RFC last-path-resumes-after-progress §3.2: reaching a stage ends same-run
+(* Reaching a stage ends same-run
    retry whatever the sink answers, and only the sink's owner marks the tool
    results it actually wrote. A sink answers [Ok ()] for a write it skipped as
    well ([Keeper_checkpoint_store.Stale_noop]), so the wrapper never reads
@@ -7374,7 +7374,7 @@ let describe_hint (hint : Driver.deferred_runtime_lane) =
     (String.concat "; " (Driver.deferred_runtime_ids hint))
 ;;
 
-(* RFC last-path-resumes-after-progress §3.1: the last candidate of a chat
+(* The last candidate of a chat
    operation saved tool results and then failed on a server error, so the
    operation continues on that candidate. The hint keeps the assignment and
    names nothing but the failed candidate, alone or at the end of a lane. *)

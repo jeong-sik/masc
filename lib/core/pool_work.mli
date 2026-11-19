@@ -6,7 +6,7 @@
     forward into it) submits it with that kind's weight and has no weight of
     its own to choose. A submit nested inside a pool job runs in place
     ({!Executor_pool_ref.in_worker_context}), so a weight chosen anywhere but
-    the outermost submit has no effect (RFC-0474 L4b).
+    the outermost submit has no effect.
 
     The type is abstract: {!cpu} and {!io} are the only constructors, so a
     compute cannot reach the pool without a declared kind. *)
@@ -19,7 +19,7 @@ type 'a t
 
 val cpu : name:string -> (unit -> 'a) -> 'a t
 (** Work that holds a whole worker while it runs. [name] names it in
-    {!Pool_wait} and the trace; callers pass [__FUNCTION__] (RFC-0474 L4c). *)
+    {!Pool_wait} and the trace; callers pass [__FUNCTION__]. *)
 
 val io : name:string -> (unit -> 'a) -> 'a t
 (** Work that shares a worker with other I/O jobs while it waits on an Eio

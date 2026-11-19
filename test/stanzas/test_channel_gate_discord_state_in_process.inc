@@ -1,4 +1,4 @@
-; RFC-0203 Phase 3 — in-process gateway support in
+; in-process gateway support in
 ; Channel_gate_discord_state.
 ;
 ; The gate reads MASC_BASE_PATH, and test/dune deliberately blanks it so no

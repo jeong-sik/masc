@@ -8,7 +8,7 @@ type pulse =
 type row_cells = { pulse : pulse; now_cell : string; strip : string; due : string; right : string }
 
 val row_cells :
-  health_error:string option -> view:Masc_tui_keeper_list_model.view ->
+  ko:bool -> health_error:string option -> view:Masc_tui_keeper_list_model.view ->
   Masc.Tui_decode_memory_health.memory_health_snapshot option ->
   Masc_tui_memory_world.reading -> row_cells
 (** Draw on the same grid as the Keeper rows. The caller draws [Fact_ages] with
@@ -22,7 +22,7 @@ val row_cells :
     server totals intact while making the age bins unknown. *)
 
 val dock_lines :
-  health_error:string option -> cells:int -> max_lines:int ->
+  ko:bool -> health_error:string option -> cells:int -> max_lines:int ->
   Masc.Tui_decode_memory_health.memory_health_snapshot option ->
   Masc_tui_memory_world.reading -> string list
 (** Keeper memory, then the curator ledger, then its briefing. A retained

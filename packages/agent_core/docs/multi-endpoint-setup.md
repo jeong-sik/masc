@@ -1,7 +1,7 @@
 # Multi-Endpoint LLM Setup
 
-agent_core supports multiple explicitly declared endpoints with round-robin load
-balancing across declarations that pass their protocol-specific probes.
+agent_core keeps the explicitly declared endpoints that pass their
+protocol-specific probes as one active snapshot.
 
 ## Quick Start
 
@@ -45,8 +45,8 @@ Eio.Switch.run @@ fun sw ->
 let net = Eio.Stdenv.net env in
 match Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints with
 | Ok statuses ->
-  (* Healthy declarations now form the active round-robin snapshot. Probe
-     failures remain visible in each status. *)
+  (* Healthy declarations now form the active snapshot. Probe failures
+     remain visible in each status. *)
   statuses
 | Error Provider_registry.No_endpoints_declared ->
   failwith "no endpoint declarations"
@@ -54,20 +54,11 @@ match Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints with
   report_probe_failures statuses
 ```
 
-## Load Balancing
-
-`Provider_registry.next_llama_endpoint ()` returns `Some endpoint` in
-round-robin order using lock-free `Atomic.fetch_and_add`. The value retains its
-protocol and capability declarations; the registry never lowers it back to a
-bare URL. It returns `None` until a typed refresh succeeds. Safe for concurrent
-Eio fibers.
-
 ## API Reference
 
 | Function | Description |
 |----------|-------------|
 | `refresh_llama_endpoints ~sw ~net ~endpoints` | Probe typed declarations and update the active list, or return an explicit error |
-| `next_llama_endpoint ()` | Get the next endpoint as an option (round-robin) |
 | `active_llama_endpoints ()` | Snapshot of current endpoint list |
 
 ## Health Probes

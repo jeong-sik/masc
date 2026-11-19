@@ -1,4 +1,4 @@
-(** RFC-0154 PR-1.  Unit tests for the typed System_error_class SSOT.
+(** Unit tests for the typed System_error_class SSOT.
 
     Covers (a) errno → variant priority over substring matching,
     (b) substring vocabulary union of the four pre-existing inline

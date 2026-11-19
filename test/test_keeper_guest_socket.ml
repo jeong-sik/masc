@@ -1,7 +1,6 @@
 (* Keeper_guest_socket against the real agent relay and the real shim, and
    against small listeners that act out what a VM runtime does before the
-   agent listens: end the connection at once, or accept it and say nothing
-   (docs/evidence/2026-11-03-microvm-request-transport, agent-boot-results).
+   agent listens: end the connection at once, or accept it and say nothing.
 
    The agent here runs without root, so its hello reports this test host's
    facts; the success cases pass an [accept] that checks the relay version

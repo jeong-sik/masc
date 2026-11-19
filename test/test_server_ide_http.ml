@@ -369,7 +369,7 @@ let test_file_activity_requires_auth () =
 
 let test_read_events_accepts_unknown_codebase_as_empty () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    (* RFC-0378 §5.4: the scope universe is store-measured, not the
+    (* The scope universe is store-measured, not the
        catalog — an unknown slug is a legitimate empty store, not a
        registry miss. *)
     let request =

@@ -47,8 +47,7 @@
   기존 target의 journal/revision·Turn_ref·operation 연결은 그대로 검증한다. JSON과 순수 report
   해석만 공통 CPU 경로에 넘기고 worker에서 workspace binding·HTTP/cache·선택을 바꾸지 않는다.
   `keeper.preparation.decode_wait`는 pool 대기·해석·반환 관측이며 순수 CPU·paint·유용한 작업
-  완료 시간이 아니다. source 비교와 미실행 복합 시나리오는
-  `docs/audits/2026-10-19-tui-preparation-workspace-admission.md`를 따른다.
+  완료 시간이 아니다.
 - Lane·공유 메모리·Wiki 확인의 시간은 풀 대기와 취소 정리를 포함한 호출자 대기다.
   순수 IO 시간이라고 표시하지 않는다. 출처 조회 실패는 `조회 불가`이며 Tool 실행
   권한 거절과 다르다. world 준비 완료도 모든 출처가 정상이라는 판정이 아니다.

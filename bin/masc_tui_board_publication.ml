@@ -244,7 +244,7 @@ let response_diagnostic ~ko = function
          status detail)
   | Unanswered { detail; raw_response = None } -> Some detail
 
-let outcome_unknown ~ko = if ko then "게시 결과 미확인" else "Board post outcome unknown"
+let outcome_unknown ~ko = if ko then "게시 결과 보고 안 됨" else "Board post outcome not reported"
 
 let response_effect = function
   | Answered (Tool_result.Completed _) -> Failure_effect.Proven_post_effect

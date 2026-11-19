@@ -72,7 +72,7 @@ val create_server_state :
     when supplied (server bootstrap path), it is recorded into
     [Eio_context.set_env] so long-lived HTTP consumers like
     [Masc_http_client.Pool] can lazy-init with the full
-    {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
+    {!Eio_unix.Stdenv.base}. *)
 
 val check_exact_output_registry : ?config_root:string -> unit -> unit
 (** What boot's exact-output registry step refuses for the runtime.toml under
@@ -229,8 +229,8 @@ val initialize_owner_state_blocking
     return the still-unclaimed persistence preparation. A transport must
     pass this opaque value directly to {!activate_owner_state}; the prepared
     ownership token is intentionally not exposed to transports.
-    [accept_store_quarantine] is the operator's [--accept-store-quarantine]
-    (RFC-0420): without it a keeper store this build cannot decode fails
+    [accept_store_quarantine] is the operator's [--accept-store-quarantine]:
+    without it a keeper store this build cannot decode fails
     initialization with [Keeper_persistence_preparation_failed
     (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
     refuses preparation even with the flag; repair directory access first.

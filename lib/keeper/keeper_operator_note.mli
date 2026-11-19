@@ -1,4 +1,4 @@
-(** One sentence an operator puts into a keeper's next turn (RFC-0366).
+(** One sentence an operator puts into a keeper's next turn.
 
     An instruction that is true for one turn — "the openssl decision landed,
     task-195 can resume" — had no path that matched its lifetime. Board posts

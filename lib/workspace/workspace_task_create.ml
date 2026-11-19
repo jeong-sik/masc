@@ -22,7 +22,7 @@ type add_task_success =
 
 type add_task_error =
   | Goal_source_unavailable of Goal_store_unavailable.t
-      (** RFC-0444: the goal store this build cannot read, as its own value. *)
+      (** The goal store this build cannot read, as its own value. *)
   | Goal_lock_failed of string
       (** The goal file lock could not be taken; no goal was read. *)
   | Unknown_goal of string
@@ -152,7 +152,7 @@ let add_task_with_result
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
       | Ok backlog ->
-        (* RFC-0323 W2: a re-run link must point at an existing, terminal task.
+        (* A re-run link must point at an existing, terminal task.
            Validated inside the lock against the same backlog snapshot the new
            task is appended to, so the check cannot race a concurrent write. *)
         (match

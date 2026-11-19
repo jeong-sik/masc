@@ -1117,7 +1117,7 @@ let media_put_ok (media_store : Agent_core.History.media_store) ~media_type ~raw
   | Ok stored -> stored
   | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
 
-(* RFC-0476: a checkpoint holds history media as a [Stored] source, which is
+(* A checkpoint holds history media as a [Stored] source, which is
    neither a Tool_output marker nor a [_blob] object. Two complete deletion
    scans must still treat its blob as live. *)
 let test_maintenance_keeps_history_media_of_a_checkpoint () =
@@ -2217,7 +2217,7 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
             | Some op -> op
             | None -> Alcotest.fail "expected gate operation to claim"
           in
-          (* The Gate keeps a head (RFC-0476 §3.2); the message naming the
+          (* The Gate keeps a head; the message naming the
              blob is a bundle object in the trace's session, which the sweep
              reads as JSON lines. *)
           let gate_session_dir =

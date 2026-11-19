@@ -1,4 +1,4 @@
-(** RFC a-language-server-the-keeper-can-ask: the Keeper's surface.
+(** The Keeper's surface.
 
     [Lsp_workspace_pool] and [Lsp_questions] are tested on their own. What is
     asserted here is what a Keeper sees: which questions are offered, and that

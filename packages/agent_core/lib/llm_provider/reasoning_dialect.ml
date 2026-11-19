@@ -312,7 +312,7 @@ let chat_template_kwargs_preserve_field dialect ~preserve_thinking =
 ;;
 
 (* The [thinking.clear_thinking] member of the [Thinking_object_clear_thinking]
-   wire (RFC-0488 §3.2). A declared [preserve_thinking] travels as its inverse.
+   wire. A declared [preserve_thinking] travels as its inverse.
    An undeclared one sends no member, so the endpoint's documented default
    applies: Z.AI keeps prior reasoning on the Coding Plan endpoint and clears
    it on the standard endpoint. Either answer agrees with the request, because
@@ -1110,7 +1110,7 @@ let%test "request_control_fields preserves inherent reasoning without granting a
       }
 ;;
 
-(* RFC-0488 §3.2: the clear-thinking wire sends [clear_thinking] only for a
+(* The clear-thinking wire sends [clear_thinking] only for a
    declared [preserve_thinking], as its inverse, and still writes an explicit
    enable without one. The receipt claims no encoding, because a row without a
    toggle wire is admitted by [supports_reasoning]. Every other preserve wire

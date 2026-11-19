@@ -121,7 +121,7 @@ const GateKeeperEntryWireSchema = Schema.Union(
 const GateKeepersWireSchema = Schema.Struct({
   candle: Schema.optional(Schema.Unknown),
   // Administrator rosters carry the Candle fold's decay basis beside
-  // `candle` (RFC-0481 §3.7). The TUI computes Candle values from it; this
+  // `candle`. The TUI computes Candle values from it; this
   // client draws none of it.
   candle_decay: Schema.optional(Schema.Unknown),
   count: Schema.NonNegativeInt,

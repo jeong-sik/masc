@@ -387,10 +387,6 @@ type keeper_msg =
       * (Masc.Tui_decode.keeper_turns_projection, request_failure) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now. *)
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), request_failure) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, request_failure) result
       * Masc_tui_operator_projection.Listing_order.ticket

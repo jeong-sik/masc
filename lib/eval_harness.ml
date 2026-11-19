@@ -84,8 +84,7 @@ type grader_result = {
   weight : float;
   passed : bool;
       (** The grader's own predicate, not a cut on [score]:
-          [apply_deterministic_grader] sets it from the match result and
-          [check_tool_expectations_with_evidence] from
+          [check_tool_expectations_with_evidence] sets it from
           [required_ok && max_ok]. [score] is derived from it (1.0 / 0.0),
           not the other way round. *)
   detail : string;         (** Why this score was given *)
@@ -137,45 +136,6 @@ type eval_suite_result = {
 (* Deterministic grading                                             *)
 (* ================================================================ *)
 
-(** Apply a deterministic grader to a value. Returns score 0.0 or 1.0. *)
-let apply_deterministic_grader (g : deterministic_grader) (value : string) : grader_result =
-  let matched = match g.mode with
-    | Exact -> value = g.expected
-    | Contains ->
-        let v_lower = String.lowercase_ascii value in
-        let e_lower = String.lowercase_ascii g.expected in
-        let rec find_at i =
-          if i + String.length e_lower > String.length v_lower then false
-          else if String.sub v_lower i (String.length e_lower) = e_lower then true
-          else find_at (i + 1)
-        in
-        find_at 0
-    | Regex pattern ->
-        Safe_ops.protect ~default:false (fun () ->
-          let re = Re.Pcre.re pattern |> Re.compile in
-          Re.execp re value)
-    | NotContains ->
-        let v_lower = String.lowercase_ascii value in
-        let e_lower = String.lowercase_ascii g.expected in
-        let rec find_at i =
-          if i + String.length e_lower > String.length v_lower then true
-          else if String.sub v_lower i (String.length e_lower) = e_lower then false
-          else find_at (i + 1)
-        in
-        find_at 0
-  in
-  let score = if matched then 1.0 else 0.0 in
-  { grader_desc = g.description;
-    score;
-    weight = g.weight;
-    passed = matched;
-    detail = if matched
-      then Printf.sprintf "matched: %s" g.description
-      else Printf.sprintf "failed: expected %s '%s'" (match g.mode with
-        | Exact -> "exact" | Contains -> "contains"
-        | Regex _ -> "regex" | NotContains -> "not_contains") g.expected;
-  }
-
 (** Check tool expectations against actual tool calls made. *)
 let check_tool_expectations_with_evidence
     (expectations : tool_expectation list)
@@ -216,14 +176,6 @@ let check_tool_expectations_with_evidence
       detail;
     }
   ) expectations
-
-let check_tool_expectations expectations actual_calls =
-  let calls =
-    actual_calls
-    |> List.map (fun tool_name ->
-           ({ tool_name; route_evidence = None } : Eval_tool_selector.call))
-  in
-  check_tool_expectations_with_evidence expectations calls
 
 (* ================================================================ *)
 (* Score computation                                                 *)
@@ -496,42 +448,6 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
     }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to parse scenario: %s" (Printexc.to_string exn))
-
-(** Load scenarios from a JSON file containing an array of scenario objects. *)
-let load_scenarios_from_file (path : string) : (scenario list, string) result =
-  if not (Sys.file_exists path) then
-    Error (Printf.sprintf "Scenario file not found: %s" path)
-  else
-    try
-      let content = Fs_compat.load_file path in
-      let json = Yojson.Safe.from_string content in
-      match json with
-      | `List items ->
-          let results = List.map scenario_of_json items in
-          let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) results in
-          if errors <> [] then
-            Error (Printf.sprintf "Parse errors: %s" (String.concat "; " errors))
-          else
-            Ok (List.filter_map (function Ok s -> Some s | Error _ -> None) results)
-      | `Assoc _ ->
-          (* Single scenario *)
-          (match scenario_of_json json with
-           | Ok s -> Ok [s]
-           | Error e -> Error e)
-      | other ->
-          (* Bind the received kind so operators reading the load
-             failure can distinguish a wrong-type bug ([`Null] from
-             an empty file, [`Int] / [`Bool] from a single-line typo)
-             from a wrong-shape bug ([`List] of non-objects which is
-             handled by the [`List items] arm above and surfaces a
-             different "Parse errors:" prefix). *)
-          Error
-            (Printf.sprintf
-               "load_scenarios_from_file: expected JSON array of scenarios \
-                or a single scenario object, got %s (path=%S)"
-               (Json_util.kind_name other) path)
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Error (Printf.sprintf "Failed to load scenarios: %s" (Printexc.to_string exn))
 
 (* ================================================================ *)
 (* Report generation                                                 *)

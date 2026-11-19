@@ -310,7 +310,7 @@ val response_observed : route -> bool
 val route_resumes_on_same_path : route -> bool
 (** Whether a failure passes with time on the path that answered it, so a chat
     operation whose last candidate failed after saving tool results continues
-    on that same path (RFC last-path-resumes-after-progress §3.3).
+    on that same path.
 
     [true]: [Rate_limited], [Provider_capacity], [Empty_completion] with
     [EndTurn], [MaxTokens], or [StopSequence], [Server_error],

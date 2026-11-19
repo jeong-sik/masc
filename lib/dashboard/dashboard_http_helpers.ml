@@ -3,7 +3,7 @@
     Extracted from server_dashboard_http.ml for sub-module reuse. *)
 
 
-(* Delegations to the canonical Env_config_core readers (RFC-0371 B7):
+(* Delegations to the canonical Env_config_core readers:
    this module used to carry raw getenv + parse + clamp copies of them. *)
 let int_of_env_default name ~default ~min_v ~max_v =
   Env_config_core.get_int_clamped ~default ~min_v ~max_v name
@@ -24,7 +24,7 @@ let keeper_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
       Keeper_memory_recall.record_memory_recall_read_error ~site path exn_class;
       []
 
-(* RFC-0142 PR-4: lift the silent [| _ -> default] catch-all through
+(* Lift the silent [| _ -> default] catch-all through
    [Json_field.{list,string,assoc} |> to_option] so a Wrong_shape
    payload disappears with the same default (preserving caller
    semantics) but the type system now distinguishes Field_absent

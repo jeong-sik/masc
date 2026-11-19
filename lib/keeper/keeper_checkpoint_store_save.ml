@@ -121,7 +121,7 @@ let save_agent_core_classified_typed
           let plan payload =
             offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous ~absent boundary payload)
           in
-          (* The objects first, then the head that names them (RFC-0476 §3.3). *)
+          (* The objects first, then the head that names them. *)
           let install payload (plan : Objects.plan) =
             match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
             | Error error -> Error (Objects_write_failed error)

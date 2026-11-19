@@ -243,7 +243,7 @@ let test_wallet_decay_and_policy_observation () =
   check int "only keepers >= min_active_balance_milli count as active" 1
     summary_t3_filtered.active_keepers
 
-(* RFC-0481 §3.7: a reader holding the fold's basis draws what the server
+(* A reader holding the fold's basis draws what the server
    would fold at the same instant, through policy boundaries and for Keepers
    with and without a balance. *)
 let test_the_decay_basis_folds_to_the_same_values_later () =

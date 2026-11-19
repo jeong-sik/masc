@@ -1,5 +1,4 @@
-(** Server_routes_http_routes_dos — a person's moves on the shared DOS machine
-    (RFC play-link-for-the-shared-machine §2.5).
+(** Server_routes_http_routes_dos — a person's moves on the shared DOS machine.
 
     [POST /api/v1/dos/press], [/type], [/step] and [/pass] run the tool of the
     same name under the actor [with_tool_actor_auth] resolves, after checking

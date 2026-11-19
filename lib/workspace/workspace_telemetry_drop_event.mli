@@ -3,7 +3,7 @@
 
     Introduced by RFC-0088 §4 Option A (Counter-as-Fix umbrella scoping,
     Workspace async-context-free telemetry drop sub-scope) as a fold-in
-    amendment to RFC-0044 (`docs/rfc/RFC-0044-persistence-read-drop-typed.md`).
+    amendment to RFC-0044.
 
     Motivation: the three call sites in [Workspace] that invoke
     [warn_telemetry_drop] (after catching [Stdlib.Effect.Unhandled] when

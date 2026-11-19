@@ -5,7 +5,7 @@ module Types = Masc_domain
     - Issue #7690 regression: the previous delete used
       [{ st with goals = ...; updated_at }] which preserves [version], so
       successive deletes all landed at the same version.
-    - RFC-0444 PR-1: the store is read through the closed sum
+    - The store is read through the closed sum
       [Goal_store.source]; a store this build cannot read is [Unavailable]
       with its reason, mirror state and reset step, never an empty state, and
       every writer refuses it without touching either file. *)

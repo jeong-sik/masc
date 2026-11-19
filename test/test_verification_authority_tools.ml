@@ -1402,7 +1402,7 @@ let test_goal_and_task_inspect_real_pdf () =
   let producer_name = "pdf-producer" in
   let root = workspace_producer_playground config producer_name in
   let fixture = Filename.concat (Masc_test_deps.find_project_root ())
-    "docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf" in
+    "test/fixtures/verifier-booklet.pdf" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
   let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let source = Filename.concat root "booklet.pdf" in

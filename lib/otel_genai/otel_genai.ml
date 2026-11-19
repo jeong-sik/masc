@@ -30,7 +30,7 @@ module Attr_key = struct
   let masc_gen_ai_runtime_id = "masc.gen_ai.runtime_id"
   let masc_gen_ai_response_finish_reason = "masc.gen_ai.response.finish_reason"
 
-  (* RFC-0233 §2.3 - per-turn TurnRecord projection onto the turn span. *)
+  (* per-turn TurnRecord projection onto the turn span. *)
   let masc_turn_blocks = "masc.turn.blocks"
   let masc_turn_profile = "masc.turn.profile"
   let masc_turn_execution_ids = "masc.turn.execution_ids"

@@ -1,6 +1,6 @@
 (** In-process runtime handlers for descriptor-backed workspace tools.
 
-    RFC-0179. Hosts handlers for descriptors whose executor is [In_process] —
+    Hosts handlers for descriptors whose executor is [In_process] —
     pure OCaml-runtime functions with no sandbox, no host process spawn, no
     remote MCP. Dispatch uses producer-owned [Keeper_tool_execution.t]
     results; raw string entrypoints are compatibility projections only. *)
@@ -147,7 +147,7 @@ val handle_constitution_write_with_outcome
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
-(** Write one norm into this world's constitution (RFC-0442). An internal
+(** Write one norm into this world's constitution. An internal
     self-write like the memory tools, not an external Gate effect. *)
 
 val handle_constitution_remove_with_outcome
@@ -155,7 +155,7 @@ val handle_constitution_remove_with_outcome
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
-(** Take one norm back out of this world's constitution (RFC-0442). *)
+(** Take one norm back out of this world's constitution. *)
 
 val handle_memory_retract_with_outcome
   :  config:Workspace.config
@@ -233,7 +233,7 @@ val handle_voice_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_task_with_outcome] is the descriptor-projection
+(** [handle_masc_task_with_outcome] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
     claim_next / task_history / tasks / transition / update_priority).
     Constructs a [Task.Handlers.context] from
@@ -242,7 +242,7 @@ val handle_masc_task_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_plan_with_outcome] is the descriptor-projection
+(** [handle_masc_plan_with_outcome] is the descriptor-projection
     cluster handler for the [masc_plan_*] tools (set_task / get_task /
     clear_task). Constructs a [Tool_plan.context] from [config] and calls
     [Tool_plan.dispatch]. *)
@@ -250,7 +250,7 @@ val handle_masc_plan_with_outcome
   : config:Workspace.config -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_run_with_outcome] is the descriptor-projection
+(** [handle_masc_run_with_outcome] is the descriptor-projection
     cluster handler for [masc_run_*] tools (deliverable / get / init /
     list / log / plan). Constructs a [Tool_run.context] from [config] and
     keeper [meta], then calls [Tool_run.dispatch]. *)
@@ -258,7 +258,7 @@ val handle_masc_run_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_agent_with_outcome] is the descriptor-projection
+(** [handle_masc_agent_with_outcome] is the descriptor-projection
     cluster handler for [masc_get_metrics] / [masc_agent_fitness] /
     [masc_agent_card].
     Constructs a [Tool_agent.context] from [config + meta.name] and calls
@@ -267,7 +267,7 @@ val handle_masc_agent_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_workspace_with_outcome] is the descriptor-projection
+(** [handle_masc_workspace_with_outcome] is the descriptor-projection
     cluster handler for [masc_status] / [masc_heartbeat] / [masc_check] /
     [masc_goal_*]. Constructs a [Tool_workspace.context] from
     [config + meta.name] and calls [Tool_workspace.dispatch]. *)
@@ -275,7 +275,7 @@ val handle_masc_workspace_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_misc_with_outcome] is the descriptor-projection
+(** [handle_masc_misc_with_outcome] is the descriptor-projection
     cluster handler for [masc_config] / [masc_dashboard] / [masc_tool_help] /
     [masc_web_search] / [masc_web_fetch].
     Constructs a [Tool_misc.context] from [config + meta.name] and calls
@@ -287,7 +287,7 @@ val handle_masc_misc_with_outcome
   -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_agent_timeline_with_outcome] is the
+(** [handle_masc_agent_timeline_with_outcome] is the
     descriptor-projection singleton handler for [masc_agent_timeline].
     Constructs a [Tool_agent_timeline.context] from [config + meta.name]
     and calls [Tool_agent_timeline.dispatch]. *)
@@ -306,7 +306,7 @@ val handle_keeper_code_query_with_outcome
     Answers with a refusal outside a turn, where there is no pool: a server
     started here would outlive every caller that could ask it anything. *)
 
-(** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
+(** [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. [result_projection] is the
     projection the lane running the call applies to a result; a paged answer
     ([masc_schedule_notes_list]) cuts its page to that ceiling. *)
@@ -320,7 +320,7 @@ val handle_masc_schedule_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the
+(** [handle_masc_fusion_with_outcome] is the in-process handler for the
     [masc_fusion] out-of-band panel+judge deliberation tool.  It loads the
     [fusion] policy from runtime.toml and delegates durable async submission to
     {!Fusion_tool.handle}. The common async lifecycle mints the run id.
@@ -352,7 +352,7 @@ val handle_masc_file_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0266 §7 Phase 3 — [fusion_status_json] projects the calling keeper's
+(** [fusion_status_json] projects the calling keeper's
     fusion runs to the masc_fusion_status tool's JSON string. With an empty
     [run_id] it lists every tracked run owned by [keeper]
     ([{ ok; count; runs }]); with a non-empty [run_id] it returns the owned
@@ -368,7 +368,7 @@ val fusion_status_json
   -> run_id:string
   -> string
 
-(** RFC-0266 §7 Phase 3 — in-process handler for the [masc_fusion_status]
+(** in-process handler for the [masc_fusion_status]
     read-only tool. Parses the optional [run_id] argument and projects the
     process-wide [Fusion_run_registry.global], scoped
     to [meta.name]. Explicit run lookup also returns original durable Board
@@ -381,7 +381,7 @@ val handle_masc_fusion_status
   -> unit
   -> string
 
-(** RFC-keeper-vision-delegation-tool §2.6 — [handle_analyze_image_with_outcome].
+(** [handle_analyze_image_with_outcome].
     Accepts exactly one stored [artifact] or sandbox [path]. A path is read
     through the existing sandbox runner, validated and stored for this Keeper
     before the ordinary vision sub-call. Requires [config] and Eio context for
@@ -402,7 +402,7 @@ val handle_analyze_image_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — descriptor-projection cluster handler for the
+(** descriptor-projection cluster handler for the
     [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at
     module load.  Receives [meta] so callers like [masc_keeper_status]

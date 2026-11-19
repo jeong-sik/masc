@@ -1,5 +1,5 @@
 /*
-  RFC-0004 Phase A0.2 PR-1 — atdts round-trip PoC.
+  atdts round-trip PoC.
 
   Verifies that the atdts-generated readAgentStartedPayload accepts
   the payload that Keeper_event_bridge.native_event_to_json emits for an

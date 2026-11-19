@@ -110,7 +110,7 @@ type store_error =
       { primary_err : string
       ; recovery_err : string option
       }
-      (** RFC-0234: returned by mutating functions when at least one of the
+      (** Returned by mutating functions when at least one of the
           ledger and its [.last-good] recovery file exists and no state can be
           parsed from either. [recovery_err] is [None] when no recovery file
           exists. The mutation is refused so the surviving bytes are NOT

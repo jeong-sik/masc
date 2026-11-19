@@ -1,10 +1,10 @@
 (* server_routes_http_routes_keeper_gate — HTTP routes for the Keeper Gate
    dashboard surface.
 
-   The gate projection reads, the gate mode settings (workspace, keeper and
-   external), the per-keeper exact-lane preference, and the resolve, retry and
-   rule-delete actions. Server_routes_http_routes_dashboard.add_routes
-   registers this group in the middle of its own pipeline. *)
+   The gate projection reads, the gate mode settings (workspace and
+   external), and the resolve, retry and rule-delete actions.
+   Server_routes_http_routes_dashboard.add_routes registers this group in the
+   middle of its own pipeline. *)
 
 open Server_auth
 open Server_dashboard_http
@@ -90,150 +90,6 @@ let gate_mode_change_json change recovery =
      :: ("recovery_blockers", recovery_blockers_json)
      :: fields)
 ;;
-
-(* Which admitted slot this Keeper uses first in one exact-output lane. Naming
-   a slot the lane does not offer is refused here rather than on the next run,
-   so the operator learns while still looking at the setting. *)
-let handle_keeper_exact_lane_body state operator_name request reqd body_str =
-  let refuse message =
-    respond_json_value_with_cors ~status:`Bad_request request reqd
-      (operator_error_json message)
-  in
-  try
-    let fields =
-      match Yojson.Safe.from_string body_str with
-      | `Assoc fields -> fields
-      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-        []
-    in
-    match List.assoc_opt "keeper_name" fields, List.assoc_opt "lane_id" fields with
-    | ( Some (`String keeper_name)
-      , Some (`String lane_id) )
-      when String.trim keeper_name <> "" && String.trim lane_id <> "" -> (
-      match
-        match List.assoc_opt "slot_id" fields with
-        | None | Some `Null -> Ok None
-        | Some (`String slot_id) when String.trim slot_id <> "" ->
-          Ok (Some (String.trim slot_id))
-        | Some _ -> Error "slot_id must be a non-empty string or null"
-      with
-      | Error message -> refuse message
-      | Ok slot_id -> (
-        let config = Mcp_server.workspace_config state in
-        let set () =
-          Keeper_exact_lane_preference.set
-            config ~actor:operator_name ~keeper_name ~lane_id slot_id
-        in
-        match
-          match slot_id with
-          | None -> set ()
-          | Some slot_id ->
-            Result.bind
-              (Keeper_exact_lane_preference.validate_admitted_slot
-                 ~lane_id
-                 ~slot_id)
-              set
-        with
-        | Error message -> refuse message
-        | Ok current ->
-          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
-          Sse.broadcast
-            (`Assoc
-               [ "type", `String "keeper_exact_lane_preference_changed"
-               ; "keeper_name", `String keeper_name
-               ; "lane_id", `String lane_id
-               ; ( "slot_id"
-                 , match slot_id with
-                   | Some slot_id -> `String slot_id
-                   | None -> `Null )
-               ]);
-          respond_json_value_with_cors request reqd
-            (`Assoc
-               [ "ok", `Bool true
-               ; "keeper_name", `String keeper_name
-               ; "lane_id", `String lane_id
-               ; ( "slot_id"
-                 , match current with
-                   | Some current ->
-                     `String current.Keeper_exact_lane_preference.slot_id
-                   | None -> `Null )
-               ])))
-    | _, _ -> refuse "keeper_name and lane_id are required"
-  with Yojson.Json_error message -> refuse message
-;;
-
-(* One keeper held to a higher bar than the workspace. Its own handler
-   rather than a field on the workspace one: the two answer different
-   questions, and a body that omitted [keeper_name] would otherwise move
-   every keeper at once. *)
-let handle_gate_keeper_mode_body state operator_name request reqd body_str =
-  let refuse message =
-    respond_json_value_with_cors ~status:`Bad_request request reqd
-      (operator_error_json message)
-  in
-  try
-    let fields =
-      match Yojson.Safe.from_string body_str with
-      | `Assoc fields -> fields
-      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-        []
-    in
-    match List.assoc_opt "keeper_name" fields with
-    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
-      (* An absent mode clears the override; a present one has to parse.
-         Absent and unreadable are different answers and only one of them is
-         a request to stop singling this keeper out. *)
-      match
-        match List.assoc_opt "mode" fields with
-        | None | Some `Null -> Ok None
-        | Some mode_json ->
-          Result.map Option.some (Keeper_gate_mode.parse_json mode_json)
-      with
-      | Error message -> refuse message
-      | Ok mode -> (
-        (* Same admission bar as the workspace lane: an auto_judge override
-           is a promise that a judge topology exists to drain it, and this
-           route is the entry point of the override-only-auto_judge state
-           the sweeps now serve. *)
-        let readiness =
-          match mode with
-          | Some Keeper_gate_mode.Auto_judge ->
-            Hitl_summary_worker.snapshot_topology_readiness ()
-          | Some (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow)
-          | None -> Ok ()
-        in
-        match readiness with
-        | Error detail ->
-          respond_json_value_with_cors
-            ~status:`Service_unavailable
-            request
-            reqd
-            (operator_error_json ("Auto Judge unavailable: " ^ detail))
-        | Ok () -> (
-        let config = Mcp_server.workspace_config state in
-        match
-          Keeper_gate_mode.set_for_keeper config ~actor:operator_name
-            ~keeper_name mode
-        with
-        | Error message -> refuse message
-        | Ok change ->
-          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
-          Sse.broadcast
-            (`Assoc
-               [ "type", `String "gate_keeper_mode_changed"
-               ; "keeper_name", `String keeper_name
-               ; ( "mode"
-                 , match mode with
-                   | Some mode -> `String (Keeper_gate_mode.to_string mode)
-                   | None -> `Null )
-               ]);
-          respond_json_value_with_cors request reqd
-            (match Keeper_gate_mode.keeper_change_json change with
-             | `Assoc fields -> `Assoc fields))))
-    | Some _ | None -> refuse "keeper_name is required"
-  with Yojson.Json_error message -> refuse message
-;;
-
 
 let handle_gate_mode_body_for_lane
       ~set_mode
@@ -461,51 +317,6 @@ let add_routes router =
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/gate/mode" (fun state operator_name request reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
-  (* The same two lists the Gate projection carries, on their own so a surface
-     that only wants them does not pay for the approval queue and the resolved
-     history to find out which Keepers were singled out. *)
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/gate/keeper-settings" (fun state req reqd ->
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let modes, modes_state =
-           match Keeper_gate_mode.keeper_overrides ~base_path with
-           | Ok rows ->
-             ( `List
-                 (List.map
-                    (fun (row : Keeper_gate_mode.keeper_override) ->
-                      `Assoc
-                        [ "keeper_name", `String row.keeper_name
-                        ; "mode", `String (Keeper_gate_mode.to_string row.mode)
-                        ])
-                    rows)
-             , `Assoc [ "state", `String "ready" ] )
-           | Error detail ->
-             ( `List []
-             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
-         in
-         let exact_lanes, exact_lanes_state =
-           match Keeper_exact_lane_preference.all ~base_path with
-           | Ok rows ->
-             ( `List
-                 (List.map Keeper_exact_lane_preference.to_projection_json rows)
-             , `Assoc [ "state", `String "ready" ] )
-           | Error detail ->
-             ( `List []
-             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
-         in
-         Http.Response.json_value ~compress:true ~request:req
-           (`Assoc
-              [ "modes", modes
-              ; "modes_state", modes_state
-              ; "exact_lanes", exact_lanes
-              ; "exact_lanes_state", exact_lanes_state
-              ])
-           reqd)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/gate/keeper-mode" (fun state operator_name request reqd ->
-           Http.Request.read_body_async reqd
-             (handle_gate_keeper_mode_body state operator_name request reqd))
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/runtime/keeper-exact-lane" (fun state operator_name request reqd ->
-           Http.Request.read_body_async reqd
-             (handle_keeper_exact_lane_body state operator_name request reqd))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/gate/external-mode" (fun state operator_name request reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_external_mode_body state operator_name request reqd))

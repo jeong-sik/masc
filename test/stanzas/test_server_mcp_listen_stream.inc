@@ -1,4 +1,4 @@
-; MCP subscriptions/listen over HTTP/1.1 (RFC-0493 §3.2), on in-memory httpun
+; MCP subscriptions/listen over HTTP/1.1, on in-memory httpun
 ; connections: the acknowledgement comes first and notifications follow, and a
 ; client that stops reading holds up no other subscription and ends at the
 ; stall bound.

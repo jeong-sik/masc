@@ -222,7 +222,7 @@ manifest 없는 경로에 SHA-256 을 더하면 표 비교는 64자가 되지만
 | 층 | 내용 | 파일 |
 |---|---|---|
 | L1 | `Fs_compat` 의 load·reload, `Web_dashboard` 의 `asset_version` 과 reload, 표 항목의 `version`, `serve_dashboard_static` 의 순서, 시험. PR #51545 | `lib/fs_compat/fs_compat_owned_reader.ml/.mli`, `lib/fs_compat/fs_compat.mli`, `lib/web_dashboard.ml/.mli`, `lib/server/server_routes_http_pages.ml`, `test/test_http_pages_asset_read.ml` |
-| L2 | 설치 뒤 측정 결과. PR #51602 | `docs/evidence/research/2026-11-09-h2-sse-tls/` |
+| L2 | 설치 뒤 측정 결과. PR #51602 | |
 
 `Fs_compat` 의 reload 는 표가 부르기 전에는 쓰는 곳이 없다. 그래서 일곱 파일을 한 PR 로 낸다.
 
@@ -240,7 +240,7 @@ L1 은 #51545 로, L2 는 #51602 로 main 에 들어갔다.
 
 이 RFC 가 없애려던 일(요청마다 본문 읽기, 본문 비교)은 프로파일에서 보이지 않는다. 이 RFC 를 쓴 이유였던 CPU 차이(#51400)는 #51545 가 든 build 에서도 남아 있다. 이 RFC 가 그 차이를 얼마나 줄였는지는 가리지 못했다.
 
-§5 의 기준을 #51545 가 든 설치 build 로 확인했다. 원값은 `docs/evidence/research/2026-11-09-h2-sse-tls/` 의 run14 에 있다.
+§5 의 기준을 #51545 가 든 설치 build 로 확인했다.
 
 **측정**
 

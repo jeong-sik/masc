@@ -60,8 +60,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | None -> reason)
     | None -> reason
   in
-  (* A rest is not an error: the provider stated when its quota resets
-     (RFC-turn-failure-visible-stop §2.4). *)
+  (* A rest is not an error: the provider stated when its quota resets. *)
   let outcome, empty_preview =
     match ended with
     | Failed_cycle -> Proactive_error, "keeper cycle failed"

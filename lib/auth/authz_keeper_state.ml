@@ -135,7 +135,6 @@ let apply t ~(author : Author.t) ~is_active ~runtime_owner (event : E.t) =
     Error (Not_a_human principal)
   | ( ( Author.Local_operator
       | Author.System_cron
-      | Author.System_maintenance
-      | Author.System_migration )
+      | Author.System_maintenance )
     , (E.Made _ | E.Assigned _) ) -> Error (Not_a_keeper_author author)
 ;;

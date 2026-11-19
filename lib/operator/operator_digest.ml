@@ -122,9 +122,6 @@ let build_workspace_attention_observation ~now config =
     | Some left, Some right -> Some (Float.min left right) in
   List.sort compare_attention (host_items @ pending_items), deadline
 
-let build_workspace_attention_items config =
-  fst (build_workspace_attention_observation ~now:(Time_compat.now ()) config)
-
 (* [Paused_on_blocker] and [Paused] share the wire reason, so both are
    [keeper_paused]; the row's [next_human_action] tells them apart. *)
 let keeper_attention_kind reason =

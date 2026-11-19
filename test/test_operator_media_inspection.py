@@ -88,7 +88,7 @@ class OperatorInspection(unittest.TestCase):
             self.assertEqual(len(data), page['rendered_bytes'])
 
     def test_pdf_returns_original_identity_and_every_actual_render(self):
-        path = self.copy('docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf', 'original.pdf')
+        path = self.copy('test/fixtures/verifier-booklet.pdf', 'original.pdf')
         payload = self.invoke(path)
         data = payload['result']['data']
         self.assertEqual(data['sha256'], payload['source']['sha256'])

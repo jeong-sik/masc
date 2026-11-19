@@ -780,7 +780,7 @@ let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
 
 (* agy 1.5.9 keeps its login in the HOME's default keychain: a run that finds
    the login file moves it into the keychain masc provisioned and deletes the
-   file (#52369). The file is still what binds the account (RFC-0490 §6.3), so
+   file (#52369). The file is still what binds the account, so
    a generation whose file the CLI moved away gets it again from the selected
    source. The caller admits this generation only when the source names the
    principal its record names, so the copy cannot select another account.

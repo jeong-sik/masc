@@ -68,7 +68,7 @@ let keeper_skill_publish_fn
 
 (* Default allows every target so embedded contexts without the runtime wiring
    keep creating schedules; the runtime installs the durable-metadata reader at
-   boot. Tool_schedule stays free of static keeper dependencies (RFC-0194). *)
+   boot. Tool_schedule stays free of static keeper dependencies. *)
 let schedule_wake_target_registered_fn
   : (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
   = Atomic.make (fun _config _keeper_name -> Ok true)
@@ -265,7 +265,7 @@ let get_default_runtime_id_fn
   = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
 
 (* The completion-authority evaluator's runtime comes only from the published
-   [verifier_exact] exact-output lane (RFC-0361 D7(a)): admitted slot ids in
+   [verifier_exact] exact-output lane: admitted slot ids in
    frozen declaration order. The unconnected default is an explicit [Error] so
    an unwired process leaves the review visibly deferred instead of silently
    picking a runtime. *)
@@ -317,7 +317,7 @@ let verification_submit_request_fn
               assignee
               verification_id))
 
-(* RFC-0221 §3.1: compensation hook for atomic submit. Filled at boot to delete
+(* Compensation hook for atomic submit. Filled at boot to delete
    a verification record whose task_status commit failed. A missing hook is an
    explicit error: a submit must never leave the caller believing that the
    verification record was persisted when the storage boundary is absent. *)
@@ -360,7 +360,7 @@ let verification_submitted_fn
            verification_id
            assignee)
 
-(* RFC-0387 stage 2: the goal-side analogue of [verification_submitted_fn].
+(* The goal-side analogue of [verification_submitted_fn].
    The uninstalled default is loud for the same reason — a durable pending
    request with no lane draining it is exactly the gate-without-caller wedge
    the stage was split to avoid. *)

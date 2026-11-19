@@ -101,7 +101,7 @@ let read_with_outcome ~(config : Workspace.config) =
 
 (* [replaces] names the held articles one norm supersedes. Absent, null or
    empty is a plain write; anything else must be an array of article ids,
-   each named once (RFC-0504 §2.2). *)
+   each named once. *)
 let replaces_arg args =
   match args with
   | `Assoc fields -> (
@@ -188,8 +188,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
       "text is required and must be a string: the sentence the world agreed on"
   | Some text -> (
     (* [replaces] decides the move before anything else is validated: a
-       replacement answers the bundle rule, not the per-article cap
-       (RFC-0504 §2.2-§2.3). *)
+       replacement answers the bundle rule, not the per-article cap. *)
     match replaces_arg args, reason_arg args with
     | Error detail, _ | _, Error detail ->
       Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
@@ -280,7 +279,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
           | Error detail ->
             Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
           | Ok bundle ->
-            (* RFC-0504 §2.3: the replacement must render smaller than the
+            (* The replacement must render smaller than the
                bundle it retires — a merge that grows the render is refused. *)
             let replacement_bytes =
               String.length (World_constitution_render.articles [ article ])

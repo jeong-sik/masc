@@ -13,7 +13,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 
 let review_label state = function
-  | Review_unobserved -> ui_text state ~ko:"미관측" ~en:"not observed"
+  | Review_unobserved -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
   | Review_running _ -> ui_text state ~ko:"검증 중" ~en:"reviewing"
   | Review_waiting_original _ -> ui_text state ~ko:"원 실행 확인" ~en:"checking original"
   | Review_stopped {cause=Review_original_repair;_} ->
@@ -72,8 +72,8 @@ let reading_notice_lines state ~width ~inflight ~error =
         let prefix = if refreshing then
             ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
               ~en:"Refreshing · previous reading · last error: "
-          else ui_text state ~ko:"이전 자료 · 현재 상태 미확인: "
-              ~en:"Previous reading · current state unconfirmed: " in
+          else ui_text state ~ko:"이전 관측 · 조회 실패: "
+              ~en:"Previous reading · read failed: " in
         Some (Theme.warn (), prefix ^ detail) in
   match notice with
   | None -> []
@@ -93,32 +93,32 @@ let review_detail ~ko review =
   let text korean english = if ko then korean else english in
   match review with
   | Review_unobserved ->
-    text "자동 검증의 실행 기록이 아직 관측되지 않았습니다." "No automatic review run has been observed yet."
+    text "자동 검증 실행 보고 안 됨" "No automatic review run reported yet."
   | Review_running actor ->
-    text "자동 검증자가 증거를 확인하고 있습니다: " "The automatic reviewer is checking the evidence: " ^ actor
+    text "자동 검증 증거 확인 중: " "Automatic reviewer checking evidence: " ^ actor
   | Review_waiting_original {detail;actor} ->
-    text "기존 검증 실행의 기록을 확인하고 있습니다. 모델 재호출은 예약하지 않습니다. "
-      "Checking the record of the earlier review run. No model call is scheduled again. "
+    text "기존 검증 실행 기록 확인 중 · 모델 재호출 미예약 · "
+      "Checking earlier review run · no model retry scheduled · "
     ^ actor ^ " · " ^ detail
   | Review_stopped {cause; detail; actor} ->
     let reason = match cause with
       | Review_environment ->
-        text "검증 환경에 접근하지 못했습니다." "The review environment could not be reached."
-      | Review_no_judgment -> text "검증자가 판정을 내리지 못했습니다." "The reviewer reached no judgment."
+        text "검증 환경 접근 불가" "Review environment unreachable"
+      | Review_no_judgment -> text "검증자 판정 없음" "Reviewer reached no judgment"
       | Review_commit_failure ->
-        text "검증 결과를 Task에 반영하지 못했습니다." "The review result could not be written to the Task."
+        text "검증 결과 Task 반영 실패" "Failed to write review result to Task"
       | Review_original_repair ->
-        text "원 실행의 결과를 확정할 수 없어 운영자 확인이 필요합니다."
-          "The original run's result cannot be settled. An operator check is needed."
-      | Review_failure -> text "검증 실행이 중단되었습니다." "The review run stopped."
-      | Review_cancelled -> text "검증 실행이 취소되었습니다." "The review run was cancelled." in
-    reason ^ " " ^ actor ^ " · " ^ detail
+        text "원 실행 결과 미확정 · 운영자 확인 필요"
+          "Original run unsettled · operator check needed"
+      | Review_failure -> text "검증 실행 중단" "Review run stopped"
+      | Review_cancelled -> text "검증 실행 취소" "Review run cancelled" in
+    reason ^ " · " ^ actor ^ " · " ^ detail
   | Review_approved reason ->
-    text "승인 판정이 기록되었습니다. Task 완료 여부는 Task 상태에서 확인합니다. "
-      "An approval was recorded. Whether the Task is done is read from its status. " ^ reason
-  | Review_rejected reason -> text "반려 판정이 기록되었습니다. " "A rejection was recorded. " ^ reason
+    text "승인 판정 기록됨 · Task 완료 여부는 Task 상태 확인 · "
+      "Approval recorded · check Task status for completion · " ^ reason
+  | Review_rejected reason -> text "반려 판정 기록됨 · " "Rejection recorded · " ^ reason
   | Review_superseded actor ->
-    text "다른 판정이 먼저 적용되었습니다: " "Another verdict was applied first: " ^ actor
+    text "다른 판정 선적용: " "Another verdict applied first: " ^ actor
 
 (* The task and its actual review state lead the list. Submission identity,
    evidence counts and original source remain in the complete reading. *)
@@ -181,7 +181,6 @@ let render_verification_list (state : state) =
           Some (Masc_tui_value.Position.partial ~selected ~loaded:(offset + shown) ~total)
         else Some (Masc_tui_value.Position.row ~selected ~total:(offset + shown))
   in
-  box_top buf cols;
   box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   let col_hdr, request_row =
@@ -364,9 +363,9 @@ let verification_contract_lines state ~width (request : Masc.Tui_decode.verifica
   let say korean english = if ko then korean else english in
   [Ansi.dim, ""; Ansi.bold, say "  완료 조건" "  Completion contract"]
   @ List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_completion_contract
-  @ [Ansi.bold, say "  요구 증거" "  Required evidence"]
+  @ [Ansi.dim, ""; Ansi.bold, say "  요구 증거" "  Required evidence"]
   @ (if request.vr_required_artifacts = [] then
-       wrap (say "별도 요구 목록이 없습니다." "No separate list of required evidence.")
+       wrap (say "별도 요구 목록 없음" "No separate list of required evidence.")
      else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
   @ [Ansi.dim, ""; Ansi.bold, say "  제출 정보" "  Submission"]
   @ wrap ("Task: " ^ request.vr_task_id ^ say " · 제출자: " " · submitted by: " ^ request.vr_submitted_by)
@@ -427,9 +426,9 @@ let verification_evidence_index state request ~width observation =
     let say korean english = if ko then korean else english in
     (* The selected item carries its own number below; this row counts the
        items, it does not say which is read. *)
-    judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf
-        (if ko then "  증거 %s · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
-         else "  Evidence %s · e/E next/previous · i list · o open · s save")
+    judgement_detail_rows ~width ([Ansi.dim, ""; Ansi.bold, Printf.sprintf
+        (if ko then "  증거 %s  e/E:다음/이전  i:목록  o:열기  s:저장"
+         else "  Evidence %s  e/E:next/prev  i:list  o:open  s:save")
         (Masc_tui_value.Count.grouped count)]
       @ rows @ [Theme.recede (), location]
       @ List.filter_map (fun (key, saved_index, progress) ->
@@ -439,7 +438,7 @@ let verification_evidence_index state request ~width observation =
             | Masc_tui_evidence_file.Not_started -> None
             | Writing path ->
               Some (Theme.warn (),
-                say "  저장 시도 경로(완료 미확인): " "  Saving to (completion unconfirmed): " ^ path)
+                say "  저장 중(완료 보고 안 됨): " "  Saving to (completion not reported): " ^ path)
             | Saved path -> Some (Ansi.reset, say "  이 기기에 저장한 파일: " "  Saved on this device: " ^ path)
             | Aborted path ->
               Some (Theme.warn (), say "  저장하지 못한 목적지: " "  Could not save to: " ^ path))
@@ -464,9 +463,9 @@ let verification_detail_pane (state : state) ~rows ~cols
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
   in
-  let approve = say "  a 두 번: 운영자 승인" "  a twice: operator approval" in
-  let reject = say "x: 사유와 함께 반려 · j/k: 스크롤" "x: reject with a reason · j/k: scroll" in
-  let verdict_action = approve ^ " · " ^ reject in
+  let approve = say "  a×2:운영자 승인" "  a×2:operator approval" in
+  let reject = say "x:사유 반려  j/k:스크롤" "x:reject with reason  j/k:scroll" in
+  let verdict_action = approve ^ "  " ^ reject in
   let verdict_action_rows =
     if Message_layout.display_width verdict_action <= width then
       [ verdict_action ]
@@ -750,7 +749,6 @@ let render_harness_list (state : state) =
              ~after:("  " ^ connection_badge state))
           (connection_badge state)
   in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
@@ -787,9 +785,9 @@ let render_harness_list (state : state) =
     (* The producer also emits zero for an absent/unreadable timestamp. The
        current wire cannot distinguish that from the Unix epoch. *)
     | newest :: _, _ when Float.equal newest.hv_at 0.0 ->
-        ui_text state ~ko:"시각 미관측" ~en:"time not observed"
+        ui_text state ~ko:"시각 보고 안 됨" ~en:"time not reported"
     | newest :: _, _ -> Masc_domain.iso8601_of_unix_seconds newest.hv_at
-    | [], None -> ui_text state ~ko:"미관측" ~en:"not observed"
+    | [], None -> ui_text state ~ko:"미조회" ~en:"not read"
     | [], Some _ -> ui_text state ~ko:"이 페이지에 판정 없음" ~en:"none on this page"
   in
   box_line_styled buf cols ~style:(Theme.recede ())
@@ -809,7 +807,7 @@ let render_harness_list (state : state) =
        ~keys:(Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
          ~has_rows:(shown > 0) state.view));
   (* Drawing and cursor/page movement consume the same state-owned bound.
-     The timestamp makes six head rows and two tail rows; aggregate ledger
+     The timestamp makes five head rows and two tail rows; aggregate ledger
      rows are part of the selected detail document instead. *)
   let content_height =
     match scrolled_surface state ~cols Harness with
@@ -956,7 +954,7 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
     |> List.map (fun line -> Ansi.bold, "  " ^ line)
   in
   title
-  @ detail_section_heading (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
+  @ detail_section_heading ~width (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
   @ [ field ~style:(semantic_status_color ruling) (t "판정" "Verdict") ruling
     ; field "Gate" verdict.hv_gate
     ; field (t "평가자" "Evaluator") verdict.hv_evaluator
@@ -967,35 +965,40 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
      here to read, and it runs long. [field] is one [single_line], so it was cut at
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
-  @ (if reason = "" then [] else wrapped (t "사유" "Reason") reason)
-  @ fallback
-  @ detail_section_heading (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
+  @ (if reason = "" then [] else (Ansi.dim, "") :: wrapped (t "사유" "Reason") reason)
+  @ (if fallback = [] then [] else (Ansi.dim, "") :: fallback)
+  @ detail_section_heading ~width (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
   @ [ field (t "태스크" "Task") verdict.hv_task_id
     ; field (t "태스크 링크" "Task link") (Link.reference Task verdict.hv_task_id)
     ; field (t "에이전트" "Agent") verdict.hv_agent
     ]
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
+  let width = max 1 (framed_inner_width cols) in
+  let goal_lines = harness_goal_lines state verdict in
+  let ledger_section_num = if goal_lines = [] then 3 else 4 in
   let lines =
-    reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
+    reading_notice_lines state ~width
       ~inflight:state.harness_inflight
       ~error:(Option.map (fun detail -> Last_error detail) state.harness_error)
     @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
-        ~width:(max 1 (framed_inner_width cols)) verdict
+        ~width verdict
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)
-    @ (match harness_goal_lines state verdict with
+    @ (match goal_lines with
        | [] -> []
-       | goal_lines ->
-           detail_section_heading (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
-           @ goal_lines)
+       | lines ->
+           detail_section_heading ~width (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
+           @ lines)
     @ (match harness_ledger_lines ~cols state.harness with
        | [] -> []
        | lines ->
-           detail_section_heading (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts")
+           detail_section_heading ~width
+             (Printf.sprintf "%d. %s" ledger_section_num
+                (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts"))
            @ List.map (fun line -> Ansi.reset, line) lines)
-    |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
+    |> judgement_detail_rows ~width
   in
   let content_height = max 1 (rows - framed_chrome_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in

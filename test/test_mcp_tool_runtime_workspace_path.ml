@@ -97,7 +97,7 @@ let test_masc_start_on_the_active_workspace_keeps_its_scope () =
            (Mcp_server.workspace_scope state).epoch))
 ;;
 
-(* RFC-0393 D4: identity uniqueness. A name that already names a Keeper is
+(* Identity uniqueness. A name that already names a Keeper is
    refused at the join boundary — an external agent binding under it would
    poison every ledger attribution for that Keeper. *)
 let test_masc_start_refuses_a_keeper_name () =

@@ -2,7 +2,7 @@
 
     These tests deliberately exercise typed checkpoint messages. A Direct turn's
     assistant response is durable conversation. An autonomous turn's wake cue
-    and final text are not (RFC-0385): they stay in the turn record and raw
+    and final text are not: they stay in the turn record and raw
     trace, and only what the turn did with a tool enters replay. *)
 
 module Finalize = Masc.Keeper_replay_checkpoint
@@ -865,7 +865,7 @@ let test_response_text_is_captured_when_not_suppressed () =
        ~consume:(fun ~response_text -> response_text))
 ;;
 
-(* RFC-0385 2.6: PR #27014 kept this suffix so a plan like "I will inspect the
+(* PR #27014 kept this suffix so a plan like "I will inspect the
    queue next" could reach the next cycle. Measured on a live keeper, what
    actually accumulated was the keeper restating its own status, and the next
    turn read that as the example to follow. A plan that must survive is written
@@ -1334,7 +1334,7 @@ let test_default_thinking_preservation_survives_restore () =
           {config with preserve_thinking = Some false} in
       Alcotest.(check bool) "declared clearing reaches the wire" true
         (cleared |> member "clear_thinking" |> to_bool);
-      (* RFC-0488 §3.2: a row that declares no preservation keeps the restored
+      (* A row that declares no preservation keeps the restored
          reasoning as sent and sends no [thinking] object, so the endpoint's
          documented default applies. *)
       let omitted = check "undeclared preservation keeps completed-turn reasoning"

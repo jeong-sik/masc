@@ -6,9 +6,7 @@
     surface, so a reader never has to ask whether the schema loaded.
 
     Seven flat parameters: [argv] or [command], with [shell], [cwd],
-    [timeout_sec], [intent] and [run_in_background].
-    [test_execute_tool_toml_parity] pins the shape and the
-    description bounds, not bytes. *)
+    [timeout_sec], [intent] and [run_in_background]. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

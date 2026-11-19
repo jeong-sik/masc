@@ -9,7 +9,7 @@ let frame event =
 
 (* Httpun adds no Content-Length to a streaming body, so closing the writer is
    the only end of the response; advertising keep-alive would make a client
-   wait for an end that cannot be framed (same as [keeper_chat_stream_headers]). *)
+   wait for an end that cannot be framed (same as [keeper_chat_stream_request_headers]). *)
 let response_headers () =
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()

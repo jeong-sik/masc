@@ -301,7 +301,7 @@ let a_system_author_may_not_write_one () =
       with
       | Error (R.Author_not_admitted _) -> ()
       | Ok _ -> Alcotest.fail "a system author wrote an invite record")
-    [ Author.System_cron; Author.System_maintenance; Author.System_migration ]
+    [ Author.System_cron; Author.System_maintenance ]
 ;;
 
 let () =

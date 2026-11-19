@@ -708,6 +708,78 @@ let test_folded_thought_summary_includes_preview_when_width_permits () =
   check bool "Korean preview fits within odd width" true
     (Layout.display_width korean <= 53 && holds korean Layout.cut_mark)
 
+let test_fit_width_puts_padding_after_ellipsis_on_wide_and_space_cuts () =
+  let cut = Layout.cut_mark in
+  (* 2-cell Korean cut at even width 6: room 5 fits 2 syllables (4 cells),
+     so ellipsis sits tight against the text with trailing space after it. *)
+  let korean = Layout.fit_width "가나다라마" 6 in
+  check string "Korean fit_width has no space before ellipsis"
+    ("가나" ^ cut ^ " ") korean;
+  check int "Korean fit_width preserves exact display width" 6
+    (Layout.display_width korean);
+  let spaced = Layout.fit_width "hello world" 7 in
+  check string "ASCII fit_width trims trailing space before ellipsis"
+    ("hello" ^ cut ^ " ") spaced;
+  check int "ASCII fit_width preserves exact display width" 7
+    (Layout.display_width spaced);
+  check int "fitted_source_bytes agrees with fit_width space trimming" 5
+    (Layout.fitted_source_bytes "hello world" 7);
+  let indented = Layout.fit_width "      abcdef" 5 in
+  check string "leading-only spaces stay before ellipsis" ("    " ^ cut) indented
+
+let test_wrap_words_avoids_orphan_separators_and_applies_kinsoku () =
+  (* Multi-space separators must not leave trailing space before wrap. *)
+  let double_spaced = Layout.wrap_words ~max_cells:6 "alpha  beta" in
+  check (list string) "double-space wrap drops trailing space"
+    [ "alpha"; "beta" ] double_spaced;
+  let triple_spaced = Layout.wrap_words ~max_cells:6 "alpha   beta" in
+  check (list string) "triple-space wrap drops trailing spaces"
+    [ "alpha"; "beta" ] triple_spaced;
+  (* Inline separator tokens are preserved losslessly (never silently dropped). *)
+  let piped = Layout.wrap_words ~max_cells:8 "cmd1 | cmd2" in
+  check bool "pipe token is preserved" true
+    (List.exists (fun row -> holds row "|") piped);
+  (* Kinsoku keeps closing parenthesis attached to its preceding syllable. *)
+  let kinsoku = Layout.wrap_words ~max_cells:8 "가나다라)" in
+  check bool "closing paren does not start continuation row" false
+    (List.exists (String.starts_with ~prefix:")") kinsoku);
+  check string "kinsoku concatenates losslessly" "가나다라)"
+    (String.concat "" kinsoku);
+  (* Separator at the very end of the cut does not bypass kinsoku pull-back. *)
+  let sep_kinsoku = Layout.wrap_words ~max_cells:8 "foo/bar/)" in
+  check bool "closing paren after trailing slash does not start continuation row" false
+    (List.exists (String.starts_with ~prefix:")") sep_kinsoku);
+  check string "separator+kinsoku concatenates losslessly" "foo/bar/)"
+    (String.concat "" sep_kinsoku);
+  (* Opening parenthesis does not dangle at the end of a row. *)
+  let opening = Layout.wrap_words ~max_cells:9 "가나다라(값)" in
+  check bool "opening paren does not end first row" false
+    (String.ends_with ~suffix:"(" (List.hd opening));
+  check string "opening kinsoku concatenates losslessly" "가나다라(값)"
+    (String.concat "" opening)
+
+let test_origin_bare_separates_tool_block_from_following_speech () =
+  let entries =
+    [ entry Layout.Tool "tool" "" "first call"
+    ; entry Layout.Tool "tool" "" "second call"
+    ; entry Layout.Keeper "sangsu" "" "answer after tools"
+    ; entry Layout.Tool "tool" "" "follow-up call"
+    ]
+  in
+  let { Layout.rows; _ } =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~inner_width:60
+      ~height:20 ~requested:0 entries
+  in
+  let spacing_count =
+    List.fold_left
+      (fun acc (row : Layout.row) ->
+         if row.kind = Layout.Spacing then acc + 1 else acc)
+      0 rows
+  in
+  (* Tool->Tool has no gap, Tool->Keeper gets one, Keeper->Tool gets one. *)
+  check int "bare transcript inserts breathing row after tool block before speech"
+    2 spacing_count
+
 let () =
   run "tui_message_layout"
     [
@@ -729,6 +801,10 @@ let () =
         ; test_case "an edge cut carries the mark" `Quick test_an_edge_cut_carries_the_mark
         ; test_case "a wide head is cut whole within its width" `Quick
             test_a_wide_head_is_cut_whole_within_its_width
+        ; test_case "fit_width places padding after ellipsis without floating space" `Quick
+            test_fit_width_puts_padding_after_ellipsis_on_wide_and_space_cuts
+        ; test_case "wrap_words avoids orphan separators and applies CJK kinsoku" `Quick
+            test_wrap_words_avoids_orphan_separators_and_applies_kinsoku
         ] );
       ( "spans"
       , [ test_case "a span that is not a number reads as nothing" `Quick
@@ -766,6 +842,8 @@ let () =
             test_bare_sender_row_marks_arrived_reasoning_only
         ; test_case "folded thought summary surfaces a 1-line preview when room permits"
             `Quick test_folded_thought_summary_includes_preview_when_width_permits
+        ; test_case "Origin_bare inserts breathing row after tool block before speech"
+            `Quick test_origin_bare_separates_tool_block_from_following_speech
         ;] )
     ; ( "composer"
       , [] )

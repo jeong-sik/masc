@@ -64,7 +64,7 @@ module Execution_id = Sequenced_id (struct
   let prefix = "exec"
 end)
 
-(** Turn reference — RFC-0233 §7. Canonical per-turn join key, derived
+(** Turn reference. Canonical per-turn join key, derived
     deterministically from the [(trace_id, absolute_turn)] pair already
     recorded on {!Turn_record.t}. Serializes as ["<trace_id>#<absolute_turn>"]
     so keeper chat rows and board posts join on one stable value across

@@ -1,10 +1,10 @@
-(** Coding-eval case declarations (RFC-0396 W1).
+(** Coding-eval case declarations.
 
     One case is one directory under [benchmarks/coding/cases/<id>/] holding
     [case.json], a [workspace/] the verify script fails on, a [solution/]
     overlay that turns verify green, and the verify script itself. The only
-    pass verdict is that script exiting 0 against a workspace copy
-    (RFC-0396 D2); this module carries the declaration and never judges. *)
+    pass verdict is that script exiting 0 against a workspace copy;
+    this module carries the declaration and never judges. *)
 
 type level =
   | L1

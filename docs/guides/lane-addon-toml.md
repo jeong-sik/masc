@@ -119,8 +119,7 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 겹치지 않는다. Native 실행은 `ephemeral` 상태를 지원하며, 패키지가 선언하고 설치에서
 선택한 Exact Output은 비공개 host broker로 실행한다. `persistent` 패키지 상태와
 observation sampling은 해당 호스트 계약을 연결하기 전까지 거절한다. Chrome의 전용
-유지 프로필은 패키지 상태와 별도인 브라우저 설정이다. 브라우저 실행기 분리와 검증 범위는
-[설계](../design/browser-addon-lifecycle.md)를 따른다.
+유지 프로필은 패키지 상태와 별도인 브라우저 설정이다.
 
 ## Ego 설치별 Space
 
@@ -181,7 +180,7 @@ sources = []
 장착할 수 있다. 임의 JSON Schema 전체 지원을 뜻하지 않는다. Hook 변경은 설치
 revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 모델 route를 바꾸지
 않는다. 브라우저 실행기와 모델 Hook의 분리 진행은
-[설계](../design/browser-addon-lifecycle.md)와 [#44150](https://github.com/jeong-sik/masc/issues/44150)에서 추적한다.
+[#44150](https://github.com/jeong-sik/masc/issues/44150)에서 추적한다.
 
 ## LLM Exact Output 선택
 
@@ -587,5 +586,4 @@ worker에서 실행하지만, Skill helper 스크립트는 본문이나 파일�
 생산성 향상을 보장하지 않는다.
 
 구현 경계: [선언 loader](../../lib/lane_addon/lane_addon_config.mli),
-[설치 runtime](../../lib/lane_addon/lane_addon_runtime.mli),
-[전체 v0 계약](../design/lane-addon-v0.md).
+[설치 runtime](../../lib/lane_addon/lane_addon_runtime.mli).

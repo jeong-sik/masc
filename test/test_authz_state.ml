@@ -29,7 +29,6 @@ let authors =
   ; Authz_records.Author.Local_operator
   ; Authz_records.Author.System_cron
   ; Authz_records.Author.System_maintenance
-  ; Authz_records.Author.System_migration
   ]
 ;;
 

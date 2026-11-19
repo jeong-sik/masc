@@ -9,7 +9,7 @@ type action_result = { completion : completion; service : Sandbox_readiness.entr
 open Result.Syntax
 let publisher = "Developer ID Application: Docker Inc (9BNSXJN65R)"
 (* Explicit trust anchor measured from official Docker 4.90.0/238679 macOS ARM
-   DMG; see docs/evidence/prerequisite-installers/docker-desktop-4.90.0.json. *)
+   DMG. *)
 let requirement = "=anchor apple generic and identifier \"com.docker.docker\" and certificate leaf[subject.OU] = \"9BNSXJN65R\""
 let valid_sha value = String.length value = 64 && String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) value
 let checksum body =

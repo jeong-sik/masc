@@ -1,4 +1,4 @@
-(* RFC-0506: 유령 스킬 감지 — a Skill activated recently whose package is
+(* 유령 스킬 감지 — a Skill activated recently whose package is
    gone from every catalog source is recorded, never blocked or restored. *)
 
 type ghost =

@@ -64,7 +64,7 @@ let cached_shell_json_for_namespace ~state ~scope ~config =
 let schedule_namespace_truth_shell_refresh ~state ~scope ~sw ~clock config =
   if Atomic.compare_and_set namespace_truth_shell_refreshing false true then (
     (* The reader answers from the cached shell; no request waits on this
-       refresh (RFC-0204 3.4). *)
+       refresh. *)
     Eio.Fiber.fork ~sw (fun () ->
         Pool_lane.with_background @@ fun () ->
         Eio_guard.protect

@@ -310,32 +310,33 @@ type waiting_group_layout = {
   segment_count : int;
 }
 
-let waiting_group_parts ~compact (summary : Masc_tui_keeper_list_model.waiting_summary) =
+let waiting_group_parts ~ko ~compact (summary : Masc_tui_keeper_list_model.waiting_summary) =
+  let say korean english = if ko then korean else english in
   let part activity label count =
     if count = 0 then None
     else Some (Masc_tui_keeper_mark.activity_glyph activity, label, count)
   in
-  [ part Masc_tui_keeper_list_model.Tool_waiting "tool" summary.tool
-  ; part Masc_tui_keeper_list_model.Model_waiting "model" summary.model
+  [ part Masc_tui_keeper_list_model.Tool_waiting (say "도구" "tool") summary.tool
+  ; part Masc_tui_keeper_list_model.Model_waiting (say "모델" "model") summary.model
   ; part Masc_tui_keeper_list_model.External_waiting
-      (if compact then "ext" else "external") summary.external_wait
+      (if compact then say "외부" "ext" else say "외부" "external") summary.external_wait
   ; part Masc_tui_keeper_list_model.Delegate_result
-      (if compact then "result" else "delegate result") summary.delegate
-  ; part Masc_tui_keeper_list_model.Verifying "verify" summary.verification
+      (if compact then say "결과" "result" else say "위임 결과" "delegate result") summary.delegate
+  ; part Masc_tui_keeper_list_model.Verifying (say "검증" "verify") summary.verification
   ; (if summary.background = 0 then None
      else
        Some
          ( Masc_tui_keeper_mark.badge_glyph
              (Masc_tui_keeper_list_model.Badge_async
                 { running = summary.background; ownership_unknown = 0 })
-         , "async"
+         , say "비동기" "async"
          , summary.background ))
   ]
   |> List.filter_map Fun.id
 
-let waiting_group_detail ~compact summary =
+let waiting_group_detail ~ko ~compact summary =
   let parts =
-    waiting_group_parts ~compact summary
+    waiting_group_parts ~ko ~compact summary
     |> List.map (fun (glyph, label, count) ->
       Printf.sprintf "%s %s %d" glyph label count)
   in
@@ -343,24 +344,27 @@ let waiting_group_detail ~compact summary =
   | [] -> ""
   | _ -> "  " ^ String.concat " · " parts
 
-let waiting_group_text ~compact ~group_count summary =
-  Printf.sprintf "\xe2\x97\x8c WAITING %d%s" group_count
-    (waiting_group_detail ~compact summary)
+let waiting_group_text ~ko ~compact ~group_count summary =
+  Printf.sprintf "\xe2\x97\x8c %s %d%s" (if ko then "대기" else "WAITING") group_count
+    (waiting_group_detail ~ko ~compact summary)
 
-let waiting_group_layout ~available_cells ~group_count summary =
-  let full = waiting_group_text ~compact:false ~group_count summary in
-  let compact_text = waiting_group_text ~compact:true ~group_count summary in
+let waiting_group_layout_for ~ko ~available_cells ~group_count summary =
+  let full = waiting_group_text ~ko ~compact:false ~group_count summary in
+  let compact_text = waiting_group_text ~ko ~compact:true ~group_count summary in
   let full_cells = Masc_tui_message_layout.display_width full in
   let compact_cells = Masc_tui_message_layout.display_width compact_text in
   let compact = full_cells > available_cells in
   { compact
   ; cells = (if compact then compact_cells else full_cells)
-  ; segment_count = List.length (waiting_group_parts ~compact:false summary)
+  ; segment_count = List.length (waiting_group_parts ~ko ~compact:false summary)
   }
 
-let waiting_group_heading_detail ~available_cells ~group_count summary =
-  let layout = waiting_group_layout ~available_cells ~group_count summary in
-  waiting_group_detail ~compact:layout.compact summary
+let waiting_group_layout ~available_cells ~group_count summary =
+  waiting_group_layout_for ~ko:false ~available_cells ~group_count summary
+
+let waiting_group_heading_detail ?(ko = false) ~available_cells ~group_count summary =
+  let layout = waiting_group_layout_for ~ko ~available_cells ~group_count summary in
+  waiting_group_detail ~ko ~compact:layout.compact summary
 
 let keeper_failure_context_for_detail ~show_runtime failure_context =
   if show_runtime then None else failure_context

@@ -13,12 +13,10 @@ Release only when all items are true:
 
 1. checkpoint save and restore use agent core checkpoint primitives;
 2. MASC owns domain transitions and exposes matching receipts/tool results;
-3. the validation in
-   [KEEPER-CONTINUITY-VALIDATION.md](./KEEPER-CONTINUITY-VALIDATION.md) passes;
-4. lane isolation is proven under a busy turn, provider failure, and restart;
-5. load/save/receipt errors are observable and actionable;
-6. dashboard and status surfaces report typed lifecycle/checkpoint facts only;
-7. no prompt, parser, sidecar, API, or UI derives runtime state from assistant
+3. lane isolation is proven under a busy turn, provider failure, and restart;
+4. load/save/receipt errors are observable and actionable;
+5. dashboard and status surfaces report typed lifecycle/checkpoint facts only;
+6. no prompt, parser, sidecar, API, or UI derives runtime state from assistant
    prose.
 
 ## Evidence Bundle

@@ -504,7 +504,7 @@ type basis =
    insertion/refresh timestamps. [first_seen]: insertion, authoritative,
    preserved across re-upsert. [last_seen]: most recent observation of the
    same claim bytes; a re-observation refreshes it and adds no row, and is
-   not a strength signal (RFC-0418). A fact's value is the librarian's
+   not a strength signal. A fact's value is the librarian's
    judgment, not a score or a model-invented semantic identity. *)
 type fact =
   { claim : string

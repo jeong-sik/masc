@@ -368,6 +368,11 @@ val last_row : recent_entry option fact
     [None] for a store without rows, and a row that is not JSON is
     {!Malformed_json}. *)
 
+val newest_parsed_row : Yojson.Safe.t option fact
+(** The store's newest row that is JSON, as {!find_latest_entry_result} finds
+    it when it selects every {!Parsed} row: rows that are not JSON are passed
+    over, and [None] is a store in which no row is JSON. *)
+
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 (** The fact's value for the store. When the store keeps it, no file is read
     and no system call is made for a directory that exists

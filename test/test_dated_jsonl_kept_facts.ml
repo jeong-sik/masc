@@ -1,8 +1,10 @@
 (** The facts [Dated_jsonl] keeps in memory about a store ([read_fact]).
 
-    The files are the authority. Every test compares the fact with the strict
-    read of the files it stands for, [read_recent_result t 1], and looks at
-    how the answer was come by: [Held] means no file was read.
+    The files are the authority. Every test compares a fact with the strict
+    read of the files it stands for, and looks at how the answer was come by:
+    [Held] means no file was read. The last row stands for
+    [read_recent_result t 1], and the newest row that is JSON for
+    [find_latest_entry_result] selecting every [Parsed] row.
 
     This executable stands for the server: it says it is the one process
     that writes the stores before any test runs. What a process that has not
@@ -22,7 +24,10 @@
     5. One directory has one fact, whichever spelling reached it. A
        spelling is asked about again after a removal, and by an append whose
        directory was not there when it began or that a removal overlapped.
-    6. Each read is counted by how its value was come by. *)
+    6. Each read is counted by how its value was come by.
+    7. The newest row that is JSON passes over rows that are not, in its own
+       file and in later ones, and an append moves it from its own row's
+       file. *)
 
 open Alcotest
 module D = Dated_jsonl
@@ -127,6 +132,32 @@ let check_the_fact_is_the_files label store =
     label
     (newest_row_in_the_files store)
     (value_of (last_row store))
+;;
+
+(* The newest row that is JSON, as an [answer]: its rows are all [Parsed]. *)
+let newest_parsed_row store =
+  let parsed = Option.map (fun json -> D.Parsed json) in
+  match D.read_fact store D.newest_parsed_row with
+  | Fact_cell.Held value -> Held (parsed value)
+  | Fact_cell.Read_and_kept value -> Read_and_kept (parsed value)
+  | Fact_cell.Read_not_kept value -> Read_not_kept (parsed value)
+  | Fact_cell.Read_failed error -> Read_failed (D.read_error_to_string error)
+;;
+
+(* The strict read that fact stands for. *)
+let newest_parsed_row_in_the_files store =
+  D.find_latest_entry_result store (function
+    | D.Parsed _ as row -> Some row
+    | D.Malformed_json _ -> None)
+  |> Result.map_error D.read_error_to_string
+;;
+
+let check_the_newest_parsed_row_is_the_files label store =
+  check
+    (result (option entry) string)
+    label
+    (newest_parsed_row_in_the_files store)
+    (value_of (newest_parsed_row store))
 ;;
 
 (* Text put into the day file of [ts] behind the store's back. *)
@@ -445,6 +476,118 @@ let test_which_file_holds_the_newest_row () =
     ]
 ;;
 
+(* --- 7. the newest row that is JSON ------------------------------------ *)
+
+let test_the_newest_parsed_row_passes_over_a_row_that_is_not_json () =
+  let location = temp_location "djkf_parsed" in
+  let store = D.open_store location in
+  check answer "a store without rows" (Read_and_kept None) (newest_parsed_row store);
+  D.append store (row 1);
+  check answer "an append moves it" (Held (Some (D.Parsed (row 1)))) (newest_parsed_row store);
+  ignore (write_behind_the_store location ~ts:(now ()) "{\"cut\": \n" : string);
+  D.directories_removed ();
+  check
+    answer
+    "the cut row after it is passed over"
+    (Read_and_kept (Some (D.Parsed (row 1))))
+    (newest_parsed_row store);
+  check_the_newest_parsed_row_is_the_files "as the strict search says" store;
+  check
+    answer
+    "later readers open no file"
+    (Held (Some (D.Parsed (row 1))))
+    (newest_parsed_row store);
+  D.append store (row 2);
+  check
+    answer
+    "the next row replaces it"
+    (Held (Some (D.Parsed (row 2))))
+    (newest_parsed_row store)
+;;
+
+(* A later day file holds one row, and it is not JSON. It is the store's last
+   row, and it is nothing to the newest row that is JSON: that fact counts
+   from the file of its own row, so today's append moves it and reads no
+   file, while the same append forgets the last row. *)
+let test_the_newest_parsed_row_counts_from_its_own_file () =
+  let location = temp_location "djkf_parsed_later" in
+  let store = D.open_store location in
+  D.append store (row 1);
+  let later =
+    write_behind_the_store location ~ts:(now () +. (3. *. day)) "not json\n"
+  in
+  D.directories_removed ();
+  let is_the_later_row label = function
+    | Read_and_kept (Some (D.Malformed_json { path; _ })) -> check string label later path
+    | other -> failf "%s: expected the later file's row, got %a" label (pp answer) other
+  in
+  check
+    answer
+    "the later file's row is passed over"
+    (Read_and_kept (Some (D.Parsed (row 1))))
+    (newest_parsed_row store);
+  is_the_later_row "the last row is the later file's" (last_row store);
+  D.append store (row 2);
+  check
+    answer
+    "today's row is the newest row that is JSON"
+    (Held (Some (D.Parsed (row 2))))
+    (newest_parsed_row store);
+  check_the_newest_parsed_row_is_the_files "as the strict search says" store;
+  is_the_later_row "the last row is read again, and is the later file's" (last_row store)
+;;
+
+let test_a_json_row_in_a_later_file_stays_the_newest () =
+  let location = temp_location "djkf_parsed_older" in
+  let store = D.open_store location in
+  ignore
+    (write_behind_the_store location ~ts:(now () +. (3. *. day)) "{\"row\":9}\n" : string);
+  check
+    answer
+    "the later file's row is the newest"
+    (Read_and_kept (Some (D.Parsed (row 9))))
+    (newest_parsed_row store);
+  D.append store (row 1);
+  check
+    answer
+    "today's row does not replace it"
+    (Read_and_kept (Some (D.Parsed (row 9))))
+    (newest_parsed_row store);
+  check_the_newest_parsed_row_is_the_files "as the strict search says" store
+;;
+
+(* What an append makes of the kept value, with no file and no clock. *)
+let test_what_a_row_makes_of_the_newest_parsed_row () =
+  let previous = Some (row 1) in
+  let after ~newest ~row ~written =
+    D.For_testing.after_row D.newest_parsed_row ~value:previous ~newest ~row ~written
+    |> Option.map (fun (value, newest) -> Option.map (fun json -> D.Parsed json) value, newest)
+  in
+  let answer = option (pair (option entry) (option (pair string string))) in
+  let today = "2026-11", "18.jsonl" in
+  let cut = D.Malformed_json { path = "18.jsonl"; line_number = None; detail = "cut" } in
+  List.iter
+    (fun (label, newest, row, written, expected) ->
+       check answer label expected (after ~newest ~row ~written))
+    [ ( "a JSON row in a store without one"
+      , None
+      , D.Parsed (row 2)
+      , today
+      , Some (Some (D.Parsed (row 2)), Some today) )
+    ; ( "a JSON row in the file of the kept one"
+      , Some today
+      , D.Parsed (row 2)
+      , today
+      , Some (Some (D.Parsed (row 2)), Some today) )
+    ; ( "a JSON row in a file before the kept one's"
+      , Some today
+      , D.Parsed (row 2)
+      , ("2026-11", "17.jsonl")
+      , None )
+    ; "a row that is not JSON: the files are asked", Some today, cut, today, None
+    ]
+;;
+
 (* --- a store another process writes ------------------------------------- *)
 
 (* This executable has said it holds the writer lease. The cost log is also
@@ -493,7 +636,9 @@ let test_which_stores_keep_their_facts () =
   check
     (list store)
     "the stores whose facts are kept"
-    [ D.Store.Keeper D.Store.Keeper.Turn_records ]
+    [ D.Store.Keeper D.Store.Keeper.Execution_receipts
+    ; D.Store.Keeper D.Store.Keeper.Turn_records
+    ]
     kept
 ;;
 
@@ -659,6 +804,7 @@ let test_the_fact_is_the_files_after_every_operation () =
     row !number
   in
   let held = ref 0 in
+  let parsed_held = ref 0 in
   for step = 1 to 400 do
     (match Random.State.int random 16 with
      | 0 | 1 | 2 | 3 | 4 | 5 -> D.append store (next ())
@@ -683,10 +829,17 @@ let test_the_fact_is_the_files_after_every_operation () =
     (match last_row store with
      | Held _ -> incr held
      | Read_and_kept _ | Read_not_kept _ | Read_failed _ -> ());
-    check_the_fact_is_the_files (Printf.sprintf "after step %d" step) store
+    (match newest_parsed_row store with
+     | Held _ -> incr parsed_held
+     | Read_and_kept _ | Read_not_kept _ | Read_failed _ -> ());
+    check_the_fact_is_the_files (Printf.sprintf "after step %d" step) store;
+    check_the_newest_parsed_row_is_the_files
+      (Printf.sprintf "the newest row that is JSON, after step %d" step)
+      store
   done;
   (* The run is not a run of file reads: most answers came from memory. *)
-  check bool "most answers were held" true (!held > 200)
+  check bool "most answers were held" true (!held > 200);
+  check bool "most answers of the newest row that is JSON were held" true (!parsed_held > 200)
 ;;
 
 (* One append and one reader of a forgotten fact, started together, many
@@ -809,6 +962,24 @@ let () =
             "reads are counted by how they were come by"
             `Quick
             test_reads_are_counted_by_how_they_were_come_by
+        ] )
+    ; ( "the newest row that is JSON"
+      , [ test_case
+            "it passes over a row that is not JSON"
+            `Quick
+            test_the_newest_parsed_row_passes_over_a_row_that_is_not_json
+        ; test_case
+            "it counts from the file of its own row"
+            `Quick
+            test_the_newest_parsed_row_counts_from_its_own_file
+        ; test_case
+            "a JSON row in a later file stays the newest"
+            `Quick
+            test_a_json_row_in_a_later_file_stays_the_newest
+        ; test_case
+            "what a row makes of it"
+            `Quick
+            test_what_a_row_makes_of_the_newest_parsed_row
         ] )
     ; ( "a store another process writes"
       , [ test_case

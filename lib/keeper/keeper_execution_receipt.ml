@@ -609,11 +609,24 @@ let append (config : Workspace.config) (receipt : t) =
           (Printexc.to_string exn)))
 ;;
 
-let latest_json (config : Workspace.config) keeper_name =
+(* The Keeper's newest receipt row that is JSON: the store's kept fact, which
+   reads no file once it is held. Both readers below take it, so they answer
+   from one row. *)
+let newest_receipt_row (config : Workspace.config) keeper_name =
   let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
-  match Dated_jsonl.read_recent store 1 with
-  | [ json ] -> Some json
-  | _ -> None
+  store, Dated_jsonl.read_fact store Dated_jsonl.newest_parsed_row
+;;
+
+let latest_json (config : Workspace.config) keeper_name =
+  match newest_receipt_row config keeper_name with
+  | _, (Fact_cell.Held row | Fact_cell.Read_and_kept row | Fact_cell.Read_not_kept row) -> row
+  | store, Fact_cell.Read_failed _ ->
+    (* The strict read refuses this store (a foreign name beside the months,
+       a day file that is not a regular file). This function has always read
+       such a store leniently, and its answer for one stays what it was. *)
+    (match Dated_jsonl.read_recent store 1 with
+     | [ json ] -> Some json
+     | _ -> None)
 ;;
 
 type receipt_turn =
@@ -795,15 +808,14 @@ let latest_receipt_reading_of_json json =
 ;;
 
 let read_latest_receipt (config : Workspace.config) keeper_name =
-  let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
-  match
-    Dated_jsonl.find_latest_entry_result store (function
-      | Dated_jsonl.Parsed json -> Some json
-      | Dated_jsonl.Malformed_json _ -> None)
-  with
-  | Error err -> Receipt_store_unreadable err
-  | Ok None -> No_receipt
-  | Ok (Some json) -> latest_receipt_reading_of_json json
+  match newest_receipt_row config keeper_name with
+  | _, Fact_cell.Read_failed err -> Receipt_store_unreadable err
+  | _, (Fact_cell.Held None | Fact_cell.Read_and_kept None | Fact_cell.Read_not_kept None) ->
+    No_receipt
+  | ( _
+    , ( Fact_cell.Held (Some json)
+      | Fact_cell.Read_and_kept (Some json)
+      | Fact_cell.Read_not_kept (Some json) ) ) -> latest_receipt_reading_of_json json
 ;;
 
 let latest_json_by_keeper (config : Workspace.config) keeper_names =

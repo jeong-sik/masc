@@ -1553,18 +1553,17 @@ let read_recent_lines_result ?offset t n =
   read_recent_using_result ?offset t n ~decode:(fun ~path line -> path, line)
 ;;
 
-let find_latest_entry_result t f =
+(* The first value [f] selects, newest row first, with the day file its row
+   is in. *)
+let find_latest_entry_with_its_file_result t f =
   let open Result.Syntax in
   let rec visit_days month_path = function
     | [] -> Ok None
     | day :: rest ->
-      let* found =
-        find_latest_entry_in_file_result
-          (Filename.concat month_path day)
-          f
-      in
+      let path = Filename.concat month_path day in
+      let* found = find_latest_entry_in_file_result path f in
       (match found with
-       | Some _ -> Ok found
+       | Some value -> Ok (Some (value, path))
        | None -> visit_days month_path rest)
   in
   let rec visit_months = function
@@ -1579,6 +1578,10 @@ let find_latest_entry_result t f =
   in
   let* months = list_month_dirs_result t in
   visit_months months
+;;
+
+let find_latest_entry_result t f =
+  Result.map (Option.map fst) (find_latest_entry_with_its_file_result t f)
 ;;
 
 let read_recent_lines ?(offset=0) t n =
@@ -2606,6 +2609,30 @@ let last_row : recent_entry option fact =
           | (path, row) :: _ ->
             { value = Some row; newest = Some (place_of_day_file_path path) }))
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
+  }
+
+(* The newest row that is JSON. A row the fact passes over tells it nothing,
+   so [newest] is the day file of the value's own row: a row appended to that
+   file or a later one is the newest JSON row, whatever the files in between
+   hold. An append writes JSON; were a row not to read back as JSON, the
+   files would be asked again. *)
+let newest_parsed_row : Yojson.Safe.t option fact =
+  { id = Type.Id.make ()
+  ; name = "newest_parsed_row"
+  ; read =
+      (fun t ->
+        find_latest_entry_with_its_file_result t (function
+          | Parsed json -> Some json
+          | Malformed_json _ -> None)
+        |> Result.map (function
+          | None -> { value = None; newest = None }
+          | Some (json, path) ->
+            { value = Some json; newest = Some (place_of_day_file_path path) }))
+  ; step =
+      (fun _ written ->
+        match Lazy.force written.row with
+        | Parsed json -> Some (Some json)
+        | Malformed_json _ -> None)
   }
 
 (* Whether this process holds the workspace's writer lease. A cell is moved

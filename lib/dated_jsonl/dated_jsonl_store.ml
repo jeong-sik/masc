@@ -227,8 +227,12 @@ let keeper_facts = function
      A turn runs only in a process that holds the lease. Day files go by the
      prune pass and by the Keeper's purge, both in that process. *)
   | Keeper.Turn_records -> Kept_by_the_lease_holder
+  (* One writer, [Keeper_execution_receipt.append], called when a Keeper's
+     run ends; a run is in a process that holds the lease. Day files go by
+     the prune pass and by the Keeper's purge, both in that process. Boot
+     reconcile does not move this store. *)
+  | Keeper.Execution_receipts -> Kept_by_the_lease_holder
   | Keeper.Metrics
-  | Keeper.Execution_receipts
   | Keeper.Provider_inputs
   | Keeper.Memory_recall_artifacts
   | Keeper.Crash_events

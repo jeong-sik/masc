@@ -64,7 +64,10 @@ let keeper_metrics_response ~config ~keeper_name req =
        the rows the metrics store keeps as text, decoded in the job. *)
     let limit = Keeper_status_metrics.recent_metrics_row_count in
     if limit_parameters <> [] then
-      error `Bad_request "invalid_metrics_limit" "the metrics window is fixed at 120 rows"
+      error
+        `Bad_request
+        "invalid_metrics_limit"
+        (Printf.sprintf "the metrics window is fixed at %d rows" limit)
     else
       let reading =
         Eio_guard.with_named_switch "keeper-metrics-tail" (fun () ->

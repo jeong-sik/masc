@@ -75,9 +75,19 @@ val newest_metrics_lines_result :
     A fact of the Keeper's metrics store ({!Dated_jsonl.last_lines}), kept and
     forgotten as {!latest_tool_audit_snapshot_from_files} is. *)
 
-val newest_metrics_lines_passing_over_what_is_not_the_stores :
-  Workspace.config -> keeper_name:string -> string list
-(** {!newest_metrics_lines_result} for a reader that shows the rows it can.
-    When the strict read refuses the store, the rows are read with
-    [Dated_jsonl.read_recent_lines], which passes over a directory entry that
-    is not the store's and answers no row for a directory it cannot list. *)
+val recent_activity_row_count : int
+(** How many of a Keeper's newest metrics rows the recent activity of a
+    Keeper row shows. *)
+
+val recent_activity_lines : Workspace.config -> keeper_name:string -> string list
+(** The text of the Keeper's newest {!recent_activity_row_count} metrics
+    rows, oldest first: the end of {!newest_metrics_lines_result}.
+
+    The recent activity shows the rows it can. When the strict read refuses
+    the store, those rows are read with [Dated_jsonl.read_recent_lines],
+    which passes over a directory entry that is not the store's and answers
+    no row for a directory it cannot list. It asks for
+    {!recent_activity_row_count} rows and no more, so it opens no day file
+    older than the ones that hold them.
+
+    @raise Sys_error when one of those day files cannot be read. *)

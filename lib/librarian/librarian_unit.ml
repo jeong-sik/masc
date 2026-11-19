@@ -11,6 +11,7 @@ type missing_part =
   | External_rows of range
   | Undecodable_history_line of { offset : int }
   | Undecodable_internal_line of { offset : int }
+  | Undecodable_external_row of { row : int }
 
 type missing_at =
   { line : int

@@ -81,6 +81,10 @@ type scanned =
       scan. *)
   }
 
+(** How many lines one locked read takes. An append waits for one such read
+    at most. *)
+val scan_window_rows : int
+
 (** Every complete line from the first, in order ({!Private_jsonl_scan}).
     No file is no line. *)
 val fold

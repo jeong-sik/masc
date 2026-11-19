@@ -39,6 +39,9 @@ type missing_part =
   | Undecodable_internal_line of { offset : int }
   (** A row of an official-client file that does not decode, by the byte
       offset where the row starts. *)
+  | Undecodable_external_row of { row : int }
+  (** A row of the external store that does not decode, by its row number
+      from 0. *)
 
 (** What is missing from the unit at [line]. *)
 type missing_at =

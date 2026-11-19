@@ -434,7 +434,7 @@ let test_the_forecast_takes_the_drivers_start () =
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
       Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted ~front
-        ~turn_start:turn_boundary ~history_at_start:Boundary.Continued_history
+        ~turn_start:turn_boundary ~this_turn_start:None
         ~counted_tokens:None messages in
     check bool (name ^ ": the driver takes the start this case names") true
       (expected driver.composed.origin);

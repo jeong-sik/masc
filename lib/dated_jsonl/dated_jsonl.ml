@@ -91,9 +91,11 @@ let compare_places left right =
 ;;
 
 (* A row an append put at the end of a day file: the row as the strict reads
-   decode it, the file, and the store's directory. *)
+   decode it, its line as they read it (the text without its newline), the
+   file, and the store's directory. *)
 type written =
   { row : recent_entry Lazy.t
+  ; line : string
   ; place : place
   ; store_dir : string
   }
@@ -989,8 +991,9 @@ let settle_kept entry before written =
      fill of that cell can have read the files without the row. *)
   if Atomic.get entry.kept != before.kept_then then forget_kept entry
 
-let written_row ~(dated : Store.dated_path) parsed =
+let written_row ~(dated : Store.dated_path) ~line parsed =
   { row = lazy (recent_entry_of_parsed ~path:dated.path (Lazy.force parsed))
+  ; line
   ; place = { month_dir = dated.month_dir; day_file = dated.day_file }
   ; store_dir = dated.base_dir
   }
@@ -1000,7 +1003,8 @@ let written_row ~(dated : Store.dated_path) parsed =
    before the mutex is taken when the store keeps a fact; a fact that appears
    after that look is parsed under the mutex, once. *)
 type rendered =
-  { rows : string
+  { line : string
+  ; rows : string
   ; parsed : (Yojson.Safe.t, string) result Lazy.t
   }
 
@@ -1010,7 +1014,7 @@ let render entry json =
   (match Atomic.get entry.kept with
    | [] -> ()
    | _ :: _ -> ignore (Lazy.force parsed : (Yojson.Safe.t, string) result));
-  { rows = line ^ "\n"; parsed }
+  { line; rows = line ^ "\n"; parsed }
 
 (* Run [change], which changes the store's files under the store's mutex and
    keeps the cells right itself while it returns. When it raises, the files
@@ -1055,7 +1059,7 @@ let append_unlocked ~on_committed t json =
       Fs_compat.append_jsonl_rows dated.path rendered.rows;
       (* The facts first, then the caller's acknowledgement: whoever the
          acknowledgement wakes reads the facts with the row in them. *)
-      settle_kept entry before (written_row ~dated rendered.parsed);
+      settle_kept entry before (written_row ~dated ~line:rendered.line rendered.parsed);
       on_committed ();
       match run_post_append_pruning_unlocked t ~dated with
       | `Kept_every_file -> ()
@@ -1968,7 +1972,7 @@ let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
       Skipped_rotation_exhausted { sequence_limit = max_int }
     | Some outcome ->
       Fs_compat.append_jsonl_rows dated.path rendered.rows;
-      settle_kept entry before (written_row ~dated rendered.parsed);
+      settle_kept entry before (written_row ~dated ~line:rendered.line rendered.parsed);
       on_committed ();
       (match run_post_append_pruning_unlocked t ~dated with
        | `Kept_every_file -> ()
@@ -2545,12 +2549,11 @@ let last_row : recent_entry option fact =
    A row is its JSON, or [None] when it is not JSON. The file it is in is no
    part of the value: a size rotation renames the current day file under the
    rows a window still holds, and a kept name would be the old one. *)
-let last_rows ~name ~count : Yojson.Safe.t option list fact =
-  if count < 1 then invalid_arg (Printf.sprintf "Dated_jsonl.last_rows: count %d" count);
-  let json_of = function
-    | Parsed json -> Some json
-    | Malformed_json _ -> None
-  in
+(* A window of the store's newest [count] physical rows, oldest first.
+   [of_line] gives a row from its line as the strict read hands it over, and
+   [of_written] the same row from an append. The value names no file. *)
+let window ~what ~name ~count ~of_line ~of_written =
+  if count < 1 then invalid_arg (Printf.sprintf "Dated_jsonl.%s: count %d" what count);
   let rec drop excess rows =
     match rows with
     | _ :: rest when excess > 0 -> drop (excess - 1) rest
@@ -2560,8 +2563,7 @@ let last_rows ~name ~count : Yojson.Safe.t option list fact =
   ; name
   ; read =
       (fun t ->
-        read_recent_using_result t count ~decode:(fun ~path line ->
-          path, json_of (recent_entry_of_line ~path line))
+        read_recent_using_result t count ~decode:(fun ~path line -> path, of_line ~path line)
         |> Result.map (fun rows ->
           { value = List.map snd rows
           ; newest =
@@ -2571,9 +2573,29 @@ let last_rows ~name ~count : Yojson.Safe.t option list fact =
           }))
   ; step =
       (fun held written ->
-        let rows = held @ [ json_of (Lazy.force written.row) ] in
+        let rows = held @ [ of_written written ] in
         Some (drop (List.length rows - count) rows))
   }
+
+let last_rows ~name ~count : Yojson.Safe.t option list fact =
+  let json_of = function
+    | Parsed json -> Some json
+    | Malformed_json _ -> None
+  in
+  window
+    ~what:"last_rows"
+    ~name
+    ~count
+    ~of_line:(fun ~path line -> json_of (recent_entry_of_line ~path line))
+    ~of_written:(fun written -> json_of (Lazy.force written.row))
+
+let last_lines ~name ~count : string list fact =
+  window
+    ~what:"last_lines"
+    ~name
+    ~count
+    ~of_line:(fun ~path:_ line -> line)
+    ~of_written:(fun written -> written.line)
 
 (* What [select] gives for the newest row it selects. The strict search goes
    from the newest row back and stops at the first one selected, so the rows
@@ -2674,11 +2696,19 @@ module For_testing = struct
   let in_registry location =
     File_system_named.has_entry registry (Store.absolute_dir location)
 
-  let after_row ?(base_dir = Filename.current_dir_name) fact ~value ~newest ~row ~written =
+  let after_row
+        ?(base_dir = Filename.current_dir_name)
+        ?(line = "")
+        fact
+        ~value
+        ~newest
+        ~row
+        ~written
+    =
     let place (month_dir, day_file) = { month_dir; day_file } in
     after_row
       fact
-      { row = Lazy.from_val row; place = place written; store_dir = base_dir }
+      { row = Lazy.from_val row; line; place = place written; store_dir = base_dir }
       { value; newest = Option.map place newest }
     |> Option.map (fun held ->
       held.value, Option.map (fun place -> place.month_dir, place.day_file) held.newest)

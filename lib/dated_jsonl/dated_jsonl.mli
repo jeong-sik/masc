@@ -371,6 +371,15 @@ val last_rows : name:string -> count:int -> Yojson.Safe.t option list fact
 
     @raise Invalid_argument when [count] is less than 1. *)
 
+val last_lines : name:string -> count:int -> string list fact
+(** A fact: the lines of the store's newest [count] physical rows, oldest
+    first, as [read_recent_lines_result t count] reads them: each row's text
+    without its newline, whether or not it is JSON. As {!last_rows}, with the
+    rows left as text for a reader that decodes the few it needs: 120 rows of
+    2.8 kB took four times the memory as parsed JSON that they take as text.
+
+    @raise Invalid_argument when [count] is less than 1. *)
+
 val newest_parsed_row : Yojson.Safe.t option fact
 (** The store's newest row that is JSON, as {!find_latest_entry_result} finds
     it when it selects every {!Parsed} row: rows that are not JSON are passed
@@ -725,6 +734,7 @@ module For_testing : sig
 
   val after_row :
     ?base_dir:string ->
+    ?line:string ->
     'a fact ->
     value:'a ->
     newest:(string * string) option ->
@@ -737,5 +747,7 @@ module For_testing : sig
       value after the row with the newest day file it saw, or [None] when the
       append forgets the fact instead. It reads no file and no clock.
       [base_dir] is the store's directory as a {!newest_selected} selection
-      is told it; the current directory's name when left out. *)
+      is told it; the current directory's name when left out. [line] is the
+      row's text, which only {!last_lines} looks at; the empty text when left
+      out. *)
 end

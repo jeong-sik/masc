@@ -95,9 +95,40 @@ let finalize_days ~today_index days =
 
 module StringSet = Set.Make (String)
 
-type source =
-  | Live
-  | Archived
+(* A task's time as the windows read it: parsed once, or counted as one the
+   windows cannot place. *)
+type instant =
+  | At of float
+  | Unparseable
+
+let instant_of_text text =
+  match Masc_domain.parse_iso8601_opt text with
+  | Some at when Float.is_finite at -> At at
+  | Some _ | None -> Unparseable
+
+type ending =
+  | Open
+  | Completed_at of instant
+  | Cancelled_at of instant
+
+let ending_of_status : Masc_domain.task_status -> ending = function
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> Open
+  | Done { completed_at; _ } -> Completed_at (instant_of_text completed_at)
+  | Cancelled { cancelled_at; _ } -> Cancelled_at (instant_of_text cancelled_at)
+
+module Archived = struct
+  type entry = { id : string; created : instant; ending : ending }
+
+  type t = entry list
+
+  let empty = []
+
+  let add archived (task : Masc_domain.task) =
+    { id = task.id;
+      created = instant_of_text task.created_at;
+      ending = ending_of_status task.task_status }
+    :: archived
+end
 
 let of_tasks ~now ~archived tasks =
   let window_started_at = now -. (24. *. 60. *. 60.) in
@@ -113,10 +144,9 @@ let of_tasks ~now ~archived tasks =
     | Some at -> at >= window_started_at && at <= now
     | None -> false
   in
-  let parse state text =
-    match Masc_domain.parse_iso8601_opt text with
-    | Some at when Float.is_finite at -> state, Some at
-    | Some _ | None ->
+  let place state = function
+    | At at -> state, Some at
+    | Unparseable ->
       { state with unparseable_timestamps = state.unparseable_timestamps + 1 }, None
   in
   let today_index = day_index now in
@@ -126,74 +156,92 @@ let of_tasks ~now ~archived tasks =
     if index < oldest_index || index > today_index then days
     else bump index quiet_day days f
   in
-  (* [masc_gc] moves finished tasks out of the backlog into the archive. They
-     still happened on the days they happened, so the windows count them.
-     The current counts and the assignee rows stay the backlog's: they
-     describe what is on the board now. A task the GC put back into the
-     backlog but left in the archive is counted once, as live. *)
-  let live_ids =
-    List.fold_left
-      (fun ids (task : Masc_domain.task) -> StringSet.add task.id ids)
-      StringSet.empty tasks
-  in
-  let sourced =
-    List.map (fun task -> Live, task) tasks
-    @ List.filter_map
-        (fun (task : Masc_domain.task) ->
-          if StringSet.mem task.id live_ids then None else Some (Archived, task))
-        archived
-  in
-  let state, assignees, days =
-    List.fold_left
-      (fun (state, assignees, days) (source, (task : Masc_domain.task)) ->
-        let state, created_at = parse state task.created_at in
-        let state =
-          if recent created_at then
-            { state with recent = { state.recent with created = state.recent.created + 1 } }
-          else state
+  (* What a task's two times add to the windows, live or archived alike:
+     the 24 hour counts, the day bars, the times that cannot be placed and
+     the oldest open registration. *)
+  let count_times (state, days) ~created ~ending =
+    let state, created_at = place state created in
+    let state =
+      if recent created_at then
+        { state with recent = { state.recent with created = state.recent.created + 1 } }
+      else state
+    in
+    let days =
+      match created_at with
+      | Some at -> bump_day days at (fun d -> { d with rd_created = d.rd_created + 1 })
+      | None -> days
+    in
+    let terminal =
+      match ending with
+      | Open -> None
+      | Completed_at at -> Some (`Completed, at)
+      | Cancelled_at at -> Some (`Cancelled, at)
+    in
+    let state, terminal_at =
+      match terminal with
+      | Some (_, at) -> place state at
+      | None -> state, None
+    in
+    let days =
+      match terminal, terminal_at with
+      | Some (kind, _), Some at ->
+        bump_day days at (fun d ->
+          match kind with
+          | `Completed -> { d with rd_completed = d.rd_completed + 1 }
+          | `Cancelled -> { d with rd_cancelled = d.rd_cancelled + 1 })
+      | Some _, None | None, _ -> days
+    in
+    let state =
+      match terminal, terminal_at with
+      | Some (kind, _), at when recent at ->
+        let counts =
+          match kind with
+          | `Completed -> { state.recent with completed = state.recent.completed + 1 }
+          | `Cancelled -> { state.recent with cancelled = state.recent.cancelled + 1 }
         in
-        let days =
-          match created_at with
-          | Some at -> bump_day days at (fun d -> { d with rd_created = d.rd_created + 1 })
-          | None -> days
+        { state with recent = counts }
+      | Some _, _ | None, _ -> state
+    in
+    let state =
+      match terminal with
+      | Some _ -> state
+      | None ->
+        let oldest =
+          match state.oldest_open_created_at, created_at with
+          | oldest, Some at when at <= now ->
+            Some (Option.fold ~none:at ~some:(Float.min at) oldest)
+          | oldest, _ -> oldest
         in
-        let count, terminal, who =
+        { state with oldest_open_created_at = oldest }
+    in
+    (state, days), created_at, terminal_at
+  in
+  (* The current counts and the assignee rows are the backlog's: they
+     describe what is on the board now. *)
+  let (state, days), assignees =
+    List.fold_left
+      (fun (counted, assignees) (task : Masc_domain.task) ->
+        let (state, days), created_at, terminal_at =
+          count_times counted ~created:(instant_of_text task.created_at)
+            ~ending:(ending_of_status task.task_status)
+        in
+        let current, who =
           match task.task_status with
-          | Masc_domain.Todo -> { state.current with todo = state.current.todo + 1 }, None, None
+          | Masc_domain.Todo -> { state.current with todo = state.current.todo + 1 }, None
           | Claimed { assignee; _ } ->
-            { state.current with claimed = state.current.claimed + 1 }, None, Some (`Open, assignee)
+            { state.current with claimed = state.current.claimed + 1 }, Some (`Open, assignee)
           | InProgress { assignee; _ } ->
-            { state.current with in_progress = state.current.in_progress + 1 }, None, Some (`Open, assignee)
+            { state.current with in_progress = state.current.in_progress + 1 },
+            Some (`Open, assignee)
           | AwaitingVerification { assignee; _ } ->
             { state.current with awaiting_verification = state.current.awaiting_verification + 1 },
-            None, Some (`Open, assignee)
-          | Done { assignee; completed_at; _ } ->
-            { state.current with completed = state.current.completed + 1 },
-            Some (`Completed, completed_at), Some (`Done, assignee)
+            Some (`Open, assignee)
+          | Done { assignee; _ } ->
+            { state.current with completed = state.current.completed + 1 }, Some (`Done, assignee)
           (* [Cancelled] carries [cancelled_by], which answers who cancelled
              rather than who held the task, so no assignee row grows here. *)
-          | Cancelled { cancelled_at; _ } ->
-            { state.current with cancelled = state.current.cancelled + 1 },
-            Some (`Cancelled, cancelled_at), None
-        in
-        let state, who =
-          match source with
-          | Live -> { state with current = count }, who
-          | Archived -> state, None
-        in
-        let state, terminal_at =
-          match terminal with
-          | Some (_, text) -> parse state text
-          | None -> state, None
-        in
-        let days =
-          match terminal, terminal_at with
-          | Some (kind, _), Some at ->
-            bump_day days at (fun d ->
-              match kind with
-              | `Completed -> { d with rd_completed = d.rd_completed + 1 }
-              | `Cancelled -> { d with rd_cancelled = d.rd_cancelled + 1 })
-          | Some _, None | None, _ -> days
+          | Cancelled _ ->
+            { state.current with cancelled = state.current.cancelled + 1 }, None
         in
         let assignees =
           match who with
@@ -209,31 +257,28 @@ let of_tasks ~now ~archived tasks =
                   ra_lead_hours = ((completed -. created) /. 3600.) :: r.ra_lead_hours }
               | (None, _) | (_, None) -> { r with ra_done })
         in
-        let state =
-          match terminal, terminal_at with
-          | Some (kind, _), at when recent at ->
-            let counts =
-              match kind with
-              | `Completed -> { state.recent with completed = state.recent.completed + 1 }
-              | `Cancelled -> { state.recent with cancelled = state.recent.cancelled + 1 }
-            in
-            { state with recent = counts }
-          | Some _, _ | None, _ -> state
-        in
-        let state =
-          match terminal with
-          | Some _ -> state
-          | None ->
-            let oldest =
-              match state.oldest_open_created_at, created_at with
-              | oldest, Some at when at <= now ->
-                Some (Option.fold ~none:at ~some:(Float.min at) oldest)
-              | oldest, _ -> oldest
-            in
-            { state with oldest_open_created_at = oldest }
-        in
-        state, assignees, days)
-      (empty, [], []) sourced
+        ({ state with current }, days), assignees)
+      ((empty, []), []) tasks
+  in
+  (* [masc_gc] moves finished tasks out of the backlog into the archive. They
+     still happened on the days they happened, so the windows count them. A
+     task the GC put back into the backlog but left in the archive is counted
+     once, as live. *)
+  let live_ids =
+    List.fold_left
+      (fun ids (task : Masc_domain.task) -> StringSet.add task.id ids)
+      StringSet.empty tasks
+  in
+  let state, days =
+    List.fold_left
+      (fun counted (entry : Archived.entry) ->
+        if StringSet.mem entry.Archived.id live_ids then counted
+        else
+          let counted, _, _ =
+            count_times counted ~created:entry.Archived.created ~ending:entry.Archived.ending
+          in
+          counted)
+      (state, days) archived
   in
   { state with
     by_assignee = finalize_assignees assignees;

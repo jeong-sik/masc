@@ -305,6 +305,22 @@ let repair_utf8_text_with_stats ?(surface = "persistence") ?path s =
 let repair_utf8_text ?surface ?path s =
   (repair_utf8_text_with_stats ?surface ?path s).text
 
+(* [Yojson.Safe.from_string] lexes [Lexing.from_string text], which copies
+   [text] whole into the lexer's buffer, so a 5.3 MB backlog was its string,
+   that copy and the tree at once. This lexer refills a small buffer from
+   [text] as it goes; the result and the errors are [from_string]'s. *)
+let json_of_text text =
+  let next = ref 0 in
+  let lexbuf =
+    Lexing.from_function (fun buffer room ->
+      let length = Int.min room (String.length text - !next) in
+      Bytes.blit_string text !next buffer 0 length;
+      next := !next + length;
+      length)
+  in
+  try Yojson.Safe.from_lexbuf (Yojson.init_lexer ()) lexbuf
+  with Yojson.End_of_input -> raise (Yojson.Json_error "Blank input data")
+
 (** Parse JSON with detailed error reporting.
 
     We still run the UTF-8 repair pass before parsing, but we avoid the
@@ -318,8 +334,8 @@ let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
   else
     let repaired = repair_utf8_text_with_stats ~surface:"json" ~path:context trimmed in
     try
-      if repaired.changed then Ok (Yojson.Safe.from_string repaired.text)
-      else Ok (Yojson.Safe.from_string trimmed)
+      if repaired.changed then Ok (json_of_text repaired.text)
+      else Ok (json_of_text trimmed)
     with Yojson.Json_error msg ->
       let preview =
         String_util.utf8_safe ~max_bytes:53 ~suffix:"..."

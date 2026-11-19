@@ -19314,9 +19314,7 @@ let launch_local_keeper_read state ~mailbox ~intent base_path =
 
 let launch_local_work_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_work
-    ~read:(fun request ->
-      Masc_tui_loader.read_local_workspace
-        ~fresh:(request.lwr_intent = Snapshot_read.Refresh) request.lwr_base_path)
+    ~read:(fun request -> Masc_tui_loader.read_local_workspace request.lwr_base_path)
     ~prepare:Masc_tui_loader.prepare_local_workspace
     ~message:(fun request result -> Local_msg (Local_workspace_read (request, result))) base_path
 
@@ -25859,13 +25857,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if Masc_tui_types.observer_replay_is_complete handshake then begin
           note_local_source_observer_resume state Local_keepers;
           launch_local_source_followup state ~mailbox Local_keepers;
-          (* A Resumed replay can still miss a same-stat task replacement:
-             the backlog file keeps its size and mtime, so the backlog cache
-             serves the old rows and no event is owed. The resume itself is
-             the "file may have changed underneath us" moment, so re-read
-             the work sources fresh regardless of followup state. Keeper
-             metadata has no same-stat writer and keeps followup-only
-             recovery. *)
+          (* A Resumed replay can still miss a write no event announced,
+             such as a task file another process replaced while the stream
+             was down. The resume itself is the "file may have changed
+             underneath us" moment, so read the work sources again
+             regardless of followup state; a file whose version did not
+             move is not decoded again. Keeper metadata keeps
+             followup-only recovery. *)
           launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
             state.local_base_path;
           (* The closed stream carried readings, so the replay cannot vouch for

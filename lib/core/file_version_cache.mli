@@ -8,6 +8,13 @@
     value is shared by every reader of that version, so it must not be
     mutable. *)
 
+type version
+(** A file's device, inode, size and modification time. *)
+
+val version_of_stats : Unix.stats -> version
+
+val same_version : version -> version -> bool
+
 type 'a t
 
 val create : unit -> 'a t

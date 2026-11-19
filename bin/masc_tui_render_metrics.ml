@@ -417,7 +417,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let card_height = if graphs then 5 else 4 in
   let render_card ~card_w ?status ?count ?(role = Masc_tui_theme.Panel_neutral) ~title_style name lines =
     let style =
-      { Masc_tui_card.border = Theme.recede ()
+      { Masc_tui_card.border = Theme.border_muted ()
       ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold ^ title_style
       ; reset = Ansi.reset

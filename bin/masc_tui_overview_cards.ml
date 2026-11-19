@@ -90,7 +90,7 @@ let draw ~ko ~(edges : edges) ~inner
       ({ Masc_tui_card.edge = edges.actions; body = rows_of actions }, selection_in actions)
     in
     let style =
-      { Masc_tui_card.border = Theme.recede ()
+      { Masc_tui_card.border = Theme.border_muted ()
       ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold
       ; reset = Ansi.reset

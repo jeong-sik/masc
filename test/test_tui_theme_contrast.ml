@@ -1104,6 +1104,84 @@ let test_selection_bar_falls_back_to_reverse_without_truecolor () =
        ~project:truecolor low_contrast_palette)
 ;;
 
+let test_border_muted_is_softer_than_recede_on_every_scheme () =
+  let hairline_floor = 2.2 in
+  List.iter
+    (fun scheme ->
+      let surfaces =
+        [ "page", Masc_tui_theme.Page, background scheme
+        ; "side_pane", side_pane, side_pane_ground scheme.palette
+        ]
+      in
+      List.iter
+        (fun (surface_name, surface, ground) ->
+          let drawn_border =
+            Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+              ~default_foreground:"\027[39m"
+              ~project:truecolor ~surface (Some scheme.palette)
+          in
+          let drawn_recede =
+            Masc_tui_theme.For_testing.recede ~colors_enabled:true
+              ~default_foreground:"\027[39m"
+              ~project:truecolor ~surface (Some scheme.palette)
+          in
+          match truecolor_rgb ~prefix:truecolor_prefix drawn_border with
+          | None ->
+            Alcotest.failf "%s/%s: expected Truecolor hairline, got %S"
+              scheme.name surface_name drawn_border
+          | Some border_rgb ->
+            let border_ratio = Color.contrast_ratio border_rgb ground in
+            check bool
+              (Printf.sprintf "%s/%s: hairline border reads at %.2f"
+                 scheme.name surface_name border_ratio)
+              true
+              (border_ratio >= hairline_floor -. 0.01);
+            (match truecolor_rgb ~prefix:truecolor_prefix drawn_recede with
+             | Some recede_rgb ->
+               let recede_ratio = Color.contrast_ratio recede_rgb ground in
+               check bool
+                 (Printf.sprintf
+                    "%s/%s: hairline (%.2f) sits quieter than recede (%.2f)"
+                    scheme.name surface_name border_ratio recede_ratio)
+                 true
+                 (border_ratio < recede_ratio)
+             | None -> ()))
+        surfaces)
+    schemes
+;;
+
+let test_border_muted_fallbacks () =
+  let sample = List.hd schemes in
+  let default_fg = "\027[39m" in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  check string "NO_COLOR suppresses hairline" ""
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:false
+       ~default_foreground:default_fg ~project:truecolor
+       ~surface:Masc_tui_theme.Page (Some sample.palette));
+  check string "missing palette keeps default foreground" default_fg
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:truecolor
+       ~surface:Masc_tui_theme.Page None);
+  let ansi256_recede =
+    Masc_tui_theme.For_testing.recede ~colors_enabled:true
+      ~default_foreground:default_fg ~project:(project Palette.Ansi256)
+      ~surface:Masc_tui_theme.Page (Some sample.palette)
+  in
+  check string "Ansi256 falls back to recede" ansi256_recede
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:(project Palette.Ansi256)
+       ~surface:Masc_tui_theme.Page (Some sample.palette));
+  let ansi16_recede =
+    Masc_tui_theme.For_testing.recede ~colors_enabled:true
+      ~default_foreground:default_fg ~project:(project Palette.Ansi16)
+      ~surface:Masc_tui_theme.Page (Some sample.palette)
+  in
+  check string "Ansi16 falls back to recede" ansi16_recede
+    (Masc_tui_theme.For_testing.border_muted ~colors_enabled:true
+       ~default_foreground:default_fg ~project:(project Palette.Ansi16)
+       ~surface:Masc_tui_theme.Page (Some sample.palette))
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
@@ -1164,6 +1242,10 @@ let () =
             `Quick test_truecolor_selection_bar_clears_contrast_on_every_scheme
         ; Alcotest.test_case "selection bar falls back to reverse without truecolor"
             `Quick test_selection_bar_falls_back_to_reverse_without_truecolor
+        ; Alcotest.test_case "hairline border is softer than recede on every scheme"
+            `Quick test_border_muted_is_softer_than_recede_on_every_scheme
+        ; Alcotest.test_case "hairline border fallbacks follow capability"
+            `Quick test_border_muted_fallbacks
 
         ] )
     ; ( "toml theme loading"

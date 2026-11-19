@@ -125,7 +125,7 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   let half = max 1 ((width - 2) / 2) in
   let at rows i = Option.value (List.nth_opt rows i) ~default:"—" in
   let card ~width ~height name rows =
-    let style : Card.style = {border=Theme.recede (); focused_border=Theme.border_focus ();
+    let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
                               title_style=Theme.info (); reset=Ansi.reset} in
     Card.render ~ko ~style ~width ~height
       {edge={name; key=None; status=None; count=None; focus=Card.Unfocused;
@@ -192,7 +192,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
       @ [quiet ("Enter "
           ^ text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
-  let style : Card.style = {border=Theme.recede (); focused_border=Theme.border_focus ();
+  let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
                             title_style=Theme.info (); reset=Ansi.reset} in
   let body = Card.render ~ko ~style ~width:(max 1 (cols - 4)) ~height
     {edge={name=text "◇ 기억의 흐름" "◇ Memory flow"; key=None; status=None; count=None;

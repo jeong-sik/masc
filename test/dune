@@ -3370,6 +3370,7 @@
 (include stanzas/test_runtime_resolved_fleet.inc)
 
 (include stanzas/test_tui_overview_cards.inc)
+(include stanzas/test_tui_overview_bands.inc)
 (include stanzas/test_tui_overview_providers.inc)
 (include stanzas/test_tui_kept_reads.inc)
 (include stanzas/test_tui_io_domain.inc)

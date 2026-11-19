@@ -191,6 +191,12 @@ let test_a_call_without_a_chat_execution_is_refused () =
       ~class_:Tool_result.Workflow_rejection
       "a call with no chat execution"
       (call ~execution_scope:None config (args request_id));
+    (* The scope comes first: a call that names nothing is refused for the
+       missing chat execution too, before its arguments are read. *)
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "a call with no chat execution and no target"
+      (call ~execution_scope:None config (`Assoc []));
     Eio.Promise.resolve resolve_release ())
 ;;
 
@@ -378,9 +384,9 @@ let test_a_receipt_under_the_schedule_id_is_not_the_schedules () =
 
 (* The tool runs through the bundle a turn builds. The call leaves the wait in
    the terminal state the turn reads, and a refused call leaves it open. *)
-let bundle_for config =
+let bundle_for ?(execution_scope = Some chat_scope) config =
   Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
-    ~execution_scope:chat_scope
+    ?execution_scope
     ~config
     ~meta:(meta ())
     ~publication_recovery:
@@ -546,20 +552,43 @@ let test_a_post_cannot_share_a_batch_with_a_wait () =
 
 (* Every run is offered the wait, whether or not it serves a chat execution:
    the tool array is part of the request prefix a provider caches (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A call from
-   a run that serves none is refused before anything is read (above). *)
+   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A run picks
+   its descriptors without the scope ([offered_descriptors]), and the bundle
+   hands the scope to the tool handlers only. So a run that serves a chat
+   execution and one that does not send the same tool array. A call from a
+   run that serves none is refused before anything is read (above). *)
 let test_every_run_is_offered_the_wait () =
   let names descriptors =
     List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.internal_name) descriptors
   in
-  let offered =
-    Keeper_run_tools_setup.offered_descriptors ~task_skill_descriptors:None
-      ~lane_descriptors:(fun () -> [])
-  in
   check bool "a run without a held task skill is offered the wait" true
-    (List.mem "keeper_receipt_wait" (names offered));
-  check int "and every registered descriptor"
-    (List.length (Keeper_tool_descriptor.all_descriptors ())) (List.length offered)
+    (List.mem "keeper_receipt_wait"
+       (names
+          (Keeper_run_tools_setup.offered_descriptors ~task_skill_descriptors:None
+             ~lane_descriptors:(fun () -> []))));
+  with_workspace (fun ~sw:_ ~clock:_ config ->
+    let serves_chat = bundle_for config in
+    let serves_none = bundle_for ~execution_scope:None config in
+    Fun.protect
+      ~finally:(fun () ->
+        serves_chat.cleanup ();
+        serves_none.cleanup ())
+      (fun () ->
+         let wire tools =
+           List.map
+             (fun (tool : Agent_core.Tool.t) ->
+                Yojson.Safe.to_string (Agent_core.Types.tool_schema_to_json tool.schema))
+             tools
+         in
+         check bool "the bundle of a run with no chat execution offers the wait" true
+           (List.exists
+              (fun (tool : Agent_core.Tool.t) ->
+                 String.equal tool.schema.name "keeper_receipt_wait")
+              serves_none.tools);
+         check (list string) "Agent Core sends the same tool array with or without a chat execution"
+           (wire serves_chat.agent_core_tools) (wire serves_none.agent_core_tools);
+         check (list string) "an official client gets the same tools with or without one"
+           (wire serves_chat.tools) (wire serves_none.tools)))
 ;;
 
 let () =

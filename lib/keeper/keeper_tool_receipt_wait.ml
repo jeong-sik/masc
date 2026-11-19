@@ -164,38 +164,40 @@ let handle
      a-sent-request-prefix-changes-only-when-the-window-moves §3.2). One that
      serves no conversation has no turn to end on a receipt, whatever the call
      names, so it is refused before anything is read. *)
-  match execution_scope, target_of_args args with
-  | None, (Ok _ | Error _) ->
+  match execution_scope with
+  | None ->
     refusal ~class_:Tool_result.Workflow_rejection
       "This run serves no conversation, so it has no turn to end on a receipt."
-  | Some _, Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
-  | Some scope, Ok target ->
-    let base_path = config.Workspace.base_path in
-    let keeper_name = meta.Keeper_meta_contract.name in
-    (match
-       Result.bind (waitable ~base_path ~keeper_name target) (fun request_id ->
-         Result.map
-           (fun () -> request_id)
-           (not_waited_by_another ~base_path ~keeper_name ~scope request_id))
-     with
-     | Error (class_, detail) -> refusal ~class_ detail
-     | Ok request_id ->
-       let named =
-         match target with
-         | Run _ -> []
-         | Schedule schedule_id -> [ "schedule_id", `String schedule_id ]
-       in
-       Keeper_tool_execution.success_data
-         (`Assoc
-             ([ "ok", `Bool true
-              ; "status", `String "waiting"
-              ; "request_id", `String request_id
-              ]
-              @ named
-              @ [ ( "message"
-                  , `String
-                      "This turn ends here. A later run of this conversation starts \
-                       with the receipt of this request." )
-                ]))
-       |> Keeper_tool_execution.with_receipt_wait_receipt ~request_id)
+  | Some scope ->
+    (match target_of_args args with
+     | Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
+     | Ok target ->
+       let base_path = config.Workspace.base_path in
+       let keeper_name = meta.Keeper_meta_contract.name in
+       (match
+          Result.bind (waitable ~base_path ~keeper_name target) (fun request_id ->
+            Result.map
+              (fun () -> request_id)
+              (not_waited_by_another ~base_path ~keeper_name ~scope request_id))
+        with
+        | Error (class_, detail) -> refusal ~class_ detail
+        | Ok request_id ->
+          let named =
+            match target with
+            | Run _ -> []
+            | Schedule schedule_id -> [ "schedule_id", `String schedule_id ]
+          in
+          Keeper_tool_execution.success_data
+            (`Assoc
+                ([ "ok", `Bool true
+                 ; "status", `String "waiting"
+                 ; "request_id", `String request_id
+                 ]
+                 @ named
+                 @ [ ( "message"
+                     , `String
+                         "This turn ends here. A later run of this conversation starts \
+                          with the receipt of this request." )
+                   ]))
+          |> Keeper_tool_execution.with_receipt_wait_receipt ~request_id))
 ;;

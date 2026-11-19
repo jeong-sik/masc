@@ -558,9 +558,10 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
          refuse, which says more than an argument-parse rejection would. *)
       `Assoc [ ("job_id", `String "matrix-no-such-job") ]
   | "keeper_receipt_wait" ->
-      (* A request id no background run was accepted under: the tool has to
-         look the request up and refuse, which says more than an
-         argument-parse rejection would. *)
+      (* The matrix bundle serves no chat execution, so the call is refused
+         before anything is read, whatever it names. The id keeps the
+         arguments well formed; the refusal of a request no background run
+         was accepted under is test_keeper_receipt_wait_tool's. *)
       `Assoc [ ("request_id", `String "matrix-no-such-request") ]
   | "keeper_task_cancel" ->
       (* Deliberately not [Generic.ensure_task]: cancelling or releasing the

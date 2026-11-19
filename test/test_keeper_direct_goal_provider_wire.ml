@@ -26,6 +26,7 @@ let contains ~needle text = Astring.String.is_infix ~affix:needle text
 let owner_request = "Create a Task for the remaining result and inspect its evidence."
 let reported_value = "1/2 independently inspected results"
 let model_id = "direct-goal-wire-fixture"
+let anthropic_model_id = "direct-goal-wire-anthropic-fixture"
 let peer_name = "peer-request-wire"
 let peer_operation = "kmsg-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -69,8 +70,9 @@ let install_catalog ~sw =
   let previous = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous);
   let source = Printf.sprintf
-      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
-      model_id in
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n\
+       [[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"anthropic\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+      model_id anthropic_model_id in
   match Llm_provider.Model_catalog.of_toml_string ~source:"direct-goal-wire" source with
   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error detail -> fail detail
@@ -232,9 +234,14 @@ let run_case source () =
 (* RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2 (D3).
    A turn that serves an admitted request and a turn that does not send Agent
    Core the same System, because the provider caches the request from its
-   first byte. The source rides the first request's end context only. An
+   first byte. The source rides the first request's end context only; the
+   next test shows the lane that keeps that context in its history. An
    official client still reads it in its System, also one that takes the turn
-   over after an Agent Core round. *)
+   over after an Agent Core round.
+   A self-woken turn renders no source, and both turn kinds format Active
+   Goals with [Keeper_unified_prompt.format_active_goal_summaries] from the
+   same store. So the direct renderer without a source stands in for the
+   System a self-woken turn sends. *)
 let test_admitted_source_leaves_the_agent_core_system () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -307,6 +314,129 @@ let test_admitted_source_leaves_the_agent_core_system () =
   let core_again = after_tools Runtime_execution.Masc_agent_core admitted official_takeover in
   check string "Agent Core after an official round sends its own System again"
     (effective chat_first) (effective core_again)
+
+(* An Anthropic response with signed thinking binds the request it answered,
+   so Agent Core keeps that request's end context in its history
+   ([Historical_system_context]) and sends it again in place (RFC-AC-041).
+   The admitted source rides that first end context, so on this lane it stays
+   where the first request put it: never in the System and never a new tail
+   after tool results. The checkpoint keeps it in that row too
+   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2). *)
+let test_anthropic_sends_the_first_end_context_again_in_place () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  let base_path = Filename.temp_dir "anthropic-first-context-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  install_prompts base_path;
+  let partition =
+    Direct.project_partition ~workspace_memory_access:None
+      (Direct.prepare ~direct_input_source:(Some (peer_input_source ()))
+         ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"anthropic-first-context")
+         ~current_task:Keeper_world_observation_inputs.No_current_task
+         ~held_task_skills:[] ~task_skill_surfaces:[]
+         ~workspace_memory:Workspace_memory_ledger.Missing
+         ~wiki_contents:Keeper_wiki_contents.Off ~lane_updates:(Ok (`List []))
+         ~approval_authority_text:"" ~recent_direct_conversation_text:""
+         ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" ())
+  in
+  let dynamic = Keeper_context_layers.text partition in
+  let system_prompt = "Read the metric, then answer." in
+  let previous = ref None in
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
+      let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
+          ~injected_this_turn:(Option.is_some !previous) messages in
+      let issued = Keeper_run_prompt.assemble_request_context
+          ~checkpoint_owner:Runtime_execution.Masc_agent_core
+          ~system:(system_of_text system_prompt) ~post_tool_round
+          ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
+          ~existing_extra_system_context:current_params.extra_system_context
+          ~blocks:[Prompt_block_id.Dynamic_context, dynamic] in
+      previous := Some issued;
+      AdjustParams {current_params with extra_system_context = issued.extra_system_context;
+        system_prompt_override = Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override issued}
+    | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _
+    | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
+  let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Read the fixture metric"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content = "inspected 1 of 2";
+                                  content_blocks = None; _meta = None}) in
+  let reply ~id ~stop_reason content = Yojson.Safe.to_string (`Assoc [
+      "id", `String id; "type", `String "message"; "role", `String "assistant";
+      "model", `String anthropic_model_id; "content", `List content;
+      "stop_reason", `String stop_reason; "stop_sequence", `Null;
+      "usage", `Assoc ["input_tokens", `Int 1; "output_tokens", `Int 1]]) in
+  let responses = [|
+    reply ~id:"signed-read" ~stop_reason:"tool_use"
+      [ `Assoc ["type", `String "thinking"; "thinking", `String "Read the metric first.";
+                "signature", `String "sig-signed-read"]
+      ; `Assoc ["type", `String "tool_use"; "id", `String "read-metric"; "name", `String "Read";
+                "input", `Assoc []] ];
+    reply ~id:"answered" ~stop_reason:"end_turn"
+      [ `Assoc ["type", `String "text"; "text", `String "One of two results is inspected."] ] |] in
+  let received = ref [] in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun _ body ->
+         let json = Yojson.Safe.from_string body in
+         (* A token count carries no [max_tokens]; only completions are kept. *)
+         if Json.member "max_tokens" json = `Null then `OK, {|{"input_tokens":1}|}
+         else begin
+           let index = List.length !received in
+           received := json :: !received;
+           if index < Array.length responses then `OK, responses.(index)
+           else `Bad_request, "unexpected provider request"
+         end)) in
+  let provider_cfg = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic ~provider_id:"fixture"
+      ~model_id:anthropic_model_id ~base_url:server.base_url ~request_path:"/v1/messages" () in
+  let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"anthropic-first-context" ~provider_cfg ~system_prompt ~tools:[read_tool] in
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks = Some hooks}
+      ~execution_capture:(Runtime_agent.execution_capture runtime) owner_request
+                     |> Result.map_error Runtime_agent.run_failure_error with
+    | Ok ({stop_reason = Runtime_agent.Completed _; _} as result) -> result
+    | Ok _ -> fail "the Anthropic tool loop did not complete"
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let names_source text = List.exists (fun needle -> contains ~needle text) [peer_name; peer_operation] in
+  let bodies = List.rev !received in
+  check int "a signed tool call and its answer take two requests" 2 (List.length bodies);
+  List.iteri (fun index body ->
+    check bool "no request's System carries the source" false
+      (names_source (Yojson.Safe.to_string (Json.member "system" body)));
+    let messages = Json.member "messages" body |> Json.to_list in
+    let carrying = List.filter_map (fun (position, message) ->
+        if names_source (Yojson.Safe.to_string message) then Some position else None)
+        (List.mapi (fun position message -> position, message) messages) in
+    let first_assistant = List.find_index (fun message ->
+        Json.member "role" message = `String "assistant") messages in
+    let last = List.nth messages (List.length messages - 1) in
+    match index, carrying, first_assistant with
+    | 0, [position], None ->
+      check int "the first request carries the source in its end context"
+        (List.length messages - 1) position
+    | 1, [position], Some assistant ->
+      check bool "a later request sends that context again ahead of the signed call" true
+        (position < assistant);
+      check bool "tool feedback stays the newest message" true
+        (contains ~needle:"tool_result" (Yojson.Safe.to_string last))
+    | _, ([] | [_] | _ :: _ :: _), (None | Some _) ->
+      failf "request %d carries the source in %d messages" index (List.length carrying)) bodies;
+  let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
+  let kept = List.filter (fun (message : Agent_core.Types.message) ->
+      List.exists (function
+        | Agent_core.Types.Text text -> names_source text
+        | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)
+      checkpoint.messages in
+  match kept with
+  | [ message ] ->
+    check bool "the checkpoint keeps the source only in the retained first context" true
+      (message.origin = Llm_provider.Types.Historical_system_context)
+  | [] | _ :: _ :: _ -> failf "the checkpoint keeps the source in %d messages" (List.length kept)
 
 let test_goal_survives_read_then_task_creation ~peer () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -764,6 +894,8 @@ let () = run "direct Goal context on actual provider wire"
       (test_goal_survives_read_then_task_creation ~peer:false);
     test_case "peer request source rides only the first end context through Read and Task creation" `Quick
       (test_goal_survives_read_then_task_creation ~peer:true);
+    test_case "an Anthropic lane sends the first end context again in place, source included" `Quick
+      test_anthropic_sends_the_first_end_context_again_in_place;
     test_case "an admitted source leaves the Agent Core System and stays in an official one" `Quick
       test_admitted_source_leaves_the_agent_core_system;
     test_case "Task approval survives the following tool reply" `Quick

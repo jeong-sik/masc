@@ -139,8 +139,10 @@ val injected_on_post_tool_round : t -> bool
     separately produced immutable Goal snapshot and stays in the System after
     tools. [Direct_input_source] stays in an official client's System as
     well. On Agent Core it rides the first round's [Dynamic_context] only, so
-    a round that follows tool results carries no source and no User tail for
-    it. [Completion_authority] carries this turn's approval/rejection
+    no round that follows tool results adds a User tail for it. An Anthropic
+    lane keeps that first context in its history after a response with
+    signed thinking ([Historical_system_context], RFC-AC-041) and sends it
+    again in place, source included. [Completion_authority] carries this turn's approval/rejection
     correlation keys and rides every round of its turn, without rebroadcasting
     Task, Gate, Lane or other inbox state. [Goals_awaiting_proof] rides every
     round as well: a later round that lost it would read a Goal under proof as

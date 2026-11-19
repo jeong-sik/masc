@@ -300,35 +300,8 @@ let purge_error_to_string = function
     "nothing was purged; the Keeper's turn log line was not written: " ^ detail
 ;;
 
-let checkpoint_identity_error_to_string =
-  Keeper_checkpoint_store.checkpoint_identity_error_to_string
-;;
-
 let checkpoint_ref_load_error_to_string =
   Keeper_checkpoint_store.checkpoint_ref_load_error_to_string
-;;
-
-let checkpoint_cas_error_to_string = function
-  | Keeper_checkpoint_store.Source_unavailable error ->
-    "source unavailable: " ^ checkpoint_ref_load_error_to_string error
-  | Source_changed _ -> "source changed"
-  | Candidate_identity_invalid error ->
-    "candidate identity invalid: " ^ checkpoint_identity_error_to_string error
-  | Candidate_session_mismatch { expected; candidate } ->
-    Printf.sprintf
-      "candidate session mismatch expected=%s candidate=%s"
-      (Keeper_id.Trace_id.to_string expected)
-      (Keeper_id.Trace_id.to_string candidate)
-  | Candidate_turn_regressed { source_turn; candidate_turn } ->
-    Printf.sprintf
-      "candidate turn regressed source=%d candidate=%d"
-      source_turn
-      candidate_turn
-  | Candidate_unencodable error -> "candidate cannot be encoded: " ^ Agent_core.Error.to_string error
-  | Candidate_content_mismatch { reference; content } ->
-    Printf.sprintf "candidate content %s does not match its reference %s" content reference.sha256
-  | Objects_not_installed error -> Keeper_checkpoint_object_store.write_error_to_string error
-  | Commit_not_installed error -> Keeper_fs.durable_write_error_to_string error
 ;;
 
 let purge_report_json report =
@@ -514,7 +487,7 @@ let purge_install config ~keeper_name ~trace_id ~session_dir
           } ->
         Error
           (Purge_install_failed
-             (checkpoint_cas_error_to_string cause))
+             (Keeper_checkpoint_store.checkpoint_cas_error_to_string cause))
       | Installed installed ->
         (* The archive entries are heads of the checkpoint
            before the purge; while one is there, the object

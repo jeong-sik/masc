@@ -163,7 +163,8 @@
 
 ;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
 ;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
-;; default; --apply backs up then saves through the locked validated store.
+;; default; --apply backs up, then installs over the head it read. A purge that
+;; drops a broken tail writes the Keeper's turn log line first.
 
 (executable
  (name masc_checkpoint_purge)
@@ -178,6 +179,7 @@
   masc_core
   masc.config_dir_resolver
   masc.agent_core
+  masc.keeper_checkpoint_ref
   unix))
 
 ;; Operator Candle gifts outside any Goal: one cursor-checked Granted row

@@ -515,6 +515,17 @@ module For_testing : sig
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for {!val:border_muted}. *)
+
+  val diff_row_styles
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> kind:[ `Added | `Removed ]
+    -> Masc_tui_terminal_palette.t option
+    -> string * string
+  (** Pure capability/environment fixture returning [(bg, fg)] SGR escapes for
+      a diff row. *)
 end
 
 val selection : string
@@ -551,6 +562,17 @@ module Syntax : sig
   (** Fixed light text paired with both fixed dark diff backgrounds. Unlike
       the terminal default foreground, this pair keeps its contrast when a
       light terminal theme uses dark default text. *)
+
+  val diff_row_styles
+    :  kind:[ `Added | `Removed ]
+    -> Masc_tui_terminal_palette.t option
+    -> string * string
+  (** Palette-adaptive Truecolor [(bg, fg)] escapes for diff rows. Blends the
+      active page ground toward green (added) or red (removed) on Truecolor
+      terminals and lifts the foreground to clear WCAG 4.5:1 over the tinted
+      background. Falls back to [(diff_added_bg/diff_removed_bg,
+      diff_row_foreground)] on non-Truecolor capabilities and [("", "")] under
+      NO_COLOR. *)
 end
 
 val strip_sgr : string -> string

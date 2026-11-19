@@ -749,8 +749,12 @@ let change_result_badge ~ko (change : Masc.Tui_decode.file_change) =
 let diff_row_span ?(hscroll = 0) ~width (row : Diff.row) =
   let background, marker, text =
     match row with
-    | Diff.Removed line -> (Span.bg Theme.Syntax.diff_removed_bg, "-", line)
-    | Diff.Added line -> (Span.bg Theme.Syntax.diff_added_bg, "+", line)
+    | Diff.Removed line ->
+        (Span.combine (Span.bg (Theme.Syntax.diff_removed_bg ()))
+           (Span.fg (Theme.Syntax.diff_removed_fg ())), "-", line)
+    | Diff.Added line ->
+        (Span.combine (Span.bg (Theme.Syntax.diff_added_bg ()))
+           (Span.fg (Theme.Syntax.diff_added_fg ())), "+", line)
     | Diff.Context line -> (Span.plain, " ", line)
   in
   (* Context is dim so the changed lines are what an eye lands on. The marker

@@ -4395,8 +4395,12 @@ let tree_diff_gutter (row : Masc.Tui_decode.git_diff_row) =
 let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row) =
   let background =
     match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> Span.bg Theme.Syntax.diff_removed_bg
-    | Masc.Tui_decode.Gd_added -> Span.bg Theme.Syntax.diff_added_bg
+    | Masc.Tui_decode.Gd_removed ->
+        Span.combine (Span.bg (Theme.Syntax.diff_removed_bg ()))
+          (Span.fg (Theme.Syntax.diff_removed_fg ()))
+    | Masc.Tui_decode.Gd_added ->
+        Span.combine (Span.bg (Theme.Syntax.diff_added_bg ()))
+          (Span.fg (Theme.Syntax.diff_added_fg ()))
     | Masc.Tui_decode.Gd_context -> Span.plain
   in
   let gutter = tree_diff_gutter row in

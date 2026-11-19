@@ -931,6 +931,71 @@ let selection_style_for ~colors_enabled ~project palette =
           | Some style -> style
           | None -> selection))
 ;;
+
+(* Palette-adaptive Truecolor diff row tints. Blends the page ground gently
+   toward the scheme's green (added) or red (removed) slot and pairs it with
+   a foreground verified at WCAG 4.5:1 over the tinted band, replacing the
+   hardcoded xterm-256 swamp-green/brown backgrounds on Truecolor terminals. *)
+let diff_tint_dark_ratio = 0.22
+let diff_tint_light_ratio = 0.18
+let diff_row_fallback_fg = "\027[38;5;255m"
+
+let diff_row_styles_for ~colors_enabled ~project ~kind palette =
+  if not colors_enabled then "", ""
+  else
+    let fallback () =
+      let bg =
+        match kind with
+        | `Added -> style_for ~colors_enabled "\027[48;5;22m"
+        | `Removed -> style_for ~colors_enabled "\027[48;5;52m"
+      in
+      bg, style_for ~colors_enabled diff_row_fallback_fg
+    in
+    match palette with
+    | None -> fallback ()
+    | Some pal ->
+      let slot =
+        match kind with
+        | `Added -> Bright_green
+        | `Removed -> Bright_red
+      in
+      (match Terminal_palette.ansi pal (ansi_color_index slot) with
+       | None -> fallback ()
+       | Some hue ->
+         let page = Terminal_palette.background pal in
+         let foreground = Terminal_palette.foreground pal in
+         let ratio =
+           if Color.is_light page then diff_tint_light_ratio
+           else diff_tint_dark_ratio
+         in
+         let tinted_bg = blend_rgb ~ratio page hue in
+         if tinted_bg = page then fallback ()
+         else
+           (match project tinted_bg with
+            | Some bg_proj ->
+              (match Terminal_palette.direct_rgb bg_proj with
+               | Some bg_rgb ->
+                 let fg_lifted =
+                   Color.lift_for_contrast ~background:bg_rgb
+                     ~floor:status_contrast_floor foreground
+                 in
+                 if Color.contrast_ratio fg_lifted bg_rgb >= status_contrast_floor
+                 then
+                   (match project fg_lifted with
+                    | Some fg_proj ->
+                      (match Terminal_palette.direct_rgb fg_proj with
+                       | Some fg_rgb
+                         when Color.contrast_ratio fg_rgb bg_rgb
+                              >= status_contrast_floor ->
+                         ( projected_background ~colors_enabled (Some bg_proj)
+                         , projected_foreground ~colors_enabled (Some fg_proj) )
+                       | Some _ | None -> fallback ())
+                    | None -> fallback ())
+                 else fallback ()
+               | None -> fallback ())
+            | None -> fallback ()))
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
@@ -947,6 +1012,7 @@ module For_testing = struct
   let selection_style = selection_style_for
   let border_muted_rgb = border_muted_rgb
   let border_muted = border_muted_for
+  let diff_row_styles = diff_row_styles_for
 end
 
 let ansi_readable ~surface palette color =
@@ -992,8 +1058,9 @@ module Syntax = struct
   (* What does not take a hue from the palette. The words a reader scans for
      (keyword, string, number, type, link, a JSON key) are hues, and draw
      through [Masc_tui_ansi.Theme.Syntax], which lifts them. Punctuation
-     recedes by weight instead, and a diff row pairs a fixed background with
-     fixed text. *)
+     recedes by weight instead; diff rows adapt to the palette on Truecolor
+     terminals via [diff_row_styles] and fall back to the fixed 256-colour
+     pair below when Truecolor or a palette is unavailable. *)
   let json_punctuation = Sgr.dim
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
@@ -1012,6 +1079,11 @@ module Syntax = struct
      backgrounds above. *)
   let diff_added = Sgr.green
   let diff_removed = Sgr.red
+
+  let diff_row_styles ~kind palette =
+    diff_row_styles_for ~colors_enabled ~project:Terminal_palette.best_color
+      ~kind palette
+  ;;
 end
 
 let strip_sgr_internal ?on_span text =

@@ -144,6 +144,12 @@ module Theme = struct
        hues above, because a quiet row on a side pane sits on that pane. *)
     ; recede : string
     ; border_muted : string
+    ; diff_added_bg : string
+    ; diff_removed_bg : string
+    ; diff_added_fg : string
+    ; diff_removed_fg : string
+    ; diff_added : string
+    ; diff_removed : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -200,6 +206,12 @@ module Theme = struct
       let of_state = Masc_tui_theme.status_readable ~surface palette in
       let of_text = Masc_tui_theme.status_text_readable ~surface palette in
       let of_colour = Masc_tui_theme.ansi_readable ~surface palette in
+      let diff_added_bg, diff_added_fg =
+        Masc_tui_theme.Syntax.diff_row_styles ~kind:`Added palette
+      in
+      let diff_removed_bg, diff_removed_fg =
+        Masc_tui_theme.Syntax.diff_row_styles ~kind:`Removed palette
+      in
       let next =
         { generation
         ; lift_enabled
@@ -234,6 +246,12 @@ module Theme = struct
         ; slot_2 = of_colour (category_colour Slot_2)
         ; recede = Masc_tui_theme.recede ~surface palette
         ; border_muted = Masc_tui_theme.border_muted ~surface palette
+        ; diff_added_bg
+        ; diff_removed_bg
+        ; diff_added_fg
+        ; diff_removed_fg
+        ; diff_added = of_colour Masc_tui_theme.Bright_green
+        ; diff_removed = of_colour Masc_tui_theme.Bright_red
         }
       in
       if Atomic.compare_and_set cache previous (Some next) then next
@@ -424,10 +442,12 @@ module Theme = struct
     let json_number () = (resolved ()).hue_yellow
     let json_literal () = (resolved ()).hue_magenta
     let json_punctuation = Masc_tui_theme.Syntax.json_punctuation
-    let diff_added = Masc_tui_theme.Syntax.diff_added
-    let diff_removed = Masc_tui_theme.Syntax.diff_removed
-    let diff_added_bg = Masc_tui_theme.Syntax.diff_added_bg
-    let diff_removed_bg = Masc_tui_theme.Syntax.diff_removed_bg
+    let diff_added () = (resolved ()).diff_added
+    let diff_removed () = (resolved ()).diff_removed
+    let diff_added_bg () = (resolved ()).diff_added_bg
+    let diff_removed_bg () = (resolved ()).diff_removed_bg
+    let diff_added_fg () = (resolved ()).diff_added_fg
+    let diff_removed_fg () = (resolved ()).diff_removed_fg
     let diff_row_foreground = Masc_tui_theme.Syntax.diff_row_foreground
   end
 end

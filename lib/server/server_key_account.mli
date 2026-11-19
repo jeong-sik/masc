@@ -6,7 +6,19 @@
 (** The routes of a person's key accounts (RFC
     a-persons-api-key-is-their-own-provider-account). The caller passed
     [Manage_own_provider] ({!Auth_preview.person}) before any of these reads
-    anything. An answer names no path of the server and nothing of a key. *)
+    anything. An answer names no path of the server and nothing of a key.
+
+    {b A record the zone did not take.} The three routes answer it by what
+    the zone says once it failed ({!Authz_zone.read}). A zone that can be
+    trusted has not stopped: the answer is the 503 with [..._not_recorded]
+    below, and a request asked again is read and its record is tried. It
+    goes in after a moment in which another process held a file and wrote
+    nothing. A zone that cannot be trusted takes
+    no record until the server starts again, and every request of a person
+    from then on gets the 503 of {!Login_routes.zone_uncertain}, which has
+    no [code]. The request that found the zone so gets that answer too, in
+    place of the [..._not_recorded] one. What it left is in the list of the
+    accounts once the server started again. *)
 
 (** [/api/v1/setup/accounts/key]. *)
 val path : string
@@ -25,8 +37,8 @@ val entry_prefix : string
     - 400 [not_a_key_account]: the account holds a login.
     - 409 [account_call_running]: a call of the account runs.
     - 403 [removal_refused]: the person is not active.
-    - 503 [removal_not_recorded]: the start or the end was not recorded. The
-      person asks again.
+    - 503 [removal_not_recorded]: the start or the end was not recorded,
+      and the zone did not stop. The person asks again.
     - 503 [key_not_removed] or [home_not_removed]: the files were not all
       removed, and the log says which stayed. Nothing spends the account.
       The person asks again. *)
@@ -61,8 +73,9 @@ val remove
     - 500 [internal_error]: the log refused the record for a reason no
       request of a person leads to.
     - 503 [configuration_unavailable]: runtime.toml was not read.
-    - 503 [registration_not_recorded]: the record was not written, and
-      nothing of the key was stored.
+    - 503 [registration_not_recorded]: the record was not written, nothing
+      of the key was stored, and the zone did not stop. The person sends
+      the key again.
     - 503 [key_not_stored]: the files were not made, and the account was
       removed in the same request. Nothing of the key stays.
     - 503 [account_not_removed] with [provider_account_id]: the files were
@@ -105,8 +118,10 @@ val register
       theirs that was started is not ended.
     - 500 [internal_error]: the log refused the record for a reason no
       request of a person leads to.
-    - 503 [replacement_not_recorded]: the record was not written, and the
-      key of the account was not changed. The person sends the key again.
+    - 503 [replacement_not_recorded]: the record was not written, the key
+      of the account was not changed, and the zone did not stop. The person
+      sends the key again. A commit that wrote its intent and
+      not its record blocks the account until then (the same RFC, 3.7).
     - 503 [key_not_stored]: the record was written and the new key was not
       put in place. The key before is not read, and the server removes the
       folder of the keys of the account, so the account has no key until

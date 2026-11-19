@@ -750,14 +750,10 @@ let normalize_response response_format (response : Types.api_response) =
      | Error (Output_limit_stopped | Window_stopped _ | Incomplete_structured_response _)
      | Error (Invalid_json _) -> Error (Incomplete_structured_response Tool_use))
   | Types.MaxTokens -> Error Output_limit_stopped
-  (* No content block is the empty answer, the same test the OpenAI-compatible
-     parser applies before it reports an empty completion. *)
+  (* The empty answer is the one every completion consumer calls empty
+     ([Complete_common.ensure_nonempty_completion]). *)
   | Types.ContextWindowExceeded ->
-    Error
-      (Window_stopped
-         (match response.content with
-          | [] -> No_output
-          | _ :: _ -> Partial_output))
+    Error (Window_stopped (if Complete_common.has_no_output response then No_output else Partial_output))
   | Types.Refusal -> Error (Incomplete_structured_response Refusal)
   | Types.ContentFilter -> Error (Incomplete_structured_response Content_filter)
   | Types.RepetitionTruncation -> Error (Incomplete_structured_response Repetition_truncation)

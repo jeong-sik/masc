@@ -38,7 +38,7 @@ let request_authority_exn request =
 ;;
 
 let has_repo_keeper_config root =
-  let keepers_dir = Filename.concat root "config/keepers" in
+  let keepers_dir = Filename.concat root "config/keepers-default" in
   Sys.file_exists keepers_dir && Sys.is_directory keepers_dir
 
 let repo_root () =
@@ -980,36 +980,6 @@ activation_mode = "manual"
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
 
-let test_bundled_keeper_profiles_resolve_prompt_defaults () =
-  let repo = repo_root () in
-  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  let restore key = function
-    | Some value -> Unix.putenv key value
-    | None -> Unix.putenv key ""
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      restore "MASC_CONFIG_DIR" original_config;
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
-      Config_dir_resolver.reset ();
-      let keepers_dir = Filename.concat repo "config/keepers" in
-      Sys.readdir keepers_dir
-      |> Array.to_list
-      |> List.filter (fun file -> Filename.check_suffix file ".toml")
-      |> List.iter (fun file ->
-           let path = Filename.concat keepers_dir file in
-           let name = Filename.chop_extension file in
-           match KTP.load_keeper_profile_defaults_result_for_base_path ~base_path:repo name with
-           | Error e ->
-             fail
-               (Printf.sprintf
-                  "%s failed to resolve: %s"
-                  path
-                  (KTP.keeper_toml_load_error_to_string e))
-           | Ok _defaults -> ()))
-
 let read_text_file path =
   let channel = open_in_bin path in
   Fun.protect
@@ -1050,12 +1020,10 @@ let test_shipped_keeper_profiles_load () =
              (Filename.concat presets_dir (Filename.concat preset "keepers")))
     else []
   in
-  let config_files = toml_files (Filename.concat repo "config/keepers") in
   (* The roster a fresh workspace is seeded with. It reaches an operator who
      has authored nothing, so it is the one set where an unloadable profile is
      met before there is anything to compare it against. *)
   let default_roster_files = toml_files (Filename.concat repo "config/keepers-default") in
-  check bool "config/keepers holds keeper TOMLs" true (config_files <> []);
   check bool "config/keepers-default holds the fresh-install roster" true
     (default_roster_files <> []);
   check bool "presets hold keeper TOMLs" true (preset_files <> []);
@@ -1068,7 +1036,7 @@ let test_shipped_keeper_profiles_load () =
         (match KTP.profile_defaults_of_toml doc with
          | Ok _ -> ()
          | Error detail -> fail (path ^ ": " ^ detail)))
-    (config_files @ default_roster_files @ preset_files)
+    (default_roster_files @ preset_files)
 
 (* The fresh-install roster reaches a host with no model and no sandbox: that
    is the state a fresh install is in. A Keeper that autoboots there fails on
@@ -2508,8 +2476,6 @@ let () =
             test_tool_deny_parses_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
-          test_case "bundled keeper profiles resolve prompt defaults" `Quick
-            test_bundled_keeper_profiles_resolve_prompt_defaults;
           test_case "every shipped keeper TOML loads" `Quick
             test_shipped_keeper_profiles_load;
           test_case "fresh-install roster does not autoboot" `Quick

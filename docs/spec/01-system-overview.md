@@ -144,7 +144,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `keeper_store_layout_manifest` | `bin/keeper_store_layout_manifest.ml` | Keeper 런타임 저장소 레이아웃 manifest 생성 |
 | `gen_board_tool_registry` | `bin/gen_board_tool_registry.ml` | Board 도구 레지스트리 미러 코드 생성 |
 | `lane_fusion_container_probe` | `bin/lane_fusion_container_probe.ml` | Fusion 컨테이너 격리 검증. Docker와 합성 HTTP 모델 응답을 쓴다. |
-| `masc_tui_keys_doc_cli` | `bin/masc_tui_keys_doc_cli.ml` | TUI 키바인딩 문서 생성/검증 CLI |
+| `masc_tui_keys_doc_cli` | `bin/masc_tui_keys_doc_cli.ml` | TUI 키 목록 문서를 출력하는 CLI (native TUI proof 의 `key-reference.md`) |
 
 ## 7. Canonical Front Door and Internal Supporting Substrates
 

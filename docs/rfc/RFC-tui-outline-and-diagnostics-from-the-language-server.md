@@ -88,7 +88,7 @@ related: ["a-language-server-the-keeper-can-ask"]
 
 ### 5.1 편집기가 이미 한다
 
-`e` 는 `$EDITOR` 로 초안을 연다(`docs/guides/TUI-KEYS.md` 의 Workspace / Code). 편집기는 보통 개요와 진단을 이미 보여준다. TUI 가 같은 일을 하는 이유가 필요하다.
+`e` 는 `$EDITOR` 로 초안을 연다(TUI `?` 의 Workspace / Code). 편집기는 보통 개요와 진단을 이미 보여준다. TUI 가 같은 일을 하는 이유가 필요하다.
 
 - 가능한 이유: 운영자가 원격 터미널에서 TUI 만 쓰는 경우, Keeper 가 쓴 파일을 편집기 없이 읽는 경우, 편집 중이 아니라 읽기만 하는 경우.
 - 이 이유들이 실제인지는 모른다. §6.1 이 이것을 묻는다.

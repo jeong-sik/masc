@@ -70,7 +70,7 @@ Keepers 목록에서 시안 키 일곱은 이미 다른 뜻이다.
 
 `v` 는 레이아웃 순환(compact · detailed · grouped)이고 푸터에 `v:view` 로 적혀 있다. `J` 는 고른 Keeper 의 상세를 Automation 탭(일정)으로 열고, `K` 는 그 Keeper 앞으로 쌓인 Keeper 요청을 읽는 창(동료 읽기)을 연다.
 
-Keepers 목록은 `[` `]` 를 쓰지 않는다. `K` 창이 열려 있을 때만 그 창이 `[` `]` 로 앞 · 다음 동료를 고른다(`bin/masc_tui.ml` 의 detail reading 갈래). Work · Board · Keeper 상세 같은 다른 화면은 `[` `]` 를 앞 · 다음 행이나 탭으로 쓴다(`docs/guides/TUI-KEYS.md`).
+Keepers 목록은 `[` `]` 를 쓰지 않는다. `K` 창이 열려 있을 때만 그 창이 `[` `]` 로 앞 · 다음 동료를 고른다(`bin/masc_tui.ml` 의 detail reading 갈래). Work · Board · Keeper 상세 같은 다른 화면은 `[` `]` 를 앞 · 다음 행이나 탭으로 쓴다(`bin/masc_tui_keys.ml`, TUI 의 `?`).
 
 ## 2. 제안
 
@@ -391,7 +391,6 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 - V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 은 `Keeper_memory_age_bins.t` 를 바꾸는 hard cut 이라 서버 · TUI · dashboard 가 한 PR 에서 함께 컴파일돼야 한다. 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
 - P1 · P2 는 보기와 무관하게 지금 화면을 고친다. 그래서 R0 · P1 · P2 를 한 스택으로 먼저 착지하고, V1 부터는 그 뒤에 새로 쌓는다(E14). 어느 스택이든 맨 위 PR 로 한 번에 병합한다(`docs/guides/NATIVE-GITHUB-STACKS.md`).
 - P1 은 서버 저장 · 행 JSON · 디코더 · TUI 칸을 같은 층에서 바꿨다.
-- `docs/guides/TUI-KEYS.md` 는 생성 문서다. 키나 범례를 바꾼 층이 생성기 출력과 맞춘다.
 
 ## 4. 하지 않는 것
 

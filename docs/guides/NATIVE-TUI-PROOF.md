@@ -207,9 +207,9 @@ generator. The receipt's `key_reference` records its artifact path, SHA-256 and
 producer target; the surrounding source/workflow identities also apply to it.
 Generation must succeed before a final receipt is written. A selected source
 without the generator target fails instead of substituting another document.
-This output can be used to update `docs/guides/TUI-KEYS.md` after checking the
-source identity and digest. It does not establish visible key handling or compare
-screen wording, layout or row order.
+It is the readable key reference for that source; no copy is committed. It does
+not establish visible key handling or compare screen wording, layout or row
+order.
 
 Every selected suite runs once even if an earlier suite fails. The workflow
 retains each suite and log pipeline exit code in `test-results.tsv` and the

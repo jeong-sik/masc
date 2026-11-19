@@ -116,6 +116,26 @@ type block =
             bracket it. [None] while no usage has bracketed the range. *)
   }
 
+(** How much one turn grew the input while the window stayed (RFC
+    a-sent-request-prefix-changes-only-when-the-window-moves §4). Every count
+    is the provider's [input_tokens] for a request, a sample or not: the
+    turn's first request carries the turn context and is still the largest
+    request of a turn that calls no tool. A request with the turn context
+    opens a turn. A front that moves, or a restart, opens another window, and
+    the growth starts over with it. *)
+type turn_growth =
+  { ended_at : int option
+        (** The count of the last request before the current turn, under
+            this window; [None] for the turn the window opened in. *)
+  ; peak : int option
+        (** The largest count among the current turn's requests; [None] once
+            one of them went uncounted. *)
+  ; largest : int option
+        (** The largest [peak - ended_at] of a turn that finished under this
+            window. *)
+  ; last_input : int option  (** The count of the last request. *)
+  }
+
 type t =
   { prefix_digest : string
   ; total_tokens : int option
@@ -130,6 +150,7 @@ type t =
   ; blocks : block list  (** Oldest first, contiguous over the carried range. *)
   ; last : request
   ; last_usage : usage option
+  ; growth : turn_growth
   }
 
 type event =
@@ -190,6 +211,15 @@ val holds : digest_at:(int -> string option) -> t -> bool
     caller that has to decide before it composes whether the ledger's front
     names an atom of this history (RFC keeper-context-window-in-tokens
     §10.3). *)
+
+val next_turn_peak : t -> int option
+(** The input the next turn is expected to reach while the window stays: the
+    last request's count plus the largest growth of a turn that finished
+    under this window, the current turn included as if it had just finished
+    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §4). [None]
+    while either is unknown. The turn a window opened in has no count before
+    it, so the first growth is the next turn's, read once that turn has
+    opened. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)

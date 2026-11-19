@@ -171,7 +171,8 @@ val declared_at : declared:string list -> string -> int option
 (** The index of a runtime id in a lane's declaration, [None] when absent. *)
 
 val carry
-  :  measure:(Agent_core.Types.message -> int)
+  :  ?past_max_context:Keeper_turn_driver_try_provider.past_max_context
+  -> measure:(Agent_core.Types.message -> int)
   -> continuity:Keeper_turn_driver_try_provider.continuity option
   -> front:Keeper_carried_front.seed option
   -> accepted:Keeper_carried_front.seed option
@@ -183,7 +184,9 @@ val carry
 (** The pure arithmetic: {!Keeper_turn_driver_try_provider.choose_range_start}
     over these values, projected by
     {!Keeper_turn_driver_try_provider.project_range_start}. [counted_tokens]
-    rides along only when the range opens on [front]. *)
+    rides along only when the range opens on a ledger [front].
+    [past_max_context] is the size signal the driver reads at a turn's first
+    request; omitted, no window moves for size. *)
 
 (** What the turn driver reads before a turn's first request, over a history
     with the autonomous wake line appended as its newest atom. The same for

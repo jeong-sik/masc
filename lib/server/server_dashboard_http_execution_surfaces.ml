@@ -739,17 +739,6 @@ let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot ()
     (invalidate_task_mutation_caches ~invalidate_full_health_snapshot)
 ;;
 
-(** Bypass the proactive warm-up guard so tests that call
-    [dashboard_namespace_truth_http_json] get the full response instead of
-    the "initializing" short-circuit. *)
-let seed_execution_cache_for_test ~state () =
-  let owner = execution_owner_for_scope ~state (Mcp_server.workspace_scope state) in
-  with_execution_publication_lock ~owner (fun () ->
-    Server_dashboard_http_cache.mark_cached_surface_success
-      owner.cache
-      (`Assoc [ "status", `String "seeded_for_test" ]))
-;;
-
 let transport_health_cache =
   Server_dashboard_http_cache.create_cached_surface
     (`Assoc

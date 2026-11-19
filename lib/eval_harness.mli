@@ -6,8 +6,8 @@
     Standard / OpenAI Harness inspired.
 
     The [score_std_dev] aggregator is hidden. Callers consume the typed
-    records, deterministic grader / tool-expectation runners, pass@k /
-    summary builders, scenario loader, and {!report_to_string}.
+    records, the tool-expectation runner, pass@k / summary builders,
+    {!scenario_of_json}, and {!report_to_string}.
 
     @since 2.73.0 *)
 
@@ -120,18 +120,6 @@ type eval_suite_result = {
 
 (** {1 Grading runners} *)
 
-val apply_deterministic_grader :
-  deterministic_grader -> string -> grader_result
-(** Score [value] against the deterministic grader. Returns a
-    binary 0.0 / 1.0 score in [grader_result.score]. *)
-
-val check_tool_expectations :
-  tool_expectation list ->
-  string list ->
-  grader_result list
-(** Run every tool expectation against the actual tool-call name
-    list and return one [grader_result] per expectation. *)
-
 val check_tool_expectations_with_evidence :
   tool_expectation list ->
   Eval_tool_selector.call list ->
@@ -161,11 +149,6 @@ val summarize_runs :
 (** {1 Scenario IO} *)
 
 val scenario_of_json : Yojson.Safe.t -> (scenario, string) result
-
-val load_scenarios_from_file :
-  string -> (scenario list, string) result
-(** Decode every JSON object in [path] into a {!scenario}; surfaces
-    Yojson / Sys errors as [Error msg]. *)
 
 (** {1 Reporting} *)
 

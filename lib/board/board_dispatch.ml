@@ -649,9 +649,6 @@ let read_post ~reader ~post_id =
 let read_post_for_evidence ~reader ~post_id =
   read_post_for_evidence_unchecked ~post_id |> visible_post ~reader ~post_id
 
-let get_post_unchecked ~post_id =
-  read_post_unchecked ~post_id |> Result.map_error Board.board_error_of_read_error
-
 let get_post ~reader ~post_id =
   read_post ~reader ~post_id |> Result.map_error Board.board_error_of_read_error
 
@@ -799,9 +796,6 @@ let read_comments ~reader ~post_id =
   match read_post ~reader ~post_id with
   | Error _ as error -> error
   | Ok _ -> read_comments_unchecked ~post_id
-
-let get_comments_unchecked ~post_id =
-  read_comments_unchecked ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let get_comments ~reader ~post_id =
   read_comments ~reader ~post_id |> Result.map_error Board.board_error_of_read_error
@@ -1126,9 +1120,6 @@ let stats ~reader () =
       "expired_pending", `Int expired_posts; "last_sweep", `Float store.last_sweep;
       "backend", `String "jsonl"])
 
-let list_comments_unchecked ?(limit = 1000) () =
-  let store = backend () in Board.list_comments store ~limit ()
-
 let list_comments ~reader ?(limit = 1000) () =
   let store = backend () in
   let comments = Board.list_comments store ~limit:max_int () in
@@ -1190,8 +1181,6 @@ let search ~reader ~query ~limit =
   let store = backend () in
       let predicate = post_matches_text query in
       Board.search_posts store ~predicate:(fun post -> Board_access.can_read ~reader post && predicate post) ~limit
-
-let search_unchecked ~query ~limit = search ~reader:Board_access.Operator ~query ~limit
 
 let flush () =
   match Atomic.get backend_state with

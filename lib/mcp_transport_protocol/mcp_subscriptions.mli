@@ -89,11 +89,4 @@ val acknowledgement :
 (** The first message on a subscription, which no notification may precede —
     use it with {!register_after_ack}. *)
 
-val graceful_closure : subscription_id:Yojson.Safe.t -> Yojson.Safe.t
-(** The JSON-RPC response to the long-lived request, marking a clean end. A
-    transport that drops without it is an unexpected disconnect.
-
-    Built here rather than at each transport: HTTP/1 and h2c wrote their own
-    header-mismatch body and drifted until that moved to one place. *)
-
 val reset_for_test : unit -> unit

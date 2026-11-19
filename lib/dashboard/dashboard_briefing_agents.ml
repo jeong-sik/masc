@@ -250,6 +250,3 @@ let build_agent_briefs_observation ~now_ts config attention_queue (_keepers : Yo
            else Float.compare right.last_seen_ts left.last_seen_ts)
   |> List.map (fun (row : agent_context) -> row.json) in
   {json; next_deadline_unix = !next_deadline_unix}
-
-let build_agent_briefs config attention_queue keepers =
-  (build_agent_briefs_observation ~now_ts:(Time_compat.now ()) config attention_queue keepers).json

@@ -77,12 +77,6 @@ type runtime_exhaustion_reason =
   | Session_conflict
   | Other_detail of string
 
-let runtime_exhaustion_reason_retryable = function
-  | Candidates_filtered_after_cycles -> true
-  | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
-    true
-  | Session_conflict | Other_detail _ -> false
-
 let runtime_exhaustion_label_payload_max_bytes = 200
 
 let runtime_exhaustion_label_payload detail =

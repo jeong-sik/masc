@@ -430,8 +430,8 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     ~source:(operation_source keeper_name)
     ~input:(`Assoc [ "message", `String "answer me" ])));
   Eio.Promise.await started;
-  (match owner_ok (Owner.interrupt_running_operation owner operation_id) with
-   | Owner.Operation_interrupt_signalled -> ()
+  (match fst (owner_ok (Owner.interrupt_turn owner (Owner.Direct_operation operation_id))) with
+   | Owner.Interrupt_result Owner.Operation_interrupt_signalled -> ()
    | _ -> fail "running operation did not accept the interrupt");
   (match Eio.Promise.await settled with
    | Owner.Operation_failed { kind = Keeper_chat_operation.Turn_cancelled; _ } -> ()

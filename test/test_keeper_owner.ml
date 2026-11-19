@@ -2817,29 +2817,30 @@ let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
   ignore (await_terminal owner first_id 1_000);
   check bool "replacement operation started" true
     (Chat_operation.Operation_id.equal (Eio.Stream.take started) second_id);
-  (match Owner.interrupt_running_operation owner first_id with
-   | Ok
-       (Owner.Operation_not_current
-          { running_operation_id = Some running }) ->
+  let interrupt_operation operation_id =
+    match fst (owner_ok (Owner.interrupt_turn owner (Owner.Direct_operation operation_id))) with
+    | Owner.Interrupt_result result -> result
+    | Owner.Pending_admission_paused -> fail "a running owner reported a paused pending admission"
+  in
+  (match interrupt_operation first_id with
+   | Owner.Operation_not_current { running_operation_id = Some running } ->
        check bool "stale interrupt observes replacement identity" true
          (Chat_operation.Operation_id.equal running second_id)
-   | Ok Owner.Operation_interrupt_signalled ->
+   | Owner.Operation_interrupt_signalled ->
        fail "stale interrupt signalled the replacement operation"
-   | Ok (Owner.Operation_not_current { running_operation_id = None }) ->
+   | Owner.Operation_not_current { running_operation_id = None } ->
        fail "replacement lost its running identity"
-   | Ok Owner.Operation_settling -> fail "a finished operation was reported as settling"
-   | Ok Owner.Operation_maintenance_running -> fail "a finished operation was reported as maintenance running"
-   | Ok Owner.Operation_slot_held_by_autonomous_turn -> fail "a finished operation was reported as held by an autonomous turn"
-   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
-   | Error error -> fail (Owner.error_to_string error));
-  (match Owner.interrupt_running_operation owner second_id with
-   | Ok Owner.Operation_interrupt_signalled -> ()
-   | Ok (Owner.Operation_not_current _) -> fail "exact replacement was not current"
-   | Ok Owner.Operation_settling -> fail "the running replacement was reported as settling"
-   | Ok Owner.Operation_maintenance_running -> fail "the running replacement was reported as maintenance running"
-   | Ok Owner.Operation_slot_held_by_autonomous_turn -> fail "the running replacement was reported as held by an autonomous turn"
-   | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
-   | Error error -> fail (Owner.error_to_string error));
+   | Owner.Operation_settling -> fail "a finished operation was reported as settling"
+   | Owner.Operation_maintenance_running -> fail "a finished operation was reported as maintenance running"
+   | Owner.Operation_slot_held_by_autonomous_turn -> fail "a finished operation was reported as held by an autonomous turn"
+   | Owner.Operation_interrupt_failed detail -> fail detail);
+  (match interrupt_operation second_id with
+   | Owner.Operation_interrupt_signalled -> ()
+   | Owner.Operation_not_current _ -> fail "exact replacement was not current"
+   | Owner.Operation_settling -> fail "the running replacement was reported as settling"
+   | Owner.Operation_maintenance_running -> fail "the running replacement was reported as maintenance running"
+   | Owner.Operation_slot_held_by_autonomous_turn -> fail "the running replacement was reported as held by an autonomous turn"
+   | Owner.Operation_interrupt_failed detail -> fail detail);
   let terminal = await_terminal owner second_id 1_000 in
   match terminal.state with
   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
@@ -3090,7 +3091,7 @@ let test_pending_stop_cannot_pause_different_active_child () =
   check bool "active successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
   (* The refusal deliberately leaves this child working. End only that fixture
      execution so the enclosing switch can finish after the assertions. *)
-  ignore (owner_ok (Owner.interrupt_running_operation owner (operation_id "active-other")));
+  ignore (interrupt_turn owner (Direct_operation (operation_id "active-other")));
   ignore (await_terminal owner (operation_id "active-other") 1_000)
 ;;
 
@@ -4067,7 +4068,7 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
    | Some { lane = Owner.Autonomous; _ } -> ()
    | Some { lane = Owner.Chat_operation | Owner.Maintenance; _ } | None ->
      fail "the autonomous cycle does not hold the slot");
-  (match owner_ok (Owner.interrupt_running_operation owner stuck_id) with
+  (match interrupt_turn owner (Owner.Direct_operation stuck_id) with
    | Owner.Operation_slot_held_by_autonomous_turn -> ()
    | Owner.Operation_interrupt_signalled -> fail "the operation id cancelled the autonomous cycle"
    | Owner.Operation_not_current _ | Owner.Operation_settling | Owner.Operation_maintenance_running

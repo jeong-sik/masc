@@ -1403,11 +1403,7 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
     Alcotest.(check bool)
       "reason is Dns_failure"
       true
-      (reason = Keeper_internal_error.Dns_failure);
-    Alcotest.(check bool)
-      "Dns_failure is policy-retryable (Auto_resume_with_backoff eligible)"
-      true
-      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason)
+      (reason = Keeper_internal_error.Dns_failure)
   | Some other ->
     Alcotest.failf "expected Runtime_exhausted, got %s"
       (Keeper_internal_error.kind_of_masc_internal_error other)
@@ -1450,10 +1446,6 @@ let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
       "reason is Session_conflict"
       true
       (reason = Keeper_internal_error.Session_conflict);
-    Alcotest.(check bool)
-      "session conflict is not automatically retryable"
-      false
-      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
     Alcotest.(check string)
       "session conflict has a stable observation label"
       "session_conflict"

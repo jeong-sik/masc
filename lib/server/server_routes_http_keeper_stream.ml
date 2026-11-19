@@ -3012,7 +3012,7 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
   }
 ;;
 
-let keeper_chat_stream_headers origin =
+let keeper_chat_stream_request_headers request =
   Httpun.Headers.of_list
     ([
        ("content-type", "text/event-stream");
@@ -3021,16 +3021,6 @@ let keeper_chat_stream_headers origin =
           Content-Length for streaming bodies, so the terminal delimiter is the
           writer close; advertising keep-alive makes clients wait for a
           response end that cannot be framed. *)
-       ("connection", "close");
-       ("x-accel-buffering", "no");
-     ]
-    @ cors_headers origin)
-
-let keeper_chat_stream_request_headers request =
-  Httpun.Headers.of_list
-    ([
-       ("content-type", "text/event-stream");
-       ("cache-control", "no-cache");
        ("connection", "close");
        ("x-accel-buffering", "no");
      ]

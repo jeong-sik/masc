@@ -5,7 +5,7 @@
     {!Dashboard_briefing_agents} (which itself runtimes
     {!Dashboard_utils}), so callers reach the agent-brief
     + per-entity context records ({!attention_context},
-    {!agent_context}, {!keeper_context}) and {!build_agent_briefs}
+    {!agent_context}, {!keeper_context}) and {!build_agent_briefs_observation}
     unqualified through this module's facade.  Type
     identity propagates end-to-end via
     [include module type of struct include M end].

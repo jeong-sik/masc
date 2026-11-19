@@ -111,8 +111,9 @@ val register
       put in place. The account has no key until the person sends one
       again: the key before is not read.
 
-    The body is read before the records of the account, so a body that is
-    refused answers 400 whatever account the id names. *)
+    The id is read first, then the body, then the records of the account.
+    A path that is no id answers 404 with the body not read. For an id that
+    is one, a body that is refused answers 400 whatever account it names. *)
 val replace
   :  person:Server_setup_account_login.person
   -> base_path:string

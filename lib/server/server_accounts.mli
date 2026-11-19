@@ -153,11 +153,8 @@ val health_version : string -> string option
     access, gives the environment and [sw] to the transport of a login
     ([Eio_context]), records the port for the CLI of the workspace
     ([Workspace_connection]), starts one fiber that ends what a stopped
-    server left, first the removals of key accounts
-    ({!Server_key_account_purge.resume}), which keep a key on disk while
-    they wait, then the deletions of conversations
-    ({!Server_keeper_conversation_purge.resume}), which can wait for a
-    vendor, calls [on_ready], and serves until [sw] is
+    server left ({!Server_stopped_work.start}), calls [on_ready], and serves
+    until [sw] is
     cancelled. A refused boot has not set the two. The two are one value
     each for the process: a process runs one account server, and a second
     [run] in it would replace what the first one set. The cleartext listener follows the HTTP mode of the

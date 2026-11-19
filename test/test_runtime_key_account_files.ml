@@ -259,7 +259,7 @@ let other_keys label ~runtime_root id generation expected =
     label
     expected
     (match F.remove_other_keys ~runtime_root ~account_id:id ~generation with
-     | Ok () -> "removed"
+     | Ok gone -> Printf.sprintf "removed %d" gone
      | Error (_ : string) -> "left")
 ;;
 
@@ -319,7 +319,7 @@ let test_replaced_with_no_files =
    generations its record does not name go. *)
 let test_other_keys =
   with_root (fun ~base_path:_ ~runtime_root ->
-    other_keys "an account with no files" ~runtime_root account generation "removed";
+    other_keys "an account with no files" ~runtime_root account generation "removed 0";
     Alcotest.(check bool) "it made no folder" false (there (keys_of ~runtime_root account));
     made "the account" ~runtime_root account the_key "made";
     (* A replacement that put its key in place and went no further. *)
@@ -328,17 +328,17 @@ let test_other_keys =
      | Error (_ : K.write_error) -> Alcotest.fail "the key of the second generation was not written");
     let keys = keys_of ~runtime_root account in
     let in_place = key_file_at ~runtime_root account second in
-    other_keys "the files of the other generations" ~runtime_root account second "removed";
+    other_keys "the files of the other generations" ~runtime_root account second "removed 1";
     Alcotest.(check (list string)) "the file of the generation named is left alone" [ Filename.basename in_place ] (names_of keys);
     Alcotest.(check string) "and its key reads back" "key:sk-test-the-second-key" (read_name in_place);
-    other_keys "the same again" ~runtime_root account second "removed";
+    other_keys "the same again" ~runtime_root account second "removed 0";
     Alcotest.(check (list string)) "nothing more went" [ Filename.basename in_place ] (names_of keys);
     (* A record that names a generation whose file was never put in place:
        no file of the folder is the key of the account. *)
-    other_keys "for a generation with no file" ~runtime_root account third "removed";
+    other_keys "for a generation with no file" ~runtime_root account third "removed 1";
     Alcotest.(check (list string)) "the folder is empty" [] (names_of keys);
     let no_root = Filename.concat (Filename.dirname runtime_root) "namespace-of-nobody" in
-    other_keys "under a runtime root that is not there" ~runtime_root:no_root account generation "removed";
+    other_keys "under a runtime root that is not there" ~runtime_root:no_root account generation "removed 0";
     Alcotest.(check bool) "it made no runtime root" false (there no_root))
 ;;
 
@@ -354,6 +354,18 @@ let test_other_keys_link =
       "what the link led to is in place"
       "key:sk-test-the-other-key"
       (read_name (key_file_of ~runtime_root other_account));
+    (* A replacement writes no key through the link either. *)
+    replaced
+      "a replacement of that account"
+      ~runtime_root
+      account
+      second
+      "sk-test-the-second-key"
+      "key_not_written:folder_not_private";
+    Alcotest.(check (list string))
+      "the folder the link led to holds its own key alone"
+      [ Filename.basename (key_file_of ~runtime_root other_account) ]
+      (names_of (keys_of ~runtime_root other_account));
     (match (Unix.lstat link).Unix.st_kind with
      | Unix.S_LNK -> ()
      | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
@@ -502,7 +514,7 @@ let test_other_keys_stay =
          [ Filename.basename stuck; Filename.basename in_place ]
          (names_of keys);
        Unix.chmod stuck 0o700;
-       other_keys "asked again, the folder written again" ~runtime_root account second "removed";
+       other_keys "asked again, the folder written again" ~runtime_root account second "removed 1";
        Alcotest.(check (list string)) "the new key alone is left" [ Filename.basename in_place ] (names_of keys)))
 ;;
 

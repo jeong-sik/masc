@@ -53,6 +53,10 @@ val owner : t -> Authz_types.Provider_account_id.t -> Authz_types.User_id.t opti
 (** The accounts this person owns, in the order of their ids. *)
 val owned_by : t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list
 
+(** The key accounts of every person, in the order of their ids: those a
+    removal went through among them, since their records stay. *)
+val key_accounts : t -> Authz_types.Provider_account_id.t list
+
 (** What the records of its removal say of an account, as far as a
     replacement of its key reads them. This module holds no record of a
     removal: {!Authz_state} reads them for it. *)

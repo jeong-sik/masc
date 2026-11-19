@@ -73,6 +73,45 @@ type squash =
   | By_selection of selection
   | Owns_keyboard
 
+type scrollbar =
+  { offset : int
+  ; visible : int
+  ; total : int
+  }
+
+type scrollbar_cell =
+  | Track
+  | Thumb
+  | Arrow_up
+  | Arrow_down
+
+type box_glyphs =
+  { tl : string
+  ; tr : string
+  ; bl : string
+  ; br : string
+  ; h : string
+  ; v : string
+  }
+
+let glyphs_of_focus = function
+  | Focused_list | Focused_other ->
+      { tl = Box.tl_heavy
+      ; tr = Box.tr_heavy
+      ; bl = Box.bl_heavy
+      ; br = Box.br_heavy
+      ; h = Box.h_heavy
+      ; v = Box.v_heavy
+      }
+  | Unfocused ->
+      { tl = Box.tl_round
+      ; tr = Box.tr_round
+      ; bl = Box.bl_round
+      ; br = Box.br_round
+      ; h = Box.h
+      ; v = Box.v
+      }
+
 (* A side, one cell of padding, a cell of content, one cell of padding, a side. *)
 let side_and_padding_cells = 4
 let min_width = side_and_padding_cells + 1
@@ -221,14 +260,15 @@ let border_style ~style = function
 let squashed_start = "\xe2\x95\xb6" (* ╶ *)
 let squashed_end = "\xe2\x95\xb4" (* ╴ *)
 
-let edge_ends = function
-  | Full -> (Box.tl_round, Box.tr_round)
+let edge_ends ~glyphs = function
+  | Full -> (glyphs.tl, glyphs.tr)
   | Squashed -> (squashed_start, squashed_end)
 
 (* [shape] is the card's height: a full card's top edge, or the one row of a
    squashed card. Both say the same things in the same places. *)
 let top_edge ~ko ~style ~width ~shape edge =
-  let start, finish = edge_ends shape in
+  let glyphs = glyphs_of_focus edge.focus in
+  let start, finish = edge_ends ~glyphs shape in
   let fit = top_fit ~ko ~width edge in
   let border = border_style ~style edge.focus in
   let paint code text = code ^ text ^ style.reset in
@@ -257,23 +297,23 @@ let top_edge ~ko ~style ~width ~shape edge =
     | Some count when fit.count_kept -> Some (count_text ~ko count)
     | Some _ | None -> None
   in
-  let opening = start ^ Box.h in
-  let closing = Box.h ^ finish in
+  let opening = start ^ glyphs.h in
+  let closing = glyphs.h ^ finish in
   match left_cells > 0, count with
-  | false, None -> paint border (start ^ repeat Box.h (width - 2) ^ finish)
+  | false, None -> paint border (start ^ repeat glyphs.h (width - 2) ^ finish)
   | true, None ->
       paint border (opening ^ " ") ^ left
-      ^ paint border (" " ^ repeat Box.h (width - left_cells - left_only_cells) ^ finish)
+      ^ paint border (" " ^ repeat glyphs.h (width - left_cells - left_only_cells) ^ finish)
   | false, Some count ->
       paint border
         (opening
-         ^ repeat Box.h (width - cells count - count_only_cells)
+         ^ repeat glyphs.h (width - cells count - count_only_cells)
          ^ " " ^ count ^ " " ^ closing)
   | true, Some count ->
       (* [fits] left at least one rule cell between the two. *)
       let rule = width - left_cells - cells count - left_and_count_cells + 1 in
       paint border (opening ^ " ") ^ left
-      ^ paint border (" " ^ repeat Box.h rule ^ " " ^ count ^ " " ^ closing)
+      ^ paint border (" " ^ repeat glyphs.h rule ^ " " ^ count ^ " " ^ closing)
 
 let bottom_fit ~ko ~width ~hidden =
   let room = width - bottom_text_cells in
@@ -282,24 +322,63 @@ let bottom_fit ~ko ~width ~hidden =
   else if cells (Value.Count.grouped hidden) <= room then Number_only
   else Plain
 
-let bottom_edge ~ko ~border ~reset ~width hidden =
+let bottom_edge ~ko ~glyphs ~border ~reset ~width hidden =
   let paint text = border ^ text ^ reset in
   let with_text text =
     paint
-      (Box.bl_round
-       ^ repeat Box.h (width - cells text - bottom_text_cells + 1)
-       ^ " " ^ text ^ " " ^ Box.h ^ Box.br_round)
+      (glyphs.bl
+       ^ repeat glyphs.h (width - cells text - bottom_text_cells + 1)
+       ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
   in
   match bottom_fit ~ko ~width ~hidden with
   | Says_more -> with_text (Value.Count.more ~ko hidden)
   | Number_only -> with_text (Value.Count.grouped hidden)
-  | Plain -> paint (Box.bl_round ^ repeat Box.h (width - 2) ^ Box.br_round)
+  | Plain -> paint (glyphs.bl ^ repeat glyphs.h (width - 2) ^ glyphs.br)
 
-let body_row ~border ~reset ~width content =
+let scrollbar_cells ~rows { offset; visible; total } =
+  if rows <= 0 || visible <= 0 || total <= visible then None
+  else
+    let max_offset = total - visible in
+    let clamped_offset = max 0 (min max_offset offset) in
+    let has_arrows = rows >= 3 in
+    let track_rows = if has_arrows then rows - 2 else rows in
+    let thumb_len =
+      let num =
+        Int64.(add (mul (of_int visible) (of_int track_rows)) (of_int (total - 1)))
+      in
+      let raw = Int64.(to_int (div num (of_int total))) in
+      (* On an overflowing track of 2+ cells, reserve at least one Track cell
+         so the thumb still moves visibly as [offset] changes. *)
+      let max_thumb = max 1 (track_rows - 1) in
+      max 1 (min max_thumb raw)
+    in
+    let max_start = track_rows - thumb_len in
+    let thumb_start =
+      if max_start <= 0 then 0
+      else
+        let num =
+          Int64.(add (mul (of_int clamped_offset) (of_int max_start)) (of_int (max_offset / 2)))
+        in
+        max 0 (min max_start Int64.(to_int (div num (of_int max_offset))))
+    in
+    let track_cell index =
+      if index >= thumb_start && index < thumb_start + thumb_len then Thumb
+      else Track
+    in
+    let inner = List.init track_rows track_cell in
+    Some (if has_arrows then (Arrow_up :: inner) @ [ Arrow_down ] else inner)
+
+let right_edge_cell ~glyphs ~border ~thumb_style ~reset = function
+  | None | Some Track -> border ^ glyphs.v ^ reset
+  | Some Thumb -> thumb_style ^ Box.scroll_thumb ^ reset
+  | Some Arrow_up -> border ^ Box.scroll_up ^ reset
+  | Some Arrow_down -> border ^ Box.scroll_down ^ reset
+
+let body_row ~glyphs ~border ~thumb_style ~reset ~width ~scroll_cell content =
   String.concat ""
-    [ border; Box.v; reset; " "
+    [ border; glyphs.v; reset; " "
     ; Layout.fit_width content (content_cells ~width)
-    ; " "; border; Box.v; reset
+    ; " "; right_edge_cell ~glyphs ~border ~thumb_style ~reset scroll_cell
     ]
 
 let window ~rows body =
@@ -311,21 +390,39 @@ let window ~rows body =
 (* [body] is the rows already asked of the card at its content width, so a
    body that wraps is asked once per card however many times the layout reads
    its height. *)
-let render_body ~ko ~style ~width ~height edge body =
+let render_body ?scrollbar ~ko ~style ~width ~height edge body =
   if width < min_width || height < min_height then
     List.init (max 0 height) (fun _ -> blank width)
   else begin
     let rows = height - 2 in
     let shown, hidden = window ~rows body in
+    let glyphs = glyphs_of_focus edge.focus in
     let border = border_style ~style edge.focus in
+    let thumb_style =
+      if String.equal style.title_style "" then border else style.title_style
+    in
+    let scroll_cells =
+      match scrollbar with
+      | None -> None
+      | Some sb -> Option.map Array.of_list (scrollbar_cells ~rows sb)
+    in
     let filler = List.init (rows - List.length shown) (fun _ -> "") in
-    (top_edge ~ko ~style ~width ~shape:Full edge
-     :: List.map (body_row ~border ~reset:style.reset ~width) (shown @ filler))
-    @ [ bottom_edge ~ko ~border ~reset:style.reset ~width hidden ]
+    let body_rows =
+      List.mapi
+        (fun index content ->
+           let scroll_cell =
+             Option.map (fun arr -> arr.(index)) scroll_cells
+           in
+           body_row ~glyphs ~border ~thumb_style ~reset:style.reset ~width
+             ~scroll_cell content)
+        (shown @ filler)
+    in
+    (top_edge ~ko ~style ~width ~shape:Full edge :: body_rows)
+    @ [ bottom_edge ~ko ~glyphs ~border ~reset:style.reset ~width hidden ]
   end
 
-let render ~ko ~style ~width ~height card =
-  render_body ~ko ~style ~width ~height card.edge
+let render ?scrollbar ~ko ~style ~width ~height card =
+  render_body ?scrollbar ~ko ~style ~width ~height card.edge
     (card.body ~cells:(content_cells ~width))
 
 let columns_that_fit ~inner_width ~gap ~min_card_width ~max_columns =

@@ -1,4 +1,3 @@
-open Fs_compat_internal
 open Fs_compat_base_io
 open Fs_compat_owned_file
 open Fs_compat_path_ops
@@ -52,16 +51,36 @@ let with_private_path_lock ~locking ~path f =
      | Some result -> result
      | None -> raise (Sys_error ("private file is busy: " ^ path)))
 
+(* A writer's directory is made inside the blocking job that then writes the
+   file, and nothing is remembered between calls: a directory that is there
+   costs one [stat], and one that was removed is made again by the next
+   write, whichever call removed it (#53279). *)
+let make_directory_in_this_job dir =
+  test_exec_home_guard ~op:"mkdir_p" dir;
+  mkdir_p_unix dir
+;;
+
+(* As [make_directory_in_this_job], for the two transactions that made their
+   directory with [mkdir_p] before their job: a directory that cannot be
+   made stays the [Sys_error] it was in a fiber. *)
+let make_transaction_directory_in_this_job dir =
+  try make_directory_in_this_job dir with
+  | Unix.Unix_error (code, operation, argument) ->
+    raise
+      (Sys_error
+         (Stdlib.Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message code)))
+;;
+
 let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for_lock) ?validate_prefix
     ?(confirm_existing=(fun () -> false)) ?(verify_content=false)
     ?(append_io=durable_append_unix_io) ~io path (plan : _ private_file_read_plan) =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
-  if create then mkdir_p_memoized dir;
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-update"
     ~path
     (fun () ->
+    if create then make_transaction_directory_in_this_job dir;
     with_private_path_lock ~locking ~path (fun () ->
       evict_inactive_cached_writer_for_path path;
       let require_binding = function
@@ -422,11 +441,11 @@ let update_existing_private_file_durable_locked_with_io_for_testing ~io path dec
 let rewrite_private_file_durable_locked_result path decide =
   test_exec_home_guard ~op:"rewrite_private_file_durable_locked" path;
   let dir = Filename.dirname path in
-  mkdir_p_memoized dir;
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-rewrite"
     ~path
     (fun () ->
+    make_transaction_directory_in_this_job dir;
     with_append_path_mutex path (fun () ->
       evict_inactive_cached_writer_for_path path;
       let existing = Option.value (load_file_opt path) ~default:"" in
@@ -550,11 +569,7 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
         (fun () ->
            test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
            let dir = Filename.dirname path in
-           Mkdir_memo.mkdir_p_memoized
-             ~mkdir_p:(fun dir ->
-               test_exec_home_guard ~op:"mkdir_p" dir;
-               mkdir_p_unix dir)
-             dir;
+           make_directory_in_this_job dir;
            with_append_path_mutex path (fun () ->
              evict_inactive_cached_writer_for_path path;
              match
@@ -766,8 +781,7 @@ let append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let write () =
-    Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
-      (Stdlib.Filename.dirname path);
+    mkdir_p_unix (Stdlib.Filename.dirname path);
     let buf = Buffer.create 256 in
     Yojson.Safe.to_buffer buf json;
     Buffer.add_char buf '\n';
@@ -785,8 +799,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
 let append_jsonl_rows (path : string) (rows : string) : unit =
   test_exec_home_guard ~op:"append_jsonl_rows" path;
   let write () =
-    Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
-      (Stdlib.Filename.dirname path);
+    mkdir_p_unix (Stdlib.Filename.dirname path);
     append_lines_unix path rows
   in
   (* The same boundary as [append_jsonl]: the joined result is the caller's
@@ -802,8 +815,7 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
   else begin
     test_exec_home_guard ~op:"append_jsonl_batch" path;
     let write () =
-      Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
-        (Stdlib.Filename.dirname path);
+      mkdir_p_unix (Stdlib.Filename.dirname path);
       let buf = Buffer.create 4096 in
       List.iter (fun json ->
         Yojson.Safe.to_buffer buf json;

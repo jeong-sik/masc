@@ -388,7 +388,8 @@ let render_connectors (state : state) =
   (* Configuration is secondary to whether this connector can be reached
      and which channel it serves. Name is flexible; every other field keeps
      its column even when another row has a long Unicode name. *)
-  let layout = Masc_tui_table.fit ~inner_width:(max 0 (framed_inner_width cols - 2))
+  let table_inner_width = max 0 (framed_inner_width cols - 2) in
+  let layout = Masc_tui_table.fit ~inner_width:table_inner_width
     ~width:column_width ~flex:Connector_name_column
     ~drop_order:[ Connector_configured_column ]
     [ Connector_name_column; Connector_configured_column; Connector_reachable_column;
@@ -423,8 +424,12 @@ let render_connectors (state : state) =
       ~en:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh  Esc:features")
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        ("  " ^ Masc_tui_table.header_row
-          (cells ~name:"" ~configured:"" ~reachable:"" ~status:"" ~channel:""));
+        ("  "
+         ^ Masc_tui_table.header_row_with_dropped
+             ~ko:(state.ui_language = Lang_ko)
+             ~inner_width:table_inner_width
+             ~dropped:layout.dropped
+             (cells ~name:"" ~configured:"" ~reachable:"" ~status:"" ~channel:""));
       c.push_divider ();
       Option.iter (fun notice ->
         c.push_styled ~style:(Theme.info ()) ("  " ^ notice)) read_notice;

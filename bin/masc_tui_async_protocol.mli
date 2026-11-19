@@ -906,6 +906,10 @@ type async_msg =
   | Verification_msg of verification_msg
   | Harness_msg of harness_msg
   | Overview_loaded of (overview_snapshot, string) result
+  | Engine_sample_read of Masc_tui_engine_samples.reading
+      (** The engine graphs' own [/health] read (RFC tui-one-screen-grammar
+          section 5.6). It reads no workspace data and is not stamped with
+          one. *)
   | Fusion_msg of fusion_msg
   | Memory_msg of memory_msg
   | Repository_msg of repository_msg

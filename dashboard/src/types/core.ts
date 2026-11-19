@@ -973,6 +973,9 @@ export type ChatBlock =
   | ChatStatusBlock
 export type KeeperConversationStreamState =
   | 'cancelling'
+  // The operator pressed stop before the send read the server's acceptance.
+  // The stop goes to the server when the acceptance arrives.
+  | 'stop_pending'
   | 'opening'
   | 'thinking'
   | 'retrying'

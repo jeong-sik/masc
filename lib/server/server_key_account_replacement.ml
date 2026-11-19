@@ -92,32 +92,63 @@ let replace ~(person : Login.person) ~base_path id key =
 
 (* ---- the start of the server ---- *)
 
-type left =
+(* Why the folder of the keys of an account was not looked at. *)
+type not_looked_at =
   | Call_running
-  | Stayed of string
+  | Zone_not_trusted of Authz_zone.uncertain
+  | Owner_without_membership
+  | Folder_not_read of string
+
+let nothing_there = { Files.gone = 0; stayed = None }
 
 (* Read inside the call of the account, where a replacement of its key runs
    too: the generation of that time names the one file that stays. The
-   runtime root is spelled and not made, so an account with no file gets
-   none. An owner with no membership has no name for the folder of their
-   files: there is nothing of theirs to look at.
+   state is one the zone can be trusted for ([Authz_zone.read]): nothing
+   commits here, and records that went back would name a generation before
+   the one on disk, whose file is the key in use.
+
+   The runtime root is spelled and not made, so an account with no file
+   gets none. An owner with no membership has no record that names the
+   folder of their files: it is not looked at, and what it holds stays
+   (issue #53111).
 
    The account of a removal that began or went through is looked at too.
-   The removal takes every file of it, whichever of the two runs first. *)
+   The removal takes every file of it, whichever of the two runs first. Of
+   such an account whose owner has no membership nothing is said here: the
+   resume of the removal says it. *)
 let remove_left_keys_of ~zone ~base_path id =
   Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
-    let state = (Authz_zone.snapshot zone).Authz_zone.state in
-    match Accounts.find state.Authz_state.provider_accounts id with
-    | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok 0
-    | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } } ->
-      (match Authz_principal_state.find_membership state.Authz_state.principals owner with
-       | None -> Ok 0
-       | Some { Authz_principal_state.workspace_id = _; account_home_namespace = namespace } ->
-         Files.remove_other_keys
-           ~runtime_root:(Runtime_account_home_layout.person_runtime_root ~base_path ~namespace)
-           ~account_id:id
-           ~generation
-         |> Result.map_error (fun detail -> Stayed detail)))
+    match Authz_zone.read zone with
+    | Error uncertain -> Error (Zone_not_trusted uncertain)
+    | Ok trusted ->
+      let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+      (match Accounts.find state.Authz_state.provider_accounts id with
+       | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok nothing_there
+       | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } } ->
+         (match Authz_principal_state.find_membership state.Authz_state.principals owner with
+          | Some { Authz_principal_state.workspace_id = _; account_home_namespace = namespace } ->
+            Files.remove_other_keys
+              ~runtime_root:(Runtime_account_home_layout.person_runtime_root ~base_path ~namespace)
+              ~account_id:id
+              ~generation
+            |> Result.map_error (fun detail -> Folder_not_read detail)
+          | None ->
+            (match Authz_state.account_removal state ~owner id with
+             | Authz_state.Removal_begun -> Ok nothing_there
+             | Authz_state.Removal_not_begun
+             | Authz_state.Removal_stayed (_ : Authz_purge_event.account_failed_stage)
+             | Authz_state.Removal_start_given_up -> Error Owner_without_membership))))
+;;
+
+(* The lines of a start say that it is one: no replacement was asked for.
+   The same rule holds for them: no key, and a detail that can name a path
+   goes to the log alone. *)
+let logged_at_start id what detail =
+  Log.Server.warn
+    "The start of the server, the folder of the keys of account %s: %s: %s"
+    (Provider_account_id.to_string id)
+    what
+    detail
 ;;
 
 (* An exception of one account would end the switch of the server, and at
@@ -128,30 +159,48 @@ let guarded id f =
   | () -> ()
   | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
-  | exception exn -> logged id "the files of its keys were not looked at" (Printexc.to_string exn)
+  | exception exn -> logged_at_start id "it was not looked at" (Printexc.to_string exn)
 ;;
 
 let remove_left_keys ~zone ~base_path =
+  (* The list names the accounts to ask about and decides nothing: each is
+     read again, where the zone can be trusted, inside its call. *)
   List.iter
     (fun id ->
       guarded id
       @@ fun () ->
       match remove_left_keys_of ~zone ~base_path id with
-      | Ok 0 -> ()
-      | Ok gone ->
+      | Ok { Files.gone; stayed } ->
         (* A file that held a key went with no request of its owner, so the
            log of the server says it. *)
-        Log.Server.info
-          "The start of the server removed %d of the files of the folder of the keys of account %s: \
-           none of them is the key its records say"
-          gone
-          (Provider_account_id.to_string id)
+        if gone > 0
+        then
+          Log.Server.info
+            "The start of the server removed %d of the files of the folder of the keys of account \
+             %s: none of them is the key its records say"
+            gone
+            (Provider_account_id.to_string id);
+        Option.iter (fun detail -> logged_at_start id "a file of it stays" detail) stayed
       | Error Call_running ->
-        (* The call can be a replacement, which removes them itself. The
-           next start looks again. *)
-        Log.Server.debug
-          "The files of the keys of account %s were not looked at: a call of the account runs"
+        (* The call can be a replacement, which removes them itself, and
+           whether a file was left is not known: it is no warning. It is
+           said where a log of the default level shows it, since a key the
+           owner replaced can stay on disk until the next start. *)
+        Log.Server.info
+          "The start of the server did not look at the folder of the keys of account %s: a call \
+           of the account runs. The next start looks again, and so do a replacement of its key \
+           and its removal."
           (Provider_account_id.to_string id)
-      | Error (Stayed detail) -> logged id "a file of the folder of its keys stays" detail)
+      | Error (Zone_not_trusted uncertain) ->
+        logged_at_start
+          id
+          "it was not looked at, the authorization zone cannot be trusted now"
+          (Authz_zone.uncertain_detail uncertain)
+      | Error Owner_without_membership ->
+        Log.Server.warn
+          "The start of the server did not look at the folder of the keys of account %s: its \
+           owner has no membership, so nothing names the folder of their files"
+          (Provider_account_id.to_string id)
+      | Error (Folder_not_read detail) -> logged_at_start id "it was not looked at" detail)
     (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
 ;;

@@ -292,12 +292,10 @@ let reader_after_wheel (reader : clamped_scroll)
   | Resource_scroll _ -> None
 
 
-let navigation_rows = 1
-
-
 let get_terminal_size () =
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
-  (max 1 (rows - navigation_rows), max 1 (cols - !acting_pane_reserved_cols))
+  ( Render_schedule.Viewport.below_strip ~terminal_rows:rows
+  , max 1 (cols - !acting_pane_reserved_cols) )
 
 
 (* The lines a buffer has ended since [start]: how far down a frame the next
@@ -708,8 +706,8 @@ let zone4_action_text (state : state) ~action_text ~preferred_action =
 (* [position] reaches the footer only through [Footer_hints], which the chat
    uses for its "back from newest" marker. Every other position is a value
    drawn on the title row. *)
-let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
-    (state : state) ~max_cells ~hints =
+let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
+    (state : state) ~max_cells ~keys =
   (* Hints off trades the key text for status room. "?:help" stays only
      when the current input owner lets that key open the help sheet. *)
   (* The same seam names the sheet while the keys are visible, and asks the
@@ -721,19 +719,20 @@ let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = No
   let help_hint = Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko) in
   let hints =
     if not state.hints_visible then
-      if door_answers then help_hint else ""
+      Masc_tui_footer.Written (if door_answers then help_hint else "")
     else if door_answers then
       (* Inspect the key, as the shared fitter does, rather than its label. *)
-      if List.exists (fun item ->
-           match Masc_tui_footer.item_key item with
+      if List.exists (fun (key : Masc_tui_footer.key_item) ->
+           match Masc_tui_footer.item_key key.item with
            | Some key -> List.mem "?" (Masc_tui_footer.key_atoms key)
-           | None -> false) (Masc_tui_footer.split_on_double_space hints)
-      then hints else hints ^ "  " ^ help_hint
-    else hints
+           | None -> false) (Masc_tui_footer.row_items keys)
+      then keys else Masc_tui_footer.append_answering keys help_hint
+    else keys
   in
   (* The keys this frame announces, for the navigation trace (RFC-0485). *)
   Masc_tui_nav_trace_log.announce
-    (match choices with None -> hints | Some text -> text ^ "  " ^ hints);
+    (let answering = Masc_tui_footer.answering_text hints in
+     match choices with None -> answering | Some text -> text ^ "  " ^ answering);
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in
@@ -890,12 +889,21 @@ let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = No
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
     ~help_key_answers:door_answers ~key_style:(Ansi.bold ^ Theme.accent ())
+    ~refused_keys:
+      (if Masc_tui_theme.colors_enabled then Masc_tui_footer.Shown_dim
+       else Masc_tui_footer.Left_out)
     ~ko:(state.ui_language = Lang_ko)
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
       @ identity @ conflict)
     ~dim:(Theme.recede ()) ~reset:Ansi.reset ~max_cells ~hints ()
+
+(* A row a footer spelled itself and filtered to the keys that answer. *)
+let footer_line_with ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
+    ~hints =
+  footer_line_keys ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
+    ~keys:(Masc_tui_footer.Written hints)
 
 
 let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~hints =
@@ -1391,8 +1399,9 @@ let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 
 
 (* The line [surface_strip] draws above every surface. A row a surface counts
-   in its own frame sits this many lines lower in the terminal's. *)
-let strip_rows = 1
+   in its own frame sits this many lines lower in the terminal's. Viewport
+   owns the count, because [get_terminal_size] takes the same rows off. *)
+let strip_rows = Render_schedule.Viewport.navigation_rows
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -2134,8 +2143,8 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
-let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar (state : state)
-    ~terminal_rows ~cols ~surface_key ~title ~hints
+let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
+    (state : state) ~terminal_rows ~cols ~surface_key ~title ~keys
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -2277,10 +2286,17 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
         combined
   in
   Buffer.add_string buf
-    (footer_line ?help_door ?status ~recovery_in_slot
-       state ~max_cells:full_cols ~hints);
+    (footer_line_keys ?help_door ?status ~recovery_in_slot
+       state ~max_cells:full_cols ~keys);
   Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
+
+(* A surface whose footer spelled its own row, filtered to the keys that
+   answer. *)
+let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+    ~surface_key ~title ~hints ~body =
+  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+    ~surface_key ~title ~keys:(Masc_tui_footer.Written hints) ~body
 
 
 (* What the reads under way and the reads that failed have to say, one piece
@@ -3302,18 +3318,15 @@ let question_hints (state : state) =
   let open Masc_tui_keys in
   match state.ask_answer_mode with
   | Ask_browsing ->
-      let asks =
+      let ask_selected =
         match open_ask_rows state with
-        | [] -> No_asks
-        | _ :: _ ->
-            (match selected_ask_row state with
-             | Some _ -> Ask_selected
-             | None -> Asks_unselected)
+        | [] -> false
+        | _ :: _ -> Option.is_some (selected_ask_row state)
       in
       footer_hints_approvals ~lang:state.ui_language
         (Approval_browsing
            { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
-           ; asks
+           ; ask_selected
            ; source = Option.is_some (selected_ask_origin state)
            ; last_answer = Option.is_some (current_ask_answer_feedback state)
            })
@@ -3853,8 +3866,9 @@ let planning_proof_mark proof =
    gives up the only notice of a state the operator is standing in. The keys stay
    on the row beside it now instead of being replaced by it. *)
 
-let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [])
-    state reading =
+type keeper_keys = Roster_keys | Detail_keys
+
+let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -3904,60 +3918,43 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      Each item carries its key, so a detail tab that answers one of these
      keys itself can take it off the row. The Sandbox tab's [s] sets the
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
-  let view_and_order =
-    if state.view = Keepers Keeper_list then
-      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":" ^ say "보기" "view"
-      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":" ^ say "정렬" "order"
-      ]
-    else []
-  in
-  (* The key that leaves this screen and, on the roster, the key that opens a
-     Keeper. They are spelled the way the key table and every other footer
-     spell them. The roster wrote [right/enter] in lowercase, which
-     [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
-     to the Dashboard at all. *)
-  let accent key = (Theme.accent ()) ^ key ^ Ansi.reset in
   (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
      is open, and [s] and [m] with them. *)
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
-  let way =
-    if offers_back then
-      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ say "뒤로" "back" ^ Ansi.reset ]
-    else
-      let esc =
-        "Esc",
-        "Esc:" ^ Ansi.dim
-        ^ (match story with
-           | None -> say "뒤로" "dashboard"
-           | Some _ -> say "닫기" "close")
-        ^ Ansi.reset
-      in
-      (* A heading opens no Keeper; its arrows fold the group under it. On a
-         Keeper, Enter and Right are one item so that the pinned Enter keeps
-         Right on the row too: they were one item while both opened the
-         detail, and Right alone would be the first key a narrow row loses
-         after [r]. The labels follow the keys in order. *)
-      if keeper_list_on_heading state then
-        [ "Left / Right", accent "Left / Right" ^ ":" ^ say "접기 / 펴기" "fold"; esc ]
-      else if state.view = Keepers Keeper_list
-              && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
-        [ "Enter",
-          accent "Enter" ^ ":"
-          ^ (match story with None -> say "World" "world" | Some _ -> say "닫기" "close")
-        ; esc
-        ]
-      else
-        let enter =
-          match story with
-          | None -> say "Story" "story"
-          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
-              say "닫기" "close"
-          | Some Masc_tui_keeper_story.Schedule -> say "Story" "story"
-          | Some Masc_tui_keeper_story.Memory -> say "기억 열기" "browse"
-        in
-        [ "Enter / Right",
-          accent "Enter / Right" ^ ":" ^ enter ^ " / " ^ say "상세" "detail"
-        ; esc
+  (* The keys that move -- [j/k], [v], [o], Right, Left and Esc on the
+     roster, the Story window's [Tab] to its next page, and [r] and [q] -- are
+     the help sheet's to name on the roster (RFC tui-one-screen-grammar
+     section 2). The roster's Enter opens and closes the Story or World
+     window: a table key doing something that is not a move, so it acts and
+     stays until the roster's keys move. On the Memory page it goes into the
+     memory browser instead, which is a move, and on a group heading there is
+     no window to open. The detail keeps its way back, [r] and [q] until it is
+     drawn from the action list. *)
+  let accent key = (Theme.accent ()) ^ key ^ Ansi.reset in
+  let moves =
+    match keys with
+    | Roster_keys -> []
+    | Detail_keys ->
+        [ "j/k", Ansi.dim ^ "j/k:" ^ say "선택" "move" ^ Ansi.reset ]
+  in
+  let window_key word = [ "Enter", accent "Enter" ^ ":" ^ word ] in
+  let close_word = say "닫기" "close" in
+  let way_and_tail =
+    match keys with
+    | Roster_keys ->
+        if keeper_list_on_heading state then []
+        else if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+          window_key (match story with None -> say "World" "world" | Some _ -> close_word)
+        else
+          (match story with
+           | None | Some Masc_tui_keeper_story.Schedule -> window_key (say "Story" "story")
+           | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
+               window_key close_word
+           | Some Masc_tui_keeper_story.Memory -> [])
+    | Detail_keys ->
+        [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ say "뒤로" "back" ^ Ansi.reset
+        ; "r", Ansi.dim ^ "r:" ^ say "새로 조회" "refresh" ^ Ansi.reset
+        ; "q", "q:" ^ Ansi.dim ^ say "종료" "quit" ^ Ansi.reset
         ]
   in
   let story_hints =
@@ -3965,17 +3962,15 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
     | None -> []
     | Some Masc_tui_keeper_story.World -> []
     | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) ->
-        [ accent "Tab" ^ ":" ^ say "쪽" "page"
-        ; accent "s" ^ ":" ^ say "일정" "schedules"
+        [ accent "s" ^ ":" ^ say "일정" "schedules"
         ; accent "m" ^ ":" ^ say "기억" "memory"
         ]
   in
   (* [s] shuts a Keeper down only while the window is closed. *)
   let taken = match story with None -> taken | Some _ -> "s" :: taken in
   let items =
-      view_and_order
-      @ [ "j/k", Ansi.dim ^ "j/k:" ^ say "선택" "move" ^ Ansi.reset
-          ; toggle_key, toggle
+      moves
+      @ [ toggle_key, toggle
           ; Keeper_control.action_key Keeper_control.Wakeup,
             hint Keeper_control.Wakeup (action_word Keeper_control.Wakeup)
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
@@ -4011,10 +4006,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
                     (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":" ^ say "채팅" "chat"
                   else Ansi.dim ^ "c:" ^ say "채팅" "chat" ^ Ansi.reset)
           ]
-      @ way
-      @ [ "r", Ansi.dim ^ "r:" ^ say "새로 조회" "refresh" ^ Ansi.reset
-        ; "q", "q:" ^ Ansi.dim ^ say "종료" "quit" ^ Ansi.reset
-        ]
+      @ way_and_tail
   in
   story_hints
   @ (items

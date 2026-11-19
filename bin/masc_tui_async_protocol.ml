@@ -915,6 +915,7 @@ type async_msg =
   | Verification_msg of verification_msg
   | Harness_msg of harness_msg
   | Overview_loaded of (overview_snapshot, string) result
+  | Engine_sample_read of Masc_tui_engine_samples.reading
   | Fusion_msg of fusion_msg
   | Memory_msg of memory_msg
   | Repository_msg of repository_msg
@@ -1160,6 +1161,7 @@ let rec workspace_message_is_read = function
   | Verification_msg (Verification_loaded _)
   | Harness_msg (Harness_loaded _)
   | Overview_loaded _
+  | Engine_sample_read _
   | Fusion_msg (Fusion_runs_loaded _
   | Fusion_detail_loaded _
   | Fusion_historical_detail_loaded _
@@ -1348,7 +1350,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Voice_msg (Voice_wizard_saved _ | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
   | Voice_wizard_probed _ | Voice_wizard_reread _ | Voice_config_loaded _ | Voice_calibrated _
   | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
-  | Overview_loaded _ | Http_msg (Http_asks_loaded _ | Http_approvals_loaded _)
+  | Overview_loaded _ | Engine_sample_read _ | Http_msg (Http_asks_loaded _ | Http_approvals_loaded _)
   | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _)
   | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _
   | Http_msg (Http_initial_identity_read _ | Http_refresh_done _ | Http_refresh_failed _)
@@ -1521,7 +1523,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_msg (Keeper_composite_loaded (_, _, _)) | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
     | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))
     | Measurement_artifact_loaded (_, _, _) | Verification_msg (Verification_loaded _)
-    | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
+    | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
     | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
     | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
     | Memory_msg (Memory_recall_standing_loaded (_, _))
@@ -1666,7 +1668,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
   | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))
   | Measurement_artifact_loaded (_, _, _) | Verification_msg (Verification_loaded _)
-  | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
+  | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
   | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
   | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
   | Memory_msg (Memory_recall_standing_loaded (_, _))

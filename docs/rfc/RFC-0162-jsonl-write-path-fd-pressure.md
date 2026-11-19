@@ -16,11 +16,10 @@ related: ["0089", "0097", "0108", "0137", "0154"]
 
 Dashboard 라이브 상태(2026-05-23) 가 `.masc/tool_calls/` append 경로에서 `EMFILE/ENFILE` 을 표시하고 있다. 진단 결과 7 개의 표면 신호(`tool_call_io_append_failed`, `Fiber_unresolved` paused keeper, `CDAL proof incomplete`, `Fleet capacity degraded`, `PULSE idle`, dashboard self-amplification, 영구 누적 disk) 가 **단일 root** `.masc/` JSONL writer 의 fd/disk 압박으로 수렴한다.
 
-RFC-0108 §3.3 는 `Cross-domain LRU fd cache` 를 *명시적 비목표* 로 선언하면서 "fd 수가 keeper N (≤64) 수준이라 cache 가 없어도 무방" 이라고 가정했다. 본 RFC 는 production evidence 로 이 가정을 반증하고, 네 phase 로 root chain 을 닫는다.
+RFC-0108 §3.3 는 `Cross-domain LRU fd cache` 를 *명시적 비목표* 로 선언하면서 "fd 수가 keeper N (≤64) 수준이라 cache 가 없어도 무방" 이라고 가정했다. 본 RFC 는 production evidence 로 이 가정을 반증하고, 세 phase 로 root chain 을 닫는다.
 
 | Phase | 변경 | RFC 의존 | Effect |
 |---|---|---|---|
-| 0a | `Fs_compat.append_jsonl` mkdir_p path-keyed memoize | 없음 (RFC-0108 직교) | append 당 stat syscall 1 → 0 |
 | 0b | `Dated_jsonl.count_entries` TTL cache (10s) | 없음 | dashboard 30s refresh self-amplification 제거 |
 | 1 | `MASC_TOOL_CALL_LOG_RETENTION_DAYS` opt-in → opt-out default 30d | 본 RFC (mli 약속 회복) | 무한 누적 정책 종료 |
 | 2 | Cross-domain fd reuse (per-domain fd cache) | 본 RFC, RFC-0108 §3.3 가정 invalidate | append 당 open+close 2 syscall 제거 |
@@ -61,11 +60,10 @@ RFC-0108 (Atomic JSONL Append) 가 다음을 명시적 비목표로 선언:
 
 > Cross-domain LRU fd cache: 단순화를 위해 fd 는 첫 `open_writer` 가 가지고 있다가 `close` 시 해제. **fd 수가 keeper N (≤64) 수준이라 cache 가 없어도 무방.**
 
-라이브 데이터는 이 가정을 *세 축* 에서 반증한다:
+라이브 데이터는 이 가정을 *두 축* 에서 반증한다:
 
 1. **호출량 축**: 22,440 tool calls / 활동 윈도우 → 매 호출이 fresh `open_out_gen` (`lib/fs_compat/fs_compat.ml:642-661`) 를 부르므로 N=64 fd 는 *순간 동시 open 수* 일 뿐, OS file-table churn 은 그 1000× 이상.
-2. **stat 축**: `Fs_compat.append_jsonl` 가 매 호출 `mkdir_p dir` 호출 (`fs_compat.ml:645`). month dir 이 이미 존재해도 `Sys.file_exists` 또는 `Eio.Path.mkdirs` 가 `fstatat` 1회 호출. RFC-0108 의 fd budget 분석 *밖* — fd 가 아닌 stat 압박.
-3. **read-side amplification 축**: dashboard 가 30s 마다 `Dated_jsonl.count_entries` (`lib/dated_jsonl/dated_jsonl.ml:426`) 로 30 day-file 을 모두 `open_in_bin` + line-scan. write-path fd 압박을 *보여주는* UI 가 read-path 로 같은 fd 풀을 더 압박한다. self-amplification.
+2. **read-side amplification 축**: dashboard 가 30s 마다 `Dated_jsonl.count_entries` (`lib/dated_jsonl/dated_jsonl.ml:426`) 로 30 day-file 을 모두 `open_in_bin` + line-scan. write-path fd 압박을 *보여주는* UI 가 read-path 로 같은 fd 풀을 더 압박한다. self-amplification.
 
 ### 1.4 7 surface → single root chain
 
@@ -87,49 +85,16 @@ RFC-0108 (Atomic JSONL Append) 가 다음을 명시적 비목표로 선언:
 
 S3 의 `Fiber_unresolved` variant 는 RFC-0089 (substring classifier closure) family 의 *carve-out gap* 이다: typed variant 22 종 중 어디에도 `Fd_pressure_blocked` / `Disk_write_failed` 같은 infra-level cause 가 *없다*. 본 RFC §3.5 가 관련 후속 RFC 후보로 명시한다.
 
-## 2. Diagnosis: 3 concurrent root contributors
+## 2. Diagnosis: 2 concurrent root contributors
 
 | Contributor | 위치 | 책임 |
 |---|---|---|
-| **C1. mkdir_p 매 호출** | `lib/fs_compat/fs_compat.ml:642-661` `append_jsonl` 가 `mkdir_p dir` 호출 | append 당 stat 1회. month dir 이 이미 존재해도 회피 불가 |
 | **C2. fresh fd 매 호출** | 같은 함수의 `open_out_gen` ... `close_out_noerr` | RFC-0108 §3.3 이 *명시적* 으로 cache 안 함. 결과: append 당 open+close 2 syscall |
 | **C3. 무한 disk 누적** | `lib/keeper_tool_call_log.ml:93-103` `retention_days ()` 의 None default | 4 월 데이터가 5 월 운영 fd 압박에 기여. mli 가 *이미 "default is 30 days"* 약속 → ml drift 가 root |
 
-C1 은 RFC-0108 결정과 *직교*. C2 는 RFC-0108 §3.3 결정과 *충돌* — 가정 invalidate 후 변경. C3 은 *문서-구현 drift 회복*.
+C2 는 RFC-0108 §3.3 결정과 *충돌* — 가정 invalidate 후 변경. C3 은 *문서-구현 drift 회복*.
 
 ## 3. Design
-
-### 3.1 Phase 0a — mkdir_p once-per-path memoize
-
-`lib/fs_compat/fs_compat.ml` 에 process-local cache 추가:
-
-```ocaml
-let mkdir_p_done : (string, unit) Hashtbl.t = Hashtbl.create 32
-let mkdir_p_memo_mu = Stdlib.Mutex.create ()
-
-let mkdir_p_memoized (path : string) : unit =
-  let cached =
-    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
-      Hashtbl.mem mkdir_p_done path)
-  in
-  if not cached then begin
-    mkdir_p path;
-    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
-      Hashtbl.replace mkdir_p_done path ())
-  end
-```
-
-`append_jsonl` 의 `mkdir_p dir` → `mkdir_p_memoized dir` 로 swap (hot path 만).
-
-**보장**:
-
-| 보장 | 메커니즘 |
-|---|---|
-| Cross-domain safe | `Stdlib.Mutex.protect` 가 cache lookup/insert 보호. mkdir 자체는 idempotent |
-| Race 시 max 2 회 stat | A/B 두 도메인 동시 진입 시 둘 다 lookup→miss→mkdir 실행. 두 번째 mkdir 은 EEXIST 무해 |
-| Cache eviction 없음 | dir path 는 month/store 단위라 process lifetime 동안 O(month 수) 항목만 누적 |
-
-**RFC-0108 과 직교**: 본 cache 는 *fd* 가 아니라 *dir 존재 사실* 만 캐싱. RFC-0108 §2.5 의 `out_channel` buffer 공유 corruption 과 무관.
 
 ### 3.2 Phase 0b — Dated_jsonl.count_entries TTL cache
 
@@ -247,7 +212,7 @@ let get_or_open_writer_locked path =
 let append_jsonl path json =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Filename.dirname path in
-  mkdir_p_memoized dir;                              (* Phase 0a *)
+  mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
   let path_mu = get_append_path_mutex path in
   let oc =
@@ -294,7 +259,7 @@ RFC-0089 (substring classifier closure) family 의 *infrastructure-level extensi
 
 | PR | Phase | 변경 영역 | Base |
 |---|---|---|---|
-| #N+0 | RFC body + Phase 0a + 0b + 1 (소규모 cluster, independent commits) | docs/rfc, lib/fs_compat, lib/dated_jsonl, lib/keeper_tool_call_log, test | origin/main |
+| #N+0 | RFC body + Phase 0b + 1 (소규모 cluster, independent commits) | docs/rfc, lib/fs_compat, lib/dated_jsonl, lib/keeper_tool_call_log, test | origin/main |
 | #N+1 | Phase 2 impl (큰 작업, 별도 PR) | lib/fs_compat per-domain fd cache, test | origin/main |
 
 각 PR 은 *독립 머지 가능* (RFC-0108 §4.3 학습 반영, `feedback_post_merge_push_check_required` + `feedback_stacked_pr_sha_runtime_on_amend`).
@@ -312,11 +277,6 @@ RFC-0089 (substring classifier closure) family 의 *infrastructure-level extensi
 ```
 
 ## 5. Verification
-
-### 5.1 Phase 0a — mkdir cache
-
-- Unit: `test/test_fs_compat_mkdir_memo.ml` — 4 케이스 (first call, repeat idempotent, external-delete contract, concurrent race-safe).
-- Integration: 머지 후 24h 운영 → `coverage_gap.tool_call_io_append_failed` 빈도 변화 측정.
 
 ### 5.2 Phase 0b — count_entries TTL
 
@@ -345,7 +305,7 @@ RFC-0089 (substring classifier closure) family 의 *infrastructure-level extensi
 
 ## 7. Open Questions
 
-- Phase 0a/0b cache 의 *invalidation* — 운영자 외부 `rm -rf .masc/tool_calls/2026-04` 시 cache stale. SIGUSR1 hook 으로 `Hashtbl.reset` 노출 vs 무시.
+- Phase 0b cache 의 *invalidation* — 운영자 외부 `rm -rf .masc/tool_calls/2026-04` 시 cache stale. SIGUSR1 hook 으로 `Hashtbl.reset` 노출 vs 무시.
 - Phase 2 per-domain fd cache 의 *day rollover* — UTC 자정 모든 캐시 entry stale. eager refresh vs lazy LRU evict 선택.
 - Phase 1 default 30d 적정성 — 운영 7d/debug 30d/audit 90d 의 사용 패턴 evidence 필요.
 

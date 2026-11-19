@@ -1926,25 +1926,322 @@ describe('sendKeeperThreadMessage operation stream', () => {
     })
   })
 
-  it('aborts locally without server cancel before operation acceptance', async () => {
-    streamKeeperMessage.mockImplementation(async (
-      _name: string,
-      _message: string,
-      opts: { signal: AbortSignal },
-    ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
-      opts.signal.addEventListener('abort', () => {
-        const error = new Error('Aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    }))
+  describe('a stop pressed before the server accepts the operation', () => {
+    // #52952: this stop closed the stream and marked both rows cancelled
+    // without a word to the server. A closed stream does not take back an
+    // operation the server accepted, so its turn could run under rows that
+    // said cancelled.
+    type UnacceptedStreamOptions = {
+      operationId: string
+      signal: AbortSignal
+      onEvent: (event: KeeperChatStreamEvent) => void
+    }
 
-    const send = sendKeeperThreadMessage('echo', 'cancel before accept').catch(() => undefined)
-    await Promise.resolve()
-    await cancelActiveKeeperThreadMessage('echo')
-    await send
+    type HeldStream = {
+      operationId: () => string
+      aborted: () => boolean
+      accept: (state: 'Queued' | 'Running') => unknown
+      fail: (error: Error) => void
+      close: () => void
+    }
 
-    expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+    /** Streams that stay open with no acceptance, by the order the sends
+     *  opened them. Each ends the way the reader in api/keeper.ts does: a read
+     *  that is waiting ends with the abort reason, and a frame the send throws
+     *  from ends the read with that thrown value. */
+    function holdUnacceptedStreams(): (index: number) => HeldStream {
+      const opened: Array<{
+        options: UnacceptedStreamOptions
+        resolve: (outcome: { terminal: boolean }) => void
+        reject: (error: unknown) => void
+        handlingFrame: boolean
+      }> = []
+      streamKeeperMessage.mockImplementation((
+        _name: string,
+        _message: string,
+        options: UnacceptedStreamOptions,
+      ) => new Promise<{ terminal: boolean }>((resolve, reject) => {
+        const stream = { options, resolve, reject, handlingFrame: false }
+        opened.push(stream)
+        options.signal.addEventListener('abort', () => {
+          // An abort raised while a frame is handled is met after that frame.
+          if (!stream.handlingFrame) reject(options.signal.reason)
+        }, { once: true })
+      }))
+      const stream = (index: number) => {
+        const found = opened[index]
+        if (!found) throw new Error(`send ${index} has not opened its stream`)
+        return found
+      }
+      return index => ({
+        operationId: () => stream(index).options.operationId,
+        aborted: () => stream(index).options.signal.aborted,
+        // Answers what the send threw from the acceptance frame, or null.
+        accept: state => {
+          const held = stream(index)
+          held.handlingFrame = true
+          try {
+            held.options.onEvent({
+              type: 'CUSTOM',
+              name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+              value: {
+                operation_id: held.options.operationId,
+                state,
+                queued_count: state === 'Queued' ? 1 : 0,
+              },
+            })
+          } catch (error) {
+            held.reject(error)
+            return error
+          } finally {
+            held.handlingFrame = false
+          }
+          // The frame was handled. The next read of an aborted stream ends
+          // with the abort reason.
+          if (held.options.signal.aborted) held.reject(held.options.signal.reason)
+          return null
+        },
+        fail: error => { stream(index).reject(error) },
+        close: () => { stream(index).resolve({ terminal: false }) },
+      })
+    }
+
+    function holdUnacceptedStream(): HeldStream {
+      return holdUnacceptedStreams()(0)
+    }
+
+    function replyRow() {
+      return (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    }
+
+    it('waits for the acceptance and then cancels the operation by its id', async () => {
+      const stream = holdUnacceptedStream()
+      cancelKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id, sequence: '1', createdAt: 1, input: null,
+        state: { kind: 'cancelled', completedAt: 2 },
+      }))
+
+      const send = sendKeeperThreadMessage('echo', 'stop before accept').catch(() => undefined)
+      await Promise.resolve()
+      expect(await cancelActiveKeeperThreadMessage('echo')).toBe(true)
+
+      // The server does not know the operation yet. Nothing names it to the
+      // server, the stream stays open for the acceptance, and no row says
+      // cancelled.
+      expect(stream.aborted()).toBe(false)
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect(keeperSending.value.echo).toBe(true)
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+      expect(replyRow()).toMatchObject({ delivery: 'sending', streamState: 'stop_pending' })
+
+      // The acceptance frame ends the read as an abort does, so no frame
+      // behind it reaches a row the stop already closed.
+      const thrown = stream.accept('Queued')
+      expect(thrown).toBeInstanceOf(Error)
+      expect(thrown).toMatchObject({ name: 'AbortError' })
+      await send
+
+      expect(stream.aborted()).toBe(true)
+      expect(cancelKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream.operationId())
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.delivery])).toEqual([
+        ['user', 'cancelled'],
+        ['assistant', 'cancelled'],
+      ])
+      expect(replyRow()?.streamState).toBeNull()
+      expect(keeperSending.value.echo).toBe(false)
+    })
+
+    it('stops the turn when the operation is accepted already running', async () => {
+      const stream = holdUnacceptedStream()
+      cancelKeeperChatOperation.mockRejectedValue(chatOperationRefusal('not_queued'))
+      interruptKeeperChatOperation.mockResolvedValue({ kind: 'signalled' })
+      fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id,
+        state: { kind: 'failed', completedAt: 3, failureKind: 'Turn_cancelled', detail: 'stopped by the operator', outcomeRef: null },
+      }))
+      fetchKeeperChatHistory.mockRejectedValue(new Error('history unavailable'))
+
+      const send = sendKeeperThreadMessage('echo', 'stop me').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+
+      stream.accept('Running')
+      await send
+
+      expect(interruptKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream.operationId())
+      await vi.waitFor(() => expect((keeperThreads.value.echo ?? [])
+        .some(entry => entry.role === 'user' && entry.delivery === 'error')).toBe(true))
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+    })
+
+    it('sends one stop however often it is pressed before the acceptance', async () => {
+      const stream = holdUnacceptedStream()
+      cancelKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id, sequence: '1', createdAt: 1, input: null,
+        state: { kind: 'cancelled', completedAt: 2 },
+      }))
+
+      const send = sendKeeperThreadMessage('echo', 'stop twice').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(stream.aborted()).toBe(false)
+
+      stream.accept('Queued')
+      await send
+
+      expect(cancelKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream.operationId())
+    })
+
+    it('holds the stop for the operation sent first and leaves the one behind it open', async () => {
+      const stream = holdUnacceptedStreams()
+      cancelKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id, sequence: '1', createdAt: 1, input: null,
+        state: { kind: 'cancelled', completedAt: 2 },
+      }))
+      fetchKeeperChatOperation.mockResolvedValue({
+        operationId: 'terminal',
+        state: { kind: 'cancelled', completedAt: 1 },
+      })
+
+      const first = sendKeeperThreadMessage('echo', 'first').catch(() => undefined)
+      await Promise.resolve()
+      const second = sendKeeperThreadMessage('echo', 'second').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+
+      const waiting = (keeperThreads.value.echo ?? []).filter(entry => entry.streamState === 'stop_pending')
+      expect(waiting).toHaveLength(1)
+
+      // The acceptance of the later operation carries no stop and closes nothing.
+      expect(stream(1).accept('Queued')).toBeNull()
+      expect(stream(0).aborted()).toBe(false)
+      expect(stream(1).aborted()).toBe(false)
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+
+      expect(stream(0).accept('Queued')).toMatchObject({ name: 'AbortError' })
+      await first
+
+      expect(cancelKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream(0).operationId())
+      expect(stream(1).aborted()).toBe(false)
+
+      stream(1).close()
+      await second
+    })
+
+    it('does not hold a stop for an accepted operation whose send released it', async () => {
+      // A stream cut after the acceptance hands the operation to its own
+      // record and waits there for the turn. The send has released its claim,
+      // and its stream is still the Keeper's first. That is not "before the
+      // acceptance": no acceptance is coming for a stop to wait on.
+      const stream = holdUnacceptedStream()
+      let endTurn!: (operation: unknown) => void
+      fetchKeeperChatOperation.mockImplementation(() => new Promise(resolve => { endTurn = resolve }))
+      fetchKeeperChatHistory.mockResolvedValue([])
+
+      const send = sendKeeperThreadMessage('echo', 'cut after the acceptance').catch(() => undefined)
+      await Promise.resolve()
+      expect(stream.accept('Running')).toBeNull()
+      stream.close()
+      await vi.waitFor(() => expect(fetchKeeperChatOperation).toHaveBeenCalled())
+      expect(keeperSending.value.echo).toBe(true)
+
+      expect(await cancelActiveKeeperThreadMessage('echo')).toBe(true)
+
+      expect(stream.aborted()).toBe(true)
+      expect(keeperSending.value.echo).toBe(false)
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.streamState === 'stop_pending')).toBe(false)
+
+      endTurn({ operationId: stream.operationId(), state: { kind: 'cancelled', completedAt: 1 } })
+      await send
+    })
+
+    it('sends the held stop when the acceptance finds its reply row gone', async () => {
+      const stream = holdUnacceptedStream()
+      cancelKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+        operationId: id, sequence: '1', createdAt: 1, input: null,
+        state: { kind: 'cancelled', completedAt: 2 },
+      }))
+
+      const send = sendKeeperThreadMessage('echo', 'row goes away').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      // The acceptance cannot be written to a row that left the thread, and
+      // that ends the send. The server accepted the operation all the same.
+      keeperThreads.value = { ...keeperThreads.value, echo: [] }
+
+      stream.accept('Queued')
+      await send
+
+      expect(cancelKeeperChatOperation).toHaveBeenCalledExactlyOnceWith('echo', stream.operationId())
+    })
+
+    it('shows the failure of a send that fails before the acceptance, and names nothing to the server', async () => {
+      const stream = holdUnacceptedStream()
+      fetchKeeperChatHistory.mockResolvedValue([])
+
+      const send = sendKeeperThreadMessage('echo', 'never accepted').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      stream.fail(new Error('the server did not answer'))
+      await send
+
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
+      expect(keeperActionErrors.value.echo).toBe('the server did not answer')
+      expect(keeperSending.value.echo).toBe(false)
+    })
+
+    it('shows a stream that closes before the acceptance as cut, and names nothing to the server', async () => {
+      const stream = holdUnacceptedStream()
+
+      const send = sendKeeperThreadMessage('echo', 'cut before accept').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      stream.close()
+      await send
+
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+      expect(replyRow()).toMatchObject({ delivery: 'interrupted', streamState: null })
+      expect(replyRow()?.error).toContain('스트림이 종료 신호 없이 끊겼습니다')
+      expect(keeperSending.value.echo).toBe(false)
+    })
+
+    it('ends a stream that aborts before the acceptance as a failed send, not a cancelled one', async () => {
+      // No stop aborts this stream before the acceptance. The case pins what an
+      // abort from anywhere else must not do: say cancelled for an operation
+      // the server was never asked to stop.
+      const stream = holdUnacceptedStream()
+      fetchKeeperChatHistory.mockResolvedValue([])
+      const aborted = new Error('The operation was aborted.')
+      aborted.name = 'AbortError'
+
+      const send = sendKeeperThreadMessage('echo', 'aborted elsewhere').catch(() => undefined)
+      await Promise.resolve()
+      stream.fail(aborted)
+      await send
+
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'The operation was aborted.',
+      })
+      expect(keeperSending.value.echo).toBe(false)
+    })
   })
 
   it('streams thinking, tool use, and final text after operation acceptance', async () => {

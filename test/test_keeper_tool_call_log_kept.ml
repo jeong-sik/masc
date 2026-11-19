@@ -12,7 +12,11 @@
     3. A Keeper whose newest call lies before the window has none.
     4. Without a Keeper only the ledger's last row is looked at: a last row
        that is not JSON gives none, while a Keeper's call before it is still
-       found. *)
+       found.
+    5. With the read index in the ledger's directory, as in the server, the
+       window is filled and kept, and it answers as the indexed reader does.
+    6. A ledger the strict read refuses keeps nothing and is read leniently
+       on each call, newest row first. *)
 
 open Alcotest
 open Masc
@@ -54,7 +58,8 @@ let newest_tool ?keeper_name () =
 ;;
 
 (* The ledger's day files, newest first, as the strict listing gives them.
-   The directory also holds the read index, which is not among them. *)
+   A directory the indexed reader has read also holds the read index, which
+   is not among them. *)
 let day_files store =
   let listed = function
     | Ok paths -> paths
@@ -157,6 +162,96 @@ let test_a_last_row_that_is_not_json () =
       (newest_tool ~keeper_name:"alpha" ()))
 ;;
 
+(* The tool of the newest call among the ledger's newest sixteen rows, as the
+   indexed reader gives it. Calling it makes the read index. *)
+let newest_tool_by_the_index ?keeper_name () =
+  match Keeper_tool_call_log.read_recent ?keeper_name ~n:16 () with
+  | Error _ -> fail "the indexed reader failed"
+  | Ok rows ->
+    (match List.rev rows with
+     | [] -> None
+     | newest :: _ -> Json_util.assoc_string_opt "tool" newest)
+;;
+
+(* The server's ledger directory holds the read index beside the month
+   directories. With the index there the strict read still reads the store,
+   so the window is filled and kept, and its answers are the indexed
+   reader's for the same rows. *)
+let test_the_window_is_kept_beside_the_read_index () =
+  with_ledger (fun store ->
+    log ~keeper_name:"alpha" ~tool_name:"first";
+    log ~keeper_name:"beta" ~tool_name:"second";
+    log ~keeper_name:"alpha" ~tool_name:"third";
+    let by_the_index_of_alpha = newest_tool_by_the_index ~keeper_name:"alpha" () in
+    let by_the_index_of_beta = newest_tool_by_the_index ~keeper_name:"beta" () in
+    let by_the_index = newest_tool_by_the_index () in
+    check
+      bool
+      "the read index is in the ledger's directory"
+      true
+      (Sys.file_exists
+         (Filename.concat (Dated_jsonl.base_dir store) Common.tool_call_read_index_basename));
+    check
+      bool
+      "the strict read passes over it"
+      true
+      (Result.is_ok (Dated_jsonl.read_recent_result store 1));
+    check (option string) "the indexed reader's answer" (Some "third") by_the_index_of_alpha;
+    check
+      (option string)
+      "one Keeper's newest call, as the indexed reader gives it"
+      by_the_index_of_alpha
+      (newest_tool ~keeper_name:"alpha" ());
+    check
+      (option string)
+      "the other Keeper's"
+      by_the_index_of_beta
+      (newest_tool ~keeper_name:"beta" ());
+    check (option string) "the ledger's last row" by_the_index (newest_tool ());
+    remove_day_files store;
+    check
+      (option string)
+      "the window was kept: answered with the day files gone"
+      (Some "third")
+      (newest_tool ~keeper_name:"alpha" ()))
+;;
+
+(* An entry the ledger's store did not declare lies in its directory. The
+   strict read refuses the store, so nothing is kept, and each call reads the
+   newest rows leniently and looks at them newest first, as this function did
+   before there was a fact. *)
+let test_a_ledger_the_strict_read_refuses_is_read_leniently () =
+  with_ledger (fun store ->
+    log ~keeper_name:"alpha" ~tool_name:"first";
+    log ~keeper_name:"beta" ~tool_name:"second";
+    log ~keeper_name:"alpha" ~tool_name:"third";
+    Out_channel.with_open_text
+      (Filename.concat (Dated_jsonl.base_dir store) "notes.txt")
+      (fun channel -> output_string channel "not dated");
+    check
+      bool
+      "the strict read refuses the ledger"
+      true
+      (Result.is_error (Dated_jsonl.read_recent_result store 1));
+    check (option string) "the ledger's last row" (Some "third") (newest_tool ());
+    check
+      (option string)
+      "one Keeper's newest call"
+      (Some "third")
+      (newest_tool ~keeper_name:"alpha" ());
+    check
+      (option string)
+      "the other Keeper's"
+      (Some "second")
+      (newest_tool ~keeper_name:"beta" ());
+    log ~keeper_name:"beta" ~tool_name:"fourth";
+    check
+      (option string)
+      "a call logged after it is read too: nothing was kept"
+      (Some "fourth")
+      (newest_tool ()))
+;;
+
 let () =
   Fact_cell.keep_in_this_process ();
   run
@@ -178,6 +273,14 @@ let () =
             "a last row that is not JSON"
             `Quick
             test_a_last_row_that_is_not_json
+        ; test_case
+            "the window is kept beside the read index"
+            `Quick
+            test_the_window_is_kept_beside_the_read_index
+        ; test_case
+            "a ledger the strict read refuses is read leniently"
+            `Quick
+            test_a_ledger_the_strict_read_refuses_is_read_leniently
         ] )
     ]
 ;;

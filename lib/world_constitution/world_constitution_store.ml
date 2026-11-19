@@ -54,9 +54,10 @@ let append_at ~base_path ~expected_end_offset entry =
   let line =
     Yojson.Safe.to_string (World_constitution_wire.entry_to_json entry) ^ "\n"
   in
-  (* The offset-checked append does not create its directory, so this is the
-     only creator on the path. Memoized because it runs on every append. *)
-  match Fs_compat.mkdir_p_memoized dir with
+  (* Made here, ahead of the append that would make it too, so that a
+     directory that cannot be made is [Directory_unavailable] and not a
+     failed write. *)
+  match Fs_compat.mkdir_p dir with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Error (Directory_unavailable { path = dir; detail = Printexc.to_string exn })

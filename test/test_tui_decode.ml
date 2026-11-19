@@ -4370,10 +4370,6 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
   Alcotest.(check bool) "every origin survives its own word" true
     (origins (List.map encode every_origin) = every_origin)
 
-(* Every available surface carries the list, and every entry its reason
-   (Keeper_skill_catalog.configured_name_unavailable_to_yojson). Without the
-   list the Tools screen would stay silent about a selected Skill that is not
-   in the turn catalog. *)
 (* The server writes kind and execution from one surface, so a profile whose
    pair it never writes is refused rather than drawn with whatever execution
    string it carried. *)
@@ -4421,6 +4417,10 @@ let test_decode_skill_profile_refuses_a_kind_and_execution_pair_it_never_writes 
   Alcotest.(check bool) "a composition run on demand" false
     (decodes (profile ~kind:"composition" ~execution:"on_demand" ~io:composition_io))
 
+(* Every available surface carries the list, and every entry its reason
+   (Keeper_skill_catalog.configured_name_unavailable_to_yojson). Without the
+   list the Tools screen would stay silent about a selected Skill that is not
+   in the turn catalog. *)
 let test_decode_effective_surface_requires_the_unavailable_skill_names () =
   (match decode_surface_tools (minimal_available_surface ~unavailable_skill_names:None []) with
    | Ok _ -> Alcotest.fail "a surface without unavailable_skill_names decoded"

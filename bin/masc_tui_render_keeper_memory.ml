@@ -102,9 +102,9 @@ let event_cells ?(selected=false) ~ko ~now ~cols (event : Activity.event) =
     ~style:(if selected then "" else kind_style event.kind) (kind_word ~ko event.kind) in
   if cols < 70 then
     [time; kind; cell ~header:(if ko then "기억의 흐름" else "memory flow")
-      ~width:(max 1 (cols - 21)) (endpoints event.before ^ " → " ^ after)]
+      ~width:(max 1 (cols - 19 - (2 * Table.cell_gap))) (endpoints event.before ^ " → " ^ after)]
   else
-    let room = max 1 ((cols - 22) / 2) in
+    let room = max 1 ((cols - 19 - (3 * Table.cell_gap)) / 2) in
     [time; kind;
      cell ~header:(if ko then "이전" else "before") ~width:room (endpoints event.before);
      cell ~header:(if ko then "이후 / 사유" else "after / reason") ~width:room after]

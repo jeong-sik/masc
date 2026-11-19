@@ -66,6 +66,7 @@ type wake_status =
   | Wake_succeeded
   | Wake_failed
 
+val wake_statuses : wake_status list
 val wake_status_to_string : wake_status -> string
 val wake_status_of_string : string -> (wake_status, decode_error) result
 val wake_status_strings : string list

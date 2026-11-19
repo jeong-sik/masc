@@ -10,7 +10,11 @@ module Reading = Masc_tui_types
    them. Colour belongs to the caller. *)
 
 let person_glyph = "@" (* a person typed it *)
-let automation_glyph = "\xe2\x97\x90" (* ◐ a keeper or a lane *)
+(* [#], not a status mark: the column says who wrote a post, and ◐ there read
+   as 하는 중, its meaning everywhere else (RFC tui-one-screen-grammar 7.2).
+   ASCII keeps the leftmost column one cell on every terminal, and it pairs
+   with the person's [@]. *)
+let automation_glyph = "#" (* a keeper or a lane *)
 let unknown_glyph = "?" (* a kind this build was not taught *)
 
 (* The system's posts are the ground -- two thirds of the board -- and marking

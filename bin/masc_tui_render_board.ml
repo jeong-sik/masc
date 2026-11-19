@@ -83,7 +83,9 @@ let board_kind_mark kind =
   let mark = Masc_tui_board_kind_mark.glyph kind in
   match kind with
   | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ mark ^ Ansi.reset
-  | Some Post_by_automation -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  (* An automation's post is not a warning (RFC tui-one-screen-grammar 7.3):
+     it recedes, so the person's posts the column exists for stand out. *)
+  | Some Post_by_automation -> (Theme.recede ()) ^ mark ^ Ansi.reset
   | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ mark ^ Ansi.reset
   | Some Post_by_system | None -> mark
 

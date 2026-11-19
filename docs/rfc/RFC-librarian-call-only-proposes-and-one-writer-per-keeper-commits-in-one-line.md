@@ -191,7 +191,8 @@ type task_evidence =
   | No_task
   | Task_source_unavailable
   | Task of { task : Task_id.t; goals : goal_shown list option }   (* None: 받아들일 때 Goal 을 읽지 못했다 *)
-type stimulus = { sender : sender; source : stimulus_source }
+type stimulus = Board of board_item | Schedule of { schedule : string; occurrence : string } | ...
+  (* event queue 의 갈래마다 생성자 하나. 그 항목의 id 와 항목이 실은 이름만 *)
 type admission = { task : task_evidence; stimuli : stimulus list }
 
 type turn_line =
@@ -212,6 +213,13 @@ type turn_line =
 - `slice` 는 bundle 하나에서 메시지 `skip` 개를 건너뛰고 `take` 개를 가리킨다. 줄을 쓰는 쪽이 그때 가진 head 를 보고 적는다. purge 뒤에는 bundle 하나가 두 단위의 메시지를 같이 담을 수 있어서, bundle digest 만으로는 범위를 가리키지 못한다.
 
 - Task 는 턴을 받아들일 때 잡아서 `Opened` 에 적는다. `Closed` 는 싣지 않는다. `Opened` 를 못 쓴 턴에는 Task 가 없다.
+- `stimuli` 는 턴이 Keeper 의 event queue 에서 받은 것이다. queue 가 준 순서대로 적는다.
+  - queue 의 갈래마다 줄 타입이 하나다. queue 에 갈래가 생기면 바꾸는 함수가 컴파일되지 않는다.
+  - 줄은 그 항목의 id 를 싣는다. 항목이 이름을 실었으면 그 이름도 싣는다. Board 글의 글쓴이, workspace 메시지를 보낸 agent, Task 를 취소한 Keeper, 맡긴 턴을 돈 Keeper 가 그렇다.
+  - 이름은 만든 쪽이 적은 글이다. Keeper 등록부와 맞춰 보지 않았다.
+  - 이름을 싣지 않는 갈래가 있다. connector 의 귀띔, HITL 판정, Ask 의 답은 id 만 싣는다. 보낸 이는 그 id 가 가리키는 행에 있다.
+  - 내용은 싣지 않는다. id 가 가리키는 저장소에 있다.
+  - 직접 요청으로 시작한 턴과 Keeper 의 cadence 로 시작한 턴은 비어 있다. 직접 요청의 메시지는 이력에 말한 이와 함께 있다.
 
 줄에 적은 digest 는 그 줄이 남아 있는 한 읽을 수 있다. head 가 나중에 어떻게 바뀌어도 같다.
 
@@ -221,7 +229,7 @@ type turn_line =
 - `runtime` 은 runtime 선언의 id 글(`string`)이다.
 - `Closed.turn` 은 `int` 다. 그 턴의 `Opened` 가 시작하는 바이트 offset 이다.
 - `slice.bundle` 은 `Agent_core.Checkpoint_objects.digest` 다.
-- `Opened` 는 `admission` 묶음 대신 `task` 하나를 싣는다. `stimuli` 는 턴 경로에 거는 층(L3a3b4d)이 더한다.
+- `Opened` 는 `admission` 묶음 대신 `task` 와 `stimuli` 두 칸을 싣는다.
 
 **줄은 이 모듈이 가진 타입, id, 글만 담는다.** 다른 저장소가 가진 타입의 값은 담지 않는다.
 쓰는 쪽이 줄을 쓸 때 남의 값을 이 모듈의 타입으로 바꾼다. 바꾸는 함수는 모든 경우를 다룬다.
@@ -293,9 +301,13 @@ head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, �
   |---|---|
   | head 가 있다 | `Reset {Announced Cleared; after = 지우기가 넣을 head 의 끝자리}`. 남기는 메시지는 열린 채로 들어가므로(`keeper_history_clear.ml:199`) 닫힌 메시지 수는 0 이다 |
   | head 가 없고 넣을 것이 있다 | 따로 쓰지 않는다. head 가 마지막 끝자리보다 아래면 위 표의 `Unannounced` 가 쓰인다. 넣은 것은 다음 줄이 싣는다 |
-  | 해석 못 하는 head 를 치우고 새로 넣는다 | `Reset {Unannounced; before = 마지막 끝자리; after = 새 head 의 끝자리}`. 그 head 에서 무엇이 닫혔는지 셀 수 없다. 지금은 줄을 쓰지 않는다 |
-  | 해석 못 하는 head 를 치우기만 한다 | `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` |
+  | 해석 못 하는 head 를 치우고 새로 넣는다 | `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}`. 넣는 메시지는 열린 채 들어가서 새 head 의 끝자리가 빈 끝자리다. 그 head 에서 무엇이 닫혔는지 셀 수 없다. 지금은 줄을 쓰지 않는다 |
+  | 해석 못 하는 head 를 치우기만 한다 | 위와 같은 줄 |
   | 바꿀 것이 없다 | 쓰지 않는다 |
+
+  - 해석 못 하는 head 를 치우는 두 갈래의 줄은 session 을 지우는 정지의 줄과 같다. 줄 쓰는 쪽의 사건 하나를 셋이 쓴다.
+  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 닫힌 메시지 수만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 매번 쓴다. 마지막 줄이 이미 같은 줄이어도 쓴다. 까닭은 정지와 같다(아래).
 - 끊긴 곳 뒤를 버리는 purge(recovering purge). 규칙은 `keeper_checkpoint_purge.ml:391-428` 에 있다. dashboard(`server_dashboard_http_keeper_api_checkpoints.ml:612`)와 CLI(`bin/masc_checkpoint_purge.ml:251`) 두 군데서 들어온다. `Announced Recovered` 를 쓴다. 지금은 두 진입이 head 를 다르게 넣는다. dashboard 는 compare-and-swap 이고 CLI 는 watermark 저장이다. 함수 하나를 지나게 하면서 CLI 를 compare-and-swap 으로 옮긴다.
 - session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` 를 쓴다.
   - 정지는 이 줄을 매번 쓴다. 위 표의 줄은 head 가 마지막 끝자리 아래일 때만 쓰인다. 정지는 head 를 없애는 쪽이라 마지막 끝자리가 이미 비어 있어도 쓴다.
@@ -396,7 +408,7 @@ type input_fault =
 ### 5.5 질문에 어떻게 싣나
 
 - tool 호출은 id 와 이름만 남긴 표시로 싣는다. tool 결과는 id 와 결과 종류만, tool 관찰은 `{index, tool_name, outcome}` 만 싣는다. 지금 재는 줄임과 같다.
-- 상대가 보낸 행과 턴을 깨운 것(stimulus)은 저마다 자기 보낸 이를 타입으로 싣는다.
+- 상대가 보낸 행은 저마다 자기 보낸 이를 타입으로 싣는다. 턴을 깨운 것(stimulus)은 갈래와 id, 그리고 queue 항목이 실은 이름을 싣는다(§5.1).
 - 단위마다 턴 id, 닫힌 시각, runtime, outcome, 그리고 자기 `Opened` 의 Task 를 싣는다. Goal 은 `shown` 의 글 그대로다.
 
 ### 5.6 purge 는 Librarian 을 기다리지 않는다
@@ -1509,7 +1521,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I9 | 죽은 뒤 상태는 durable 기록에서 다시 만든다. 깨움과 신호는 귀띔이고, 할 일은 디스크에서 계산한다 | 상태는 반영 기록의 꼬리 줄과 턴 기록에서 나온다. 귀띔을 놓쳐도 `Idle` 의 pulse 가 턴 기록의 길이를 보고 찾는다(§9.5) | 두 번 복구 시험(L5). `LibrarianWriter` 의 boot 행 |
 | I10 | durable 기록은 들어온 일만큼 자란다. 패스 수나 장애 시간만큼 자라지 않는다 | §10 | F10 시험(L6) |
 | I11 | 보내는 것의 크기는 만들 때 묶인다 | §6.3 에 적은 뜻으로 지킨다. 미리 세는 slot 은 보내기 전에, 그 밖은 provider 자신의 창이 묶는다 | F6 시험(L7) |
-| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다(§5.2) | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. 항목마다 보낸 이가 있다. `baseline` 앞에서 닫힌 내용에는 Task 가 없다. `Opened` 를 쓰고 죽은 턴이 저장한 메시지는 프로세스 시작 단계가 그 턴의 단위로 닫는다(§5.2). 받아들일 때 열려 있던 메시지는 받아들인 턴의 것이다 | `LibrarianTurnLog`: `OwnNotClosedBefore` |
+| I12 | 누구인지와 누가 말했는지는 타입 있는 값으로 온다. 옛 턴이 지금의 Task 를 빌리지 않는다. 받아들일 때 열려 있던 메시지와 턴이 남긴 열린 메시지는 예외다(§5.2) | 받아들일 때의 근거와 깨운 것을 `Opened` 에 적는다. queue 항목이 이름을 실었으면 그 이름이 줄에 있다. `baseline` 앞에서 닫힌 내용에는 Task 가 없다. `Opened` 를 쓰고 죽은 턴이 저장한 메시지는 프로세스 시작 단계가 그 턴의 단위로 닫는다(§5.2). 받아들일 때 열려 있던 메시지는 받아들인 턴의 것이다 | `LibrarianTurnLog`: `OwnNotClosedBefore` |
 | I13 | 날것 턴은 덧붙이기만 한다. purge 가 독자가 무엇을 읽었는지를 정하지 않는다 | 줄이 내용을 sha 로 이름 붙은 bundle 로 가리킨다. purge 는 Librarian 의 읽은 자리를 읽지 않는다. 고쳐 쓰기만 하는 purge 는 단위 줄이 아직 없는 메시지(닫혔든 열렸든)를 건드리지 않는다. 끊긴 곳 뒤를 버리는 purge 는 버리는 것을 줄에 먼저 적는다(§5.6) | `LibrarianTurnLog`: `UnreadReadable`. 단위 줄 위의 메시지를 고쳐 쓰는 buggy 설정이 깨진다(§21) |
 | I14 | metric 이 무엇도 막지 않는다. 갈래는 타입으로 나눈다. 모양은 하드컷으로 바꾼다 | 경보와 카운터는 아무것도 막지 않는다. 갈래는 닫힌 생성자 위에 있다 | 타입 검사. L9 의 해석 시험 |
 | I15 | 지식 하나에 맞는 fact 하나. 낡았는지는 Librarian 이 판단한다. 시간이나 TTL 이 아니다 | Librarian 이 `Drop`, `Merge`, `Revise` 로 판단한다. TTL 도 크기 예산도 fact 를 지우지 않는다. 자리 내기는 Librarian 에게 하는 질문이다 | L1 채점기(merge 뒤 보존, 변화율) |
@@ -1847,12 +1859,12 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b4a | 턴이 자기 줄을 쓴다. 받아들일 때 `Opened`, 끝날 때 `Closed` 다. 두 줄을 쓰는 곳은 하나다(`Keeper_turn_log_turn.around`). 옛 경계 파일 옆에 쓴다. 닫는 저장이 한 일을 턴이 끝까지 들고 간다. 카운터 `turn_log_append_failed` | 끝나는 길마다 `Closed` 가 정확히 하나다. 길은 돌려줌, 예외, 취소다. 줄을 못 써도 턴의 답과 예외가 그대로다. 실패한 저장은 `Save_failed`, 쓰지 않은 저장은 `Stale_save` 로 실린다 |
 | L3a3b4b | 받아들임은 head 의 열린 메시지를 닫지 않는다. §5.2 와 모델(`LibrarianTurnLog`)을 그렇게 고친다. 코드는 L3a3b4a 그대로다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다. Keeper 만들기의 첫 저장, 멈춘 턴을 잇는 저장(gate, checkpoint, runtime), 입력을 기다린 답의 저장이다. 받아들임이 닫으면 이어 가는 턴의 메시지가 Task 없이 실린다 | 모델의 정상 설정이 모두 통과한다. 받아들임이 닫는다는 규칙에 기대던 설정과 속성이 없어진다. 열린 메시지는 그것을 닫은 저장의 단위에 든다 |
 | L3a3b4c | 프로세스 시작 단계(`Keeper_turn_log_process_start`). checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 저장된 Keeper 마다 돈다. 마지막 `Opened` 가 열려 있으면 head 의 열린 메시지를 닫고 `Closed {Process_exited}` 를 쓴다. 턴 기록이 없으면 `Log_started` 를 쓴다. 카운터 `turn_log_open_close_failed` | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 열린 턴이 없으면 head 의 열린 메시지를 그대로 둔다. 읽지 못한 턴 기록에는 닫지도 쓰지도 않는다. 닫는 저장이 실패해도 줄을 쓰고, 줄을 못 써도 프로세스 시작이 그대로 간다 |
-| L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다 | payload 갈래마다 줄 타입이 하나다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다(`Keeper_turn_log_turn.stimulus`). 턴을 도는 함수가 받은 queue 항목을 인자로 받는다. 이 칸이 없는 `Opened` 는 읽지 않는다 | payload 갈래마다 줄 타입이 하나다. 줄 타입마다 글로 박은 모양. 턴 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |
-| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다 |
+| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |

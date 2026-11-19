@@ -1,5 +1,7 @@
 open Keeper_memory_os_types
 open Keeper_turn_log
+open Keeper_turn_log_wire
+module Stimulus = Keeper_turn_log_stimulus_codec
 module Digest = Agent_core.Checkpoint_objects
 
 (* Field names. *)
@@ -10,6 +12,7 @@ let f_mark = "mark"
 let f_turn_ref = "turn_ref"
 let f_runtime = "runtime"
 let f_task = "task"
+let f_stimuli = "stimuli"
 let f_baseline = "baseline"
 let f_turn = "turn"
 let f_outcome = "outcome"
@@ -33,18 +36,6 @@ let f_kind = wire_field_kind
 let f_goals = "goals"
 let f_goal = "goal"
 let f_shown = "shown"
-
-(* A closed set of tokens. Writing is a total match, so a new constructor
-   does not compile until it has a token. Reading goes through the list of
-   every value: a value missing from its list is written and then refused,
-   which the round trip test of every line shows. *)
-let of_token ~token_of values field fields =
-  let ( let* ) = Result.bind in
-  let* token = wire_string_field field fields in
-  match List.find_opt (fun value -> String.equal (token_of value) token) values with
-  | Some value -> Ok value
-  | None -> wire_fail [ Wire_field field ] (Unknown_token token)
-;;
 
 let outcome_token = function
   | Completed -> "completed"
@@ -158,13 +149,14 @@ let to_json line =
       ; f_at, `Float at
       ; f_mark, mark_to_json mark
       ]
-  | Opened { at; turn_ref; runtime; task; baseline } ->
+  | Opened { at; turn_ref; runtime; task; stimuli; baseline } ->
     `Assoc
       [ kind Kind_opened
       ; f_at, `Float at
       ; f_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
       ; f_runtime, `String runtime
       ; f_task, task_to_json task
+      ; f_stimuli, `List (List.map Stimulus.to_json stimuli)
       ; f_baseline, mark_to_json baseline
       ]
   | Closed { turn; at; outcome; after; unattributed; own } ->
@@ -189,12 +181,6 @@ let to_json line =
 ;;
 
 let ( let* ) = Result.bind
-
-let object_fields = function
-  | `Assoc fields -> Ok fields
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-    wire_here Expected_object
-;;
 
 let count_field field fields =
   let* value = wire_int_field field fields in
@@ -239,17 +225,6 @@ let slice_of_json json =
   let* skip = count_field f_skip fields in
   let* take = count_field f_take fields in
   if take = 0 then wire_fail [ Wire_field f_take ] Not_positive else Ok { bundle; skip; take }
-;;
-
-let list_field field fields decode =
-  let* items = wire_list_field field fields in
-  let rec collect index decoded = function
-    | [] -> Ok (List.rev decoded)
-    | item :: rest ->
-      let* value = wire_at_element field index (decode item) in
-      collect (index + 1) (value :: decoded) rest
-  in
-  collect 0 [] items
 ;;
 
 let goal_of_json json =
@@ -309,7 +284,7 @@ let of_json json =
   | Kind_opened ->
     let* () =
       exact_field_names_result
-        [ f_line; f_at; f_turn_ref; f_runtime; f_task; f_baseline ]
+        [ f_line; f_at; f_turn_ref; f_runtime; f_task; f_stimuli; f_baseline ]
         fields
     in
     let* at = wire_number_field f_at fields in
@@ -321,8 +296,9 @@ let of_json json =
     in
     let* runtime = wire_string_field f_runtime fields in
     let* task = object_field f_task fields task_of_json in
+    let* stimuli = list_field f_stimuli fields Stimulus.of_json in
     let* baseline = object_field f_baseline fields mark_of_json in
-    Ok (Opened { at; turn_ref; runtime; task; baseline })
+    Ok (Opened { at; turn_ref; runtime; task; stimuli; baseline })
   | Kind_closed ->
     let* () =
       exact_field_names_result

@@ -448,6 +448,7 @@ let run_turn
          base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(input_speaker : Keeper_input_speaker.t)
+      ~(woken_by : Keeper_event_queue.stimulus list)
       ~(turn_kind : Turn_record.turn_kind)
       ~(approval_admission : Keeper_approval_origin.admission)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
@@ -714,6 +715,7 @@ let run_turn
     ~turn_ref
     ~runtime:runtime_id_string
     ~task:(Keeper_turn_log_turn.task_evidence ctx.task_context)
+    ~stimuli:(List.map Keeper_turn_log_turn.stimulus woken_by)
     ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
       Result.is_ok settlement.result)
   @@ fun turn_log ->

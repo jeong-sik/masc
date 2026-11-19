@@ -86,6 +86,9 @@ type ctx =
       (* Reply route for a continuation-bearing wake, handed to tool setup so
          surface posts know the admitted external destination. *)
   ; approval_admission : Keeper_approval_origin.admission
+  ; woken_by : Keeper_event_queue.stimulus list
+      (* The event queue entries this turn was admitted with. The turn log's
+         [Opened] names them. *)
   ; hitl_resolutions : Keeper_hitl_resolution_batch.t option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
@@ -258,6 +261,7 @@ let run (ctx : ctx)
                  ~build_turn_prompt
                  ~user_message
                  ~input_speaker:(Keeper_unified_prompt.autonomous_input_speaker observation)
+                 ~woken_by:ctx.woken_by
                  ~turn_kind:Turn_record.Autonomous
                  ~skill_snapshot
                  ~task_skill_selection

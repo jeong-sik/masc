@@ -55,6 +55,67 @@ let task_evidence : Keeper_turn_task_context.t -> Turn_log.task_evidence = funct
     Task { task = task_id; goals = None }
 ;;
 
+let board_item ~post (signal : Keeper_event_queue.board_stimulus) : Turn_log.board_item =
+  let event : Turn_log.board_event =
+    match signal.kind with
+    | Post_created -> Post_created
+    | Post_updated { content_updated_at = (_ : float) } -> Post_updated
+    | Comment_added { comment_id; parent_id = (_ : string option) } ->
+      Comment_added { comment = comment_id }
+    | Reaction_changed { user_id; _ } -> Reaction_changed { by = user_id }
+    | Vote_cast { voter; _ } -> Vote_cast { by = voter }
+  in
+  { post; author = signal.author; event }
+;;
+
+let completion_judge : Masc_domain.completion_authority -> Turn_log.completion_judge = function
+  | Human_operator { operator_id } -> Human_operator { operator = operator_id }
+  | System_llm_agent { agent_run_id } -> System_agent { run = agent_run_id }
+;;
+
+(* Ids and names only. What an entry says stays in the store its id points
+   at, and the answer or the reason an entry carries is in the turn's own
+   messages once the turn has read it. *)
+let stimulus (queued : Keeper_event_queue.stimulus) : Turn_log.stimulus =
+  match queued.payload with
+  | Board_signal signal -> Board (board_item ~post:queued.post_id signal)
+  | Board_routing_pending signal ->
+    Board_routing_pending (board_item ~post:queued.post_id signal)
+  | Board_attention { candidate_id; signal } ->
+    Board_attention { candidate = candidate_id; item = board_item ~post:queued.post_id signal }
+  | Bootstrap -> Bootstrap
+  | Tool_result_ready receipt -> Tool_result { receipt }
+  | Fusion_completed { run_id; _ } -> Fusion { run = run_id }
+  | Schedule_due { schedule_id; occurrence_id; _ } ->
+    Schedule { schedule = schedule_id; occurrence = occurrence_id }
+  | Connector_attention { event_id; channel = (_ : Keeper_continuation_channel.t) } ->
+    Connector { event = event_id }
+  | Hitl_resolved { approval_id; _ } -> Hitl { approval = approval_id }
+  | Ask_answered { ask_id; channel = (_ : Keeper_continuation_channel.t) } -> Ask { ask = ask_id }
+  | Completion_authority_rejected { car_task_id; car_verification_id; car_authority; _ } ->
+    Completion_rejected
+      { task = car_task_id
+      ; verification = car_verification_id
+      ; judge = completion_judge car_authority
+      }
+  | Task_outcome { to_task_id; to_verification_id; to_authority; _ } ->
+    Completion_approved
+      { task = to_task_id
+      ; verification = to_verification_id
+      ; judge = completion_judge to_authority
+      }
+  | Task_cancelled { tc_task_id; tc_cancelled_by; tc_reason = (_ : string option) } ->
+    Task_cancelled { task = tc_task_id; by = tc_cancelled_by }
+  | Workspace_message { wmsg_request_id; wmsg_from } ->
+    Workspace_message { request = wmsg_request_id; from = wmsg_from }
+  | Delegate_completed { dc_operation_id; dc_keeper; _ } ->
+    Delegate { operation = dc_operation_id; keeper = dc_keeper }
+  | Composition_completed { cc_request_id; cc_tool; _ } ->
+    Composition { request = cc_request_id; tool = cc_tool }
+  | Owned_job_completed { oj_job_id; _ } ->
+    Owned_job { job = Keeper_owned_job_identity.Job_id.to_string oj_job_id }
+;;
+
 type site =
   | Admission
   | End
@@ -83,9 +144,9 @@ let record place event =
 
 (* A cancellation before the turn started is the turn's own and leaves. Any
    other failure is the log's: the turn starts without its line. *)
-let admit ~place ~turn_ref ~runtime ~task =
+let admit ~place ~turn_ref ~runtime ~task ~stimuli =
   let admitted =
-    match record place (Writer.Admit { turn_ref; runtime; task }) with
+    match record place (Writer.Admit { turn_ref; runtime; task; stimuli }) with
     | Ok (Recorder.Appended _ | Nothing_to_append) as answer -> Recorder.admitted answer
     | Error error as answer ->
       not_written ~place ~turn_ref Admission (Recorder.not_recorded_to_string error);
@@ -127,8 +188,8 @@ let exit_of_exception = function
   | exn -> if Keeper_registry_types.is_operator_interrupt exn then Cancelled else Raised
 ;;
 
-let around ~place ~turn_ref ~runtime ~task ~succeeded body =
-  let turn = admit ~place ~turn_ref ~runtime ~task in
+let around ~place ~turn_ref ~runtime ~task ~stimuli ~succeeded body =
+  let turn = admit ~place ~turn_ref ~runtime ~task ~stimuli in
   match body turn with
   | answer ->
     finish turn (if succeeded answer then Returned_ok else Returned_error);

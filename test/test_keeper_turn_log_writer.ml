@@ -21,7 +21,7 @@ let log_id =
 ;;
 
 let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1
-let admit = Writer.Admit { turn_ref; runtime = "runtime-a"; task = No_task }
+let admit = Writer.Admit { turn_ref; runtime = "runtime-a"; task = No_task; stimuli = [] }
 
 let mark ?(trace = "a") ?(chat_bytes = 0) closed_messages : Log.mark =
   { trace

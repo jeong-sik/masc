@@ -4711,6 +4711,18 @@ let projection_http_fixture requests =
       `OK,
       {|{"id":"projection-a","model":"projection-http-fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}|}) }
 
+(* What every fixture turn is admitted with, so a test can read it back from
+   the turn log's [Opened]. *)
+let production_fixture_woken_by : Keeper_event_queue.stimulus list =
+  [ { post_id = "workspace-message:fixture-request"
+    ; urgency = Normal
+    ; arrived_at = 0.0
+    ; payload =
+        Workspace_message { wmsg_request_id = "fixture-request"; wmsg_from = "fixture-sender" }
+    }
+  ]
+;;
+
 let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
     ~http_fixture ~base_path ~trace_id
@@ -4853,6 +4865,7 @@ candidates = [%s]
                                     })
                                 ~user_message
                                 ~input_speaker
+                                ~woken_by:production_fixture_woken_by
                                 ~turn_kind
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
@@ -8628,8 +8641,13 @@ let assert_turn_log ~keepers_dir ~trace_id ~ended =
       | Error error -> fail (Keeper_memory_os_types.wire_error_to_string error))
   in
   match lines with
-  | [ Keeper_turn_log.Log_started _; Opened { turn_ref; _ }; Closed { outcome; _ } ] ->
+  | [ Keeper_turn_log.Log_started _; Opened { turn_ref; stimuli; _ }; Closed { outcome; _ } ] ->
     check string "turn log turn" (trace_id ^ "#1") (Ids.Turn_ref.to_string turn_ref);
+    check bool "the admission names what the turn was woken by" true
+      (stimuli
+       = [ Keeper_turn_log.Workspace_message
+             { request = "fixture-request"; from = "fixture-sender" }
+         ]);
     check bool "the turn's end says how it ended" true (outcome = ended)
   | lines ->
     fail

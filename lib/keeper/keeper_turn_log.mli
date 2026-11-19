@@ -89,6 +89,78 @@ type task_evidence =
       (** [None] when the Goals could not be read at admission. *)
       }
 
+(** What happened on a Board post. *)
+type board_event =
+  | Post_created
+  | Post_updated
+  | Comment_added of { comment : string }
+  | Reaction_changed of { by : string }
+  | Vote_cast of { by : string }
+
+type board_item =
+  { post : string (** The queue entry's post id. *)
+  ; author : string
+  ; event : board_event
+  }
+
+(** Who judged a completion. *)
+type completion_judge =
+  | Human_operator of { operator : string }
+  | System_agent of { run : string }
+
+(** One thing a turn took from its Keeper's event queue: what it is, by the
+    id its own store keeps, and who sent it where the queue entry names
+    someone. One constructor for each kind of entry the queue holds.
+
+    A name is the text the producer wrote. It was not matched against the
+    Keeper registry. No content is carried: it stays in the store the id
+    points at. *)
+type stimulus =
+  | Board of board_item
+  | Board_routing_pending of board_item
+  (** Kept while the post's routing could not be decided. Not a delivery. *)
+  | Board_attention of
+      { candidate : string
+      ; item : board_item
+      }
+  | Bootstrap
+  | Tool_result of { receipt : string }
+  | Fusion of { run : string }
+  | Schedule of
+      { schedule : string
+      ; occurrence : string
+      }
+  | Connector of { event : string }
+  | Hitl of { approval : string }
+  | Ask of { ask : string }
+  | Completion_rejected of
+      { task : string
+      ; verification : string
+      ; judge : completion_judge
+      }
+  | Completion_approved of
+      { task : string
+      ; verification : string
+      ; judge : completion_judge
+      }
+  | Task_cancelled of
+      { task : string
+      ; by : string
+      }
+  | Workspace_message of
+      { request : string
+      ; from : string
+      }
+  | Delegate of
+      { operation : string
+      ; keeper : string (** The Keeper that ran the delegated turn. *)
+      }
+  | Composition of
+      { request : string
+      ; tool : string
+      }
+  | Owned_job of { job : string }
+
 type line =
   | Log_started of
       { id : Log_id.t
@@ -100,6 +172,10 @@ type line =
       ; turn_ref : Ids.Turn_ref.t
       ; runtime : string
       ; task : task_evidence (** Taken at admission. [Closed] does not carry it. *)
+      ; stimuli : stimulus list
+      (** What the turn took from the event queue, in the queue's order.
+          Empty for a direct request, whose message is in the history with
+          its speaker, and for a turn the Keeper's own cadence started. *)
       ; baseline : mark
       }
   | Closed of

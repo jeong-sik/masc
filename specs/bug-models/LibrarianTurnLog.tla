@@ -533,12 +533,11 @@ ResetAnnounce(kind, j) ==
            pre == IF kind = "clear_undec" THEN << >> ELSE Pre(lg0, h1, cl1)
            lg1 == lg0 \o pre
            new == NewHead(kind, j, h1)
-           ll == LastLine(lg1)
            rl == IF kind = "clear_undec"
-                 \* the clear of an undecodable head appends Unannounced itself; not a second one with the same after
-                 THEN (IF ll.k = "R" /\ ll.cause = "unann" /\ ll.mark = Mk(new) THEN << >>
-                       ELSE << Line("R", "unann", 0, "none", LastMark(lg1), Mk(new), << >>,
-                                    cl1 \ (NamedIn(lg1) \cup SpansIn(lg1) \cup lostIds), {}, NoAdm) >>)
+                 \* the clear of an undecodable head appends the line a stop appends, without
+                 \* reading the head, and every time: also when the last line already is that line
+                 THEN << Line("R", "unann", 0, "none", LastMark(lg1), Mk(new), << >>,
+                              cl1 \ (NamedIn(lg1) \cup SpansIn(lg1) \cup lostIds), {}, NoAdm) >>
                  ELSE << Line("R", IF kind = "clear" THEN "cleared" ELSE "recovered", 0, "none",
                               Mk(h1), Mk(new),
                               IF Q(lg1).trace = h1.trace

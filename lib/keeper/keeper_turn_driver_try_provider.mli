@@ -92,25 +92,19 @@ val absorbed_history :
     be used ({!continuity_for_request}) (RFC keeper-context-window-in-tokens
     section 13.6). *)
 
-val completed_history_end :
-  trace_id:string ->
-  lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
-  messages:Agent_core.Types.message list -> (int, Librarian_continuity_snapshot.error) result
-(** The last verified completed atom endpoint. An attempt seed is not proof that
-    resumed work completed; callers retain original bodies when no proof exists. *)
-
 val turn_start :
   config:Workspace.config -> keeper_name:string -> trace_id:string ->
   messages:Agent_core.Types.message list -> Keeper_carried_front.turn_start
 (** Where a request with no absorbed point starts (RFC
-    keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
-    the keeper's turn-boundary store, [Turn_boundary 0] when the history has
-    no completed turn. A store this process cannot read, or a boundary the
-    history in hand does not match, is answered [Turn_boundary_unknown]: a
-    request it decides then opens on the newest atom alone and its origin says
-    so, rather than on the whole history. Reading it logs nothing; the request
-    whose range it opens warns
-    ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
+    keeper-context-window-in-tokens §13.4): the end of the last unit of the
+    Keeper's turn log (RFC librarian-call-only-proposes §11.2), as the atom of
+    [messages] that the first message after its closed messages opens. A log
+    with no line is [Turn_boundary 0]. A log this process cannot read, a mark
+    of another trace, or [messages] shorter than the mark is answered
+    [Turn_boundary_unknown]: a request it decides then opens on the newest
+    atom alone and its origin says so, rather than on the whole history. No
+    digest is compared. Reading it logs nothing; the request whose range it
+    opens warns ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
 
 val prepare_continuity :
   trace_id:string ->

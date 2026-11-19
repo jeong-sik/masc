@@ -618,6 +618,7 @@
   test_keeper_turn_log_reset
   test_keeper_shutdown_session_turn_log
   test_keeper_purge_turn_log
+  test_keeper_turn_start_from_turn_log
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
@@ -954,6 +955,7 @@
   test_keeper_turn_log_reset
   test_keeper_shutdown_session_turn_log
   test_keeper_purge_turn_log
+  test_keeper_turn_start_from_turn_log
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page

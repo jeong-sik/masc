@@ -75,6 +75,13 @@ candidates = ["refused.sample", "accepted.sample"]
   let config = Workspace.default_config base_path in
   body ~sw ~net:env#net ~config ~base_path ~refused ~accepted
 
+(* A completed turn over [messages] in the Keeper's turn log, where the turn
+   start is read from (RFC librarian-call-only-proposes §11.2). The boundary
+   log keeps its own line beside it: the Librarian still reads that one. *)
+let start_turn_log ~config messages =
+  Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+    ~trace_id ~closed_messages:(List.length messages)
+
 (* One completed turn over [covered], written to the keeper's boundary log. *)
 let record_completed_turn ~config =
   let position = match B.position_of_messages covered with
@@ -85,6 +92,7 @@ let record_completed_turn ~config =
   let keepers_dir = Workspace.keepers_runtime_dir config in
   (match B.append ~keepers_dir ~keeper_id:keeper_name boundary with
    | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  start_turn_log ~config covered;
   boundary
 
 (* Runs one turn whose history is [covered] plus this turn's input, and
@@ -314,6 +322,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
         { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
          history_at_start = B.Fresh_history; position}} with
    | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  start_turn_log ~config completed;
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest initial_messages in
   (match
      Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
@@ -370,6 +379,7 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
         { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
          history_at_start = B.Fresh_history; position}} with
    | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  start_turn_log ~config completed;
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest initial_messages in
   (match
      Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
@@ -407,11 +417,12 @@ let three_completed_exchanges =
 let record_three_completed_exchanges ~config =
   let position = match B.position_of_messages three_completed_exchanges with
     | Ok position -> position | Error detail -> fail detail in
-  match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  (match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
      {recorded_at = 1.; event = B.Turn_ended
         { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
          history_at_start = B.Fresh_history; position}} with
-  | Ok () -> () | Error error -> fail (B.append_error_to_string error)
+  | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  start_turn_log ~config three_completed_exchanges
 ;;
 
 let refused_then_answered answer =

@@ -132,6 +132,34 @@ let clock_of = function
    while such an instant is noted. *)
 let wall_clock_recheck_s = 5.0
 
+let nanoseconds_per_second = 1e9
+
+module Mono = struct
+  type t = int64
+
+  let now = Mtime_clock.elapsed_ns
+
+  (* A wait too long for the clock's range is due at its end: the same as
+     never for a process. *)
+  let offset_ns seconds =
+    let ns = seconds *. nanoseconds_per_second in
+    if ns >= Int64.to_float Int64.max_int then Int64.max_int else Int64.of_float ns
+
+  let add_saturating at offset =
+    let sum = Int64.add at offset in
+    if Int64.compare offset 0L > 0 && Int64.compare sum at < 0 then Int64.max_int else sum
+
+  let after at seconds =
+    (* [seconds > 0.] is false for nan. *)
+    let offset = if seconds > 0. then offset_ns seconds else 0L in
+    add_saturating at offset
+
+  (* RFC tui-idle-wait §3.2: only what remains of a wall-clock instant moves
+     onto this clock, so a wall-clock step after this call does not move the
+     result, and the next pass converts again. *)
+  let of_wall ~now ~wall_now at = after now (at -. wall_now)
+end
+
 type deadline = { reason : deadline_reason; at_ns : int64 }
 
 let earlier left right = if Int64.compare right.at_ns left.at_ns < 0 then right else left
@@ -140,22 +168,7 @@ let earliest = function
   | [] -> None
   | first :: rest -> Some (List.fold_left earlier first rest)
 
-let nanoseconds_per_second = 1e9
-
-(* A wait too long for the clock's range is due at its end: the same as
-   never for a process. *)
-let offset_ns seconds =
-  let ns = seconds *. nanoseconds_per_second in
-  if ns >= Int64.to_float Int64.max_int then Int64.max_int else Int64.of_float ns
-
-let add_saturating now_ns offset =
-  let sum = Int64.add now_ns offset in
-  if Int64.compare offset 0L > 0 && Int64.compare sum now_ns < 0 then Int64.max_int else sum
-
-let in_seconds reason ~now_ns seconds =
-  (* [seconds > 0.] is false for nan. *)
-  let offset = if seconds > 0. then offset_ns seconds else 0L in
-  { reason; at_ns = add_saturating now_ns offset }
+let in_seconds reason ~now_ns seconds = { reason; at_ns = Mono.after now_ns seconds }
 
 module Pass = struct
   let current : deadline option Atomic.t = Atomic.make None
@@ -178,20 +191,23 @@ let reached reason ~now ~at =
   if not (Float.is_finite now && Float.is_finite at) then false
   else if now >= at then true
   else begin
-    let now_ns = Mtime_clock.elapsed_ns () and remaining = at -. now in
+    let now_ns = Mono.now () and remaining = at -. now in
     Pass.note (match clock_of reason with
       | Wall when remaining > wall_clock_recheck_s ->
           in_seconds Wall_clock_recheck ~now_ns wall_clock_recheck_s
-      | Wall | Monotonic -> in_seconds reason ~now_ns remaining);
+      | Wall -> { reason; at_ns = Mono.of_wall ~now:now_ns ~wall_now:now at }
+      | Monotonic -> in_seconds reason ~now_ns remaining);
     false
   end
 
-let reached_ns reason ~now_ns ~at_ns =
-  if Int64.compare now_ns at_ns >= 0 then true
+let reached_mono reason ~now ~at =
+  if Int64.compare now at >= 0 then true
   else begin
-    Pass.note { reason; at_ns };
+    Pass.note { reason; at_ns = at };
     false
   end
+
+let reached_ns reason ~now_ns ~at_ns = reached_mono reason ~now:now_ns ~at:at_ns
 
 (* RFC tui-idle-wait §2.3: the one cadence left. The machine's screen
    arrives through the observer stream and the chat beside it reads on its

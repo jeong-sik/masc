@@ -93,8 +93,31 @@ val wall_clock_recheck_s : float
     slept or a clock that was set is seen this long after at the latest
     (RFC tui-idle-wait §6). *)
 
+(** An instant on the loop's own clock, [Mtime_clock.elapsed_ns], the clock
+    a {!deadline}'s [at_ns] is on. Only {!Mono.now} makes one from the clock;
+    the other functions move from an instant already on it. A wall-clock reading
+    ([Unix.gettimeofday]) is a [float], so it does not type-check where a
+    decision compares instants on this clock (#53581). *)
+module Mono : sig
+  type t = private int64
+  (** Nanoseconds on [Mtime_clock.elapsed_ns]. *)
+
+  val now : unit -> t
+
+  val after : t -> float -> t
+  (** [seconds] after an instant. A negative or nan wait is the instant
+      itself; a wait past the clock's range, [infinity] among them, is the
+      clock's end. *)
+
+  val of_wall : now:t -> wall_now:float -> float -> t
+  (** The instant on this clock that a wall-clock instant names, [now] and
+      [wall_now] being read together: [now] plus what remains until it. A
+      wall-clock instant already past is [now]. Every wall-clock instant that
+      reaches this clock goes through here (RFC tui-idle-wait §3.2). *)
+end
+
 type deadline = { reason : deadline_reason; at_ns : int64 }
-(** [at_ns] is on [Mtime_clock.elapsed_ns]. *)
+(** [at_ns] is a {!Mono.t}'s nanoseconds. *)
 
 val earliest : deadline list -> deadline option
 (** The deadline with the smallest [at_ns], [None] for none. *)
@@ -111,8 +134,12 @@ val reached : deadline_reason -> now:float -> at:float -> bool
     {!wall_clock_recheck_s} away is noted as [Wall_clock_recheck] that far
     away instead. A non-finite instant is never reached and is not noted. *)
 
+val reached_mono : deadline_reason -> now:Mono.t -> at:Mono.t -> bool
+(** [now >= at] on the loop's clock. While it answers [false], [at] is noted
+    for this pass ({!Pass}). *)
+
 val reached_ns : deadline_reason -> now_ns:int64 -> at_ns:int64 -> bool
-(** {!reached} on [Mtime_clock.elapsed_ns]. *)
+(** {!reached_mono} on raw [Mtime_clock.elapsed_ns] nanoseconds. *)
 
 (** What the decisions of one loop pass noted. The window runs from the end
     of one wait to the start of the next: every per-pass decision runs again

@@ -25,6 +25,10 @@ type retirement =
   | Retired_now
   | Still_registered
 
+type 'answer asked =
+  | Answered of 'answer
+  | Ended
+
 type event =
   | Write of
       { by : Librarian_effects.actor
@@ -47,6 +51,7 @@ type t =
   ; mailbox : event Eio.Stream.t
   ; status : status Atomic.t
   ; gone : unit Eio.Promise.t
+  ; ended : unit Eio.Promise.u
   }
 
 let status t = Atomic.get t.status
@@ -83,17 +88,16 @@ let stop_text : Store.stop -> string = function
 let status_of : Machine.state -> status = function
   | Idle store -> Open (Store.tail store)
   | Stopped stop -> Stopped stop
-  | Retired -> Retired
 ;;
 
 (* The state after an event, made visible before the event is answered: the
    caller that is woken reads the status the answer is about. *)
 let publish t ~was (state : Machine.state) =
   (match was, state with
-   | (Machine.Idle _ | Retired), Stopped stop ->
+   | Machine.Idle _, Stopped stop ->
      Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory store stopped: %s"
        (stop_text stop)
-   | (Machine.Idle _ | Stopped _ | Retired), (Idle _ | Stopped _ | Retired) -> ());
+   | (Machine.Idle _ | Stopped _), (Idle _ | Stopped _) -> ());
   Atomic.set t.status (status_of state)
 ;;
 
@@ -126,7 +130,7 @@ let live t ~sw =
        | Stopped stop ->
          Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory store did not open: %s"
            (stop_text stop)
-       | Idle (_ : Store.t) | Retired -> ());
+       | Idle (_ : Store.t) -> ());
       state)
   in
   let rec loop state =
@@ -164,38 +168,33 @@ let live t ~sw =
   loop state
 ;;
 
-let run t ~gone =
+let create ~now ~registered place =
+  let gone, ended = Eio.Promise.create () in
+  { place
+  ; now
+  ; registered
+  ; mailbox = Eio.Stream.create max_int
+  ; status = Atomic.make Booting
+  ; gone
+  ; ended
+  }
+;;
+
+let run t =
   let retiring =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set t.status Retired;
-        Eio.Promise.resolve gone ())
+        Eio.Promise.resolve t.ended ())
       (fun () -> Eio.Switch.run (fun sw -> live t ~sw))
   in
   Eio.Promise.resolve retiring Retired_now
 ;;
 
-let start ~sw ~now ~registered place =
-  let gone, resolve_gone = Eio.Promise.create () in
-  let t =
-    { place
-    ; now
-    ; registered
-    ; mailbox = Eio.Stream.create max_int
-    ; status = Atomic.make Booting
-    ; gone
-    }
-  in
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    run t ~gone:resolve_gone;
-    `Stop_daemon);
-  t
-;;
-
 (* A writer that has ended takes nothing from its mailbox, so the caller
    also waits for the end. An answer the writer gave before it ended is the
    answer. *)
-let ask t ~when_gone event =
+let ask t event =
   let reply, resolver = Eio.Promise.create () in
   Eio.Stream.add t.mailbox (event resolver);
   match
@@ -205,24 +204,19 @@ let ask t ~when_gone event =
          Eio.Promise.await t.gone;
          None)
   with
-  | Some answer -> answer
-  | None -> Option.value (Eio.Promise.peek reply) ~default:when_gone
+  | Some answer -> Answered answer
+  | None ->
+    (match Eio.Promise.peek reply with
+     | Some answer -> Answered answer
+     | None -> Ended)
 ;;
 
-let write t ~by ~trace write =
-  ask t
-    ~when_gone:(Machine.Unavailable Keeper_retired)
-    (fun reply -> Write { by; trace; write; reply })
-;;
+let write t ~by ~trace write = ask t (fun reply -> Write { by; trace; write; reply })
+let resume t = ask t (fun reply -> Resume reply)
+let adopt t ~by ~observed = ask t (fun reply -> Adopt { by; observed; reply })
 
-let resume t =
-  ask t ~when_gone:(Machine.Not_done (Act_unavailable Keeper_retired)) (fun reply -> Resume reply)
+let retire t =
+  match ask t (fun reply -> Retire reply) with
+  | Answered retirement -> retirement
+  | Ended -> Retired_now
 ;;
-
-let adopt t ~by ~observed =
-  ask t
-    ~when_gone:(Machine.Not_done (Act_unavailable Keeper_retired))
-    (fun reply -> Adopt { by; observed; reply })
-;;
-
-let retire t = ask t ~when_gone:Retired_now (fun reply -> Retire reply)

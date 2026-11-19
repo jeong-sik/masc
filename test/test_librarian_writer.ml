@@ -1,6 +1,7 @@
 (* One Keeper's writer (RFC librarian-call-only-proposes §8.6, §9): the fiber
    that boots the store, answers what arrives in the order it arrived, holds
-   the lock for as long as it lives, and ends when its Keeper is gone. *)
+   the lock for as long as it lives, and ends when its Keeper is gone. A
+   writer that has ended says so and does nothing with what it is sent. *)
 
 open Alcotest
 module Writer = Masc.Librarian_writer
@@ -79,23 +80,27 @@ let unavailable_text : Machine.unavailable -> string = function
   | Keeper_retired -> "the keeper is retired"
 ;;
 
-let write_text : Machine.write_answer -> string = function
-  | Written line -> Printf.sprintf "written as commit %d" line.seq
-  | Already_held -> "already held"
-  | Already_done -> "already done"
-  | Already_absent -> "already absent"
-  | Refused refusal -> "refused: " ^ Direct.refusal_kind refusal
-  | Not_a_snapshot (_ : Envelope.refusal) -> "not a snapshot"
-  | Unavailable why -> unavailable_text why
+let ended = "the writer ended"
+
+let write_text : Machine.write_answer Writer.asked -> string = function
+  | Ended -> ended
+  | Answered (Written line) -> Printf.sprintf "written as commit %d" line.seq
+  | Answered Already_held -> "already held"
+  | Answered Already_done -> "already done"
+  | Answered Already_absent -> "already absent"
+  | Answered (Refused refusal) -> "refused: " ^ Direct.refusal_kind refusal
+  | Answered (Not_a_snapshot (_ : Envelope.refusal)) -> "not a snapshot"
+  | Answered (Unavailable why) -> unavailable_text why
 ;;
 
-let act_text : Machine.act_answer -> string = function
-  | Done -> "done"
-  | Not_done Nothing_to_resume -> "nothing to resume"
-  | Not_done Not_stopped -> "not stopped"
-  | Not_done Snapshot_mismatch -> "snapshot mismatch"
-  | Not_done Snapshot_unreadable -> "snapshot unreadable"
-  | Not_done (Act_unavailable why) -> unavailable_text why
+let act_text : Machine.act_answer Writer.asked -> string = function
+  | Ended -> ended
+  | Answered Done -> "done"
+  | Answered (Not_done Nothing_to_resume) -> "nothing to resume"
+  | Answered (Not_done Not_stopped) -> "not stopped"
+  | Answered (Not_done Snapshot_mismatch) -> "snapshot mismatch"
+  | Answered (Not_done Snapshot_unreadable) -> "snapshot unreadable"
+  | Answered (Not_done (Act_unavailable why)) -> unavailable_text why
 ;;
 
 let retirement_text : Writer.retirement -> string = function
@@ -123,7 +128,11 @@ let ticking () =
 let with_switch body = Eio_main.run (fun (_ : Eio_unix.Stdenv.base) -> Eio.Switch.run body)
 
 let start ?(registered = fun () -> true) ~sw place =
-  Writer.start ~sw ~now:(ticking ()) ~registered place
+  let writer = Writer.create ~now:(ticking ()) ~registered place in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Writer.run writer;
+    `Stop_daemon);
+  writer
 ;;
 
 let test_write_waits_for_the_boot () =
@@ -193,8 +202,8 @@ let test_one_writer_holds_the_lock () =
     check string "once the Keeper is gone the writer ends" "retired"
       (retirement_text (Writer.retire first));
     check string "its status says so" "retired" (status_text first);
-    check string "it takes no write" "the keeper is retired" (write first "the probe runs");
-    check string "nor an act" "the keeper is retired" (act_text (Writer.resume first));
+    check string "it takes no write" ended (write first "the probe runs");
+    check string "nor an act" ended (act_text (Writer.resume first));
     check string "a second retirement finds it ended" "retired"
       (retirement_text (Writer.retire first));
     check string "the lock is free: the second writer boots" "done"

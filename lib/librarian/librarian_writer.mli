@@ -8,7 +8,10 @@
     are handled in the order they came.
 
     A reader does not go through the mailbox. {!status} is a value the
-    writer replaces after every event. *)
+    writer replaces after every event.
+
+    Every function here can be called from any domain. {!run} is the
+    exception: it is the fiber. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -31,22 +34,32 @@ type status =
   | Stopped of Librarian_store.stop
   | Retired (** The fiber has ended. This writer takes nothing more. *)
 
-(** Starts the fiber on [sw]. It ends when the writer retires or [sw] does.
+(** A writer that is [Booting] and does nothing until {!run}. What is sent
+    to it before then waits in its mailbox.
 
     [now] stamps every line. [registered] says whether the Keeper is in the
-    Keeper registry: a {!retire} that finds it there is dropped.
-
-    The lock is taken without waiting. A writer that does not get it is
-    [Stopped Store_unwritable], and {!resume} tries again. The lock is held
-    until the fiber ends. *)
-val start
-  :  sw:Eio.Switch.t
-  -> now:(unit -> float)
+    Keeper registry: a {!retire} that finds it there is dropped. *)
+val create
+  :  now:(unit -> float)
   -> registered:(unit -> bool)
   -> Librarian_machine.place
   -> t
 
+(** The writer's fiber: call it once, in a fiber of its own. It returns when
+    the writer retires.
+
+    The lock is taken without waiting. A writer that does not get it is
+    [Stopped Store_unwritable], and {!resume} tries again. The lock is held
+    until [run] returns. *)
+val run : t -> unit
+
 val status : t -> status
+
+type 'answer asked =
+  | Answered of 'answer
+  | Ended
+  (** The writer ended before it took the request. Nothing was done with
+      it. Whether the Keeper has another writer is the registry's to say. *)
 
 (** A direct write. Returns when the writer has answered it: for a write
     that commits, after the line is synced and the snapshot written. *)
@@ -55,15 +68,16 @@ val write
   -> by:Librarian_effects.actor
   -> trace:string
   -> Librarian_direct.write
-  -> Librarian_machine.write_answer
+  -> Librarian_machine.write_answer asked
 
-val resume : t -> Librarian_machine.act_answer
-val adopt : t -> by:string -> observed:Digest.digest -> Librarian_machine.act_answer
+val resume : t -> Librarian_machine.act_answer asked
+val adopt : t -> by:string -> observed:Digest.digest -> Librarian_machine.act_answer asked
 
 type retirement =
   | Retired_now (** The lock is released and the fiber has ended. *)
   | Still_registered (** The Keeper is registered. The writer goes on. *)
 
 (** Ends the writer of a Keeper that is no longer registered. Returns after
-    the lock is released, so the Keeper's files can be removed. *)
+    the lock is released, so the Keeper's files can be removed. A writer
+    that has ended already is [Retired_now]. *)
 val retire : t -> retirement

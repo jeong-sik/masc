@@ -178,11 +178,22 @@ let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option
 (* One activation mode and the sandbox declaration from the roster row. The
    cell fills the whole flags field, so the columns to its right line up with
    their header. *)
-let keeper_flag_cell (runtime : keeper_runtime option) =
+(* Without a runtime the cell holds one mark at its left, the reason there are
+   no letters (RFC tui-one-screen-grammar 5.6, 6.4): [—] the roster loaded and
+   has no fiber for the keeper, [◌] the roster was not read, [✕] its record
+   could not be read. The mark and its blanks fill the same six cells the two
+   letters do. *)
+let keeper_flag_cell (liveness : Keeper_control.liveness) =
   let gap = String.make Render_schedule.keeper_flags_gap ' ' in
-  match runtime with
-  | None -> Theme.recede () ^ "-" ^ gap ^ "-" ^ Ansi.reset
-  | Some row ->
+  let lone tone mark = tone ^ mark ^ gap ^ " " ^ Ansi.reset in
+  match liveness with
+  | Keeper_control.Absent -> lone (Theme.recede ()) Masc_tui_theme.Glyph.no_value
+  | Keeper_control.Unobserved ->
+      lone (Theme.recede ()) (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread)
+  | Keeper_control.Invalid _ ->
+      lone (Theme.status_tone Masc_tui_value.Mark.Failed)
+        (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+  | Keeper_control.Present row ->
       let module Mark = Masc_tui_keeper_mark in
       let sandbox =
         match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
@@ -499,7 +510,9 @@ let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
   String.concat ""
     [ prefix
     ; now_cell
-    ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
+    ; (if columns.kcol_show_flags then
+         " " ^ keeper_flag_cell row.reading.Keeper_control.liveness
+       else "")
     ; " " ^ Theme.recede ()
       ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
       ^ Ansi.reset
@@ -1823,7 +1836,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   in
   let meta_row =
     dim (Render_schedule.keeper_flags_header ^ " ")
-    ^ keeper_flag_cell runtime
+    ^ keeper_flag_cell row.reading.Keeper_control.liveness
     ^ dim
         (Printf.sprintf "   %s %s   %s" Masc_tui_keeper_mark.age_header age
            (keeper_runtime_label runtime))

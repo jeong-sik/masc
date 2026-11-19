@@ -97,7 +97,7 @@ let code_pane_content_height (state : state) =
   pane_surface_content_height ~rows
 
 let draft_rows_cache :
-    (Masc_tui_code_draft.t * int * ui_language * string list) option Domain.DLS.key =
+    (Masc_tui_code_draft.t * int * ui_language * int * string list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
 let prepare_code_draft_rows ~ko ~cols draft =
@@ -139,8 +139,8 @@ let prepare_code_draft_rows ~ko ~cols draft =
   let rows = Diff.rows ~before ~after:(Draft.text draft) |> List.concat_map (fun row ->
     let marker, style, text = match row with
       | Diff.Context text -> "  ", Ansi.dim, text
-      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
-      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text in
+      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
+      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text in
     Terminal_text.single_line
       (fst (Message_layout.expand_tabs ~column:0 text))
     |> Message_layout.split_cells
@@ -158,12 +158,16 @@ let code_draft_rows state ~cols =
   match current_code_draft state with
   | None -> Domain.DLS.set draft_rows_cache None; []
   | Some draft ->
+      let palette_gen =
+        Masc_tui_terminal_palette.(snapshot_generation (snapshot ()))
+      in
       match Domain.DLS.get draft_rows_cache with
-      | Some (seen, width, language, rows)
-        when seen == draft && width = cols && language = state.ui_language -> rows
+      | Some (seen, width, language, seen_gen, rows)
+        when seen == draft && width = cols && language = state.ui_language
+             && seen_gen = palette_gen -> rows
       | Some _ | None ->
           let rows = prepare_code_draft_rows ~ko:(state.ui_language = Lang_ko) ~cols draft in
-          Domain.DLS.set draft_rows_cache (Some (draft, cols, state.ui_language, rows));
+          Domain.DLS.set draft_rows_cache (Some (draft, cols, state.ui_language, palette_gen, rows));
           rows
 
 let code_hover_rows state ~cols =
@@ -255,8 +259,8 @@ let history_change_rows ~ko ~cols (change : Masc.Tui_decode.file_change) =
   let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
     let marker, style, text = match row with
       | Diff.Context text -> "  ", Ansi.dim, text
-      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
-      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text
+      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
+      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text
     in
     (* Code whitespace is evidence: word wrapping would erase indentation
        and collapse internal spaces. Cell splitting also retains empty rows. *)
@@ -345,7 +349,7 @@ let prepare_code_history_rows (state : state) ~cols =
 
 let history_rows_cache :
     (((code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t
-      * int option * code_note option * int * ui_language)
+      * int option * code_note option * int * ui_language * int)
      * ((int * code_history_entry) option * string) list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
@@ -353,14 +357,17 @@ let code_history_rows (state : state) ~cols =
   let source = state.code_history in
   let expanded = state.code_history_expanded in
   let note = state.code_lsp_note in
+  let palette_gen =
+    Masc_tui_terminal_palette.(snapshot_generation (snapshot ()))
+  in
   match Domain.DLS.get history_rows_cache with
-  | Some ((seen, seen_expanded, seen_note, width, language), rows)
+  | Some ((seen, seen_expanded, seen_note, width, language, seen_gen), rows)
       when seen == source && seen_expanded = expanded && seen_note = note && width = cols
-           && language = state.ui_language -> rows
+           && language = state.ui_language && seen_gen = palette_gen -> rows
   | Some _ | None ->
       let rows = prepare_code_history_rows state ~cols in
       Domain.DLS.set history_rows_cache
-        (Some ((source, expanded, note, cols, state.ui_language), rows));
+        (Some ((source, expanded, note, cols, state.ui_language, palette_gen), rows));
       rows
 
 let code_history_pane_cols () =
@@ -862,9 +869,9 @@ let render_code (state : state) =
                      let body =
                        match row.gdr_kind with
                        | Gd_removed ->
-                           Theme.Syntax.diff_removed_bg ^ text ^ Ansi.reset
+                           Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg () ^ text ^ Ansi.reset
                        | Gd_added ->
-                           Theme.Syntax.diff_added_bg ^ text ^ Ansi.reset
+                           Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg () ^ text ^ Ansi.reset
                        | Gd_context -> Ansi.dim ^ text ^ Ansi.reset
                      in
                      box_line pane_buf pane_cols

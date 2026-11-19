@@ -1274,6 +1274,58 @@ let test_terminal_probe_does_not_clobber_active_theme () =
         (Palette.current () = Some terminal_palette))
 ;;
 
+let test_truecolor_diff_rows_clear_contrast_on_every_scheme () =
+  List.iter
+    (fun scheme ->
+      let page = background scheme in
+      List.iter
+        (fun (label, kind) ->
+          let bg_code, fg_code =
+            Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+              ~project:truecolor ~kind (Some scheme.palette)
+          in
+          match
+            ( truecolor_rgb ~prefix:"\027[48;2;" bg_code
+            , truecolor_rgb ~prefix:truecolor_prefix fg_code )
+          with
+          | Some bg_rgb, Some fg_rgb ->
+            check bool
+              (Printf.sprintf "%s: %s diff bg differs from page" scheme.name
+                 label)
+              true (bg_rgb <> page);
+            let ratio = Color.contrast_ratio fg_rgb bg_rgb in
+            check bool
+              (Printf.sprintf "%s: %s diff fg reads at %.2f over tint"
+                 scheme.name label ratio)
+              true
+              (ratio >= text_floor -. 0.01)
+          | _ ->
+            Alcotest.failf "%s: %s expected Truecolor diff pair, got (%S, %S)"
+              scheme.name label bg_code fg_code)
+        [ "added", `Added; "removed", `Removed ])
+    schemes
+;;
+
+let test_diff_rows_fall_back_without_truecolor () =
+  let sample = List.hd schemes in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  check (Alcotest.pair string string) "NO_COLOR suppresses diff styles" ("", "")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:false
+       ~project:truecolor ~kind:`Added (Some sample.palette));
+  check (Alcotest.pair string string) "missing palette falls back to 256-colour diff"
+    ("\027[48;5;22m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:truecolor ~kind:`Added None);
+  check (Alcotest.pair string string) "Ansi256 falls back to 256-colour added diff"
+    ("\027[48;5;22m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:(project Palette.Ansi256) ~kind:`Added (Some sample.palette));
+  check (Alcotest.pair string string) "Ansi16 falls back to 256-colour removed diff"
+    ("\027[48;5;52m", "\027[38;5;255m")
+    (Masc_tui_theme.For_testing.diff_row_styles ~colors_enabled:true
+       ~project:(project Palette.Ansi16) ~kind:`Removed (Some sample.palette))
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
@@ -1352,6 +1404,10 @@ let () =
             `Quick test_direct_truecolor_default_scheme_passes_natively
         ; Alcotest.test_case "late terminal probe does not clobber active theme"
             `Quick test_terminal_probe_does_not_clobber_active_theme
+        ; Alcotest.test_case "truecolor diff rows clear contrast on every scheme"
+            `Quick test_truecolor_diff_rows_clear_contrast_on_every_scheme
+        ; Alcotest.test_case "diff rows fall back cleanly without truecolor"
+            `Quick test_diff_rows_fall_back_without_truecolor
 
         ] )
     ; ( "toml theme loading"

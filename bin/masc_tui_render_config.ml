@@ -1363,8 +1363,8 @@ let render_themes (state : state) =
          (Theme.Syntax.keyword ()) Ansi.reset
          (Theme.Syntax.string ()) Ansi.reset
          (Theme.Syntax.code_number ()) Ansi.reset
-         Theme.Syntax.diff_added Ansi.reset
-         Theme.Syntax.diff_removed Ansi.reset);
+         (Theme.Syntax.diff_added ()) Ansi.reset
+         (Theme.Syntax.diff_removed ()) Ansi.reset);
   end;
   let lang_toggle =
     pressable Press_ui_language

@@ -29,7 +29,14 @@ let mark closed_messages : Log.mark =
 let started = Log.Log_started { id = log_id; at = 100.0; mark = mark 4 }
 
 let opened baseline =
-  Log.Opened { at = 101.0; turn_ref; runtime = "glm-main"; task = No_task; baseline = mark baseline }
+  Log.Opened
+    { at = 101.0
+    ; turn_ref
+    ; runtime = "glm-main"
+    ; task = No_task
+    ; stimuli = []
+    ; baseline = mark baseline
+    }
 ;;
 
 let closed ?(outcome = Log.Completed) turn after =

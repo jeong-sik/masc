@@ -128,6 +128,7 @@ let admitted (place : Recorder.place) n =
          { turn_ref = Ids.Turn_ref.make ~trace_id:place.session_id ~absolute_turn:n
          ; runtime = "test-runtime"
          ; task = Log.No_task
+         ; stimuli = []
          })
   in
   must (Printf.sprintf "admission of turn %d" n) answer;

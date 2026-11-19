@@ -781,6 +781,7 @@ description: Keeper refusal fixture
             fail "an invalid shared prompt reached model prompt construction")
           ~user_message:"continue the saved work"
           ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+          ~woken_by:[]
           ~turn_kind:Turn_record.Direct
           ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
           ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
@@ -844,6 +845,7 @@ let test_checkpoint_read_error_stops_turn ~io_failure () =
         fail "a failed checkpoint read reached prompt construction")
       ~user_message:"continue the saved work"
       ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+      ~woken_by:[]
       ~turn_kind:Turn_record.Direct
       ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
@@ -897,6 +899,7 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
         fail "an unreadable constitution reached prompt construction")
       ~user_message:"continue the saved work"
       ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+      ~woken_by:[]
       ~turn_kind:Turn_record.Direct
       ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)

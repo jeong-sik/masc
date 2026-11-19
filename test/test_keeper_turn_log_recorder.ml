@@ -131,6 +131,7 @@ let admit place n =
        { turn_ref = Ids.Turn_ref.make ~trace_id:session_id ~absolute_turn:n
        ; runtime = "test-runtime"
        ; task = Log.No_task
+       ; stimuli = []
        })
 ;;
 

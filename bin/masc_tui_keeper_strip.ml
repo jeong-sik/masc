@@ -132,20 +132,34 @@ let wake_strip ~style slots =
     | Next.Wakes_with_unknown _ | Next.Wakes_unknown -> false) slots then
     empty_band ~cells
   else
-    let peak = List.fold_left (fun peak -> function
-      | Next.Wakes count -> max peak count
-      | Next.Wakes_with_unknown count -> max peak count
-      | Wakes_unknown -> peak) 0 slots in
-    (* A Keeper's own row is a small graph inside a list, so it recedes, as
-       btop's process rows do (RFC tui-one-screen-grammar section 7.3). A
-       group or fleet row sums its Keepers: each slot walks the wakes ramp
-       by its share of the busiest slot. *)
+    let peak, min_pos =
+      List.fold_left (fun (peak, min_pos) -> function
+        | Next.Wakes count | Next.Wakes_with_unknown count when count > 0 ->
+            max peak count, (match min_pos with None -> Some count | Some m -> Some (min m count))
+        | Next.Wakes _ | Next.Wakes_with_unknown _ | Wakes_unknown -> peak, min_pos)
+        (0, None) slots
+    in
+    let flat = match min_pos with Some m -> m = peak | None -> true in
+    (* Keep wake strips calm: a uniform cadence draws a quiet low sparkline
+       instead of a solid neon full-block wall, and varying counts cap at
+       six-eighths height with a muted wakes tint. *)
+    let wake_level count =
+      if flat then "\xe2\x96\x82" (* ▂ *)
+      else
+        let glyphs = [| "\xe2\x96\x81"; "\xe2\x96\x82"; "\xe2\x96\x83"; "\xe2\x96\x84"; "\xe2\x96\x85"; "\xe2\x96\x86" |] in
+        let n = Array.length glyphs in
+        let idx = min (n - 1) (((count * n + peak - 1) / max 1 peak) - 1) in
+        glyphs.(max 0 idx)
+    in
     let tone = match style with
       | Keeper_wakes -> fun _ -> Theme.recede ()
       | Wake_counts ->
           let tint = Theme.series_tint Masc_tui_theme.Wakes in
-          fun count -> tint (float_of_int count /. float_of_int (max 1 peak)) in
-    String.concat "" (List.mapi (fun index slot ->
+          fun count ->
+            if flat then Theme.recede ()
+            else tint (0.45 *. (float_of_int count /. float_of_int (max 1 peak)))
+    in
+    String.concat "" (List.map (fun slot ->
       let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
       match slot with
       | Next.Wakes_unknown -> quiet Grid.Strip_unknown
@@ -154,8 +168,8 @@ let wake_strip ~style slots =
           if count <= 0 then quiet Grid.Strip_empty else
           let mark = match style with
             | Keeper_wakes -> Grid.strip_mark Grid.Strip_wake
-            | Wake_counts -> Grid.level_glyph ~peak count in
-          (if index = 0 then Ansi.bold else "") ^ tone count ^ mark ^ Ansi.reset) slots)
+            | Wake_counts -> wake_level count in
+          tone count ^ mark ^ Ansi.reset) slots)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
@@ -168,7 +182,7 @@ let failed_count readings index =
 
 (* A grid with no band has no cells for the two maxima to scale, and the
    maximum over no cells is not a reading: there is no row to draw. *)
-let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
+let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows =
   if grid.side_cells <= 0 then None
   else
   let readings = List.map (fun row ->
@@ -180,7 +194,9 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
     if Pulse.nothing_read readings then history_unknown_label ~cells:grid.side_cells
     else String.concat "" (List.map (fun (n, unknown) ->
       if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
-      else if unknown then "?" else "·") counts) in
+      else Theme.recede ()
+        ^ (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")
+        ^ Ansi.reset) counts) in
   let active = List.filter (fun row -> match runtime row with
     | Some row -> not row.Decode.kr_paused | None -> true) rows in
   let future = match active with
@@ -192,7 +208,10 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
     | Next.Wakes n -> max p n
     | Next.Wakes_with_unknown n -> max p n
     | Next.Wakes_unknown -> p) 0 future in
-  let strip = wake_strip ~style:Wake_counts future in
+  let strip =
+    if summarize_wakes then wake_summary ~ko future
+    else wake_strip ~style:Wake_counts future
+  in
   let pulse_max = if peak = 0 && List.exists snd counts then "?" else string_of_int peak in
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true

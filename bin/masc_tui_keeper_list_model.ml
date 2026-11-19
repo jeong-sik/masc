@@ -767,14 +767,35 @@ let initially_folded ~count = function
   | Group_age (Age_within_3h | Age_within_3d | Age_older) -> false
 
 let first_folds ~seen ~folded groups =
-  List.fold_left (fun (seen, folded) -> function
-    | None -> seen, folded
-    | Some group ->
-        if List.mem group seen then seen, folded
-        else
-          let count = List.length (List.filter (( = ) (Some group)) groups) in
-          group :: seen, (if initially_folded ~count group then refold Fold group folded else folded))
-    (seen, folded) groups
+  let present =
+    List.fold_left
+      (fun acc -> function
+        | None -> acc
+        | Some g -> if List.mem g acc then acc else g :: acc)
+      [] groups
+    |> List.rev
+  in
+  let orig_seen = seen in
+  let seen, folded =
+    List.fold_left (fun (seen, folded) -> function
+      | None -> seen, folded
+      | Some group ->
+          if List.mem group seen then seen, folded
+          else
+            let count = List.length (List.filter (( = ) (Some group)) groups) in
+            group :: seen, (if initially_folded ~count group then refold Fold group folded else folded))
+      (seen, folded) groups
+  in
+  (* Never auto-collapse every present group on first visit, or a view like
+     By_cause with zero active failures opens as folded headings over an empty
+     viewport. Keep the primary group expanded when freshly seen and all
+     present groups would otherwise fold. *)
+  match present with
+  | first :: _
+    when List.for_all (fun g -> List.mem g folded) present
+      && not (List.mem first orig_seen) ->
+      seen, refold Unfold first folded
+  | [] | _ :: _ -> seen, folded
 
 type group_counts = {
   attention_rows : int;

@@ -246,7 +246,23 @@ let field_cell ~unmeasured ~measured = function
    Memory pane and in the memory view's ● column. The wire words name code
    paths ("not_committed"); these say what happened, in a word that fits the
    column. *)
-let pass_word ending = Masc_tui_types.memory_pass_text ~ko:false ending
+let pass_word ?(ko = false) ending =
+  if not ko then Masc_tui_types.memory_pass_text ~ko:false ending
+  else
+    let open Tui_decode_memory_health in
+    match ending with
+    | Pass_drained -> "처리됨"
+    | Pass_lane_unconfigured -> "레인 없음"
+    | Pass_yielded_to_waiting_unit -> "양보됨"
+    | Pass_pending (Masc.Keeper_librarian_pending.Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ }) ->
+        "결과 확인"
+    | Pass_pending (Worker { wait = Unreachable; _ }) -> "연결 안 됨"
+    | Pass_pending (Message_floor _) -> "분할 읽기"
+    | Pass_off | Pass_not_committed | Pass_stopped _ | Pass_raised _
+    | Pass_pending
+        ( Worker { wait = (Processing | Journal_recheck); _ }
+        | Publication _ | Basis_changed _ | Local_failure _ ) ->
+        Masc_tui_types.memory_pass_text ~ko:true ending
 ;;
 
 (* A pass that broke is a failure. A pass that saved nothing, or a librarian
@@ -263,21 +279,36 @@ let pass_tone = function
   | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> Masc_tui_keeper_axis_cell.Quiet
 ;;
 
-let pass_cell reading =
+let admission_wait_word ~ko pending =
+  if not ko then pass_word ~ko:false (Tui_decode_memory_health.Pass_pending pending) ^ " (admit)"
+  else
+    match pending with
+    | Masc.Keeper_librarian_pending.Worker { wait = Processing; _ } -> "접수·처리 중"
+    | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } -> "접수·확인"
+    | Worker { wait = Unreachable; _ } -> "접수·미연결"
+    | Worker { wait = Journal_recheck; _ } -> "접수·재확인"
+    | Message_floor _ -> "접수·분할"
+    | Publication _ -> "접수·확정 중"
+    | Basis_changed _ -> "접수·갱신"
+    | Local_failure _ -> "접수·실패"
+;;
+
+let pass_cell ?(ko = false) reading =
   let durable = field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
-    ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ending; tone = pass_tone ending })
+    ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ~ko ending; tone = pass_tone ending })
     (pass_end reading) in
   match reading with
   | Row { admission_wait = Some admission; _ } ->
-    let pending = Tui_decode_memory_health.Pass_pending
-      (Masc.Keeper_librarian_pending.admission_pending admission) in
+    let admission_pending = Masc.Keeper_librarian_pending.admission_pending admission in
+    let pending = Tui_decode_memory_health.Pass_pending admission_pending in
     (match durable.tone with
      | Failure -> durable
      | Attention when pass_tone pending = Masc_tui_keeper_axis_cell.Quiet -> durable
      | Quiet | Attention ->
        let text = match admission with
-         | Masc.Keeper_librarian_pending.Admission_waiting _ -> pass_word pending ^ " (admit)"
-         | Admission_failed _ -> Masc_tui_types.memory_admission_text ~ko:false admission in
+         | Masc.Keeper_librarian_pending.Admission_waiting _ ->
+             admission_wait_word ~ko admission_pending
+         | Admission_failed _ -> Masc_tui_types.memory_admission_text ~ko admission in
        { Masc_tui_keeper_axis_cell.text; tone = pass_tone pending })
   | Row { admission_wait = None; _ } | Unknown | No_row | Refused _ -> durable
 ;;

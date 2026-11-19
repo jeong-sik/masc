@@ -637,6 +637,7 @@
   test_keeper_turn_log_marks
   test_keeper_turn_log_writer
   test_keeper_turn_log_head
+  test_keeper_turn_log_ends
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
@@ -984,6 +985,7 @@
   test_keeper_turn_log_marks
   test_keeper_turn_log_writer
   test_keeper_turn_log_head
+  test_keeper_turn_log_ends
   test_keeper_memory_activity
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page

@@ -302,18 +302,31 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
 
    [live_cache_ttl_s] is the 30 s tier documented for "frequently-changing data
    such as active keeper state" — schedule state belongs there rather than in
-   the 120 s projection tier. The aggregate response takes no selectors, so
-   base_path is the whole key. Exact lookups bypass this aggregate cache below. *)
-let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
+   the 120 s projection tier. The key is base_path and [active_only]: the fleet
+   list and the active-only list the Dashboard calendar reads are each one
+   entry per workspace. Target-scoped pages, cursor pages and exact lookups
+   bypass this cache below. [name] is the pool work's label: the two lists
+   differ in rows built (20 against up to 200), so each keeps its own. *)
+let scheduled_automation_cached_json ~name ~active_only ~(config : Workspace.config) :
   Yojson.Safe.t
   =
   Dashboard_cache.get_or_compute
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key
-       ~base_path:config.base_path)
+       ~base_path:config.base_path
+       ~active_only)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    (Pool_work.cpu ~name (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+        ~active_only
         config))
+;;
+
+let dashboard_scheduled_automation_http_json ~config =
+  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:false ~config
+;;
+
+let dashboard_active_schedules_http_json ~config =
+  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:true ~config
 ;;
 
 let dashboard_scheduled_automation_query_http_json
@@ -323,16 +336,22 @@ let dashboard_scheduled_automation_query_http_json
   =
   match Server_utils.query_param request "schedule_id" with
   | None ->
-    (* A target selector is already narrowed by its target, so it bypasses the
-       aggregate's shared cache the same way the exact lookup does: a
-       client-controlled selector in a cache key is a key per caller. *)
+    let active_only =
+      Server_utils.bool_query_param request "active_only" ~default:false
+    in
+    (* A target selector and a cursor bypass the shared cache the same way the
+       exact lookup does: a client-controlled value in a cache key is a key per
+       caller. [active_only] has two values, so both of its lists are cached. *)
     (match Server_utils.query_param request "payload_target",
            Server_utils.query_param request "cursor" with
-     | None, None -> dashboard_scheduled_automation_http_json ~config
+     | None, None ->
+       if active_only
+       then dashboard_active_schedules_http_json ~config
+       else dashboard_scheduled_automation_http_json ~config
      | payload_target, cursor ->
        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
          Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-           ?payload_target ?cursor
+           ?payload_target ~active_only ?cursor
            config))
   | Some schedule_id ->
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->

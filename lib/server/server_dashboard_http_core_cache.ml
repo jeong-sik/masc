@@ -165,21 +165,27 @@ let invalidate_ide_file_activity ~base_path =
 ;;
 
 (* Keyed by base path rather than config: the schedule store's change observer
-   is handed only the base path of the workspace it wrote. *)
-let scheduled_automation_cache_key ~base_path =
+   is handed only the base path of the workspace it wrote. [active_only] is
+   the one selector that is cached: it has two values, so it adds one key per
+   workspace rather than one per caller. *)
+let scheduled_automation_cache_key ~base_path ~active_only =
   partition_cache_key
     ~partition:(cache_partition_of_base_path ~base_path)
     "scheduled_automation"
-    (dashboard_query_cache_suffix [])
+    (dashboard_query_cache_suffix
+       (if active_only then [ "active_only", Some "true" ] else []))
 ;;
 
-(* The fleet schedule list carries the schedule runner's status and its holds,
+(* The cached schedule lists carry the schedule runner's status and its holds,
    and the runner changes both on every tick. Cached for [live_cache_ttl_s]
-   alone, the page would keep saying [ok] for that long after a tick failed,
-   so the runner loop drops it each time a tick's outcome is on record
+   alone, a page would keep saying [ok] for that long after a tick failed,
+   so the runner loop drops them each time a tick's outcome is on record
    (#38411). *)
 let invalidate_scheduled_automation ~base_path =
-  Dashboard_cache.invalidate (scheduled_automation_cache_key ~base_path)
+  List.iter
+    (fun active_only ->
+       Dashboard_cache.invalidate (scheduled_automation_cache_key ~base_path ~active_only))
+    [ false; true ]
 ;;
 
 let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec

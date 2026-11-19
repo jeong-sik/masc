@@ -1815,6 +1815,46 @@ let test_scheduled_automation_reads_its_cache_key () =
         (cache_sentinel cache_key)
         (Server_dashboard_http.dashboard_scheduled_automation_http_json ~config))
 
+(* The Dashboard calendar reads [active_only=true] (#52961). That list has its
+   own cache key: it is not answered from the fleet list's entry, and the
+   invalidation the schedule store and the runner loop call drops both. *)
+let test_active_only_scheduled_automation_reads_its_own_cache_key () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let key ~active_only =
+        Server_dashboard_http_core_cache.scheduled_automation_cache_key
+          ~base_path:config.base_path
+          ~active_only
+      in
+      let fleet_key = key ~active_only:false in
+      let active_key = key ~active_only:true in
+      check bool "the two lists have different keys" false
+        (String.equal fleet_key active_key);
+      List.iter seed_cache [ fleet_key; active_key ];
+      let read target =
+        Server_dashboard_http.dashboard_scheduled_automation_query_http_json
+          ~config
+          (request target)
+      in
+      check
+        (of_pp Yojson.Safe.pp)
+        "active_only=true is served from the active-only key"
+        (cache_sentinel active_key)
+        (read "/api/v1/dashboard/scheduled-automation?active_only=true");
+      check
+        (of_pp Yojson.Safe.pp)
+        "no selector is served from the fleet key"
+        (cache_sentinel fleet_key)
+        (read "/api/v1/dashboard/scheduled-automation");
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation
+        ~base_path:config.base_path;
+      check bool "one invalidation drops both lists" true
+        (Option.is_none (Dashboard_cache.peek fleet_key)
+         && Option.is_none (Dashboard_cache.peek active_key)))
+
 (* The exact lookup answers with a closed status, so a blank id is a named
    outcome rather than a not_found that reads like "no such schedule". Pin the
    two the caller can reach without a store: an empty id is invalid_id, and the
@@ -2065,7 +2105,7 @@ let test_schedule_page_can_be_scoped_to_one_target () =
     (Some "keeper:alpha")
     (scoped |> member "payload_target_selector" |> to_option to_string);
   check int "the scoped limit is its own number"
-    Server_dashboard_schedule_projection.schedule_projection_target_request_limit
+    Server_dashboard_schedule_projection.schedule_projection_selected_request_limit
     (scoped |> member "request_limit" |> to_int);
   (* #38411: the runner's status rides the scoped page too, but only the word.
      The rest of /health's runner object is every target's holds and every
@@ -8487,6 +8527,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
+          test_case "active-only scheduled-automation reads its own cache key" `Quick
+            test_active_only_scheduled_automation_reads_its_own_cache_key;
           test_case "schedule exact lookup carries the wake history" `Quick
             test_schedule_exact_lookup_carries_the_wake_history;
           test_case "schedule exact lookup found matches the Dashboard fixture" `Quick

@@ -340,11 +340,22 @@ export function normalizeScheduledAutomation(
   }
 }
 
+export type ScheduledAutomationReadOptions = AbortableRequestOptions & {
+  /** Read the schedules that are still going to run instead of the fleet
+   *  page. The fleet page is the 20 soonest schedules of the whole ledger;
+   *  this one leaves ended schedules out and holds up to the server's
+   *  selected-page limit, and its counts are the selection's. */
+  activeOnly?: boolean
+}
+
 export async function fetchDashboardScheduledAutomation(
-  opts?: AbortableRequestOptions,
+  opts?: ScheduledAutomationReadOptions,
 ): Promise<DashboardScheduledAutomationProjection> {
   await ensureDevToken()
-  const raw = await get<unknown>('/api/v1/dashboard/scheduled-automation', {
+  const path = opts?.activeOnly === true
+    ? '/api/v1/dashboard/scheduled-automation?active_only=true'
+    : '/api/v1/dashboard/scheduled-automation'
+  const raw = await get<unknown>(path, {
     signal: opts?.signal,
   })
   return normalizeScheduledAutomation(raw)

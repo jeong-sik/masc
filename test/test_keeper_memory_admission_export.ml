@@ -76,7 +76,6 @@ let export cohort () = with_workspace @@ fun ~base_path ->
   let keeper_id = "synthetic-" ^ String.map (function '_' -> '-' | c -> c) cohort.name in
   let trace_id = "synthetic-admission-export" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let config = Masc.Workspace.default_config base_path in
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name",`String keeper_id; "trace_id",`String trace_id]) |> require in
   let meta = {meta with Masc.Keeper_meta_contract.instructions=instructions} in
@@ -88,16 +87,17 @@ let export cohort () = with_workspace @@ fun ~base_path ->
         ~facts:initial_facts () |> require) in
   let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let current_before = Fs_compat.load_file_opt current_path in
-  List.iter (fun content ->
-    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-      ~config ~meta ~args:(`Assoc ["content",`String content]) in
-    let receipt = Yojson.Safe.from_string result.raw_output in
-    check string "producer persisted candidate" "persisted_pending_admission"
-      Yojson.Safe.Util.(receipt |> member "outcome" |> to_string)) cohort.proposed_claims;
+  List.iteri (fun index claim ->
+    let observation = Memory.observed ~claim ~category:Memory.Fact ~now:(Time_compat.now ())
+      ~origin:{kind=Memory.Authored; trace_id} in
+    ignore (Queue.append ~keepers_dir ~keeper_id
+      ~request_id:(Printf.sprintf "memory-admission-%d" index) observation
+      |> Result.map_error Queue.append_error_to_string |> require : Queue.candidate))
+    cohort.proposed_claims;
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "producer left no candidate batch" in
   let candidates = Queue.candidates admission in
-  check int "every proposed input reached the real queue"
+  check int "every proposed input is in the queue"
     (List.length cohort.proposed_claims) (List.length candidates);
   let queue_path = Queue.path ~keepers_dir ~keeper_id in
   let queue_before = Fs_compat.load_file queue_path in

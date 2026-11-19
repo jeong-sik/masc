@@ -32,6 +32,17 @@ let fact ~claim : Memory.fact =
     ~origin:{ kind = Memory.Authored; trace_id = "" }
 ;;
 
+(* Appends a plain observation to the Keeper's pending admission queue. *)
+let queue_observation ~keepers_dir ~keeper_id ~trace_id ~request_id claim =
+  let observation =
+    Memory.observed ~claim ~category:Memory.Fact ~now:(Time_compat.now ())
+      ~origin:{ kind = Memory.Authored; trace_id }
+  in
+  match Masc.Keeper_memory_admission_queue.append ~keepers_dir ~keeper_id ~request_id observation with
+  | Ok (_ : Masc.Keeper_memory_admission_queue.candidate) -> ()
+  | Error error -> fail (Masc.Keeper_memory_admission_queue.append_error_to_string error)
+;;
+
 let current_a = fact ~claim:"keep A"
 let current_b = fact ~claim:"drop B"
 
@@ -983,17 +994,9 @@ let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
   let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
     ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[current_a;current_b] () |> require in
-  let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id;"trace_id",`String "admission-producer"]) |> require in
-  let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(`Assoc ["content",`String "A was confirmed; B was withdrawn in favor of A"]) in
-  let receipt = Yojson.Safe.from_string written.raw_output in
-  check string "actual producer returns pending outcome" "persisted_pending_admission"
-    Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
-  check bool "pending receipt has no current identity" true
-    (Yojson.Safe.Util.member "memory_id" receipt = `Null);
-  let request_id = Yojson.Safe.Util.(receipt |> member "request_id" |> to_string) in
+  let request_id = "memory-admission-producer" in
+  queue_observation ~keepers_dir ~keeper_id ~trace_id:"admission-producer" ~request_id
+    "A was confirmed; B was withdrawn in favor of A";
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "missing candidate" in
   let requests = ref 0 in
@@ -1057,11 +1060,8 @@ let test_admission_retirement_evidence ~reobserved () =
     ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[policy;unrelated] () |> require : Current.t);
   let enqueue () =
-    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-      ~config ~meta ~args:(`Assoc ["content",`String policy.claim]) in
-    let json = Yojson.Safe.from_string result.raw_output in
-    check string "real producer queues observation" "persisted_pending_admission"
-      Yojson.Safe.Util.(json |> member "outcome" |> to_string) in
+    queue_observation ~keepers_dir ~keeper_id ~trace_id:"retirement-input"
+      ~request_id:"memory-admission-retired-policy" policy.claim in
   let retire target reason =
     let result = Masc.Keeper_tool_memory_runtime.keeper_memory_retract_with_outcome
       ~config ~meta ~args:(`Assoc ["memory_id",`String (Memory.memory_id target);
@@ -1140,13 +1140,8 @@ let test_admission_unavailable_retirement_history () =
   let snapshot = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
     ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[current_a;current_b] () |> require in
-  let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id; "trace_id",`String "unavailable-history"]) |> require in
-  let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(`Assoc ["content",`String "A proposed durable observation"]) in
-  check string "producer saved pending input" "persisted_pending_admission"
-    Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "outcome" |> to_string);
+  queue_observation ~keepers_dir ~keeper_id ~trace_id:"unavailable-history"
+    ~request_id:"memory-admission-unavailable-history" "A proposed durable observation";
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "candidate missing" in
   let candidate = match Queue.candidates admission with
@@ -1205,19 +1200,12 @@ let test_mixed_admission ~depends_on_deferred () =
   let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
     ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write;trace_id="seed"}
     ~facts:[] () |> require in
-  let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id;"trace_id",`String "mixed-admission"]) |> require in
-  let enqueue claim =
-    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-      ~config ~meta ~args:(`Assoc ["content",`String claim]) in
-    let json = Yojson.Safe.from_string result.raw_output in
-    check string "real producer persists candidate" "persisted_pending_admission"
-      Yojson.Safe.Util.(json |> member "outcome" |> to_string);
-    Yojson.Safe.Util.(json |> member "request_id" |> to_string) in
-  let uncertain_id = enqueue "A awaits owner confirmation." in
+  let enqueue request_id claim =
+    queue_observation ~keepers_dir ~keeper_id ~trace_id:"mixed-admission" ~request_id claim;
+    request_id in
+  let uncertain_id = enqueue "memory-admission-uncertain" "A awaits owner confirmation." in
   let confirmed_claim = "Independent B has owner approval." in
-  let confirmed_id = enqueue confirmed_claim in
+  let confirmed_id = enqueue "memory-admission-confirmed" confirmed_claim in
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "pending batch absent" in
   let uncertain, confirmed = match Queue.candidate_ids admission with
@@ -1288,13 +1276,9 @@ let test_admission_change_without_candidate_support shape () =
   let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
     ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[current_a;current_b] () |> require in
-  let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id;"trace_id",`String "unsupported-merge"]) |> require in
-  let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(`Assoc ["content",`String "A transient debug print."]) in
-  let request_id = Yojson.Safe.Util.(Yojson.Safe.from_string written.raw_output
-    |> member "request_id" |> to_string) in
+  let request_id = "memory-admission-unsupported-merge" in
+  queue_observation ~keepers_dir ~keeper_id ~trace_id:"unsupported-merge" ~request_id
+    "A transient debug print.";
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "missing candidate" in
   let merged = "keep A, stated once" in

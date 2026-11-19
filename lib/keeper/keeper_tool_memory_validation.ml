@@ -50,8 +50,6 @@ type memory_write_error_kind =
   | Supersedes_not_current
   | Supersedes_not_authored
   | Supersedes_premise_of_successor
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -75,8 +73,6 @@ let memory_write_error_kind_to_string = function
   | Supersedes_not_authored -> "supersedes_not_authored"
   | Supersedes_premise_of_successor -> "supersedes_premise_of_successor"
   | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
-  | Pending_admission_capacity_exceeded -> "pending_admission_capacity_exceeded"
-  | Pending_admission_persistence_failed -> "pending_admission_persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
 ;;
@@ -111,11 +107,10 @@ let class_of_memory_write_error_kind = function
     Tool_result.Policy_rejection
   (* Like a retraction of an absent fact: the store moved on since the id was
      read, which a fresh search answers. *)
-  | Supersedes_not_current | Pending_admission_capacity_exceeded -> Tool_result.Workflow_rejection
+  | Supersedes_not_current -> Tool_result.Workflow_rejection
   | Source_read_failed
       ( Keeper_memory_source_current.Source_io_failed _
       | Keeper_memory_source_current.Source_endpoint_unanswered _ )
-  | Pending_admission_persistence_failed
   | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
   (* The store committed and then did not show what it committed: a
@@ -160,19 +155,6 @@ let memory_write_failure_effect = function
     ( Tool_result.Proven_post_effect
     , "A new snapshot revision was committed, but this claim is not in it. Search \
        memory for the claim before writing it again." )
-  | Pending_admission_capacity_exceeded ->
-    ( Tool_result.Proven_pre_effect
-    , "The candidate was not saved: the pending admission queue has no room. \
-       Existing pending input is unchanged. Retain the complete claim and retry \
-       after committed candidates are drained or the operator changes the queue \
-       capacity; do not shorten the claim to disguise this refusal." )
-  | Pending_admission_persistence_failed ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The candidate may or may not have been saved to the pending admission queue. \
-       Current Memory search cannot establish whether it is pending. Retain and \
-       report this request_id for investigation. Do not retry merely because \
-       current search is empty: another tool call creates a new request and may \
-       duplicate the candidate. Admission has not been confirmed." )
   | Persistence_failed Ordinary_current ->
     ( Tool_result.Effect_outcome_unknown
     , "The claim may or may not have been committed. Search memory for it before \
@@ -201,8 +183,8 @@ let memory_write_failure_effect = function
 let premise_id_expectation =
   Printf.sprintf
     "A memory identity is %s. keeper_memory_search returns one as memory_id for \
-     current match it finds. A current-store keeper_memory_write receipt returns the \
-     identity it committed; a pending admission request_id is not a memory identity."
+     current match it finds. A keeper_memory_write receipt returns the identity it \
+     committed."
     Keeper_memory_os_types.memory_id_shape
 ;;
 
@@ -265,14 +247,13 @@ let memory_write_rejection_fields error_kind =
          premise_id
          premise_id_expectation)
   (* The store holds no fact under these identities, so this claim cannot rest
-     on them yet. Admission must finish before a candidate can be a premise. *)
+     on them. *)
   | Unsupported_derivation ->
     at
       "premise_ids"
       "The ids under missing_premise_ids name no current fact in the store. Search \
-       current Memory for supported premise identities. Newly submitted observations \
-       must pass admission first; their pending request_ids are not premises. Only \
-       submit this claim without derivation when it is itself an observation."
+       current Memory for supported premise identities. Only submit this claim \
+       without derivation when it is itself an observation."
   | Supersedes_invalid ->
     at
       "supersedes"
@@ -315,8 +296,6 @@ let memory_write_rejection_fields error_kind =
   | Board_comment_without_post
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
   | Persistence_failed (Ordinary_current | Source_bound_current)
   | Commit_receipt_inconsistent
   | No_memory_write_error -> []

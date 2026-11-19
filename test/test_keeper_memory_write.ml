@@ -1,4 +1,4 @@
-(** Explicit writes distinguish durable pending input from admitted Memory. *)
+(** Explicit Memory writes through the Keeper's write tool. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Current = Masc.Keeper_memory_os_current
@@ -200,19 +200,6 @@ let seed_current ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) claim =
       ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} value with
   | Ok _ -> Masc.Keeper_memory_os_types.memory_id value
   | Error _ -> Alcotest.fail "could not seed current fact"
-;;
-
-let admit_pending ~keepers_dir ~keeper_id =
-  let module Queue = Masc.Keeper_memory_admission_queue in
-  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
-  let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
-    | Some batch -> batch | None -> Alcotest.fail "pending input missing" in
-  let facts = Queue.candidates batch |> List.map (fun (row : Queue.candidate) -> row.fact) in
-  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:(Queue.candidate_ids batch)
-    ~keepers_dir ~keeper_id ~now:(Time_compat.now ())
-    ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
-    ~absorbed:[] ~revisions:[] ~new_claims:facts () |> require);
-  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require
 ;;
 
 (* A Board reference names where an observation was read. It is an observation
@@ -464,29 +451,27 @@ let test_valid_body_composition () =
      Alcotest.failf "unexpected validation error: %s" (error_label error_kind))
 ;;
 
-(* Nobody drains the admission queue while the Librarian switch is off, so a
-   plain observation must not enter it there: the write takes the direct
-   current-snapshot path and is recallable immediately. *)
-let test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off () =
-  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "0" (fun () ->
-    with_temp_dir
-    @@ fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    let meta = make_meta "librarian-off" in
-    let args = make_args ~title:"t" ~content:"the standby region is eu-west-2" in
-    let receipt =
-      (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
-        .Masc.Keeper_tool_execution.raw_output
-    in
-    let json = Yojson.Safe.from_string receipt in
-    Alcotest.(check string) "a switch-off write lands in current Memory"
-      "persisted_current_snapshot" (string_field "outcome" json);
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    Alcotest.(check int) "the fact is recallable immediately" 1
-      (List.length (current_facts ~keepers_dir ~keeper_id:meta.name)))
+(* A plain observation commits to the current snapshot and is recallable
+   immediately. *)
+let test_an_ordinary_write_lands_in_current_memory () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "ordinary-write" in
+  let args = make_args ~title:"t" ~content:"the standby region is eu-west-2" in
+  let receipt =
+    (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+      .Masc.Keeper_tool_execution.raw_output
+  in
+  let json = Yojson.Safe.from_string receipt in
+  Alcotest.(check string) "the write lands in current Memory"
+    "persisted_current_snapshot" (string_field "outcome" json);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Alcotest.(check int) "the fact is recallable immediately" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 
-(* Pending receipt identity changes for each observation, but must not make
-   repeated identical writes look like useful progress to the repeat guard. *)
+(* Writing a claim Memory already holds moves the snapshot's stamps and nothing
+   else, so the repeat guard reads every such rewrite as the same answer. *)
 let test_a_rewrite_receipt_has_the_same_answer () =
   with_temp_dir
   @@ fun base_path ->
@@ -507,19 +492,15 @@ let test_a_rewrite_receipt_has_the_same_answer () =
   in
   let first = write () in
   let second = write () in
-  let first_json = Yojson.Safe.from_string first in
-  let second_json = Yojson.Safe.from_string second in
-  Alcotest.(check string) "write is pending, not a current insertion"
-    "persisted_pending_admission" (string_field "outcome" first_json);
-  Alcotest.(check bool) "separate observations have distinct queue identities" false
-    (string_field "request_id" first_json = string_field "request_id" second_json);
-  Alcotest.(check string) "queue stamps cannot manufacture progress"
-    (fingerprint first) (fingerprint second);
+  let third = write () in
+  let disposition receipt = string_field "identity_disposition" (Yojson.Safe.from_string receipt) in
+  Alcotest.(check string) "the first write inserts the claim" "inserted" (disposition first);
+  Alcotest.(check string) "the second sees it again" "reobserved" (disposition second);
+  Alcotest.(check string) "snapshot stamps cannot manufacture progress"
+    (fingerprint second) (fingerprint third);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Alcotest.(check int) "repeated pending writes do not change current Memory" 0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  List.iter (fun field -> Alcotest.(check bool) ("no current identity field: " ^ field) true
-    (Yojson.Safe.Util.member field first_json = `Null)) ["memory_id";"revision";"identity_disposition"]
+  Alcotest.(check int) "Memory holds the claim once" 1
+    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name))
 ;;
 
 let test_write_comes_back_through_recall () =
@@ -527,9 +508,6 @@ let test_write_comes_back_through_recall () =
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "durable-write" in
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
   let execution =
     Runtime.keeper_memory_write_with_outcome
       ~config
@@ -548,7 +526,7 @@ let test_write_comes_back_through_recall () =
     (match json_field "ok" response with
      | `Bool value -> value
      | _ -> false);
-  Alcotest.(check string) "stored as pending input" "pending_memory_admission"
+  Alcotest.(check string) "stored in the current snapshot" "current_memory_snapshot"
     (string_field "store" response);
   let recorded_at = string_field "recorded_at" response in
   Alcotest.(check bool) "receipt carries a UTC stamp" true
@@ -557,30 +535,8 @@ let test_write_comes_back_through_recall () =
     ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
     ~args:(`Assoc ["query",`String "reasoning_content";"source",`String "current"])
     |> Yojson.Safe.from_string |> match_texts in
-  Alcotest.(check (list string)) "pending input is not recalled as current" [] (search ());
-  Alcotest.(check int) "no current fact before admission" 0
-    (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  let pending_id = string_field "request_id" response in
-  (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
-   | Ok (Some batch) ->
-     (match Masc.Keeper_memory_admission_queue.candidates batch with
-      | [row] ->
-        Alcotest.(check string) "receipt identifies the durable candidate" pending_id row.request_id;
-        Alcotest.(check int) "receipt sequence is authoritative" row.sequence (int_field "sequence" response);
-        Alcotest.(check string) "observed candidate retains original content"
-          "reasoning_content must be replayed unmodified" row.fact.claim
-      | _ -> Alcotest.fail "expected one pending candidate")
-   | _ -> Alcotest.fail "successful write omitted pending candidate");
-  let unsupported = Runtime.keeper_memory_write_with_outcome ~config ~meta
-    ~args:(make_derived_args ~content:"derived too early" ~rule_id:"rule"
-      ~premise_ids:[pending_id]) in
-  Alcotest.(check bool) "pending request identity is not a premise" false
-    (Yojson.Safe.Util.member "ok" (Yojson.Safe.from_string unsupported.raw_output) = `Bool true);
-  admit_pending ~keepers_dir ~keeper_id:meta.name;
-  Alcotest.(check (list string)) "admitted claim reaches demand recall"
-    ["reasoning_content must be replayed unmodified"] (search ());
-  (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
-   | Ok None -> () | _ -> Alcotest.fail "committed admission was not acknowledged")
+  Alcotest.(check (list string)) "the claim reaches demand recall"
+    ["reasoning_content must be replayed unmodified"] (search ())
 ;;
 
 let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
@@ -2323,16 +2279,6 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
       (match json_field "ok" write_response with
        | `Bool value -> value
        | _ -> false);
-    let pending_claims keepers_dir = match Masc.Keeper_memory_admission_queue.read_pending
-        ~keepers_dir ~keeper_id:meta.name with
-      | Ok None -> []
-      | Ok (Some batch) -> Masc.Keeper_memory_admission_queue.candidates batch
-          |> List.map (fun (row : Masc.Keeper_memory_admission_queue.candidate) -> row.fact.claim)
-      | Error detail -> Alcotest.fail detail in
-    Alcotest.(check (list string)) "pending write uses config workspace" ["workspace A only"]
-      (pending_claims target_keepers);
-    Alcotest.(check (list string)) "ambient queue untouched" [] (pending_claims decoy_keepers);
-    admit_pending ~keepers_dir:target_keepers ~keeper_id:meta.name;
     let claims_at keepers_dir =
       current_facts ~keepers_dir ~keeper_id:meta.name
       |> List.map (fun fact -> fact.Masc.Keeper_memory_os_types.claim)
@@ -2485,29 +2431,6 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
   Alcotest.(check bool) "the detail names the file" true (mentions_path 0)
 ;;
 
-let test_pending_and_current_corruption_are_distinct () =
-  with_temp_dir @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "pending-corruption" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
-  Fs_compat.save_file current_path "{broken-current";
-  let write () = Runtime.keeper_memory_write_with_outcome ~config ~meta
-    ~args:(make_args ~title:"" ~content:"a candidate, not yet current") in
-  let accepted = write () in
-  Alcotest.(check bool) "pending durability is independent of current decoding" true
-    (Yojson.Safe.Util.member "ok" (Yojson.Safe.from_string accepted.raw_output) = `Bool true);
-  Alcotest.(check string) "pending append does not repair or replace current"
-    "{broken-current" (Fs_compat.load_file current_path);
-  let queue_path = Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name in
-  Fs_compat.save_file queue_path "{broken-pending";
-  let rejected = write () in
-  check_failure_class "corrupt pending store" Tool_result.Dependency_unavailable rejected;
-  Alcotest.(check string) "malformed pending bytes are preserved"
-    "{broken-pending" (Fs_compat.load_file queue_path)
-;;
-
 (* A crash mid-append leaves a line with no newline. The next absorb commits
    anyway: the append cuts the torn line back to the last complete row before
    it writes. A librarian that could not commit would spend a provider call
@@ -2600,12 +2523,9 @@ let test_absorbed_search_preserves_board_basis source =
          |> fun execution -> Yojson.Safe.from_string execution.raw_output
        in
        Alcotest.(check bool) "public writer succeeded" true (json_field "ok" written = `Bool true);
-       Alcotest.(check bool) "pending receipt preserves the original Board source" true
-         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written));
-       Alcotest.(check string) "Board observations are pending" "persisted_pending_admission"
-         (string_field "outcome" written))
+       Alcotest.(check bool) "the receipt preserves the original Board source" true
+         (Yojson.Safe.equal (expected_basis comment_fields) (json_field "basis" written)))
     cases;
-  admit_pending ~keepers_dir ~keeper_id:meta.name;
   let original = current_facts ~keepers_dir ~keeper_id:meta.name in
   Alcotest.(check int) "both original facts were stored" 2 (List.length original);
   List.iter
@@ -3546,34 +3466,6 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
    class tells the model that other arguments will not save the claim. A store
    error does not say whether the new snapshot was moved into place before it,
    so the commit is reported as unknown rather than as not saved. *)
-let test_pending_capacity_refusal_is_proven_before_effect () =
-  with_temp_dir @@ fun base_path ->
-  let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "capacity-refusal" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let queue_path = Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name in
-  let write content = Runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(make_args ~title:"" ~content) in
-  let first = write "keep the first complete claim" in
-  Alcotest.(check bool) "first candidate accepted" true
-    (Yojson.Safe.Util.member "ok"
-       (Yojson.Safe.from_string first.Masc.Keeper_tool_execution.raw_output) = `Bool true);
-  let before = Fs_compat.load_file queue_path in
-  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.pending_max_bytes_env_key
-    (Some (string_of_int (String.length before))) @@ fun () ->
-  let refused = write "keep the second complete claim too" in
-  check_failure_class "full pending queue" Tool_result.Workflow_rejection refused;
-  Alcotest.(check bool) "refusal proves no effect" true
-    (refused.Masc.Keeper_tool_execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
-  let response = Yojson.Safe.from_string refused.Masc.Keeper_tool_execution.raw_output in
-  Alcotest.(check string) "wire error preserves capacity refusal"
-    "pending_admission_capacity_exceeded" (string_field "error_kind" response);
-  Alcotest.(check string) "wire effect agrees with typed effect"
-    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
-    (string_field "effect_disposition" response);
-  Alcotest.(check string) "existing pending input is untouched" before (Fs_compat.load_file queue_path)
-;;
-
 let test_unwritable_store_is_a_dependency_failure () =
   with_temp_dir
   @@ fun base_path ->
@@ -3582,9 +3474,9 @@ let test_unwritable_store_is_a_dependency_failure () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  (* A directory where the pending queue file belongs: every open for writing
+  (* A directory where the snapshot file belongs: every open for writing
      fails regardless of the user the test runs as. *)
-  Fs_compat.mkdir_p (Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name);
+  Fs_compat.mkdir_p (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name);
   let execution =
     Runtime.keeper_memory_write_with_outcome
       ~config
@@ -3597,7 +3489,7 @@ let test_unwritable_store_is_a_dependency_failure () =
   in
   Alcotest.(check string)
     "persistence, not validation"
-    "pending_admission_persistence_failed"
+    "persistence_failed"
     (string_field "error_kind" response);
   Alcotest.(check bool)
     "the commit is unknown"
@@ -4226,11 +4118,11 @@ let () =
             `Quick
             test_a_rewrite_receipt_has_the_same_answer
         ] )
-    ; ( "librarian switch"
+    ; ( "ordinary write"
       , [ Alcotest.test_case
-            "an ordinary write bypasses the queue when the Librarian is off"
+            "an ordinary write lands in current Memory"
             `Quick
-            test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off
+            test_an_ordinary_write_lands_in_current_memory
         ] )
     ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
@@ -4403,8 +4295,6 @@ let () =
             "corrupt snapshot is a dependency failure"
             `Quick
             test_corrupt_snapshot_is_a_dependency_failure
-        ; Alcotest.test_case "pending corruption stays distinct from current corruption" `Quick
-            test_pending_and_current_corruption_are_distinct
         ; Alcotest.test_case
             "a torn tail does not stop the next absorb"
             `Quick
@@ -4453,10 +4343,6 @@ let () =
             "an unreadable absorbed store leaves all its current facts"
             `Quick
             test_an_unreadable_absorbed_store_leaves_all_its_current_facts
-        ; Alcotest.test_case
-            "pending capacity refusal is proven before effect"
-            `Quick
-            test_pending_capacity_refusal_is_proven_before_effect
         ; Alcotest.test_case
             "unwritable store is a dependency failure"
             `Quick

@@ -49,18 +49,95 @@ let keyed state walk (list : on_screen) key =
 let its_rows state (list : on_screen) =
   Option.map (fun rows -> keyed state (over_rows rows) list) list.os_rows
 
+type tools_list =
+  | Tools_skills
+  | Tools_async_requests
+
+(* Every pane named: a pane that grows a list is added here once, and a [_]
+   would leave its move keys scrolling the page without a word. *)
+let tools_list (state : state) =
+  if Option.is_some state.tools_skill_source_picker then None
+  else
+    match state.tools_pane with
+    | Tools_surface -> (
+        match state.tools_skill_focus, tools_skill_profiles state with
+        | Choosing_skill, _ :: _ -> Some Tools_skills
+        | Choosing_skill, [] | Reading_page, _ -> None)
+    | Tools_async when state.tools_async_detail_open -> None
+    | Tools_async -> (
+        match tools_async_targets state with
+        | _ :: _ -> Some Tools_async_requests
+        | [] -> None)
+    | Tools_activations | Tools_usage | Tools_storage
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> None
+
+let read_skill_page (state : state) =
+  match state.tools_pane, selected_tools_skill_profile state with
+  | Tools_surface, Some _ -> state.tools_skill_focus <- Reading_page
+  | Tools_surface, None
+  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> ()
+
+let choose_skill_again (state : state) =
+  match state.tools_pane, state.tools_skill_focus with
+  | Tools_surface, Reading_page ->
+      state.tools_skill_focus <- Choosing_skill;
+      true
+  | Tools_surface, Choosing_skill
+  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> false
+
+(* What the footer says j/k and Esc do: read from [tools_list], the focus,
+   the original Task and the open request, the facts the move keys and Esc's
+   arm read. Esc's arm asks the original Task first, then the open request,
+   and so does this. *)
+let tools_keys (state : state) : Masc_tui_keys.tools_keys =
+  match tools_list state with
+  | Some (Tools_skills | Tools_async_requests) -> Masc_tui_keys.Tools_walks_list
+  | None -> (
+      match state.tools_pane, state.tools_skill_focus with
+      | Tools_surface, Reading_page -> Masc_tui_keys.Tools_reads_skill_page
+      | Tools_async, _ when Option.is_some state.tools_async_task_source ->
+          Masc_tui_keys.Tools_reads_original_task
+      | Tools_async, _ when state.tools_async_detail_open ->
+          Masc_tui_keys.Tools_reads_request
+      | Tools_surface, Choosing_skill
+      | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ ->
+          Masc_tui_keys.Tools_reads_page)
+
+let show_tools_pane (state : state) pane =
+  state.tools_pane <- pane;
+  state.tools_skill_focus <- Choosing_skill
+
+let move_tools_skill state move =
+  let count = List.length (tools_skill_profiles state) in
+  state.tools_skill_cursor <- Masc_tui_scroll.cursor_apply ~count move state.tools_skill_cursor
+
+let move_tools_list state list move =
+  match list with
+  | Tools_skills -> move_tools_skill state move
+  | Tools_async_requests -> move_tools_async_selection state move
+
 (* Named rather than caught, like the dispatcher's [row_list]: a surface that
    walks something other than its rows is added here once, and a [_] would
    send it to its rows without a word. *)
-let moves (state : state) ~on_screen =
+let moves (state : state) ~on_screen ~follow =
   if state.context_inspector_open || state.repository_changes_open then
     Option.bind (on_screen ()) (its_rows state)
   else
     match state.view with
     | Keepers Keeper_list -> Option.map (keyed state (move_keeper_list_stop state)) (on_screen ())
     | Overview -> Option.map (keyed state (Masc_tui_home.home_move state)) (on_screen ())
+    (* The Tools selection takes the page its list was drawn in like any
+       other list, then hands the landing to [follow]. *)
+    | Tools ->
+        Option.map (fun list key ->
+          let height =
+            Option.bind (on_screen ()) (fun (shown : on_screen) -> page_height state shown.os_page)
+          in
+          move_tools_list state list (cursor_move ~height key);
+          follow list)
+          (tools_list state)
     | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
     | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning | Schedules
     | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
-    | Config | Resources | Tools | System_logs ->
+    | Config | Resources | System_logs ->
         Option.bind (on_screen ()) (its_rows state)

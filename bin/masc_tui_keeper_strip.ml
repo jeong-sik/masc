@@ -42,7 +42,11 @@ let odd_dormant row =
 
 let header ~ko ~now ~cells ~view ~selected ~age rows =
   let say korean english = if ko then korean else english in
-  let unknown = say "미확인" "unknown" in
+  (* A group of Keepers wears the status mark of its verdict, in that mark's
+     colour (RFC tui-one-screen-grammar §7.2); the groups the verdict cannot
+     place keep the unreported mark and say what they hold. *)
+  let status mark = Masc_tui_value.Mark.glyph mark, Theme.status_tone mark in
+  let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
   (* The age words name the bound each bucket is cut at, as [bucket] reads
      it off [Model.age]. *)
   let groups = match view with
@@ -51,13 +55,22 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
          Today, "▆", say "하루 안" "today", Ansi.reset;
          Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
          Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
-         Unknown, "?", unknown, Theme.recede ()]
+         Unknown, unreported, say "나이 모름" "age unknown", Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-        [Failures, "!", say "실패" "failing", Theme.warn ();
-         Recoveries, "✓", say "복구" "recovered", Theme.ok ();
-         Sound, "●", say "정상" "ok", Theme.ok ();
-         Paused, "○", say "일시정지" "paused", Theme.recede ();
-         Unknown, "?", unknown, Theme.recede ()] in
+        let failed, failed_tone = status Masc_tui_value.Mark.Failed in
+        let caution, caution_tone = status Masc_tui_value.Mark.Caution in
+        let settled, settled_tone = status Masc_tui_value.Mark.Settled in
+        let paused, paused_tone = status Masc_tui_value.Mark.Paused in
+        [Failures, failed, say "실패" "failing", failed_tone;
+         Recoveries, caution, say "복구" "recovered", caution_tone;
+         Sound, settled, say "정상" "ok", settled_tone;
+         Paused, paused, say "일시정지" "paused", paused_tone;
+         (* [Grid.Other] holds two kinds: a Keeper whose runtime record is
+            absent, not read yet or unreadable, so its health is not known;
+            and an offline Keeper with no failure in the window. An offline
+            Keeper that failed in the window is a recovery. The group keeps
+            the unreported mark of the first kind, and its word names both. *)
+         Unknown, unreported, say "상태 모름·꺼짐" "health unknown or offline", Theme.recede ()] in
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
   let groups = List.filter_map (fun (key, mark, word, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in
@@ -154,15 +167,21 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
 
 type wake_style = Keeper_wakes | Wake_counts
 
+let unreported_mark = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+
 let window_label ~cells full narrow =
   Theme.recede ()
   ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
   ^ Ansi.reset
 
-(* One label in place of a half-hour band that has nothing read to draw, in the
-   band's width; [?] when the label does not fit. *)
-let history_unknown_label ~ko ~cells =
-  window_label ~cells (if ko then "기록 미확인" else "history unknown") "?"
+(* A band with no cell to draw holds one mark at its left, as a graph that was
+   never read does (RFC tui-one-screen-grammar 5.6, 6.4): [?] when nothing in
+   the band was reported, [—] when the band is read and holds no run. Why it
+   was not reported is the selected row's detail. *)
+let unreported_band ~cells = window_label ~cells unreported_mark unreported_mark
+let empty_band ~cells = window_label ~cells Masc_tui_theme.Glyph.no_value Masc_tui_theme.Glyph.no_value
+
+let history_unknown_label ~cells = unreported_band ~cells
 
 let wake_summary ~ko slots =
   let cells = List.length slots in
@@ -170,29 +189,30 @@ let wake_summary ~ko slots =
     | Next.Wakes count -> known + max 0 count, unknown
     | Next.Wakes_with_unknown count -> known + max 0 count, true
     | Next.Wakes_unknown -> known, true) (0, false) slots in
-  let full, narrow = match known, unknown with
-    | 0, true -> (if ko then "일정 미확인" else "schedule unknown"), "?"
-    | 0, false -> (if ko then "구간 내 예약 없음" else "no runs in window"), "-"
-    | count, true ->
-        (if ko then Printf.sprintf "%d회 확인 · 일부 미확인" count
-         else Printf.sprintf "%d known · partial" count), Printf.sprintf "? %d+" count
-    | count, false ->
-        (if ko then Printf.sprintf "%d회 예약 확인" count
-         else Printf.sprintf "%d known wakes" count), string_of_int count in
-  if cells = 0 then "" else window_label ~cells full narrow
+  if cells = 0 then "" else
+  match known, unknown with
+  | 0, true -> unreported_band ~cells
+  | 0, false -> empty_band ~cells
+  | count, true ->
+      window_label ~cells
+        (if ko then Printf.sprintf "%d회 이상 예약" count else Printf.sprintf "%d+ wakes" count)
+        (Printf.sprintf "%d+" count)
+  | count, false ->
+      window_label ~cells
+        (if ko then Printf.sprintf "%d회 예약" count else Printf.sprintf "%d wakes" count)
+        (string_of_int count)
 
-let wake_strip ~ko ~style slots =
+let wake_strip ~style slots =
   let cells = List.length slots in
-  let label = window_label ~cells in
   if cells = 0 then ""
   else if List.for_all (function
     | Next.Wakes_unknown -> true
     | Next.Wakes _ | Next.Wakes_with_unknown _ -> false) slots then
-    label (if ko then "일정 미확인" else "schedule unknown") "?"
+    unreported_band ~cells
   else if List.for_all (function
     | Next.Wakes n -> n <= 0
     | Next.Wakes_with_unknown _ | Next.Wakes_unknown -> false) slots then
-    label (if ko then "구간 내 예약 없음" else "no runs in window") "-"
+    empty_band ~cells
   else
     let peak = List.fold_left (fun peak -> function
       | Next.Wakes count -> max peak count
@@ -239,7 +259,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let counts = List.init grid.side_cells (failed_count readings) in
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
   let pulse =
-    if Pulse.nothing_read readings then history_unknown_label ~ko ~cells:grid.side_cells
+    if Pulse.nothing_read readings then history_unknown_label ~cells:grid.side_cells
     else String.concat "" (List.map (fun (n, unknown) ->
       if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
       else if unknown then "?" else "·") counts) in
@@ -254,7 +274,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
     | Next.Wakes n -> max p n
     | Next.Wakes_with_unknown n -> max p n
     | Next.Wakes_unknown -> p) 0 future in
-  let strip = wake_strip ~ko ~style:Wake_counts future in
+  let strip = wake_strip ~style:Wake_counts future in
   let pulse_max = if peak = 0 && List.exists snd counts then "?" else string_of_int peak in
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true

@@ -123,9 +123,13 @@ type write_error =
     follows an error is for whoever asked. A registration writes the first
     generation of an account it has just recorded, and after an error it
     removes the account with its folder
-    ({!Runtime_key_account_files.remove}). That removal takes every
-    generation, so it does not follow an error on an account that had a
-    key. *)
+    ({!Runtime_key_account_files.remove}). A replacement writes the next
+    generation of an account whose record already names it, and after an
+    error it removes the folder of the keys
+    ({!Runtime_key_account_files.remove_keys}): from that record on the key
+    before is not read. Either removal takes every generation, so neither
+    follows an error on an account whose records still name a key that is
+    there. *)
 val write
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

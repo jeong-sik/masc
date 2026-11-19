@@ -1606,14 +1606,9 @@ let acting_pane_input (state : state) =
     let paused = reading.Keeper_control.paused in
     let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
     let mark_tone =
-      if paused then Pane.Dim
-      else
-        match reading_of_health with
-        | Some Tui_decode.Health_running -> Pane.Ok
-        | Some Tui_decode.Health_idle -> Pane.Dim
-        | Some Tui_decode.Health_failing -> Pane.Warn
-        | Some Tui_decode.Health_offline -> Pane.Bad
-        | None -> Pane.Dim
+      match Masc_tui_keeper_mark.state_mark ~paused reading_of_health with
+      | Some mark -> Pane.status_tone mark
+      | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
     ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
@@ -5854,6 +5849,11 @@ let context_retained_body_lines ~width text =
           ; retained_table_frame = !table_frame_enabled; retained_lines = lines };
       lines
 
+let section_rule_text = Masc_tui_ansi.Section.rule_text
+let section_heading_style = Masc_tui_ansi.Section.style
+
+let section_heading_line title = section_heading_style ^ section_rule_text title ^ Ansi.reset
+
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
@@ -5866,7 +5866,7 @@ let context_exact_item_detail_lines ~width ~scale ~part
     | Error status -> [ status ]
     | Ok text -> context_retained_body_lines ~width text
   in
-  [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
+  [ section_heading_line "RETAINED ITEM"
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
@@ -6826,6 +6826,9 @@ let keeper_deletions_hints (state : state) ~scrollable =
    poll. *)
 let answering_lines (state : state) =
   let _, cols = get_terminal_size () in
+  (* The overlay may draw the age of the observation time, which every
+     successful turns answer moves (RFC tui-one-screen-grammar §8). *)
+  if Option.is_some state.keeper_turns_observed_at then note_turn_observation_age_drawn ();
   Masc_tui_answering.overlay
     ~ko:(state.ui_language = Lang_ko)
     ~width:(max 0 (framed_inner_width cols - 2))
@@ -6925,13 +6928,11 @@ let studio_panel ~width ~title ~lines =
   @ [ border "└" "┘" ]
 
 let detail_heading_rows ~first lines =
-  let heading =
-    List.map (fun line -> Theme.info () ^ Ansi.bold, "  " ^ line) lines
-  in
+  let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in
   if first then heading else (Ansi.dim, "") :: heading
 
 let detail_section_heading ?(first = false) title =
-  detail_heading_rows ~first [ "[ " ^ title ^ " ]" ]
+  detail_heading_rows ~first [ section_rule_text title ]
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
@@ -6951,7 +6952,7 @@ let detail_page ~width blocks =
     (List.mapi
        (fun index (title, lines) ->
           detail_heading_rows ~first:(index = 0)
-            (Message_layout.wrap_words ~max_cells ("[ " ^ title ^ " ]"))
+            (Message_layout.wrap_words ~max_cells (section_rule_text title))
           @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
        blocks)
 
@@ -7004,7 +7005,7 @@ let runtime_config_status_lines state ~cols =
   detail_page ~width:(framed_inner_width cols) blocks
 
 let detail_section_lines ?(first = false) title =
-  let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+  let heading = [ "  " ^ section_heading_line title ] in
   if first then heading else "" :: heading
 
 let wrap_summary_column_items ~width items =
@@ -7130,8 +7131,8 @@ let runtime_substrate_tabs (state : state)
    connection badge last. It is laid out
    by [detail_heading] like the Activity row, so the badge stays whole, the
    pieces of [after] are left out whole from the end, and the strip draws in
-   what they leave. The strip is whole or it is not drawn, and a strip that
-   draws nothing takes its separator with it. Each row used to hand the strip
+   what they leave. The strip degrades cleanly down to its compact floor, and
+   a strip that draws nothing takes its separator with it. Each row used to hand the strip
    the cells that were left after [after] and drew the row with [box_line],
    which cut the badge when [after] alone was wider than the row.
 
@@ -7152,7 +7153,8 @@ let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
          ; draw =
              (fun width ->
                let room = width - cells before in
-               if room < tab_strip_min_width tabs then title
-               else before ^ tab_strip ~width:room ~press:pressable tabs)
+               match tab_strip ~width:room ~press:pressable tabs with
+               | "" -> title
+               | strip -> before ^ strip)
          })
     ~id:"" ~after:("" :: after) ~tail:(connection_badge state)

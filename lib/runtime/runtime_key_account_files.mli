@@ -38,11 +38,13 @@ type make_error =
     account that has its files ({!replace}): the home that is there is
     looked at and left as it is.
 
-    {!remove} is not the undo of a call: it takes the key of every
-    generation. On an account whose files are there, an error says what
-    this call did. [Key_not_written Generation_taken] says it wrote no key
-    and changed none: the key in place is the one that was there, and a
-    removal after it would take that key away. *)
+    {!remove} is not the undo of a call, and neither is {!remove_keys}:
+    each takes the key of every generation. On an account whose files are
+    there, an error says what this call did. [Key_not_written
+    Generation_taken] says it wrote no key and changed none: the key in
+    place is the one that was there, and a removal after it takes that key
+    away. A replacement asks for that after its record ({!remove_keys}),
+    where the key before is not read any more. *)
 val make
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
@@ -84,6 +86,22 @@ val remove
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, remove_error) result
 
+(** Removes the folder of the keys of [account_id] with everything in it, as
+    {!remove} does first, and leaves its home. A replacement whose key was
+    not stored asks this (RFC
+    a-persons-api-key-is-their-own-provider-account 3.7): the account is to
+    read no key then, whatever the write left in the folder. A later write
+    makes the folder again ({!make}). Under a runtime root that is not there
+    it removes nothing and makes nothing. [Error] when the folder is still
+    there, was not looked at, or went while the folder it was in was not
+    synced; the detail can name a path of the server. What is in the folder
+    goes in no order of its own and the first that does not go ends the
+    removal, so a file that could have gone can stay beside it. *)
+val remove_keys
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (unit, string) result
+
 (** Whether something has the name of the folder of the keys of [account_id]
     or of its home under [runtime_root], a link included. A restore of a
     backup brings back the files of an account whose removal went through,
@@ -113,8 +131,8 @@ type key_state =
     account reads it, and gives nothing of the key. It makes nothing: where
     a use makes the runtime root of the person, this looks whether it is
     there. It takes no call of the account, so it says what was there at the
-    reading: an account whose registration or removal is under way can read
-    [Key_missing] for that moment. *)
+    reading: an account whose registration, replacement or removal is under
+    way can read [Key_missing] for that moment. *)
 val key_state
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
@@ -150,8 +168,9 @@ type other_keys_swept =
     A folder of keys that is not there holds nothing, and neither does a
     runtime root that is not there. [Error] is a folder that was not looked
     at: what stands in its place is no folder, a link among them, and is
-    not read and is left, or its names could not be read. The detail is for
-    the log of the server too. The key file of [generation] is not looked
+    not read and is left, or its names could not be read, or the runtime
+    root could not be looked at, or no key file is spelled under it. The
+    detail is for the log of the server too. The key file of [generation] is not looked
     at, so this says nothing of whether the account has its key
     ({!key_state}).
 
@@ -177,16 +196,17 @@ type other_keys =
     ({!remove_other_keys}).
 
     [generation] is the one the record of the replacement has just named,
-    so a use of the account reads this file from that record on. After an
-    error nothing was removed, and what the write left is what {!make} says
-    of its error: after [Key_not_written (Not_written _)] the key may be in
-    place, and after the others it is not. An account whose key of
-    [generation] is not in place reads [Key_missing] until a later
-    replacement names the generation after it: the key of the generation
-    before is on disk and is not read. [Key_not_written Generation_taken]
-    says a file of [generation] was there before the call, in place or
-    beside the place, which no replacement of this server wrote: the record
-    of a generation is written once, before its file. *)
+    so a use of the account reads the file of that name from that record
+    on. After an error nothing was removed, and what the write left is what
+    {!make} says of its error: after [Key_not_written (Not_written _)] the
+    key may be in place, and after the others it is not.
+    [Key_not_written Generation_taken] says a file of [generation] was there
+    before the call, in place or beside the place, which no replacement of
+    this server wrote: the record of a generation is written once, before
+    its file. In place, it is what the account reads. So the caller of a
+    replacement that answered an error removes the folder
+    ({!remove_keys}): the key of the generation before is on disk and is
+    not read, and the file of [generation] is not known to be absent. *)
 val replace
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

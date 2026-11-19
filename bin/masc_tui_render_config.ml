@@ -410,7 +410,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
     | None -> [] | Some (_, text) -> wrap text
   in
   let section ?(first = false) title =
-    let heading = [ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+    let heading = [ section_heading_line title ] in
     if first then heading else "" :: heading
   in
   let document = match Masc_tui_fetched.value prompts with
@@ -1190,7 +1190,7 @@ let render_presets (state : state) =
       (* The mark at the head of a row ([▸], [!], [✓]) says the same thing in
          words, so a terminal without colour loses nothing. *)
       let style = match row.tone with
-        | Masc_tui_preset_text.Heading -> Theme.info () ^ Ansi.bold
+        | Masc_tui_preset_text.Heading -> Masc_tui_ansi.Section.style
         | Masc_tui_preset_text.Confirmed -> Theme.ok ()
         | Masc_tui_preset_text.Caution -> Theme.warn ()
         | Masc_tui_preset_text.Failure -> Theme.bad ()

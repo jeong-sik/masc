@@ -16,8 +16,25 @@ let refused status ~code sentence = R.json status [ "error", `String sentence; "
 
 let unknown_account = refused R.Not_found_404 ~code:"unknown_account" "No key account of yours has this id."
 
+(* A record the zone did not take, and what is answered for it.
+
+   Whether asking again can go through is the zone's to say
+   ({!Authz_zone.read}). A zone that can be trusted has not stopped: a
+   request asked again is read and its record is tried, and goes in after a
+   moment in which another process held a file and wrote nothing.
+   [asked_again] says what the request left and to ask again. A zone that
+   cannot be trusted takes no record until the server starts again, and
+   answers every request of a person from then on as {!R.zone_uncertain}
+   does, before the request is read. This request found it so, and is
+   answered the same: asked again, it gets that answer. *)
+let not_taken (person : Login.person) ~asked_again =
+  match Authz_zone.read person.zone with
+  | Ok (_ : Authz_zone.trusted) -> asked_again
+  | Error uncertain -> R.zone_uncertain uncertain
+;;
+
 (* The details of each failure are in the log ({!Purge.remove}). *)
-let removal_error : Purge.error -> R.answer = function
+let removal_error person : Purge.error -> R.answer = function
   | Purge.Not_found -> unknown_account
   | Purge.Not_a_key_account ->
     refused
@@ -32,10 +49,13 @@ let removal_error : Purge.error -> R.answer = function
   | Purge.Not_started (Authz_purge.Refused (Authz_purge_state.User_not_active _)) ->
     refused R.Forbidden_403 ~code:"removal_refused" "Your account is not active, so it removes no account."
   | Purge.Not_started (Authz_purge.Commit_failed (_ : Authz_zone.error)) ->
-    refused
-      R.Service_unavailable_503
-      ~code:"removal_not_recorded"
-      "The removal could not be recorded, and nothing was removed. Ask again to remove it."
+    not_taken
+      person
+      ~asked_again:
+        (refused
+           R.Service_unavailable_503
+           ~code:"removal_not_recorded"
+           "The removal could not be recorded, and nothing was removed. Ask again to remove it.")
   | Purge.Not_started
       ( Authz_purge.Body_not_built (_ : Authz_body.error)
       | Authz_purge.Refused
@@ -55,10 +75,13 @@ let removal_error : Purge.error -> R.answer = function
       ~code:"internal_error"
       "The removal was refused for a reason this server does not expect."
   | Purge.Not_ended (_ : Authz_purge.error) ->
-    refused
-      R.Service_unavailable_503
-      ~code:"removal_not_recorded"
-      "The end of the removal could not be recorded. Ask again to finish it."
+    not_taken
+      person
+      ~asked_again:
+        (refused
+           R.Service_unavailable_503
+           ~code:"removal_not_recorded"
+           "The end of the removal could not be recorded. Ask again to finish it.")
   | Purge.Files_not_removed Authz_purge_event.Key_not_removed ->
     refused
       R.Service_unavailable_503
@@ -79,7 +102,7 @@ let remove ~person ~base_path ~provider_account_id =
   | Ok id ->
     (match Purge.remove ~person ~base_path id with
      | Ok () -> R.json R.Ok_200 [ "provider_account_id", `String provider_account_id; "removed", `Bool true ]
-     | Error error -> removal_error error)
+     | Error error -> removal_error person error)
 ;;
 
 (* ---- registration ---- *)
@@ -277,13 +300,13 @@ let registration_refusal refusal =
 ;;
 
 (* The details of each failure are in the log ({!Registration.register}). *)
-let registration_error : Registration.error -> R.answer = function
+let registration_error person : Registration.error -> R.answer = function
   | Registration.Id_not_usable -> not_recorded
   | Registration.Not_recorded error ->
     (match not_recorded_of error with
      | Refused_by_state refusal -> registration_refusal refusal
      | Not_built -> unexpected
-     | Store_did_not_take -> not_recorded)
+     | Store_did_not_take -> not_taken person ~asked_again:not_recorded)
   | Registration.Files_not_made ->
     refused
       R.Service_unavailable_503
@@ -323,7 +346,7 @@ let register ~person ~base_path ~body =
                [ "provider_account_id", `String (Authz_types.Provider_account_id.to_string id)
                ; "kind", `String "key"
                ]
-           | Error error -> registration_error error)))
+           | Error error -> registration_error person error)))
 ;;
 
 (* ---- replacement ---- *)
@@ -396,13 +419,14 @@ let replacement_refusal : Accounts.refusal -> R.answer = function
 ;;
 
 (* The details of each failure are in the log ({!Replacement.replace}). *)
-let replacement_error : Replacement.error -> R.answer = function
+let replacement_error person : Replacement.error -> R.answer = function
   | Replacement.Refused refusal -> replacement_refusal refusal
   | Replacement.Account_busy ->
     refused
       R.Conflict_409
       ~code:"account_call_running"
       "A call of this account is running. Try again when it ends."
+  | Replacement.Files_not_reached -> replacement_not_recorded
   | Replacement.Not_recorded error ->
     (match not_recorded_of error with
      | Refused_by_state refusal ->
@@ -412,13 +436,13 @@ let replacement_error : Replacement.error -> R.answer = function
         | Of_account refusal -> replacement_refusal refusal
         | No_request_leads_here -> replacement_unexpected)
      | Not_built -> replacement_unexpected
-     | Store_did_not_take -> replacement_not_recorded)
+     | Store_did_not_take -> not_taken person ~asked_again:replacement_not_recorded)
   | Replacement.Key_not_stored ->
     refused
       R.Service_unavailable_503
       ~code:"key_not_stored"
-      "The replacement was recorded, and the new key could not be stored on this server. The account \
-       has no key now. Send the key again."
+      "The replacement was recorded, and the new key could not be stored on this server. The key the \
+       account had is not used any more. Send the key again."
 ;;
 
 let replace ~person ~base_path ~provider_account_id ~body =
@@ -433,6 +457,6 @@ let replace ~person ~base_path ~provider_account_id ~body =
           R.json
             R.Ok_200
             [ "provider_account_id", `String provider_account_id; "old_keys_removed", `Bool old_keys_removed ]
-        | Error error -> replacement_error error))
+        | Error error -> replacement_error person error))
 ;;
 

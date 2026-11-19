@@ -45,7 +45,7 @@ let dimensions cols =
 let prefix name_cells mark name =
   "▌ " ^ mark ^ " " ^ Layout.fit_width (Terminal_text.single_line name) name_cells ^ " "
 
-let header ~cols ~now =
+let header ~ko ~cols ~now =
   let name, count = dimensions cols in
   let start = Masc.Keeper_turn_pulse.slot_start now - ((count - 1) * Masc.Keeper_turn_pulse.slot_seconds) in
   let ruler = Bytes.make count ' ' in
@@ -65,8 +65,15 @@ let header ~cols ~now =
       ticks (position + 12)
     end in
   ticks first_tick;
-  if count >= 3 then Bytes.blit_string "now" 0 ruler (count - 3) 3;
-  prefix name " " "keeper" ^ Bytes.to_string ruler ^ "┃ fail"
+  (* The ruler holds ASCII hour labels, one byte a cell; the now word is laid
+     after the cells it takes, so a Korean word keeps the ruler's width. *)
+  let now_word = if ko then "현재" else "now" in
+  let now_cells = Layout.display_width now_word in
+  let ruler = Bytes.to_string ruler in
+  let ruler =
+    if count >= now_cells then String.sub ruler 0 (count - now_cells) ^ now_word else ruler in
+  prefix name " " (Masc_tui_keeper_mark.grid_column_word ~ko Masc_tui_keeper_mark.Keeper_column)
+  ^ ruler ^ (if ko then "┃ 실패" else "┃ fail")
 
 let marks hours =
   String.concat "" (List.map (fun hour ->
@@ -78,18 +85,18 @@ let marks hours =
 
 (* A band nothing was read for says so once in the band's width, as the roster's
    history column does; a partly read band keeps one mark per half hour. *)
-let band ~ko ~count readings marks_of =
-  if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~ko ~cells:count
+let band ~count readings marks_of =
+  if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~cells:count
   else marks_of ()
 
 let row ~ko ~cols ~now ~name runtime =
   let name_cells, count = dimensions cols in
   let hours = slots ~now ~count runtime in
-  let mark = match Grid.verdict ~now runtime with
-    | Grid.Failing _ -> "!"
-    | Grid.Paused -> "○"
-    | Grid.Recovered | Grid.Sound | Grid.Other -> "●" in
-  prefix name_cells mark name ^ band ~ko ~count [ hours ] (fun () -> marks hours) ^ "┃ "
+  (* The row mark every view draws for this verdict (RFC
+     tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
+  let mark =
+    Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime) in
+  prefix name_cells mark name ^ band ~count [ hours ] (fun () -> marks hours) ^ "┃ "
   ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 
 let fleet ~ko ~cols ~now runtimes =
@@ -99,11 +106,11 @@ let fleet ~ko ~cols ~now runtimes =
     Pulse.failure_count (List.map (fun hours ->
       match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
   let peak = Pulse.peak_failure_count counts in
-  prefix name_cells " " "fleet"
-  ^ band ~ko ~count all (fun () ->
+  prefix name_cells " " (if ko then "전체" else "fleet")
+  ^ band ~count all (fun () ->
       String.concat "" (List.map (function
         | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
         | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
         | (Pulse.Exact n | Pulse.At_least n) ->
             Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts))
-  ^ "┃ peak " ^ count_text peak
+  ^ (if ko then "┃ 최대 " else "┃ peak ") ^ count_text peak

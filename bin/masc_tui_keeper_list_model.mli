@@ -86,6 +86,13 @@ type activity =
   | Offline
   | Unknown
 
+val group_of_activity : activity -> attention
+(** The state view's group of an activity: a held call, a question or a
+    confirmation is [Attention]; a failed attempt [Failing]; a turn under way,
+    a deferred one included, [Active]; a wait of any kind, verification
+    included, [Waiting]; rest, a pause and offline [Inactive]; an activity
+    not read [Unobserved]. *)
+
 type badge =
   | Badge_read_error
   | Badge_waiting_unavailable
@@ -168,6 +175,10 @@ val holds_awaiting_verification : verification_holders -> keeper_name:string -> 
     The row's current task cannot be relied on for this, since submission
     clears it. *)
 val primary_activity_of_row : row -> activity
+
+val runtime_of_row : row -> Masc.Tui_decode.keeper_runtime option
+(** The row's runtime record, or [None] where it is absent, not read or
+    invalid. *)
 
 (** What a Keeper waits on a person for. *)
 type person_wait =

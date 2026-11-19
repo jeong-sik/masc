@@ -15,6 +15,8 @@ import { assign, assignPath, keepersPath, make, readAssigned, readKeepers, readM
 import type { Assign, Keeper, KeepersModel, ListView, Make } from './keepers'
 import { createChecks } from './check'
 import { createConnect } from './connect'
+import { createKeyAdds } from './key-add'
+import { createRemovals } from './key-remove'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
 import type { TalkModel, TalkView } from './talk'
 import { csrfHeader } from './wire'
@@ -401,12 +403,12 @@ describe('the Keepers of a person', () => {
 
 // ---- the panel ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } }
-const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' } }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false }
+const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
 const owned: Owned = {
   accounts: [
-    { id: 'acct_claude_1', integration: { read: true, value: 'claude_code' } },
-    { id: 'acct_codex_1', integration: { read: true, value: 'codex' } },
+    { id: 'acct_claude_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, removal: null },
+    { id: 'acct_codex_1', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, removal: null },
   ],
   runtimes: [
     { id: 'rt_sonnet', accountId: 'acct_claude_1', model: { read: true, value: 'claude-sonnet-5' } },
@@ -421,6 +423,14 @@ describe('the models a Keeper can be given', () => {
   it('are the models read on accounts whose subscription a Keeper may run on here', () => {
     expect(runtimeChoices([claude, codex], owned).map((one) => one.runtimeId)).toEqual(['rt_sonnet', 'rt_opus'])
   })
+
+  it('leave out the models of a key account whose key the server did not read, and of one a removal was left on', () => {
+    const keyOf = (id: string, key: 'readable' | 'key_missing' | 'key_unreadable' | 'not_looked_at', removal: 'key_not_removed' | null = null) =>
+      ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, removal }) as const
+    const accounts = [keyOf('readable', 'readable'), keyOf('missing', 'key_missing'), keyOf('unreadable', 'key_unreadable'), keyOf('unseen', 'not_looked_at'), keyOf('left', 'readable', 'key_not_removed')]
+    const runtimes = accounts.map((account) => ({ id: `rt_${account.id}`, accountId: account.id, model: { read: true, value: 'claude-sonnet-5' } }) as const)
+    expect(runtimeChoices([claude], { accounts, runtimes }).map((one) => one.runtimeId)).toEqual(['rt_readable'])
+  })
 })
 
 const nothingSent: Send = () => Promise.reject(new Error('nothing is sent'))
@@ -432,6 +442,8 @@ const subscriptionsShowing = (panel: PanelView): SubscriptionsModel => ({
   retry: vi.fn(() => Promise.resolve()),
   connecting: createConnect({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   checking: createChecks({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  adding: createKeyAdds({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  removing: createRemovals({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   stop: vi.fn(),
 })
 const readPanel = (mine: Owned = owned): PanelView => ({ kind: 'read', forUser: 'usr_first', integrations: [claude, codex], owned: mine })

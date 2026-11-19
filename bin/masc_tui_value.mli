@@ -37,6 +37,13 @@ module Redraw : sig
   (** Run a computation whose text is measured and not drawn, such as the
       widest of every row's sentence, offscreen rows included. What it notes
       is forgotten: only drawn text asks for a redraw. *)
+
+  val deferred : (unit -> 'a) -> 'a * float option
+  (** Build text that is drawn only if it lands in the rows a screen shows,
+      such as one row of a list that scrolls. The earliest instant the build
+      noted is returned instead of noted; the caller notes it
+      ({!note_change_at}) when it draws the text. What the frame noted before
+      stays noted. *)
 end
 
 (** A moment, drawn in the time zone of the machine the TUI runs on. *)
@@ -190,6 +197,15 @@ end
     a minute it has no seconds, so past a minute it changes at most once a
     minute. A finished length keeps the finer ladder
     ({!Masc_tui_message_layout.elapsed_text}). *)
+(** A span someone set, such as how often a schedule wakes. *)
+module Interval : sig
+  val text : int -> string
+  (** Whole seconds in at most two units, giving back the exact setting where
+      two units can say it: [45s], [1m30s], [5m], [6h], [1h30m], [1d],
+      [2d03h]. A setting that needs three units reads as {!Ongoing.text}. A
+      setting at or below zero reads [0s]. *)
+end
+
 module Ongoing : sig
   val text : float -> string
   (** [45s], [3m], [1h04m], [2d03h], [120d]: whole seconds below a minute,

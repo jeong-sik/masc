@@ -44,6 +44,25 @@ val abandoned : t -> t
 (** The read that began last never ran, so it answered nothing. What it was
     to read is owed again, and the failures in a row are kept. *)
 
+val answering : t -> t
+(** The record as the read that just answered left it, whoever started that
+    read. A read the record holds in flight is that read, and a change
+    announced during it stays recorded. An answer while the record holds no
+    read in flight comes from a read started without it, such as one on
+    entering a surface; it is taken as a read that began just now, with the
+    failures in a row kept and no change announced since. So a success
+    settles the record, and a failure or a placeholder waits like any other.
+    Counting a change there would make every such success read again at
+    once, and the next success the same. *)
+
+val placeholder : retry_s:float -> max_retry_s:float -> now:float -> t -> t
+(** The read that began last answered with the placeholder a server sends
+    until it has built the reading, and no push says when it has. It is read
+    again after a wait that grows with each placeholder in a row, like
+    {!failed}. A change announced while the read was in flight is read now:
+    the placeholder may have been answered from before it. The placeholders
+    in a row are kept, so the next one still waits longer. *)
+
 val due : now:float -> t -> bool
 (** Whether a read should start now, when the surface is able to read. *)
 

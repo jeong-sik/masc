@@ -370,7 +370,7 @@ let test_retained_task_outcomes () =
       task "invalid" "invalid timestamp" Todo;
       task "future" "2026-09-08T10:00:00Z" Todo ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   check int "new registrations in the window" 3 flow.recent.created;
   check int "completion is independent of creation time" 1 flow.recent.completed;
   check int "cancellation is separate" 1 flow.recent.cancelled;
@@ -414,7 +414,7 @@ let test_tasks_error_is_sanitized () =
     (contains output "\\x1B[2J");
   check bool "the error text is still visible" true (contains output "boom");
   let flow =
-    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:[] []
+    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:Masc_tui_task_flow.Archived.empty []
   in
   let state = make_state () in
   state.task_flow <- Some flow;
@@ -449,7 +449,7 @@ let test_assignee_work_and_daily_flow () =
         (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
           reason = None }) ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   let rows = flow.by_assignee in
   check int "only states that carry an assignee open a row" 2 (List.length rows);
   let row name =
@@ -510,6 +510,9 @@ let test_archived_tasks_count_in_the_day_bars_only () =
       (* Restored to the backlog, still in the archive: counted once. *)
       task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ]
   in
+  let archived =
+    List.fold_left Masc_tui_task_flow.Archived.add Masc_tui_task_flow.Archived.empty archived
+  in
   let flow = Masc_tui_task_flow.of_tasks ~now ~archived live in
   let completed_in_span =
     List.fold_left (fun n (d : Masc_tui_task_flow.day) -> n + d.d_completed) 0 flow.daily
@@ -530,7 +533,7 @@ let test_assignee_rows_capped () =
       task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
         (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
   let state = make_state () in
   state.task_flow <- Some flow;
@@ -764,6 +767,26 @@ let test_the_metrics_body_hands_its_window_only_when_it_hides_lines () =
   check int "a body that shows every line hands nothing" 0
     (List.length (handed ~budget:400))
 
+let test_kpi_layout_responsive_tiers () =
+  check bool "below 80 cols falls back to Compact" true
+    (Render_metrics.kpi_layout ~cols:79 = Render_metrics.Compact);
+  (match Render_metrics.kpi_layout ~cols:80 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "80 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=80");
+  (match Render_metrics.kpi_layout ~cols:120 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "120 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=120");
+  (match Render_metrics.kpi_layout ~cols:155 with
+   | Render_metrics.Cards_2x2 { card_cells; _ } ->
+       check bool "155 cols 2x2 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_4 _ | Compact -> fail "expected Cards_2x2 at cols=155");
+  (match Render_metrics.kpi_layout ~cols:156 with
+   | Render_metrics.Cards_4 { card_cells; _ } ->
+       check bool "156 cols 4x1 card has >= 32 text cells" true (card_cells >= 32)
+   | Cards_2x2 _ | Compact -> fail "expected Cards_4 at cols=156")
+
 let () =
   run "tui_render_metrics"
     [ ( "connection"
@@ -813,7 +836,9 @@ let () =
             test_the_newest_session_event_is_kept_when_taller_than_the_room
         ] )
     ; ( "responsiveness"
-      , [] )
+      , [ test_case "KPI cards step down 4x1 -> 2x2 -> Compact cleanly" `Quick
+            test_kpi_layout_responsive_tiers
+        ] )
     ; ( "render_body"
       , [ test_case "a Tasks read error is sanitized before it is drawn" `Quick
             test_tasks_error_is_sanitized

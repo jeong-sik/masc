@@ -34,18 +34,10 @@ let status_is_ok = function
 
 let blocker_text ~ko (fleet : F.fleet) = Option.map (blocker_phrase ~ko) fleet.fs_blocker
 
-let seconds_per_hour = 3600
-let seconds_per_minute = 60
-
-(* A setting, not a measurement, so the words must give back the exact value:
-   the largest unit that divides it, else the two-unit span. Rounding to the
-   nearest minute would show 90 seconds as a setting of 2m. *)
+(* A setting, so the words give back the exact value (RFC
+   tui-one-screen-grammar §6.2), as every set interval reads. *)
 let interval_text interval =
-  let seconds = F.Proactive_interval.to_seconds interval in
-  if seconds mod seconds_per_hour = 0 then Printf.sprintf "%dh" (seconds / seconds_per_hour)
-  else if seconds mod seconds_per_minute = 0 then
-    Printf.sprintf "%dm" (seconds / seconds_per_minute)
-  else Masc_tui_message_layout.span_text (Float.of_int seconds)
+  Masc_tui_value.Interval.text (F.Proactive_interval.to_seconds interval)
 
 let proactive_text ~ko (fleet : F.fleet) =
   let interval = interval_text fleet.fs_proactive_interval in

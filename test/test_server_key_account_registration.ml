@@ -17,6 +17,61 @@ module B = Authz_bootstrap
 module E = Authz_invite_event
 module Z = Authz_zone
 
+(* The child of [with_foreign_lock]: takes the lock file the way [Fs_compat]
+   does, says so, and holds the lock until its input closes. A lock that
+   another process holds needs a second process, so the case starts this
+   executable again. *)
+let hold_lock_child_flag = "--hold-log-lock"
+
+let () =
+  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) hold_lock_child_flag
+  then (
+    let fd = Unix.openfile Sys.argv.(2) [ Unix.O_WRONLY ] 0o600 in
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+        Unix.lockf fd Unix.F_LOCK 0;
+        output_char stdout 'R';
+        flush stdout;
+        try ignore (input_char stdin) with
+        | End_of_file -> ());
+    exit 0)
+;;
+
+(* Runs [f] while another process holds [lock_path], and returns once that
+   process ended and the lock is free. *)
+let with_foreign_lock ~lock_path f =
+  (* Close-on-exec, so that the child does not inherit the write end of the
+     release pipe and the parent's close of it reaches the child as EOF. *)
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let pid =
+    Unix.create_process
+      Sys.executable_name
+      [| Sys.executable_name; hold_lock_child_flag; lock_path |]
+      release_read
+      ready_write
+      Unix.stderr
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  let rec wait_for_child () =
+    match Unix.waitpid [] pid with
+    | result -> result
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close release_write;
+      ignore (wait_for_child () : int * Unix.process_status))
+    (fun () ->
+      let ready = Bytes.create 1 in
+      let count = Unix.read ready_read ready 0 1 in
+      Unix.close ready_read;
+      if count <> 1 || Bytes.get ready 0 <> 'R' then Alcotest.fail "the lock holder did not start";
+      f ())
+;;
+
 let get = function
   | Ok value -> value
   | Error _ -> Alcotest.fail "a fixture value was refused"
@@ -562,7 +617,7 @@ let test_files_not_made =
 (* The files are not made and the removal does not go through: the answer
    gives the account, the records say how far its removal went, and its
    owner removes it. The modes that keep a folder closed do not keep the
-   superuser out, so this case says nothing when the superuser runs it. *)
+   superuser out, so this case is skipped when the superuser runs it. *)
 let test_account_stays =
   with_zone (fun ~zone ~root ~base_path ->
     if Unix.geteuid () <> 0
@@ -600,7 +655,8 @@ let test_account_stays =
       Alcotest.(check (list (pair string string)))
         "the records say the removal went through"
         [ Provider_account_id.to_string account, "purged" ]
-        (List.map (fun (id, status) -> Provider_account_id.to_string id, status) (removals alice))))
+        (List.map (fun (id, status) -> Provider_account_id.to_string id, status) (removals alice)))
+    else Alcotest.skip ())
 ;;
 
 (* ---- the replacement of a key (the same RFC, 3.7) ---- *)
@@ -609,6 +665,7 @@ let test_account_stays =
    it holds. *)
 let second_key = key_prefix ^ "-the-second-of-alice"
 let third_key = key_prefix ^ "-the-third-of-alice"
+let left_key = key_prefix ^ "-no-record-names"
 let key_of_bob = key_prefix ^ "-of-bob"
 let second_key_of_bob = key_prefix ^ "-the-second-of-bob"
 
@@ -797,9 +854,78 @@ let test_replacement_refused =
       ~code:"replacement_refused")
 ;;
 
+(* A file in the place of the key of the generation after, which no
+   replacement of this server wrote: the record that names the generation
+   makes it the file the account reads. The store fails on it, and the
+   folder of the keys goes, so the account reads no key, and neither that
+   file nor the key before stays on disk. The next replacement puts its key
+   in place. *)
+(* The record goes in and the key file is refused, in a folder the server
+   can remove: the folder of the keys goes with the key before in it, and
+   the home of the account stays. A folder of keys that others read is one
+   no key is written into. *)
+let test_replacement_not_stored_and_the_folder_gone =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let keys = Filename.dirname (key_file_of alice ~runtime_root account) in
+    Unix.chmod keys 0o755;
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "under a folder of keys that others read" answer ~status:503 ~code:(Some "key_not_stored");
+    Alcotest.(check int) "the record went in" 2 (generation_of alice account);
+    Alcotest.(check bool) "the folder of the keys is gone" false (Sys.file_exists keys);
+    Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root);
+    Alcotest.(check (list string)) "nor the key sent" [] (holding ~text:second_key root);
+    Alcotest.(check bool) "the home of the account stays" true (Sys.is_directory (home_of ~runtime_root account));
+    let next = replace alice ~base_path account (replacement_body third_key) in
+    answered "the next replacement" next ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 3 (generation_of alice account);
+    Alcotest.(check string)
+      "its key reads back"
+      ("key:" ^ third_key)
+      (read_name (key_file_of alice ~runtime_root account)))
+;;
+
+let test_replacement_over_a_file_in_its_place =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let in_the_place =
+      get_text
+        (Layout.key_file
+           ~runtime_root
+           ~account_id:account
+           ~generation:(Key_generation.next Key_generation.first))
+    in
+    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 in_the_place (fun out ->
+      Out_channel.output_string out left_key);
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "over a file in the place of its key" answer ~status:503 ~code:(Some "key_not_stored");
+    says_nothing_of "a key that was not stored" ~key:second_key answer;
+    Alcotest.(check int) "the record went in" 2 (generation_of alice account);
+    Alcotest.(check string)
+      "the file the records say holds no key"
+      "key_missing"
+      (read_name (key_file_of alice ~runtime_root account));
+    Alcotest.(check (list string)) "the file that was in the place is gone" [] (holding ~text:left_key root);
+    Alcotest.(check (list string)) "the key before is gone" [] (holding ~text:the_key root);
+    Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root);
+    let next = replace alice ~base_path account (replacement_body third_key) in
+    answered "the next replacement" next ~status:200 ~code:None;
+    Alcotest.(check int) "it took the generation after the one that has no file" 3 (generation_of alice account);
+    Alcotest.(check string)
+      "its key reads back from the file the records say"
+      ("key:" ^ third_key)
+      (read_name (key_file_of alice ~runtime_root account)))
+;;
+
 (* A removal that stopped on the account: its key is not replaced, and the
    account is removed. The modes that keep a folder closed do not keep the
-   superuser out, so this case and the next say nothing when the superuser
+   superuser out, so this case and the next are skipped when the superuser
    runs them. *)
 let test_replacement_after_removal =
   with_zone (fun ~zone ~root ~base_path ->
@@ -825,11 +951,14 @@ let test_replacement_after_removal =
         (replace alice ~base_path account (replacement_body second_key))
         ~status:404
         ~code:(Some "unknown_account");
-      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root)))
+      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root))
+    else Alcotest.skip ())
 ;;
 
 (* The record goes in and the key file does not: the account has no key, and
-   the key before is not read again. The next replacement puts a key in
+   the key before is not read again. The folder of the keys of the case is
+   one nothing is written into, so the server does not remove it either,
+   and the key before stays on disk. The next replacement puts a key in
    place and takes the files before it away. *)
 let test_replacement_not_stored =
   with_zone (fun ~zone ~root ~base_path ->
@@ -852,7 +981,10 @@ let test_replacement_not_stored =
         "key_missing"
         (read_name (key_file_of alice ~runtime_root account));
       Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root);
-      Alcotest.(check (list string)) "the key before is on disk, where nothing reads it" [ first_file ] (holding ~text:the_key root);
+      Alcotest.(check (list string))
+        "the key before is on disk, in the folder that did not go, where nothing reads it"
+        [ first_file ]
+        (holding ~text:the_key root);
       (* A file of the folder that does not go: the new key is in place all
          the same, and the answer says a file stayed. *)
       let stuck = Filename.concat keys "0-stuck" in
@@ -873,7 +1005,8 @@ let test_replacement_not_stored =
         ("key:" ^ third_key)
         (read_name (key_file_of alice ~runtime_root account));
       Alcotest.(check (list string)) "the key of the first generation is gone" [] (holding ~text:the_key root);
-      Unix.chmod stuck 0o700))
+      Unix.chmod stuck 0o700)
+    else Alcotest.skip ())
 ;;
 
 (* What the list of the accounts of the person says is on the account. *)
@@ -888,10 +1021,45 @@ let spent (person : Login.person) id =
   Result.is_ok (Authz_provider_account.availability (state_of person) ~user_id:person.Login.user_id id)
 ;;
 
-(* The log takes the intent of a replacement and not its record. At the next
+(* The runtime root of the person is not reached: the replacement is turned
+   down before its record and changes nothing. The superuser reaches a
+   folder whatever its mode is, so the case is skipped when the superuser
+   runs it. *)
+let test_replacement_without_the_runtime_root =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let above = Filename.dirname runtime_root in
+      Unix.chmod above 0o000;
+      let answer =
+        Fun.protect
+          ~finally:(fun () -> Unix.chmod above 0o700)
+          (fun () -> replace alice ~base_path account (replacement_body second_key))
+      in
+      answered
+        "under a runtime root that is not reached"
+        answer
+        ~status:503
+        ~code:(Some "replacement_not_recorded");
+      says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+      unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+      Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+      let again = replace alice ~base_path account (replacement_body third_key) in
+      answered "the replacement, asked again" again ~status:200 ~code:None;
+      Alcotest.(check int) "it took the next generation" 2 (generation_of alice account))
+    else Alcotest.skip ())
+;;
+
+(* The log takes the intent of a replacement and not its record, and stops.
+   The request that found it so is answered as every request after it is:
+   the 503 of a zone that cannot be trusted, which has no code. At the next
    start of the server the intent is one that was given up: it blocks the
    account, and the same request closes it (the same RFC, 3.7). The
-   superuser writes a file whatever its mode is, so the case says nothing
+   superuser writes a file whatever its mode is, so the case is skipped
    when the superuser runs it. *)
 let test_replacement_given_up =
   with_zone (fun ~zone ~root ~base_path ->
@@ -905,7 +1073,7 @@ let test_replacement_given_up =
       Unix.chmod log_path 0o400;
       let answer = replace alice ~base_path account (replacement_body second_key) in
       Unix.chmod log_path 0o600;
-      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      answered "under a log that stopped" answer ~status:503 ~code:None;
       says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
       (* The server starts again. *)
       let alice = { alice with Login.zone = opened ~root ~base_path } in
@@ -927,7 +1095,8 @@ let test_replacement_given_up =
         "its key reads back from the file the records say"
         ("key:" ^ third_key)
         (read_name (key_file_of alice ~runtime_root account));
-      Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root)))
+      Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root))
+    else Alcotest.skip ())
 ;;
 
 (* The server stopped between the new key of a replacement and the removal
@@ -1003,7 +1172,7 @@ let test_left_keys_under_a_stopped_log =
       Unix.chmod log_path 0o400;
       let answer = replace alice ~base_path account (replacement_body third_key) in
       Unix.chmod log_path 0o600;
-      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      answered "under a log that stopped" answer ~status:503 ~code:None;
       Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path);
       Alcotest.(check (list string))
         "a start over the zone whose log stopped leaves the file"
@@ -1016,7 +1185,71 @@ let test_left_keys_under_a_stopped_log =
       Alcotest.(check string)
         "the key the records say reads back"
         ("key:" ^ second_key)
-        (read_name (key_file_of alice ~runtime_root account))))
+        (read_name (key_file_of alice ~runtime_root account)))
+    else Alcotest.skip ())
+;;
+
+(* Another process holds the lock of the log for a moment and writes
+   nothing. The record is not taken and the log is not stopped: the answer
+   says to send the key again, and the same server takes it then. *)
+let test_replacement_under_a_held_log =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let lock_path = Fs_compat.private_jsonl_lock_path (Authz_log.path_of_base_path ~base_path) in
+    let answer =
+      with_foreign_lock ~lock_path (fun () -> replace alice ~base_path account (replacement_body second_key))
+    in
+    answered "while another process holds the log" answer ~status:503 ~code:(Some "replacement_not_recorded");
+    says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+    unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+    let again = replace alice ~base_path account (replacement_body third_key) in
+    answered "the replacement, asked again of the same server" again ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 2 (generation_of alice account);
+    Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+    Alcotest.(check string)
+      "the key that was sent again reads back"
+      ("key:" ^ third_key)
+      (read_name (key_file_of alice ~runtime_root account)))
+;;
+
+(* A registration and a removal that find the log stopped are answered as
+   every request after them is, and leave what was there. Each is asked of
+   a zone a start opened. *)
+let test_under_a_log_that_stopped =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let log_path = Authz_log.path_of_base_path ~base_path in
+      let under_a_log_that_takes_no_record f =
+        Unix.chmod log_path 0o400;
+        Fun.protect ~finally:(fun () -> Unix.chmod log_path 0o600) f
+      in
+      let answer = under_a_log_that_takes_no_record (fun () -> register alice ~base_path (key_body second_key)) in
+      answered "a registration under a log that stopped" answer ~status:503 ~code:None;
+      says_nothing_of "a registration that was not recorded" ~key:second_key answer;
+      Alcotest.(check (list string)) "no file of the server holds its key" [] (holding ~text:second_key root);
+      (* The server starts again. *)
+      let alice = { alice with Login.zone = opened ~root ~base_path } in
+      let answer =
+        under_a_log_that_takes_no_record (fun () ->
+          Server_key_account.remove
+            ~person:alice
+            ~base_path
+            ~provider_account_id:(Provider_account_id.to_string account))
+      in
+      answered "a removal under a log that stopped" answer ~status:503 ~code:None;
+      Alcotest.(check string)
+        "the key of the account is in place"
+        ("key:" ^ the_key)
+        (read_name (key_file_of alice ~runtime_root account)))
+    else Alcotest.skip ())
 ;;
 
 (* The key before of a key account, where a stopped server leaves it. *)
@@ -1095,7 +1328,8 @@ let test_left_keys_of_two_accounts =
         (holding ~text:first.key root);
       Unix.chmod stuck 0o700;
       at_start ();
-      Alcotest.(check bool) "the next start removes what stayed" false (Sys.file_exists stuck)))
+      Alcotest.(check bool) "the next start removes what stayed" false (Sys.file_exists stuck))
+    else Alcotest.skip ())
 ;;
 
 let () =
@@ -1113,7 +1347,12 @@ let () =
         ; Alcotest.test_case "a refused request changes nothing" `Quick test_replacement_refused
         ; Alcotest.test_case "an account a removal stopped on" `Quick test_replacement_after_removal
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
+        ; Alcotest.test_case "a key that is not stored, and its folder gone" `Quick test_replacement_not_stored_and_the_folder_gone
+        ; Alcotest.test_case "a runtime root that is not reached" `Quick test_replacement_without_the_runtime_root
+        ; Alcotest.test_case "a file in the place of the new key" `Quick test_replacement_over_a_file_in_its_place
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
+        ; Alcotest.test_case "a log another process holds for a moment" `Quick test_replacement_under_a_held_log
+        ; Alcotest.test_case "a registration and a removal under a log that stopped" `Quick test_under_a_log_that_stopped
         ; Alcotest.test_case "what a stopped server left in the folder of the keys" `Quick test_left_keys_at_start
         ; Alcotest.test_case "records that cannot be trusted remove no key" `Quick test_left_keys_under_a_stopped_log
         ; Alcotest.test_case "one account keeps no other waiting" `Quick test_left_keys_of_two_accounts

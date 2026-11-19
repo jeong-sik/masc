@@ -228,10 +228,37 @@ val footer_hints :
     A list renderer that knows whether its list holds a row draws
     {!footer_row_of_surface} instead, so a key that needs one keeps its place. *)
 
+(** What j/k and Esc do on the Tools pane on screen (RFC
+    tui-one-screen-grammar §3.1). {!Masc_tui_list_moves.tools_keys} reads it
+    from the state the dispatcher reads. *)
+type tools_keys =
+  | Tools_walks_list
+      (** j/k move the selection in the Skill list or the async request list *)
+  | Tools_reads_skill_page
+      (** after Enter or f on Available: j/k scroll the page of the chosen
+          Skill, and Esc returns to the Skill list *)
+  | Tools_reads_request
+      (** an open request in async runs: j/k scroll it, and Esc returns to
+          the request list *)
+  | Tools_reads_original_task
+      (** the original Task opened from a request: j/k scroll it, and Esc
+          returns to the request *)
+  | Tools_reads_page
+      (** j/k scroll a pane that has no list, or a list with nothing in it;
+          Esc keeps the sheet's word *)
+
+val tools_footer_moves_and_back : tools_keys -> binding * binding
+(** The j/k binding and the Esc binding the Tools footer names for [keys]. *)
+
 val footer_hints_tools :
-  lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
+  lang:Masc_tui_types.ui_language ->
+  pane:Masc_tui_types.tools_pane ->
+  keys:tools_keys ->
+  string
 (** Tools' bracket keys select retained runs in Available and Keepers in other
-    panes. The catalog's volume child shows only volume and reading controls. *)
+    panes. The catalog's volume child shows only volume and reading controls.
+    [keys] decides the j/k and Esc words ({!tools_footer_moves_and_back}), so
+    the footer says whether the keys walk a list or scroll a page. *)
 
 val footer_hints_metrics :
   lang:Masc_tui_types.ui_language ->

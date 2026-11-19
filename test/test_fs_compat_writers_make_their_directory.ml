@@ -98,8 +98,9 @@ let in_eio f () =
 ;;
 
 (* The two transactions that made their directory before their blocking job
-   now make it inside the job. A directory that cannot be made is a
-   [Sys_error] in a fiber and outside one. *)
+   now make it inside the job. A directory whose making fails — a regular
+   file is on the way above it — is a [Sys_error] in a fiber and outside
+   one. *)
 let directory_that_cannot_be_made write () =
   let root = fresh_root () in
   Fun.protect
@@ -111,6 +112,30 @@ let directory_that_cannot_be_made write () =
       match write path first_row with
       | () -> fail "the write went through a regular file"
       | exception Sys_error _ -> ())
+;;
+
+(* A regular file at the directory's own place is not a failed making: the
+   making takes it for the directory. The transaction's first look at its
+   file reports it, the same way in a fiber and outside one: the update
+   through its [lstat], the rewrite through its read. *)
+let regular_file_where_the_directory_would_be ~reported write () =
+  let root = fresh_root () in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree root)
+    (fun () ->
+      let in_the_way = Filename.concat root "kept" in
+      Fs_compat.save_file in_the_way "a regular file where the directory would be";
+      let path = Filename.concat in_the_way "rows.jsonl" in
+      (match write path first_row with
+       | () -> fail "the write went through a regular file"
+       | exception raised ->
+         if not (reported raised)
+         then failf "reported as %s" (Printexc.to_string raised));
+      check
+        string
+        "the file in the way is as it was"
+        "a regular file where the directory would be"
+        (Fs_compat.load_file in_the_way))
 ;;
 
 let transactions_that_report_sys_error =
@@ -146,5 +171,23 @@ let () =
                 (in_eio (directory_that_cannot_be_made write))
             ])
           transactions_that_report_sys_error )
+    ; ( "a regular file where the directory would be"
+      , List.concat_map
+          (fun (name, reported) ->
+            let write = List.assoc name writers in
+            [ test_case (name ^ " outside a fiber") `Quick
+                (regular_file_where_the_directory_would_be ~reported write)
+            ; test_case (name ^ " in a fiber") `Quick
+                (in_eio (regular_file_where_the_directory_would_be ~reported write))
+            ])
+          [ ( "update_private_file_durable_locked_result"
+            , function
+              | Unix.Unix_error (Unix.ENOTDIR, _, _) -> true
+              | _ -> false )
+          ; ( "rewrite_private_file_durable_locked_result"
+            , function
+              | Sys_error _ -> true
+              | _ -> false )
+          ] )
     ]
 ;;

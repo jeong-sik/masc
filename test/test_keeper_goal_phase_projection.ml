@@ -434,8 +434,6 @@ max-concurrent = 1
     check bool "independent request stays visible" true
       (contains_in world_state "Please inspect the independent file.");
     let log_path = Keeper_types_support.keeper_decision_log_path config meta.name in
-    let directory = Filename.dirname log_path in
-    if not (Sys.file_exists directory) then Unix.mkdir directory 0o755;
     Keeper_unified_metrics_decision.append_decision_record ~config ~meta
       ~keeper_turn_id:1 ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
       ~observation ~latency_ms:0 ~outcome:Keeper_decision_outcome.Success

@@ -198,15 +198,14 @@ let activity_heading (state : state) ~cols ~on_logs ~reading =
          ; draw =
              (fun width ->
                let room = width - around in
-               if room < tab_strip_min_width tabs
-               then title
-               else
-                 before
-                 ^ tab_strip ~width:room
-                     ~press:(fun surface text ->
-                       pressable (Press_surface surface) text)
-                     tabs
-                 ^ dot)
+               match
+                 tab_strip ~width:room
+                   ~press:(fun surface text ->
+                     pressable (Press_surface surface) text)
+                   tabs
+               with
+               | "" -> title
+               | strip -> before ^ strip ^ dot)
          })
     ~id:"" ~after:reading ~tail
 

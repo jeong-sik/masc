@@ -61,8 +61,14 @@ let make_directory_in_this_job dir =
 ;;
 
 (* As [make_directory_in_this_job], for the two transactions that made their
-   directory with [mkdir_p] before their job: a directory that cannot be
-   made stays the [Sys_error] it was in a fiber. *)
+   directory with [mkdir_p] before their job: a directory whose making fails
+   stays the [Sys_error] it was in a fiber.
+
+   A file that is not a directory at the directory's own place is not a
+   failed making: [mkdir_p_unix] takes anything at the path for the directory
+   and returns. The transaction's first look at its file then reports it, in
+   a fiber and outside one: the update's [lstat] raises
+   [Unix_error (ENOTDIR, _, _)], and the rewrite's read raises [Sys_error]. *)
 let make_transaction_directory_in_this_job dir =
   try make_directory_in_this_job dir with
   | Unix.Unix_error (code, operation, argument) ->

@@ -49,10 +49,24 @@ type display =
         (** The rows of the selected Skill's measurement card, under the
             Skill list, so a key that opens the measurements can bring the
             card into view. *)
+  ; row_changes : (int * float) list
+        (** Each row of [lines] whose time text was built without noting
+            when it next reads differently, by its index in [lines], with
+            that instant: the Async pane's request ages, on every row a
+            request wraps into. Building the display notes none of them;
+            the frame notes those it draws ({!drawn_change}). *)
   }
 
 val tools_display : ?cols:int -> ?terminal_rows:int -> state -> display
-(** {!tools_display_lines} with where the selected Skill's rows are. *)
+(** {!tools_display_lines} with where the selected Skill's rows are and
+    when the rows' deferred time text changes. *)
+
+val drawn_change : display -> (string * string) Masc_tui_rows.t -> float option
+(** The earliest instant a row of [row_changes] that the window draws reads
+    differently, [None] when the window draws none of them. The window is
+    cut from the display's [lines]. The frame notes this instant
+    ({!Masc_tui_value.Redraw.note_change_at}), so a row scrolled out of the
+    window asks for no redraw. *)
 
 val tools_diagnostics_copy_text : state -> string option
 (** What the Available section's copy holds: the Keeper, its diagnostics

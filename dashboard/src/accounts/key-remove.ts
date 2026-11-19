@@ -1,0 +1,211 @@
+// Removing a key account: an account that holds an API key the person
+// registered. The server takes the key of the account off its disk and then
+// the home of the account, inside the call of the account
+// (lib/server/server_key_account_purge.ml, `remove`).
+//
+// `createRemovals` holds the latest removal of each account; account-rows.ts
+// draws it in the card of the account. After an answer that can have changed
+// the account, the panel reads the subscriptions again: an account that was
+// removed is not in the list, and one whose removal stopped has what the
+// removal left on it. The panel says what became of an account only once
+// its list has the account no more (subscriptions.ts, `leftWords`).
+
+import { signal, type ReadonlySignal } from '@preact/signals'
+import { isRecord } from '../lib/type-guards'
+import { bodyOf, csrfHeader, deliver, serverFailure } from './wire'
+import type { Send } from './wire'
+
+/** The route that removes the key account `accountId` (lib/server/server_login_http.ml). */
+export const removePath = (accountId: string): string => `/api/v1/setup/accounts/key/${encodeURIComponent(accountId)}`
+
+/** The codes of a removal the server did not do or did not finish
+    (lib/server/server_key_account.ml, `removal_error`). */
+const refusalCodes = [
+  'unknown_account', 'not_a_key_account', 'account_call_running', 'removal_refused', 'internal_error',
+  'removal_not_recorded', 'key_not_removed', 'home_not_removed',
+] as const
+
+/** Why an account was not removed. A code this console does not know is
+    kept apart, and so is a refusal with none. */
+export type RemovalRefusal = typeof refusalCodes[number] | 'unrecognised'
+
+/** Why the removal of an account the server has did not go through.
+    `unknown_account` is not one: that account is gone. */
+export type RemovalStopped = Exclude<RemovalRefusal, 'unknown_account'>
+
+const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null)
+
+/** What came of asking the server to remove an account. */
+export type Asked =
+  | { readonly kind: 'removed' }
+  | { readonly kind: 'signed_out' }
+  /** `reason` is the server's own sentence. */
+  | { readonly kind: 'refused'; readonly status: number; readonly code: RemovalRefusal; readonly reason: string | null }
+  /** No answer came: the server may have removed the account. */
+  | { readonly kind: 'unreachable' }
+  /** An answer came as if all was well, and it does not say the account was
+      removed: it is not the answer of this route. */
+  | { readonly kind: 'unreadable' }
+  /** A failure with no code of this route. It is not the server's word that
+      it did nothing: what stands in front of the server answers so too,
+      after the server removed the account. */
+  | { readonly kind: 'server_failed' }
+
+/** Whether a body is what the route answers once the account is removed
+    (lib/server/server_key_account.ml, `remove`). */
+const saysRemoved = (json: unknown): boolean => isRecord(json) && json.removed === true
+
+/** Asks the server to remove the key account `accountId`. The request has no
+    body: the path names the account. */
+export async function removeAccount(to: Send, csrfToken: string, accountId: string): Promise<Asked> {
+  const response = await deliver(to, removePath(accountId), { method: 'DELETE', headers: { accept: 'application/json', [csrfHeader]: csrfToken } })
+  if (response === null) return { kind: 'unreachable' }
+  if (response.status === 401) return { kind: 'signed_out' }
+  const json = await bodyOf(response)
+  if (response.ok) return saysRemoved(json) ? { kind: 'removed' } : { kind: 'unreadable' }
+  const code = isRecord(json) ? json.code : undefined
+  const known = refusalCodes.find((one) => one === code)
+  if (known === undefined && response.status >= serverFailure) return { kind: 'server_failed' }
+  return { kind: 'refused', status: response.status, code: known ?? 'unrecognised', reason: isRecord(json) ? text(json.error) : null }
+}
+
+/** The latest removal of one account. */
+export type Removing =
+  | { readonly kind: 'sending' }
+  /** The server did not remove the account, or did not finish. */
+  | { readonly kind: 'refused'; readonly status: number; readonly code: RemovalStopped; readonly reason: string | null; readonly attempts: number }
+  /** The page has no word of the server on the removal: no answer came, or
+      one it could not read, or a failure with no code of this route. The
+      server may have removed the account: the subscriptions are read again. */
+  | { readonly kind: 'unknown'; readonly answer: 'none' | 'unreadable' | 'server_failed'; readonly attempts: number }
+  /** The server said the account is gone: it removed it, or, `already`, it
+      had none (another page removed it first). The subscriptions were asked
+      for again. */
+  | { readonly kind: 'removed'; readonly already: boolean }
+  /** The request found that the session had ended; the browser is on its way to the sign-in page. */
+  | { readonly kind: 'leaving' }
+
+export interface RemovalsDeps {
+  readonly send: Send
+  readonly leave: () => void
+  /** The CSRF token of the session of the person the panel shows, or null before one. */
+  readonly token: () => string | null
+  /** Reads the person's subscriptions again. */
+  readonly refresh: () => Promise<void>
+}
+
+export interface RemovalsModel {
+  /** The latest removal of each account the person asked to remove, by the
+      id of the account, in the order they were first asked for. */
+  readonly removing: ReadonlySignal<ReadonlyMap<string, Removing>>
+  /** Removes the key account `accountId`. A removal of an account that
+      runs, or any removal once the session ended, does nothing. */
+  readonly remove: (accountId: string) => Promise<void>
+  /** Forgets every removal, for another person is shown now. An answer that
+      comes later changes nothing. */
+  readonly reset: () => void
+}
+
+/** How many removals of the account came to nothing in a row before this one. */
+function failedBefore(before: Removing | undefined): number {
+  switch (before?.kind) {
+    case 'refused':
+    case 'unknown':
+      return before.attempts
+    case undefined:
+    case 'sending':
+    case 'removed':
+    case 'leaving':
+      return 0
+  }
+}
+
+/** Whether a refused removal can have changed what the list says of the
+    account: the server recorded how far it got, or could not say whether
+    its record went in. */
+function changedTheAccount(code: RemovalStopped): boolean {
+  switch (code) {
+    case 'key_not_removed':
+    case 'home_not_removed':
+    case 'removal_not_recorded':
+      return true
+    case 'not_a_key_account':
+    case 'account_call_running':
+    case 'removal_refused':
+    case 'internal_error':
+    case 'unrecognised':
+      return false
+  }
+}
+
+export function createRemovals({ send, leave, token, refresh }: RemovalsDeps): RemovalsModel {
+  const removing = signal<ReadonlyMap<string, Removing>>(new Map())
+  /** Each reset makes a new round; an answer writes only while its round is the latest. */
+  let round = 0
+  let left = false
+
+  const set = (accountId: string, next: Removing): void => {
+    removing.value = new Map(removing.peek()).set(accountId, next)
+  }
+
+  /** The list is asked for again first, so the button of the account stays
+      held until then. */
+  const went = async (mine: number, accountId: string, already: boolean): Promise<void> => {
+    await refresh()
+    if (mine !== round) return
+    set(accountId, { kind: 'removed', already })
+  }
+
+  const unheard = async (accountId: string, answer: 'none' | 'unreadable' | 'server_failed', attempts: number): Promise<void> => {
+    set(accountId, { kind: 'unknown', answer, attempts })
+    await refresh()
+  }
+
+  const remove = async (accountId: string): Promise<void> => {
+    const before = removing.peek().get(accountId)
+    const csrfToken = token()
+    if (left || before?.kind === 'sending' || csrfToken === null) return
+    const mine = round
+    const attempts = failedBefore(before) + 1
+    set(accountId, { kind: 'sending' })
+    const asked = await removeAccount(send, csrfToken, accountId)
+    if (mine !== round || left) return
+    switch (asked.kind) {
+      case 'signed_out': {
+        // Every removal that runs is left behind with the page.
+        left = true
+        const all = new Map(removing.peek())
+        for (const [id, one] of all) if (one.kind === 'sending') all.set(id, { kind: 'leaving' })
+        removing.value = all
+        leave()
+        return
+      }
+      case 'unreachable':
+        await unheard(accountId, 'none', attempts)
+        return
+      case 'unreadable':
+      case 'server_failed':
+        await unheard(accountId, asked.kind, attempts)
+        return
+      case 'removed':
+        await went(mine, accountId, false)
+        return
+      case 'refused':
+        if (asked.code === 'unknown_account') {
+          await went(mine, accountId, true)
+          return
+        }
+        set(accountId, { kind: 'refused', status: asked.status, code: asked.code, reason: asked.reason, attempts })
+        if (changedTheAccount(asked.code)) await refresh()
+        return
+    }
+  }
+
+  const reset = (): void => {
+    round += 1
+    left = false
+    removing.value = new Map()
+  }
+
+  return { removing, remove, reset }
+}

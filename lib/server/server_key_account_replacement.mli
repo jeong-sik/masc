@@ -10,7 +10,8 @@
     + The published state says the account is a key account of the person
       on which no removal began or stopped ({!Authz_state.key_to_replace}).
       It is asked before the call of the account is taken, and again inside
-      it.
+      it. The runtime root of the person is made or found there too: under
+      a root that is not reached no record is written.
     + The record [key_replaced] of the next generation is written
       ({!Authz_provider_account.replace_key}).
     + The key file of that generation is written, and then every other file
@@ -33,6 +34,9 @@ type error =
       (** What the state said of the request before any record was written:
           nothing was changed. *)
   | Account_busy  (** A call of the account runs. Nothing was changed. *)
+  | Files_not_reached
+      (** The runtime root of the person was not made or found, so no record
+          was tried. Nothing was changed. *)
   | Not_recorded of Authz_provider_account.error
       (** The record did not go into the log. Nothing was changed, except
           that a replacement whose intent was written and given up blocks
@@ -40,9 +44,12 @@ type error =
           ({!Authz_provider_account.replace_key}). *)
   | Key_not_stored
       (** The record went in and the key of its generation was not put in
-          place, or is not known to stay there. The account reads
-          [key_missing] until a later replacement goes through: the key
-          before is not read again. *)
+          place, or is not known to stay there. The folder of the keys of
+          the account was then removed, with the key before in it, so the
+          account reads [key_missing] until a later replacement goes
+          through. A folder that did not go is in the log of the server,
+          and what the account reads then is what a list of the accounts
+          says of its key. *)
 
 type replaced =
   { old_keys_removed : bool
@@ -66,8 +73,20 @@ val replace
     the server runs it, and so does the start of the preview.
 
     The records are read where the zone can be trusted ({!Authz_zone.read}),
-    and a zone that cannot be is not acted on: records that went back name
-    a generation before the one on disk, whose file is the key in use.
+    as a decision made without a commit reads them, and a zone that cannot
+    be is not acted on. Such a zone stays so until a restart, so the first
+    account that finds it so is the last one asked about, and the log says
+    it once.
+
+    A log that went back alone stops the start before this runs. A log and
+    an external store that went back together are not told from ones that
+    did not: the files of a generation after the one their records say go
+    too. The file of the generation they say went at the replacement after
+    it, so the account reads no key until its key is sent again. Where that
+    replacement left it ([old_keys_removed] false) and no start came since,
+    the file is there, and the account reads the key from before the
+    replacement. An account registered after the point the files went back
+    to is not in the records, so its key file is not looked at and stays.
 
     The accounts are those the records hold when it starts: one registered
     after that has no file a stopped server left, and its replacements
@@ -82,6 +101,9 @@ val replace
     folder of their files (issue #53111). How many files of an account went
     goes to the log of the server, and so does a file that stays, an
     account that was not looked at, and an exception of one account, after
-    which the others are looked at. Cancellation and the exceptions of a
+    which the others are looked at. Of an account whose removal began and
+    whose owner has no membership nothing is said here: a removal that is
+    pending says it in its resume, and one that went through took the
+    files. Cancellation and the exceptions of a
     process that cannot go on are raised. *)
 val remove_left_keys : zone:Authz_zone.t -> base_path:string -> unit

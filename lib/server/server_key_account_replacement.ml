@@ -10,6 +10,7 @@ let ( let* ) = Result.bind
 type error =
   | Refused of Accounts.refusal
   | Account_busy
+  | Files_not_reached
   | Not_recorded of Authz_provider_account.error
   | Key_not_stored
 
@@ -32,6 +33,20 @@ let state_of (person : Login.person) = (Authz_zone.snapshot person.zone).Authz_z
 let held (person : Login.person) id =
   Authz_state.key_to_replace (state_of person) ~user_id:person.user_id id
   |> Result.map_error (fun refusal -> Refused refusal)
+;;
+
+(* Before the record: the runtime root of the person, under which the
+   folder of the keys of the account is. Under a root that is not reached
+   the key of the record could not be written, and a store that failed
+   could not clear the folder. So the replacement is turned down while
+   nothing was written, and every failure after the record is one of a
+   folder this process reaches. *)
+let reached (person : Login.person) ~base_path id =
+  match Login.person_runtime_root person ~base_path with
+  | Ok runtime_root -> Ok runtime_root
+  | Error (_ : string) ->
+    logged id "it was not recorded" "the runtime root of the person was not made";
+    Error Files_not_reached
 ;;
 
 (* The second step, and the generation the record names.
@@ -59,23 +74,28 @@ let recorded (person : Login.person) id ~held:before =
        Error (Not_recorded error))
 ;;
 
-(* The third and the fourth step. From the record on, the key of the
-   generation before is not read, so an error here leaves the account with
-   no key until the person sends one again. *)
-let stored (person : Login.person) ~base_path id ~generation key =
-  match Login.person_runtime_root person ~base_path with
-  | Error (_ : string) ->
-    logged id "its record went in, and its key was not stored" "the runtime root of the person was not made";
+(* The third and the fourth step.
+
+   A store that failed: from the record on the key of the generation before
+   is not read, and the account is to read no key until the person sends
+   one again (RFC 3.7). The folder is not known to hold none. A file of the
+   new generation can have been there before the call, and is then what
+   the account reads; the key that was sent can be in place with its folder
+   not synced. So the folder of the keys goes, as it does first in a
+   removal of the account, and the key before goes with it. The next
+   replacement makes the folder again. *)
+let stored ~runtime_root id ~generation key =
+  match Files.replace ~runtime_root ~account_id:id ~generation key with
+  | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
+  | Ok (Files.Other_keys_left detail) ->
+    logged id "its new key is in place, and a file of the folder of its keys stays" detail;
+    Ok { old_keys_removed = false }
+  | Error error ->
+    logged id "its record went in, and its key was not stored" (Files.make_error_detail error);
+    (match Files.remove_keys ~runtime_root ~account_id:id with
+     | Ok () -> ()
+     | Error detail -> logged id "its key was not stored, and the folder of its keys stays" detail);
     Error Key_not_stored
-  | Ok runtime_root ->
-    (match Files.replace ~runtime_root ~account_id:id ~generation key with
-     | Ok Files.Other_keys_removed -> Ok { old_keys_removed = true }
-     | Ok (Files.Other_keys_left detail) ->
-       logged id "its new key is in place, and a file of the folder of its keys stays" detail;
-       Ok { old_keys_removed = false }
-     | Error error ->
-       logged id "its record went in, and its key was not stored" (Files.make_error_detail error);
-       Error Key_not_stored)
 ;;
 
 let replace ~(person : Login.person) ~base_path id key =
@@ -86,8 +106,9 @@ let replace ~(person : Login.person) ~base_path id key =
     (* Read again inside the call, whoever holds it: the records of that
        time say whose the account is and which generation it holds. *)
     let* before = held person id in
+    let* runtime_root = reached person ~base_path id in
     let* generation = recorded person id ~held:before in
-    stored person ~base_path id ~generation key)
+    stored ~runtime_root id ~generation key)
 ;;
 
 (* ---- the start of the server ---- *)
@@ -104,8 +125,7 @@ let nothing_there = { Files.gone = 0; stayed = None }
 (* Read inside the call of the account, where a replacement of its key runs
    too: the generation of that time names the one file that stays. The
    state is one the zone can be trusted for ([Authz_zone.read]): nothing
-   commits here, and records that went back would name a generation before
-   the one on disk, whose file is the key in use.
+   commits here, so nothing else judges the zone.
 
    The runtime root is spelled and not made, so an account with no file
    gets none. An owner with no membership has no record that names the
@@ -114,8 +134,10 @@ let nothing_there = { Files.gone = 0; stayed = None }
 
    The account of a removal that began or went through is looked at too.
    The removal takes every file of it, whichever of the two runs first. Of
-   such an account whose owner has no membership nothing is said here: the
-   resume of the removal says it. *)
+   such an account whose owner has no membership nothing is said here: a
+   removal that is pending says it in its resume, and one that went through
+   took the files. Files that came back after it are those of issue
+   #53111. *)
 let remove_left_keys_of ~zone ~base_path id =
   Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
     match Authz_zone.read zone with
@@ -151,56 +173,80 @@ let logged_at_start id what detail =
     detail
 ;;
 
+(* What a look at one account says of the accounts after it. *)
+type rest =
+  | Looked_at_next
+  | Left_alone of Authz_zone.uncertain
+
 (* An exception of one account would end the switch of the server, and at
    each start again. It goes to the log, and the accounts after it are
    looked at. *)
 let guarded id f =
   match f () with
-  | () -> ()
+  | rest -> rest
   | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
-  | exception exn -> logged_at_start id "it was not looked at" (Printexc.to_string exn)
+  | exception exn ->
+    logged_at_start id "it was not looked at" (Printexc.to_string exn);
+    Looked_at_next
+;;
+
+let remove_left_keys_of_and_say ~zone ~base_path id =
+  match remove_left_keys_of ~zone ~base_path id with
+  | Ok { Files.gone; stayed } ->
+    (* A file that held a key went with no request of its owner, so the log
+       of the server says it. *)
+    if gone > 0
+    then
+      Log.Server.info
+        "The start of the server removed %d of the files of the folder of the keys of account %s: \
+         none of them is the key its records say"
+        gone
+        (Provider_account_id.to_string id);
+    Option.iter (fun detail -> logged_at_start id "a file of it stays" detail) stayed;
+    Looked_at_next
+  | Error Call_running ->
+    (* The call can be a replacement, which removes them itself, and whether
+       a file was left is not known: it is no warning. It is said where a
+       log of the default level shows it, since a key the owner replaced can
+       stay on disk until the next start. *)
+    Log.Server.info
+      "The start of the server did not look at the folder of the keys of account %s: a call of \
+       the account runs. The next start looks again, and so do a replacement of its key and its \
+       removal."
+      (Provider_account_id.to_string id);
+    Looked_at_next
+  | Error (Zone_not_trusted uncertain) -> Left_alone uncertain
+  | Error Owner_without_membership ->
+    Log.Server.warn
+      "The start of the server did not look at the folder of the keys of account %s: its owner \
+       has no membership, so nothing names the folder of their files"
+      (Provider_account_id.to_string id);
+    Looked_at_next
+  | Error (Folder_not_read detail) ->
+    logged_at_start id "it was not looked at" detail;
+    Looked_at_next
 ;;
 
 let remove_left_keys ~zone ~base_path =
   (* The list names the accounts to ask about and decides nothing: each is
-     read again, where the zone can be trusted, inside its call. *)
-  List.iter
-    (fun id ->
-      guarded id
-      @@ fun () ->
-      match remove_left_keys_of ~zone ~base_path id with
-      | Ok { Files.gone; stayed } ->
-        (* A file that held a key went with no request of its owner, so the
-           log of the server says it. *)
-        if gone > 0
-        then
-          Log.Server.info
-            "The start of the server removed %d of the files of the folder of the keys of account \
-             %s: none of them is the key its records say"
-            gone
-            (Provider_account_id.to_string id);
-        Option.iter (fun detail -> logged_at_start id "a file of it stays" detail) stayed
-      | Error Call_running ->
-        (* The call can be a replacement, which removes them itself, and
-           whether a file was left is not known: it is no warning. It is
-           said where a log of the default level shows it, since a key the
-           owner replaced can stay on disk until the next start. *)
-        Log.Server.info
-          "The start of the server did not look at the folder of the keys of account %s: a call \
-           of the account runs. The next start looks again, and so do a replacement of its key \
-           and its removal."
-          (Provider_account_id.to_string id)
-      | Error (Zone_not_trusted uncertain) ->
-        logged_at_start
-          id
-          "it was not looked at, the authorization zone cannot be trusted now"
-          (Authz_zone.uncertain_detail uncertain)
-      | Error Owner_without_membership ->
-        Log.Server.warn
-          "The start of the server did not look at the folder of the keys of account %s: its \
-           owner has no membership, so nothing names the folder of their files"
-          (Provider_account_id.to_string id)
-      | Error (Folder_not_read detail) -> logged_at_start id "it was not looked at" detail)
-    (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
+     read again, where the zone can be trusted, inside its call.
+
+     A zone that cannot be trusted stays so until a restart reads its files
+     again ([Authz_zone.uncertain]). The first account that finds it so is
+     the last one asked about, and the one cause is said once. *)
+  let rec from = function
+    | [] -> ()
+    | id :: after ->
+      (match guarded id (fun () -> remove_left_keys_of_and_say ~zone ~base_path id) with
+       | Looked_at_next -> from after
+       | Left_alone uncertain ->
+         Log.Server.warn
+           "The start of the server looked at no folder of keys from account %s on, %d of the \
+            accounts: the authorization zone cannot be trusted now: %s"
+           (Provider_account_id.to_string id)
+           (List.length after + 1)
+           (Authz_zone.uncertain_detail uncertain))
+  in
+  from (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
 ;;

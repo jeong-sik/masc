@@ -6,25 +6,62 @@
     its own mark, and a new member of the health vocabulary is a compile
     error here rather than a keeper that looks fine. *)
 
+val state_mark :
+  paused:bool -> Masc.Tui_decode.keeper_health_reading option -> Masc_tui_value.Mark.t option
+(** The status mark of a Keeper's health (RFC tui-one-screen-grammar §7.2):
+    running is settled, idle waiting, failing failed, and offline or paused
+    is paused. [None] is a roster that was not read -- not a health nothing
+    could name. *)
+
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string
-(** [None] is a roster that was not read -- not a health nothing could name. *)
+(** {!state_mark}'s glyph, or the not-read-yet mark for [None]. *)
 
 val failing_glyph : string
 (** Opens every line about a failing keeper's past: the FAILING group heading,
     its count in the summary, and the sentence of its last failure. *)
 
+val attention_mark : Masc_tui_keeper_list_model.attention -> Masc_tui_value.Mark.t option
+(** The status mark of a state-view group: the operator's turn, failed,
+    under way, waiting; the inactive group waits too. [None] is the group of
+    activities not read. *)
+
+val activity_mark : Masc_tui_keeper_list_model.activity -> Masc_tui_value.Mark.t option
+(** The status mark of what a Keeper is doing now (§7.2): the mark of its
+    activity's group ({!attention_mark} of
+    {!Masc_tui_keeper_list_model.group_of_activity}). A pause and offline are
+    paused instead. The word beside the mark says which. A row whose health
+    failed stands under the failing group while its activity keeps its own
+    mark. [None] is an activity that was not read. *)
+
+val offline_unexpectedly : Masc_tui_keeper_list_model.row -> bool
+(** The row is offline, and its Keeper starts on its own and is not paused:
+    it should be running. *)
+
+val row_activity_mark : Masc_tui_keeper_list_model.row -> Masc_tui_value.Mark.t option
+(** {!activity_mark} of the row's activity, except that an offline Keeper
+    which starts on its own and is not paused is a caution: it should be
+    running. *)
+
+val row_activity_glyph : Masc_tui_keeper_list_model.row -> string
+(** {!row_activity_mark}'s glyph, or the not-read-yet mark. *)
+
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
-(** The compact list's activity mark. The renderer adds the activity word.
-    Preparing and running turns wear the still under-way mark
-    ({!Masc_tui_value.Mark.Under_way}). [!] belongs to a held call alone; a
-    failed attempt in an open turn has its own mark. *)
+(** The compact list's activity mark: {!activity_mark}'s glyph, or the
+    not-read-yet mark. The renderer adds the activity word. *)
 
 val attempt_glyph : string
 (** The mark beside an attempt node in the secondary-row attempt chain. *)
 
 val badge_glyph : Masc_tui_keeper_list_model.badge -> string
-(** The mark beside a secondary activity badge; the badge always keeps its
-    own text label and count where applicable. *)
+(** The status mark (RFC tui-one-screen-grammar §7.2) beside a secondary
+    activity badge; the badge always keeps its own word and count where
+    applicable. A list that could not be read wears the read-failed mark of
+    a missing value (§6.4). *)
+
+val due_glyph : Masc_tui_keeper_list_model.due -> string
+(** The mark of a due group's heading in the time view: late is caution, held
+    paused, a coming run waiting, no schedule the dash of a value read as
+    none, and an unknown next time the unreported mark. *)
 
 val legend : (string * string) list
 (** Each mark and the word the wide surfaces print beside it, in the order a
@@ -82,7 +119,7 @@ val pulse_ok_mark : string
     mark. *)
 
 val pulse_rested_mark : string
-(** An hour whose worst turn rested. The mark of a spent quota. *)
+(** An hour whose worst turn rested. *)
 
 val pulse_failed_mark : string
 (** An hour with a failed turn. The mark of a failed attempt. *)
@@ -124,8 +161,8 @@ val grid_failing_mark : string
 val grid_paused_mark : string
 val grid_recovered_mark : string
 val grid_ok_mark : string
-(** The row marks: [!] failing, [○] paused, [✓] recovered (the cause view
-    only), [●] the rest. *)
+(** The row marks, status marks of RFC tui-one-screen-grammar §7.2: [✕]
+    failing, [‖] paused, [▲] recovered (the cause view only), [●] the rest. *)
 
 val grid_late_word : string
 val grid_held_word : string
@@ -185,6 +222,29 @@ val grid_facts_by_age_header : string
 val grid_saved_header : string
 val grid_stale_header : string
 val grid_facts_header : string
+
+type grid_column =
+  | Keeper_column
+  | Now_column
+  | Due_column
+  | Lag_column
+  | Turns_column
+  | Librarian_column
+  | Lag_bar_column
+  | Lag_bar_short_column
+  | Digest_column
+  | Gap_column
+  | Facts_by_age_column
+  | Saved_column
+  | Stale_column
+  | Facts_column
+
+val grid_column_word : ko:bool -> grid_column -> string
+(** A view's column header in the screen's language (RFC tui-one-screen-grammar
+    7.1). In English it is the [grid_*_header] word the legend names. *)
+
+val grid_next_column_word : ko:bool -> window:string -> string
+(** {!grid_next_header} in the screen's language: [다음 ▹ 12h]. *)
 (** The column headers of the memory and age views. The lag bar's header is
     [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. [saved]
     is the snapshot's saved time, not a source-revalidation result. *)

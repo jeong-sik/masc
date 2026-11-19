@@ -17,7 +17,13 @@ type 'line too_tall =
       (** a detail that does not fit whole takes no rows, so a part of it
           never reads as the whole of it *)
 
+val default_max_rows : int
+(** Default height cap (12 rows) for {!Cut_with} details so a single unusually
+    long detail row never forces every other selection to carry dozens of blank
+    lines (RFC §8). *)
+
 val fit :
+  ?cap:int ->
   budget:int ->
   rows:'row list ->
   detail:('row -> 'line list) ->
@@ -26,14 +32,16 @@ val fit :
   'line list ->
   'line list
 (** [shown], the selected row's detail, in exactly the height the tallest
-    detail among [rows] and [shown] takes, held to [budget]: a shorter
-    detail ends in [blank] lines. With [Cut_with], a detail taller than
-    [budget] is cut there. With [Fold], every detail takes no rows when the
-    tallest does not fit, whichever row is selected. The height depends on
-    [rows], [budget] and the length of [shown] only, so it is the same for
-    every selection of one list. *)
+    detail among [rows] and [shown] takes, held to [budget] (and for
+    {!Cut_with}, also capped at [cap], which defaults to {!default_max_rows}).
+    A shorter detail ends in [blank] lines. With {!Fold}, [default_max_rows]
+    is not applied unless [cap] is passed explicitly, so a narrow terminal with
+    enough vertical [budget] does not silently fold away whole-or-nothing
+    attribution records. The height depends on [rows], [budget], [cap] and the
+    length of [shown] only, so it is the same for every selection of one list. *)
 
 val fit_tallest :
+  ?cap:int ->
   budget:int ->
   tallest:int ->
   too_tall:'line too_tall ->

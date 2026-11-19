@@ -269,7 +269,7 @@ val directories_removed : unit -> unit
 - 날짜별 저장소의 칸은 읽는 쪽만 만든다. 쓰는 쪽과 지우는 쪽은 있는 칸만 돈다. prune 은 디스크의 Keeper 디렉터리마다 저장소를 연다(`prune_listed_stores_bound`). 여는 쪽마다 칸을 만들면 아무도 읽지 않는 디렉터리에도 칸이 생긴다. 결정 기록은 다르다. 쓰는 쪽도 기록의 이름으로 칸을 찾으므로, 쓸 때 빈 칸이 생긴다(`Keeper_row_facts.appending_decision`). 값은 채우지 않는다. 칸 수는 process 가 읽거나 쓴 기록 파일 수다.
 - 칸은 저장소를 쓰는 process 만 든다. 칸을 고치는 것은 그 process 의 쓰기뿐이고, 다른 process 가 쓴 줄은 칸에 닿지 않는다. TUI 는 서버와 다른 process 인데 같은 함수로 TurnRecord 파일을 읽는다(`bin/masc_tui_context_state.ml` 의 `load`). 값을 들면 TUI 는 처음 읽은 줄을 끝까지 보인다.
   - 「이 process 가 혼자 쓴다」는 사실 둘로 이루어진다. 하나는 process 의 사실이다. 이 process 가 writer lease 를 쥐었는가. 다른 하나는 저장소의 사실이다. 이 저장소의 파일을 lease 를 쥔 process 만 바꾸는가. 둘 다 맞을 때만 `read_fact` 가 값을 든다.
-  - process 의 사실은 process 가 말한다(`Fact_cell.keep_in_this_process`). 한 번 말하면 거두지 않는다. 저장소의 사실과 결정 기록의 행이 같은 말을 본다. 서버는 BasePath writer lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). 이 함수는 받은 lease 가 지금 이 process 가 쥔 lease 일 때만 말한다. 놓은 lease 로 부르면 `Lease_not_held` 를 돌려주고 아무 말도 하지 않는다.
+  - process 의 사실은 process 가 말한다(`Fact_cell.keep_in_this_process`). 한 번 말하면 거두지 않는다. 저장소의 사실과 결정 기록의 행이 같은 말을 본다. lease 를 쥐고 Keeper 를 돌리는 실행 파일 둘이 lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). HTTP 서버(`bin/main_eio.ml`)와 stdio 런타임(`bin/main_stdio_eio.ml`)이다. 이 함수는 받은 lease 가 지금 이 process 가 쥔 lease 일 때만 말한다. 놓은 lease 로 부르면 `Lease_not_held` 를 돌려주고 아무 말도 하지 않는다.
   - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord, execution receipt, 도구 호출 원장, Keeper metrics 다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
   - 둘 중 하나라도 아니면 전처럼 매번 파일을 읽는다. 칸도 등록부 항목도 만들지 않는다.
   - `Fact_cell.keep_in_this_process` 자체는 누구나 부를 수 있다. `Fact_cell` 은 lease 를 모르고, 서버를 대신하는 시험 실행 파일도 이 함수를 부른다. lease 를 쥐지 않은 실행 파일이 부르면 #53145 의 결함이 돌아온다. 그래서 TUI 가 쓰는 진입점을 시험으로 고정한다(§5).
@@ -279,6 +279,10 @@ val directories_removed : unit -> unit
 - 그래서 L2 는 등록부 key 를 file system 이 그 디렉터리를 부르는 이름으로 만든다(`File_system_named.name`). 이 규칙은 `lib/core` 의 `File_system_named` 에 있고, 저장소 등록부와 결정 기록 칸의 표가 같이 쓴다. 디렉터리가 있으면 경로 전체를 `realpath` 로 푼 이름이다. symlink 를 따라가고, 조각마다 디렉터리 항목의 이름이 온다. 그래서 두 글자가 같은 key 를 얻는 것과 한 디렉터리인 것이 같은 말이다. 대소문자를 접는지는 file system 이 답한다. 디렉터리가 아직 없으면 있는 가장 깊은 조상을 풀고 나머지 조각을 적은 글자대로 붙인다. 줄 쓰기가 경로 mutex 를 고르는 규칙과 같다.
 - handle 은 등록부 항목을 들지 않는다. 쓰거나 지울 때마다 자기 저장소의 항목을 찾는다. Keeper 저장소의 handle 은 디렉터리 글자로 process 가 끝날 때까지 기억된다(`keeper_types_support.ml` 의 `*_store_cache`). 열 때 항목을 정하면, 디렉터리가 없을 때 연 handle 이 그 뒤에도 옛 글자의 항목을 쓴다.
 - 있는 디렉터리의 이름은 적은 글자마다 한 번만 묻고 기억한다. 그 뒤의 쓰기와 읽기에는 파일 system call 이 없다. 없는 디렉터리는 기억하지 않고 쓸 때마다 다시 묻는다. 그 답은 디렉터리가 생기면 바뀔 수 있다. 첫 쓰기가 디렉터리를 만들므로 다시 묻는 것은 그때까지다. 쓰기가 디렉터리를 만들었으면 쓴 뒤에 이름을 다시 묻는다. 적은 글자가 `없는 조각/..` 을 지나면 만든 뒤의 이름이 달라진다. 항목이 달라졌으면 두 항목의 칸을 비운다.
+- handle 을 얻는 일도 파일을 보지 않는다. Keeper 저장소의 위치(`Keeper_types_support.keeper_store_location`)와 결정 기록의 경로(`keeper_decision_log_path`)는 경로일 뿐이다. 전에는 이 함수들이 부를 때마다 Keepers 디렉터리가 있는지 확인했다. fiber 안에서 그 확인은 Eio `stat` 이고, worker thread 가 답하는 동안 fiber 는 차례를 내놓는다. 든 값을 읽는 쪽이 저장소를 열 때마다 이 값을 치렀다.
+  - 저장소 밖에서 쟀다(load average 약 200, 확인 한 번의 최솟값/중앙값). `Fs_compat.file_exists` 는 49/83 µs, `Sys.file_exists` 는 2.8/3.6 µs 다. 옆에서 한 번에 1 ms 씩 도는 fiber 하나가 있으면 `Fs_compat.file_exists` 는 2.6/3.2 ms 가 된다. 기다리는 동안 다른 fiber 가 돌기 때문이다.
+  - 든 값을 읽는 동안 옆 fiber 가 한 번도 돌지 않는 것을 시험으로 고정한다(`test_keeper_turn_tool_audit_kept`, `test_keeper_execution_receipt_kept`, `test_keeper_decision_row_kept`). 기다리는 호출이 하나라도 끼면 옆 fiber 가 돈다.
+  - Keepers 디렉터리는 쓰는 쪽이 만든다. 날짜별 저장소는 append 가, 결정 기록은 `append_decision_record` 가, feedback 기록은 `Keeper_response_feedback.record` 가 만든다.
 - 기억은 디렉터리를 지운 쪽이 `Dated_jsonl.directories_removed` 로 지운다. 이 함수는 기억한 이름을 모두 지우고 모든 저장소의 칸을 비운다. 어느 디렉터리인지 받지 않는다. 받은 디렉터리만 지우면 그 디렉터리를 가리키던 다른 글자(symlink, 대소문자)가 옛 항목에 남는다. 지우는 일은 드물고, 비운 칸은 다음 읽기 한 번이 채운다. 지우기와 겹친 쓰기는 자기 줄이 어느 디렉터리로 갔는지 모른다. 그래서 쓴 뒤에 이름을 다시 묻고, 항목이 달라졌으면 두 항목의 칸을 비운다.
 - 저장소 경로(`Store.dir`)는 부르는 쪽이 적은 글자 그대로 둔다. 경로 글자를 바꾸면 그 글자를 디스크에 적어 둔 곳이 어긋난다. 도구 호출 읽기 색인은 날짜 파일 경로를 cursor 의 key 로 둔다(`keeper_tool_call_index.ml:70-71`, `:1038-1040`). base path 에 symlink 가 낀 설치에서 글자가 바뀌면 색인이 모든 날짜 파일을 처음 보는 파일로 읽는다.
 - 결정 기록 칸은 `Keeper_row_facts` 의 표에 둔다. key 는 결정 기록 파일을 file system 이 부르는 이름이다. 저장소 디렉터리와 같은 규칙으로 얻는다. 줄 쓰기의 경로 mutex 등록부에는 칸을 걸 수 없다. 그 등록부는 쓰는 쪽이 없으면 항목을 지우고(`fs_compat_base_io.ml:263-268`), 경로를 고를 때마다 `realpath` 를 돈다.
@@ -391,7 +395,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 | L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
 | W | 줄 쓰기 함수가 규칙 11 을 지킨다. 병합됐다(#52991). 그 리뷰의 후속은 #53017 이다 | `test_fs_compat_fd_cache`, `test_fs_compat_append_jsonl_atomicity` |
 | L2 | 먼저 깔 것이 셋이다. 저장소 선언의 곁 파일 이름(§3.4), file system 이 부르는 이름으로 만든 등록부 key(§3.2), 따로 만든 잠금 handle 의 읽기 전용 타입(§3.2). 그 위에 칸(`Fact_cell`)과 `Dated_jsonl` 의 사실, 값 넷(최근 TurnRecord, 가장 새 온전한 receipt, 도구 호출 16줄, 결정 기록 마지막 행)을 둔다. `Dated_jsonl` 의 쓰는 함수 둘이 등록부 항목의 칸을 맞춘다. 결정 기록 칸의 표(`Keeper_row_facts`). 결정 기록 tail 의 결과 읽기(§3.4). 지우는 쪽이 끝나는 모든 경로의 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 칸 정체 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, 취소 시험, 지우다 실패하는 시험, `step` 단위 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다. 채우기 시도 수와 들어간 수를 칸마다 적는다. 어느 칸의 들어간 수가 늘 0 이면 그 칸은 채워지지 않는 것이다 |
-| L3a | 가장 최근 Turn tool audit 행 칸(`Dated_jsonl.newest_selected`). metrics 저장소를 쓰는 곳을 따라가 보고 kept 로 적는다. 읽는 쪽은 Keeper 행·briefing·Keeper 상세의 tool audit 다. `Tool_audit_cache` 를 지운다 | 차분 시험(회전과 prune 포함), heartbeat 시험 |
+| L3a | 가장 최근 Turn tool audit 행 칸(`Dated_jsonl.newest_selected`). metrics 저장소를 쓰는 곳을 따라가 보고 kept 로 적는다. 읽는 쪽은 Keeper 행·briefing·Keeper 상세의 tool audit 다. `Tool_audit_cache` 를 지운다 | 차분 시험(회전, 날짜 prune, 쓰기 뒤의 바이트 prune 포함), heartbeat 시험, purge 뒤 heartbeat 만 쓴 후계 시험 |
 | L3b | metrics 끝 120행 칸. 읽는 쪽은 최근 도구 이름, 최근 활동, 대시보드의 metrics 창이다 | 차분 시험. 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
 | L3c | `Dated_jsonl.latest_view` 를 지운다. L3a 뒤로 부르는 곳이 없다 | 지운 이름을 `rg` 로 찾으면 0 |
 | L4 | 지우기: 행 helper 의 Current/Reuse 구분, 행 몫의 audit 10초 캐시, `dt_profile`, 행 안의 중복 읽기. 그 뒤 남은 행 일(승인 audit, quarantine 원장)을 잰다 | 지운 이름을 `rg` 로 찾으면 0. 남은 행 일의 sub-op 를 로그로 센다 |
@@ -436,7 +440,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - TUI 의 진입점도 본다. `test_tui_context_state` 는 TUI 가 링크하는 모듈을 그대로 링크하고, TUI 처럼 lease 를 쥐었다고 말하지 않는다. `Masc_tui_context_state.load` 를 부르고, 파일에 TurnRecord 한 줄을 덧붙이고, 다시 부른다. 두 번째 답이 덧붙인 줄이어야 한다.
 - 다른 process 가 쓰는 저장소는 말한 process 에서도 들지 않는다. `test_dated_jsonl_kept_facts` 는 cost 기록 저장소에서 같은 순서를 돌린다. 값을 드는 저장소의 목록도 같은 시험이 고정한다. 목록에 저장소를 더하면 이 시험이 바뀐다.
 - 놓은 lease 는 말하지 못한다(`test_server_startup_takeover`).
-- 서버가 실제로 말하는지는 시험으로 고정하지 못했다. 말하는 줄은 `bin/main_eio.ml` 에 있고 시험은 실행 파일을 링크하지 못한다. 그 줄이 빠지면 서버는 매번 파일을 읽는다. 값은 맞고 느려진다. `masc_dated_jsonl_fact_reads_total` 의 `read_not_kept` 가 늘어나는 것으로 보인다.
+- 서버가 실제로 말하는지는 시험으로 고정하지 못했다. 말하는 줄은 `bin/main_eio.ml` 과 `bin/main_stdio_eio.ml` 에 있고 시험은 실행 파일을 링크하지 못한다. 그 줄이 빠지면 그 실행 파일은 매번 파일을 읽는다. stdio 런타임이 L3a 까지 그랬다. 값은 맞고 느려진다. `masc_dated_jsonl_fact_reads_total` 의 `read_not_kept` 가 늘어나는 것으로 보인다.
 
 **파일을 열지 않는다는 시험.** 값을 채운 뒤 그 파일을 지우고 행을 다시 만든다. 두 번째 행이 첫 번째와 같으면 읽는 쪽이 파일을 열지 않은 것이다. 이 시험은 §7 의 한계(서버가 돌 때 손으로 지운 파일은 재시작까지 안 보인다)도 그대로 보여 준다.
 
@@ -525,6 +529,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - 값을 드는 것은 서버 process 뿐이다. TUI 가 파일에서 직접 읽는 context 는 이 RFC 로 빨라지지 않는다.
 - 디렉터리가 없는 저장소를 읽은 값("줄 없음")도 든다. 그 뒤 디렉터리를 밖에서 통째로 옮겨 넣으면 그 저장소의 다음 쓰기나 재시작, purge 까지 "줄 없음"으로 보인다. 손으로 지우는 경우와 같은 부류다.
 - 서버가 도는 동안 이 저장소를 손으로 지우면, 메모리 값은 그 저장소의 다음 쓰기나 재시작까지 옛 행을 보인다. 헌법 `runtime_data` 의 "지우고 새로 한다"는 멈추고 지우고 다시 띄우는 것이고, 이 RFC 는 그 순서를 그대로 지원한다. 서버가 돌 때는 대시보드 purge 로 지운다. purge 는 칸을 비운다.
+- purge 는 파일을 다 지운 뒤에, 끝나는 모든 경로에서 칸을 비운다. 그 사이에는 지워지는 Keeper 의 든 값이 지워진 파일의 것이다. 그 Keeper 의 행은 이때 지워진 것과 아직 안 지워진 것이 섞여 있고, purge 가 끝나면 행이 없어진다. 그래서 저장소마다 따로 비우지 않는다.
 - 다른 코드가 이 저장소를 열어 바로 쓸 수 있다. `Dated_jsonl.open_store`·`append` 와 `Store.keeper` 는 공개다(`dated_jsonl.mli:72`, `:99`, `dated_jsonl_store.mli:76`). 그러면 메모리 값이 틀린다. 차분 시험은 이름 붙인 쓰는 함수만 부른다. §8.4 가 이 구멍을 다룬다.
 - 칸은 지우지 않는다. 한 번 만든 칸은 process 가 끝날 때까지 남는다. 수의 상한은 그동안 읽은 저장소 수다. Keeper 하나에 넷(결정 기록, receipt, TurnRecord, metrics), workspace 하나에 하나다. purge 한 Keeper 의 칸은 `Unfilled` 로 남는다.
 - reader 가 읽을 때마다 남기던 보고가 준다. 깨진 줄이나 읽기 오류를 세는 곳은 지금 행을 만들 때마다 같은 줄을 다시 센다. 칸에서 읽으면 채울 때만 센다. L2 에서 그 수를 쓰는 화면과 알림을 찾아 PR 에 적는다.

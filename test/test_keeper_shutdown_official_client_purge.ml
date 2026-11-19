@@ -177,6 +177,55 @@ let test_purge_forgets_the_kept_turn_record () =
   check string "and the kept row with it" "read, no row" (newest ())
 ;;
 
+(* The newest turn's tool audit is held in memory too
+   ([Keeper_status_metrics.latest_tool_audit_snapshot_from_files]), and a
+   heartbeat row leaves a held audit as it is. A same-name successor that has
+   written only a heartbeat has no turn: an audit still held after the purge
+   would be the purged Keeper's. *)
+let test_purge_forgets_the_kept_tool_audit () =
+  with_base_path @@ fun config base_path ->
+  let oauth_source = Filename.concat base_path "operator-oauth.json" in
+  let account_home = Filename.concat base_path "muse-account" in
+  write_runtime_toml
+    base_path
+    (runtime_toml ~oauth_source ~account_home
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+  let turn =
+    `Assoc
+      (Masc.Keeper_metrics_record.fields Masc.Keeper_metrics_record.Turn
+       @ [ "ts", `String "2026-11-19T00:00:01Z"
+         ; "channel", `String "turn"
+         ; "tool_call_count", `Int 1
+         ; "tools_used", `List [ `String "the_purged_keepers_tool" ]
+         ])
+  in
+  let heartbeat =
+    `Assoc
+      (Masc.Keeper_metrics_record.fields Masc.Keeper_metrics_record.Heartbeat
+       @ [ "ts", `String "2026-11-19T00:00:02Z"; "channel", `String "heartbeat" ])
+  in
+  let tools () =
+    match
+      Masc.Keeper_status_metrics.latest_tool_audit_snapshot_from_files config ~keeper_name
+    with
+    | Ok snapshot ->
+      Ok
+        (Option.map
+           (fun (snapshot : Masc.Keeper_status_metrics.tool_audit_snapshot) ->
+              snapshot.latest_tool_names)
+           snapshot)
+    | Error error -> Error (Dated_jsonl.read_error_to_string error)
+  in
+  let answer = result (option (list string)) string in
+  Masc.Keeper_types_support.append_keeper_metrics config keeper_name turn;
+  check answer "the turn's tools" (Ok (Some [ "the_purged_keepers_tool" ])) (tools ());
+  purge config;
+  check bool "the purge removes the metrics store" false
+    (Sys.file_exists (Masc.Keeper_types_support.keeper_metrics_dir config keeper_name));
+  Masc.Keeper_types_support.append_keeper_metrics config keeper_name heartbeat;
+  check answer "the successor has no turn" (Ok None) (tools ())
+;;
+
 (* The purge removes the Keeper's store directories with plain [rmdir]. A
    same-name successor in the same process writes into them again: nothing
    remembers that a directory was once made (#53279). *)
@@ -366,6 +415,8 @@ let () =
             test_a_same_name_successor_writes_after_the_purge
         ; test_case "purge forgets the kept decision row" `Quick
             test_purge_forgets_the_kept_decision_row
+        ; test_case "purge forgets the kept tool audit" `Quick
+            test_purge_forgets_the_kept_tool_audit
         ; test_case "purge omits a home it can no longer derive" `Quick
             test_purge_omits_home_it_cannot_derive
         ; test_case

@@ -218,18 +218,21 @@ let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   | Idle -> text "대기 중" "idle"
   | Paused -> text "일시정지" "paused"
   | Offline -> text "오프라인" "offline"
-  | Unknown -> text "미확인" "unknown"
+  (* An activity that was not read has no word: the not-read-yet mark says it
+     (RFC tui-one-screen-grammar §6.4), and the row's detail says why. *)
+  | Unknown -> ""
 
-let keeper_activity_style (activity : Keeper_list_model.activity) =
-  match activity with
-  | Held_call -> Theme.bad ()
-  | Question | Confirmation | Offline | Attempt_failed -> Theme.warn ()
-  | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
-  | Tool_waiting -> Theme.warn ()
-  | Model_waiting -> Theme.info ()
-  | Delegate_result -> Theme.category Theme.Slot_2
-  | Verifying -> Theme.category Theme.Slot_1
-  | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
+(* The row's activity word. An offline Keeper that starts on its own wears the
+   caution mark, and its word says why, in the NOW cell's ten cells. *)
+let keeper_row_activity_word ~ko (row : Keeper_list_model.row) =
+  if Masc_tui_keeper_mark.offline_unexpectedly row then (if ko then "자율 꺼짐" else "auto off")
+  else keeper_activity_word ~ko (Keeper_list_model.primary_activity_of_row row)
+
+(* The row's activity colour is its mark's (RFC tui-one-screen-grammar §7.2). *)
+let keeper_activity_style (row : Keeper_list_model.row) =
+  match Masc_tui_keeper_mark.row_activity_mark row with
+  | Some mark -> Theme.status_tone mark
+  | None -> Theme.recede ()
 
 let keeper_badge_text ~ko (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
@@ -461,18 +464,18 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   in
   let status_color =
     match operator_disposition with
-    | Some _ -> Theme.bad ()
-    | None -> keeper_activity_style activity
+    | Some _ -> Theme.status_tone Masc_tui_value.Mark.Yours
+    | None -> keeper_activity_style row
   in
   let glyph =
     match operator_disposition with
     | Some _ -> Masc_tui_keeper_mark.activity_glyph Held_call
-    | None -> Masc_tui_keeper_mark.activity_glyph activity
+    | None -> Masc_tui_keeper_mark.row_activity_glyph row
   in
   let status_word =
     match operator_disposition with
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
-    | None -> keeper_activity_word ~ko activity
+    | None -> keeper_row_activity_word ~ko row
   in
   status_color ^ glyph ^ " "
   ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
@@ -746,8 +749,7 @@ let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
   else if List.for_all (function
     | Masc_tui_keeper_pulse.Half_hour_unknown -> true
     | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false) slots then
-    Masc_tui_keeper_strip.history_unknown_label ~ko:(state.ui_language = Lang_ko)
-      ~cells:grid.side_cells
+    Masc_tui_keeper_strip.history_unknown_label ~cells:grid.side_cells
   else String.concat ""
     (List.map
        (fun half_hour ->
@@ -765,7 +767,7 @@ let grid_wake_window state ~style slots =
   match state.keeper_list_view with
   | Keeper_list_model.By_state -> Masc_tui_keeper_strip.wake_summary ~ko slots
   | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
-      Masc_tui_keeper_strip.wake_strip ~ko ~style slots
+      Masc_tui_keeper_strip.wake_strip ~style slots
 
 (* Scheduled wakes per half hour, the now slot first. Unknown windows get
    one label; the shared renderer keeps mixed unknown and empty slots apart. *)
@@ -1197,13 +1199,18 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
         let parts = (if retry > 0 then [Printf.sprintf "▹ retry %d" retry] else [])
           @ (if wait > 0 then [Printf.sprintf "◌ wait %d" wait] else [])
           @ (if unknown > 0 then [Printf.sprintf "? %d" unknown] else []) in
-        Printf.sprintf "! %d failing" count, String.concat "  " parts, ""
+        (* The cause groups wear the row marks of their verdicts. *)
+        Printf.sprintf "%s %d failing" Keeper_mark.grid_failing_mark count,
+        String.concat "  " parts, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
-        Printf.sprintf "✓ %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_recovered_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
-        Printf.sprintf "● %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_ok_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused ->
-        Printf.sprintf "○ %d" count, group_wake_strip state grid ~now members, ""
+        Printf.sprintf "%s %d" Keeper_mark.grid_paused_mark count,
+        group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_state _ | Keeper_list_model.Group_due _ ->
         string_of_int count, group_wake_strip state grid ~now members, ""
     | Keeper_list_model.Group_memory _ ->
@@ -1302,41 +1309,43 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
   let window = Grid.window_label ~slots:grid.side_cells in
   let side = grid.side_cells > 0 in
   let mem = grid.mem_cells > 0 in
+  let word = Keeper_mark.grid_column_word ~ko:(state.ui_language = Lang_ko) in
   let lag_bar =
-    if Grid.strip_cells grid >= grid_lag_bar_header_cells then Keeper_mark.grid_lag_bar_header
-    else Keeper_mark.grid_lag_bar_short_header
+    if Grid.strip_cells grid >= grid_lag_bar_header_cells then word Keeper_mark.Lag_bar_column
+    else word Keeper_mark.Lag_bar_short_column
   in
   let pulse_header word = grid_spread ~cells:grid.side_cells word Grid.slot_label in
   let name, pulse, now_word, strip, due, right =
     match columns with
     | Axis_row.Activity_columns ->
-        ( Keeper_mark.grid_keeper_header
+        ( word Keeper_mark.Keeper_column
         , pulse_header (Keeper_mark.grid_pulse_header ~window)
-        , Keeper_mark.axis_now_header
+        , word Keeper_mark.Now_column
         , (match state.keeper_list_view with
            | Keeper_list_model.By_state ->
                ui_text state ~ko:("예약 확인 · " ^ window) ~en:("known wakes · " ^ window)
            | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
-               Keeper_mark.grid_next_header ~window)
-        , Keeper_mark.grid_due_header
-        , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
+               Keeper_mark.grid_next_column_word ~ko:(state.ui_language = Lang_ko) ~window)
+        , word Keeper_mark.Due_column
+        , Message_layout.pad_left (word Keeper_mark.Lag_column) (grid.mem_cells - grid_level_cells) )
     | Axis_row.Memory_columns ->
-        ( Keeper_mark.grid_keeper_header
-        , pulse_header (Keeper_mark.grid_pulse_header ~window:(Keeper_mark.grid_turns_word ^ " " ^ window))
-        , Keeper_mark.grid_librarian_header
+        ( word Keeper_mark.Keeper_column
+        , pulse_header
+            (Keeper_mark.grid_pulse_header ~window:(word Keeper_mark.Turns_column ^ " " ^ window))
+        , word Keeper_mark.Librarian_column
         , lag_bar
-        , Keeper_mark.grid_digest_header
-        , Message_layout.pad_left Keeper_mark.grid_gap_header grid.mem_cells )
+        , word Keeper_mark.Digest_column
+        , Message_layout.pad_left (word Keeper_mark.Gap_column) grid.mem_cells )
     | Axis_row.Age_columns ->
         ( (if grid.name_cells >= grid_facts_by_age_name_cells then
-             fit_width Keeper_mark.grid_keeper_header grid_facts_by_age_offset
-             ^ Keeper_mark.grid_facts_by_age_header
-           else Keeper_mark.grid_keeper_header)
+             fit_width (word Keeper_mark.Keeper_column) grid_facts_by_age_offset
+             ^ word Keeper_mark.Facts_by_age_column
+           else word Keeper_mark.Keeper_column)
         , Age_ladder.tick_line ~column:grid.side_cells
-        , Keeper_mark.grid_saved_header
+        , word Keeper_mark.Saved_column
         , lag_bar
-        , Keeper_mark.grid_stale_header
-        , Message_layout.pad_left Keeper_mark.grid_facts_header grid.mem_cells )
+        , word Keeper_mark.Stale_column
+        , Message_layout.pad_left (word Keeper_mark.Facts_column) grid.mem_cells )
   in
   String.concat ""
     [ String.make Grid.gutter_cells ' '
@@ -1577,13 +1586,12 @@ let keeper_view_tabs ~ko ~cols ~sort ~density view =
     let pad = max 0 (inner - used) in
     lead ^ tabs ^ String.make pad ' ' ^ after
 
-let keeper_state_heading_style = function
-  | Keeper_list_model.Attention -> Theme.bad ()
-  | Keeper_list_model.Failing -> Theme.warn ()
-  | Keeper_list_model.Active -> Theme.ok ()
-  | Keeper_list_model.Waiting -> Theme.info ()
-  | Keeper_list_model.Inactive -> Theme.recede ()
-  | Keeper_list_model.Unobserved -> Theme.warn ()
+(* A state group's heading takes the colour of the group's mark, the one its
+   rows wear (RFC tui-one-screen-grammar §7.2). *)
+let keeper_state_heading_style attention =
+  match Masc_tui_keeper_mark.attention_mark attention with
+  | Some mark -> Theme.status_tone mark
+  | None -> Theme.recede ()
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Group_state attention -> keeper_state_heading_style attention
@@ -1652,9 +1660,7 @@ let keeper_group_heading_text ~ko ~available_cells rows group count =
         | Keeper_list_model.Due_none -> "NO SCHEDULE"
         | Keeper_list_model.Due_unknown -> "SCHEDULE UNKNOWN"
       in
-      Printf.sprintf "%s %s %d"
-        (Masc_tui_keeper_mark.badge_glyph Keeper_list_model.Badge_schedule)
-        label count
+      Printf.sprintf "%s %s %d" (Masc_tui_keeper_mark.due_glyph due) label count
   | Keeper_list_model.Group_memory follow ->
       let label =
         match follow with
@@ -1866,11 +1872,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
 (* The Keeper's name and current activity mark + word, embedded on the left of
    the Story window's top rule. *)
 let keeper_story_lead ~ko (row : Keeper_list_model.row) =
-  let activity = Keeper_list_model.primary_activity_of_row row in
   Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
-  ^ keeper_activity_style activity
-  ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
-  ^ keeper_activity_word ~ko activity ^ Ansi.reset
+  ^ keeper_activity_style row
+  ^ Masc_tui_keeper_mark.row_activity_glyph row ^ " "
+  ^ keeper_row_activity_word ~ko row ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
@@ -1928,10 +1933,12 @@ let rec matrix_letter index =
   let last = String.make 1 (Char.chr (Char.code 'A' + index mod 26)) in
   if index < 26 then last else matrix_letter (index / 26 - 1) ^ last
 
-let matrix_header matrix =
-  String.make Grid.gutter_cells ' ' ^ fit_width "keeper" matrix.matrix_name_cells ^ " "
+let matrix_header ~ko matrix =
+  String.make Grid.gutter_cells ' '
+  ^ fit_width (Keeper_mark.grid_column_word ~ko Keeper_mark.Keeper_column) matrix.matrix_name_cells
+  ^ " "
   ^ String.concat "" (List.mapi (fun index _ -> fit_width (matrix_letter index) matrix.matrix_cell_cells) matrix.matrix_ids)
-  ^ " " ^ fit_width "last" 5
+  ^ " " ^ fit_width (if ko then "최근" else "last") 5
   ^ fit_width ("◂ " ^ Grid.window_label ~slots:matrix.matrix_pulse_slots) matrix.matrix_pulse_slots
 
 let matrix_keeper_row matrix ~now row =
@@ -2215,17 +2222,16 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
             ]
         ]
       in
-      let activity = Keeper_list_model.primary_activity_of_row row in
       let badge_plain =
-        Masc_tui_keeper_mark.activity_glyph activity ^ " "
-        ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
+        Masc_tui_keeper_mark.row_activity_glyph row ^ " "
+        ^ keeper_row_activity_word ~ko:(state.ui_language = Lang_ko) row
       in
       let badge_cells = Message_layout.display_width badge_plain in
       let heading =
         if (not compact) && width >= badge_cells + 6 then
           let name_cells = width - badge_cells - 2 in
           Ansi.bold ^ Message_layout.fit_width name name_cells ^ Ansi.reset
-          ^ "  " ^ keeper_activity_style activity ^ badge_plain ^ Ansi.reset
+          ^ "  " ^ keeper_activity_style row ^ badge_plain ^ Ansi.reset
         else
           Ansi.bold ^ fit name ^ Ansi.reset
       in
@@ -2948,9 +2954,11 @@ let render_keeper_axes (state : state) =
   box_line buf cols "";
   (match matrix, shape with
    | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
-       box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (matrix_header ~ko:(state.ui_language = Lang_ko) matrix)
    | None, Axis_row.Wall_columns ->
-       box_line buf cols (Masc_tui_keeper_wall.header ~cols:inner ~now:now_unix);
+       box_line buf cols
+         (Masc_tui_keeper_wall.header ~ko:(state.ui_language = Lang_ko) ~cols:inner ~now:now_unix);
        box_line buf cols (Masc_tui_keeper_wall.fleet ~ko:(state.ui_language = Lang_ko)
          ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
@@ -4810,7 +4818,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let recurrence_words =
                  List.map
                    (fun (row : schedule_row) ->
-                      Terminal_text.single_line row.sch_recurrence_summary)
+                      Terminal_text.single_line
+                        (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+                           ~summary:row.sch_recurrence_summary row.sch_recurrence))
                    rows
                in
                (* Every line carries a two-cell lead before the table, so the
@@ -4881,7 +4891,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ; krow_received =
                          occurrence_clock row.sch_stimulus_recorded_at_iso
                      ; krow_recurrence =
-                         Terminal_text.single_line row.sch_recurrence_summary
+                         Terminal_text.single_line
+                           (Masc_tui_schedule_recurrence.text ~ko ~now:(Unix.gettimeofday ())
+                              ~summary:row.sch_recurrence_summary row.sch_recurrence)
                      ; krow_by = Terminal_text.single_line row.sch_requested_by
                      ; krow_requested =
                          Terminal_text.column_timestamp row.sch_requested_at_iso

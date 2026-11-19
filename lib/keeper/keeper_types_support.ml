@@ -20,10 +20,15 @@ let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir c
 let metrics_store_cache : (string, Keeper_metrics_storage.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
-(* Where one of a keeper's date-split stores lives. The keepers directory is
-   made first, as every store accessor here has always done. *)
+(* Where one of a keeper's date-split stores lives: a path, with no look at
+   the file system. A store's append makes its directories, and a read of a
+   store that is not there reads no row.
+
+   This made the keepers directory first, with an existence check each time.
+   In a fiber that check is an Eio [stat], which a worker thread answers
+   while the fiber waits for its next turn. Every read of a fact a store
+   keeps in memory ([Dated_jsonl.read_fact]) paid it to open the store. *)
 let keeper_store_location config name store =
-  ignore (keeper_dir_ config : string);
   Dated_jsonl.Store.keeper (Workspace.dated_store_root config) ~keeper:name store
 
 let keeper_metrics_storage config name =
@@ -218,16 +223,22 @@ let is_internal_history_source = function
   | Direct_user | Direct_assistant -> false
   | World_state_prompt | Internal_assistant -> true
 
+(* The two records a Keeper keeps in the keepers directory: paths, with no
+   look at the file system, for the same reason as [keeper_store_location].
+   The newest decision row is kept in memory ([Keeper_row_facts]) and its
+   readers ask for it by this path on every Keeper row. The records' writers
+   make the directory ([append_decision_record],
+   [Keeper_response_feedback.record]). *)
 let keeper_decision_log_path config name =
   Filename.concat
-    (keeper_dir_ config)
+    (Workspace.keepers_runtime_dir config)
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Decision_log)
 
 let keeper_feedback_log_path config name =
   Filename.concat
-    (keeper_dir_ config)
+    (Workspace.keepers_runtime_dir config)
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Feedback_log)
@@ -305,6 +316,8 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
    kept row over the row it wrote. The runtime history reads every Keeper's
    decision log too, so a row written moves it. *)
 let append_decision_record config name json =
+  (* [Fs_compat.append_lines] makes no directory. *)
+  ignore (keeper_dir_ config : string);
   let path = keeper_decision_log_path config name in
   let row = jsonl_row json in
   Keeper_row_facts.appending_decision ~path ~row (fun () ->

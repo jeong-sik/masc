@@ -23,6 +23,14 @@ module Redraw = struct
   let measuring measure =
     let noted = Domain.DLS.get earliest in
     Fun.protect ~finally:(fun () -> Domain.DLS.set earliest noted) measure
+
+  (* Built inside a measurement, so the frame's own noting is put back
+     whether [build] returns or raises; what [build] noted is handed back. *)
+  let deferred build =
+    measuring (fun () ->
+        Domain.DLS.set earliest None;
+        let built = build () in
+        (built, Domain.DLS.get earliest))
 end
 
 module Instant = struct
@@ -312,6 +320,35 @@ module Ongoing = struct
     let since = since_on one_unit
     let until = until_on one_unit
   end
+end
+
+module Interval = struct
+  let seconds_per_minute = 60
+  let seconds_per_hour = 60 * seconds_per_minute
+  let seconds_per_day = 24 * seconds_per_hour
+
+  let text seconds =
+    let lossy () = Ongoing.text (Float.of_int seconds) in
+    if seconds <= 0 then "0s"
+    else if seconds < seconds_per_minute then Printf.sprintf "%ds" seconds
+    else if seconds mod seconds_per_day = 0 then
+      Printf.sprintf "%dd" (seconds / seconds_per_day)
+    else if seconds >= seconds_per_day then
+      if seconds mod seconds_per_hour = 0 then
+        Printf.sprintf "%dd%02dh" (seconds / seconds_per_day)
+          (seconds mod seconds_per_day / seconds_per_hour)
+      else lossy ()
+    else if seconds mod seconds_per_hour = 0 then
+      Printf.sprintf "%dh" (seconds / seconds_per_hour)
+    else if seconds >= seconds_per_hour then
+      if seconds mod seconds_per_minute = 0 then
+        Printf.sprintf "%dh%02dm" (seconds / seconds_per_hour)
+          (seconds mod seconds_per_hour / seconds_per_minute)
+      else lossy ()
+    else if seconds mod seconds_per_minute = 0 then
+      Printf.sprintf "%dm" (seconds / seconds_per_minute)
+    else
+      Printf.sprintf "%dm%02ds" (seconds / seconds_per_minute) (seconds mod seconds_per_minute)
 end
 
 module Mark = struct

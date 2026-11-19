@@ -15,7 +15,8 @@
        be read, and [latest_json] reads it leniently, as it did before there
        was a fact.
     5. A [.jsonl] file whose name begins with a dot is not the store's. The
-       lenient read took its rows; both readers now pass the file over. *)
+       lenient read took its rows; both readers now pass the file over.
+    6. A kept receipt is answered without the fiber giving up its turn. *)
 
 open Alcotest
 open Masc
@@ -121,6 +122,44 @@ let test_a_kept_receipt_is_read_without_the_files () =
     check_both_readers config "once the removal is told" None)
 ;;
 
+(* How many turns a fiber that is ready to run gets while [read] is called
+   fifty times. Fibers of one domain take turns only where one of them
+   waits, so a read that never waits gives the fiber beside it none. A read
+   that asks the file system through Eio waits for a worker thread, and the
+   fiber beside it runs. *)
+let turns_of_a_fiber_beside read =
+  Eio.Switch.run
+  @@ fun sw ->
+  let turns = ref 0 in
+  let stop = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+    while not !stop do
+      incr turns;
+      Eio.Fiber.yield ()
+    done);
+  Eio.Fiber.yield ();
+  let before = !turns in
+  for _ = 1 to 50 do
+    read ()
+  done;
+  let during = !turns - before in
+  stop := true;
+  during
+;;
+
+(* Opening the store used to look whether the keepers directory was there,
+   through Eio, on every read. *)
+let test_a_kept_receipt_is_answered_without_waiting () =
+  with_workspace (fun config ->
+    Receipt.append config (receipt ~ended_at:first);
+    check_both_readers config "read and kept" (Some first);
+    check
+      int
+      "the fiber beside got no turn"
+      0
+      (turns_of_a_fiber_beside (fun () -> check_both_readers config "held" (Some first))))
+;;
+
 (* The append of a receipt moves the kept one, with no read of the files in
    between. *)
 let test_an_appended_receipt_replaces_the_kept_one () =
@@ -210,6 +249,10 @@ let () =
             `Quick
             test_a_store_the_strict_read_refuses
         ; test_case "a dot file is not the store's" `Quick test_a_dot_file_is_not_the_stores
+        ; test_case
+            "a kept receipt is answered without waiting"
+            `Quick
+            test_a_kept_receipt_is_answered_without_waiting
         ] )
     ]
 ;;

@@ -4705,7 +4705,7 @@
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
  (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control
-  masc_tui_scroll))
+  masc_tui_keeper_mark masc_tui_scroll masc_tui_value))
 
 (include stanzas/test_tui_keeper_axis_row.inc)
 
@@ -7792,3 +7792,6 @@
 (include stanzas/test_keeper_media_reading_reply.inc)
 (include stanzas/test_keeper_media_reading_outcome.inc)
 (include stanzas/test_keeper_media_reading_producer.inc)
+(include stanzas/test_tui_task_archive.inc)
+(include stanzas/test_tui_tools_inventory_owed.inc)
+(include stanzas/test_tui_drawn_effect.inc)

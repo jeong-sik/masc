@@ -2,7 +2,7 @@
 type group = Failing | Other | Sound
 val group : now:float -> Masc.Tui_decode.keeper_runtime option -> group
 val rank : group -> int
-val header : cols:int -> now:float -> string
+val header : ko:bool -> cols:int -> now:float -> string
 val fleet :
   ko:bool -> cols:int -> now:float -> Masc.Tui_decode.keeper_runtime option list -> string
 (** A band nothing was read for says so once ({!Masc_tui_keeper_strip.history_unknown_label});

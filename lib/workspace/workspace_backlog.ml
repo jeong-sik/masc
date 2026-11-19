@@ -21,15 +21,21 @@ let decode_backlog ~path json =
   |> Result.map_error (fun msg ->
     Printf.sprintf "[read_backlog] backlog decode failed for %s: %s" path msg)
 
-(** Filesystem backlog cache keyed by path and file mtime/size.
+(** Filesystem backlog cache keyed by path and file version: device, inode,
+    size and modification time.
 
     CPU sampling showed that reading + Yojson-decoding backlog.json is one
     of the hottest paths in dashboard/keeper snapshot code, and the file is
     read many times between mutations. [write_backlog] invalidates this
-    process's cache after persisting; an external replacement with the same
-    mtime and size cannot be distinguished. A Memory backend may use the same
-    path for a different authoritative value, so it neither reads nor populates
-    this filesystem cache. *)
+    process's cache after persisting. Every writer replaces the file with a
+    rename, and a rename gives the path another inode than the file it
+    replaces, so a write in another process is seen even when it keeps the
+    size and the modification time. A rewrite in place that sets the old
+    size and modification time back goes unseen, and so can a later
+    replacement that gets a freed inode number back within one file-time
+    tick at the same size.
+    A Memory backend may use the same path for a different authoritative
+    value, so it neither reads nor populates this filesystem cache. *)
 module Task_id_map = Map.Make (String)
 module Task_id_set = Set.Make (String)
 
@@ -107,8 +113,7 @@ let find_task_in_backlog_opt (backlog : backlog) (task_id : string) : task optio
   Task_id_map.find_opt task_id (prepare_backlog backlog).tasks_by_id
 
 type backlog_cache_entry = {
-  mtime : float;
-  size : int;
+  read_version : File_version_cache.version;
   backlog : backlog;
   mutable prepared : prepared_backlog option;
 }
@@ -193,7 +198,7 @@ let read_backlog_with_source_r config =
                   match file_stat_opt path with
                   | None -> None
                   | Some st ->
-                      if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
+                      if File_version_cache.same_version (File_version_cache.version_of_stats st) entry.read_version
                       then Some entry.backlog
                       else None)
             in
@@ -203,7 +208,7 @@ let read_backlog_with_source_r config =
   | Some backlog ->
     Ok { observed_backlog = backlog; recovered_from = None }
   | None -> (
-      (* Cache the decoded backlog keyed on the file's (mtime, size). A
+      (* Cache the decoded backlog keyed on the file's version. A
          writer commits under [with_backlog_file_lock] and clears this cache
          after its write, but the reader takes no such lock: statting only
          after the read would register (new stat, old backlog) when a commit
@@ -236,14 +241,14 @@ let read_backlog_with_source_r config =
               in
               (match (stat_before, stat_after, generation) with
               | Some before, Some after, Some generation
-                when after.Unix.st_mtime = before.Unix.st_mtime
-                     && after.Unix.st_size = before.Unix.st_size ->
+                when File_version_cache.same_version
+                       (File_version_cache.version_of_stats before)
+                       (File_version_cache.version_of_stats after) ->
                   (Atomic.get before_backlog_cache_registration_hook) ();
                   Stdlib.Mutex.protect backlog_cache_mu (fun () ->
                       if !backlog_cache_generation == generation then
                         Hashtbl.replace backlog_cache path
-                          { mtime = after.Unix.st_mtime
-                          ; size = after.Unix.st_size
+                          { read_version = File_version_cache.version_of_stats after
                           ; backlog
                           ; prepared = None
                           })

@@ -25,31 +25,59 @@ let test_a_cut_mark_leads_to_the_nearest_hidden_entry () =
     [ "Config"; "Logs"; "Calls"; "Memory" ]
     (List.map (fun (_, _, _, target) -> target) (Masc_tui_hit.to_list zones))
 
-(* A strip is whole or it is not drawn. Narrower than its current entry with
-   the marks its position calls for, it cannot hold even that entry, and a
-   strip cut to the width would end inside the name and name nothing. It draws
-   nothing, so it presses nothing either and the clock drawn after it keeps
-   its cells. *)
-let test_a_strip_under_its_minimum_draws_nothing () =
+(* Below the micro-floor (6 cells) the strip draws nothing so 1-2 char
+   stubs never steal cells from the clock beside it. Between 6 cells and
+   [tab_strip_min_width], staged degradation preserves the active tab
+   within [width]. *)
+let test_a_strip_under_its_compact_floor_draws_nothing () =
   let tabs =
     [ ("stack", true, "stack"); ("request", false, "request"); ("proof", false, "proof") ]
   in
-  let width = Masc_tui_ansi.tab_strip_min_width tabs - 1 in
   let registry = Masc_tui_hit.registry () in
   let drawn =
-    Masc_tui_ansi.tab_strip ~width ~press:(Masc_tui_hit.mark registry) tabs
+    Masc_tui_ansi.tab_strip ~width:5 ~press:(Masc_tui_hit.mark registry) tabs
   in
-  Alcotest.(check string) "nothing is drawn" "" drawn;
+  Alcotest.(check string) "nothing is drawn under 6 cells" "" drawn;
   let _lines, zones = Masc_tui_hit.extract registry [ drawn ^ "  12:00:00" ] in
-  Alcotest.(check int) "nothing is pressable" 0
-    (List.length (Masc_tui_hit.to_list zones))
+  Alcotest.(check int) "nothing is pressable under 6 cells" 0
+    (List.length (Masc_tui_hit.to_list zones));
+  let narrow = Masc_tui_ansi.tab_strip_min_width tabs - 1 in
+  let narrow_registry = Masc_tui_hit.registry () in
+  let degraded_drawn =
+    Masc_tui_ansi.tab_strip ~width:narrow
+      ~press:(Masc_tui_hit.mark narrow_registry) tabs
+  in
+  let degraded_lines, narrow_zones =
+    Masc_tui_hit.extract narrow_registry [ degraded_drawn ]
+  in
+  let degraded =
+    Masc_tui_theme.strip_sgr (String.concat "" degraded_lines)
+  in
+  Alcotest.(check bool) "preserves active tab under full min_width" true
+    (cells degraded > 0 && cells degraded <= narrow);
+  Alcotest.(check (list string))
+    "compact window registers only its drawn entries"
+    [ "stack"; "request" ]
+    (List.map (fun (_, _, _, target) -> target)
+       (Masc_tui_hit.to_list narrow_zones));
+  let floor_registry = Masc_tui_hit.registry () in
+  let floor_drawn =
+    Masc_tui_ansi.tab_strip ~width:6
+      ~press:(Masc_tui_hit.mark floor_registry) tabs
+  in
+  let _floor_lines, floor_zones =
+    Masc_tui_hit.extract floor_registry [ floor_drawn ]
+  in
+  Alcotest.(check (list string))
+    "compact floor registers only the active tab without leaking cut marks"
+    [ "stack" ]
+    (List.map (fun (_, _, _, target) -> target)
+       (Masc_tui_hit.to_list floor_zones))
 
-(* At every width the strip is the whole strip when that fits, the window
-   around the current entry when only that fits, and nothing below that. The
-   window is no wider than the width and holds the current entry's label
-   whole. The labels hold wide characters, so the cells are neither the bytes
-   nor the characters. *)
-let test_a_strip_is_whole_or_a_window_around_the_current_entry_or_absent () =
+(* At every width the strip never exceeds [width]: whole when that fits,
+   windowed with full current label at or above [tab_strip_min_width],
+   staged compact active tab down to 6 cells, and absent below 6 cells. *)
+let test_a_strip_degrades_cleanly_at_every_width () =
   let labels = [ "후보 순서"; "전체 런타임"; "기능 (11개)"; "클라이언트 (3개 연결)" ] in
   List.iteri
     (fun current current_label ->
@@ -62,13 +90,15 @@ let test_a_strip_is_whole_or_a_window_around_the_current_entry_or_absent () =
       for width = 0 to cells whole + 2 do
         let drawn = plain ~width tabs in
         let at = Printf.sprintf "%s at %d cells" current_label width in
+        Alcotest.(check bool) (at ^ ": within the width") true (cells drawn <= width);
         if width >= cells whole then Alcotest.(check string) (at ^ ": whole") whole drawn
-        else if width >= minimum then begin
-          Alcotest.(check bool) (at ^ ": within the width") true (cells drawn <= width);
+        else if width >= minimum then
           Alcotest.(check bool) (at ^ ": the current label is whole") true
             (Astring.String.is_infix ~affix:current_label drawn)
-        end
-        else Alcotest.(check string) (at ^ ": nothing") "" drawn
+        else if width >= 6 then
+          Alcotest.(check bool) (at ^ ": keeps active tab orientation") true
+            (cells drawn > 0)
+        else Alcotest.(check string) (at ^ ": nothing below 6 cells") "" drawn
       done)
     labels
 
@@ -77,10 +107,10 @@ let () =
     [ ( "tab strip"
       , [ Alcotest.test_case "a cut mark leads to the nearest hidden entry" `Quick
             test_a_cut_mark_leads_to_the_nearest_hidden_entry
-        ; Alcotest.test_case "a strip under its minimum draws nothing" `Quick
-            test_a_strip_under_its_minimum_draws_nothing
+        ; Alcotest.test_case "a strip under its compact floor draws nothing" `Quick
+            test_a_strip_under_its_compact_floor_draws_nothing
         ; Alcotest.test_case
-            "a strip is whole, a window around the current entry, or absent" `Quick
-            test_a_strip_is_whole_or_a_window_around_the_current_entry_or_absent
+            "a strip degrades cleanly across every width" `Quick
+            test_a_strip_degrades_cleanly_at_every_width
         ] )
     ]

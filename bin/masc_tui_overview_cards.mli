@@ -1,6 +1,7 @@
-(** The Dashboard's readings as titled cards in two columns: what needs a
-    decision and what to continue on the left, the status readings on the right
-    and, under them, what the server says needs the operator.
+(** The Dashboard's readings as titled cards: a two-column grid on wide
+    terminals (decisions and continuation on the left, status and operator
+    actions on the right) that steps down to a single-column card stack on
+    narrower terminals (44..89 inner cells).
 
     Every row is written out in full. A row is as many lines as its text takes
     at the card's width, so a long Keeper name or the note that a chat is saved
@@ -47,13 +48,15 @@ val draw :
   actions:('action * string) list ->
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit
-    and the caller draws the plain rows instead: [inner] holds fewer than two
-    columns, the cards need more than [rows] lines with every card that may
-    squash squashed, or [decisions_whole] is false. [decisions_whole] says the
-    window holds every decision; a partial window uses the plain selectable
-    list instead. The cards are as tall as their rows and the two columns end
-    on the same line. A card with no rows has an empty body: its edge's
-    count says there are none.
+    and the caller draws the plain rows instead: [inner] holds fewer than one
+    card column (< 44 cells), the cards need more than [rows] lines with every
+    card that may squash squashed, or [decisions_whole] is false. On terminals
+    wide enough for two columns ([inner >= 90]) the cards form a 2-column grid
+    whose columns end on the same line; between 44 and 89 inner cells they step
+    down to a 1-column card stack matching [j]/[k] destination order.
+    [decisions_whole] says the window holds every decision; a partial window
+    uses the plain selectable list instead. A card with no rows has an empty
+    body: its edge's count says there are none.
 
     A card that [rows] cannot hold is squashed to its top edge, which keeps
     its name, mark and count ({!Masc_tui_card.grid}). The card that holds the

@@ -306,7 +306,7 @@ let test_login_account =
 
 (* A removal that leaves the key says so in the log, nothing spends the
    account, and its owner ends it by asking again. The mode that keeps the key
-   in place does not keep the superuser from it, so the case says nothing when
+   in place does not keep the superuser from it, so the case is skipped when
    the superuser runs it. *)
 let test_key_stays =
   with_zone (fun ~zone ~base_path ->
@@ -327,7 +327,8 @@ let test_key_stays =
       Unix.chmod keys 0o700;
       removes "the same account, its folder written again" ~base_path ~by:alice ~of_:alice "removed";
       stands "its purge" alice "purged";
-      files_there "its files" ~base_path alice false))
+      files_there "its files" ~base_path alice false)
+    else Alcotest.skip ())
 ;;
 
 (* What the start of a server ends: a removal that was started and not ended,

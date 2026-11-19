@@ -476,7 +476,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
-| `Esc` | roster focused: return to the composer; chat focused: back, and during a turn interrupt it |
+| `Esc` | roster focused: return to the composer; chat focused: back without interrupting |
+| `Ctrl-C` | chat focused during a turn: interrupt it; otherwise arm quit |
 
 ## Keepers / Logs
 
@@ -858,25 +859,24 @@ count is drawn beyond the available space.
 
 | Keys | What it does |
 |---|---|
-| `j/k` | scroll |
+| `j/k` | in Available, select a Skill, and after Enter or f scroll its page; in async runs, select an original request; the other sections and an open request scroll; the wheel scrolls the page in every section |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 | `p` | available / async runs / receipts / usage / all tools. Available shows the selected Keeper's exposed tools and Skills; ORIGIN names the tool source. Async runs shows workspace requests and recovery: active counts active ledger requests, runtime-owned means a current runtime owner, ownership-unknown is unconfirmed. Receipts keeps current-session Skill evidence: triggered=invoked, delivered/handed off=delivered, actions=later tool actions. These are separate events; no record does not prove no use. Usage aggregates recorded calls by exact Skill revision across current Keeper sessions; last use is the ledger's recorded time, and unread ledgers stay qualified. All tools lists process-wide registrations, separately from a Keeper's callable surface and observed calls. DIRECT=direct calls allowed; SURFACES=exposure paths; none=no exposure path. Use Skill receipts for usage evidence and Activity for tool input/output. |
-| `J/K` | in async runs, select an original request; otherwise select a published Skill |
-| `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
+| `f` | outside async requests, select the next Composition, load its exact-revision performance charts and open its page at them; Esc returns to the Skill list on it |
 | `Ctrl-O` | outside async requests, preview the selected Composition Skill's declared graph with Pele; Normal Skills have none, and f selects a Composition |
 | `[ / ]` | in Available, older/newer retained original run; in other panes, previous/next Keeper |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `d` | remove the selected published package; press d again on the same row to confirm |
-| `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
+| `Esc` | return from original Task to request, then request to list, and from a Skill's page to the Skill list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `Tab` | next |
 | `q` | quit |
 | `Ctrl-S` | in Available, unfold or fold the runtime, digest and byte-budget rows |
 | `Y` | in Available, copy the diagnostics with whole digests and the selected Skill's whole revision |
 | `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
-| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
+| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill, and in Available turn j/k and paging to its page until Esc |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
 | `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |
@@ -939,11 +939,10 @@ or completion.
 | Keys | What it does |
 |---|---|
 | `●` | healthy |
-| `!` | failing |
-| `·` | idle |
-| `○` | paused |
-| `×` | offline |
-| `-` | unread |
+| `✕` | failing |
+| `○` | idle |
+| `‖` | paused, or offline |
+| `◌` | unread |
 
 ## Keeper columns
 
@@ -952,7 +951,7 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
+| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (✕ failing, ‖ paused, ▲ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
 | `◂ turns │ librarian │ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
 | `facts by age ▸ │ saved │ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
 | `· ▁ ▄ █ ?` | the views' turn pulse: autonomous turn results of the last half hours, one mark per half hour, newest on the right: · no turn / ▁ ok / ▄ failed and ok / █ failed / ? unknown; a rested turn counts as failed, chat turns are not counted, and a half hour from before the server's record of the keeper reads ?. The header names how long the marks span |
@@ -962,7 +961,7 @@ or completion.
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL ▹ prefixes next candidate after turn failure |
-| `◷` | next scheduled run or hold status (Detailed second row; due in the views) |
+| `due` | the views' next scheduled run or hold status; DETAIL's schedule badge says the same |
 | `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row; its lag under lag in the views, and the memory and age views draw their own cells). mem ? is memory health not read yet, or a refused row that may be this keeper's; mem ! is this keeper's row, refused; — is a keeper with no memory snapshot |
 | `facts` | ordinary memory facts by time since first seen, one bar per group oldest first (over 7d, 1–7d, under 1d); bar height is relative to the largest group of the same strip, 0 is none, ? is not measured (Detailed second row; the age view draws the bins under facts by age ▸, · for an empty one) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |

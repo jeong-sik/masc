@@ -40,6 +40,10 @@ export type Problem =
   /** No answer came at all. */
   | { readonly kind: 'unreachable' }
 
+/** The first status of an answer that is a failure, not a refusal: the
+    server, or what stands in front of it, did not say that it did nothing. */
+export const serverFailure = 500
+
 export type Answer<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly problem: Problem }
@@ -93,6 +97,10 @@ export interface Integration {
   /** The other models the operator bound to it. With none of either, the operator bound no model. */
   readonly withheld: readonly Withheld[]
   readonly calls: Calls
+  /** Whether a person registers an API key of their own for it, beside the
+      login every subscription of the list takes (`connect` of
+      lib/server/server_person_integrations.ml). */
+  readonly takesKey: boolean
 }
 
 /** Whether a model of the subscription can be checked here now: the server
@@ -125,11 +133,37 @@ export type ModelUnread =
   | 'template_not_declared'
   | 'runtime_not_bound'
 
-/** A subscription account the person connected. */
+/** What the server found of the key file of a key account
+    (lib/auth_preview.ml, `key_code`): a key it can read, no file, a file
+    that gives no key, or a place it could not look at. It is what was there
+    at the reading: while a registration or a removal of the account runs,
+    the file can be missing for that moment. */
+const keyStates = ['readable', 'key_missing', 'key_unreadable', 'not_looked_at'] as const
+export type KeyState = typeof keyStates[number] | 'unrecognised'
+
+/** What an account holds: a login of the subscription, or an API key the
+    person registered. */
+export type Held =
+  | { readonly kind: 'login' }
+  | { readonly kind: 'key'; readonly key: KeyState }
+
+/** What is left of a removal of an account that did not go through
+    (lib/auth_preview.ml, `removal_code`): the stage that stayed, or a start
+    the server gave up. Nothing runs on such an account, and its owner asks
+    for the removal again. */
+const removals = ['key_not_removed', 'home_not_removed', 'start_given_up'] as const
+export type Removal = typeof removals[number] | 'unrecognised'
+
+/** A subscription account the person connected. An account whose removal
+    is under way or went through is not listed. */
 export interface ProviderAccount {
   readonly id: string
-  /** The id of the subscription its login was of. */
+  /** The id of the subscription: the one its login was of, or the one its
+      key was registered for. */
   readonly integration: Fact<string, IntegrationUnread>
+  readonly held: Held
+  /** Null for an account no removal was left on. */
+  readonly removal: Removal | null
 }
 
 /** A Runtime the person made: a model called through one of their accounts. */
@@ -230,8 +264,11 @@ function readIntegration(json: unknown): Integration | null {
   const models = readList(json.models, text)
   const withheld = readList(json.withheld, readWithheld)
   const calls = readCalls(json)
-  if (id === null || typeof json.display_name !== 'string' || models === null || withheld === null || calls === null) return null
-  return { id, displayName: json.display_name, models, withheld, calls }
+  // How a person connects it: a login, and a key where one is taken. A way
+  // named later is one this console has no control for.
+  const connect = readList(json.connect, text)
+  if (id === null || typeof json.display_name !== 'string' || models === null || withheld === null || calls === null || connect === null) return null
+  return { id, displayName: json.display_name, models, withheld, calls, takesKey: connect.includes('key') }
 }
 
 export function readIntegrations(json: unknown): readonly Integration[] | null {
@@ -271,11 +308,34 @@ function readModelUnread(code: string): ModelUnread | 'unrecognised' {
   }
 }
 
+/** What the account holds. A key account says of its key file, and a login
+    account says nothing of a key. Another kind is not what the route
+    promises. */
+function readHeld(json: Readonly<Record<string, unknown>>): Held | null {
+  switch (json.kind) {
+    case 'login': return json.key === undefined ? { kind: 'login' } : null
+    case 'key': {
+      const state = text(json.key)
+      return state === null ? null : { kind: 'key', key: keyStates.find((known) => known === state) ?? 'unrecognised' }
+    }
+    default: return null
+  }
+}
+
+/** The removal left on the account: null when the answer names none. */
+function readRemoval(value: unknown): Removal | null | undefined {
+  if (value === undefined) return null
+  const code = text(value)
+  return code === null ? undefined : removals.find((known) => known === code) ?? 'unrecognised'
+}
+
 function readAccount(json: unknown): ProviderAccount | null {
   if (!isRecord(json)) return null
   const id = text(json.provider_account_id)
   const integration = readFact(json, 'integration_id', readIntegrationUnread)
-  return id === null || integration === null ? null : { id, integration }
+  const held = readHeld(json)
+  const removal = readRemoval(json.removal)
+  return id === null || integration === null || held === null || removal === undefined ? null : { id, integration, held, removal }
 }
 
 function readRuntime(json: unknown): Runtime | null {
@@ -288,8 +348,10 @@ function readRuntime(json: unknown): Runtime | null {
 
 /** What a person owns. Every Runtime is on one of the accounts listed: the
     authorization log makes a Runtime only on an account its maker owns
-    (lib/auth/authz_runtime_state.ml, `Account_not_theirs`), and never unlinks
-    an account. An answer that breaks this is not what the route promises. */
+    (lib/auth/authz_runtime_state.ml, `Account_not_theirs`), and the server
+    lists no Runtime of an account it does not list (lib/auth_preview.ml,
+    `provider_accounts`). An answer that breaks this is not what the route
+    promises. */
 export function readOwned(json: unknown): Owned | null {
   if (!isRecord(json)) return null
   const accounts = readList(json.provider_accounts, readAccount)

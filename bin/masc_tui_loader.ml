@@ -90,12 +90,12 @@ let summarize_errors label errors =
 (* Every refresh read all ten meta files whole, and in a thirty-second sample
    not one of them changed. A file nothing has written to since the last read
    still decodes to what it decoded then, so the read is skipped and that value
-   reused -- the same size-and-modification-time test [Workspace_backlog]
-   already applies to the backlog. [Unix.stat] carries sub-second times here, so
-   a write cannot land inside one without moving it. *)
+   reused while the file version holds: device, inode, size and modification
+   time. A writer that replaces the file with a rename gives it another inode,
+   so a replacement that keeps the size and the modification time is still
+   read. *)
 type cached_keeper_meta = {
-  cached_mtime : float;
-  cached_size : int;
+  cached_version : File_version_cache.version;
   cached_keeper : keeper;
 }
 
@@ -107,19 +107,18 @@ let stat_opt path =
 
 let cached_keeper_for path stat =
   match stat, Hashtbl.find_opt keeper_meta_cache path with
-  | Some (st : Unix.stats), Some entry
-    when st.Unix.st_mtime = entry.cached_mtime
-         && st.Unix.st_size = entry.cached_size ->
+  | Some stat, Some entry
+    when File_version_cache.same_version
+           (File_version_cache.version_of_stats stat) entry.cached_version ->
       Some entry.cached_keeper
   | (Some _ | None), (Some _ | None) -> None
 
 let remember_keeper path stat keeper =
   match stat with
   | None -> ()
-  | Some (st : Unix.stats) ->
+  | Some stat ->
       Hashtbl.replace keeper_meta_cache path
-        { cached_mtime = st.Unix.st_mtime;
-          cached_size = st.Unix.st_size;
+        { cached_version = File_version_cache.version_of_stats stat;
           cached_keeper = keeper;
         }
 
@@ -170,50 +169,122 @@ let load_keepers (base_path : string) : keeper list * string option =
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) (keepers @ declarations)
       , summarize_errors "keeper metadata read failed" errors )
 
-(* The tasks [masc_gc] moved out of the backlog, for the flow's windows.
-   The archive is megabytes and only a GC rewrites it, so it is parsed again
-   only when its size or modification time changed. A row that does not
-   decode is counted and named, not dropped quietly. *)
-type cached_archive = {
-  archive_path : string;
-  archive_mtime : float;
-  archive_size : int;
-  archive_read : Masc_domain.task list * int;
+(* The tasks [masc_gc] moved out of the backlog, for the flow's windows. The
+   archive is megabytes and only a GC rewrites it, so it is decoded only when
+   its file version moves; a refresh takes the kept value like any read. It
+   is kept as the ids and parsed times the windows count, never as tasks. A
+   row that does not decode is counted and named, not dropped quietly. *)
+type archive_reading = {
+  archived : Masc_tui_task_flow.Archived.t;
+  undecoded : int;
 }
 
-let archive_seen : cached_archive option ref = ref None
+let no_archive = { archived = Masc_tui_task_flow.Archived.empty; undecoded = 0 }
 
-let read_archived_tasks path : (Masc_domain.task list * int, string) result =
-  match Unix.stat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ([], 0)
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  | { Unix.st_mtime; st_size; _ } ->
-    (match !archive_seen with
-     | Some cached when String.equal cached.archive_path path
-                        && Float.equal cached.archive_mtime st_mtime
-                        && cached.archive_size = st_size -> Ok cached.archive_read
-     | Some _ | None ->
-       (match Safe_ops.read_json_file_safe path with
-        | Error error -> Error error
-        | Ok json ->
-          let read =
-            List.fold_right
-              (fun entry (tasks, undecoded) ->
-                match Masc_domain.task_of_yojson entry with
-                | Ok task -> task :: tasks, undecoded
-                | Error _ -> tasks, undecoded + 1)
-              (Workspace_task_id.archive_entries_of_json json) ([], 0)
-          in
-          archive_seen := Some {archive_path = path; archive_mtime = st_mtime;
-                                archive_size = st_size; archive_read = read};
-          Ok read))
-;;
+(* Why a Work read has no archive. A document that is not one object with
+   one [tasks] list is what the bytes of that file version say, so it is
+   kept with the version like a reading, and an archive stuck in such a
+   shape is not streamed again on every read. A file that could not be
+   opened or read now says nothing about its bytes and is not kept. *)
+type archive_fault =
+  | Archive_malformed of string
+  | Archive_unreadable of string
+
+(* What one file version's bytes read as: a reading, or why they are not
+   an archive. *)
+let archive_cache : (archive_reading, string) result File_version_cache.t =
+  File_version_cache.create ()
+
+(* Which [tasks] lists the archive object has had so far. *)
+type archive_tasks =
+  | No_tasks_list
+  | Tasks_list of archive_reading
+  | Repeated_tasks_list
+
+(* The lexer reads the channel, and one archived task at a time is a JSON
+   tree, reduced before the next one is read. Read whole, the file was a
+   string, the lexer's copy of it and a tree alive at once.
+
+   The whole-file readers repair invalid UTF-8 before they parse, the
+   backlog's reader included, and this lexer takes the bytes as they are.
+   An id that is not UTF-8 would then be another id here than in the
+   backlog, and a task restored there would count twice, so a row with such
+   an id is one that does not decode. *)
+let decode_archive_channel ~path channel : (archive_reading, archive_fault) result =
+  let lexbuf = Lexing.from_channel channel in
+  let lexer = Yojson.init_lexer ~fname:path () in
+  let read_task reading lexer lexbuf =
+    match Masc_domain.task_of_yojson (Yojson.Safe.read_json lexer lexbuf) with
+    | Ok task when String.is_valid_utf_8 task.id ->
+        { reading with archived = Masc_tui_task_flow.Archived.add reading.archived task }
+    | Ok _ | Error _ -> { reading with undecoded = reading.undecoded + 1 }
+  in
+  let read_member tasks name lexer lexbuf =
+    match name, tasks with
+    | "tasks", No_tasks_list ->
+        Tasks_list (Yojson.Safe.read_sequence read_task no_archive lexer lexbuf)
+    | "tasks", (Tasks_list _ | Repeated_tasks_list) ->
+        Yojson.Safe.skip_json lexer lexbuf;
+        Repeated_tasks_list
+    | _, (No_tasks_list | Tasks_list _ | Repeated_tasks_list) ->
+        Yojson.Safe.skip_json lexer lexbuf;
+        tasks
+  in
+  match
+    Yojson.Safe.read_space lexer lexbuf;
+    let tasks = Yojson.Safe.read_fields read_member No_tasks_list lexer lexbuf in
+    Yojson.Safe.read_space lexer lexbuf;
+    tasks, Yojson.Safe.read_eof lexbuf
+  with
+  | Tasks_list reading, true -> Ok reading
+  | No_tasks_list, true -> Error (Archive_malformed "the archive has no tasks list")
+  | Repeated_tasks_list, true ->
+      Error (Archive_malformed "the archive has more than one tasks list")
+  | (No_tasks_list | Tasks_list _ | Repeated_tasks_list), false ->
+      Error (Archive_malformed "the archive has more after its object")
+  | exception Yojson.Json_error detail -> Error (Archive_malformed detail)
+  | exception (Yojson.End_of_array | Yojson.End_of_object | Yojson.End_of_input) ->
+      Error (Archive_malformed "the archive ends early")
+  | exception Sys_error detail -> Error (Archive_unreadable detail)
+
+let decode_archive_file path : (archive_reading, archive_fault) result =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok no_archive
+  | exception Unix.Unix_error (error, _, _) ->
+      Error (Archive_unreadable (Unix.error_message error))
+  | descriptor ->
+      let channel = Unix.in_channel_of_descr descriptor in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> decode_archive_channel ~path channel)
+
+(* The decode runs on the CPU pool, as the whole-file parse did, so a GC's
+   rewrite does not hold the screen's domain for the length of the file. A
+   fault is logged where a decode met it, so a kept one is not logged again
+   on every read. *)
+let read_archive path : (archive_reading, archive_fault) result =
+  let decode () =
+    match
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        decode_archive_file path)
+    with
+    | Ok reading -> Ok (Ok reading)
+    | Error (Archive_malformed detail) ->
+        report path detail;
+        Ok (Error detail)
+    | Error (Archive_unreadable detail) ->
+        report path detail;
+        Error detail
+  in
+  match File_version_cache.load archive_cache path ~decode with
+  | Ok (Ok reading) -> Ok reading
+  | Ok (Error detail) -> Error (Archive_malformed detail)
+  | Error detail -> Error (Archive_unreadable detail)
 
 (** Load tasks from the canonical workspace backlog: the active rows for the
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
-let load_active_tasks ~fresh (base_path : string) :
+let load_active_tasks (base_path : string) :
     Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
@@ -221,7 +292,6 @@ let load_active_tasks ~fresh (base_path : string) :
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
-  if fresh then Workspace_backlog.invalidate_backlog_cache config;
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
@@ -259,16 +329,16 @@ let load_active_tasks ~fresh (base_path : string) :
         | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
-        match read_archived_tasks (Workspace_utils_paths_backend.archive_path config) with
-        | Ok (tasks, 0) -> tasks, None
-        | Ok (tasks, undecoded) ->
-          ( tasks
+        match read_archive (Workspace_utils_paths_backend.archive_path config) with
+        | Ok { archived; undecoded = 0 } -> archived, None
+        | Ok { archived; undecoded } ->
+          ( archived
           , Some
               (Printf.sprintf "%d archived tasks could not be read; the day bars miss them"
                  undecoded) )
-        | Error error ->
-          report (Workspace_utils_paths_backend.archive_path config) error;
-          [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
+        | Error (Archive_malformed error | Archive_unreadable error) ->
+          ( Masc_tui_task_flow.Archived.empty
+          , Some ("task archive unavailable, the day bars miss archived tasks: " ^ error) )
       in
       ( Masc_tui_overview_tasks.Rows_read
           (Tui_decode.active_tasks_of_domain ~goals_for_task
@@ -608,9 +678,9 @@ let with_local_read_mutex mutex read =
   | Ok reading -> reading
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
-let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
+let read_local_work_unlocked (base_path : string) : local_reading =
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
-    load_active_tasks ~fresh base_path
+    load_active_tasks base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
   { lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
@@ -618,11 +688,11 @@ let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
 
-let read_local_workspace ?(fresh = false) base_path =
+(* A refresh and a change event read the same way: each file is decoded
+   only when its version moved since the value kept for it. *)
+let read_local_workspace base_path =
   with_local_read_mutex local_work_read_mutex
-    (fun () ->
-      if fresh then archive_seen := None;
-      read_local_work_unlocked ~fresh base_path)
+    (fun () -> read_local_work_unlocked base_path)
 
 (* Whether the named Keeper's metadata file is not the one the last local
    read decoded: written since, created, or removed. The server announces a

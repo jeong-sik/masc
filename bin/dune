@@ -1295,7 +1295,7 @@
  (wrapped false)
  (modules masc_tui_fleet_line)
  (libraries masc masc_tui_ansi masc_tui_fleet_stream masc_tui_message_layout
-  masc_tui_words))
+  masc_tui_value masc_tui_words))
 
 (library
  (name masc_tui_fleet_stream)
@@ -1322,6 +1322,14 @@
  (name masc_tui_layout)
  (wrapped false)
  (modules masc_tui_layout))
+
+; How often a schedule wakes, in words, from the typed recurrence the wire
+; already carries; the domain gives the daily offset.
+(library
+ (name masc_tui_schedule_recurrence)
+ (wrapped false)
+ (modules masc_tui_schedule_recurrence)
+ (libraries masc.masc_schedule masc_tui_value unix))
 
 (library
  (name masc_tui_render_schedule)
@@ -2262,7 +2270,8 @@
  (name masc_tui_list_moves)
  (wrapped false)
  (modules masc_tui_list_moves)
- (libraries masc_tui_types masc_tui_home masc_tui_scroll))
+ ; masc_tui_keys holds the words the Tools footer picks from tools_keys.
+ (libraries masc_tui_types masc_tui_home masc_tui_scroll masc_tui_keys))
 
 ; The health section an operator action names, decoded from its wire name.
 (library
@@ -2484,6 +2493,7 @@
   masc_tui_tool_tree
   masc_tui_types
   masc_tui_keys
+  masc_tui_rows
   masc_tui_value
   unix
   yojson))
@@ -3123,6 +3133,7 @@
   masc_tui_keeper_verdict
   ; render_keepers' Terminal tab says its words in the screen's language.
   masc_tui_say
+  masc_tui_schedule_recurrence
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

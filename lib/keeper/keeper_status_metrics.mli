@@ -54,8 +54,9 @@ val latest_tool_audit_snapshot_from_files :
     nothing about whether a turn was recorded.
 
     The value is a fact of the Keeper's metrics store
-    ({!Dated_jsonl.newest_selected}). The process that writes the store keeps
-    it in memory and reads no file for it; any other process reads the files
-    each time. Code that removes the store's files without going through
+    ({!Dated_jsonl.newest_selected}). A process that holds the workspace's
+    writer lease and has said so ([Server_startup_takeover.keep_store_facts])
+    keeps it in memory and reads no file for it; any other process reads the
+    files each time. Code that removes the store's files without going through
     [Dated_jsonl] tells it with {!Dated_jsonl.directories_removed}, as the
     Keeper's purge does. *)

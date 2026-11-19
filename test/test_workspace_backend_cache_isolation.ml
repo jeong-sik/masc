@@ -198,6 +198,42 @@ let invalidation_rejects_an_older_inflight_cache_fill () =
           check bool "older read cannot overwrite the fresh cache" true
             (has_named_task (read_backlog filesystem) task new_title))))
 
+(* A reader in another process (the TUI) cannot see the writer's clear, so
+   the file version decides alone. Writers replace the file with a rename,
+   so a replacement that keeps the size and the modification time still has
+   a new inode. *)
+let a_replacement_keeping_size_and_mtime_is_read_again () =
+  with_workspace (fun _env filesystem ->
+    let old_title = "stat-token-OLD" and new_title = "stat-token-NEW" in
+    let task = create_task filesystem old_title in
+    let path = Workspace_utils.backlog_path filesystem in
+    let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+    Unix.utimes path stamp stamp;
+    let first = read_backlog filesystem in
+    check bool "an unchanged file is not decoded again" true
+      (read_backlog filesystem == first);
+    let before = Unix.stat path in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    let at =
+      match Str.search_forward (Str.regexp_string old_title) original 0 with
+      | at -> at
+      | exception Not_found -> fail "task title absent from persisted backlog" in
+    let changed = Bytes.of_string original in
+    Bytes.blit_string new_title 0 changed at (String.length new_title);
+    let replacement = path ^ ".replacement" in
+    Out_channel.with_open_bin replacement (fun channel ->
+      Out_channel.output_bytes channel changed);
+    Unix.utimes replacement before.Unix.st_atime before.Unix.st_mtime;
+    Unix.rename replacement path;
+    let after = Unix.stat path in
+    check int "the replacement keeps the size" before.Unix.st_size after.Unix.st_size;
+    check bool "the replacement keeps the modification time" true
+      (Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+    check bool "the replacement is another inode" true
+      (before.Unix.st_ino <> after.Unix.st_ino);
+    check bool "the replacement is read without an invalidation" true
+      (has_named_task (read_backlog filesystem) task new_title))
+
 let initialization_gate_uses_the_selected_backend () =
   with_workspace (fun _env filesystem ->
     let empty_memory, _ = memory_config filesystem in
@@ -224,6 +260,8 @@ let () =
       ; test_case "recovery is not promoted by a filesystem cache" `Quick filesystem_cache_cannot_promote_memory_recovery
       ; test_case "memory read with Eio guard and domain pool" `Quick memory_backlog_reads_with_enabled_guard_and_pool
       ; test_case "invalidation fences an older cache fill" `Quick invalidation_rejects_an_older_inflight_cache_fill
+      ; test_case "a same-size same-mtime replacement is read again" `Quick
+          a_replacement_keeping_size_and_mtime_is_read_again
       ]
     ; "initialization",
       [ test_case "gate follows the selected backend" `Quick initialization_gate_uses_the_selected_backend ]

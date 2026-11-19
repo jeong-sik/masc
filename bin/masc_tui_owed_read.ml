@@ -34,6 +34,15 @@ let abandoned = function
   | Reading { failures; _ } -> Owed { failures }
   | (Settled | Owed _ | Waiting _) as unchanged -> unchanged
 
+let answering = function
+  | Reading _ as reading -> reading
+  | (Settled | Owed _ | Waiting _) as unheard -> started unheard
+
+let placeholder ~retry_s ~max_retry_s ~now = function
+  | Reading { failures; changed_since = true } -> Owed { failures = failures + 1 }
+  | Reading { changed_since = false; _ } as reading -> failed ~retry_s ~max_retry_s ~now reading
+  | (Settled | Owed _ | Waiting _) as unchanged -> unchanged
+
 let due ~now = function
   | Owed _ -> true
   | Waiting { retry_at; _ } -> now >= retry_at

@@ -313,7 +313,7 @@ val meter_cell_readable : paint -> meter_cell_colour -> string
 (** The quantity a picture draws. One quantity draws in one hue on every
     screen, so a reader who learned its colour once finds it again. *)
 type series =
-  | Calls  (** Tool calls, requests: how much ran. Cyan. *)
+  | Calls  (** Tool calls, requests: how much ran. Blue (cyan is reserved for status.info). *)
   | Failures
       (** Failed calls. Magenta: red is the status colour of a bucket in which
           every call failed, and a legend says so. *)
@@ -324,8 +324,8 @@ type series =
   | Backlog  (** Work behind: a lag, a queue. Yellow. *)
   | Usage  (** A plan window's use over days, its role unconfirmed. Blue. *)
   | Wakes
-      (** Scheduled Keeper wakes per half hour ahead. Cyan, the hue of the
-          calls they become. *)
+      (** Scheduled Keeper wakes per half hour ahead. Green (cyan is reserved
+          for status.info). *)
 
 val ramp_steps : int
 (** [100]: a ramp is drawn as [ramp_steps + 1] colours, like btop's 101. *)

@@ -64,7 +64,7 @@ let draw ~ko ~(edges : edges) ~inner
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
   in
-  if fits < column_count || not decisions_whole then None
+  if inner < min_card_width || not decisions_whole then None
   else begin
     let rows_of entries ~cells =
       List.concat_map (row_body ~is_selected ~cells) entries
@@ -95,12 +95,26 @@ let draw ~ko ~(edges : edges) ~inner
       ; reset = Ansi.reset
       }
     in
-    let grid status_column =
-      Masc_tui_card.grid ~ko ~style ~inner_width:inner
-        ~gap:column_gap ~row_gap:card_row_gap ~max_rows:rows
-        [ [ decision_card; continue_card ]; status_column ]
+    let status_column =
+      match actions with
+      | [] -> [ status_card ]
+      | _ :: _ -> [ status_card; actions_card ]
     in
-    match actions with
-    | [] -> grid [ status_card ]
-    | _ :: _ -> grid [ status_card; actions_card ]
+    let columns =
+      if fits >= column_count then
+        [ [ decision_card; continue_card ]; status_column ]
+      else
+        (* Narrow terminals (44..89 inner cells) step down to a single-column
+           card stack ordered to match [Masc_tui_home.destinations]
+           (decisions -> operator actions -> continuation -> status) so j/k
+           traversal stays monotonically top-to-bottom. *)
+        let single_column =
+          match actions with
+          | [] -> [ decision_card; continue_card; status_card ]
+          | _ :: _ -> [ decision_card; actions_card; continue_card; status_card ]
+        in
+        [ single_column ]
+    in
+    Masc_tui_card.grid ~ko ~style ~inner_width:inner
+      ~gap:column_gap ~row_gap:card_row_gap ~max_rows:rows columns
   end

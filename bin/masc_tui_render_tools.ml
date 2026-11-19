@@ -45,26 +45,36 @@ let refusal_text ~request refusal =
    the Skill's own row and the rows that say why it was loaded: it draws as a
    [Row] in its own style, and {!tools_display} says which physical rows the
    entry takes, so the key handler brings it into view by those numbers
-   rather than by looking for its colour. A [Laid_out] block is rows fitted to
+   rather than by looking for its colour. A [Timed] row draws as a [Row]
+   whose time text reads differently from the instant it carries. It was
+   built without noting that instant ({!Masc_tui_value.Redraw.deferred}):
+   {!tools_display} hands it back with each physical row the text lands on,
+   and the frame notes it only for a row it draws, so a row scrolled out of
+   the window asks for no redraw. A [Laid_out] block is rows fitted to
    a width by a step that has to see the words first -- a boxed card wraps
    its rows, a table keeps its columns only if its header fits, a chart sizes
    its bars beside its names -- so how many rows it takes depends on the
    language, and it gets the language when the frame draws ({!draw}). A
    [Measurement_card] is laid out the same way, and {!tools_display} says
    which rows the selected Skill's measurement card takes. A [Cursor] handed
-   to a [Laid_out] block is drawn but not counted; the Skill list is in
-   none. *)
+   to a [Laid_out] block is drawn but not counted, and a [Timed] row there
+   is drawn without its instant; the Skill list and the Async request list
+   are in none. *)
 type piece =
   | Row of string * Say.t
   | Cursor of string * Say.t
+  | Timed of string * Say.t * float
   | Laid_out of (Say.language -> (string * string) list)
   | Measurement_card of (Say.language -> (string * string) list)
 
-(* Which of {!tools_display}'s runs a drawn row belongs to. *)
+(* Which of {!tools_display}'s runs a drawn row belongs to: none, the
+   [Cursor]'s entry, the measurement card, or a [Timed] text with when it
+   reads differently. *)
 type mark =
   | Unmarked
   | Entry
   | Card
+  | Changes_at of float
 
 let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
 
@@ -79,6 +89,7 @@ let draw_marked language pieces =
     (function
       | Row (style, text) -> [ (style, Say.render language text), Unmarked ]
       | Cursor (style, text) -> [ (style, Say.render language text), Entry ]
+      | Timed (style, text, at) -> [ (style, Say.render language text), Changes_at at ]
       | Laid_out lay -> List.map (fun row -> row, Unmarked) (lay language)
       | Measurement_card lay -> List.map (fun row -> row, Card) (lay language))
     pieces
@@ -268,6 +279,9 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.observed_at)))
     actions
 
+(* A request row reads its age, and the list scrolls: the age is built
+   deferred, so only a row the window draws asks for the redraw on which its
+   age reads differently ([Timed]). *)
 let async_request_inventory_lines (state : state) =
   let errors = Option.to_list (Option.map (function
     | Request_failed detail -> Theme.bad (),
@@ -277,12 +291,12 @@ let async_request_inventory_lines (state : state) =
     | Request_withdrawn refusal -> Theme.bad (),
         Say.code " " ++ refusal_text ~request:Kept_request.Async_requests_read refusal)
     state.tools_async_observation_error) in
-  errors @ (match state.tools_async_observation with
+  rows errors @ (match state.tools_async_observation with
   | None ->
-    if errors=[] then [ Theme.warn (), Say.both ~ko:" Async broker — 미조회" ~en:" Async broker — not loaded" ]
+    if errors=[] then rows [ Theme.warn (), Say.both ~ko:" Async broker — 미조회" ~en:" Async broker — not loaded" ]
     else []
   | Some (Async_unavailable { kind; reason }) ->
-    [ Theme.bad (),
+    rows [ Theme.bad (),
       Say.both ~ko:" Async broker — 영속 목록 조회 불가: " ~en:" Async broker — durable inventory unavailable: "
       ++ Say.as_received (Terminal_text.single_line kind)
       ++ Option.fold ~none:Say.empty
@@ -312,22 +326,27 @@ let async_request_inventory_lines (state : state) =
         | Async_running -> Say.both ~ko:"실행 중" ~en:"running"
         | Async_cancelling -> Say.both ~ko:"취소 중" ~en:"cancelling"
       in
-      let elapsed =
-        match
-          Masc_tui_message_layout.age_text ~now ~since:request.ar_submitted_at
-        with
-        | Some text -> Say.as_received text
-        | None -> Say.code Masc_tui_theme.Glyph.no_value
+      let elapsed, changes_at =
+        Masc_tui_value.Redraw.deferred (fun () ->
+          match
+            Masc_tui_message_layout.age_text ~now ~since:request.ar_submitted_at
+          with
+          | Some text -> Say.as_received text
+          | None -> Say.code Masc_tui_theme.Glyph.no_value)
       in
       let selected = Option.exists (fun (target : Masc.Tui_decode_async_request.target) ->
         target.request_id=request.ar_request_id && target.submitted_by=request.ar_submitted_by
         && target.keeper_name=request.ar_keeper_name) state.tools_async_selection in
-      tone,
-      Say.code (if selected then " › " else "   ")
-      ++ Say.concat ~sep:say_dot
-           [ Say.as_received (Terminal_text.single_line request.ar_request_id);
-             Say.as_received (Terminal_text.single_line request.ar_keeper_name);
-             status; elapsed; ownership ]) requests
+      let text =
+        Say.code (if selected then " › " else "   ")
+        ++ Say.concat ~sep:say_dot
+             [ Say.as_received (Terminal_text.single_line request.ar_request_id);
+               Say.as_received (Terminal_text.single_line request.ar_keeper_name);
+               status; elapsed; ownership ]
+      in
+      match changes_at with
+      | Some at -> Timed (tone, text, at)
+      | None -> Row (tone, text)) requests
     in
     let recovery_lines = match recovery with
       | None ->
@@ -342,7 +361,7 @@ let async_request_inventory_lines (state : state) =
             report.arr_unreadable report.arr_failed report.arr_staging_inspected
             report.arr_staging_deleted report.arr_staging_preserved) ]
     in
-    summary_lines @ request_lines @ recovery_lines)
+    rows summary_lines @ request_lines @ rows recovery_lines)
 
 let async_logical_lines value =
   let module Detail = Masc.Tui_decode_async_request in
@@ -509,7 +528,7 @@ let async_request_observation_lines ~cols state =
   match state.tools_async_detail_open,state.tools_async_selection,state.tools_async_task_source with
   | true,Some _,Some source -> async_source_task_lines ~cols state source
   | true,Some target,None -> rows (async_request_detail_lines ~cols state target)
-  | true,None,_ | false,_,_ -> rows (async_request_inventory_lines state)
+  | true,None,_ | false,_,_ -> async_request_inventory_lines state
 
 (* The Tools sections, named where the reader is standing. Same shape as
    {!config_pane_strip}: a reader who has seen one has seen the other. *)
@@ -1189,6 +1208,7 @@ type display =
   { lines : (string * string) list
   ; cursor : cursor_rows option
   ; card : cursor_rows option
+  ; row_changes : (int * float) list
   }
 
 let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
@@ -1199,7 +1219,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
     let view = Masc_tui_pick_list.view ~page:(skill_source_picker_page state ~terminal_rows)
       ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id picker.ssp_sources picker.ssp_list in
     (* The picker pages its own window to its cursor, so no Skill row is
-       reported for the frame to scroll to. *)
+       reported for the frame to scroll to, and it draws no time text. *)
     { lines =
         draw language (rows
           (skill_source_picker_prefix (Say.of_ko_flag (fun ~ko -> Masc_tui_pick_list.summary ~ko view))
@@ -1208,7 +1228,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  (if view.selected_row = Some index then Theme.selection else Ansi.dim),
                  Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
     ; cursor = None
-    ; card = None }
+    ; card = None
+    ; row_changes = [] }
   | None ->
   let registered_tools =
     match state.tools_inventory with
@@ -2744,7 +2765,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as
           Markdown or shorten its identities to fit the frame. Every row a
-          wrapped marked row becomes keeps the mark, so its run is whole. *)
+          wrapped marked row becomes keeps the mark, so its run is whole, and
+          every row keeps the instant its time text changes at. *)
        if Masc_tui_message_layout.display_width text <= width then [ (style, text), mark ]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
             |> List.map (fun line -> (style, line), mark))
@@ -2769,14 +2791,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       wrap prefix @ draw_marked language pane_lines
     else wrap (prefix @ pane_lines)
   in
-  (* The first and the last row wearing [wanted]. The [Cursor] pieces are the
+  (* The first and the last row [in_run] picks. The [Cursor] pieces are the
      adjacent rows of one Skill and the card is one piece, so each run is
      whole. *)
-  let span wanted =
+  let span in_run =
     List.fold_left
       (fun (index, span) (_, mark) ->
          let span =
-           match mark = wanted, span with
+           match in_run mark, span with
            | false, _ -> span
            | true, None -> Some { first_row = index; last_row = index }
            | true, Some rows -> Some { rows with last_row = index }
@@ -2785,7 +2807,27 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       (0, None) marked
     |> snd
   in
-  { lines = List.map fst marked; cursor = span Entry; card = span Card }
+  { lines = List.map fst marked
+  ; cursor = span (function Entry -> true | Unmarked | Card | Changes_at _ -> false)
+  ; card = span (function Card -> true | Unmarked | Entry | Changes_at _ -> false)
+  ; row_changes =
+      List.concat
+        (List.mapi
+           (fun index (_, mark) ->
+             match mark with
+             | Changes_at at -> [ (index, at) ]
+             | Unmarked | Entry | Card -> [])
+           marked)
+  }
 ;;
+
+let drawn_change display window =
+  List.fold_left
+    (fun earliest (index, at) ->
+      match Masc_tui_rows.at window index, earliest with
+      | None, _ -> earliest
+      | Some _, None -> Some at
+      | Some _, Some sooner -> Some (Float.min sooner at))
+    None display.row_changes
 
 let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines

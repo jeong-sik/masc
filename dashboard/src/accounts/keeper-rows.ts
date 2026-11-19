@@ -1,7 +1,9 @@
 // The Keepers panel: a card for each Keeper of the person, with the model it
 // works with, the field that gives it another and its conversation
 // (talk-area.ts), and the form of a new Keeper. The models offered are the ones a Keeper can run on here: a model
-// checked on an account whose subscription the server lets a Keeper run on.
+// checked on an account whose subscription the server lets a Keeper run on,
+// that holds what it runs on (a login, or a key the server read), and that
+// no removal was left on (account-rows.ts, `keeperOn`).
 // A Keeper that cannot work says so on its card before anything is pressed.
 
 import { html } from 'htm/preact'
@@ -22,10 +24,11 @@ export interface Choice {
   readonly label: string
 }
 
-/** The Runtimes a Keeper can run on here, in the order of the subscriptions panel. */
+/** The Runtimes a Keeper can run on here, in the order of the subscriptions
+    panel: those of the accounts whose card says a Keeper can run. */
 export function runtimeChoices(integrations: readonly Integration[], owned: Owned): readonly Choice[] {
-  return accountFacts(integrations, owned).flatMap(({ account, offered, runtimes }) => {
-    if (offered === null || offered.calls.kind !== 'allowed') return []
+  return accountFacts(integrations, owned).flatMap(({ account, offered, runtimes, keeper }) => {
+    if (offered === null || keeper.kind !== 'can_run') return []
     const subscription = `${integrationName(offered)} 계정 ${idTail(account.id)}`
     return runtimes.flatMap((runtime) => (runtime.model.read ? [{ runtimeId: runtime.id, label: `${runtime.model.value} · ${subscription}` }] : []))
   })
@@ -37,7 +40,10 @@ type Uses =
   | { readonly kind: 'runs'; readonly choice: Choice }
   /** The Runtime is the person's, and a Keeper cannot run on it here now. */
   | { readonly kind: 'stopped'; readonly model: string | null }
-  /** The subscriptions are not read, or the Runtime is not among them. */
+  /** The subscriptions are not read, or the Runtime is not among them. The
+      server lists no Runtime of an account that was removed or that a
+      removal was left on (lib/auth_preview.ml, `provider_accounts`), so a
+      Keeper keeps such a Runtime and the list does not have it. */
   | { readonly kind: 'unknown' }
 
 function usesOf(keeper: Keeper, owned: Owned | null, choices: readonly Choice[] | null): Uses {
@@ -64,7 +70,8 @@ function usesWords(uses: Uses): string {
     case 'runs': return `쓰는 모델: ${uses.choice.label}`
     case 'stopped':
       return `쓰는 모델: ${uses.model ?? '알 수 없는 모델'}. 이 모델로는 지금 Keeper가 일할 수 없어요. 이유는 위 구독 카드에 있어요.`
-    case 'unknown': return '쓰는 모델을 불러오지 못했어요.'
+    // Said once the subscriptions are read: before that the card says they are not (`KeeperRow`).
+    case 'unknown': return '쓰는 모델이 내 구독 목록에 없어요. 그 모델의 계정을 없앴으면 이 Keeper는 일할 수 없어요. 다른 모델을 골라 주세요.'
   }
 }
 

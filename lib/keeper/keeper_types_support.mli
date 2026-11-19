@@ -27,8 +27,9 @@ val keeper_metrics_dir : Workspace.config -> string -> string
 
 val keeper_store_location :
   Workspace.config -> string -> Dated_jsonl.Store.Keeper.t -> Dated_jsonl.Store.location
-(** Where one of a keeper's date-split stores lives. Makes the keepers
-    directory when it is missing. *)
+(** Where one of a keeper's date-split stores lives. A path: the file system
+    is not looked at and nothing is made. The store's append makes its
+    directories. *)
 
 val execution_receipts_dirname : string
 (** Runtime subdirectory under each keeper directory for date-split execution
@@ -105,7 +106,12 @@ val history_source_of_string : string -> history_source option
     conversation. *)
 val is_internal_history_source : history_source -> bool
 
+(** Where a Keeper's decision record and feedback record are. Paths: the
+    file system is not looked at and nothing is made. The records' writers
+    make the keepers directory ({!append_decision_record},
+    [Keeper_response_feedback.record]). *)
 val keeper_decision_log_path : Workspace.config -> string -> string
+
 val keeper_feedback_log_path : Workspace.config -> string -> string
 
 (** Rotate [path] when it reaches the configured size threshold.

@@ -1499,8 +1499,10 @@ let memory_overview_rows ~cols ~budget (state : state) =
       let tallest = List.fold_left (fun tallest measure -> max tallest (folded measure)) 0 measures in
       (* Each reading is folded into the room before it is measured, so
          none is cut here: [fit_tallest] only pads the selected one to the
-         tallest. *)
-      Masc_tui_detail_height.fit_tallest ~budget:room ~tallest
+         tallest. The room is the cap as well: a reading too tall for it is
+         already drawn in its compact form, so the default cap would only cut
+         a reading that fits. *)
+      Masc_tui_detail_height.fit_tallest ~cap:room ~budget:room ~tallest
         ~too_tall:(Masc_tui_detail_height.Cut_with
                      (if ko then "  … v:전체" else "  … v:full reading"))
         ~blank:"" (fold (context, compact_context))

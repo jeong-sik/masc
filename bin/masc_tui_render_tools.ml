@@ -2812,37 +2812,37 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       ++ Say.both ~ko:": 편집기에서 이어 쓰기" ~en:":resume in editor")
     (skill_create_drafts_for_current_workspace state) in
   let prefix = tools_selection_document ~cols state @ rows (drafts @ reading_lines @ error_lines) in
-  let marked =
-    if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
-      wrap (pane_lines @ rows (reading_lines @ error_lines))
-    else if state.tools_pane = Tools_storage then
-      (* No Skill is selected here, so the Skill heading stays out. *)
-      wrap (rows (reading_lines @ error_lines) @ pane_lines)
-    else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
-      wrap prefix @ draw_marked language pane_lines
-    else wrap (prefix @ pane_lines)
-  in
-  (* The rows each entry of the pane's list takes once wrapped. A row wraps
-     by its own width alone, so an entry takes as many rows wrapped by itself
-     as it does among the rows around it. The first entry takes every row of
-     the page above it too, since the window brings the top of the page in
-     with it (Home); a page counted without them let PgUp onto the first
-     entry push the entry read first off the window. A pane with a list
-     draws [prefix] and then its pane lines. *)
-  let entry_rows =
+  (* The rows each entry of the pane's list takes, in order, from the page
+     wrapped one piece at a time, so no row is wrapped twice. The first entry
+     takes every row of the page above it too, since the window brings the
+     top of the page in with it (Home); a page counted without them let PgUp
+     onto the first entry push the entry read first off the window. *)
+  let list_entry_rows wrapped =
+    let rows_of = function
+      | List_entry _, rows -> Some (List.length rows)
+      | (Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _), _ -> None
+    in
     let rec from_first above = function
-      | List_entry pieces :: rest ->
-          (List.length (wrap (List.rev above)) + List.length (wrap pieces))
-          :: List.filter_map
-               (function
-                 | List_entry pieces -> Some (List.length (wrap pieces))
-                 | Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _ -> None)
-               rest
-      | (Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _) as piece :: rest ->
-          from_first (piece :: above) rest
+      | (List_entry _, rows) :: rest -> (above + List.length rows) :: List.filter_map rows_of rest
+      | ((Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _), rows) :: rest ->
+          from_first (above + List.length rows) rest
       | [] -> []
     in
-    from_first (List.rev prefix) pane_lines
+    from_first 0 wrapped
+  in
+  let marked, entry_rows =
+    if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
+      wrap (pane_lines @ rows (reading_lines @ error_lines)), []
+    else if state.tools_pane = Tools_storage then
+      (* No Skill is selected here, so the Skill heading stays out. *)
+      wrap (rows (reading_lines @ error_lines) @ pane_lines), []
+    else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
+      wrap prefix @ draw_marked language pane_lines, []
+    else
+      (* A row wraps by its own width alone, so a piece takes as many rows
+         wrapped by itself as among the rows around it. *)
+      let wrapped = List.map (fun piece -> piece, wrap [ piece ]) (prefix @ pane_lines) in
+      List.concat_map snd wrapped, list_entry_rows wrapped
   in
   let entries =
     let listed list = match entry_rows with [] -> None | heights -> Some (list, heights) in

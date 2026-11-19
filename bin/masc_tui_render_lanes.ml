@@ -1683,21 +1683,28 @@ let lane_run_payload_availability_lines ~width availability payload =
 let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
   lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
-let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) =
+let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_detail) =
+  let say korean english = if ko then korean else english in
   let preflight_lines = match detail.lrd_librarian_preflight with
     | None -> []
     | Some reading ->
       let decision = match reading.lp_status with
-        | Tui_decode.Preflight_awaiting -> "응답 대기"
-        | Tui_decode.Preflight_not_called reason -> "호출하지 않음 · " ^ reason
-        | Tui_decode.Preflight_failed reason -> if details then "호출 실패 · " ^ reason else "호출 실패"
-        | Tui_decode.Preflight_invalid reason -> "답변 거절 · " ^ reason
+        | Tui_decode.Preflight_awaiting -> say "응답 대기" "awaiting response"
+        | Tui_decode.Preflight_not_called reason -> say "호출하지 않음 · " "not called · " ^ reason
+        | Tui_decode.Preflight_failed reason ->
+            if details then say "호출 실패 · " "call failed · " ^ reason
+            else say "호출 실패" "call failed"
+        | Tui_decode.Preflight_invalid reason -> say "답변 거절 · " "answer refused · " ^ reason
         | Tui_decode.Preflight_judged judgment ->
           Masc.Typesafeai_librarian_preflight.decision_label judgment.choice in
       let path = match reading.lp_generation_path with
-        | Tui_decode.Generation_not_entered -> "생성 Lane 진입 전"
-        | Tui_decode.Generation_full_lane -> "생성 Lane 진입 · 실제 요청 수는 별도 기록"
-        | Tui_decode.Generation_jev_no_change -> "생성 호출 생략 · 빈 변경 검증 통과" in
+        | Tui_decode.Generation_not_entered -> say "생성 Lane 진입 전" "before generation lane"
+        | Tui_decode.Generation_full_lane ->
+            say "생성 Lane 진입 · 실제 요청 수는 별도 기록"
+              "entered generation lane · actual request count recorded separately"
+        | Tui_decode.Generation_jev_no_change ->
+            say "생성 호출 생략 · 빈 변경 검증 통과"
+              "generation skipped · no-change verification passed" in
       let probabilities = match reading.lp_status with
         | Tui_decode.Preflight_judged judgment ->
           [Printf.sprintf "Confidence %.3f" judgment.confidence]
@@ -1709,38 +1716,59 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
         | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
-        | None -> [] | Some reason -> ["검증 거절 → 생성 Lane · " ^ reason] in
+        | None -> []
+        | Some reason -> [say "검증 거절 → 생성 Lane · " "rejected → generation lane · " ^ reason] in
       let memory = match reading.lp_memory_scope, reading.lp_memory_result with
-        | Tui_decode.Memory_inference_scope, _ -> "기억 판정: 회차 메모리에만 보관 · 저장하지 않음"
-        | Tui_decode.Context_only_scope, None -> "기억 snapshot: Context 전용 · 저장하지 않음"
-        | Tui_decode.Memory_disposition_scope, None -> "기억 snapshot: 적용 결과가 기록되지 않음"
+        | Tui_decode.Memory_inference_scope, _ ->
+            say "기억 판정: 회차 메모리에만 보관 · 저장하지 않음"
+              "Memory judgment: turn memory only · not persisted"
+        | Tui_decode.Context_only_scope, None ->
+            say "기억 snapshot: Context 전용 · 저장하지 않음"
+              "Memory snapshot: Context only · not persisted"
+        | Tui_decode.Memory_disposition_scope, None ->
+            say "기억 snapshot: 적용 결과가 기록되지 않음"
+              "Memory snapshot: disposition not recorded"
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
-          Printf.sprintf "기억 snapshot: 변경 없음 · revision %d · %d facts" revision facts
+          Printf.sprintf
+            (if ko then "기억 snapshot: 변경 없음 · revision %d · %d facts"
+             else "Memory snapshot: unchanged · revision %d · %d facts")
+            revision facts
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
-          Printf.sprintf "기억 snapshot: +%d / -%d · revision %d · %d facts" added removed revision facts in
+          Printf.sprintf
+            (if ko then "기억 snapshot: +%d / -%d · revision %d · %d facts"
+             else "Memory snapshot: +%d / -%d · revision %d · %d facts")
+            added removed revision facts in
       let side_writes = List.map (fun (kind, status) ->
         let label = match kind with
           | Tui_decode.Context_write -> "Context"
           | Tui_decode.Continuity_write -> "Continuity" in
         let outcome = match status with
-          | Tui_decode.Side_not_attempted -> "not attempted"
-          | Tui_decode.Side_answer_missing -> "answer missing"
-          | Tui_decode.Side_withheld -> "withheld"
-          | Tui_decode.Side_outcome_unconfirmed -> "outcome unconfirmed"
-          | Tui_decode.Side_committed -> "committed"
-          | Tui_decode.Side_answer_refused detail -> "answer refused · " ^ detail
-          | Tui_decode.Side_failed detail -> "failed · " ^ detail in
+          | Tui_decode.Side_not_attempted -> say "시도 안 함" "not attempted"
+          | Tui_decode.Side_answer_missing -> say "응답 없음" "answer missing"
+          | Tui_decode.Side_withheld -> say "보류됨" "withheld"
+          | Tui_decode.Side_outcome_unconfirmed -> say "결과 미확인" "outcome unconfirmed"
+          | Tui_decode.Side_committed -> say "반영 완료" "committed"
+          | Tui_decode.Side_answer_refused detail -> say "응답 거절 · " "answer refused · " ^ detail
+          | Tui_decode.Side_failed detail -> say "실패 · " "failed · " ^ detail in
         label ^ ": " ^ outcome) reading.lp_side_writes in
       let document = String.concat "\n"
-        ([path; memory] @ side_writes @ ["JEV 판정 · " ^ decision] @ rejection
-      @ (if details then model @ elapsed @ probabilities @ [""; "원문 실행 증거"]
-         else ["d: 모델·확률·원문 펼치기"])) in
+        ([path; memory] @ side_writes
+         @ [say "JEV 판정 · " "JEV judgment · " ^ decision] @ rejection
+         @ (if details then
+              model @ elapsed @ probabilities
+              @ [""; say "원문 실행 증거" "Raw execution evidence"]
+            else [say "d: 모델·확률·원문 펼치기" "d: expand model, probabilities, and raw evidence"])) in
       let document =
         if String.length document <= lane_run_preview_source_max_bytes then document
         else
-          let notice = Printf.sprintf "\n… truncated preflight, total %d bytes" (String.length document) in
+          let notice =
+            Printf.sprintf
+              (if ko then "\n… preflight 생략됨 · 전체 %d바이트"
+               else "\n… truncated preflight, total %d bytes")
+              (String.length document)
+          in
           let room = lane_run_preview_source_max_bytes - String.length notice in
           let cut = String_util.utf8_char_boundary document room in
           String.sub document 0 cut ^ notice in
@@ -2023,18 +2051,18 @@ let inspection_input_lines ~width = function
   | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~width ~sha256 report
   | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
 
-let inspection_output_lines ~details ~width = function
-  | Inspection_lane detail -> lane_run_output_lines ~details ~width detail
+let inspection_output_lines ~ko ~details ~width = function
+  | Inspection_lane detail -> lane_run_output_lines ~ko ~details ~width detail
   | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_output_lines ~width measurement.report
   | Inspection_measurement (_, Measurement.Temporal report) -> temporal_output_lines ~width report
 
-let lane_run_stacked_lines ~details ~width detail =
+let lane_run_stacked_lines ~ko ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
   @ indent (inspection_input_lines ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
-  @ indent (inspection_output_lines ~details ~width detail)
+  @ indent (inspection_output_lines ~ko ~details ~width detail)
 
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
@@ -2135,7 +2163,10 @@ let render_lane_run_detail (state : state) ~run_id =
         let input_lines =
           inspection_input_lines ~width:left_width detail
         in
-        let output_lines = inspection_output_lines ~details:state.lane_run_preflight_details ~width:right_width detail in
+        let output_lines =
+          inspection_output_lines ~ko:(state.ui_language = Lang_ko)
+            ~details:state.lane_run_preflight_details ~width:right_width detail
+        in
         if payload_rows = 0
         then 0, None, content_height
         else begin
@@ -2180,9 +2211,10 @@ let render_lane_run_detail (state : state) ~run_id =
       end
       else begin
         let lines =
+          let ko = state.ui_language = Lang_ko in
           if compact_preflight then
-            inspection_output_lines ~details:false ~width:(max 1 (framed_inner_width cols - 4)) detail
-          else lane_run_stacked_lines ~details:state.lane_run_preflight_details ~width:(max 1 (framed_inner_width cols - 4)) detail
+            inspection_output_lines ~ko ~details:false ~width:(max 1 (framed_inner_width cols - 4)) detail
+          else lane_run_stacked_lines ~ko ~details:state.lane_run_preflight_details ~width:(max 1 (framed_inner_width cols - 4)) detail
         in
         let max_scroll =
           if content_height = 0

@@ -3149,7 +3149,8 @@ let render_keeper_axes (state : state) =
   Option.iter
     (fun (name, portrait) ->
       box_line buf cols
-        (Theme.recede () ^ "  selected · " ^ Terminal_text.single_line name ^ Ansi.reset);
+        (Theme.recede () ^ ui_text state ~ko:"  선택됨 · " ~en:"  selected · "
+         ^ Terminal_text.single_line name ^ Ansi.reset);
       let picture_row = count_frame_lines buf in
       List.iter (box_line buf cols) portrait.Masc_tui_chat_portrait.picture_lines;
       box_line buf cols "";
@@ -3280,12 +3281,15 @@ let render_keeper_axes (state : state) =
     if keeper_count > 0 then None
     else
       match keeper_rows_page state ~error:keepers_error with
-      | Page_empty when Option.is_some matrix -> Some "   no failing Keepers"
+      | Page_empty when Option.is_some matrix ->
+          Some (ui_text state ~ko:"   실패 중인 키퍼 없음" ~en:"   no failing Keepers")
       | Page_empty -> Some (match state.workspace_identity with
-          | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
+          | Workspace_identity_mismatch _ ->
+              ui_text state ~ko:"   서버 키퍼 목록이 비어 있음" ~en:"   server Keeper roster is empty"
           | Workspace_identity_match | Workspace_identity_match_unconfirmed _
           | Workspace_identity_unread ->
-            "   no keeper metadata under .masc/keepers/")
+              ui_text state ~ko:"   .masc/keepers/ 아래 키퍼 메타데이터 없음"
+                ~en:"   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some (page_unread_note ~ko:(state.ui_language = Lang_ko))
       | Page_failed -> None
   in
@@ -3671,22 +3675,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let cursor = Item_account.cursor ~items state.item_cursor in
     let selected_item = List.nth_opt items cursor in
     let milli value = Printf.sprintf "%d.%03d" (value / 1000) (value mod 1000) in
+    let ko = state.ui_language = Lang_ko in
+    let item_say korean english = if ko then korean else english in
     let account_line =
       match account, state.item_account_error with
       | Some (Item_account.Ready account), _ ->
           let balance_milli = selected_item_balance_now state in
-          Printf.sprintf "  Wallet %s Candle%s · %d owned"
+          Printf.sprintf
+            (if ko then "  지갑 %s Candle%s · 보유 %d개"
+             else "  Wallet %s Candle%s · %d owned")
             (milli (Item_account.spendable_milli account ~balance_milli))
-            (match balance_milli with Some _ -> "" | None -> " (as read)")
+            (match balance_milli with Some _ -> "" | None -> item_say " (마지막 관측)" " (as read)")
             (List.length account.owned_items)
-      | Some Item_account.Off, _ -> "  Candle off"
+      | Some Item_account.Off, _ -> item_say "  Candle 꺼짐" "  Candle off"
       | Some (Item_account.Disabled reason), _ ->
-          "  Candle disabled: " ^ Terminal_text.single_line reason
-      | None, Some detail -> "  Account unavailable: " ^ Terminal_text.single_line detail
+          item_say "  Candle 비활성: " "  Candle disabled: " ^ Terminal_text.single_line reason
+      | None, Some detail ->
+          item_say "  계정 조회 불가: " "  Account unavailable: " ^ Terminal_text.single_line detail
       | None, None ->
           (match pending_detail_read state ~tab:Detail_items ~keeper:k.k_name with
-           | Some _ -> "  Loading Item account…"
-           | None -> "  Item account not observed")
+           | Some _ -> item_say "  아이템 계정 불러오는 중" "  Loading Item account"
+           | None -> item_say "  아이템 계정 미조회" "  Item account not observed")
     in
     let is_worn item =
       match portrait_reading with
@@ -3696,16 +3705,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
     (* Starting accessories may be worn without being purchased. Ownership and
        the observed picture therefore remain separate facts. *)
-    let equipped_word = "  " ^ Ansi.bold ^ "wearing" ^ Ansi.reset in
+    let equipped_word = "  " ^ Ansi.bold ^ item_say "착용 중" "wearing" ^ Ansi.reset in
     let item_account_facts item =
       match account with
       | Some (Item_account.Ready account) ->
           let owned = List.mem item account.owned_items in
           let price =
             match List.find_opt (fun (entry : Item_account.entry) -> entry.item = item) account.catalog with
-            | None -> "catalog unavailable"
-            | Some { price = Item_account.Unpriced; _ } -> "unpriced"
-            | Some { price = Item_account.Priced 0; _ } -> "free"
+            | None -> item_say "카탈로그 미조회" "catalog unavailable"
+            | Some { price = Item_account.Unpriced; _ } -> item_say "가격 미정" "unpriced"
+            | Some { price = Item_account.Priced 0; _ } -> item_say "무료" "free"
             | Some { price = Item_account.Priced amount; _ } ->
               milli amount ^ " Candle"
               ^ (if owned then ""
@@ -3714,10 +3723,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      Item_account.spendable_milli account
                        ~balance_milli:(selected_item_balance_now state)
                    in
-                   if amount <= spendable then " · can buy"
-                   else " · need " ^ milli (amount - spendable) ^ " more")
+                   if amount <= spendable then item_say " · 구매 가능" " · can buy"
+                   else
+                     let diff = milli (amount - spendable) in
+                     if ko then " · " ^ diff ^ " 더 필요"
+                     else " · need " ^ diff ^ " more")
           in
-          Some ((if owned then "owned · " else "not owned · ") ^ price)
+          Some ((if owned then item_say "보유 · " "owned · " else item_say "미보유 · " "not owned · ") ^ price)
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
     in
     let outfit_lines = match portrait_reading with
@@ -3725,11 +3737,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Tui_decode.Ready equipment ->
         let slots = List.map (fun slot ->
           let name = match Keeper_portrait_item.in_slot equipment slot with
-            | None -> "none"
+            | None -> item_say "없음" "none"
             | Some item -> Item_account.item_name item in
           Keeper_portrait_item.slot_id slot ^ ": " ^ name) Keeper_portrait_item.slots in
         Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
-          ("Wearing · " ^ String.concat " · " slots)
+          (item_say "착용 중 · " "Wearing · " ^ String.concat " · " slots)
         |> List.map (fun line -> "  " ^ line)
     in
     let portrait =
@@ -3757,10 +3769,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Item_account.item_name item) facts (if is_worn item then equipped_word else "")
     in
     let headline =
-      [ Printf.sprintf "  Items · %s · %s · %s"
+      [ Printf.sprintf
+          (if ko then "  아이템 · %s · %s · %s" else "  Items · %s · %s · %s")
           (Item_account.filter_name state.item_filter)
           (Masc_tui_value.Count.grouped (List.length items))
-          (if state.item_preview && selected_item <> None then "try on" else "current outfit")
+          (if state.item_preview && selected_item <> None then item_say "미리 착용" "try on"
+           else item_say "현재 복장" "current outfit")
       ; account_line ]
     in
     let portrait = match state.detail_tab, portrait with
@@ -3777,7 +3791,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let observation = match portrait_reading with
         | Tui_decode.Ready _ -> []
         | Tui_decode.Unavailable reason ->
-          [ "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
+          [ item_say "  초상화 조회 불가: " "  Portrait unavailable: " ^ Terminal_text.single_line reason ] in
       let selected_facts = match selected_item with
         | None -> []
         | Some item ->
@@ -3789,12 +3803,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | None -> []) in
       let empty = if count > 0 then [] else
         [ "  " ^ (match state.item_filter, account with
-          | Item_account.Owned, Some (Item_account.Ready _) -> "No purchased accessories yet."
-          | Item_account.Can_buy, Some (Item_account.Ready _) -> "No unowned item fits the current balance."
+          | Item_account.Owned, Some (Item_account.Ready _) ->
+              item_say "구매한 장신구가 아직 없습니다." "No purchased accessories yet."
+          | Item_account.Can_buy, Some (Item_account.Ready _) ->
+              item_say "현재 잔액으로 구매 가능한 미보유 아이템이 없습니다."
+                "No unowned item fits the current balance."
           | (Item_account.Owned | Item_account.Can_buy), (None | Some (Item_account.Off | Item_account.Disabled _)) ->
-            "This view needs a ready Item account."
-          | (Item_account.All | Item_account.In_slot _), _ -> "No items in this view.") ] in
-      let footer = ["  Requests open a chat draft; the Keeper reports the result."] in
+              item_say "이 보기는 활성화된 아이템 계정이 필요합니다."
+                "This view needs a ready Item account."
+          | (Item_account.All | Item_account.In_slot _), _ ->
+              item_say "이 보기에 표시할 아이템이 없습니다." "No items in this view.") ] in
+      let footer =
+        [ item_say "  요청 시 채팅 초안이 열리며 키퍼가 결과를 보고합니다."
+            "  Requests open a chat draft; the Keeper reports the result." ] in
       let reserved = List.length headline + List.length selected_facts + List.length outfit_lines
         + List.length observation + List.length empty + List.length footer in
       let visible = min count (max 1 (base_height - reserved)) in
@@ -5025,7 +5046,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Option.map
            (fun (stamp, providers) ->
              ( stamp
-             , Masc_tui_render_identity.draw ~cols
+             , Masc_tui_render_identity.draw ~ko:(state.ui_language = Lang_ko) ~cols
                  { keeper_name = k.k_name
                  ; providers
                  ; filter = state.identity_filter
@@ -5111,7 +5132,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             stamped_or state.github_identity_view
               state.github_identity_view_error
           in
-          Masc_tui_render_github.lines
+          Masc_tui_render_github.lines ~ko:(state.ui_language = Lang_ko)
             { token_input = state.github_token_input
             ; save_status = state.github_token_save_status
             ; login_scopes = state.github_login_scopes

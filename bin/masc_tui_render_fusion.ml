@@ -128,7 +128,10 @@ let render_fusion_list (state : state) =
                  state_count (Theme.bad ()) ~ko:"실패" ~en:"failed" failed_count
                else "")
             ; (if history_count = 0 then ""
-               else Printf.sprintf "%d Board evidence" history_count) ]
+               else
+                 Printf.sprintf
+                   (if state.ui_language = Lang_ko then "게시판 근거 %d건" else "%d Board evidence")
+                   history_count) ]
           ~position:
             (if shown = 0 then None
              else

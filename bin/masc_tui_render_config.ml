@@ -357,10 +357,10 @@ let render_runtime_params (state : state) =
             when edit.rpe_mode = Friendly_value
                  && List.mem (runtime_param_type_name edit.rpe_value_type)
                       [ "bool"; "boolean" ] ->
-            ui_text state ~ko:"Left/Right/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
+            ui_text state ~ko:"←/→/Space:전환  Enter:적용  Esc:취소" ~en:"Left/Right/Space:toggle  Enter:apply  Esc:cancel"
           | Some edit
             when edit.rpe_mode = Friendly_value && edit.rpe_choices <> [] ->
-            ui_text state ~ko:"Left/Right/Space:선택  Enter:적용  Esc:취소" ~en:"Left/Right/Space:cycle  Enter:apply  Esc:cancel"
+            ui_text state ~ko:"←/→/Space:선택  Enter:적용  Esc:취소" ~en:"Left/Right/Space:cycle  Enter:apply  Esc:cancel"
           | Some { rpe_mode = Friendly_value; _ } ->
             ui_text state ~ko:"입력:값  Enter:적용  Ctrl-U:지우기  Esc:취소" ~en:"type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | Some { rpe_mode = Advanced_json; _ } ->
@@ -2439,7 +2439,9 @@ let render_config (state : state) =
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
        | Some _ when runtime_form_input_locked state ->
-         "Esc back · input retained · Ctrl-X closes recovery after receipt"
+         ui_text state
+           ~ko:"Esc:뒤로 · 입력 보존됨 · Ctrl-X:영수증 확인 후 복구 닫기"
+           ~en:"Esc back · input retained · Ctrl-X closes recovery after receipt"
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language

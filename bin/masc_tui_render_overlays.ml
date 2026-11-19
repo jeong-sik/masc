@@ -123,38 +123,44 @@ let context_split_window ~height ~offset lines =
    note rather than a key. *)
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let keeper =
-    Option.value ~default:"no Keeper" state.context_inspector_keeper
+    Option.value ~default:(say "키퍼 없음" "no Keeper") state.context_inspector_keeper
     |> Keeper_chat.terminal_safe_text
   in
   (* What the numbers describe: a reading in flight, or one received some
      time ago. The pane does not poll, so without the age a reading from
      before the current turn read as the current turn. *)
   let refreshing =
-    if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
+    if state.context_inspector_loading then
+      Ansi.dim ^ say "  새로고침 중" "  refreshing" ^ Ansi.reset
     else
       match state.context_inspector_reading, state.context_inspector_read_at with
       | Some _, Some read_at ->
-          Ansi.dim ^ "  read " ^ Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) read_at
-          ^ " ago" ^ Ansi.reset
+          let ago = Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) read_at in
+          Ansi.dim
+          ^ (if ko then "  " ^ ago ^ " 전 조회" else "  read " ^ ago ^ " ago")
+          ^ Ansi.reset
       | Some _, None | None, (Some _ | None) -> ""
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
   let search_marker = search_marker_styled state in
+  let ctx_title = screen_title (say " 컨텍스트" " Context") in
   let tabs =
     tab_strip
       ~width:
         (tab_strip_width ~cols
-           ~before:(screen_title " Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
+           ~before:(ctx_title ^ "  " ^ keeper ^ refreshing ^ "  ")
            ~after:search_marker)
       ~press:(fun tab text -> pressable (Press_context_tab tab) text)
       (List.map
          (fun (label, tab) -> (label, state.context_inspector_tab = tab, tab))
-         [ ("stack", Masc_tui_context_inspector.Composition)
-         ; ("request", Masc_tui_context_inspector.Exact_input)
-         ; ("proof", Masc_tui_context_inspector.Input_map)
-         ; ("response", Masc_tui_context_inspector.Response)
+         [ (say "구성" "stack", Masc_tui_context_inspector.Composition)
+         ; (say "요청" "request", Masc_tui_context_inspector.Exact_input)
+         ; (say "근거" "proof", Masc_tui_context_inspector.Input_map)
+         ; (say "응답" "response", Masc_tui_context_inspector.Response)
          ])
   in
   let hints = Masc_tui_keys.footer_hints_context ~cols state in
@@ -198,7 +204,7 @@ let render_context_inspector state =
     ~help_door:(Option.is_none state.search)
     ~frame:Chrome_overlay
     ~title:
-      (screen_title " Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
+      (ctx_title ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
        ^ search_marker)
     ~hints
     ~body:(fun ~budget:content_height c ->
@@ -274,27 +280,40 @@ let detail_reading_document reading ~cols =
    read status outside the document window so End/G cannot hide a failed or
    pending replacement while the old page remains on screen. *)
 let detail_peer_status state reading =
+  let ko = state.ui_language = Lang_ko in
   let retained = function
-    | Some page -> Printf.sprintf " · page %d retained" page
+    | Some page ->
+        Printf.sprintf (if ko then " · %d페이지 유지" else " · page %d retained") page
     | None -> "" in
   let retry = function
-    | Some page -> Printf.sprintf " · r retries page %d" page
+    | Some page ->
+        Printf.sprintf (if ko then " · r:%d페이지 재시도" else " · r retries page %d") page
     | None -> "" in
   match keeper_peer_status_for_reading state reading with
   | Some (Keeper_peer_loading {page; retained = previous; retry = failed}) ->
-      Some (Theme.info (), Printf.sprintf "  Loading page %d%s%s"
-        page (retained previous) (retry failed))
+      Some (Theme.info (),
+        Printf.sprintf (if ko then "  %d페이지 읽는 중%s%s" else "  Loading page %d%s%s")
+          page (retained previous) (retry failed))
   | Some (Keeper_peer_arrived {page; retained = previous; retry = failed}) ->
-      Some (Theme.info (), Printf.sprintf "  Page %d response received%s%s · awaiting frame"
-        page (retained previous) (retry failed))
+      Some (Theme.info (),
+        Printf.sprintf
+          (if ko then "  %d페이지 응답 수신%s%s · 화면 반영 대기"
+           else "  Page %d response received%s%s · awaiting frame")
+          page (retained previous) (retry failed))
   | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
       Some (Theme.warn (), keeper_peer_failure_status ~page ~retained:previous ~reason)
   | Some (Keeper_peer_kept_back {page; retained = previous; notice}) ->
-      Some (Theme.warn (), Printf.sprintf "  %s · r retry · page %d%s"
-        (Masc.Tui_terminal_text.sanitize_terminal_text notice) page (retained previous))
+      Some (Theme.warn (),
+        Printf.sprintf
+          (if ko then "  %s · r:재시도 · %d페이지%s" else "  %s · r retry · page %d%s")
+          (Masc.Tui_terminal_text.sanitize_terminal_text notice) page (retained previous))
   | Some (Keeper_peer_current page) ->
-      Some (Theme.recede (), Printf.sprintf "  Page %d · queued relationships" page)
-  | Some Keeper_peer_unread -> Some (Theme.warn (), "  Relationship page unavailable · r retry")
+      Some (Theme.recede (),
+        Printf.sprintf (if ko then "  %d페이지 · 대기 중 관계" else "  Page %d · queued relationships") page)
+  | Some Keeper_peer_unread ->
+      Some (Theme.warn (),
+        ui_text state ~ko:"  관계 페이지 조회 불가 · r:재시도"
+          ~en:"  Relationship page unavailable · r retry")
   | None -> None
 
 let detail_reading_height state reading ~terminal_rows ~count =
@@ -320,8 +339,10 @@ let render_detail_reading (state : state) reading =
   let height = detail_reading_height state reading ~terminal_rows ~count in
   let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
   let source_title = Terminal_text.single_line (Masc_tui_detail_reading.title reading) in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let title, search_hint = match Masc_tui_detail_reading.search_query reading with
-    | None -> source_title, "/:find"
+    | None -> source_title, say "/:찾기" "/:find"
     | Some query ->
         let match_count = List.fold_left (fun count (_,mark) ->
           match mark with
@@ -333,11 +354,13 @@ let render_detail_reading (state : state) reading =
         let editing = Masc_tui_detail_reading.search_editing reading in
         (* The footer can collapse to its help door. Keep the query with the
            document too, ahead of its title so narrow readers can see it. *)
-        (if editing then "Find " else "") ^ query_label ^ " · " ^ source_title,
+        (if editing then say "찾기 " "Find " else "") ^ query_label ^ " · " ^ source_title,
         query_label ^ "  " ^
-          (if editing then "Enter:keep  Esc:cancel" else "n/N:next/previous  /:find") in
+          (if editing then say "Enter:유지  Esc:취소" "Enter:keep  Esc:cancel"
+           else say "n/N:다음/이전  /:찾기" "n/N:next/previous  /:find") in
   let hints=Option.value (Masc_tui_detail_reading.hints reading)
-      ~default:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back" in
+      ~default:(say "j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  Esc:뒤로"
+                  "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back") in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state
     ~terminal_rows ~cols ~surface_key:"detail-reading"
     ~title:(screen_title (" " ^ title))
@@ -389,9 +412,22 @@ let palette_noun : palette_mode -> string * string = function
   | Masc_tui_types.Palette_worktrees _ -> ("worktree", "worktrees")
   | Masc_tui_types.Palette_search _ -> ("match", "matches")
 
-let palette_count mode count =
-  let singular, plural = palette_noun mode in
-  Message_layout.count_noun ~plural count singular
+let palette_count ~ko mode count =
+  if ko then
+    let noun =
+      match mode with
+      | Masc_tui_types.Palette_jump -> "명령"
+      | Masc_tui_types.Palette_choice _ -> "이름"
+      | Masc_tui_types.Palette_files _ -> "파일"
+      | Masc_tui_types.Palette_locations _ -> "위치"
+      | Masc_tui_types.Palette_branches _ -> "브랜치"
+      | Masc_tui_types.Palette_worktrees _ -> "워크트리"
+      | Masc_tui_types.Palette_search _ -> "일치"
+    in
+    Printf.sprintf "%s %d개" noun count
+  else
+    let singular, plural = palette_noun mode in
+    Message_layout.count_noun ~plural count singular
 
 (* The search runs under the directory the Code pane had open (the server
    passes it to git as a pathspec), so the overlay says which. The root of the
@@ -420,30 +456,39 @@ let render_palette (state : state) =
   let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let title, prompt, action =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
-        (" Command palette", ":", if Option.is_some typed_question then "ask" else "run")
+        (say " 명령 팔레트" " Command palette", ":",
+         if Option.is_some typed_question then say "질문" "ask" else say "실행" "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
-        ( Printf.sprintf " %s · %s on line %d" choice_question
-            (palette_count state.palette_mode names) choice_line
-        , "filter:", "ask" )
+        let heading =
+          if ko then
+            Printf.sprintf " %s · %d줄 %s" choice_question choice_line
+              (palette_count ~ko state.palette_mode names)
+          else
+            Printf.sprintf " %s · %s on line %d" choice_question
+              (palette_count ~ko state.palette_mode names) choice_line
+        in
+        (heading, say "필터:" "filter:", say "질문" "ask")
     | Masc_tui_types.Palette_files _ ->
-        (" Find file", "filter:", "open")
+        (say " 파일 찾기" " Find file", say "필터:" "filter:", say "열기" "open")
     | Masc_tui_types.Palette_branches _ ->
-        (" Branches", "filter:", "close")
+        (say " 브랜치" " Branches", say "필터:" "filter:", say "닫기" "close")
     | Masc_tui_types.Palette_worktrees _ ->
-        (" Worktrees", "filter:", "close")
+        (say " 워크트리" " Worktrees", say "필터:" "filter:", say "닫기" "close")
     | Masc_tui_types.Palette_search _ ->
-        (" Search in files", "search:",
+        (say " 파일 내 검색" " Search in files", say "검색:" "search:",
          (match Masc_tui_palette.search_enter state with
-          | Masc_tui_palette.Enter_opens _ -> "open"
-          | Masc_tui_palette.Enter_searches -> "search"))
+          | Masc_tui_palette.Enter_opens _ -> say "열기" "open"
+          | Masc_tui_palette.Enter_searches -> say "검색" "search"))
     | Masc_tui_types.Palette_locations offer ->
         let query = Masc_tui_fetched.request_key offer.clo_query in
         (Printf.sprintf " %s · %s" query.clq_question
-           (Terminal_text.single_line query.clq_symbol), "filter:", "open")
+           (Terminal_text.single_line query.clq_symbol), say "필터:" "filter:", say "열기" "open")
   in
   (* The overlay fills unused rows so the footer stays on the composer row. *)
   let caret = "\xe2\x96\x8c" in
@@ -475,67 +520,85 @@ let render_palette (state : state) =
     | Palette_worktrees _ ->
         List.map Terminal_text.single_line
           (match code_worktrees_view state with
-           | Masc_tui_fetched.Absent -> [ "Worktrees are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading worktrees" ]
+           | Masc_tui_fetched.Absent ->
+               [ say "워크트리 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                   "Worktrees are no longer active; Esc returns to Code" ]
+           | Masc_tui_fetched.Loading -> [ say "워크트리 읽는 중" "Reading worktrees" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
-                   (palette_count state.palette_mode
+                   (palette_count ~ko state.palette_mode
                       (List.length listing.Tui_decode.gws_worktrees))
-                   (if String.equal listing.gws_root "" then "workspace repository"
+                   (if String.equal listing.gws_root "" then
+                      say "워크스페이스 저장소" "workspace repository"
                     else listing.gws_root)
-                   (if listing.gws_truncated then " · first only" else "") ])
+                   (if listing.gws_truncated then say " · 앞부분만 표시" " · first only" else "") ])
     | Palette_branches _ ->
         List.map Terminal_text.single_line
           (match code_branches_view state with
-           | Masc_tui_fetched.Absent -> [ "Branches are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading branches" ]
+           | Masc_tui_fetched.Absent ->
+               [ say "브랜치 목록이 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                   "Branches are no longer active; Esc returns to Code" ]
+           | Masc_tui_fetched.Loading -> [ say "브랜치 읽는 중" "Reading branches" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
-                   (palette_count state.palette_mode
+                   (palette_count ~ko state.palette_mode
                       (List.length listing.Tui_decode.gbs_branches))
-                   (if String.equal listing.gbs_root "" then "workspace checkout"
+                   (if String.equal listing.gbs_root "" then
+                      say "워크스페이스 체크아웃" "workspace checkout"
                     else listing.gbs_root)
-                   (if listing.gbs_truncated then " · newest only" else "") ])
+                   (if listing.gbs_truncated then say " · 최신만 표시" " · newest only" else "") ])
     | Palette_search search_origin ->
         List.map Terminal_text.single_line
           (match code_search_current state with
            | None ->
-               [ Printf.sprintf "Type at least %d characters, then Enter to search %s"
+               [ Printf.sprintf
+                   (if ko then "%d자 이상 입력 후 Enter로 %s 검색"
+                    else "Type at least %d characters, then Enter to search %s")
                    code_search_min_query_bytes
                    (match search_place search_origin with
-                    | None -> "the checkout"
-                    | Some dir -> "under " ^ dir) ]
+                    | None -> say "체크아웃 전체" "the checkout"
+                    | Some dir -> if ko then dir ^ " 하위" else "under " ^ dir) ]
            | Some (key, Masc_tui_fetched.Loading) ->
-               [ "Searching for " ^ key.css_query ]
+               [ if ko then key.css_query ^ " 검색 중" else "Searching for " ^ key.css_query ]
            | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
                [ detail ]
            | Some (_, Masc_tui_fetched.Ready search) ->
                (match search.Tui_decode.wss_matches, search.wss_truncated with
                 | _, false -> []
-                | [], true -> [ "No match could be shown · narrow the text" ]
+                | [], true ->
+                    [ say "표시할 일치 항목 없음 · 검색어를 좁혀 주세요"
+                        "No match could be shown · narrow the text" ]
                 | shown, true ->
-                    [ Printf.sprintf "Only the first %d are shown · narrow the text"
+                    [ Printf.sprintf
+                        (if ko then "앞의 %d건만 표시됨 · 검색어를 좁혀 주세요"
+                         else "Only the first %d are shown · narrow the text")
                         (List.length shown) ])
            | Some (_, Masc_tui_fetched.Absent) -> [])
     | Palette_locations offer ->
         if code_location_offer_current state offer then
-          ["Choose a returned file and line · Esc keeps the current reading"]
-        else ["These locations are no longer current · Esc returns to Code"]
+          [ say "결과 파일과 줄 선택 · Esc:현재 위치 유지"
+              "Choose a returned file and line · Esc keeps the current reading" ]
+        else
+          [ say "이 위치 결과는 더 이상 최신이 아닙니다 · Esc로 코드 화면 복귀"
+              "These locations are no longer current · Esc returns to Code" ]
     | Palette_files _ ->
         let catalog_note = match code_finder_catalog state with
-          | Masc_tui_fetched.Absent -> "File finder is no longer active; Esc returns to Code"
-          | Masc_tui_fetched.Loading -> "Reading checkout files"
+          | Masc_tui_fetched.Absent ->
+              say "파일 찾기가 비활성 상태입니다 · Esc로 코드 화면 복귀"
+                "File finder is no longer active; Esc returns to Code"
+          | Masc_tui_fetched.Loading -> say "체크아웃 파일 읽는 중" "Reading checkout files"
           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
           | Masc_tui_fetched.Ready catalog ->
               Printf.sprintf "%s · %s"
-                (palette_count state.palette_mode
+                (palette_count ~ko state.palette_mode
                    (List.length catalog.Tui_decode.wfc_files))
-                (if String.equal catalog.wfc_root "" then "workspace checkout"
+                (if String.equal catalog.wfc_root "" then
+                   say "워크스페이스 체크아웃" "workspace checkout"
                  else catalog.wfc_root) in
         let file_notes = match Masc_tui_fetched.current state.code_finder_file with
-          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file"]
+          | Some (_, Masc_tui_fetched.Loading) -> [ say "선택한 파일 여는 중" "Opening selected file" ]
           | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) -> [detail]
           | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _)) -> [] in
         List.map Terminal_text.single_line (catalog_note :: file_notes)
@@ -556,9 +619,11 @@ let render_palette (state : state) =
       (if Masc_tui_palette.command_enter_has_nothing state then
          (* Nothing is listed, so Enter, the arrows and Home/End have no row to
             act on. The key handler reads the same answer. *)
-         "Ctrl-U:clear  Esc:close"
+         say "Ctrl-U:지우기  Esc:닫기" "Ctrl-U:clear  Esc:close"
        else
-         Printf.sprintf "Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
+         Printf.sprintf
+           (if ko then "Enter:%s  ↑/↓:선택  Home/End:처음/끝  Ctrl-U:지우기  Esc:닫기"
+            else "Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close")
            action)
     ~body:(fun ~budget c ->
       c.position
@@ -569,7 +634,9 @@ let render_palette (state : state) =
       | Some (question, symbol) ->
           c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ question ^ " "
             ^ Terminal_text.single_line symbol);
-          c.push "   Ask about this symbol in the file open on Code"
+          c.push
+            (say "   코드 화면에 열린 파일의 이 심볼에 대해 질문"
+               "   Ask about this symbol in the file open on Code")
       | None ->
           let context = match state.palette_mode with
             | Palette_jump when String.trim state.palette_query = "" ->
@@ -579,7 +646,9 @@ let render_palette (state : state) =
             | Palette_search search_origin ->
                 (match search_place search_origin with
                  | None -> []
-                 | Some dir -> ["In " ^ Terminal_text.single_line dir])
+                 | Some dir ->
+                     let dir = Terminal_text.single_line dir in
+                     [ if ko then "범위: " ^ dir else "In " ^ dir ])
             | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _
             | Palette_worktrees _ | Palette_locations _ -> []
           in
@@ -701,11 +770,14 @@ let render_link_preview_modal (state : state) =
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
         ~title:
-          (screen_title " Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+          (screen_title (ui_text state ~ko:" 링크 미리보기" ~en:" Link preview")
+           ^ "  " ^ Ansi.dim ^ ui_text state ~ko:"(링크 없음)" ~en:"(no links)"
            ^ Ansi.reset)
         ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
-          c.push "  (no web links found in this conversation to preview)")
+          c.push
+            (ui_text state ~ko:"  (이 대화에서 미리볼 웹 링크가 없습니다)"
+               ~en:"  (no web links found in this conversation to preview)"))
   | Some (_url, preview, total_links, content_height, content_lines) ->
       let site = Masc_tui_link_preview.site_label preview in
       let total = List.length content_lines in
@@ -715,7 +787,8 @@ let render_link_preview_modal (state : state) =
         ~frame:Chrome_overlay
         ~overflow:(Self_scrolled (fun () -> Link_modal_scroll scroll))
         ~title:
-          (screen_title " Link preview" ^ "  " ^ Ansi.bold
+          (screen_title (ui_text state ~ko:" 링크 미리보기" ~en:" Link preview")
+           ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset)
         ~hints:
           (Masc_tui_link_preview.modal_hints ~total_links
@@ -753,7 +826,7 @@ let render_play_card (state : state) card =
                           report = (fun scroll -> Play_invite_scroll (card, scroll)) })
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
-    ~title:(screen_title " Play invite")
+    ~title:(screen_title (ui_text state ~ko:" 플레이 초대" ~en:" Play invite"))
     ~hints:(Masc_tui_keys.footer_hints_play_invite ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let width = framed_inner_width cols - String.length play_card_indent in
@@ -1034,17 +1107,19 @@ let queue_panel_viewport state panel =
 
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper
     ^ (if Option.is_some panel.qp_detail then "" else match panel.qp_layout with
-       | Masc_tui_queue_layout.Adaptive -> " · automatic"
-       | Expanded -> " · full") in
+       | Masc_tui_queue_layout.Adaptive -> say " · 자동" " · automatic"
+       | Expanded -> say " · 전체" " · full") in
   let owner () = Queue_panel_presented
       (queue_panel_owner state panel ~viewport:(queue_panel_viewport state panel)) in
   if Option.is_some panel.qp_detail then
     let lines = queue_panel_detail_lines state panel ~cols in
     surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
-      ~title:(title " Queue item")
+      ~title:(title (say " 대기열 항목" " Queue item"))
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
@@ -1061,10 +1136,10 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     let partial = Option.is_some state.msg_loaded_error || state.msg_loaded_dropped > 0
         || Option.is_some state.msg_memory_error || state.msg_memory_dropped > 0
         || Option.is_some state.msg_older_error in
-    if partial then "Partial conversation · Esc:full chat"
+    if partial then say "일부 대화만 로드됨 · Esc:전체 대화" "Partial conversation · Esc:full chat"
     else if state.msg_older_loading || Option.is_some state.msg_history_inflight then
-      "Reading conversation · Esc:full chat"
-    else "Conversation preview · Esc:full chat" in
+      say "대화 읽는 중 · Esc:전체 대화" "Reading conversation · Esc:full chat"
+    else say "대화 미리보기 · Esc:전체 대화" "Conversation preview · Esc:full chat" in
   let context_lines ~cols ~height =
     Masc_tui_render_chat.queue_context_lines state ~keeper_name:panel.qp_keeper ~cols ~height in
   let sidebar = match placement with
@@ -1084,23 +1159,24 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     | Full | Bottom _ -> cols in
   let items = queue_panel_items state panel in
   let status = if not (server_authority_ready state) then
-    "Workspace unconfirmed; any receipt is from the previous observation"
+    say "워크스페이스 미확인 · 아래 영수증은 이전 관측입니다"
+      "Workspace unconfirmed; any receipt is from the previous observation"
   else match panel.qp_reading, panel.qp_notice with
-    | Queue_loading, _ -> "Reading or sending"
+    | Queue_loading, _ -> say "읽기 또는 전송 중" "Reading or sending"
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with
-       | Some {waiting=Ok _; operations=Ok _; _} -> "Queue read · r refreshes"
-       | Some {waiting=Ok _; operations=Error _; _} -> "Inventory read · server messages unavailable"
-       | Some {waiting=Error _; operations=Ok _; _} -> "Server messages read · inventory unavailable"
-       | Some {waiting=Error _; operations=Error _; _} -> "Both server reads unavailable · r retries"
-       | None -> "Queue observation unavailable · r retries")
-    | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
+       | Some {waiting=Ok _; operations=Ok _; _} -> say "대기열 조회됨 · r:새로고침" "Queue read · r refreshes"
+       | Some {waiting=Ok _; operations=Error _; _} -> say "목록 조회됨 · 서버 메시지 조회 불가" "Inventory read · server messages unavailable"
+       | Some {waiting=Error _; operations=Ok _; _} -> say "서버 메시지 조회됨 · 목록 조회 불가" "Server messages read · inventory unavailable"
+       | Some {waiting=Error _; operations=Error _; _} -> say "서버 조회 모두 불가 · r:재시도" "Both server reads unavailable · r retries"
+       | None -> say "대기열 관측 불가 · r:재시도" "Queue observation unavailable · r retries")
+    | Queue_unavailable, None -> say "스냅샷 조회 불가 · r:재시도" "Snapshot unavailable · r retries" in
   let hints = Masc_tui_keys.footer_hints_queue state panel in
   let frame, clamped = surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
     ?sidebar
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
-    ~title:(title " Queue")
+    ~title:(title (say " 대기열" " Queue"))
     ~hints
     ~body:(fun ~budget c ->
       (match placement with
@@ -1403,11 +1479,12 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
            | Some confirmation ->
                Some (if Message_layout.display_width text <= cols then
                    pressable (Press_quit_confirmation confirmation) text
-                 else "Resize to confirm quit")
+                 else ui_text state ~ko:"종료 확인을 위해 창을 넓혀 주세요" ~en:"Resize to confirm quit")
            | None when Masc_tui_action_notice.csi_active state.last_action
                        || Option.is_some (Masc_tui_action_notice.rejection state.last_action
                             ~now ~window) -> None
-           | None -> Some "Quit changed; retry")
+           | None ->
+               Some (ui_text state ~ko:"종료 상태가 변경됨 · 다시 시도하세요" ~en:"Quit changed; retry"))
       | Some _ | None -> Some text) in
   let rejection =
     match recovery_notice, ordinary_text with
@@ -1484,7 +1561,8 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
 let render_account_login state view =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"account-login" ~title:(screen_title " Account Login")
+    ~surface_key:"account-login"
+    ~title:(screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login"))
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
       let lines, position =
@@ -1556,7 +1634,8 @@ let render_account_server state ~version =
 let render_collab state view =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"collab" ~title:(screen_title " Collab")
+    ~surface_key:"collab"
+    ~title:(screen_title (ui_text state ~ko:" 협업" ~en:" Collab"))
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
       Option.iter c.position (Masc_tui_collab.position view);
@@ -1565,17 +1644,27 @@ let render_collab state view =
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
+  let say ko en = ui_text state ~ko ~en in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols ~surface_key:"lanes"
-    ~title:(screen_title " Plugins")
-    ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
-      else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
+    ~title:(screen_title (say " 플러그인" " Plugins"))
+    ~hints:(if Option.is_some view.evidence_prompt then
+        say "j/k:선택  Enter:보존  Esc:뒤로" "j/k:choose  Enter:preserve  Esc:back"
+      else if Option.is_some view.subscription_panel then
+        say "j/k:선택  Enter:선택/저장  a:추가  d:제거  J/K:스크롤  r:새로고침  Esc:뒤로"
+          "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
       else if Option.is_some view.installer then Option.fold ~none:"" ~some:Masc_tui_lane_installer.hints view.installer
       else if Option.exists Masc_tui_lane_records.text_entry_open view.records
-        then "Tab:field  Left/Right:choice  Ctrl-S:review  PageUp/Down:scroll  Esc:cancel"
-      else if Option.is_some view.records then "j/k:select  a:add  d:remove  PageUp/Down:scroll  Esc:back; then s saves"
+        then say "Tab:필드  ←/→:선택  Ctrl-S:검토  PgUp/PgDn:스크롤  Esc:취소"
+          "Tab:field  Left/Right:choice  Ctrl-S:review  PageUp/Down:scroll  Esc:cancel"
+      else if Option.is_some view.records then
+        say "j/k:선택  a:추가  d:제거  PgUp/PgDn:스크롤  Esc:뒤로 · s:저장"
+          "j/k:select  a:add  d:remove  PageUp/Down:scroll  Esc:back; then s saves"
       else if Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
-        then "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
-      else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
+        then say "Tab:필드  ←/→:선택  Ctrl-E:항목  Ctrl-U:해제  Ctrl-S:검토  Esc:취소"
+          "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
+      else if Option.is_some view.action_menu then
+        say "j/k:동작 선택  Enter:1회 실행  J/K:상세 스크롤  Esc:취소"
+          "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
       else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
     ~body:(fun ~budget c ->
       let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in

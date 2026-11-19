@@ -87,13 +87,13 @@ let draw buf ~ko ~cols ~rows ~lead ~current lines =
   done
 ;;
 
-let ago ~now at =
+let ago ~ko ~now at =
   match Message_layout.age_text ~now ~since:at with
-  | Some span -> span ^ " ago"
+  | Some span -> if ko then span ^ " 전" else span ^ " ago"
   | None -> Masc_tui_theme.Glyph.no_value
 ;;
 
-let status_cells = 9
+let status_cells = 10
 let clock_cells = Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
 let relative_cells = 12
 
@@ -105,14 +105,18 @@ let clock_text ~now = function
 (* A schedule that has not run reads [in 5m], or [late 5m] once its time has
    passed. A closed one reads [5m ago]. A status this build does not know says
    nothing about the time. *)
-let relative_text ~now (row : Masc_tui_types.schedule_row) = function
+let relative_text ~ko ~now (row : Masc_tui_types.schedule_row) = function
   | None -> Masc_tui_theme.Glyph.no_value
   | Some at ->
       (match Masc_tui_agenda.standing_of_wire row.sch_status with
        | Masc_tui_agenda.Coming ->
-           if at >= now then "in " ^ Masc_tui_value.Ongoing.until ~now at
-           else "late " ^ Masc_tui_value.Ongoing.since ~now at
-       | Masc_tui_agenda.Settled -> ago ~now at
+           if at >= now then
+             let span = Masc_tui_value.Ongoing.until ~now at in
+             if ko then span ^ " 후" else "in " ^ span
+           else
+             let span = Masc_tui_value.Ongoing.since ~now at in
+             if ko then span ^ " 지연" else "late " ^ span
+       | Masc_tui_agenda.Settled -> ago ~ko ~now at
        | Masc_tui_agenda.Unrecognised _ -> Masc_tui_theme.Glyph.no_value)
 ;;
 
@@ -122,20 +126,21 @@ let relative_text ~now (row : Masc_tui_types.schedule_row) = function
    the request status: a one-shot whose request succeeded can still hold a
    wake that sat in the queue for days. The stages are those
    [Tui_schedule_observation.needs_attention] names. *)
-let attention_word (row : Masc_tui_types.schedule_row) =
+let attention_word ~ko (row : Masc_tui_types.schedule_row) =
+  let say korean english = if ko then korean else english in
   match row.sch_runner_hold with
-  | Some _ -> Some "held"
+  | Some _ -> Some (say "보류" "held")
   | None ->
       let open Masc.Tui_schedule_observation in
       (match row.sch_occurrence.stage with
-       | Dispatching -> Some "sending"
-       | Dispatch_failed _ -> Some "send fail"
-       | Queued | Queued_at _ -> Some "queued"
-       | Missing -> Some "missing"
-       | Turn_started -> Some "running"
-       | Turn_ended _ | Consumed | Settling _ -> Some "settling"
-       | Transferring _ -> Some "handoff"
-       | Unknown _ -> Some "unknown"
+       | Dispatching -> Some (say "전송 중" "sending")
+       | Dispatch_failed _ -> Some (say "전송 실패" "send fail")
+       | Queued | Queued_at _ -> Some (say "대기열" "queued")
+       | Missing -> Some (say "누락" "missing")
+       | Turn_started -> Some (say "실행 중" "running")
+       | Turn_ended _ | Consumed | Settling _ -> Some (say "정리 중" "settling")
+       | Transferring _ -> Some (say "인계 중" "handoff")
+       | Unknown _ -> Some (say "미확인" "unknown")
        | No_occurrence | Completed | Receipt_is_the_record | Cancelled _ -> None)
 ;;
 
@@ -149,14 +154,12 @@ let by_time (_, left) (_, right) =
   | None, None -> 0
 ;;
 
-let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
+let schedule_row_line ~ko ~now ((row : Masc_tui_types.schedule_row), due) =
   let color, status =
-    match attention_word row with
+    match attention_word ~ko row with
     | Some word -> Theme.warn (), word
     | None ->
-        (* The story speaks English for now; the words still take their
-           colour from the status, not from the word. *)
-        let status = Masc_tui_render_work.schedule_status_reading ~ko:false row.sch_status in
+        let status = Masc_tui_render_work.schedule_status_reading ~ko row.sch_status in
         status.tone, status.word
   in
   let what =
@@ -170,11 +173,11 @@ let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
     ; " "
     ; Message_layout.fit_width (clock_text ~now due) clock_cells
     ; " "
-    ; Message_layout.fit_width (relative_text ~now row due) relative_cells
+    ; Message_layout.fit_width (relative_text ~ko ~now row due) relative_cells
     ; " "
     ; dim
         (Terminal_text.single_line
-           (Masc_tui_schedule_recurrence.text ~ko:false ~now
+           (Masc_tui_schedule_recurrence.text ~ko ~now
               ~summary:row.sch_recurrence_summary row.sch_recurrence)
          ^ " · ")
     ; what
@@ -256,10 +259,10 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
 
 (* A page drawn from an earlier reading, or whose re-read failed, is the last
    reading and not the Keeper's present one. *)
-let refresh_suffix = function
+let refresh_suffix ~ko = function
   | Current -> ""
-  | Refreshing -> " (reading again)"
-  | Refresh_failed _ -> " (schedule read failed)"
+  | Refreshing -> if ko then " (다시 읽는 중)" else " (reading again)"
+  | Refresh_failed _ -> if ko then " (일정 조회 실패)" else " (schedule read failed)"
   | Refresh_kept_back notice -> " · " ^ notice
 ;;
 
@@ -279,10 +282,10 @@ let note_line = function
 (* One wake the way the schedule row tells it: how it ended, and the schedule
    that woke the Keeper. A schedule that is closed or held still counts: its
    wake happened. *)
-let wake_item_text wake =
+let wake_item_text ~ko wake =
   let row = Masc_tui_keeper_wakes.row wake in
   let outcome_text =
-    match Masc_tui_render_work.schedule_outcome ~ko:false row with
+    match Masc_tui_render_work.schedule_outcome ~ko row with
     | None -> ""
     | Some (word, tone) -> " " ^ tone ^ Terminal_text.single_line word ^ Ansi.reset
   in
@@ -295,7 +298,7 @@ let wake_item_text wake =
     | Some (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded)
     | None -> ""
   in
-  dim "wake" ^ outcome_text
+  dim (if ko then "호출" else "wake") ^ outcome_text
   ^ dim
       (" · "
        ^ Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary))
@@ -305,25 +308,28 @@ let wake_item_text wake =
 (* One turn the way the receipt tells it: the stop reason as it wrote it. A
    record without a stop reason is told as that, in the warning colour. No
    reason is sorted into ok or failed here. *)
-let turn_item_text (turn : Masc_tui_keeper_turns.turn) =
+let turn_item_text ~ko (turn : Masc_tui_keeper_turns.turn) =
   match turn.stop with
-  | Masc_tui_keeper_turns.Stopped reason -> dim ("turn " ^ Terminal_text.single_line reason)
-  | Masc_tui_keeper_turns.No_stop_reason -> warn "turn no stop reason"
+  | Masc_tui_keeper_turns.Stopped reason ->
+      dim ((if ko then "턴 " else "turn ") ^ Terminal_text.single_line reason)
+  | Masc_tui_keeper_turns.No_stop_reason ->
+      warn (if ko then "턴 종료 사유 없음" else "turn no stop reason")
 ;;
 
-let feed_item_text = function
-  | Masc_tui_keeper_feed.Wake wake -> wake_item_text wake
-  | Masc_tui_keeper_feed.Turn turn -> turn_item_text turn
-  | Masc_tui_keeper_feed.Digest _ -> dim "digest ok · librarian"
+let feed_item_text ~ko = function
+  | Masc_tui_keeper_feed.Wake wake -> wake_item_text ~ko wake
+  | Masc_tui_keeper_feed.Turn turn -> turn_item_text ~ko turn
+  | Masc_tui_keeper_feed.Digest _ ->
+      dim (if ko then "요약 완료 · 사서" else "digest ok · librarian")
 ;;
 
 (* The column of ages, wide enough for the longest the ladder writes (a hundred
    days, or ninety-nine days and 23 hours) and the word after it. *)
 let feed_age_cells = 11
 
-let feed_item_line ~now item =
-  dim (Message_layout.fit_width (ago ~now (Masc_tui_keeper_feed.at item)) feed_age_cells)
-  ^ feed_item_text item
+let feed_item_line ~ko ~now item =
+  dim (Message_layout.fit_width (ago ~ko ~now (Masc_tui_keeper_feed.at item)) feed_age_cells)
+  ^ feed_item_text ~ko item
 ;;
 
 (* The reason a read stored when it failed, after the words that say what
@@ -343,17 +349,19 @@ let turns_kept_back (state : Masc_tui_types.state) refusal =
     ~request:Masc_tui_types.Kept_request.Keeper_turns_read refusal
 
 let turns_source (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let say korean english = if ko then korean else english in
   match
     Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
   with
-  | Masc_tui_fetched.Absent -> [], [ Notice "turns not read yet" ]
-  | Masc_tui_fetched.Loading -> [], [ Notice "turns reading" ]
+  | Masc_tui_fetched.Absent -> [], [ Notice (say "턴 기록 미조회" "turns not read yet") ]
+  | Masc_tui_fetched.Loading -> [], [ Notice (say "턴 기록 읽는 중" "turns reading") ]
   | Masc_tui_fetched.Ready turns -> turns, []
   | Masc_tui_fetched.Stale ([], Masc_tui_types.Request_failed detail)
   | Masc_tui_fetched.Failed (Masc_tui_types.Request_failed detail) ->
-      [], [ Caution (with_detail "turns unknown, the read failed" detail) ]
+      [], [ Caution (with_detail (say "턴 알 수 없음, 조회 실패" "turns unknown, the read failed") detail) ]
   | Masc_tui_fetched.Stale ((_ :: _ as turns), Masc_tui_types.Request_failed detail) ->
-      turns, [ Caution (with_detail "turns (read failed)" detail) ]
+      turns, [ Caution (with_detail (say "턴 (재조회 실패)" "turns (read failed)") detail) ]
   (* Not sent, so not failed: the kept-back notice alone (RFC §2). *)
   | Masc_tui_fetched.Stale (turns, Masc_tui_types.Request_withdrawn refusal) ->
       turns, [ Caution (turns_kept_back state refusal) ]
@@ -362,25 +370,27 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
 ;;
 
 (* The note of a schedule page that is not the Keeper's present reading. *)
-let refresh_note refresh text =
+let refresh_note ~ko refresh text =
   match refresh with
-  | Current | Refreshing -> Notice (text ^ refresh_suffix refresh)
-  | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix refresh) detail)
-  | Refresh_kept_back _ -> Caution (text ^ refresh_suffix refresh)
+  | Current | Refreshing -> Notice (text ^ refresh_suffix ~ko refresh)
+  | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix ~ko refresh) detail)
+  | Refresh_kept_back _ -> Caution (text ^ refresh_suffix ~ko refresh)
 ;;
 
 (* The Keeper's wakes on its schedule page, newest first, and a note for a
    page that is not read, not readable, cut, being read again or whose re-read
    failed. A wake whose time cannot be read leaves the newest unknown. *)
 let wakes_source (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let say korean english = if ko then korean else english in
   match schedules state ~keeper_name with
-  | Not_read -> [], [ Notice "wakes not read yet" ]
-  | Reading -> [], [ Notice "wakes reading" ]
+  | Not_read -> [], [ Notice (say "호출 기록 미조회" "wakes not read yet") ]
+  | Reading -> [], [ Notice (say "호출 기록 읽는 중" "wakes reading") ]
   | Read_failed detail ->
-      [], [ Caution (with_detail "wakes unknown, the schedule read failed" detail) ]
+      [], [ Caution (with_detail (say "호출 알 수 없음, 일정 조회 실패" "wakes unknown, the schedule read failed") detail) ]
   | Read_kept_back notice -> [], [ Caution notice ]
   | Store_unreadable detail ->
-      let text = "wakes unknown, the schedule store is unreadable" in
+      let text = say "호출 알 수 없음, 일정 저장소 읽기 불가" "wakes unknown, the schedule store is unreadable" in
       ( []
       , [ Caution
             (match detail with
@@ -392,7 +402,10 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
          Masc_tui_keeper_wakes.of_page ~truncated:snapshot.scs_truncated snapshot.scs_rows
        with
        | Masc_tui_keeper_wakes.Unplaced ->
-           let text = "wakes unknown, a wake time is unreadable" ^ refresh_suffix refresh in
+           let text =
+             say "호출 알 수 없음, 시각 읽기 불가" "wakes unknown, a wake time is unreadable"
+             ^ refresh_suffix ~ko refresh
+           in
            ( []
            , [ Caution
                  (match refresh with
@@ -404,30 +417,32 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
            , (match coverage, refresh with
               | Masc_tui_keeper_wakes.Whole_page, Current -> []
               | Masc_tui_keeper_wakes.Whole_page, (Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
-                  [ refresh_note refresh "wakes" ]
+                  [ refresh_note ~ko refresh (say "호출" "wakes") ]
               | Masc_tui_keeper_wakes.First_page,
                 (Current | Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
-                  [ refresh_note refresh "wakes from the first page only" ]) ))
+                  [ refresh_note ~ko refresh (say "첫 페이지 호출만 표시" "wakes from the first page only") ]) ))
 ;;
 
 (* Keep a held digest as a past event, but a failed health refresh also leaves
    its reason: the earlier observation says nothing about a newer digest.
    A readable answer with no digest or no row has nothing to note. *)
 let digest_source (state : Masc_tui_types.state) ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let say korean english = if ko then korean else english in
   let digest_at, notes =
     match memory_reading state ~keeper_name with
     | Memory_reading.Row { digest_at; _ } -> digest_at, []
     | Memory_reading.No_row -> None, []
-    | Memory_reading.Unknown -> None, [ Notice "digest not read yet" ]
+    | Memory_reading.Unknown -> None, [ Notice (say "기억 요약 미조회" "digest not read yet") ]
     | Memory_reading.Refused reason ->
-        None, [ Caution (with_detail "digest unknown, the memory-health row was refused" reason) ]
+        None, [ Caution (with_detail (say "요약 알 수 없음, 기억 상태 행 거절됨" "digest unknown, the memory-health row was refused") reason) ]
   in
   match state.memory_health_error with
   | None -> digest_at, notes
   | Some (Masc_tui_types.Request_failed detail) ->
       let text = match digest_at with
-        | Some _ -> "digest (earlier read, refresh failed)"
-        | None -> "digest unknown, memory read failed"
+        | Some _ -> say "요약 (이전 관측 · 재조회 실패)" "digest (earlier read, refresh failed)"
+        | None -> say "요약 알 수 없음, 기억 조회 실패" "digest unknown, memory read failed"
       in
       let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
       digest_at, Caution (with_detail text detail) :: refusals
@@ -448,6 +463,7 @@ let digest_source (state : Masc_tui_types.state) ~keeper_name =
    events give way to the window's height; a window too short for every note
    keeps the cautions. With no line to spare the feed is empty, notes included. *)
 let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let turns, turn_notes = turns_source state ~keeper_name in
   let wakes, wake_notes = wakes_source state ~keeper_name in
   let digest_at, digest_notes = digest_source state ~keeper_name in
@@ -457,7 +473,7 @@ let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
       (turn_notes @ wake_notes @ digest_notes)
   in
   let item_lines =
-    List.map (feed_item_line ~now) (Masc_tui_keeper_feed.of_sources ~turns ~wakes ~digest_at)
+    List.map (feed_item_line ~ko ~now) (Masc_tui_keeper_feed.of_sources ~turns ~wakes ~digest_at)
   in
   if max_lines <= 0 then []
   else
@@ -467,22 +483,24 @@ let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
 ;;
 
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
+  let say korean english = if ko then korean else english in
   (* The cell the list draws for this Keeper, so the header and the list row
      cannot disagree about the next run. *)
   let lead =
     match next_run_cell state ~now ~keeper_name with
     | Some cell -> cell.Masc_tui_keeper_axis_cell.text
-    | None -> "◷ none"
+    | None -> say "◷ 없음" "◷ none"
   in
   match schedules state ~keeper_name with
-  | Not_read -> [ dim "  ◷ this Keeper's schedules are not read yet" ]
-  | Reading -> [ dim "  ◷ reading this Keeper's schedules" ]
+  | Not_read -> [ dim (say "  ◷ 이 키퍼의 일정 미조회" "  ◷ this Keeper's schedules are not read yet") ]
+  | Reading -> [ dim (say "  ◷ 이 키퍼의 일정 읽는 중" "  ◷ reading this Keeper's schedules") ]
   | Read_failed detail ->
-      [ warn ("  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
+      [ warn (say "  ◷ 일정 조회 실패: " "  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
   | Read_kept_back notice -> [ warn ("  ◷ " ^ Terminal_text.single_line notice) ]
   | Store_unreadable detail ->
       [ warn
-          ("  ◷ schedule store unreadable"
+          (say "  ◷ 일정 저장소 읽기 불가" "  ◷ schedule store unreadable"
            ^ (match detail with
               | Some detail -> ": " ^ Terminal_text.single_line detail
               | None -> ""))
@@ -503,26 +521,40 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
                Masc_tui_render_schedule.classify_keeper_schedule_absence
                  ~truncated:snapshot.scs_truncated ~shown:0 ~total:snapshot.scs_request_count
              with
-             | Masc_tui_render_schedule.Store_has_none -> [ dim "  no schedules for this Keeper" ]
+             | Masc_tui_render_schedule.Store_has_none ->
+                 [ dim (say "  이 키퍼에 등록된 일정 없음" "  no schedules for this Keeper") ]
              | Masc_tui_render_schedule.Page_capped _ ->
-                 [ warn "  none on the first page: more schedules may exist" ])
-        | [], _ :: _ -> [ dim "  nothing live or recent on this page" ]
-        | _ :: _, ([] | _ :: _) -> List.map (schedule_row_line ~now) entries
+                 [ warn (say "  첫 페이지에 일정 없음 · 더 많은 일정이 있을 수 있음" "  none on the first page: more schedules may exist") ])
+        | [], _ :: _ ->
+            [ dim (say "  이 페이지에 예정되거나 최근 실행된 일정 없음" "  nothing live or recent on this page") ]
+        | _ :: _, ([] | _ :: _) -> List.map (schedule_row_line ~ko ~now) entries
       in
       let observed = Terminal_text.short_timestamp snapshot.scs_observed_at_iso in
       let notes =
-        (if snapshot.scs_truncated then [ warn "  the page is cut: more schedules may exist" ] else [])
+        (if snapshot.scs_truncated then
+           [ warn (say "  페이지 일부만 표시 · 일정이 더 있을 수 있음" "  the page is cut: more schedules may exist") ]
+         else [])
         @ (match refresh with
            | Current -> []
-           | Refreshing -> [ dim (Printf.sprintf "  showing the reading of %s, reading again" observed) ]
+           | Refreshing ->
+               [ dim
+                   (Printf.sprintf
+                      (if ko then "  %s 관측 표시 중 · 다시 읽는 중"
+                       else "  showing the reading of %s, reading again")
+                      observed)
+               ]
            | Refresh_failed detail ->
                [ warn
-                   (Printf.sprintf "  read failed, showing the reading of %s: %s" observed
-                      (Terminal_text.single_line detail))
+                   (Printf.sprintf
+                      (if ko then "  재조회 실패 · %s 관측 표시 중: %s"
+                       else "  read failed, showing the reading of %s: %s")
+                      observed (Terminal_text.single_line detail))
                ]
            | Refresh_kept_back notice ->
                [ warn
-                   (Printf.sprintf "  %s · showing the reading of %s"
+                   (Printf.sprintf
+                      (if ko then "  %s · %s 관측 표시 중"
+                       else "  %s · showing the reading of %s")
                       (Terminal_text.single_line notice) observed)
                ])
       in

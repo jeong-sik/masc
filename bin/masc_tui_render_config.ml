@@ -35,7 +35,6 @@ let binary_age_text ~ko = function
 let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
   (* The list has the cursor, so its selected row is the position. *)
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title state)
@@ -391,7 +390,7 @@ let prompt_catalog_status_row state prompts =
 ;;
 
 let prompts_detail_layout state ~rows ~error_rows ~list_count =
-  let fixed_rows = if state.prompts_show_runtime_assets then 8 else 7 in
+  let fixed_rows = if state.prompts_show_runtime_assets then 7 else 6 in
   let combined = max 1 (rows - fixed_rows - error_rows) in
   let list_height = min (max 1 list_count)
       (min (combined - 1) (min 8 (max 1 (combined / 3)))) in
@@ -668,7 +667,6 @@ let render_prompt_registry (state : state) =
     title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts ~count:(fun _ ->
         Printf.sprintf (if state.ui_language = Lang_ko then "%d/%d개" else "%d/%d prompts") total all_prompt_count)
   in
-  box_top buf cols;
   (* The count the registry answered, and -- before any decoration that can
      be cut -- how many overrides it held back. The row keeps a fixed floor
      for the tab strip, so at a hundred and twenty columns the reading can
@@ -777,7 +775,6 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts
       ~count:(fun _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d assets") total)
   in
-  box_top buf cols;
   let reading =
     Printf.sprintf "%s%s · %s%s" Ansi.dim count_text
       (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
@@ -1081,9 +1078,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
 let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
-  (* Top, title, divider, list/detail divider, bottom, and footer. The error
+  (* Title, divider, list/detail divider, bottom, and footer. The error
      is outside the selection list, so a retained list keeps its full slot. *)
-  let combined_height = max 2 (rows - 6 - error_rows - entry_rows) in
+  let combined_height = max 2 (rows - 5 - error_rows - entry_rows) in
   let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
@@ -1126,7 +1123,6 @@ let render_presets (state : state) =
         | None -> ui_text state ~ko:"읽는 중" ~en:"reading"
         | Some _ -> ui_text state ~ko:"읽기 실패" ~en:"read failed")
   in
-  box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -1291,14 +1287,13 @@ let render_themes (state : state) =
       0 entries
   in
   let show_sample = rows >= 20 in
-  let chrome_rows = if show_sample then 11 else 8 in
+  let chrome_rows = if show_sample then 10 else 7 in
   let content_height = max 1 (rows - chrome_rows) in
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
   in
   let scroll = max 0 (cursor - content_height + 1) in
   let name_width = theme_name_width ~cols in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state
        ~title:
@@ -1523,7 +1518,7 @@ type models_projection = {
 let config_models_projection state ~terminal_rows ~cols =
   let pane = max 1 (framed_inner_width cols - 2 - 2) in
   let rows = config_models_drawn_rows state in
-  let content_height = max 1 (surface_body_rows state ~terminal_rows - 5) in
+  let content_height = max 1 (surface_body_rows state ~terminal_rows - 4) in
   let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
   let account (row : Masc_tui_model_runtime_table.row) =
     let email, notes = models_source_account_reading
@@ -1584,7 +1579,6 @@ let render_config_models (state : state) =
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let projection = config_models_projection state ~terminal_rows ~cols in
-  box_top buf cols;
   let path_note = config_path_note state in
   (* The cursor walks bindings, so the selected binding among them is the
      position whether the table or the stacked items are drawn. *)
@@ -1610,7 +1604,7 @@ let render_config_models (state : state) =
             ~note:path_note state)
        ~position);
   box_divider buf cols;
-  let content_height = max 1 (rows_avail - 5) in
+  let content_height = max 1 (rows_avail - 4) in
   (match state.runtime_model_form with
    | Some form ->
        let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
@@ -1712,7 +1706,7 @@ let config_models_scrolled (state : state) : scrolled =
       let terminal_rows, cols = get_terminal_size () in
       let projection = config_models_projection state ~terminal_rows ~cols in
       { sc_count = List.length projection.model_document
-      ; sc_chrome = 5 + List.length projection.model_prefix
+      ; sc_chrome = 4 + List.length projection.model_prefix
       ; sc_preview_keep = None
       }
 
@@ -2010,7 +2004,6 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
       | Voice_wizard.Model_is_blank -> "이 엔드포인트의 모델이 필요합니다 · 다른 엔드포인트의 모델은 유지됩니다"
       | Voice_wizard.Voice_is_blank -> "음성 출력의 기본 목소리가 필요합니다")
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols
        ~path:
@@ -2152,7 +2145,6 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
     box_line head cols
       (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols
        ~path:
@@ -2258,7 +2250,6 @@ let render_voice (state : state) =
     | [] -> ()
     | lines -> List.iter (fun line -> voice_body_line buf cols line) lines
   in
-  box_top head cols;
   box_line head cols
     (config_pane_title ~cols state);
   box_divider head cols;

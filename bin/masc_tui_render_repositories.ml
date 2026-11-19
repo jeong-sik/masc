@@ -960,7 +960,6 @@ let render_changes_list (state : state) =
                  (Masc_tui_message_layout.count_noun
                     s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   (* What the turn did takes the cells the drawn columns leave. *)

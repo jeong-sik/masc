@@ -5890,11 +5890,12 @@ type paged_list =
 (* One list a frame drew: which, and the rows of it the frame drew. *)
 type drawn_list = { dl_list : paged_list; dl_height : int }
 
-(* These seven draw the same fixed frame around their content, and spend two
-   more rows when a load error is on screen. A surface whose chrome moves has
-   to move the typed layout in the same change. Where the window stands is
-   on the title row, so no row under the list is kept for it. *)
-let listing_chrome ~error = if Option.is_some error then 9 else 7
+(* These listings draw the same fixed frame around their content without a
+   blank top spacer (putting Zone 2 on row 2, matching [Chrome_screen]), and
+   spend two more rows when a load error is on screen. A surface whose chrome
+   moves has to move the typed layout in the same change. Where the window
+   stands is on the title row, so no row under the list is kept for it. *)
+let listing_chrome ~error = if Option.is_some error then 8 else 6
 
 (* The verdict list also draws the newest recorded timestamp above its column
    heading, including when the page is empty or has not been observed. *)
@@ -24138,7 +24139,7 @@ let surface_body_rows (state : state) ~terminal_rows =
 
 let tools_scroll_layout state ~count =
   { sc_count = count
-  ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
+  ; sc_chrome = if Option.is_some (selected_tools_error state) then 8 else 6
   ; sc_preview_keep = None }
 ;;
 
@@ -24156,7 +24157,7 @@ let runtime_params_viewport (state : state) ~terminal_rows =
   let rows = surface_body_rows state ~terminal_rows in
   (* The row under the document counts the rows it leaves out; hints cannot
      hide it at 40 cells. *)
-  let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
+  let chrome = if Option.is_some state.runtime_param_edit then 10 else 7 in
   let content_height = max 1 (rows - chrome) in
   let list_height = min 8 (max 1 (content_height / 3)) in
   list_height, max 0 (content_height - list_height - 1)
@@ -25582,7 +25583,7 @@ type lanes_overview_projection = {
 }
 
 let lanes_overview_projection (state : state) ~rows ~cols =
-  let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
+  let budget = max 0 (rows - (Masc_tui_frame.chrome_rows - 1)) in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   let links = lanes_overview_link_rows state ~cols in
   let notices = lane_inventory_notice_lines ~cols state in

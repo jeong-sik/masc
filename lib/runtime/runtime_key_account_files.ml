@@ -136,3 +136,57 @@ let key_state ~runtime_root ~account_id ~generation =
         | Ok (_ : Runtime_api_key_file.key) -> Key_readable
         | Error error -> Key_not_read error))
 ;;
+
+(* ---- the replacement of a key ---- *)
+
+(* The names in the folder [keys], in their order: a folder gives them in
+   no order of its own, and what is reported of them is the same at each
+   asking. A folder that is not there holds none. What stands in its place
+   and is no folder is not read: a link would lead to the files of another
+   place. *)
+let names_in keys =
+  match Unix.lstat keys with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok []
+  | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument)
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Sys.readdir keys with
+     | names -> Ok (List.sort String.compare (Array.to_list names))
+     | exception Sys_error detail -> Error detail)
+  | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ }
+    -> Error (keys ^ ": it is not a folder")
+;;
+
+let remove_other_keys ~runtime_root ~account_id ~generation =
+  let* there = root_there ~runtime_root in
+  if not there
+  then Ok ()
+  else
+    let* kept = Layout.key_file ~runtime_root ~account_id ~generation in
+    let keys = Filename.dirname kept in
+    let* names = Fs_compat.Systhread_host.run ~label:thread_label (fun () -> names_in keys) in
+    (* Each of them can hold a key, so each is tried whatever became of the
+       one before it. The first that stayed is the one reported. *)
+    List.fold_left
+      (fun result name ->
+        if String.equal name (Filename.basename kept)
+        then result
+        else (
+          match result, removed (Filename.concat keys name) with
+          | Ok (), outcome -> outcome
+          | (Error (_ : string) as first), (Ok () | Error (_ : string)) -> first))
+      (Ok ())
+      names
+;;
+
+type other_keys =
+  | Other_keys_removed
+  | Other_keys_left of string
+
+let replace ~runtime_root ~account_id ~generation key =
+  match make ~runtime_root ~account_id ~generation key with
+  | Error error -> Error error
+  | Ok () ->
+    (match remove_other_keys ~runtime_root ~account_id ~generation with
+     | Ok () -> Ok Other_keys_removed
+     | Error detail -> Ok (Other_keys_left detail))
+;;

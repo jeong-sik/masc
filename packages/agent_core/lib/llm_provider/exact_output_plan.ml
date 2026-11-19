@@ -41,8 +41,39 @@ type normalized_output =
   ; validation : json_validation_provenance
   }
 
+type incomplete_stop =
+  | End_turn
+  | Tool_use
+  | Stop_sequence
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Pause_turn
+  | Compaction
+  | Unmatched_tool_calls
+  | Unknown_stop of string
+
+type window_output =
+  | No_output
+  | Partial_output
+
+let stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason = function
+  | End_turn -> Types.EndTurn
+  | Tool_use -> Types.StopToolUse
+  | Stop_sequence -> Types.StopSequence
+  | Refusal -> Types.Refusal
+  | Content_filter -> Types.ContentFilter
+  | Repetition_truncation -> Types.RepetitionTruncation
+  | Pause_turn -> Types.PauseTurn
+  | Compaction -> Types.Compaction
+  | Unmatched_tool_calls -> Types.UnmatchedToolCalls
+  | Unknown_stop token -> Types.Unknown token
+;;
+
 type output_normalization_error =
-  | Incomplete_structured_response of Types.stop_reason
+  | Output_limit_stopped
+  | Window_stopped of window_output
+  | Incomplete_structured_response of incomplete_stop
   | Missing_structured_text
   | Ambiguous_structured_text of int
   | Unexpected_structured_content
@@ -180,8 +211,12 @@ let[@warning "-32"] rejection_name = function
 (* Same treatment for [output_normalization_error]: the JsonMode provenance
    test's arms must name which constructor fired. *)
 let[@warning "-32"] normalization_error_name = function
-  | Incomplete_structured_response stop_reason ->
-    "incomplete_structured_response:" ^ Types.stop_reason_to_string stop_reason
+  | Output_limit_stopped -> "output_limit_stopped"
+  | Window_stopped No_output -> "window_stopped:no_output"
+  | Window_stopped Partial_output -> "window_stopped:partial_output"
+  | Incomplete_structured_response stop ->
+    "incomplete_structured_response:"
+    ^ Types.stop_reason_to_string (stop_reason_of_incomplete_stop stop)
   | Missing_structured_text -> "missing_structured_text"
   | Ambiguous_structured_text count -> "ambiguous_structured_text:" ^ string_of_int count
   | Unexpected_structured_content -> "unexpected_structured_content"
@@ -712,21 +747,57 @@ let normalize_response response_format (response : Types.api_response) =
      | Ok _
      | Error Missing_structured_text
      | Error (Ambiguous_structured_text _)
-     | Error (Incomplete_structured_response _)
-     | Error (Invalid_json _) ->
-       Error (Incomplete_structured_response response.stop_reason))
-  | Types.MaxTokens
-  | Types.Refusal
-  | Types.ContentFilter
-  | Types.RepetitionTruncation
-  | Types.PauseTurn
-  | Types.Compaction
-  | Types.ContextWindowExceeded
-  | Types.UnmatchedToolCalls
-  | Types.Unknown _ -> Error (Incomplete_structured_response response.stop_reason)
+     | Error (Output_limit_stopped | Window_stopped _ | Incomplete_structured_response _)
+     | Error (Invalid_json _) -> Error (Incomplete_structured_response Tool_use))
+  | Types.MaxTokens -> Error Output_limit_stopped
+  (* The empty answer is the one every completion consumer calls empty
+     ([Complete_common.ensure_nonempty_completion]). *)
+  | Types.ContextWindowExceeded ->
+    Error (Window_stopped (if Complete_common.has_no_output response then No_output else Partial_output))
+  | Types.Refusal -> Error (Incomplete_structured_response Refusal)
+  | Types.ContentFilter -> Error (Incomplete_structured_response Content_filter)
+  | Types.RepetitionTruncation -> Error (Incomplete_structured_response Repetition_truncation)
+  | Types.PauseTurn -> Error (Incomplete_structured_response Pause_turn)
+  | Types.Compaction -> Error (Incomplete_structured_response Compaction)
+  | Types.UnmatchedToolCalls -> Error (Incomplete_structured_response Unmatched_tool_calls)
+  | Types.Unknown token -> Error (Incomplete_structured_response (Unknown_stop token))
 ;;
 
 let normalize (plan : t) response = normalize_response plan.response_format response
+
+let%test "a window stop reads its output as every completion consumer does" =
+  let stopped ?(unreadable = []) content : Types.api_response =
+    { id = "window"
+    ; model = "fixture"
+    ; unreadable_tool_uses = unreadable
+    ; stop_reason = Types.ContextWindowExceeded
+    ; content
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let unreadable_call : Types.unreadable_tool_use =
+    { tool_use_id = "call-1"
+    ; tool_name = "tool"
+    ; tool_use_ordinal = 0
+    ; arguments = "{"
+    ; arguments_problem = Tool_call_input.Not_object
+    ; arguments_assembly = None
+    }
+  in
+  let output response =
+    match normalize_response Types.JsonMode response with
+    | Error (Window_stopped output) -> Some output
+    | Ok _
+    | Error
+        ( Output_limit_stopped | Incomplete_structured_response _ | Missing_structured_text
+        | Ambiguous_structured_text _ | Unexpected_structured_content | Invalid_json _ ) -> None
+  in
+  output (stopped []) = Some No_output
+  && output (stopped ~unreadable:[ unreadable_call ] []) = Some Partial_output
+  && output (stopped [ Types.Text "" ]) = Some Partial_output
+  && output (stopped [ Types.Text "{" ]) = Some Partial_output
+;;
 
 let%test "JsonMode records syntax-only validation provenance" =
   let fail fmt = Printf.ksprintf failwith ("JsonMode provenance test: " ^^ fmt) in
@@ -768,7 +839,8 @@ let%test "Off reads the prompt-requested JSON locally and refuses other text" =
   &&
   match normalize_response Types.Off (response "not json") with
   | Error (Invalid_json _) -> true
-  | Ok _ | Error (Incomplete_structured_response _) | Error (Missing_structured_text)
+  | Ok _ | Error (Output_limit_stopped | Window_stopped _ | Incomplete_structured_response _)
+  | Error (Missing_structured_text)
   | Error (Ambiguous_structured_text _) | Error (Unexpected_structured_content) -> false
 ;;
 

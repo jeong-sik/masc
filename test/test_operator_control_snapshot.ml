@@ -170,6 +170,34 @@ max-concurrent = 1
   | Ok () -> ()
   | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
 
+(* How many times the newest lines of the Keeper's metrics store have been
+   asked for in this process, however each ask was answered. The store
+   counts every read of one of its facts
+   ([masc_dated_jsonl_fact_reads_total]). *)
+let newest_metrics_lines_asked config keeper_name =
+  let store =
+    Dated_jsonl.Store.pool_job_name
+      (Dated_jsonl.Store.of_location
+         (Keeper_types_support.keeper_store_location
+            config
+            keeper_name
+            Dated_jsonl.Store.Keeper.Metrics))
+  in
+  List.fold_left
+    (fun asked outcome ->
+       asked
+       +. Otel_metric_store_core.metric_value_or_zero
+            Otel_builtin_metric_names.metric_dated_jsonl_fact_reads
+            ~labels:
+              [ "store", store
+              ; "fact", "keeper_metrics_newest_lines"
+              ; "outcome", outcome
+              ]
+            ())
+    0.
+    [ "held"; "read_and_kept"; "read_not_kept"; "read_failed" ]
+;;
+
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -306,11 +334,18 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
           |> to_int);
       Keeper_registry.For_testing.clear ();
       Operator_control.invalidate_snapshot_cache ();
+      let asked_before = newest_metrics_lines_asked config keeper_name in
       let persisted_json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:false
           (operator_ctx env sw config "owner")
       in
+      (* The row's tool audit and its recent activity both read those lines.
+         The row asks for them once and hands the answer to both. *)
+      Alcotest.(check (float 0.))
+        "the Keeper row asked its metrics store for the newest lines once"
+        1.
+        (newest_metrics_lines_asked config keeper_name -. asked_before);
       let persisted_keeper =
         match
           Yojson.Safe.Util.(
@@ -885,6 +920,16 @@ let test_recent_tool_names_ignore_blank_rows () =
        [ ""; turn_row [ "only" ]; "   " ])
 ;;
 
+(* The tool audit of a Keeper as its row reads it: the newest metrics lines
+   are asked for once and given to the read. *)
+let read_tool_audit config (meta : Keeper_meta_contract.keeper_meta) =
+  Operator_control_snapshot_tool_audit.read
+    config
+    meta
+    ~newest_lines:
+      (Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name:meta.name)
+;;
+
 let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
   Eio_main.run (fun env ->
     ensure_fs env;
@@ -902,21 +947,19 @@ let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
       (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
       cleanup_dir dir) (fun () ->
       ignore (Workspace.init config ~agent_name:None);
-      let tools read_policy =
-        match Operator_control_snapshot_tool_audit.read ~read_policy config meta with
+      (* The tool audit takes no read policy: it has no cache of its own, so
+         every read sees the row just committed. *)
+      let tools () =
+        match read_tool_audit config meta with
         | Read audit -> audit.recent_tool_names
-        | Timed_out -> Alcotest.fail "tool audit read timed out"
         | Unreadable detail -> Alcotest.failf "tool audit unreadable: %s" detail
       in
-      Alcotest.(check (list string)) "the original source has no recorded tools" []
-        (tools Dashboard_projection_read.Reuse);
+      Alcotest.(check (list string)) "the original source has no recorded tools" [] (tools ());
       Keeper_types_support.append_keeper_metrics config meta.name
         (Yojson.Safe.from_string (turn_row ["actual-committed-tool"]));
-      Alcotest.(check (list string)) "Reuse still holds the earlier request observation" []
-        (tools Reuse);
       Alcotest.(check (list string))
-        "Current reads the actual metrics commit inside the unchanged TTL"
-        ["actual-committed-tool"] (tools Current);
+        "the next read sees the metrics commit"
+        ["actual-committed-tool"] (tools ());
       let trust read_policy = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
           ~read_policy ~config ~meta in
       let initial_trust = trust Reuse in
@@ -934,59 +977,31 @@ let tool_audit_row_field read field =
   | None -> Alcotest.failf "tool audit row has no %s field" field
 ;;
 
-(* #43101: the projection cache answers a closed compute window with its
-   timeout envelope in the place of the audit. The snapshot read that as an
-   audit with no tool call. *)
-let test_reuse_timeout_is_not_an_empty_tool_audit () =
+(* An audit that was read publishes its tools in the row. *)
+let test_a_read_tool_audit_publishes_its_tools () =
   Eio_main.run (fun env ->
     ensure_fs env;
-    let clock = Eio.Stdenv.clock env in
     let dir = temp_dir () in
     let config = Workspace.default_config dir in
     let meta = health_projection_meta ~total_turns:1 in
-    (* The key the [Reuse] read computes under. *)
-    let key = "kta:" ^ Digest.to_hex (Digest.string config.base_path) ^ ":" ^ meta.name in
-    Fun.protect ~finally:(fun () -> Dashboard_cache.invalidate key; cleanup_dir dir) (fun () ->
+    Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
       ignore (Workspace.init config ~agent_name:None);
       Keeper_types_support.append_keeper_metrics config meta.name
         (Yojson.Safe.from_string (turn_row ["recorded-tool"]));
-      Dashboard_cache.invalidate key;
-      (* Three owner timeouts with no stale value open the key's circuit. Each
-         compute outlasts its window. *)
-      for _attempt = 1 to 3 do
-        let timeout = Dashboard_cache.get_or_compute_with_timeout key
-            ~ttl:10.0 ~clock ~timeout_sec:0.01
-            (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-              Eio.Time.sleep clock 1.0;
-              `Null)) in
-        Alcotest.(check bool) "the cache answers with its timeout envelope" true
-          (Dashboard_cache.is_timeout_envelope timeout)
-      done;
-      let read read_policy = Operator_control_snapshot_tool_audit.read ~read_policy config meta in
-      let timed_out =
-        Dashboard_cache.For_testing.with_default_clock clock (fun () ->
-          read Dashboard_projection_read.Reuse)
-      in
-      (match timed_out with
-       | Timed_out -> ()
-       | Read _ -> Alcotest.fail "a cache timeout read as a tool audit"
-       | Unreadable detail -> Alcotest.failf "a cache timeout read as unreadable: %s" detail);
-      Alcotest.(check string) "the row says the audit timed out" "\"timed_out\""
+      let read = read_tool_audit config meta in
+      (match read with
+       | Read audit ->
+         Alcotest.(check (list string)) "the store holds the recorded tool"
+           ["recorded-tool"] audit.recent_tool_names
+       | Unreadable detail -> Alcotest.failf "readable store read as unreadable: %s" detail);
+      Alcotest.(check string) "the row says the audit was read" "\"read\""
         (Yojson.Safe.to_string
-           (tool_audit_row_field timed_out Keeper_status_metrics.tool_audit_read_field));
-      Alcotest.(check string) "the row does not publish an empty tool list" "null"
-        (Yojson.Safe.to_string (tool_audit_row_field timed_out "recent_tool_names"));
-      (match Operator_control_snapshot_tool_audit.completeness ~keeper_name:meta.name timed_out with
-       | Partial _ -> ()
-       | Complete -> Alcotest.fail "a timed-out tool audit settled as complete");
-      match read Current with
-      | Read audit ->
-        Alcotest.(check (list string)) "the store itself holds the recorded tool"
-          ["recorded-tool"] audit.recent_tool_names;
-        Alcotest.(check string) "a read audit publishes its tools" "[\"recorded-tool\"]"
-          (Yojson.Safe.to_string (tool_audit_row_field (Read audit) "recent_tool_names"))
-      | Timed_out -> Alcotest.fail "a Current read has no cache window to time out"
-      | Unreadable detail -> Alcotest.failf "readable store read as unreadable: %s" detail))
+           (tool_audit_row_field read Keeper_status_metrics.tool_audit_read_field));
+      Alcotest.(check string) "a read audit publishes its tools" "[\"recorded-tool\"]"
+        (Yojson.Safe.to_string (tool_audit_row_field read "recent_tool_names"));
+      match Operator_control_snapshot_tool_audit.completeness ~keeper_name:meta.name read with
+      | Complete -> ()
+      | Partial detail -> Alcotest.failf "a read tool audit settled as partial: %s" detail))
 ;;
 
 let test_unreadable_metrics_store_is_not_an_empty_tool_audit () =
@@ -995,29 +1010,27 @@ let test_unreadable_metrics_store_is_not_an_empty_tool_audit () =
     let dir = temp_dir () in
     let config = Workspace.default_config dir in
     let meta = health_projection_meta ~total_turns:1 in
-    let key = "kta:" ^ Digest.to_hex (Digest.string config.base_path) ^ ":" ^ meta.name in
-    Fun.protect ~finally:(fun () -> Dashboard_cache.invalidate key; cleanup_dir dir) (fun () ->
+    Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
       ignore (Workspace.init config ~agent_name:None);
       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
       (* The store refuses a directory at a day file's path. *)
       Fs_compat.mkdir_p (Filename.concat (Filename.concat metrics_dir "2026-01") "01.jsonl");
-      Dashboard_cache.invalidate key;
-      List.iter (fun (label, read_policy) ->
-        let read = Operator_control_snapshot_tool_audit.read ~read_policy config meta in
-        (match read with
-         | Unreadable _ -> ()
-         | Read _ -> Alcotest.failf "%s: an unreadable store read as a tool audit" label
-         | Timed_out -> Alcotest.failf "%s: an unreadable store read as a timeout" label);
-        Alcotest.(check string) (label ^ ": the row says the audit is unreadable") "\"unreadable\""
-          (Yojson.Safe.to_string
-             (tool_audit_row_field read Keeper_status_metrics.tool_audit_read_field));
-        Alcotest.(check string) (label ^ ": the row does not publish an empty tool list") "null"
-          (Yojson.Safe.to_string (tool_audit_row_field read "latest_tool_names"));
-        Alcotest.(check bool) (label ^ ": the row carries the read failure") true
-          (match tool_audit_row_field read Keeper_status_metrics.tool_audit_read_error_field with
-           | `String detail -> String.length detail > 0
-           | _ -> false))
-        [ "Current", Dashboard_projection_read.Current; "Reuse", Reuse ]))
+      let read = read_tool_audit config meta in
+      (match read with
+       | Unreadable _ -> ()
+       | Read _ -> Alcotest.fail "an unreadable store read as a tool audit");
+      Alcotest.(check string) "the row says the audit is unreadable" "\"unreadable\""
+        (Yojson.Safe.to_string
+           (tool_audit_row_field read Keeper_status_metrics.tool_audit_read_field));
+      Alcotest.(check string) "the row does not publish an empty tool list" "null"
+        (Yojson.Safe.to_string (tool_audit_row_field read "latest_tool_names"));
+      Alcotest.(check bool) "the row carries the read failure" true
+        (match tool_audit_row_field read Keeper_status_metrics.tool_audit_read_error_field with
+         | `String detail -> String.length detail > 0
+         | _ -> false);
+      match Operator_control_snapshot_tool_audit.completeness ~keeper_name:meta.name read with
+      | Partial _ -> ()
+      | Complete -> Alcotest.fail "an unreadable tool audit settled as complete"))
 ;;
 
 let test_current_snapshot_retains_inventory_failure_and_confirmation_deadline () =
@@ -1103,8 +1116,8 @@ let () =
       ( "Current source reads"
       , [Alcotest.test_case "nested reads observe actual commits inside request TTL" `Quick
            test_current_nested_reads_observe_actual_commits_inside_the_request_ttl
-        ; Alcotest.test_case "a cache timeout is not an empty tool audit" `Quick
-            test_reuse_timeout_is_not_an_empty_tool_audit
+        ; Alcotest.test_case "a read tool audit publishes its tools" `Quick
+            test_a_read_tool_audit_publishes_its_tools
         ; Alcotest.test_case "an unreadable metrics store is not an empty tool audit" `Quick
             test_unreadable_metrics_store_is_not_an_empty_tool_audit
         ; Alcotest.test_case "Current retains actual inventory failure and confirmation expiry" `Quick

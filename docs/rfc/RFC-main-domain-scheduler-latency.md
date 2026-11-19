@@ -218,7 +218,7 @@ fiber 12개가 "파일 읽기 → JSON 파싱 → 한 줄 append → fsync" 를 
 
 #### 순서
 
-1. **S1 `Fs_compat`**: `run_blocking_private_file_transaction` 과 load·save·append 의 `Eio_unix.run_in_systhread` 33곳이 한 함수로 모이고, 그 함수가 host 로 보낸다. `fs_compat` 은 `masc_core` 아래 라이브러리라 `Systhread_host` 를 볼 수 없다. `Systhread_host` 를 `eio`·`eio.unix`·`eio_main` 만 쓰는 leaf 라이브러리로 내리고, 지금 쓰는 `Eio_guard.execution_context`·`Executor_pool_ref.in_worker_context`·`Log`·`Minor_heap.tune` 은 leaf 로 같이 내리거나 `start` 의 인자로 받는다. 메인이 내보내는 작업의 약 53% 다.
+1. **S1 `Fs_compat`**: `run_blocking_private_file_transaction` 과 load·save·append 의 `Eio_unix.run_in_systhread` 33곳이 한 함수로 모이고, 그 함수가 host 로 보낸다. `fs_compat` 은 `masc_core` 아래 라이브러리라 `Systhread_host` 를 볼 수 없다. `Systhread_host` 를 `eio`·`eio.unix`·`eio_main` 만 쓰는 leaf 라이브러리로 내리고, 지금 쓰는 `Eio_guard.execution_context`·`Executor_pool_ref.in_worker_context`·`Log`·`Minor_heap.apply` 는 leaf 로 같이 내리거나 `start` 의 인자로 받는다. 메인이 내보내는 작업의 약 53% 다.
 2. **S2 `Eio_guard.run_in_systhread`**: 본문이 `Systhread_host.run` 을 부른다. 호출부 146곳은 안 고친다. 약 28% 다.
 3. **S2b `Eio_unix.run_in_systhread` 직접 호출**: S1 뒤 운영 서버(build `e0f124c927a5`, 11-12)에서 남은 긴 메인 실행을 재니 이 호출들이었다. 래퍼를 거치지 않아 S1·S2 가 닿지 않는다. main 에 122줄이 있다: lane add-on 의 `offload` 한 줄을 쓰는 69곳과 직접 호출 30곳, server 20, keeper 13, 그 밖. 본문이 JSON 을 해석·직렬화하고 SHA-256 을 계산하므로 스레드가 OCaml 코드를 오래 돈다.
    - 추적 60초와 1초 `sample` 55개를 같이 떴다. 메인 스레드의 락 대기 297표본 중 235표본이 두 1초 구간에 몰렸고, 자리는 모두 `caml_thread_leave_blocking_section` 이었다. 같은 구간에 system thread 가 `Yojson`·`sha256` 을 80~126표본씩 돌았다.
@@ -389,7 +389,9 @@ memprof A(ready+3분) → B(+7분), 240초: **162 MB/s**(`agent_started` 29건, 
 | ready+7분: lag p99 / minor/min / alloc | 98 ms / 1,702 / 139 MB/s | 144 ms / 1,782 / 202 MB/s |
 | memprof A→B 4분 | 162 MB/s, 턴당 1.3 GB | 160 MB/s, major 직행 43%, live 3.08→3.04 GB |
 
-minor heap 을 16배 키워도 STW minor 횟수가 같다. 힙이 차서 도는 것이 아니다. 실험 2(`s=32M,o=200`)는 하지 않는다 — 같은 이유로 움직일 것이 없다. #33360 이 같은 사이징을 코드로 넣었고(제출 경로마다 도메인 진입 시 한 번, 서빙 도메인 포함) 그것으로 충분하다.
+minor heap 을 16배 키워도 STW minor 횟수가 같다. 힙이 차서 도는 것이 아니다. 실험 2(`s=32M,o=200`)는 하지 않는다 — 같은 이유로 움직일 것이 없다. #33360 이 같은 크기를 코드로 넣었고 그것으로 충분하다.
+
+도메인의 minor heap 은 그 도메인을 띄우는 쪽이 띄울 때 한 번 정한다(`Minor_heap.domain_mgr`). 풀 job 과 라이브러리 함수는 크기를 바꾸지 않는다. 서버는 자기 일을 하는 도메인을 모두 4M words 로 둔다. TUI 는 도메인마다 따로 정한다(`Masc_tui_domains`).
 
 #### OCaml 5.5.0 런타임 원문으로 확인한 것
 

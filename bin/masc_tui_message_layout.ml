@@ -2801,3 +2801,145 @@ let age_text ~now ~since =
      "-4s" a reader could use. *)
   if is_readable_span seconds then Some (Masc_tui_value.Ongoing.since ~now since)
   else None
+
+let is_markdown_fence trimmed =
+  String.starts_with ~prefix:"```" trimmed
+  || String.starts_with ~prefix:"~~~" trimmed
+
+let is_horizontal_rule trimmed =
+  let len = String.length trimmed in
+  if len = 0 then false
+  else
+    let rec all_rule i has_glyph =
+      if i >= len then has_glyph
+      else
+        match trimmed.[i] with
+        | '-' | '*' | '_' -> all_rule (i + 1) true
+        | ' ' | '\t' -> all_rule (i + 1) has_glyph
+        | _ -> false
+    in
+    all_rule 0 false
+
+let strip_markdown_block_prefix text =
+  let rec strip s =
+    let s = String.trim s in
+    let len = String.length s in
+    if len = 0 then ""
+    else if s.[0] = '>' then
+      strip (String.sub s 1 (len - 1))
+    else if s.[0] = '#' then
+      let rec hashes i = if i < len && s.[i] = '#' then hashes (i + 1) else i in
+      let h = hashes 0 in
+      if h < len && (s.[h] = ' ' || s.[h] = '\t') then
+        strip (String.sub s h (len - h))
+      else s
+    else if (s.[0] = '-' || s.[0] = '*' || s.[0] = '+')
+            && len >= 2 && (s.[1] = ' ' || s.[1] = '\t') then
+      strip (String.sub s 2 (len - 2))
+    else s
+  in
+  strip text
+
+(* Remove inline Markdown delimiters so a folded preview passed through
+   [Masc_tui_markdown.render] renders as uniform plain text without bold/code
+   inversion or link-delimiter capture, while preserving identifiers such as
+   [snake_case], [-42], and [*ptr]. *)
+let strip_inline_markdown text =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  let is_space_or_edge i =
+    i < 0 || i >= len || text.[i] = ' ' || text.[i] = '\t'
+  in
+  let rec walk i =
+    if i >= len then ()
+    else
+      match text.[i] with
+      | '`' | '*' -> walk (i + 1)
+      | '~' when i + 1 < len && text.[i + 1] = '~' -> walk (i + 2)
+      | '_' when i + 1 < len && text.[i + 1] = '_' -> walk (i + 2)
+      | '_' when is_space_or_edge (i - 1) || is_space_or_edge (i + 1) ->
+          walk (i + 1)
+      | '[' -> (
+          match String.index_from_opt text (i + 1) ']' with
+          | Some close_bracket
+            when close_bracket + 1 < len && text.[close_bracket + 1] = '(' -> (
+              match String.index_from_opt text (close_bracket + 2) ')' with
+              | Some close_paren ->
+                  Buffer.add_substring buf text (i + 1) (close_bracket - i - 1);
+                  walk (close_paren + 1)
+              | None ->
+                  Buffer.add_substring buf text (i + 1) (close_bracket - i - 1);
+                  walk (close_bracket + 2))
+          | Some _ | None ->
+              Buffer.add_char buf '[';
+              walk (i + 1))
+      | ']' when i + 1 < len && text.[i + 1] = '(' ->
+          Buffer.add_string buf "] (";
+          walk (i + 2)
+      | ch ->
+          Buffer.add_char buf ch;
+          walk (i + 1)
+  in
+  walk 0;
+  Buffer.contents buf
+
+let collapse_inline_whitespace text =
+  let buf = Buffer.create (String.length text) in
+  let prev_space = ref false in
+  String.iter
+    (fun ch ->
+       match ch with
+       | ' ' | '\t' | '\r' | '\n' ->
+           if Buffer.length buf > 0 && not !prev_space then begin
+             Buffer.add_char buf ' ';
+             prev_space := true
+           end
+       | _ ->
+           let code = Char.code ch in
+           if code >= 0x20 && code <> 0x7f then begin
+             Buffer.add_char buf ch;
+             prev_space := false
+           end)
+    text;
+  String.trim (Buffer.contents buf)
+
+let thought_preview ~max_cells body =
+  if max_cells <= 0 then ""
+  else
+    let first =
+      body
+      |> String.split_on_char '\n'
+      |> List.find_map (fun line ->
+           let trimmed = String.trim line in
+           if String.equal trimmed "" || is_markdown_fence trimmed
+              || is_horizontal_rule trimmed
+           then None
+           else
+             let cleaned =
+               trimmed
+               |> strip_markdown_block_prefix
+               |> strip_inline_markdown
+               |> collapse_inline_whitespace
+             in
+             if String.equal cleaned "" then None else Some cleaned)
+    in
+    match first with
+    | None -> ""
+    | Some text -> truncate_end max_cells text
+
+let folded_thought_summary ~mark ~width ~line_count ~body =
+  let unit_word = if line_count = 1 then "line" else "lines" in
+  let compact =
+    Printf.sprintf "%s Thought \xc2\xb7 %d %s \xc2\xb7 Ctrl-R"
+      mark line_count unit_word
+  in
+  let sep = " \xe2\x80\x94 " in
+  let overhead = display_width compact + display_width sep in
+  let preview_budget = min 64 (width - overhead) in
+  if preview_budget < 12 then compact
+  else
+    let preview = thought_preview ~max_cells:preview_budget body in
+    if String.equal preview "" then compact
+    else
+      Printf.sprintf "%s Thought \xc2\xb7 %d %s%s%s \xc2\xb7 Ctrl-R"
+        mark line_count unit_word sep preview

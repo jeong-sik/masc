@@ -94,19 +94,20 @@ let test_server_refusal_status_boundaries () =
           check string "provider message survives" "provider unavailable" message
         | `Overloaded, Retry.Overloaded { message } ->
           check string "provider message survives" "provider unavailable" message
-        | `Unknown,
-          Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; message } ->
+        | `Unclassified,
+          Retry.InvalidRequest { reason = Retry.Unclassified_status { status = carried }; message } ->
+          check int "the unclassified status survives" status carried;
           check string "provider message survives" "provider unavailable" message
         | _ -> failf "HTTP %d classified as %s" status (Retry.error_message error));
        check bool "only server refusals are retryable"
-         (expected <> `Unknown) (Retry.is_retryable error))
-    [ 499, `Unknown
+         (expected <> `Unclassified) (Retry.is_retryable error))
+    [ 499, `Unclassified
     ; 500, `Server_error
     ; 503, `Server_error
     ; 520, `Server_error
     ; 529, `Overloaded
     ; 599, `Server_error
-    ; 600, `Unknown
+    ; 600, `Unclassified
     ]
 ;;
 
@@ -315,6 +316,33 @@ let test_invalid_request_reason_boundary () =
           }))
 ;;
 
+(* Only 400 and 422 are refusals of the request with no named cause. A status
+   no arm names keeps its own reason and the status, and still ends the
+   attempt as the unknown refusal did. *)
+let test_unclassified_status_keeps_its_own_reason () =
+  List.iter
+    (fun status ->
+       match Retry.classify_error ~retry_after_header:None ~status ~body:"" with
+       | Retry.InvalidRequest { reason = Retry.Unclassified_status { status = carried }; _ }
+         as err ->
+         check int "the status is carried" status carried;
+         check bool "an unclassified status is not retryable" false (Retry.is_retryable err)
+       | other ->
+         fail
+           (Printf.sprintf "HTTP %d: expected Unclassified_status, got %s" status
+              (Retry.error_message other)))
+    [ 301; 304; 405; 408; 409; 418 ];
+  List.iter
+    (fun status ->
+       match Retry.classify_error ~retry_after_header:None ~status ~body:"" with
+       | Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } -> ()
+       | other ->
+         fail
+           (Printf.sprintf "HTTP %d: expected Unknown_invalid_request, got %s" status
+              (Retry.error_message other)))
+    [ 400; 422 ]
+;;
+
 (* A refusal whose body the caller's own window closed on is not a refusal
    whose body arrived empty. The provider named a status and nothing else
    that was read, so the classification says the cause is unread and the
@@ -445,6 +473,10 @@ let () =
             "invalid request reason boundary"
             `Quick
             test_invalid_request_reason_boundary
+        ; test_case
+            "a status no arm names keeps its own reason"
+            `Quick
+            test_unclassified_status_keeps_its_own_reason
         ; test_case "error_message all variants" `Quick test_error_message_all_variants
         ] )
     ]

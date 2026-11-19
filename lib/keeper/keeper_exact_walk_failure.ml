@@ -78,12 +78,26 @@ let input_size = execution ~historical_range_size:true ~named_input_capacity:tru
 let provider_input_size refusal = { input_size with provider_input_refusals = [refusal] }
 let of_input_refusal = provider_input_size
 
-type provider_cause = Exact_output.provider_refusal =
+(* The stored refusal. Not [Exact_output.provider_refusal] itself: this
+   algebra is removed at the Librarian cut, so a constructor that type gains
+   is mapped onto one stored here and the rows keep the tags they had. *)
+type provider_cause =
   | Request_body_refused | Refusal_body_not_received | Rate_limited | Overloaded
   | Server_error | Auth_failed | Authorization_refused | Payment_required
   | Invalid_request | Not_found | Context_overflow | Input_capacity | Network_error
   | Connect_failed | Timeout
 [@@deriving yojson]
+
+let provider_cause : Exact_output.provider_refusal -> provider_cause = function
+  | Request_body_refused -> Request_body_refused
+  | Refusal_body_not_received -> Refusal_body_not_received
+  | Rate_limited -> Rate_limited | Overloaded -> Overloaded | Server_error -> Server_error
+  | Auth_failed -> Auth_failed | Authorization_refused -> Authorization_refused
+  | Payment_required -> Payment_required
+  | Invalid_request | Unclassified_status -> Invalid_request
+  | Not_found -> Not_found | Context_overflow -> Context_overflow
+  | Input_capacity -> Input_capacity | Network_error -> Network_error
+  | Connect_failed -> Connect_failed | Timeout -> Timeout
 
 type stop =
   | End_turn | Stop_tool_use | Max_tokens | Stop_sequence | Refusal | Content_filter
@@ -146,11 +160,30 @@ let completion (error : Http_client.http_error) = match error with
       | Unknown_provider_failure _ -> Unknown_provider_failure
 
 let api_observation (cause : Exact_output.execution_error_cause) = match cause with
-  | Provider_response_refused {http_status;refusal;_} -> Provider_refused {http_status;refusal}
+  | Provider_response_refused {http_status;refusal;_} ->
+    Provider_refused {http_status;refusal=provider_cause refusal}
+  | Provider_context_overflow {error;http_status;dispatch} ->
+    (match http_status with
+     | Some http_status -> Provider_refused {http_status;refusal=Context_overflow}
+     | None ->
+       Completion_failed
+         { sent = (match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true)
+         ; cause = completion error
+         })
   | Completion_failed {dispatch;error} ->
     Completion_failed {sent=(match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true);
       cause=completion error}
-  | Output_limit_reached -> Output_limit | Incomplete_output -> Incomplete | Missing_output -> Missing
+  | Output_limit_reached -> Output_limit
+  (* No new stored constructor: this algebra is removed at the Librarian cut.
+     An answer stopped at the window without text is stored as a sent
+     completion stopped at the window. Over HTTP it used to be stored as a
+     provider refusal with the answer's status (200), which no refusal had
+     sent. Both name the context overflow in [of_api_observation], so the walk
+     reads the same size. With text it stays incomplete. *)
+  | Window_reached {output=No_output} ->
+    Completion_failed {sent=true; cause=Empty_completion Context_window_exceeded}
+  | Window_reached {output=Partial_output} | Incomplete_output _ -> Incomplete
+  | Missing_output -> Missing
   | Ambiguous_output count -> Ambiguous count | Unexpected_output_content -> Unexpected
   | Invalid_json_output -> Invalid_json | Response_body_deadline_exceeded -> Body_deadline
 

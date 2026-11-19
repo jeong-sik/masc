@@ -47,9 +47,7 @@ let encode_state state =
          submission child; the owner's lock can then unwind. *)
       Eio.Fiber.first
         (fun () ->
-          Eio.Executor_pool.submit_exn executor ~weight:1.0 (fun () ->
-            Minor_heap.tune ();
-            run ()))
+          Eio.Executor_pool.submit_exn executor ~weight:1.0 run)
         (fun () -> raise (Eio.Promise.await stopped))
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio)
   | Some _, Eio_guard.Non_eio -> run ()

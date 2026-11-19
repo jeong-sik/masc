@@ -1,14 +1,14 @@
 (* The mechanism is [Fs_compat.Systhread_host], below this library so that
    [Fs_compat]'s own blocking calls use it. This module supplies what that
-   layer cannot name: the log, the minor-heap tuning, and which fibers are
-   pool work. *)
+   layer cannot name: the log, the minor heap, and which fibers are pool
+   work. *)
 module Host = Fs_compat.Systhread_host
 
 let domain_count = Host.domain_count
 
-let start () =
+let start ~minor_heap () =
   Host.start
-    ~on_domain_start:Minor_heap.tune
+    ~on_domain_start:(fun () -> Minor_heap.apply minor_heap)
     ~on_failure:(fun exn ->
       Log.Misc.error
         "system-thread host failed; its callers now start threads on their own domain: %s"

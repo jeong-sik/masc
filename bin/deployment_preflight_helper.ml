@@ -901,9 +901,10 @@ let timed_scan ~base_path job =
    Refusals name the file and its store-specific fresh state requirements; a
    coupled original is not repaired by moving one file. *)
 let validate_stores ~jobs base_path =
-  (* The scans decode short-lived JSON like server and pool work. Reuse their
-     shared heap policy; an operator's OCAMLRUNPARAM remains authoritative. *)
-  Minor_heap.tune ();
+  (* The scans decode short-lived JSON like server and pool work, so they
+     collect on the server's heap; an operator's OCAMLRUNPARAM remains
+     authoritative. *)
+  Minor_heap.apply Minor_heap.Tuned;
   let print_store (name, on_refusal, result) =
     match result with
     | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail

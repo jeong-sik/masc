@@ -181,6 +181,16 @@ let test_malformed_counted_not_fatal () =
     check "malformed: not_helpful=1" (t.F.not_helpful = 1);
     check "malformed: count=2 (non-json + non-record)" (t.F.malformed = 2))
 
+(* A regular file where [.masc] would be: the keepers directory cannot be
+   made. The write says so as [`Io]; it used to leave as an exception. *)
+let test_a_directory_that_cannot_be_made_is_io () =
+  with_tmp_config (fun config ->
+    let in_the_way = Filename.dirname (Masc.Workspace.keepers_runtime_dir config) in
+    Out_channel.with_open_text in_the_way (fun channel -> output_string channel "x");
+    match F.record ~config (mk ~keeper_id:"k3" ~turn_id:"t1" ~signal:F.Helpful ~recorded_at:1.0 ()) with
+    | Error (`Io _) -> ()
+    | Ok () -> failwith "the row was written through a regular file")
+
 (* ── HTTP wire helpers (tally_to_json / record_of_request_body) ───────── *)
 
 let member k = function `Assoc fs -> List.assoc_opt k fs | _ -> None
@@ -238,6 +248,7 @@ let () =
   test_sink_roundtrip ();
   test_read_missing_log_is_empty ();
   test_malformed_counted_not_fatal ();
+  test_a_directory_that_cannot_be_made_is_io ();
   test_tally_to_json ();
   test_record_of_request_body ();
   print_endline "test_keeper_response_feedback: OK"

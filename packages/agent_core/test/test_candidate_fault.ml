@@ -36,7 +36,7 @@ let expected_of_api_error (api : Llm_provider.Retry.api_error)
        Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Admission
      | Llm_provider.Retry.Json_parse_error ->
        Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Admission
-     | Llm_provider.Retry.Unknown_invalid_request ->
+     | Llm_provider.Retry.Unknown_invalid_request | Llm_provider.Retry.Unclassified_status _ ->
        Llm_provider.Candidate_fault.Unattributed)
   | Llm_provider.Retry.NetworkError _ ->
     Llm_provider.Candidate_fault.Unknown_after_dispatch
@@ -152,6 +152,9 @@ let api_cases : (string * Llm_provider.Retry.api_error) list =
   ; ( "unknown_invalid"
     , Llm_provider.Retry.InvalidRequest
         { message = ""; reason = Llm_provider.Retry.Unknown_invalid_request } )
+  ; ( "unclassified_status"
+    , Llm_provider.Retry.InvalidRequest
+        { message = ""; reason = Llm_provider.Retry.Unclassified_status { status = 409 } } )
   ; ( "network_error"
     , Llm_provider.Retry.NetworkError
         { message = ""; kind = Llm_provider.Http_client.Connection_refused } )

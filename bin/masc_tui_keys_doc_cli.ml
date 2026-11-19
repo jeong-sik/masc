@@ -1,4 +1,4 @@
-(** Writes the generated key reference to stdout; committed over
-    docs/guides/TUI-KEYS.md. *)
+(** Writes the generated key reference to stdout. The native TUI proof
+    workflow keeps it as [key-reference.md]. *)
 
 let () = print_string (Masc_tui_keys_doc.markdown ())

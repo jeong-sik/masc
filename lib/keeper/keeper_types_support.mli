@@ -107,9 +107,9 @@ val history_source_of_string : string -> history_source option
 val is_internal_history_source : history_source -> bool
 
 (** Where a Keeper's decision record and feedback record are. Paths: the
-    file system is not looked at and nothing is made. The records' writers
-    make the keepers directory ({!append_decision_record},
-    [Keeper_response_feedback.record]). *)
+    file system is not looked at and nothing is made. The write of a row
+    makes the keepers directory ({!append_jsonl_line},
+    {!append_decision_record}). *)
 val keeper_decision_log_path : Workspace.config -> string -> string
 
 val keeper_feedback_log_path : Workspace.config -> string -> string
@@ -124,7 +124,12 @@ val keeper_feedback_log_path : Workspace.config -> string -> string
 val maybe_rotate_file : string -> unit
 
 (** Append [json] as a single UTF-8-repaired JSONL line to [path],
-    rotating first if needed. *)
+    rotating first if needed. The directory of [path] is made when it is not
+    there, by the write ({!Fs_compat.append_jsonl_rows}); a caller does not
+    make it first.
+
+    @raise Sys_error when the write fails.
+    @raise Unix.Unix_error when the directory cannot be made. *)
 val append_jsonl_line : string -> Yojson.Safe.t -> unit
 
 val append_decision_record : Workspace.config -> string -> Yojson.Safe.t -> unit

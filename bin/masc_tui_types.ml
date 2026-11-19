@@ -10130,6 +10130,7 @@ type state = {
   (* The roster starts closed. An explicit Ctrl-B choice survives both
      navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
+  mutable pane_zoom: Masc_tui_roster_pane.zoom;
   (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
      On narrow screens it occupies the body until a selection or dismissal. *)
   mutable keeper_navigation_open: bool;
@@ -10778,6 +10779,8 @@ type state = {
      ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
      the window where it is. *)
   mutable keeper_list_scroll: int;
+  (* Overview cards collapsed via btop-style 1..4 number toggles (1-based). *)
+  mutable overview_collapsed_cards: int list;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -16603,7 +16606,8 @@ let retire_identity_login_expectations (state : state) =
 
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
-  && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+  && (Masc_tui_roster_pane.hides_roster state.pane_zoom
+      || Masc_tui_roster_pane.effective_hidden state.roster_pane_preference)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
@@ -19204,10 +19208,15 @@ let goal_drop_reason_for (state : state) (goal_id : string) =
    pane draws only when the terminal is wide enough for it
    ([Masc_tui_acting_pane.drawn_cols]). An explicit reader choice applies on
    every surface and survives surface changes. *)
-let acting_pane_layout (state : state) =
+let stored_acting_pane_layout (state : state) =
   match state.acting_pane_preference with
   | Chosen_acting_pane layout -> layout
   | Default_acting_pane -> Masc_tui_acting_pane.Narrow
+
+let acting_pane_layout (state : state) =
+  if Masc_tui_roster_pane.hides_activity state.pane_zoom then
+    Masc_tui_acting_pane.Hidden
+  else stored_acting_pane_layout state
 
 (* Requests retain receipts and unresolved declarations across withdrawal.
    Successful creation releases its retry body; receipts grant no authority. *)
@@ -21340,6 +21349,7 @@ let create_state
   (* Keep the reading surface full-width until Left opens the navigator
      or Ctrl-B explicitly pins the roster. *)
   roster_pane_preference = Masc_tui_roster_pane.Hidden;
+  pane_zoom = Masc_tui_roster_pane.Normal;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_presented = Masc_tui_acting_pane.empty_frame;
@@ -21649,6 +21659,7 @@ let create_state
   keeper_list_view_save_request = None;
   keeper_message_return = None;
   keeper_list_scroll = 0;
+  overview_collapsed_cards = [];
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
@@ -26410,6 +26421,19 @@ let runtime_quota_end_label ?(ko = false) = function
         (if ko then "초기화 시각 없음, %s 다시 호출" else "no reset stated, called again %s")
         (runtime_moment_text at)
 
+(* Whether the runtime's quota rest already says its account is spent: a
+   provider quota refusal or a usage read that found the gating window spent
+   rests it for that, so an account-usage badge on the same row would say it
+   twice. A payment refusal is the balance, a different limit. *)
+let runtime_quota_rest_says_spent (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_quota_rest with
+  | Some { Runtime_quota_window.cause =
+             ( Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused
+             | Runtime_quota_window.Usage_read ); _ } -> true
+  | Some { Runtime_quota_window.cause =
+             Runtime_quota_window.Refused Runtime_quota_window.Payment_refused; _ }
+  | None -> false
+
 let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   Option.map
     (fun (spent : Runtime_quota_window.spent) ->
@@ -26455,16 +26479,52 @@ let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
     (runtime_attempt_failure_word attempt.rfa_failure)
     (runtime_moment_text attempt.rfa_noted_at) attempt.rfa_recorded_by
 
+(* The account usage of the runtime: spent windows, none, or why it is not
+   known. A failed usage read and an account the read did not report are
+   different values. The runtime table draws this reading as a mark and the
+   selected row's summary as words, so the two cannot disagree. *)
+let runtime_usage_reading state runtime =
+  match state.runtime_surface with
+  | None -> Error Masc_tui_value.Unknown.Unread
+  | Some snapshot ->
+      match runtime_spent_usage snapshot.Tui_decode.rss_resolved runtime with
+      | Ok windows -> Ok windows
+      | Error _ ->
+          Error (match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_usage with
+            | Error _ -> Masc_tui_value.Unknown.Read_failed
+            | Ok _ -> Masc_tui_value.Unknown.Unreported)
+
+(* The connection side of a runtime the probe has no entry for: the probe not
+   read yet, its read failed, or it read and left this runtime out. *)
+let runtime_probe_missing state =
+  match state.runtime_surface with
+  | None -> Masc_tui_value.Unknown.Unread
+  | Some snapshot ->
+      (match snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe with
+       | Some _, _ -> Masc_tui_value.Unknown.Read_failed
+       | None, None -> Masc_tui_value.Unknown.Unread
+       | None, Some _ -> Masc_tui_value.Unknown.Unreported)
+
+(* Why a value is not known, in the words a detail sentence uses (RFC
+   tui-one-screen-grammar 6.4). The table draws the mark instead. *)
+let runtime_unknown_words ~ko ~subject_ko ~subject_en = function
+  | Masc_tui_value.Unknown.Unread ->
+      if ko then subject_ko ^ " 미조회" else subject_en ^ " not read"
+  | Masc_tui_value.Unknown.Read_failed ->
+      if ko then subject_ko ^ " 조회 실패" else subject_en ^ " read failed"
+  | Masc_tui_value.Unknown.Unreported ->
+      if ko then subject_ko ^ " 보고 안 됨" else subject_en ^ " not reported"
+
 let runtime_usage_label state runtime =
   let ko = state.ui_language = Lang_ko in
-  match state.runtime_surface with
-  | None -> Some (if ko then "사용량 미확인" else "usage unknown")
-  | Some snapshot ->
-      match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Error _ -> Some (if ko then "사용량 미확인" else "usage unknown")
-      | Ok [] -> None
-      | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
+  match runtime_usage_reading state runtime with
+  | Error unknown ->
+      Some (runtime_unknown_words ~ko ~subject_ko:"사용량" ~subject_en:"usage" unknown)
+  | Ok [] -> None
+  | Ok (_ :: _) when runtime_quota_rest_says_spent runtime -> None
+  | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
 
+(* The selected row's summary of its route and connection cell, in words. *)
 let runtime_route_probe_text state runtime probe =
   let ko = state.ui_language = Lang_ko in
   let route = match List.filter_map Fun.id
@@ -26473,7 +26533,9 @@ let runtime_route_probe_text state runtime probe =
     | [] -> if ko then "거절 없음" else "no refusal"
     | parts -> String.concat " " parts in
   route ^ " / " ^ (match probe with
-    | None -> if ko then "미관측" else "unobserved"
+    | None ->
+        runtime_unknown_words ~ko ~subject_ko:"프로브" ~subject_en:"probe"
+          (runtime_probe_missing state)
     | Some probe -> runtime_probe_status_label ~ko probe.Masc.Tui_decode_runtime_probe.rpp_status)
 
 let runtime_pick_facts = function

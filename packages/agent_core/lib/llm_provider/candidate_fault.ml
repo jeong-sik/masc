@@ -43,7 +43,7 @@ let of_api_error (api : Retry.api_error) : t =
      | Retry.Refusal_body_not_received -> Binding Refusal_unread
      | Retry.Attempt_rejected -> Binding Admission
      | Retry.Json_parse_error -> Binding Admission
-     | Retry.Unknown_invalid_request -> Unattributed)
+     | Retry.Unknown_invalid_request | Retry.Unclassified_status _ -> Unattributed)
   (* A network failure is not a key, account or model fact: nothing the
      provider answered says whose affair it is. A connection function's failure
      is its own constructor, so [Retry.NetworkError] is everything else, and it

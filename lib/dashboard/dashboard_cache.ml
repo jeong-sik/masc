@@ -530,9 +530,8 @@ let wait_poll_interval_sec = 0.25
     [stale_until] instant moves; the freshness window and [stale_grace]
     duration are unchanged.
 
-    Measured on a 13-keeper runtime: ~39 per-keeper cache entries
-    ([kta:] / [operator:keeper-runtime-trust] / [kas:keeper-*-agent]) for
-    the 13 keepers expired in the same millisecond under a fixed 15s
+    Measured on a 13-keeper runtime: ~39 per-keeper cache entries (three
+    for each keeper) expired in the same millisecond under a fixed 15s
     [realtime_cache_ttl_s], driving hit_ratio to ~48% with recurring
     recompute spikes every TTL. *)
 let ttl_jitter = 0.10

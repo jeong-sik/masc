@@ -362,6 +362,28 @@ let parse_exact_output_lane ~(owner : Runtime_schema.exact_lane_owner) (tbl : Ot
     (* An add-on lane is always Optional: no server start depends on it. *)
     | Runtime_schema.Builtin _ | Runtime_schema.Addon _ -> Ok ()
   in
+  (* The Librarian keeps each HTTP slot's size fact for the output reserve
+     its requests carry (RFC librarian-call-only-proposes §7.4). Without a
+     declared reserve a request carries a provider default no lane value can
+     name, so a fact could outlive a change of it. *)
+  let reserve_required = function
+    | Standalone_lane.Librarian_memory -> true
+    | Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Board_attention | Standalone_lane.Verifier
+    | Standalone_lane.Candle_appraiser -> false
+  in
+  let* () =
+    match owner, max_output_tokens_result with
+    | Runtime_schema.Builtin lane, Ok None when enabled && reserve_required lane ->
+      Error
+        (error
+           (path ^ ".max_output_tokens")
+           (Printf.sprintf
+              "%s must declare max_output_tokens: each slot's size fact holds for \
+               that output reserve"
+              (Standalone_lane.to_id lane)))
+    | (Runtime_schema.Builtin _ | Runtime_schema.Addon _), (Ok _ | Error _) -> Ok ()
+  in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors

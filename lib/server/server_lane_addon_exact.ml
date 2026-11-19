@@ -276,19 +276,9 @@ let resolve ~lane_key =
    [resolve] admits a lane only with a slot, both orders keep every slot in
    [walk] or [held], and [skip_size_refused] leaves a slot out only beside a
    held one, so an empty walk on both sides has a held slot. *)
-let every_slot_held ({ lane; held_http } : Runtime_exact_lane_backpressure.ordered) =
-  let { Runtime_candidate_standing.walk = cli_walk; held = cli_held } =
-    Keeper_lane_cli_oneshot.order_slots lane.Registry.cli_slots
-  in
-  match lane.Registry.selected_slots, cli_walk with
-  | _ :: _, _ | [], _ :: _ -> None
-  | [], [] ->
-    (match
-       List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.until) held_http
-       @ List.map snd cli_held
-     with
-     | [] -> None
-     | first :: rest -> Some (List.fold_left Float.min first rest))
+let every_slot_held (ordered : Runtime_exact_lane_backpressure.ordered) =
+  Runtime_exact_lane_backpressure.held_until ordered
+    ~cli:(Keeper_lane_cli_oneshot.order_slots ordered.lane.Registry.cli_slots)
 
 (* The fingerprint a walk binds this slot's target under. *)
 let slot_target_fingerprint (slot : Registry.selected_slot) =

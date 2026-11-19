@@ -924,17 +924,19 @@ let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~
    around it is drawn in, so a painted span hands that back rather than
    resetting it. *)
 
-let slash_hint_text ~restore draft =
+let slash_hint_text_with ~accent ~bad ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
-    | Masc_tui_command.Typed text ->
-        Theme.accent () ^ text ^ restore
-    | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
+    | Masc_tui_command.Typed text -> accent ^ text ^ restore
+    | Masc_tui_command.Wrong text -> bad ^ text ^ restore
     | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
   in
   match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
+
+let slash_hint_text ~restore draft =
+  slash_hint_text_with ~accent:(Theme.accent ()) ~bad:(Theme.bad ()) ~restore draft
 
 (* One synchronous frame owns the recipient, prompt and fitted draft used by
    both its row and caret. Nothing survives to the next frame or key handler. *)
@@ -973,12 +975,20 @@ let composer_row state ~rows ~cols =
     Message_layout.input_window ~max_cells:(max 0 (cols - prompt_cells))
       ~cursor:(String.length before) draft
   in
+  let band_surface = Composer.band_surface composer in
+  let ground =
+    match band_surface with
+    | Composer.Plain -> ""
+    | Composer.Tinted | Composer.Focused_tinted ->
+        (Chat_theme.snapshot ()).Chat_theme.user_background
+  in
   let tone =
-    match (composer.Composer.focus, composer.Composer.target) with
-    | Composer.Focused, _ -> Ansi.default_fg
-    | Composer.Unfocused, Composer.Ready _ -> Ansi.dim
-    | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
-        Ansi.dim
+    match composer.Composer.focus with
+    | Composer.Focused -> Ansi.default_fg
+    | Composer.Unfocused -> Ansi.dim
+  in
+  let restore =
+    if String.equal ground "" then tone else Ansi.reset ^ ground ^ tone
   in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
@@ -996,18 +1006,63 @@ let composer_row state ~rows ~cols =
      placed after the draft, does not move. *)
   let slash_hint =
     match composer.Composer.focus with
-    | Composer.Focused -> slash_hint_text ~restore:tone composer.Composer.draft
+    | Composer.Focused ->
+        let accent =
+          if String.equal ground "" then Theme.accent ()
+          else Theme.Side_pane.info ()
+        in
+        let bad =
+          if String.equal ground "" then Theme.bad ()
+          else Theme.Side_pane.bad ()
+        in
+        slash_hint_text_with ~accent ~bad ~restore composer.Composer.draft
     | Composer.Unfocused -> None
+  in
+  (* Match the chat pane's Codex-style tinted input band: when focused on a
+     ready target, let only the prompt recede (measured against Side_pane when
+     tinted) while typed text keeps the terminal foreground on top of the
+     low-contrast surface ground. Under NO_COLOR, skip mid-line resets. *)
+  let styled_prompt =
+    match band_surface with
+    | Composer.Focused_tinted ->
+        let prompt_recede =
+          if String.equal ground "" then Theme.recede ()
+          else Theme.Side_pane.recede ()
+        in
+        if String.equal prompt_recede "" then prompt
+        else prompt_recede ^ prompt ^ Ansi.reset ^ ground ^ tone
+    | Composer.Tinted | Composer.Plain -> prompt
   in
   let body =
     match String.equal draft "", slash_hint with
-    | true, _ -> prompt
-    | false, None -> prompt ^ draft
-    | false, Some line -> prompt ^ draft ^ "   " ^ line
+    | true, _ -> styled_prompt
+    | false, None -> styled_prompt ^ draft
+    | false, Some line -> styled_prompt ^ draft ^ "   " ^ line
   in
   let body=match Composer.row_note ~ko composer with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
+  (* Fit a row onto the tinted band without letting [fit_width]'s bare reset
+     punch an untinted cutout behind trailing wide-char padding or "…". *)
+  let fit_band text width =
+    if width <= 0 then ""
+    else if String.equal ground "" then fit_width text width
+    else
+      match Message_layout.take_cells text width with
+      | Message_layout.Whole kept ->
+          kept
+          ^ String.make (max 0 (width - Message_layout.display_width kept)) ' '
+      | Message_layout.Cut _ ->
+          let room = max 0 (width - Message_layout.cut_mark_cells) in
+          let kept =
+            match Message_layout.take_cells text room with
+            | Message_layout.Whole kept | Message_layout.Cut kept -> kept
+          in
+          let pad =
+            String.make (max 0 (room - Message_layout.display_width kept)) ' '
+          in
+          kept ^ Ansi.reset ^ ground ^ tone ^ pad ^ Message_layout.cut_mark
+  in
   (* The key that opens the row sits at the right end, one cell in from the
      edge as the prompt is one cell in from the left. After the recipient it
      moved with the length of every name the cursor passed. It is drawn only
@@ -1019,8 +1074,8 @@ let composer_row state ~rows ~cols =
     let body_cells = cols - hint_cells - edge_cells in
     if String.equal hint "" || not (String.equal draft "")
        || Message_layout.display_width body + composer_hint_gap_cells > body_cells
-    then fit_width body cols
-    else fit_width body body_cells ^ hint ^ String.make edge_cells ' '
+    then fit_band body cols
+    else fit_band body body_cells ^ hint ^ String.make edge_cells ' '
   in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
@@ -1030,7 +1085,7 @@ let composer_row state ~rows ~cols =
      where it is unambiguous which keeper and which call it is for. *)
   let line = match awaiting_approval_notice state with
     | Some notice -> (Theme.warn ()) ^ fit_width notice cols ^ Ansi.reset
-    | None -> tone ^ fit_width body cols ^ Ansi.reset
+    | None -> ground ^ tone ^ body ^ Ansi.reset
   in
   let cursor = match composer.Composer.focus with
     | Composer.Unfocused -> Frame_presenter.Hidden
@@ -2083,19 +2138,38 @@ let titled_row ~cols (state : state) ~title ~position =
    same five rows, and a key handler bounding an overlay's scroll with
    [framed_content_height] must agree with what this draws, so the number has
    one owner. *)
+type chrome_frame = Chrome_screen | Chrome_overlay
+
 let surface_chrome_rows = framed_chrome_rows
 
-let surface_chrome_budget state ~terminal_rows =
+(* On [Chrome_screen], there is no outer box border: omitting the blank top
+   spacer and collapsing an empty Zone 4 notice row reclaims 2 body rows
+   (1 when a recovery notice is shown). [Chrome_overlay] keeps its full 5-row
+   rounded box chrome. *)
+let chrome_rows_for ~frame ~has_recovery =
+  match frame, has_recovery with
+  | Chrome_overlay, _ -> surface_chrome_rows
+  | Chrome_screen, true -> max 0 (surface_chrome_rows - 1)
+  | Chrome_screen, false -> max 0 (surface_chrome_rows - 2)
+
+let resolve_has_recovery ~frame ~has_recovery (state : state) =
+  match has_recovery with
+  | Some v -> v
+  | None ->
+      let _, cols = get_terminal_size () in
+      let max_cells =
+        match frame with
+        | Chrome_overlay -> framed_rule_width cols
+        | Chrome_screen -> framed_inner_width cols
+      in
+      Option.is_some (recovery_slot state ~max_cells)
+
+let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery state
+    ~terminal_rows =
+  let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
   max 1
     (Masc_tui_types.surface_body_rows state ~terminal_rows
-    - surface_chrome_rows)
-
-(* Which frame the contract draws. A surface is the terminal's whole screen and
-   its edge is already the frame, so it draws rules and no box. An overlay is
-   opened over a surface and keeps its box, which is how a reader tells the two
-   apart. The rows around the body are five either way, so the budget is the
-   same. *)
-type chrome_frame = Chrome_screen | Chrome_overlay
+    - chrome_rows_for ~frame ~has_recovery)
 
 (* What a body does with rows past its budget, said at the call rather than
    left to a default. An optional clamp cost nothing to leave out, so a body
@@ -2110,18 +2184,23 @@ type overflow =
 (* The window a [Scrolled] body gets out of [count] rows: the whole budget,
    since its position is on the title row. The key handler that bounds the
    scroll and the frame that draws it both ask this. *)
-let surface_window_height state ~terminal_rows ~count =
+let surface_window_height ?(frame = Chrome_overlay) ?has_recovery state
+    ~terminal_rows ~count =
+  let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
   Masc_tui_scroll.content_height
     ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-    ~chrome:surface_chrome_rows ~count ~preview_keep:None
+    ~chrome:(chrome_rows_for ~frame ~has_recovery) ~count ~preview_keep:None
 
 (* The window the contract cuts out of a [Scrolled] body of [count] rows,
    as its height and the scroll it draws from. The other kinds window
    themselves, or need no window. *)
-let chrome_window (state : state) ~terminal_rows ~count = function
+let chrome_window ?(frame = Chrome_overlay) ?has_recovery (state : state)
+    ~terminal_rows ~count = function
   | Fits | Paged_by_cursor | Self_scrolled _ -> None
   | Scrolled { scroll; report = _ } ->
-      let height = surface_window_height state ~terminal_rows ~count in
+      let height =
+        surface_window_height ~frame ?has_recovery state ~terminal_rows ~count
+      in
       Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
 
 (* A scrolled body's window is the contract's, so its position is too; any
@@ -2134,9 +2213,10 @@ let chrome_position ~window ~count ~handed =
 
 let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let has_recovery = resolve_has_recovery ~frame:Chrome_screen ~has_recovery:None state in
   let count = ref 0 and handed = ref None in
   let pushed () = incr count in
-  body ~budget:(max 1 (rows - surface_chrome_rows))
+  body ~budget:(max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery))
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
@@ -2145,7 +2225,7 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ; next_origin = (fun () -> (0, 0))
     ; position = (fun position -> handed := Some position) };
   chrome_position
-    ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
+    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
@@ -2186,12 +2266,15 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
      above them; the title is one row whatever it says. *)
   let body_top =
     let head = Buffer.create 256 in
-    top head cols;
+    (match frame with
+     | Chrome_screen -> ()
+     | Chrome_overlay -> top head cols);
     line head cols "";
     divider head cols;
     strip_rows + lines_ended_since head ~start:0
   in
-  let budget = max 1 (rows - surface_chrome_rows) in
+  let has_recovery = Option.is_some recovery_in_slot in
+  let budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
@@ -2218,9 +2301,11 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
-  let window = chrome_window state ~terminal_rows ~count overflow in
+  let window = chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow in
   let position = chrome_position ~window ~count ~handed:!handed in
-  top buf cols;
+  (match frame with
+   | Chrome_screen -> ()
+   | Chrome_overlay -> top buf cols);
   (* A title that already carries a position, laid out by [here_row], keeps
      it: only a position the body handed is placed here. *)
   (match position with
@@ -2272,7 +2357,9 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     empty buf cols
   done;
   (match recovery_in_slot, frame with
-   | selected, Chrome_screen -> draw_box_bottom_with_recovery buf ~cols selected
+   | None, Chrome_screen -> ()
+   | Some row, Chrome_screen ->
+       box_line_styled buf cols ~style:(Theme.warn ()) row.recovery_text
    | None, Chrome_overlay -> bottom buf cols
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
@@ -4919,6 +5006,41 @@ let help_lines ~width (state : state) =
                 lines) ]
   in
   let _, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let compact_global_legend =
+    let dim text = Theme.recede () ^ text ^ Ansi.reset in
+    let wrap_indented text =
+      Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 2)) text
+      |> List.map (fun row -> "  " ^ row)
+    in
+    let nav_heading =
+      "  " ^ Ansi.bold ^ (if ko then "전역 이동 · 상태 기호" else "Global navigation · status marks")
+      ^ Ansi.reset
+    in
+    let nav_text =
+      if ko then
+        dim "j/k 한 줄 · Enter 안으로 · Esc 밖으로 · [ ] 옆 항목 · v 보기 · Tab 화면 · / 찾기 · r 새로고침 · ? 전체"
+      else
+        dim "j/k row · Enter open · Esc back · [ ] sibling · v view · Tab screen · / find · r refresh · ? all"
+    in
+    let mark_text =
+      if ko then
+        Theme.ok () ^ "●" ^ Ansi.reset ^ dim " 정상  "
+        ^ Theme.info () ^ "◐" ^ Ansi.reset ^ dim " 하는 중  "
+        ^ dim "○ 대기  ‖ 멈춤  "
+        ^ Theme.warn () ^ "▲" ^ Ansi.reset ^ dim " 주의  "
+        ^ Theme.bad () ^ "✕" ^ Ansi.reset ^ dim " 실패  "
+        ^ Ansi.bold ^ "◆" ^ Ansi.reset ^ dim " 사람 차례"
+      else
+        Theme.ok () ^ "●" ^ Ansi.reset ^ dim " ok  "
+        ^ Theme.info () ^ "◐" ^ Ansi.reset ^ dim " active  "
+        ^ dim "○ wait  ‖ paused  "
+        ^ Theme.warn () ^ "▲" ^ Ansi.reset ^ dim " warn  "
+        ^ Theme.bad () ^ "✕" ^ Ansi.reset ^ dim " fail  "
+        ^ Ansi.bold ^ "◆" ^ Ansi.reset ^ dim " attention"
+    in
+    [ Masc_tui_help.Whole ((nav_heading :: wrap_indented nav_text) @ wrap_indented mark_text) ]
+  in
   let blocks =
     candle
     @ (match
@@ -4930,18 +5052,21 @@ let help_lines ~width (state : state) =
            if Masc_tui_help.shows_everything state.help_filter state.help_scope
            then (section first :: slash_commands) @ List.map section rest
            else
-             (* The reader's own screen and nothing behind it. The sections
-                after it are another screen's keys, and they followed the
-                first with no line between a reader could stop at. *)
+             (* Current screen's own actions first, followed by a compact
+                global navigation and status-mark legend so one [?] press
+                answers both "what works here?" and "how do I move?". *)
              let header_line, entry_rows = section_parts first in
-             Masc_tui_help.one_section ~heading:header_line entry_rows)
+             Masc_tui_help.one_section ~heading:header_line entry_rows
+             @ compact_global_legend)
   in
   match blocks with
   | _ :: _ -> blocks
   | [] ->
       [ Masc_tui_help.Whole
-          [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
-              (Terminal_text.single_line query) Ansi.reset ] ]
+          [ Printf.sprintf
+              (if ko then "%s  \"%s\" 와 일치하는 키나 명령이 없습니다.%s"
+               else "%s  No key or command matches \"%s\".%s")
+              (Theme.recede ()) (Terminal_text.single_line query) Ansi.reset ] ]
 
 
 module Context_bars = Masc_tui_context_bars

@@ -16192,15 +16192,33 @@ let toggle_acting_pane (state : state) =
        draws beside: a press here would move narrow to wide unseen, and the
        reader would meet the change on the next surface. *)
     Error "Activity pane is not drawn over this surface; preference unchanged"
-  else
+  else if Masc_tui_roster_pane.hides_activity state.pane_zoom then begin
+    let stored = stored_acting_pane_layout state in
+    if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
+      Error
+        (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
+           Masc_tui_acting_pane.threshold_cols)
+    else
+      let restored =
+        match stored with
+        | Masc_tui_acting_pane.Hidden -> Masc_tui_acting_pane.Narrow
+        | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+      in
+      state.pane_zoom <- Masc_tui_roster_pane.Normal;
+      state.acting_pane_preference <- Chosen_acting_pane restored;
+      state.acting_pane_scroll <- 0;
+      state.acting_pane_cursor <- None;
+      Ok restored
+  end else
   match
-    Masc_tui_acting_pane.next_layout ~layout:(acting_pane_layout state) ~cols
+    Masc_tui_acting_pane.next_layout ~layout:(stored_acting_pane_layout state) ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
   | Some layout ->
+      state.pane_zoom <- Masc_tui_roster_pane.Normal;
       state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
@@ -16219,11 +16237,14 @@ let show_acting_pane_tab (state : state) tab =
          Masc_tui_acting_pane.threshold_cols)
   else begin
     let layout =
-      match acting_pane_layout state with
-     | Masc_tui_acting_pane.Hidden ->
-         Masc_tui_acting_pane.Narrow
-      | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+      match state.acting_pane_preference with
+      | Chosen_acting_pane
+          ((Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout) ->
+          layout
+      | Chosen_acting_pane Masc_tui_acting_pane.Hidden | Default_acting_pane ->
+          Masc_tui_acting_pane.Narrow
     in
+    state.pane_zoom <- Masc_tui_roster_pane.Normal;
     state.acting_pane_preference <- Chosen_acting_pane layout;
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
@@ -20785,8 +20806,11 @@ let open_lane_inventory_selection state ~mailbox =
       match row.Inventory.selection with
       | Inventory.Exact _ ->
           (match selected_standalone_lane state with
-           | Some lane -> open_lane_run_list state ~mailbox
-               (Standalone_lane.run_identity lane.sl_lane)
+           | Some lane ->
+               let identity = Standalone_lane.run_identity lane.sl_lane in
+               if Lane_run_identity.keeps_run_records identity
+               then open_lane_run_list state ~mailbox identity
+               else show_lanes_action_error state "This Lane keeps no run records"
            | None -> show_lanes_action_error state "The exact Lane detail is absent from this inventory; r reads again")
       | Browser lane ->
           show_browser_lane state;
@@ -37243,6 +37267,20 @@ Use relative paths for resources already held in the package. -->
              state.keeper_message_focus <- Right_pane;
              if terminal_columns >= Masc_tui_roster_pane.threshold_cols then
                state.roster_pane_preference <- Masc_tui_roster_pane.Hidden
+           end else if Masc_tui_roster_pane.hides_roster state.pane_zoom then begin
+             if terminal_columns >= Masc_tui_roster_pane.threshold_cols then begin
+               (* Step Full -> Half rather than Normal so the right Activity
+                  pane stays collapsed and the checked [terminal_columns] width
+                  remains available for the roster on 158..183-col terminals. *)
+               state.pane_zoom <- Masc_tui_roster_pane.Half;
+               state.roster_pane_preference <- Masc_tui_roster_pane.Shown;
+               reconcile_chat_focus ();
+               Render_schedule.request render_schedule Render_schedule.Force
+             end else
+               report_action state "system"
+                 (Printf.sprintf
+                    "Keeper roster needs %d columns; preference unchanged"
+                    Masc_tui_roster_pane.threshold_cols)
            end else (match
               Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
                 ~cols:terminal_columns
@@ -38744,6 +38782,56 @@ Use relative paths for resources already held in the package. -->
               && (state.view <> Keepers Keeper_message
                   || Masc_tui_message_input.length state.msg_input = 0) ->
            focus_acting_pane_or_say_why state;
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* lazygit-style +/- screen zoom: '+' steps Normal -> Half -> Full
+          (hiding the right Activity pane at Half and both side panes at Full),
+          '_' steps back without overwriting stored Ctrl-B/Ctrl-L choices.
+          Excluded from chat ([message_mode]), composer focus, Browser Lane,
+          modals, and all text inputs so '+' and '_' always type normally. *)
+       | Some (("+" | "_") as zoom_key)
+         when not message_mode
+              && not state.composer_focused
+              && Option.is_none (browser_lane_on_screen state)
+              && not state.palette_open && not (modal_owns_keys state)
+              && not state.answering_open
+              && not state.link_modal_open
+              && not state.memory_fact_detail_open
+              && not state.keeper_navigation_open
+              && Option.is_none state.ask_text_entry
+              && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           let _raw_rows, raw_cols = Masc_tui_ansi.get_terminal_size () in
+           let activity_available =
+             not (Masc_tui_render.acting_pane_suppressed state)
+             && Masc_tui_acting_pane.drawn_cols
+                  ~layout:(stored_acting_pane_layout state) ~cols:raw_cols
+                > 0
+           in
+           let roster_available =
+             not (Masc_tui_roster_pane.effective_hidden state.roster_pane_preference)
+             && Masc_tui_roster_pane.shown ~hidden:false ~cols:raw_cols
+           in
+           let direction = if String.equal zoom_key "+" then `In else `Out in
+           let ko = state.ui_language = Lang_ko in
+           (match
+              Masc_tui_roster_pane.step_zoom ~zoom:state.pane_zoom ~direction
+                ~activity_available ~roster_available
+            with
+            | None ->
+                report_action state "view"
+                  (if ko then "접을 수 있는 사이드 패널이 없어 줌을 변경하지 않았습니다"
+                   else "No side pane is drawn on this screen/width; zoom unchanged")
+            | Some next ->
+                if next <> state.pane_zoom then begin
+                  state.pane_zoom <- next;
+                  if Masc_tui_roster_pane.hides_activity next then
+                    state.acting_pane_cursor <- None;
+                  if Masc_tui_roster_pane.hides_roster next then
+                    state.keeper_detail_focus <- Right_pane;
+                  reconcile_chat_focus ()
+                end;
+                report_action state "view"
+                  (Masc_tui_roster_pane.zoom_label ~ko state.pane_zoom));
            Render_schedule.request render_schedule Render_schedule.Force
        | Some k
          when String.equal k toggle_browser_lane_key
@@ -40684,7 +40772,8 @@ Use relative paths for resources already held in the package. -->
               | "G" | "end" -> state.memory_changes_cursor <- maximum
               | _ ->
                   let page = max 1 (Masc_tui_render_keeper_memory.changes_page_size state
-                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget state
+                    ~max_lines:(Masc_tui_render_prim.surface_chrome_budget
+                      ~frame:Masc_tui_render_prim.Chrome_screen state
                       ~terminal_rows:(fst (get_terminal_size ()))) ~keeper_name) in
                   let delta = match key with
                     | "k" | "up" | "wheel-up" | "[" -> -1
@@ -41464,7 +41553,8 @@ Use relative paths for resources already held in the package. -->
                 let terminal_rows, _ = get_terminal_size () in
                 let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
                     ~scroll:state.home_decision_scroll
-                    ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                    ~budget:(Masc_tui_render_prim.surface_chrome_budget
+                      ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
                 if not (List.exists (fun (current,_) -> equal_home_action action current) body.hb_rows) then
                   report_action state "info" "Selected action is not visible; enlarge the window"
                 else if authority <> state.workspace_authority || not (server_authority_ready state) then original ()
@@ -41487,6 +41577,19 @@ Use relative paths for resources already held in the package. -->
              | Error detail -> report_action state "error" detail)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some ("1" | "2" | "3" | "4" as digit) when state.view = Overview ->
+            let index = int_of_string digit in
+            if List.mem index state.overview_collapsed_cards then
+              state.overview_collapsed_cards <-
+                List.filter (fun n -> n <> index) state.overview_collapsed_cards
+            else
+              let _, full_cols = get_terminal_size () in
+              let inner_width = Masc_tui_ansi.framed_inner_width full_cols in
+              if
+                Masc_tui_card.columns_that_fit ~inner_width ~gap:2
+                  ~min_card_width:44 ~max_columns:2 >= 2
+              then
+                state.overview_collapsed_cards <- index :: state.overview_collapsed_cards
         | Some "f" when state.view = Metrics && not state.usage_telemetry_open ->
             state.palette_open <- true;
             state.palette_mode <- Palette_jump;
@@ -45420,7 +45523,8 @@ Use relative paths for resources already held in the package. -->
                         state.home_selected <- selected;
                       let body = Masc_tui_home.home_body prepared
                           ~scroll:state.home_decision_scroll
-                          ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                          ~budget:(Masc_tui_render_prim.surface_chrome_budget
+                            ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
                       state.home_decision_scroll <- body.hb_first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
@@ -45491,12 +45595,7 @@ Use relative paths for resources already held in the package. -->
     ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
-  (* The server's minor heap, for the same reason: every frame allocates the
-     rows it draws, and at the runtime's default size a held key meets a
-     collection every few frames. Measured on a live chat with PageUp/PageDown
-     held, the median key-to-output time fell about a quarter. A larger
-     OCAMLRUNPARAM setting is left alone. *)
-  Minor_heap.tune ();
+  Masc_tui_domains.use_ui_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -45515,14 +45614,8 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
-            (* One background worker keeps response decoding and local reads
-               off the UI domain. HTTP requests already have their own domain.
-               The server's core-sized default adds idle domains to every
-               stop-the-world collection while the chat allocates scroll rows;
-               the client has no Keeper actors to distribute over that pool. *)
-            let cpu_pool=Domain_pool.create ~sw ~domain_count:1
-                (Eio.Stdenv.domain_mgr env) in
-            Domain_pool_ref.set cpu_pool;
+            Domain_pool_ref.set
+              (Masc_tui_domains.start_worker_pool ~sw (Eio.Stdenv.domain_mgr env));
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

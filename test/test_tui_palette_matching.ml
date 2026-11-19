@@ -646,6 +646,56 @@ let test_korean_aliases_and_ui_language_entries () =
        (palette_matches state))
 ;;
 
+let test_every_palette_action_has_bilingual_description () =
+  let state = create_state ~workspace:"test" ~port:8935 () in
+  let extra_actions =
+    [ "hide browser", Palette_hide_browser_lane
+    ; "addon results", Palette_addon_results "addon-1"
+    ; "usage account", Palette_usage_scope (Some "acct-1")
+    ; "chat", Palette_chat "masc-tui"
+    ; "task", Palette_task "task-1"
+    ; "board hearth", Palette_board_hearth (Some "design")
+    ; "board post", Palette_board_post "p-1"
+    ; "lsp", Palette_lsp ("definition", "render")
+    ; "code file", Palette_code_file "bin/masc_tui.ml"
+    ; "search match",
+      Palette_code_search_match
+        { Masc.Tui_decode.wsm_path = "bin/masc_tui.ml"
+        ; wsm_line = 42
+        ; wsm_text = "let x = 1"
+        }
+    ; "worktree",
+      Palette_code_worktree
+        { Masc.Tui_decode.gw_name = "masc-tui"
+        ; gw_main = false
+        ; gw_head = Some "abcdef12"
+        ; gw_state = Masc.Tui_decode.Git_worktree_branch "main"
+        ; gw_locked = false
+        ; gw_prunable = false
+        }
+    ]
+  in
+  let entries = palette_entries state @ extra_actions in
+  check_bool "palette has entries to describe" true (entries <> []);
+  List.iter
+    (fun (label, action) ->
+       let ko_desc = action_description ~ko:true action in
+       let en_desc = action_description ~ko:false action in
+       List.iter
+         (fun (lang, desc) ->
+            check_bool
+              (Printf.sprintf "non-empty single-line description for %s (%s)" label lang)
+              true
+              (String.length (String.trim desc) > 0
+               && not (String.contains desc '\n')
+               && not (String.contains desc '\r')))
+         [ "ko", ko_desc; "en", en_desc ];
+       check_bool
+         (Printf.sprintf "ko and en descriptions differ for %s" label)
+         true (not (String.equal ko_desc en_desc)))
+    entries
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -700,6 +750,8 @@ let () =
             test_connectors_has_a_row_that_arrives_on_it
         ; Alcotest.test_case "Korean aliases and UI language entries" `Quick
             test_korean_aliases_and_ui_language_entries
+        ; Alcotest.test_case "every palette action has a bilingual live description" `Quick
+            test_every_palette_action_has_bilingual_description
         ] )
     ]
 ;;

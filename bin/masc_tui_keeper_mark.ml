@@ -108,7 +108,9 @@ let activity_glyph activity =
   | Some mark -> Status.glyph mark
   | None -> unread_glyph
 
-let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
+(* A failed attempt is a failure, so it wears the failed status mark (RFC
+   tui-one-screen-grammar 7.2: one mark, one meaning). *)
+let attempt_glyph = Status.glyph Status.Failed
 
 (* A badge says in a word what else goes on beside the activity, behind the
    status mark of its kind (§7.2). A list the screen could not read wears the
@@ -211,8 +213,9 @@ let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity)
 let failing_since_word = "failing"
 let unknown_mark = "?"
 let pulse_hours = 12
-let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
-let pulse_rested_mark = "\xe2\x8a\x98" (* ⊘ *)
+(* An hour's worst turn in the status marks (7.2): finished, rested, failed. *)
+let pulse_ok_mark = Status.glyph Status.Settled
+let pulse_rested_mark = Status.glyph Status.Waiting
 let pulse_failed_mark = attempt_glyph
 (* A quiet hour in the pulse is a small dot, not a status mark: the pulse
    counts turns, it does not state the Keeper's state. *)
@@ -252,7 +255,9 @@ let grid_pulse_ok_mark = "\xe2\x96\x81" (* ▁ *)
 let grid_pulse_failed_and_ok_mark = "\xe2\x96\x84" (* ▄ *)
 
 (* The memory and age views, the failure line and the group titles. *)
-let grid_wait_glyph = "\xe2\x97\x8c" (* ◌ *)
+(* A resting path waits: the waiting mark (RFC tui-one-screen-grammar 7.2).
+   [◌] is a value not read yet (6.4). *)
+let grid_wait_glyph = Status.glyph Status.Waiting
 let grid_full_mark = "\xe2\x96\x88" (* █ *)
 let grid_chain_link = "\xe2\x94\x81" (* ━ *)
 let grid_more_mark = "\xe2\x80\xa6" (* … *)
@@ -315,6 +320,25 @@ let grid_column_word ~ko column =
   | Saved_column -> say "저장" grid_saved_header
   | Stale_column -> say "무효화" grid_stale_header
   | Facts_column -> say "사실" grid_facts_header
+
+type grid_word = Late_word | Held_word | Wait_word | No_data_word | No_snapshot_word
+
+(* The words inside the views' cells, in the screen's language (RFC
+   tui-one-screen-grammar 7.1). Each Korean word fits the cell its English one
+   takes: the due column is five cells. *)
+let grid_word ~ko word =
+  let say korean english = if ko then korean else english in
+  match word with
+  | Late_word -> say "늦음" grid_late_word
+  | Held_word -> say "보류" grid_held_word
+  | Wait_word -> say "쉼" grid_wait_word
+  | No_data_word -> say "기록 없음" grid_no_data_word
+  | No_snapshot_word -> say "저장 없음" grid_no_snapshot_word
+
+(* [since 15:43] / [15:43부터] and [5m ago] / [5m 전]: the word sits where
+   each language puts it. *)
+let grid_since_text ~ko clock = if ko then clock ^ "부터" else grid_since_word ^ " " ^ clock
+let grid_ago_text ~ko span = span ^ " " ^ (if ko then "전" else grid_ago_word)
 
 let grid_next_column_word ~ko ~window =
   if ko then "다음 " ^ axis_next_glyph ^ " " ^ window else grid_next_header ~window

@@ -351,6 +351,19 @@ val ramp_style : paint -> series -> position:float -> string
     The colours of one ramp are computed once per palette, depth, ground and
     lift switch and then read from a table. *)
 
+(** Semantic panel border accent (btop-style per-box border hue). Under
+    truecolor/256-colour with a probed palette, each non-neutral role draws in
+    the deep WCAG-3:1 stop of its corresponding series hue; under 16-colour or
+    unknown palette it falls back to {!recede}, and under {!No_color} to [""]. *)
+type panel_role =
+  | Panel_neutral
+  | Panel_fleet
+  | Panel_usage
+  | Panel_memory
+  | Panel_attention
+
+val panel_border : paint -> panel_role -> string
+
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
     implementation/interface. Production callers use the semantic tokens

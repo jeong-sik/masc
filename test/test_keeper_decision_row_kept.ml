@@ -172,6 +172,21 @@ let test_how_long_a_kept_row_can_be () =
     check string "the reader answers as the file" (in_the_file config) (shown config))
 ;;
 
+(* Everything the reader's window holds before the row is blank. The piece
+   the reader drops is the one its window cut, which is blank here, and the
+   row is the file's last line: what is kept is what the file says. The
+   writer moves a kept row and leaves a cell no read has filled as it is, so
+   the record is read once before the row is appended. *)
+let test_a_row_behind_a_blank_run_is_what_the_file_says () =
+  with_workspace (fun config ->
+    by_hand config (String.make Keeper_row_facts.decision_window_bytes ' ' ^ "\n");
+    check string "a record of blanks holds no row" "no row" (shown config);
+    check string "and that is kept" "kept: no row" (kept config);
+    append config (row 1);
+    check string "the row is kept" "kept: turn 1" (kept config);
+    check string "and is what the file says" "turn 1" (in_the_file config))
+;;
+
 (* The rotation refuses a backup that is a directory and raises before the
    row is written. *)
 let test_an_append_that_fails_keeps_nothing () =
@@ -529,6 +544,10 @@ let () =
             `Quick
             test_a_row_that_is_not_an_object_is_not_kept
         ; test_case "how long a kept row can be" `Quick test_how_long_a_kept_row_can_be
+        ; test_case
+            "a row behind a blank run is what the file says"
+            `Quick
+            test_a_row_behind_a_blank_run_is_what_the_file_says
         ; test_case
             "an append that fails keeps nothing"
             `Quick

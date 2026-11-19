@@ -3964,6 +3964,53 @@ let assert_typed_capacity_refusal_advances_once
   | Error _ -> fail (label ^ " typed capacity refusal did not advance")
 ;;
 
+(* A 409 is not a 400 or 422 refusal of the request: the flow names it
+   [Unclassified_status] and treats it as it treats [Invalid_request]. *)
+let test_unclassified_status_advances_under_its_own_name () =
+  let (result, advances), posts =
+    with_server ~status:`Conflict ~response:{|{"error":"conflict"}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"status-409-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"status-409-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    let advances = ref 0 in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        (start_flow (frozen_flow snapshot [ "status-409-a"; "status-409-b" ]))
+    in
+    result, !advances
+  in
+  check int "HTTP 409 dispatches twice" 2 posts;
+  check int "HTTP 409 advances once" 1 advances;
+  match result with
+  | Ok _ -> fail "HTTP 409 was answered"
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "HTTP 409 is an unclassified status, not an invalid request"
+      true
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 409; refusal = EO.Unclassified_status; retry_after_s = None });
+    check
+      bool
+      "HTTP 409 is not a binding at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
+  | Error _ -> fail "HTTP 409 did not end as an execution failure"
+;;
+
 let test_context_window_400_prose_advances_to_successor () =
   let response =
     {|{"error":"The prompt is too long: 1400014, model maximum context length: 1048576 (ref: 8519ccf3-5d45-4686-9ac1-64d159f75ec1)"}|}
@@ -4868,9 +4915,10 @@ let test_payment_required_402_keeps_retry_after_body_header_priority () =
                (refusal = EO.Payment_required);
              check (option (float 0.0)) (label ^ " preserves the actual account reset")
                expected retry_after_s
-           | EO.Completion_failed _ | EO.Response_body_deadline_exceeded
-           | EO.Output_limit_reached | EO.Incomplete_output | EO.Missing_output
-           | EO.Ambiguous_output _ | EO.Unexpected_output_content | EO.Invalid_json_output ->
+           | EO.Completion_failed _ | EO.Response_body_deadline_exceeded | EO.Provider_context_overflow _
+           | EO.Output_limit_reached | EO.Window_reached _ | EO.Incomplete_output _
+           | EO.Missing_output | EO.Ambiguous_output _ | EO.Unexpected_output_content
+           | EO.Invalid_json_output ->
              fail "HTTP 402 lost its typed payment-required cause")
          ())
     [ ( "payment-body-hint", [], {|{"error":{"retry_after":90}}|}, Some 90.0 )
@@ -4906,8 +4954,8 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       ( Cohttp.Code.status_of_code 400
       , {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} )
     ~assert_cause:(function
-      | EO.Provider_response_refused
-          { http_status = 400; refusal = EO.Context_overflow; _ } -> ()
+      | EO.Provider_context_overflow
+          { http_status = Some 400; dispatch = EO.Generation_dispatch_started; _ } -> ()
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
     ()
 ;;
@@ -4952,21 +5000,51 @@ let test_glm_rate_limit_code_stays_a_rate_limit () =
     ()
 ;;
 
-(* The same window refusal as an empty answer the provider stopped at its
-   window. [Retry.overflow_of_empty_completion] names which empty answers
-   those are; the flow reads them as the typed refusal above. *)
-let test_window_stopped_empty_answer_advances_once_to_successor () =
+(* An answer the provider stopped at its window spent a generation on an
+   input that fit. It is its own cause, not a refusal of the input, whether it
+   is empty or carries text. *)
+let test_window_stopped_answer_advances_once_to_successor ~content () =
   assert_typed_capacity_refusal_advances_once
     ~refused_kind:"openai_compat"
-    ~label:"window-stopped-empty-answer"
+    ~label:("window-stopped-" ^ if String.equal content "" then "empty" else "text")
     ~first_response:
       ( Cohttp.Code.status_of_code 200
-      , {|{"id":"resp-window","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
-      )
-    ~assert_cause:(function
-      | EO.Provider_response_refused
-          { http_status = 200; refusal = EO.Context_overflow; _ } -> ()
-      | _ -> fail "an empty answer stopped at the window lost its overflow cause")
+      , Printf.sprintf
+          {|{"id":"resp-window","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+          content )
+    ~assert_cause:(fun cause ->
+      match String.equal content "", cause with
+      | true, EO.Window_reached { output = EO.No_output }
+      | false, EO.Window_reached { output = EO.Partial_output } -> ()
+      | _, _ ->
+        fail
+          (Printf.sprintf
+             "an answer stopped at the window read as %s"
+             (EO.execution_error_cause_to_string cause)))
+    ()
+;;
+
+(* The Anthropic codec keeps an empty answer and lets normalization read it.
+   An answer stopped at the window with no content block is the empty answer
+   there too, so it is [No_output] as on the OpenAI-compatible path. *)
+let test_anthropic_window_stopped_answer_reads_its_content ~content () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"anthropic"
+    ~label:("anthropic-window-stopped-" ^ if String.equal content "[]" then "empty" else "text")
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , Printf.sprintf
+          {|{"id":"msg-window","type":"message","role":"assistant","model":"flow","content":%s,"stop_reason":"model_context_window_exceeded","usage":{"input_tokens":1,"output_tokens":1}}|}
+          content )
+    ~assert_cause:(fun cause ->
+      match String.equal content "[]", cause with
+      | true, EO.Window_reached { output = EO.No_output }
+      | false, EO.Window_reached { output = EO.Partial_output } -> ()
+      | _, _ ->
+        fail
+          (Printf.sprintf
+             "an Anthropic answer stopped at the window read as %s"
+             (EO.execution_error_cause_to_string cause)))
     ()
 ;;
 
@@ -6549,6 +6627,10 @@ let () =
             `Quick
             test_context_window_400_prose_advances_to_successor
         ; test_case
+            "a status no arm names advances under its own name"
+            `Quick
+            test_unclassified_status_advances_under_its_own_name
+        ; test_case
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
             test_serialized_request_413_refusal_advances_once_to_successor
@@ -6643,7 +6725,18 @@ let () =
         ; test_case "a GLM rate-limit code stays a rate limit" `Quick
             test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
-            test_window_stopped_empty_answer_advances_once_to_successor
+            (test_window_stopped_answer_advances_once_to_successor ~content:"")
+        ; test_case "a text answer stopped at the window advances once" `Quick
+            (test_window_stopped_answer_advances_once_to_successor ~content:"{")
+        ; test_case
+            "an empty Anthropic answer stopped at the window has no output"
+            `Quick
+            (test_anthropic_window_stopped_answer_reads_its_content ~content:"[]")
+        ; test_case
+            "an Anthropic answer with text stopped at the window has partial output"
+            `Quick
+            (test_anthropic_window_stopped_answer_reads_its_content
+               ~content:{|[{"type":"text","text":"{"}]|})
         ; test_case "an output-limited text answer advances once" `Quick
             (test_output_limit_advances_once_to_successor ~content:"{}")
         ; test_case "an output-limited empty answer advances once" `Quick

@@ -221,8 +221,6 @@ status: reference
     본문의 악보인 **alphaTex 펜스**는 그리기 표시일 뿐 이 편집기가 아니다.
   - 같은 낱말의 두 층: 어레인지먼트 편집기 안에서도 "library"가 나오지만 그것은 `:import-wave`로
     들여온 **자산 목록**을 가리킨다. 이 표제어가 가리키는 진입 화면과 다르다.
-  - 사용 가이드 없음(2026-10-20 확인): `docs/guides`에 이 표면의 안내가 없고, 문서는
-    [tools/alphatex/README.md](../../tools/alphatex/README.md)뿐이다.
 
 **Phrase (프레이즈)**
 : 음을 직접 찍고 고치는 편집 문서 하나. 터미널 피아노 롤에서 음·길이·세기·트랙을 편집하고,
@@ -1842,14 +1840,15 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
-  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Verifier`·`Candle_appraiser`)은
-  닫힌 타입 `Standalone_lane.t` 하나다.
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 여섯
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Verifier`·`Candle_appraiser`·
+  `Librarian_memory`)은 닫힌 타입 `Standalone_lane.t` 하나다.
   `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
   이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Librarian`·
   `Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Candle_appraiser` 다섯이고,
-  `lane_of_standalone`이 `Standalone_lane.t`를 이 타입으로 바꾼다(`Verifier`는 `None`).
-  Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
+  `lane_of_standalone`이 `Standalone_lane.t`를 이 타입으로 바꾼다(`Verifier`·
+  `Librarian_memory`는 `None`). Verifier 검토는 Task·Goal 검증 기록에 남는다.
+  `Librarian_memory`는 실행 기록을 남기지 않는다(`Lane_run_identity.keeps_run_records`). 그 경로를 선언하는 설정은
   `Exact-output route`이고, Keeper turn이 runtime 후보를 시도하는 순서
   (`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
@@ -3810,24 +3809,6 @@ status: reference
     비동기(`merge-async`)로 일괄 접수되는 외부 플랫폼 기능인 반면, ROLL은 복수 작업의 커밋/트리를 단일 PR로 묶어 착지시키고
     원본을 닫는 내부 운영 규약이다.
   → [docs/constitution.xml](../constitution.xml)
-
-**가이드 없음 표기 (guideless marker)**
-: 릴리스 노트의 Added 불릿 끝에 달아, 그 기능을 다루는 사용 가이드가 아직 없음을
-  숨기지 않고 남기는 표식이다. `가이드 없음(` 으로 열고 두 갈래로 닫는다.
-  - 형식: 고치려는 대상 문서가 정해져 있으면 `가이드 없음(대상 문서:
-    docs/design/browser-lane.md)` 처럼 경로를 적고, 그런 문서 자체가
-    없으면 `가이드 없음(문서 없음)` 이라고 적는다. 줄이 72칸쯤에 접혀도
-    계수는 불릿 전체에서 표기를 찾는다. 계수기는 표기가 들었는지를 세는
-    도구지, 두 형식의 문법 검증기는 아니다.
-  - 계수와 증거: 노트 작성이 끝나면 `scripts/release/count-guideless-added.py`가
-    이 표기를 세어 `docs/releases/guide-metrics-<tag>.md`에 남긴다. 표기는
-    규칙상 허용되지만, 계수 결과는 receipt 묶음에 포함해 다음 게이트화 판단
-    재료로 삼는다(규약 제안 #1).
-  - 다른 것: 가이드 1장이 과하면 같은 내용을 조각 첫 불릿의 `Usage:` 하위
-    항목으로 대신한다(헌법 `a-dababc7`). 표기는 "가이드가 아예 없다"가 아니라
-    "이번 노트 기준으로 가이드를 아직 만들지 않았다"를 말한다.
-  → [docs/RELEASE-EVIDENCE.md](../RELEASE-EVIDENCE.md) ·
-  [scripts/release/count-guideless-added.py](../../scripts/release/count-guideless-added.py)
 
 **Merge-compile Record (병합 컴파일 기록)**
 : 착지하려는 정확한 병합 head SHA를, 기본으로는 그 SHA의 트리와 main 툴체인이

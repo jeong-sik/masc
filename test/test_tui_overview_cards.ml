@@ -18,7 +18,7 @@ module Layout = Masc_tui_message_layout
 (* Wide enough for the two columns, each holding a short row on one line. *)
 let inner = 94
 
-let edge name = { Card.name; key = None; status = None; count = None; focus = Card.Unfocused }
+let edge name = { Card.name; key = None; status = None; count = None; focus = Card.Unfocused; border_accent = None; footer_keys = [] }
 
 let edges =
   { Cards.decisions = edge "decisions"
@@ -37,7 +37,7 @@ let draw ~rows ~selected ~decisions ~continuation ~actions =
     ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
     ~decisions ~decisions_whole:true ~continuation
     ~status:(fun ~cells:_ -> [ "status" ])
-    ~actions
+    ~keep_actions_card:false ~actions
 
 (* Nothing selected, then each destination in turn. *)
 let selections ~decisions ~continuation ~actions =
@@ -137,7 +137,7 @@ let test_narrow_width_keeps_one_column_cards () =
       ~is_selected:(fun action -> Option.equal String.equal (Some action) selected)
       ~decisions ~decisions_whole:true ~continuation
       ~status:(fun ~cells:_ -> [ "running" ])
-      ~actions
+      ~keep_actions_card:false ~actions
   in
   check bool "43 inner cells falls back to plain list" true
     (Option.is_none (draw_at ~inner:43 ~rows:24 ~selected:None));

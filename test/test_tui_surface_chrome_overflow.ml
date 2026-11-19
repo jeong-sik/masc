@@ -74,7 +74,10 @@ let report_into reported v =
 
 let test_a_cut_body_says_what_it_hides () =
   let state = fresh () in
-  let budget = surface_chrome_budget state ~terminal_rows in
+  let budget =
+    surface_chrome_budget ~frame:Chrome_screen ~has_recovery:false state
+      ~terminal_rows
+  in
   let count = budget + 7 in
   let lines, clamped = draw ~overflow:Fits ~count state in
   Alcotest.(check bool) "the head is drawn" true (shows lines (row_text 0));
@@ -133,7 +136,10 @@ let test_the_frame_windows_a_scrolled_body () =
    hands nothing. *)
 let test_a_paged_body_hands_its_position () =
   let state = fresh () in
-  let budget = surface_chrome_budget state ~terminal_rows in
+  let budget =
+    surface_chrome_budget ~frame:Chrome_screen ~has_recovery:false state
+      ~terminal_rows
+  in
   let total = budget * 3 in
   let hand ~budget = Masc_tui_value.Position.window ~first:budget ~shown:budget ~total in
   let _ = draw ~overflow:Paged_by_cursor ~hand ~count:budget state in
@@ -149,7 +155,10 @@ let test_a_paged_body_hands_its_position () =
    last one it handed (RFC tui-one-screen-grammar, section 2). *)
 let test_the_contract_decides_which_position_is_drawn () =
   let state = fresh () in
-  let budget = surface_chrome_budget state ~terminal_rows in
+  let budget =
+    surface_chrome_budget ~frame:Chrome_screen ~has_recovery:false state
+      ~terminal_rows
+  in
   let count = budget * 4 in
   let reported = ref None in
   let _ =
@@ -160,7 +169,11 @@ let test_the_contract_decides_which_position_is_drawn () =
   in
   Alcotest.(check (option (triple int int int)))
     "a scrolled body is drawn with the contract's window"
-    (Some (1, surface_window_height state ~terminal_rows ~count, count))
+    (Some
+       ( 1
+       , surface_window_height ~frame:Chrome_screen ~has_recovery:false state
+           ~terminal_rows ~count
+       , count ))
     (window_numbers ());
   let _ =
     draw_body ~overflow:Paged_by_cursor state
@@ -171,6 +184,16 @@ let test_the_contract_decides_which_position_is_drawn () =
   in
   Alcotest.(check (option (triple int int int))) "the last position handed is drawn"
     (Some (4, budget + 3, budget * 2)) (window_numbers ())
+
+let test_empty_zone4_reclaims_rows_on_screen () =
+  let state = fresh () in
+  let overlay_budget = surface_chrome_budget ~frame:Chrome_overlay state ~terminal_rows in
+  let screen_budget = surface_chrome_budget ~frame:Chrome_screen ~has_recovery:false state ~terminal_rows in
+  let screen_with_recovery = surface_chrome_budget ~frame:Chrome_screen ~has_recovery:true state ~terminal_rows in
+  Alcotest.(check int) "Chrome_screen without recovery reclaims 2 rows over overlay"
+    (overlay_budget + 2) screen_budget;
+  Alcotest.(check int) "Chrome_screen with recovery reclaims 1 row over overlay"
+    (overlay_budget + 1) screen_with_recovery
 
 let () =
   Alcotest.run "tui_surface_chrome_overflow"
@@ -183,5 +206,7 @@ let () =
             test_a_paged_body_hands_its_position
         ; Alcotest.test_case "the contract decides which position is drawn" `Quick
             test_the_contract_decides_which_position_is_drawn
-        ;] )
+        ; Alcotest.test_case "empty zone 4 reclaims rows on screen" `Quick
+            test_empty_zone4_reclaims_rows_on_screen
+        ] )
     ]

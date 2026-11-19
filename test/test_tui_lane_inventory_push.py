@@ -22,6 +22,7 @@ def exact_lane_id(name: str) -> str:
         "board_attention": "board_attention_exact",
         "verifier": "verifier_exact",
         "candle_appraiser": "candle_appraiser",
+        "librarian_memory": "librarian_memory",
     }[name]
 
 
@@ -105,7 +106,7 @@ def machine_row(machine: str) -> dict:
 
 
 def lane_payload(machines_first: bool = False) -> dict:
-    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "candle_appraiser"]
+    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "candle_appraiser", "librarian_memory"]
     return {
         "schema": "masc.lane-inventory/v1",
         "observed_at": 1.0,

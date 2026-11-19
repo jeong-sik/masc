@@ -169,6 +169,20 @@ let test_every_execution_cause_renders_distinctly () =
     ; Provider_response_refused { http_status = 400; refusal = Invalid_request; retry_after_s = None }
     ; Provider_response_refused { http_status = 404; refusal = Not_found; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Context_overflow; retry_after_s = None }
+    ; Provider_context_overflow
+        { error =
+            Http.ProviderFailure
+              { kind = Http.Context_overflow { limit = Some 8192 }; message = "" }
+        ; http_status = None
+        ; dispatch = No_generation_dispatch
+        }
+    ; Provider_context_overflow
+        { error =
+            Http.ProviderFailure
+              { kind = Http.Context_overflow { limit = Some 8192 }; message = "" }
+        ; http_status = Some 400
+        ; dispatch = Generation_dispatch_started
+        }
     ; Provider_response_refused { http_status = 400; refusal = Input_capacity; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Network_error; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Connect_failed; retry_after_s = None }
@@ -178,7 +192,10 @@ let test_every_execution_cause_renders_distinctly () =
         }
     ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
     ; Output_limit_reached
-    ; Incomplete_output
+    ; Window_reached { output = No_output }
+    ; Window_reached { output = Partial_output }
+    ; Incomplete_output { stop = Refusal }
+    ; Incomplete_output { stop = End_turn }
     ; Missing_output
     ; Ambiguous_output 3
     ; Unexpected_output_content

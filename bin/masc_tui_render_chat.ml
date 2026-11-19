@@ -132,15 +132,24 @@ let entry_urls = Source_entry_cache.create 64
 let source_url_discoveries = ref 0
 
 let bare_urls_for_entry entry =
-  match Source_entry_cache.find_opt entry_urls entry with
-  | Some urls -> urls
-  | None ->
-      incr source_url_discoveries;
-      let seen = Hashtbl.create 4 in
-      let urls = Message_layout.bare_urls entry.Message_layout.body |> List.filter (fun url ->
-        if Hashtbl.mem seen url then false else (Hashtbl.add seen url (); true)) in
-      Source_entry_cache.replace entry_urls entry urls;
-      urls
+  (* Folded thought summaries are 1-line previews and must never expand into
+     inline link-preview cards or fetch truncated preview URLs. *)
+  match entry.Message_layout.body_presentation with
+  | Message_layout.Thinking_summary -> []
+  | Message_layout.Source_body | Message_layout.Projected_body _ -> (
+      match Source_entry_cache.find_opt entry_urls entry with
+      | Some urls -> urls
+      | None ->
+          incr source_url_discoveries;
+          let seen = Hashtbl.create 4 in
+          let urls =
+            Message_layout.bare_urls entry.Message_layout.body
+            |> List.filter (fun url ->
+                 if Hashtbl.mem seen url then false
+                 else (Hashtbl.add seen url (); true))
+          in
+          Source_entry_cache.replace entry_urls entry urls;
+          urls)
 
 let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
   let body = entry.body in
@@ -329,17 +338,30 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
    non-blank lines, matching what the unfolded block draws. *)
 type thinking_fold = Keep_source | Use_thinking_summary of string
 
-let folded_thinking_summary ~line_count ~source_height ~summary_height =
+let folded_thinking_summary ~width ~body ~line_count ~source_height ~summary_height =
   if line_count = 0 then Keep_source
   else
-      let count = line_count in
-      let summary = Printf.sprintf "Reasoning · %d %s folded · Ctrl-R"
-        count (if count = 1 then "line" else "lines") in
+    let source_rows = source_height () in
+    if source_rows <= 1 then Keep_source
+    else
+      let mark = Masc_tui_theme.Glyph.progress_waiting in
+      let summary =
+        Message_layout.folded_thought_summary ~mark ~width ~line_count ~body
+      in
       (* Formatting syntax is not visible width, and the summary can wrap
-         too. Folding is useful only when it actually saves terminal rows. *)
-      if summary_height summary < source_height ()
+         too. Folding is useful only when it actually saves terminal rows; if
+         the previewed line wraps past the source, fall back to the compact
+         count-only summary before keeping the raw source. *)
+      if summary_height summary < source_rows
       then Use_thinking_summary summary
-      else Keep_source
+      else
+        let compact =
+          Message_layout.folded_thought_summary ~mark ~width:0 ~line_count ~body:""
+        in
+        if not (String.equal summary compact)
+           && summary_height compact < source_rows
+        then Use_thinking_summary compact
+        else Keep_source
 
 
 let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
@@ -387,7 +409,7 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
       | Message_layout.Markdown_streaming ->
         (fun () -> chat_markdown ~context ~width entry.body |> trimmed_height), logical_lines () in
     let summary_height body = chat_markdown ~context ~width body |> trimmed_height in
-    match folded_thinking_summary ~line_count ~source_height ~summary_height with
+    match folded_thinking_summary ~width ~body:entry.body ~line_count ~source_height ~summary_height with
     | Keep_source -> {entry with body_presentation=Message_layout.Source_body}
     | Use_thinking_summary body ->
         {entry with body;body_presentation=Message_layout.Thinking_summary}

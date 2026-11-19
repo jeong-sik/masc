@@ -603,9 +603,10 @@ type reference_section = {
 }
 
 val reference_sections : unit -> reference_section list
-(** docs/guides/TUI-KEYS.md, section by section: {!help_sections} in the
-    sheet's order, plus the paragraphs a section's surface keeps for the
-    document. The [?] sheet does not draw those paragraphs. *)
+(** The key reference ({!Masc_tui_keys_doc}), section by section:
+    {!help_sections} in the sheet's order, plus the paragraphs a section's
+    surface keeps for the reference. The [?] sheet does not draw those
+    paragraphs. *)
 
 val footer_hints_browser_lane : lang:Masc_tui_types.ui_language -> string
 

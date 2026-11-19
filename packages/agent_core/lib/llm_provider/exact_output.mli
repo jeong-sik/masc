@@ -281,6 +281,13 @@ type provider_refusal =
   | Authorization_refused
   | Payment_required
   | Invalid_request
+      (** HTTP 400 or 422: the provider refused the request without naming a
+          size. *)
+  | Unclassified_status
+      (** A status no other constructor names (3xx, 405, 408, 409, ...). The
+          provider did not refuse the request as 400 or 422 do, so it is kept
+          apart from {!Invalid_request}. Consumers older than this constructor
+          read it as they read {!Invalid_request}. *)
   | Not_found
   | Context_overflow
   | Input_capacity
@@ -293,6 +300,35 @@ type provider_refusal =
 type generation_dispatch_fact =
   | No_generation_dispatch
   | Generation_dispatch_started
+
+(** The provider's typed stop reason for an answer that ended without one
+    structured output. [Types.MaxTokens] and [Types.ContextWindowExceeded] are
+    not here: they are {!Output_limit_reached} and {!Window_reached}. *)
+type incomplete_stop = Exact_output_plan.incomplete_stop =
+  | End_turn
+  | Tool_use
+  | Stop_sequence
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Pause_turn
+  | Compaction
+  | Unmatched_tool_calls
+  | Unknown_stop of string
+
+(** The provider stop reason this incomplete stop came from. *)
+val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason
+
+(** What a response that stopped at the model's window had produced. *)
+type window_output = Exact_output_plan.window_output =
+  | No_output
+      (** The empty answer as every completion consumer reads it
+          ({!Complete_common.has_no_output}): no content block and no tool
+          call that could not be read. The provider parser may have reported
+          it as an empty completion, or it reached normalization. *)
+  | Partial_output
+      (** The answer carried a content block or a tool call that could not be
+          read, and it was not one structured output. *)
 
 (** Why one dispatched or dispatching attempt failed. Every cause belongs to
     the binding or to its answer, never to masc's wiring: the plan parsed its
@@ -326,10 +362,30 @@ type execution_error_cause =
               hint (body takes priority). [None] for other refusals.
               Not part of flow evidence. *)
       }
+  | Provider_context_overflow of
+      { error : Http_client.http_error
+      ; http_status : int option
+      ; dispatch : generation_dispatch_fact
+      }
+      (** The provider codec typed a context overflow. It keeps that type
+          whether the receipt has an HTTP status or not; [None] never invents
+          a response status. The original typed error and dispatch fact stay
+          available to older consumers. *)
   | Output_limit_reached
       (** The normalized provider stop reason is [Types.MaxTokens]. No JSON
           output was accepted; distinct from refusal and other incomplete stops. *)
-  | Incomplete_output
+  | Window_reached of { output : window_output }
+      (** The provider typed a stop at the model's context window
+          ([Types.ContextWindowExceeded]), with or without text. The provider
+          answered and spent one generation, so this is not a refusal. The
+          input and the output together reached the window: a size fact about
+          the question, with or without text.
+
+          Consumers older than this constructor keep the reading they gave the
+          same answer before it: without text, the input's context overflow;
+          with text, an unusable output. *)
+  | Incomplete_output of { stop : incomplete_stop }
+      (** The answer stopped for [stop] without one structured output. *)
   | Missing_output
   | Ambiguous_output of int
   | Unexpected_output_content

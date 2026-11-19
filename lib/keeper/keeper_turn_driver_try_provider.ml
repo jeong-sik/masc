@@ -3116,6 +3116,7 @@ let is_size_refusal = function
       ( InvalidRequest
           { reason =
               ( Unknown_invalid_request
+              | Unclassified_status _
               | Json_parse_error
               | Attempt_rejected
               | Refusal_body_not_received )
@@ -3246,13 +3247,19 @@ let context_overflow_shrink_sequence
    - A refusal that was about size leaves a gap the Librarian still reads.
      Once it reaches the accepted start the request starts at its point
      again (rule 5), so no context is lost for good.
-   - The cost: one more request for each 400 whose reason is unknown.
+   - The cost: one more request for each 400 or 422 whose reason is
+     unknown, and for each status no classifier arm names.
    Enumerated so a new variant forces a decision here. *)
 let boundary_resend_on = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
       (InvalidRequest
-         { reason = (Request_body_refused_by_provider _ | Unknown_invalid_request); _ }) ->
+         { reason =
+             ( Request_body_refused_by_provider _
+             | Unknown_invalid_request
+             | Unclassified_status _ )
+         ; _
+         }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest

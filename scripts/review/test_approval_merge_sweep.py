@@ -52,15 +52,13 @@ class Selection(unittest.TestCase):
         self.assertEqual(SWEEP.select([row(1)], never), [1])
 
     def test_what_the_worker_would_certainly_hold_is_not_selected(self):
-        stale = row(6)
-        stale['latestOpinionatedReviews']['nodes'][1]['commit']['oid'] = sha(999)
-        same_account = row(7)
-        same_account['latestOpinionatedReviews']['nodes'][1]['author']['login'] = 'reviewer-0'
+        stale = row(6, approvals=1)
+        stale['latestOpinionatedReviews']['nodes'][0]['commit']['oid'] = sha(999)
         refused = row(8)
         refused['latestOpinionatedReviews']['nodes'].append(
             approval('reviewer-9', 8, 'CHANGES_REQUESTED'))
-        rows = [row(1, approvals=1), row(2, isDraft=True), row(3, headRefName='release/v1'),
-                row(4, mergeable='CONFLICTING'), row(5, 'other-branch'), stale, same_account,
+        rows = [row(1, approvals=0), row(2, isDraft=True), row(3, headRefName='release/v1'),
+                row(4, mergeable='CONFLICTING'), row(5, 'other-branch'), stale,
                 refused, row(9, isCrossRepository=True)]
         self.assertEqual(SWEEP.select(rows, never), [])
 

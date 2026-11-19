@@ -45,6 +45,7 @@ let test_provider_refusals () =
     ; Exact.Payment_required, F.Configuration_refused; Exact.Not_found, F.Configuration_refused
     ; Exact.Request_body_refused, F.Input_refused F.Request_body
     ; Exact.Invalid_request, F.Input_refused F.Invalid_request
+    ; Exact.Unclassified_status, F.Input_refused F.Invalid_request
     ; Exact.Context_overflow, F.Input_refused F.Context_overflow
     ; Exact.Input_capacity, F.Input_refused F.Input_capacity ];
   (* A 402 that states a window holds its account's slots until then
@@ -60,7 +61,8 @@ let test_provider_refusals () =
 
 let test_answers_that_cannot_be_used () =
   List.iter (fun (label, cause) -> check failure label F.Output_unusable (F.execution cause))
-    [ "incomplete", Exact.Incomplete_output
+    [ "incomplete", Exact.Incomplete_output { stop = Exact.End_turn }
+    ; "text cut at the window", Exact.Window_reached { output = Exact.Partial_output }
     ; "missing", Exact.Missing_output; "ambiguous", Exact.Ambiguous_output 2
     ; "unexpected content", Exact.Unexpected_output_content; "invalid json", Exact.Invalid_json_output
     ; "empty completion", completion (Http.Empty_completion { stop_reason = Agent_core.Types.EndTurn }) ];
@@ -70,6 +72,9 @@ let test_answers_that_cannot_be_used () =
 let test_completion_failures () =
   check failure "an overflow named by the provider refuses the input" (F.Input_refused F.Context_overflow)
     (F.execution (completion (Http.Context_overflow { limit = Some 8192 })));
+  check failure "an empty answer stopped at the window keeps the overflow class"
+    (F.Input_refused F.Context_overflow)
+    (F.execution (Exact.Window_reached { output = Exact.No_output }));
   check failure "a provider interruption is transient" F.Transient (F.execution (completion Http.Provider_interrupted));
   List.iter (fun (retry_after, expected) ->
       check failure "a hard quota is transient only with a usable window" expected

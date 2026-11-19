@@ -1,7 +1,9 @@
 type plan_fingerprint = Exact_output_plan.fingerprint
 
 type output_normalization_error = Exact_output_plan.output_normalization_error =
-  | Incomplete_structured_response of Types.stop_reason
+  | Output_limit_stopped
+  | Window_stopped of Exact_output_plan.window_output
+  | Incomplete_structured_response of Exact_output_plan.incomplete_stop
   | Missing_structured_text
   | Ambiguous_structured_text of int
   | Unexpected_structured_content

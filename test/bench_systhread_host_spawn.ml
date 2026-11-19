@@ -29,7 +29,7 @@ let () =
   let fibers = int_of_string Sys.argv.(3) in
   (match mode with
    | "own" -> ()
-   | "host" -> Systhread_host.start ()
+   | "host" -> Systhread_host.start ~minor_heap:Minor_heap.Tuned ()
    | other -> failwith ("mode is own or host, not " ^ other));
   Eio_main.run
   @@ fun env ->

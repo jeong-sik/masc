@@ -36,8 +36,8 @@ let occurrences ~needle haystack =
   in
   if n = 0 then 0 else loop 0 0
 
-let edge ?key ?status ?count ?(focus = Card.Unfocused) name =
-  { Card.name; key; status; count; focus }
+let edge ?key ?status ?count ?(focus = Card.Unfocused) ?border_accent ?(footer_keys = []) name =
+  { Card.name; key; status; count; focus; border_accent; footer_keys }
 
 let card ?(title = "Needs your decision") body =
   { Card.edge = edge title; body = (fun ~cells:_ -> body) }
@@ -1098,6 +1098,61 @@ let test_scrollbar_cells_decisions () =
   check int "scrollable card height" 6 (List.length rows);
   List.iter (fun row -> check int "scrollable card row width" 28 (Layout.display_width row)) rows
 
+let test_border_accent_applies_only_when_unfocused () =
+  let accent = "\027[38;5;108m" in
+  let unfocused =
+    Card.render ~ko:true ~style:styled ~width:24 ~height:4
+      { Card.edge = edge ~border_accent:accent ~focus:Card.Unfocused "Fleet"
+      ; body = (fun ~cells:_ -> [ "ok" ]) }
+  in
+  List.iter
+    (fun row ->
+       check bool "unfocused card uses its border_accent" true (contains ~needle:accent row);
+       check int "unfocused accented row width" 24 (Layout.display_width row))
+    unfocused;
+  let focused =
+    Card.render ~ko:true ~style:styled ~width:24 ~height:4
+      { Card.edge = edge ~border_accent:accent ~focus:Card.Focused_other "Fleet"
+      ; body = (fun ~cells:_ -> [ "ok" ]) }
+  in
+  List.iter
+    (fun row ->
+       check bool "focused card keeps focused_border over border_accent" true
+         (contains ~needle:styled.focused_border row);
+       check bool "focused card drops unfocused border_accent" false
+         (contains ~needle:accent row))
+    focused
+let test_footer_keys_and_superscript_digit () =
+  check (option string) "superscript 1" (Some "\xc2\xb9") (Card.superscript_digit 1);
+  check (option string) "superscript 4" (Some "\xe2\x81\xb4") (Card.superscript_digit 4);
+  check (option string) "superscript out of range" None (Card.superscript_digit 0);
+  check (option string) "superscript 10 out of range" None (Card.superscript_digit 10);
+  let footer_keys =
+    [ { Card.key = "p"; label = "work" }
+    ; { Card.key = "Enter"; label = "open" }
+    ]
+  in
+  List.iter
+    (fun (width, body) ->
+       let rows =
+         Card.render ~ko:true ~style:styled ~width ~height:4
+           { Card.edge = edge ~footer_keys "Title"
+           ; body = (fun ~cells:_ -> body) }
+       in
+       List.iter
+         (fun row ->
+            check int (Printf.sprintf "footer_keys row width at %d" width)
+              width (Layout.display_width row))
+         rows)
+    [ (5, [ "a" ])
+    ; (10, [ "a"; "b" ])
+    ; (16, [ "a"; "b" ])
+    ; (16, [ "a"; "b"; "c"; "d" ])
+    ; (24, [ "a"; "b" ])
+    ; (24, [ "a"; "b"; "c"; "d" ])
+    ; (36, [ "a"; "b"; "c"; "d" ])
+    ; (60, [ "a"; "b"; "c"; "d" ])
+    ]
 let () =
   run "tui card"
     [ ( "geometry"
@@ -1133,10 +1188,14 @@ let () =
             test_focused_card_uses_distinct_border_glyphs_without_colour
         ; test_case "scrollbar cells and scrollable card geometry" `Quick
             test_scrollbar_cells_decisions
+        ; test_case "a border_accent applies when unfocused and yields to focus" `Quick
+            test_border_accent_applies_only_when_unfocused
         ] )
     ; ( "bottom edge"
       , [ test_case "the bottom edge keeps the number whole" `Quick
             test_the_bottom_edge_keeps_the_number_whole
+        ; test_case "footer_keys and superscript_digit keep width invariants" `Quick
+            test_footer_keys_and_superscript_digit
         ] )
     ; ( "columns"
       , [ test_case "columns and gaps add up to the screen" `Quick

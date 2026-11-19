@@ -45,7 +45,8 @@ let declared_lane_failure_of_error (err : Agent_core.Error.t) =
              | Json_parse_error
              | Attempt_rejected
              | Refusal_body_not_received
-             | Unknown_invalid_request )
+             | Unknown_invalid_request
+             | Unclassified_status _ )
          ; _
          })
   | Agent_core.Error.Api (InputCapacity _)

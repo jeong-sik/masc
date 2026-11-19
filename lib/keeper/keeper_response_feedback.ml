@@ -138,15 +138,16 @@ let tally_of_records (records : record list) : tally =
 (* ── Durable sink + log read — Stdlib I/O via the sibling-log family ──── *)
 
 let record ~(config : Workspace.config) (r : record) : (unit, [ `Io of string ]) result =
-  (* The path is only a path, and append_jsonl_line makes no directory. *)
-  let (_ : string) = Keeper_fs.keeper_dir config in
   let path = Keeper_types_support.keeper_feedback_log_path config r.keeper_id in
-  (* append_jsonl_line shares the sibling JSONL writer (rotation included).
-     append_lines raises Sys_error on IO fault — caught here, surfaced as `Io,
-     never silently dropped. *)
+  (* append_jsonl_line shares the sibling JSONL writer (rotation included)
+     and makes the keepers directory. A write that fails raises Sys_error and
+     a directory that cannot be made raises Unix_error — both caught here,
+     surfaced as `Io, never silently dropped. *)
   match Keeper_types_support.append_jsonl_line path (to_json r) with
   | () -> Ok ()
   | exception Sys_error msg -> Error (`Io msg)
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (`Io (Printf.sprintf "%s %s: %s" operation argument (Unix.error_message error)))
 
 let read_tally ~(config : Workspace.config) ~keeper_id : (tally, [ `Io of string ]) result =
   let path = Keeper_types_support.keeper_feedback_log_path config keeper_id in

@@ -351,7 +351,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 경로는 `lib/keeper/` · `lib/server/` · `lib/workspace_memory/` · `lib/` · `bin/` 를 줄여 적은 것이다. 층을 시작하는 에이전트가 자기 기준 커밋에서 경로를 다시 확인한다.
 
-행에 새 글을 그리는 TUI 층(K2 K3 S3d A2 A5 D1 D2)은 표의 파일에 더해 두 곳을 고친다. `bin/masc_tui_keeper_mark.ml` 의 `column_legend`(`:96`)에 그 글의 설명을 한 줄 더하고, 생성 문서 `docs/guides/TUI-KEYS.md` 를 생성기 출력과 맞춘다. 설명이 없으면 도움말이 또 낡는다. RFC-0503 L4 가 고친 어긋남과 같다. 생성기는 `bin/masc_tui_keys_doc_cli.exe` 이고 로컬 빌드는 하지 않으므로 문서를 같게 손으로 쓰고, `test_tui_keys_doc` 를 `test.yml` 로 돌려 일치를 확인한다.
+행에 새 글을 그리는 TUI 층(K2 K3 S3d A2 A5 D1 D2)은 표의 파일에 더해 `bin/masc_tui_keeper_mark.ml` 의 `column_legend`(`:96`)에 그 글의 설명을 한 줄 더한다. 설명이 없으면 도움말이 또 낡는다. RFC-0503 L4 가 고친 어긋남과 같다.
 
 ## 4. 하지 않는 것
 
@@ -388,7 +388,6 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | `bin/masc_tui_types.ml` | 아무도 | A1 이 `due` 규칙을 이름 있는 함수로 꺼내는 한 곳, D2c 가 월드 상태 필드 하나 |
 | `bin/masc_tui_http.ml`, `bin/masc_tui_loader.ml`, `bin/masc_tui_async_protocol.ml(i)` | 아무도 | D2c 가 월드 읽기를 한 곳씩 더한다 |
 | `bin/masc_tui_keeper_mark.ml` | S(S3d 의 낱말과 글리프) | K2 K3 A2 A5 D1 D2 가 `column_legend` 에 자기 줄을 더한다 |
-| `docs/guides/TUI-KEYS.md` | 생성 문서 | 위 `column_legend` 를 고친 층이 생성기 출력과 맞춘다 |
 | `test/test_tui_keeper_control.ml`, `test/test_tui_keeper_trail.ml`, `test/test_tui_keeper_list_model.ml` | S(`keeper_runtime` 리터럴) | K3 가 `test_tui_keeper_trail.ml` 에 시험을 더한다 |
 | `lib/tui_decode_memory_health.ml(i)`, health 서버, `dashboard-misc.ts` | W | A3 는 읽기만 한다 |
 | `bin/masc_tui_render_memory.ml` | A3 가 규칙을 옮기는 두 곳 | D2 가 사다리 줄을, D2c 가 월드 줄을 더한다 |
@@ -397,7 +396,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 - 두 갈래가 같은 곳을 고치는 자리는 넷이다.
   - 둘째 줄 함수 `keeper_secondary_row_content`: K3(사슬)와 A2(오른쪽 칸).
   - 시험 픽스처 셋: S 가 `keeper_runtime` 에 항목을 더하고, K3 가 `test/test_tui_keeper_trail.ml` 에 시험을 더한다. 레코드 리터럴에 항목이 빠지면 컴파일이 깨지므로 뒤에 병합되는 스택이 맞춘다.
-  - `column_legend` 와 `docs/guides/TUI-KEYS.md`: §3 의 TUI 층 일곱이 한 줄씩 더한다. 줄이 서로 달라서 충돌이 나면 두 줄을 모두 남긴다.
+  - `column_legend`: §3 의 TUI 층 일곱이 한 줄씩 더한다. 줄이 서로 달라서 충돌이 나면 두 줄을 모두 남긴다.
   - `bin/masc_tui_keeper_axis.ml`: 2차 착수의 D1 과 D2.
 - 먼저 병합되는 스택이 이기고, 뒤 스택의 충돌은 병합하는 사람이 정해 스택 전체를 `gh stack rebase` 한 번 한다. 에이전트는 리뷰가 달린 스택을 rebase 하지 않는다(§5.1). 권하는 병합 순서는 K → A → S → W 다. 순서는 병합하는 사람이 정한다.
 - 층을 시작하기 전에 `git fetch origin main` 으로 main 이 움직였는지 보고, 같은 파일을 만지는 열린 PR 이 있는지 `gh pr list` 로 확인한다. 있으면 시작 전에 보고한다.

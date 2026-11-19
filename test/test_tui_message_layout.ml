@@ -668,6 +668,46 @@ let test_a_wide_head_is_cut_whole_within_its_width () =
   check bool "a fitting styled text is drawn as it came" true
     (String.equal styled (Layout.truncate_end width styled))
 
+let test_folded_thought_summary_includes_preview_when_width_permits () =
+  let body = "\n  ## Checking the MASC board consensus\nSecond detail line\n" in
+  let wide =
+    Layout.folded_thought_summary ~mark:"\xe2\x97\x8b" ~width:90 ~line_count:12 ~body
+  in
+  check bool "wide summary fits within pane width" true
+    (Layout.display_width wide <= 90);
+  check bool "wide summary surfaces the first readable line" true
+    (holds wide "Checking the MASC board consensus");
+  let narrow =
+    Layout.folded_thought_summary ~mark:"\xe2\x97\x8b" ~width:35 ~line_count:12 ~body
+  in
+  check bool "narrow summary drops preview rather than overflowing" false
+    (holds narrow "Checking");
+  let clipped =
+    Layout.folded_thought_summary ~mark:"\xe2\x97\x8b" ~width:52 ~line_count:12 ~body
+  in
+  check bool "clipped summary stays within width and carries preview + cut mark" true
+    (Layout.display_width clipped <= 52
+     && holds clipped "Checking"
+     && holds clipped Layout.cut_mark);
+  let single =
+    Layout.folded_thought_summary ~mark:"\xe2\x97\x8b" ~width:80 ~line_count:1
+      ~body:"-42 keeps its sign and snake_case"
+  in
+  check bool "singular line count and non-bullet sign preserved" true
+    (holds single "1 line" && holds single "-42 keeps its sign and snake_case");
+  check string "fences and horizontal rules are skipped" "actual_step"
+    (Layout.thought_preview ~max_cells:30 "```ocaml\n___\n---\nactual_step");
+  check string "inline markdown links and bold are neutralized"
+    "Checking board spec and bold text"
+    (Layout.thought_preview ~max_cells:60
+       "Checking [board spec](https://masc.internal/spec) and **bold** text");
+  let korean =
+    Layout.folded_thought_summary ~mark:"\xe2\x97\x8b" ~width:53 ~line_count:8
+      ~body:"한글 추론 요약이 좁은 폭에서도 깨지지 않고 잘립니다"
+  in
+  check bool "Korean preview fits within odd width" true
+    (Layout.display_width korean <= 53 && holds korean Layout.cut_mark)
+
 let () =
   run "tui_message_layout"
     [
@@ -724,6 +764,8 @@ let () =
             test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity
         ; test_case "bare sender row marks arrived reasoning only" `Quick
             test_bare_sender_row_marks_arrived_reasoning_only
+        ; test_case "folded thought summary surfaces a 1-line preview when room permits"
+            `Quick test_folded_thought_summary_includes_preview_when_width_permits
         ;] )
     ; ( "composer"
       , [] )

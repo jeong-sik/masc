@@ -62,10 +62,12 @@ import {
   keeperProbing,
   keeperRecovering,
   keeperSending,
+  keeperStopHeld,
   keeperStatusDetails,
   keeperStreamLastEventAt,
   keeperThreads,
   keeperToolApprovals,
+  KeeperSendClosedBeforeAcceptance,
   liveSendOwnsRequest,
   appendThreadEntry,
   mergeServerHistoryEntries,
@@ -78,6 +80,7 @@ import {
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
   cancelKeeperThreadRequest,
+  closeKeeperSendWithHeldStop,
   dispatchKeeperInterjectAction,
   hydrateTrackedKeeperChatOperations,
   hydrateKeeperChatHistory,
@@ -2014,6 +2017,31 @@ describe('sendKeeperThreadMessage operation stream', () => {
       return (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
     }
 
+    // Whether the screen is told that a stop is held for the Keeper.
+    function stopHeld(): boolean {
+      return keeperStopHeld.value.echo ?? false
+    }
+
+    // The turn the server stored for an operation: the message it accepted and
+    // the reply it ended with.
+    function storedTurn(operationId: string) {
+      const row = (id: string, role: 'user' | 'assistant', content: string, slot: string, ts: number) => ({
+        id,
+        role,
+        content,
+        ts,
+        delivery_provenance: {
+          delivery_key: { kind: 'operation', operation_id: operationId },
+          transcript_slot: { kind: slot },
+        },
+        delivery_provenance_status: 'valid',
+      })
+      return [
+        row('stored-user', 'user', 'hi', 'accepted_user', 1_780_000_000),
+        row('stored-reply', 'assistant', 'hello there', 'terminal_result', 1_780_000_001),
+      ]
+    }
+
     it('waits for the acceptance and then cancels the operation by its id', async () => {
       const stream = holdUnacceptedStream()
       cancelKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
@@ -2034,12 +2062,14 @@ describe('sendKeeperThreadMessage operation stream', () => {
       expect(keeperSending.value.echo).toBe(true)
       expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
       expect(replyRow()).toMatchObject({ delivery: 'sending', streamState: 'stop_pending' })
+      expect(stopHeld()).toBe(true)
 
       // The acceptance frame ends the read as an abort does, so no frame
       // behind it reaches a row the stop already closed.
       const thrown = stream.accept('Queued')
       expect(thrown).toBeInstanceOf(Error)
       expect(thrown).toMatchObject({ name: 'AbortError' })
+      expect(stopHeld()).toBe(false)
       await send
 
       expect(stream.aborted()).toBe(true)
@@ -2201,21 +2231,259 @@ describe('sendKeeperThreadMessage operation stream', () => {
       expect(keeperSending.value.echo).toBe(false)
     })
 
+    it('takes the way out away as soon as the send a stop is held for fails', async () => {
+      // The failed send reads the stored history once before it leaves, and
+      // that read can take as long as its time limit. No stop is held in that
+      // time, so the screen is not told one is.
+      const stream = holdUnacceptedStream()
+      let answerHistory!: (entries: unknown[]) => void
+      fetchKeeperChatHistory.mockImplementation(() => new Promise(resolve => { answerHistory = resolve }))
+
+      const send = sendKeeperThreadMessage('echo', 'held and then failed').catch(() => undefined)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(stopHeld()).toBe(true)
+
+      stream.fail(new Error('the server did not answer'))
+      await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalled())
+
+      // The send is still listed: its history read has not answered.
+      expect(keeperSending.value.echo).toBe(true)
+      expect(stopHeld()).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
+
+      answerHistory([])
+      await send
+
+      expect(stopHeld()).toBe(false)
+      expect(keeperSending.value.echo).toBe(false)
+    })
+
     it('shows a stream that closes before the acceptance as cut, and names nothing to the server', async () => {
       const stream = holdUnacceptedStream()
 
       const send = sendKeeperThreadMessage('echo', 'cut before accept').catch(() => undefined)
       await Promise.resolve()
       await cancelActiveKeeperThreadMessage('echo')
+      expect(stopHeld()).toBe(true)
       stream.close()
       await send
 
+      // The held stop went with the stream's record.
+      expect(stopHeld()).toBe(false)
       expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
       expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
       expect((keeperThreads.value.echo ?? []).some(entry => entry.delivery === 'cancelled')).toBe(false)
       expect(replyRow()).toMatchObject({ delivery: 'interrupted', streamState: null })
       expect(replyRow()?.error).toContain('스트림이 종료 신호 없이 끊겼습니다')
       expect(keeperSending.value.echo).toBe(false)
+    })
+
+    it('does not hold a stop for a send that failed and still reads the stored history', async () => {
+      // A send that failed before the acceptance reads the stored history once
+      // before it leaves, and its stream is the Keeper's first until then. No
+      // acceptance is coming for a stop to wait on.
+      const stream = holdUnacceptedStream()
+      let answerHistory!: (entries: unknown[]) => void
+      fetchKeeperChatHistory.mockImplementation(() => new Promise(resolve => { answerHistory = resolve }))
+
+      const send = sendKeeperThreadMessage('echo', 'failed before accept').catch(() => undefined)
+      await Promise.resolve()
+      stream.fail(new Error('the server did not answer'))
+      await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalled())
+      expect(keeperSending.value.echo).toBe(true)
+
+      expect(await cancelActiveKeeperThreadMessage('echo')).toBe(true)
+
+      // The stop frees the composer. The send already said how it ended, and
+      // the stop leaves that said: the row does not turn into an interrupted
+      // reply with its failure gone.
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.streamState === 'stop_pending')).toBe(false)
+      expect(stopHeld()).toBe(false)
+      expect(keeperSending.value.echo).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
+
+      answerHistory([])
+      await send
+
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+    })
+
+    it('closes the send when the operator stops waiting for the acceptance', async () => {
+      const stream = holdUnacceptedStream()
+      // The server the operator stops waiting for answers no history read either.
+      fetchKeeperChatHistory.mockImplementation(() => new Promise(() => undefined))
+
+      const thrown = sendKeeperThreadMessage('echo', 'no acceptance comes').then(() => null, error => error)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(replyRow()).toMatchObject({ delivery: 'sending', streamState: 'stop_pending' })
+      expect(stopHeld()).toBe(true)
+
+      closeKeeperSendWithHeldStop('echo')
+      expect(stream.aborted()).toBe(true)
+
+      // The caller reads an abort, as it does for a stop. The send has left: it
+      // did not wait on a history read from that server, and the composer is
+      // free.
+      expect(await thrown).toBeInstanceOf(KeeperSendClosedBeforeAcceptance)
+      expect(await thrown).toMatchObject({ name: 'AbortError' })
+      expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+      expect(keeperSending.value.echo).toBe(false)
+      expect(stopHeld()).toBe(false)
+      // The held stop went nowhere. The rows say what was closed: not that the
+      // server stopped the operation, and not that the send failed.
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
+      expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.delivery])).toEqual([
+        ['user', 'delivered'],
+        ['assistant', 'interrupted'],
+      ])
+      expect(replyRow()?.streamState).toBeNull()
+      expect(replyRow()?.error).toContain('중지는 서버에 보내지 않았습니다')
+      // The message row records how its stream ended, as it does for a send that failed.
+      expect((keeperThreads.value.echo ?? []).find(entry => entry.role === 'user')?.streamContract).toMatchObject({
+        source: 'client_stream_failure',
+        status: 'contract_gap',
+      })
+      // Nothing failed, so no action error is raised beside the row.
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    })
+
+    it('reads who closed the send from its own signal, not from what the stream threw', async () => {
+      // A browser ends an aborted read with a value of its own.
+      streamKeeperMessage.mockImplementation((
+        _name: string,
+        _message: string,
+        options: UnacceptedStreamOptions,
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => { reject(new TypeError('Load failed')) }, { once: true })
+      }))
+
+      const thrown = sendKeeperThreadMessage('echo', 'no acceptance comes').then(() => null, error => error)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      closeKeeperSendWithHeldStop('echo')
+
+      // The caller still reads an abort, and the row still says what was closed.
+      expect(await thrown).toBeInstanceOf(KeeperSendClosedBeforeAcceptance)
+      expect(replyRow()).toMatchObject({ delivery: 'interrupted', streamState: null })
+      expect(replyRow()?.error).toContain('중지는 서버에 보내지 않았습니다')
+      expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    })
+
+    it('lets the stored turn take the rows of a closed send that the server accepted after all', async () => {
+      // The closed send read no history before it left. Its rows carry the
+      // operation it named, so the next history read that holds that
+      // operation's turn replaces them.
+      const stream = holdUnacceptedStream()
+      const thrown = sendKeeperThreadMessage('echo', 'hi').then(() => null, error => error)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      closeKeeperSendWithHeldStop('echo')
+      await thrown
+      expect(replyRow()?.error).toContain('중지는 서버에 보내지 않았습니다')
+
+      fetchKeeperChatHistory.mockResolvedValue(storedTurn(stream.operationId()))
+      await hydrateKeeperChatHistory('echo')
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.map(entry => entry.role)).toEqual(['user', 'assistant'])
+      expect(replyRow()).toMatchObject({ text: 'hello there', delivery: 'history', error: null })
+    })
+
+    it('keeps the way out when the stored turn takes the place of the reply row a stop is held for', async () => {
+      // The server accepted the operation and ended its turn, and the direct
+      // stream stays open with no acceptance frame on it. A history read puts
+      // the stored turn where the rows of this send were, so no row is left to
+      // say that a stop is held. The stream's record still holds it.
+      const stream = holdUnacceptedStream()
+      const thrown = sendKeeperThreadMessage('echo', 'hi').then(() => null, error => error)
+      await Promise.resolve()
+      fetchKeeperChatHistory.mockResolvedValue(storedTurn(stream.operationId()))
+      await hydrateKeeperChatHistory('echo')
+      expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.delivery])).toEqual([
+        ['user', 'history'],
+        ['assistant', 'history'],
+      ])
+
+      expect(await cancelActiveKeeperThreadMessage('echo')).toBe(true)
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.streamState === 'stop_pending')).toBe(false)
+      expect(stream.aborted()).toBe(false)
+      expect(stopHeld()).toBe(true)
+
+      closeKeeperSendWithHeldStop('echo')
+      expect(await thrown).toBeInstanceOf(KeeperSendClosedBeforeAcceptance)
+
+      expect(stopHeld()).toBe(false)
+      expect(keeperSending.value.echo).toBe(false)
+      expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+      // The stored turn is not a row of this send, and the close writes nothing on it.
+      expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.delivery])).toEqual([
+        ['user', 'history'],
+        ['assistant', 'history'],
+      ])
+      expect(replyRow()).toMatchObject({ text: 'hello there', error: null })
+    })
+
+    it('closes only the send that a stop is held for', async () => {
+      const stream = holdUnacceptedStreams()
+      fetchKeeperChatHistory.mockResolvedValue([])
+      fetchKeeperChatOperation.mockResolvedValue({
+        operationId: 'terminal',
+        state: { kind: 'cancelled', completedAt: 1 },
+      })
+
+      // Nothing is sent, so there is nothing to close.
+      closeKeeperSendWithHeldStop('echo')
+      expect(stopHeld()).toBe(false)
+
+      const first = sendKeeperThreadMessage('echo', 'first').catch(() => undefined)
+      await Promise.resolve()
+      const second = sendKeeperThreadMessage('echo', 'second').catch(() => undefined)
+      await Promise.resolve()
+
+      // No stop was pressed: a send that only waits is not closed from here.
+      closeKeeperSendWithHeldStop('echo')
+      expect(stream(0).aborted()).toBe(false)
+      expect(stopHeld()).toBe(false)
+
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(stopHeld()).toBe(true)
+      closeKeeperSendWithHeldStop('echo')
+      await first
+
+      expect(stream(0).aborted()).toBe(true)
+      expect(stream(1).aborted()).toBe(false)
+      expect(keeperSending.value.echo).toBe(true)
+
+      // The send behind it is the Keeper's first now, and no stop is held for it.
+      expect(stopHeld()).toBe(false)
+      closeKeeperSendWithHeldStop('echo')
+      expect(stream(1).aborted()).toBe(false)
+
+      // After its acceptance a stop goes to the server. There is no wait to leave.
+      expect(stream(1).accept('Queued')).toBeNull()
+      closeKeeperSendWithHeldStop('echo')
+      expect(stream(1).aborted()).toBe(false)
+
+      stream(1).close()
+      await second
     })
 
     it('ends a stream that aborts before the acceptance as a failed send, not a cancelled one', async () => {

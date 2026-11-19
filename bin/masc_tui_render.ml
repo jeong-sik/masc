@@ -336,6 +336,141 @@ let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
       in
       scope @ meters @ List.concat_map wrap notes
 
+let overview_telemetry_snapshot (state : state) : Masc_tui_overview_bands.telemetry_snapshot =
+  let fleet_running, fleet_bootable, capacity_avail, capacity_target, capacity_shortfall =
+    match fleet_stream_view state with
+    | Masc_tui_fleet_stream.Reading { reading; _ } ->
+        let f = reading.fleet in
+        let avail =
+          max 0 (f.fs_target_reaction_capacity - f.fs_reaction_capacity_shortfall)
+        in
+        ( f.fs_running_count
+        , f.fs_bootable_count
+        , avail
+        , f.fs_target_reaction_capacity
+        , f.fs_reaction_capacity_shortfall )
+    | Awaiting_first_reading | Unreachable _ | Unavailable _ | Cannot_read _ ->
+        (0, 0, 0, 0, 0)
+  in
+  let gc_opt = Option.bind state.server_identity (fun id -> id.sid_gc) in
+  let sched_opt = Option.bind state.server_identity (fun id -> id.sid_scheduler) in
+  let fmt_words words =
+    Masc_tui_context_inspector.format_bytes (max 0 words * 8)
+  in
+  let heap_live_words, heap_total_words, heap_live_text, heap_total_text =
+    match gc_opt with
+    | Some gc when gc.sgc_heap_words > 0 ->
+        ( Some gc.sgc_live_words
+        , Some gc.sgc_heap_words
+        , Some (fmt_words gc.sgc_live_words)
+        , Some (fmt_words gc.sgc_heap_words) )
+    | Some _ | None -> (None, None, None, None)
+  in
+  let sched_p95_ms, sched_stalls =
+    match sched_opt with
+    | Some s when s.ssch_samples > 0 -> (Some s.ssch_p95_ms, Some s.ssch_stalls)
+    | Some _ | None -> (None, None)
+  in
+  let tool_calls_summary =
+    match state.tool_series with
+    | Tool_series_read calls
+      when calls.Masc_tui_usage_calls.window = Masc_tui_usage_calls.Last_day ->
+        Some (Masc_tui_usage_calls.summary_line ~cells:32 calls)
+    | Tool_series_read _ | Tool_series_unread | Tool_series_error _ -> None
+  in
+  { Masc_tui_overview_bands.fleet_running
+  ; fleet_bootable
+  ; capacity_avail
+  ; capacity_target
+  ; capacity_shortfall
+  ; fleet_status = Some (overview_capacity_status state)
+  ; heap_live_words
+  ; heap_total_words
+  ; heap_live_text
+  ; heap_total_text
+  ; sched_p95_ms
+  ; sched_stalls
+  ; tool_calls_summary
+  }
+
+let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_entry list =
+  let ko = state.ui_language = Lang_ko in
+  let turn_state_of name =
+    List.find_opt
+      (fun (row : keeper_turn_row) -> String.equal row.ktr_keeper_name name)
+      state.keeper_turns
+    |> Option.map (fun (row : keeper_turn_row) -> row.ktr_state)
+  in
+  let entry_of (k : keeper) =
+    let turn_state = turn_state_of k.k_name in
+    let mark, mark_tone, state_label, needs_attention, priority =
+      if k.k_paused then
+        ( Masc_tui_value.Mark.(glyph Paused)
+        , Theme.warn ()
+        , (if ko then "일시정지" else "paused")
+        , true
+        , 1 )
+      else
+        match turn_state with
+        | Some (Keeper_turn_unavailable _) ->
+            ( Masc_tui_value.Mark.(glyph Failed)
+            , Theme.warn ()
+            , (if ko then "확인 필요" else "check")
+            , true
+            , 0 )
+        | Some (Keeper_turn_running _) ->
+            ( Masc_tui_value.Mark.(glyph Under_way)
+            , Theme.ok ()
+            , (if ko then "실행 중" else "running")
+            , false
+            , 2 )
+        | Some Keeper_turn_idle ->
+            ( Masc_tui_value.Mark.(glyph Settled)
+            , Theme.recede ()
+            , (if ko then "대기" else "idle")
+            , false
+            , 3 )
+        | None ->
+            ( Masc_tui_value.Mark.(glyph Waiting)
+            , Theme.recede ()
+            , (if ko then "관측 중" else "observing")
+            , false
+            , 4 )
+    in
+    (* Overview does not query per-keeper live_context; show real roster
+       activity (turns and tokens) that Overview already holds. *)
+    let activity_summary =
+      match k.k_activity with
+      | Some act when act.k_total_turns > 0 && act.k_total_tokens > 0 ->
+          Printf.sprintf "%dt · %s" act.k_total_turns
+            (Message_layout.compact_count act.k_total_tokens)
+      | Some act when act.k_total_turns > 0 ->
+          Printf.sprintf "%dt" act.k_total_turns
+      | Some _ | None -> Masc_tui_theme.Glyph.no_value
+    in
+    let detail =
+      match k.k_activity with
+      | Some act ->
+          (match act.k_current_task_id with
+           | Some tid when not (String.equal tid "") -> Terminal_text.single_line tid
+           | Some _ | None -> "")
+      | None -> ""
+    in
+    ( priority
+    , { Masc_tui_overview_bands.name = Terminal_text.single_line k.k_name
+      ; mark
+      ; mark_tone
+      ; state_label
+      ; activity_summary
+      ; detail
+      ; needs_attention
+      } )
+  in
+  state.keepers
+  |> List.map entry_of
+  |> List.stable_sort (fun (p1, _) (p2, _) -> Int.compare p1 p2)
+  |> List.map snd
+
 let overview_header (state : state) ~cols =
   here_row ~cols state ~path:[]
     ~readings:[ Terminal_text.single_line state.workspace ]
@@ -432,37 +567,120 @@ let render_overview (state : state) home =
             | Masc_tui_home.Every_source_read requests -> Masc_tui_card.Whole requests
             | Masc_tui_home.Some_source_unread requests -> Masc_tui_card.At_least requests
           in
+          let ko = state.ui_language = Lang_ko in
+          let toggle_tag index =
+            Option.bind (Masc_tui_card.superscript_digit index) key
+          in
+          let collapsed index = List.mem index state.overview_collapsed_cards in
+          let collapsed_status =
+            Some
+              { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Paused
+              ; word = if ko then "접힘" else "collapsed"
+              ; tone = Theme.recede ()
+              }
+          in
+          let expand_keys index =
+            [ { Masc_tui_card.key = string_of_int index
+              ; label = if ko then "펼치기" else "expand"
+              } ]
+          in
           let edges : Masc_tui_overview_cards.edges =
             { decisions =
                 { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-                ; key = key "p"; status = None; count = Some decisions_count
-                ; focus = Masc_tui_card.Unfocused }
+                ; key = toggle_tag 1
+                ; status = (if collapsed 1 then collapsed_status else None)
+                ; count = Some decisions_count
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_attention)
+                ; footer_keys =
+                    if collapsed 1 then expand_keys 1
+                    else
+                      [ { Masc_tui_card.key = "p"; label = if ko then "승인·질문" else "requests" }
+                      ; { Masc_tui_card.key = "Enter"; label = if ko then "열기" else "open" }
+                      ] }
             ; continuation =
                 { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
-                ; key = None; status = None; count = rows_of continuation
-                ; focus = Masc_tui_card.Unfocused }
+                ; key = toggle_tag 2
+                ; status = (if collapsed 2 then collapsed_status else None)
+                ; count = rows_of continuation
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_usage)
+                ; footer_keys =
+                    if collapsed 2 then expand_keys 2
+                    else
+                      [ { Masc_tui_card.key = "Enter"; label = if ko then "채팅" else "chat" } ] }
             ; capacity =
                 { Masc_tui_card.name = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
-                ; key = key "m"; status = Some (overview_capacity_status state); count = None
-                ; focus = Masc_tui_card.Unfocused }
+                ; key = toggle_tag 3
+                ; status =
+                    if collapsed 3 then collapsed_status
+                    else Some (overview_capacity_status state)
+                ; count = None
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_fleet)
+                ; footer_keys =
+                    if collapsed 3 then expand_keys 3
+                    else
+                      [ { Masc_tui_card.key = "m"; label = if ko then "사용량" else "Usage" } ] }
             ; actions =
                 { Masc_tui_card.name =
                     ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
-                ; key = key "v"; status = None; count = rows_of operator_rows
-                ; focus = Masc_tui_card.Unfocused }
+                ; key = toggle_tag 4
+                ; status = (if collapsed 4 then collapsed_status else None)
+                ; count = rows_of operator_rows
+                ; focus = Masc_tui_card.Unfocused
+                ; border_accent = Some (Theme.panel_border Masc_tui_theme.Panel_memory)
+                ; footer_keys =
+                    if collapsed 4 then expand_keys 4
+                    else
+                      [ { Masc_tui_card.key = "v"; label = if ko then "조치 원인" else "action reasons" } ] }
             }
           in
-          let status ~cells = overview_capacity_lines ~cells ~mark:Mark_on_card_edge state in
-          Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
-            ~inner:inner_cols ~rows:available
-            ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
-            ~decisions:all_decisions ~decisions_whole:true ~continuation ~status
-            ~actions:operator_rows in
+          let status ~cells =
+            if collapsed 3 then []
+            else overview_capacity_lines ~cells ~mark:Mark_on_card_edge state
+          in
+          let draw_cards ~rows =
+            Masc_tui_overview_cards.draw ~ko ~edges
+              ~inner:inner_cols ~rows
+              ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
+              ~decisions:all_decisions
+              ~decisions_whole:true
+              ~continuation
+              ~status
+              ~keep_actions_card:(collapsed 4)
+              ~actions:operator_rows
+          in
+          match
+            Masc_tui_overview_bands.plan ~available ~cols:inner_cols
+              ~keeper_count:(List.length state.keepers)
+          with
+          | Masc_tui_overview_bands.Cards_only -> draw_cards ~rows:available
+          | Masc_tui_overview_bands.With_bands { telemetry_rows; keeper_rows; card_rows = cards_budget } ->
+              (match draw_cards ~rows:cards_budget with
+               | Some lower_rows ->
+                   let telemetry_rows_rendered =
+                     Masc_tui_overview_bands.render_telemetry ~ko ~width:inner_cols
+                       ~height:telemetry_rows (overview_telemetry_snapshot state)
+                   in
+                   let keeper_rows_rendered =
+                     if keeper_rows > 0 then
+                       Masc_tui_overview_bands.render_keepers ~ko ~width:inner_cols
+                         ~height:keeper_rows ~total_keepers:(List.length state.keepers)
+                         (overview_keeper_entries state)
+                     else []
+                   in
+                   Some (telemetry_rows_rendered @ keeper_rows_rendered @ lower_rows)
+               | None -> draw_cards ~rows:available) in
       (match card_rows with
        | Some rows ->
            List.iter c.push rows;
            if available > List.length rows then c.push (tool_calls_line ~cells:inner_cols)
        | None ->
+           if state.overview_collapsed_cards <> [] then
+             c.push_styled ~style:(Theme.warn ())
+               (ui_text state ~ko:" 접힌 카드 있음 · 1-4: 펼치기"
+                  ~en:" Cards folded · 1-4 to expand");
            if body.hb_spare > 0 then
              c.push_styled ~style:Ansi.bold
                (ui_text state ~ko:" 바로가기" ~en:" Destinations");

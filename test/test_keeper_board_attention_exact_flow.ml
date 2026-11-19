@@ -1126,6 +1126,7 @@ let test_a_held_http_lane_rests_without_dispatch () =
             , { Runtime_exact_output_registry.candidate =
                   runtime.Runtime_instance.candidate_backpressure
               ; quota_scope = scope
+              ; window = None
               } ) ]
         [ target held_slot server.base_url ];
       Runtime_quota_window.reset_for_testing ();
@@ -1184,6 +1185,7 @@ let test_a_held_http_slot_keeps_the_http_order_of_a_mixed_lane () =
             , { Runtime_exact_output_registry.candidate =
                   runtime.Runtime_instance.candidate_backpressure
               ; quota_scope = scope
+              ; window = None
               } ) ]
         [ target held_slot server.base_url ];
       Runtime_quota_window.reset_for_testing ();

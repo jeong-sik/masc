@@ -2,13 +2,12 @@ let decision_window_bytes = 40_000
 let decision_window_lines = 20
 
 (* A row of at most this many bytes, newline counted, is the newest row a
-   read finds after it was appended. The reader drops the first line of its
-   window when the window does not start at the file's start, and passes over
-   blank lines before that. A row this short leaves at least half the window
-   to what the file held before it, so the dropped line is one of those and
-   never the row itself. That rests on those bytes not being all blank: the
-   record's writer writes JSON text, which has no blank run that long outside
-   a string. *)
+   read finds after it was appended. The reader drops the first piece of its
+   window, up to the first newline, when the window does not start at the
+   file's start. A row this short leaves at least half the window to what the
+   file held before it, so the newline that ends the line before the row is
+   in the window: the dropped piece ends there or sooner, and is never the
+   row. *)
 let decision_row_bytes_followed = decision_window_bytes / 2
 
 type decision_line =

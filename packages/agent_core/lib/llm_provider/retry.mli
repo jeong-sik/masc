@@ -31,6 +31,16 @@ type invalid_request_reason =
           attempt opens a fresh window -- while a refusal whose body arrived
           ends the attempt. *)
   | Unknown_invalid_request
+      (** From {!classify_error}: an HTTP 400 or 422 whose body named nothing
+          this classifier knows. Other producers fold their own untyped
+          failures here. *)
+  | Unclassified_status of { status : int }
+      (** From {!classify_error}: a status that no other arm names (3xx, 405,
+          408, 409, ...). Kept apart from {!Unknown_invalid_request} because
+          it is not a 400 or 422 refusal of the request. The consumers that
+          existed before it read it exactly as {!Unknown_invalid_request};
+          only the Librarian slot outcome (RFC librarian §7.2) reads it
+          differently, as a slot that did not answer. *)
 
 type input_capacity_reason =
   | Serving_constraint_rejected of Serving_constraint.admission_error
@@ -121,21 +131,6 @@ val verdict_of_empty_completion
   :  stop_reason:Types.stop_reason
   -> message:string
   -> empty_completion_verdict
-
-(** [overflow_of_empty_completion ~stop_reason ~message] is the overflow-only
-    projection of {!verdict_of_empty_completion}: [Some (ContextOverflow …)]
-    when [stop_reason] is [ContextWindowExceeded], else [None]. Single
-    compiler-checked source for the #2621 empty-completion overflow rule; the
-    message prefix
-    ["empty completion (stop_reason=model_context_window_exceeded): "] and
-    [limit = None] live there so all call sites stay byte-identical. Callers
-    that must distinguish an unmodeled stop_reason from a recognized
-    non-overflow one use {!verdict_of_empty_completion} instead — this
-    projection collapses both into [None]. *)
-val overflow_of_empty_completion
-  :  stop_reason:Types.stop_reason
-  -> message:string
-  -> api_error option
 
 (** Merge a provider's structured [retry_after] evidence: the JSON body's
     [error.retry_after] field wins when present (provider-specific, more

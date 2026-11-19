@@ -105,6 +105,7 @@ type provider_refusal =
   | Authorization_refused
   | Payment_required
   | Invalid_request
+  | Unclassified_status
   | Not_found
   | Context_overflow
   | Input_capacity
@@ -122,6 +123,7 @@ let provider_refusal_to_string = function
   | Authorization_refused -> "authorization_refused"
   | Payment_required -> "payment_required"
   | Invalid_request -> "invalid_request"
+  | Unclassified_status -> "unclassified_status"
   | Not_found -> "not_found"
   | Context_overflow -> "context_overflow"
   | Input_capacity -> "input_capacity"
@@ -134,6 +136,24 @@ type generation_dispatch_fact =
   | No_generation_dispatch
   | Generation_dispatch_started
 
+type incomplete_stop = Exact_output_plan.incomplete_stop =
+  | End_turn
+  | Tool_use
+  | Stop_sequence
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Pause_turn
+  | Compaction
+  | Unmatched_tool_calls
+  | Unknown_stop of string
+
+let stop_reason_of_incomplete_stop = Exact_output_plan.stop_reason_of_incomplete_stop
+
+type window_output = Exact_output_plan.window_output =
+  | No_output
+  | Partial_output
+
 type execution_error_cause =
   | Completion_failed of
       { error : Http_client.http_error
@@ -145,8 +165,14 @@ type execution_error_cause =
       ; refusal : provider_refusal
       ; retry_after_s : float option
       }
+  | Provider_context_overflow of
+      { error : Http_client.http_error
+      ; http_status : int option
+      ; dispatch : generation_dispatch_fact
+      }
   | Output_limit_reached
-  | Incomplete_output
+  | Window_reached of { output : window_output }
+  | Incomplete_output of { stop : incomplete_stop }
   | Missing_output
   | Ambiguous_output of int
   | Unexpected_output_content
@@ -860,6 +886,7 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
           | Retry.Unknown_invalid_request )
       ; _
       } -> Invalid_request
+  | Retry.InvalidRequest { reason = Retry.Unclassified_status _; _ } -> Unclassified_status
   | Retry.RateLimited _ -> Rate_limited
   | Retry.Overloaded _ -> Overloaded
   | Retry.ServerError _ -> Server_error
@@ -909,31 +936,28 @@ let execution_error_cause ~http_status ~dispatch = function
       }
   | Exec.Provider_error
       (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
-    (match http_status with
-     | Some http_status ->
-       Provider_response_refused
-         { http_status; refusal = Context_overflow; retry_after_s = None }
-     | None -> Completion_failed { error; dispatch })
+    Provider_context_overflow { error; http_status; dispatch }
   (* Empty OpenAI/GLM content is rejected by the provider parser before JSON
-     normalization. Its typed stop reason still proves an output limit. *)
+     normalization. Its typed stop reason still proves an output limit, or a
+     stop at the window: a generation spent on an input that fit, so not a
+     refusal of the input whatever the status. Other empty stops keep the
+     transport error. *)
   | Exec.Provider_error
       (Http_client.ProviderFailure
-         { kind = Http_client.Empty_completion { stop_reason = Types.MaxTokens }; _ }) ->
-    Output_limit_reached
-  (* An empty answer the provider stopped at its window is the same refusal in
-     another shape. [Retry.overflow_of_empty_completion] is the one rule for
-     which empty answers those are. *)
-  | Exec.Provider_error
-      (Http_client.ProviderFailure
-         { kind = Http_client.Empty_completion { stop_reason }; message } as error) ->
-    (match Retry.overflow_of_empty_completion ~stop_reason ~message, http_status with
-     | Some overflow, Some http_status ->
-       Provider_response_refused
-         { http_status
-         ; refusal = provider_refusal_of_api_error overflow
-         ; retry_after_s = None
-         }
-     | Some _, None | None, (Some _ | None) -> Completion_failed { error; dispatch })
+         { kind = Http_client.Empty_completion { stop_reason }; _ } as error) ->
+    (match stop_reason with
+     | Types.MaxTokens -> Output_limit_reached
+     | Types.ContextWindowExceeded -> Window_reached { output = No_output }
+     | Types.EndTurn
+     | Types.StopToolUse
+     | Types.StopSequence
+     | Types.Refusal
+     | Types.ContentFilter
+     | Types.RepetitionTruncation
+     | Types.PauseTurn
+     | Types.Compaction
+     | Types.UnmatchedToolCalls
+     | Types.Unknown _ -> Completion_failed { error; dispatch })
   (* Other transport, provider parsing or observer failures remain distinct
      from an owned body deadline, even when their receipt has headers. The
      typed transport error travels with the cause so a consumer can tell a
@@ -956,27 +980,58 @@ let execution_error_cause ~http_status ~dispatch = function
                | Http_client.Unknown_provider_failure _ )
            ; _
            } ) as error) -> Completion_failed { error; dispatch }
-  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response Types.MaxTokens) ->
-    Output_limit_reached
-  | Exec.Output_normalization_failed
-      (Exec.Incomplete_structured_response
-         ( Types.EndTurn
-         | Types.StopToolUse
-         | Types.StopSequence
-         | Types.Refusal
-         | Types.ContentFilter
-         | Types.RepetitionTruncation
-         | Types.PauseTurn
-         | Types.Compaction
-         | Types.ContextWindowExceeded
-         | Types.UnmatchedToolCalls
-         | Types.Unknown _ )) -> Incomplete_output
+  | Exec.Output_normalization_failed Exec.Output_limit_stopped -> Output_limit_reached
+  | Exec.Output_normalization_failed (Exec.Window_stopped output) -> Window_reached { output }
+  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response stop) ->
+    Incomplete_output { stop }
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
   | Exec.Output_normalization_failed (Exec.Ambiguous_structured_text count) ->
     Ambiguous_output count
   | Exec.Output_normalization_failed Exec.Unexpected_structured_content ->
     Unexpected_output_content
   | Exec.Output_normalization_failed (Exec.Invalid_json _) -> Invalid_json_output
+;;
+
+let%test "a typed context overflow keeps its type without an HTTP status" =
+  let error =
+    Http_client.ProviderFailure
+      { kind = Http_client.Context_overflow { limit = Some 8192 }
+      ; message = "typed overflow"
+      }
+  in
+  match
+    execution_error_cause
+      ~http_status:None
+      ~dispatch:Generation_dispatch_started
+      (Exec.Provider_error error)
+  with
+  | Provider_context_overflow { error = observed; http_status = None; dispatch } ->
+    observed == error && dispatch = Generation_dispatch_started
+  | Provider_context_overflow _ -> false
+  | Completion_failed _ | Response_body_deadline_exceeded | Provider_response_refused _
+  | Output_limit_reached | Window_reached _ | Incomplete_output _ | Missing_output
+  | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output -> false
+;;
+
+let%test "a typed context overflow keeps an observed HTTP status and dispatch" =
+  let error =
+    Http_client.ProviderFailure
+      { kind = Http_client.Context_overflow { limit = Some 8192 }
+      ; message = "typed overflow"
+      }
+  in
+  match
+    execution_error_cause
+      ~http_status:(Some 400)
+      ~dispatch:Generation_dispatch_started
+      (Exec.Provider_error error)
+  with
+  | Provider_context_overflow { error = observed; http_status = Some 400; dispatch } ->
+    observed == error && dispatch = Generation_dispatch_started
+  | Provider_context_overflow _ -> false
+  | Completion_failed _ | Response_body_deadline_exceeded | Provider_response_refused _
+  | Output_limit_reached | Window_reached _ | Incomplete_output _ | Missing_output
+  | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output -> false
 ;;
 
 let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
@@ -1081,6 +1136,7 @@ let provider_refusal_is_binding_rest = function
   | Auth_failed
   | Authorization_refused
   | Invalid_request
+  | Unclassified_status
   | Not_found
   | Context_overflow
   | Input_capacity
@@ -1113,6 +1169,7 @@ let provider_failure_is_binding_rest : Http_client.provider_failure_kind -> bool
 let execution_cause_is_binding_rest = function
   | Provider_response_refused { refusal; http_status = _ } ->
     provider_refusal_is_binding_rest refusal
+  | Provider_context_overflow _ -> false
   | Completion_failed { error = Http_client.ProviderFailure { kind; message = _ }; dispatch = _ }
     -> provider_failure_is_binding_rest kind
   | Completion_failed
@@ -1134,7 +1191,8 @@ let execution_cause_is_binding_rest = function
       } -> false
   | Response_body_deadline_exceeded
   | Output_limit_reached
-  | Incomplete_output
+  | Window_reached _
+  | Incomplete_output _
   | Missing_output
   | Ambiguous_output _
   | Unexpected_output_content
@@ -1378,11 +1436,11 @@ let responses_uncertainty snapshot (execution_error : execution_error option) =
           | Other _ -> Some Response_status_unrecognized
           | Completed | Failed | Incomplete | Cancelled ->
             (match execution_error with
-             | Some { cause = Provider_response_refused _; _ } ->
+             | Some { cause = Provider_response_refused _ | Provider_context_overflow _; _ } ->
                Some Response_refusal_on_success_status
              | None
              | Some { cause = (Completion_failed _ | Response_body_deadline_exceeded
-                 | Output_limit_reached | Incomplete_output | Missing_output
+                 | Output_limit_reached | Window_reached _ | Incomplete_output _ | Missing_output
                  | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output); _ } -> None)))
     | Some _ -> Some Response_non_success_status
 ;;
@@ -1658,8 +1716,18 @@ let execution_error_cause_to_string : execution_error_cause -> string = function
       "provider refused (http_status=%d refusal=%s)"
       http_status
       (provider_refusal_to_string refusal)
+  | Provider_context_overflow { http_status; dispatch; _ } ->
+    Printf.sprintf
+      "provider context overflow (http_status=%s, %s)"
+      (match http_status with Some status -> string_of_int status | None -> "none")
+      (generation_dispatch_fact_to_string dispatch)
   | Output_limit_reached -> "output limit reached"
-  | Incomplete_output -> "incomplete output"
+  | Window_reached { output = No_output } -> "context window reached (no output)"
+  | Window_reached { output = Partial_output } -> "context window reached (partial output)"
+  | Incomplete_output { stop } ->
+    Printf.sprintf
+      "incomplete output (stop_reason=%s)"
+      (Types.stop_reason_to_string (stop_reason_of_incomplete_stop stop))
   | Missing_output -> "missing output"
   | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
   | Unexpected_output_content -> "unexpected output content"

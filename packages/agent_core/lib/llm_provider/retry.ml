@@ -6,6 +6,7 @@ type invalid_request_reason =
   | Request_body_refused_by_provider of { status : int }
   | Refusal_body_not_received
   | Unknown_invalid_request
+  | Unclassified_status of { status : int }
 
 type input_capacity_reason =
   | Serving_constraint_rejected of Serving_constraint.admission_error
@@ -68,6 +69,7 @@ let invalid_request_reason_to_string = function
     Printf.sprintf "request_body_refused_by_provider(status=%d)" status
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Unknown_invalid_request -> "unknown"
+  | Unclassified_status { status } -> Printf.sprintf "unclassified_status(status=%d)" status
 ;;
 
 let error_message = function
@@ -155,7 +157,10 @@ let is_retryable = function
     true
   | InvalidRequest
       { reason =
-          Attempt_rejected | Request_body_refused_by_provider _ | Unknown_invalid_request
+          ( Attempt_rejected
+          | Request_body_refused_by_provider _
+          | Unknown_invalid_request
+          | Unclassified_status _ )
       ; _
       } -> false
   | AuthError _ | AuthorizationError _ | ContextOverflow _ | InputCapacity _ | NotFound _
@@ -209,51 +214,6 @@ let verdict_of_empty_completion ~(stop_reason : Types.stop_reason) ~message =
   | Types.Compaction
   | Types.UnmatchedToolCalls -> Empty_attributed
   | Types.Unknown token -> Empty_unattributed { token }
-;;
-
-(** [overflow_of_empty_completion ~stop_reason ~message] is the single,
-    compiler-checked source for the #2621 empty-completion overflow rule.
-
-    An empty turn whose typed [stop_reason] is [ContextWindowExceeded] is a
-    context-overflow contract, not provider unavailability: retrying or
-    rotating replays the same oversized prompt, so only the consumer's context
-    recovery (compaction) can make progress. The provider does not report its
-    limit on this path, hence [limit = None].
-
-    Only the typed [ContextOverflow] value is produced here. Each caller keeps
-    its own wrapping of the result — [Provider_failure_attribution]'s
-    [Error.Api], and agent core boundary in [Error] that flattens via
-    [error_message] into [InvalidRequest].
-
-    This is the overflow-only projection of {!verdict_of_empty_completion}: it
-    collapses both a recognized non-overflow stop_reason and an unmodeled one
-    into [None]. Callers that must not retry an unmodeled contract read the
-    verdict directly instead. *)
-let overflow_of_empty_completion ~(stop_reason : Types.stop_reason) ~message =
-  match verdict_of_empty_completion ~stop_reason ~message with
-  | Empty_overflow overflow -> Some overflow
-  | Empty_attributed | Empty_unattributed _ -> None
-;;
-
-let%test "overflow_of_empty_completion: ContextWindowExceeded yields ContextOverflow" =
-  match
-    overflow_of_empty_completion ~stop_reason:Types.ContextWindowExceeded ~message:"X"
-  with
-  | Some
-      (ContextOverflow
-         { message = "empty completion (stop_reason=model_context_window_exceeded): X"
-         ; limit = None
-         }) -> true
-  | Some (RateLimited _) | None | Some (Overloaded _) | Some (ServerError _) | Some (AuthError _)
-  | Some (AuthorizationError _) | Some (PaymentRequired _) | Some (InvalidRequest _)
-  | Some (NotFound _) | Some (ContextOverflow _) | Some (InputCapacity _) | Some (NetworkError _)
-  | Some (Connect_failed _) | Some (Timeout _) -> false
-;;
-
-let%test "overflow_of_empty_completion: non-overflow stop_reason yields None" =
-  match overflow_of_empty_completion ~stop_reason:Types.EndTurn ~message:"X" with
-  | None -> true
-  | Some _ -> false
 ;;
 
 let%test "verdict_of_empty_completion: ContextWindowExceeded is Empty_overflow" =
@@ -371,9 +331,8 @@ let classify_error ~retry_after_header ~status ~body : api_error =
   | 422 -> InvalidRequest { message; reason = Unknown_invalid_request }
   | 413 ->
     (* HTTP 413 states the refusal cause in the status line: the payload was too
-       large. Leaving it in the catch-all below reported that cause as
-       [Unknown_invalid_request], which a consumer must treat as a defect in what it
-       built rather than a size it can reduce. The response carries a status,
+       large. Leaving it in the catch-all below would report a status without
+       that cause, which a consumer cannot read as a size it can reduce. The response carries a status,
        not a bound, and none is fabricated. This repository already reads 413 as its own case when attributing
        a failure (provider_failure_attribution.ml, 400 | 413 | 422 -> Attempt_local);
        classification was the asymmetric half. *)
@@ -386,7 +345,12 @@ let classify_error ~retry_after_header ~status ~body : api_error =
     (match server_status_class_of_code status with
      | Some Overloaded_status -> Overloaded { message }
      | Some Server_error_status -> ServerError { status; message }
-     | None -> InvalidRequest { message; reason = Unknown_invalid_request })
+     | None ->
+       (* A status no arm above names (3xx, 405, 408, 409, ...) is not a 400
+          or 422 refusal of the request, and filing it as one let a consumer
+          read it as a defect in what it sent. It keeps its own reason and the
+          status it came with. *)
+       InvalidRequest { message; reason = Unclassified_status { status } })
 ;;
 
 (* The refusal a transport reports, classified. A body that arrived is
@@ -449,6 +413,7 @@ let%test "is_retryable: flat Ollama provider prose is not retryable" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       } -> false
   | RateLimited _
@@ -475,6 +440,7 @@ let%test "HTTP 400 prose does not synthesize ContextOverflow" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -501,6 +467,7 @@ let%test "HTTP 400 prompt-too-long report without ref stays Unknown InvalidReque
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -533,6 +500,7 @@ let%test "HTTP 400 prompt-too-long report with UUID ref stays unknown" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | NotFound _
@@ -559,6 +527,7 @@ let%test "measured Ollama HTTP 400 prose stays unknown" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | NotFound _
@@ -579,6 +548,7 @@ let%test "nested HTTP 400 prompt-too-long prose stays Unknown InvalidRequest" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -605,6 +575,7 @@ let%test "HTTP 400 prompt-too-long report requires an ASCII token count" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -631,6 +602,7 @@ let%test "HTTP 400 prompt-too-long report rejects unrelated suffixes" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -657,6 +629,7 @@ let%test "HTTP 422 prompt-too-long report stays Unknown InvalidRequest" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       }
   | ContextOverflow _
@@ -681,6 +654,7 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
       { reason =
           Json_parse_error | Attempt_rejected
           | Request_body_refused_by_provider _ | Refusal_body_not_received
+          | Unclassified_status _
       ; _
       } -> false
   | RateLimited _

@@ -44,6 +44,16 @@ let order_at ~now (resolved : Registry.resolved_lane) =
   }
 ;;
 
+let held_until ({ lane; held_http } : ordered)
+      ~(cli : string Standing.exact_order) =
+  match lane.Registry.selected_slots, cli.walk with
+  | _ :: _, _ | [], _ :: _ -> None
+  | [], [] ->
+    (match List.map (fun held -> held.until) held_http @ List.map snd cli.held with
+     | [] -> None
+     | first :: rest -> Some (List.fold_left Float.min first rest))
+;;
+
 let order resolved =
   (* NDT-OK: the wall clock decides only whether a rest or a provider-stated
      time has passed. A slot it sets aside comes back in [held_http] with its
@@ -61,7 +71,9 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
       (Keeper_runtime_failure_route.usable_retry_after retry_after_s) in
     observe_slot ~resolved ~slot_id
       (Standing.Hard_quota {source=Runtime_quota_window.Payment_refused; resets_at})
-  | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started} ->
+  | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started}
+  | Exact.Provider_context_overflow
+      {error; http_status=None; dispatch=Exact.Generation_dispatch_started} ->
     Option.iter
       (fun (runtime : Registry.runtime_observation) ->
         (* NDT-OK: only the actual dispatched attempt's frozen identity owns
@@ -77,15 +89,19 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   | Exact.Provider_response_refused
       { refusal =
           ( Exact.Request_body_refused | Exact.Refusal_body_not_received | Exact.Overloaded
-          | Exact.Server_error | Exact.Invalid_request | Exact.Not_found
+          | Exact.Server_error | Exact.Invalid_request | Exact.Unclassified_status
+          | Exact.Not_found
           | Exact.Context_overflow | Exact.Input_capacity | Exact.Network_error
           | Exact.Connect_failed | Exact.Timeout )
       ; _
       }
   | Exact.Completion_failed {dispatch=Exact.No_generation_dispatch; _}
+  | Exact.Provider_context_overflow {http_status=Some _; _}
+  | Exact.Provider_context_overflow {http_status=None; dispatch=Exact.No_generation_dispatch; _}
   | Exact.Response_body_deadline_exceeded
   | Exact.Output_limit_reached
-  | Exact.Incomplete_output
+  | Exact.Window_reached _
+  | Exact.Incomplete_output _
   | Exact.Missing_output
   | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content

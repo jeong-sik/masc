@@ -22,12 +22,31 @@ type focus =
   | Focused_list
   | Focused_other
 
+type inline_key =
+  { key : string
+  ; label : string
+  }
+
+let superscript_digit = function
+  | 1 -> Some "\xc2\xb9" (* ¹ *)
+  | 2 -> Some "\xc2\xb2" (* ² *)
+  | 3 -> Some "\xc2\xb3" (* ³ *)
+  | 4 -> Some "\xe2\x81\xb4" (* ⁴ *)
+  | 5 -> Some "\xe2\x81\xb5" (* ⁵ *)
+  | 6 -> Some "\xe2\x81\xb6" (* ⁶ *)
+  | 7 -> Some "\xe2\x81\xb7" (* ⁷ *)
+  | 8 -> Some "\xe2\x81\xb8" (* ⁸ *)
+  | 9 -> Some "\xe2\x81\xb9" (* ⁹ *)
+  | _ -> None
+
 type edge =
   { name : string
   ; key : (string * string) option
   ; status : status option
   ; count : count option
   ; focus : focus
+  ; border_accent : string option
+  ; footer_keys : inline_key list
   }
 
 type t =
@@ -249,9 +268,10 @@ let top_fit ~ko ~width edge =
         | Some name -> kept ~key:false ~name ~word:false ()
         | None -> tail ())
 
-let border_style ~style = function
+let border_style ~style edge =
+  match edge.focus with
   | Focused_list | Focused_other -> style.focused_border
-  | Unfocused -> style.border
+  | Unfocused -> Option.value ~default:style.border edge.border_accent
 
 (* The ends of a squashed card are half rules, after lazygit's squashed frame:
    a row with corners would read as a box that never closes, and the half
@@ -270,7 +290,7 @@ let top_edge ~ko ~style ~width ~shape edge =
   let glyphs = glyphs_of_focus edge.focus in
   let start, finish = edge_ends ~glyphs shape in
   let fit = top_fit ~ko ~width edge in
-  let border = border_style ~style edge.focus in
+  let border = border_style ~style edge in
   let paint code text = code ^ text ^ style.reset in
   let key =
     match edge.key with
@@ -322,18 +342,68 @@ let bottom_fit ~ko ~width ~hidden =
   else if cells (Value.Count.grouped hidden) <= room then Number_only
   else Plain
 
-let bottom_edge ~ko ~glyphs ~border ~reset ~width hidden =
+let format_footer_keys ~glyphs ~style ~border ~room keys =
+  if room <= 0 || keys = [] then ("", 0)
+  else
+    let sep = border ^ " " ^ glyphs.h ^ " " ^ style.reset in
+    let sep_cells = 3 in
+    let render_one { key; label } =
+      let k = Masc_tui_theme.strip_sgr key in
+      let l = Masc_tui_theme.strip_sgr label in
+      let text =
+        if String.equal l "" then style.title_style ^ k ^ style.reset
+        else style.title_style ^ k ^ style.reset ^ border ^ " " ^ l ^ style.reset
+      in
+      let width = cells k + (if String.equal l "" then 0 else 1 + cells l) in
+      (text, width)
+    in
+    let rec collect acc used = function
+      | [] -> (List.rev acc, used)
+      | item :: rest ->
+          let text, w = render_one item in
+          let needed = if acc = [] then w else sep_cells + w in
+          if used + needed <= room then collect (text :: acc) (used + needed) rest
+          else (List.rev acc, used)
+    in
+    let kept, used = collect [] 0 keys in
+    (String.concat sep kept, used)
+
+let bottom_edge ~ko ~glyphs ~style ~border ~width ~footer_keys hidden =
+  let reset = style.reset in
   let paint text = border ^ text ^ reset in
-  let with_text text =
-    paint
-      (glyphs.bl
-       ^ repeat glyphs.h (width - cells text - bottom_text_cells + 1)
-       ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
+  let right_text =
+    match bottom_fit ~ko ~width ~hidden with
+    | Says_more -> Some (Value.Count.more ~ko hidden)
+    | Number_only -> Some (Value.Count.grouped hidden)
+    | Plain -> None
   in
-  match bottom_fit ~ko ~width ~hidden with
-  | Says_more -> with_text (Value.Count.more ~ko hidden)
-  | Number_only -> with_text (Value.Count.grouped hidden)
-  | Plain -> paint (glyphs.bl ^ repeat glyphs.h (width - 2) ^ glyphs.br)
+  let right_cells = match right_text with None -> 0 | Some t -> cells t in
+  (* Room available for left inline keys:
+     with right_text: [╰─ ] (3) + left + [ ─ ] (3) + right + [ ─╯] (3) -> width - right_cells - 9
+     without:         [╰─ ] (3) + left + [ ─╯] (3) -> width - 6 *)
+  let key_room =
+    match right_text with
+    | Some _ -> width - right_cells - 9
+    | None -> width - 6
+  in
+  let left_text, left_cells =
+    format_footer_keys ~glyphs ~style ~border ~room:key_room footer_keys
+  in
+  match left_cells > 0, right_text with
+  | false, None -> paint (glyphs.bl ^ repeat glyphs.h (width - 2) ^ glyphs.br)
+  | false, Some text ->
+      paint
+        (glyphs.bl
+         ^ repeat glyphs.h (width - right_cells - bottom_text_cells + 1)
+         ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
+  | true, None ->
+      let rule = max 0 (width - left_cells - 5) in
+      paint (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
+      ^ paint (" " ^ repeat glyphs.h rule ^ glyphs.br)
+  | true, Some text ->
+      let rule = max 1 (width - left_cells - right_cells - 8) in
+      paint (glyphs.bl ^ glyphs.h ^ " ") ^ left_text
+      ^ paint (" " ^ repeat glyphs.h rule ^ " " ^ text ^ " " ^ glyphs.h ^ glyphs.br)
 
 let scrollbar_cells ~rows { offset; visible; total } =
   if rows <= 0 || visible <= 0 || total <= visible then None
@@ -397,7 +467,7 @@ let render_body ?scrollbar ~ko ~style ~width ~height edge body =
     let rows = height - 2 in
     let shown, hidden = window ~rows body in
     let glyphs = glyphs_of_focus edge.focus in
-    let border = border_style ~style edge.focus in
+    let border = border_style ~style edge in
     let thumb_style =
       if String.equal style.title_style "" then border else style.title_style
     in
@@ -418,7 +488,7 @@ let render_body ?scrollbar ~ko ~style ~width ~height edge body =
         (shown @ filler)
     in
     (top_edge ~ko ~style ~width ~shape:Full edge :: body_rows)
-    @ [ bottom_edge ~ko ~glyphs ~border ~reset:style.reset ~width hidden ]
+    @ [ bottom_edge ~ko ~glyphs ~style ~border ~width ~footer_keys:edge.footer_keys hidden ]
   end
 
 let render ?scrollbar ~ko ~style ~width ~height card =

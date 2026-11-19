@@ -146,8 +146,6 @@ type t =
           hidden. Ctrl-N walks the same cycle. *)
   | Memory_status
       (** [/memory status] — report the selected Keeper's last measured drain. *)
-  | Memory_sync
-      (** [/memory sync] — request the existing serialized catch-up path. *)
   | Open_fleet_memory
       (** [/fleet-memory] — browse the facts of every Keeper in the fleet at
           once. [a] on the Memory overview opens the same screen. *)

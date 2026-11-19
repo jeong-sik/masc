@@ -1530,7 +1530,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - `Skip_line` 은 읽을 수 있는 단위를 지나치지 못한다. 읽는 쪽은 해석 못 하는 줄 앞의 항목 든 단위를 먼저 묻고 반영한다. 그 줄 앞에 항목 든 단위가 없을 때만 받는다. 앞에 놓인 항목 없는 단위는 같이 지나간다.
 - 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다.
 - route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
-- 옛 route 인 `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
+- 옛 route 인 `memory-catch-up` 은 쓰는 쪽을 켜기 전에 지운다(§20 L5p). 쓰는 쪽은 턴 기록과 pulse 로 할 일을 찾으므로 운영자가 깨우는 길을 두지 않는다. 일괄 cleanup, `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
 
 ## 13. 실패마다 장치와 시험
 
@@ -1867,7 +1867,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **f. add-on.** `addons/keeper-librarian/` 와 `addons/tests/test_keeper_librarian.py`. `addons/exact_worker.py` 는 고치지 않는다. Lane Add-on 틀의 서버 쪽에서 지우는 모듈을 직접 부르는 곳은 둘이다(아래 k). 틀이 싣는 add-on 목록에서도 Librarian 이 빠진다. `Lane_addon_carried` 의 `Keeper_librarian` 갈래, `lib/embedded_exact_addons/dune` 의 `embedded_keeper_librarian` 모듈과 규칙, 그 목록 전체를 도는 `exact_addon_setup`, `bin/main_eio.ml` 의 도움말 글, `lane_addon_store.ml` 의 history fence 와 resolution 디렉터리 이름 둘이다. 이 곳들은 지우는 모듈 이름을 부르지 않아서 k 의 목록에 나오지 않는다. 틀은 나머지 add-on 을 그대로 싣는다.
 
-**g. route 와 도구.** `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. history resolution route 는 지운다(`server_routes_http_routes_keepers` 의 등록과 그 handler 단위). `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
+**g. route 와 도구.** 일괄 cleanup, `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. `memory-catch-up` route 와 history resolution route 는 L5p 에서 지운다(`server_routes_http_routes_keepers` 의 등록과 그 handler). `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
 
 **h. 시험과 release 목록.**
 
@@ -1963,6 +1963,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5m | working-context pass 하나를 `keeper_librarian_queue_refresh` 에서 `keeper_working_context_pass` 로 옮긴다. 동작은 같다 | 옛 모듈의 pass 가 새 모듈을 부른다. 기존 시험 둘이 새 이름으로 같은 것을 단언한다 |
 | L5n | Keeper 의 `keeper_memory_write` 가 admission queue 에 넣지 않고 지금 스냅샷에 바로 쓴다. queue 에 넣는 곳은 이 도구 하나였다. 이미 든 줄은 옛 admission pass 가 비우고, 파일은 컷에서 지운다 | 평범한 관찰이 바로 지금 Memory 에 든다. 같은 claim 을 다시 쓰면 `reobserved` 다. 옛 admission 경로의 시험은 queue 를 직접 채운다 |
 | L5o | 서버가 큐 신호에 working-context pass 만 싣는다. launch, boot, checkpoint purge 가 durable catch-up 을 싣지 않는다 | launch 가 memory lane 에 아무것도 싣지 않는다. 돌고 있는 unit 뒤에 쌓이는 것이 없다 |
+| L5p | 운영자가 옛 durable pass 를 싣던 두 길을 지운다. `memory-catch-up` route 와 TUI 의 `/memory sync`, history original resolution route 다 | `/memory sync` 는 모르는 명령이다. 두 경로에 route 가 없다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |

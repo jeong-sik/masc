@@ -2055,7 +2055,7 @@ let proactive_outcome_word ~ko =
   let text korean english = if ko then korean else english in
   function
   | Masc.Keeper_meta_contract.Proactive_never_started -> text "아직 시작하지 않음" "never started"
-  | Masc.Keeper_meta_contract.Proactive_unknown -> text "결과 미확인" "unknown"
+  | Masc.Keeper_meta_contract.Proactive_unknown -> text "결과 보고 안 됨" "outcome not reported"
   | Masc.Keeper_meta_contract.Proactive_silent -> text "응답 없이 종료" "silent"
   | Masc.Keeper_meta_contract.Proactive_text_response -> text "글로 응답함" "replied with text"
   | Masc.Keeper_meta_contract.Proactive_tool_use -> text "도구를 사용함" "used tools"
@@ -2129,7 +2129,7 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
       let title = if String.equal (String.trim title) "" then Terminal_text.single_line task.id else title in
       let task_source = match local_rows_page state ~error:state.tasks_error with
         | Page_failed -> text "배정 목록 갱신 실패 · 보존된 배정 작업: " "assignment refresh failed · retained assignment: "
-        | Page_unread -> text "배정 목록 미확인 · 보존된 배정 작업: " "assignment source unread · retained assignment: "
+        | Page_unread -> text "배정 목록 미조회 · 보존된 배정 작업: " "assignment source not read · retained assignment: "
         | Page_empty ->
             if Option.is_some (local_source_pending state Local_work) then
               text "배정 목록 갱신 중 · 보존된 배정 작업: " "assignment refresh pending · retained assignment: "
@@ -2137,7 +2137,7 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
       in
       let keeper_source = match keeper_rows_page state ~error:state.keepers_error with
         | Page_failed -> text "Keeper 배정 연결 갱신 실패 · " "Keeper assignment link refresh failed · "
-        | Page_unread -> text "Keeper 배정 연결 미확인 · " "Keeper assignment link unread · "
+        | Page_unread -> text "Keeper 배정 연결 미조회 · " "Keeper assignment link not read · "
         | Page_empty ->
             if Option.is_some (local_source_pending state Local_keepers) then
               text "Keeper 배정 연결 갱신 중 · " "Keeper assignment link refreshing · " else ""
@@ -2165,15 +2165,16 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
            | Some (Tui_decode.Keeper_turn_running { preview = Some preview; _ }) ->
                let status = Terminal_text.single_line preview.ktp_status_text in
                if String.equal (String.trim status) "" then
-                 observed "실행 중 · 작업 이름 미관측" "running · work title not observed"
+                 observed "실행 중 · 작업 이름 보고 안 됨" "running · work title not reported"
                else observed status status
            | Some (Tui_decode.Keeper_turn_unavailable reason) ->
-               text "실행 상태 미확인: " "execution unknown: " ^ Terminal_text.single_line reason
+               text "실행 상태 조회 실패: " "execution read failed: " ^ Terminal_text.single_line reason
            | Some (Tui_decode.Keeper_turn_running { preview = None; _ }) ->
-               observed "실행 중 · 작업 이름 미관측" "running · work title not observed"
+               observed "실행 중 · 작업 이름 보고 안 됨" "running · work title not reported"
            | Some Tui_decode.Keeper_turn_idle ->
-               observed "실행 중인 턴 없음 · 작업 이름 미관측" "no running turn · work title not observed"
-           | None -> text "현재 작업 미관측" "current work not observed")
+               (* No running turn has no work to name. *)
+               observed "실행 중인 턴 없음" "no running turn"
+           | None -> text "현재 작업 미조회" "current work not read")
 
 let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
   let text ko en = ui_text state ~ko ~en in
@@ -2212,20 +2213,22 @@ let keeper_plain_turn_record (state : state) ~now ~keeper_name =
      completed, not that Plain has kept observing later turns. Even an empty
      successful page is retained here until the operator reopens Story. *)
   let retained =
-    text "보존 관측 · 현재 결과 미확인 · Enter:Story 재조회 · "
-      "retained observation · current result unknown · Enter:Story to reread · "
+    text "이전 관측 · Enter:Story 재조회 · "
+      "earlier reading · Enter:Story to reread · "
   in
   let observed turns =
     match List.rev turns with
     | [] -> text "조회된 턴 기록 없음" "no turn records in the reading"
     | (turn : Masc_tui_keeper_turns.turn) :: _ ->
+        (* An age that does not read (a clock that moved backwards) says
+           nothing, as [age_text] does. *)
         let ended = match Message_layout.age_text ~now ~since:turn.at with
           | Some age -> age ^ text " 전 종료 · " " ago ended · "
-          | None -> text "종료 시각 미확인 · " "end time unknown · "
+          | None -> ""
         in
         ended ^ (match turn.stop with
           | Masc_tui_keeper_turns.Stopped reason -> Terminal_text.single_line reason
-          | Masc_tui_keeper_turns.No_stop_reason -> text "종료 사유 미기록" "stop reason not recorded")
+          | Masc_tui_keeper_turns.No_stop_reason -> text "종료 사유 보고 안 됨" "stop reason not reported")
   in
   match Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name with
   | Masc_tui_fetched.Absent -> text "턴 종료 기록 미조회 · Enter:Story" "turn records not read · Enter:Story"
@@ -2239,7 +2242,7 @@ let keeper_plain_turn_record (state : state) ~now ~keeper_name =
         ~request:Kept_request.Keeper_turns_read refusal
       ^ " · " ^ observed turns
   | Masc_tui_fetched.Failed (Request_failed reason) ->
-      text "턴 종료 기록 미확인: " "turn records unknown: " ^ Terminal_text.single_line reason
+      text "턴 종료 기록 조회 실패: " "turn records read failed: " ^ Terminal_text.single_line reason
   | Masc_tui_fetched.Failed (Request_withdrawn refusal) ->
       workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Keeper_turns_read refusal
@@ -2251,7 +2254,7 @@ let keeper_plain_result (state : state) (row : Keeper_list_model.row) =
   | Some { k_last_proactive_outcome = Some outcome; _ } ->
       text "최근 자율 턴: " "last autonomous cycle: " ^ proactive_outcome_word ~ko outcome
   | Some { k_last_proactive_outcome = None; _ } | None ->
-      text "최근 자율 턴 결과 미관측" "last autonomous cycle outcome not observed"
+      text "최근 자율 턴 결과 보고 안 됨" "last autonomous cycle outcome not reported"
 
 let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
   let text ko en = ui_text state ~ko ~en in
@@ -2276,8 +2279,8 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
             Theme.recede () ^ (if requests_observed then
               text "관측된 사람 대기 없음 · Approvals에서 확인"
                 "no human wait in the reading · inspect Approvals"
-            else text "도움 요청 상태 미확인 · Approvals에서 확인"
-                "human waits unknown · inspect Approvals") ^ Ansi.reset
+            else text "사람 대기는 Approvals에서 확인"
+                "human waits: inspect Approvals") ^ Ansi.reset
       in
       let current = keeper_plain_work state row in
       let result = keeper_plain_result state row in
@@ -2485,8 +2488,8 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   let roster = match Keeper_control.roster_view state.keeper_roster with
     | Keeper_control.Roster_partial { observed; total } ->
         [warning "" (text
-           (Printf.sprintf "실행 관측 %d/%d · 나머지는 미확인" (List.length observed) total)
-           (Printf.sprintf "live reading %d/%d · the rest unknown" (List.length observed) total))]
+           (Printf.sprintf "일부 관측 %d/%d · 나머지는 미조회" (List.length observed) total)
+           (Printf.sprintf "partial reading %d/%d · the rest not read" (List.length observed) total))]
     | Keeper_control.Roster_invalid { errors; _ } ->
         [warning "" (text
            (Printf.sprintf "설정 읽기 오류 %d개 · 상세에서 확인" (List.length errors))
@@ -2501,7 +2504,7 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
     | Keeper_control.Roster_complete _ -> []
   in
   let failure = match state.keeper_waiting_failure with
-    | Some (Tui_decode.Keeper_waiting_invalid reason) -> Some (warning (text "대기 관측 미확인: " "waiting unknown: ") reason)
+    | Some (Tui_decode.Keeper_waiting_invalid reason) -> Some (warning (text "대기 관측 조회 실패: " "waiting read failed: ") reason)
     | Some (Tui_decode.Keeper_waiting_sources_unavailable errors) ->
         (* One line like the read errors above. The reasons come right after
            the failure, so a narrow frame cuts the closing note first. *)
@@ -2521,7 +2524,7 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
       ~path:[ text "일과 도움" "work and help" ]
       ~readings:
         (if errors <> [] || roster <> [] || waiting_failed then
-           [ Theme.warn () ^ text "일부 관측 미확인" "some observations unknown" ^ Ansi.reset ]
+           [ Theme.warn () ^ text "일부 관측" "partial reading" ^ Ansi.reset ]
          else [])
       ~position:
         (keeper_list_position ~stop:(keeper_list_stop state)
@@ -2955,8 +2958,8 @@ let render_keeper_axes (state : state) =
        box_line buf cols
          (Theme.warn () ^ "  "
           ^ text
-              (Printf.sprintf "실행 관측 %d/%d · 나머지는 미확인" (List.length observed) total)
-              (Printf.sprintf "live status covers %d of %s; the rest read as unknown"
+              (Printf.sprintf "일부 관측 %d/%d · 나머지는 미조회" (List.length observed) total)
+              (Printf.sprintf "partial reading: live status covers %d of %s; the rest not read"
                  (List.length observed) (Masc_tui_message_layout.count_noun total "keeper"))
           ^ Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
@@ -3935,8 +3938,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Observation_layout.Context_partial observation ->
             add_row context_label
               (Printf.sprintf
-                 (if ko then "컨텍스트 %s 토큰 · 창 크기 미관측"
-                  else "%s tokens in context; window not observed")
+                 (if ko then "컨텍스트 %s 토큰 · 창 크기 보고 안 됨"
+                  else "%s tokens in context; window not reported")
                  (Masc_tui_message_layout.compact_count observation.tokens));
             add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);
             add_row (t "턴 참조:" "Turn Ref:") (Terminal_text.single_line observation.turn_ref)
@@ -4448,7 +4451,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | None, None ->
           (match Connector_read.view state.connectors_read with
            | Connector_read.Quiet ->
-               [ Ansi.dim ^ t "  채널 커넥터 미관측" "  Channel transports not observed" ^ Ansi.reset ]
+               [ Ansi.dim ^ t "  채널 커넥터 미조회" "  Channel transports not read" ^ Ansi.reset ]
            | Reading _ | Waiting_after_write | Failed_to_start ->
                (* The existing typed-source notice below owns pending,
                   held recheck and failed-start guidance; none is a value. *)
@@ -5156,7 +5159,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | None ->
                 (match reading, error, reading_now with
                  | None, None, false ->
-                     [ Ansi.dim ^ t "  실행 상태 미관측" "  Execution snapshot not observed" ^ Ansi.reset ]
+                     [ Ansi.dim ^ t "  실행 상태 미조회" "  Execution snapshot not read" ^ Ansi.reset ]
                  | None, (Some _ | None), true | None, Some _, false -> []
                  | Some _, (Some _ | None), (true | false) ->
                      [ Ansi.dim

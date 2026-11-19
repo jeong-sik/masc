@@ -259,6 +259,7 @@ let decision_public_allowlist =
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
+    ; "media_projected_total"; "media_projected_counts"
     (* The other two media rows of the per-candidate projection: [delegated]
        counts the images turned into readings or references, and
        [degrade_unavailable] names the modalities nothing could remove.

@@ -34,15 +34,21 @@ val tools_display_lines : ?cols:int -> ?terminal_rows:int -> state -> (string * 
     scope and column legends are in the Tools section's Help binding. *)
 
 type cursor_rows = { first_row : int; last_row : int }
-(** Indexes in [lines] of the first and the last physical row of one entry:
-    the same index when it fits the width, more than one row when it wraps. *)
+(** Indexes in [lines] of the first and the last physical row of one run of
+    rows: the same index for one row that fits the width, more than one when
+    the run holds more rows or a row wraps. *)
 
 type display =
   { lines : (string * string) list  (** What {!tools_display_lines} returns. *)
   ; cursor : cursor_rows option
         (** The rows of the Skill the list keys act on, on a pane that lists
-            Skills. The key handler brings them into view instead of looking
-            for the selection colour, and a row that wraps comes in whole. *)
+            Skills: its own row and the rows that say why it was loaded. The
+            key handler brings them into view instead of looking for the
+            selection colour, and a row that wraps comes in whole. *)
+  ; card : cursor_rows option
+        (** The rows of the selected Skill's measurement card, under the
+            Skill list, so a key that opens the measurements can bring the
+            card into view. *)
   }
 
 val tools_display : ?cols:int -> ?terminal_rows:int -> state -> display

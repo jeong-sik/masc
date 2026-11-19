@@ -15,16 +15,31 @@
 # install says so and goes on. A non-directory path, a broken symlink or an
 # unobservable path is not a new workspace and stops the install.
 #
-# Local installs leave the guest exec shim alone and make no release request
-# for it. --refresh-guest-shim updates an existing release shim when deploying
-# a server/shim change to microVM Keepers. The release installer places it
-# initially (RFC-0427 B-2). With this option, an existing release shim
-# (masc-exec-shim with its sha256 sidecar) is replaced by
+# The server runs only a guest exec shim built from its own source (#52968,
+# RFC host-and-shim-share-one-build-identity), so the shim goes with the
+# server (#53164). A workspace shim without a sha256 sidecar was built from
+# source. When it declares another source identity than this build's
+# main_eio.exe, scripts/remote-ssh/build-shim.sh builds a new one from this
+# checkout for the guest architecture the old shim's ELF header names. The
+# new shim must declare this build's identity. It replaces the old one in
+# one rename, and the old one stays beside it as masc-exec-shim.previous,
+# which holds only the shim the latest rebuild replaced. All of this happens
+# before any binary is replaced. A failed build (build-shim.sh needs Docker), an architecture
+# this cannot build or a built shim of another source stops the install with
+# exit status 1. Nothing is changed then, and the error gives the command
+# that builds the shim by hand. A shim that already declares this build's
+# identity is kept. A workspace with no shim is given none.
+#
+# A release shim (masc-exec-shim with its sha256 sidecar) is left alone, and
+# no release is asked for, unless --refresh-guest-shim is given. That option
+# updates an existing release shim when deploying a server/shim change to
+# microVM Keepers. The release installer places it initially (RFC-0427 B-2).
+# With this option, an existing release shim is replaced by
 # the same asset of the release this build names, checked against that
 # release's SHA256SUMS. Which asset is read from the sidecar, which records
 # the one that was installed; nothing is guessed from this shell. A workspace
-# with no shim is given none, and a shim without a sidecar was built by hand
-# and is left alone. A release that cannot be read leaves the shim as it is
+# with no shim is given none, and a shim without a sidecar is the source
+# build above. A release that cannot be read leaves the shim as it is
 # and says so; an asset that does not match its checksum installs nothing.
 # The server refuses a shim built from another source (#52968, RFC
 # host-and-shim-share-one-build-identity), so a release shim that does not
@@ -68,10 +83,16 @@
 #   --no-browser-addon do not build or install the browser Add-on programs, and
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
-#   --refresh-guest-shim fetch release checksums and refresh an existing guest
-#                   exec shim; default installation leaves it as it is
+#   --refresh-guest-shim fetch release checksums and refresh an existing release
+#                   guest exec shim (one with a sha256 sidecar); default
+#                   installation leaves a release shim as it is
 #   --print-build-targets print the exact Dune inputs for this install and exit
 #                   without locking, building, checking or changing a workspace
+#
+#   By default a workspace guest exec shim without a sha256 sidecar is rebuilt
+#   from this checkout (scripts/remote-ssh/build-shim.sh, which needs Docker)
+#   when it declares another source than this build. A failed rebuild installs
+#   nothing.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -366,6 +387,40 @@ sys.exit(1)
 PY
 }
 
+# The guest architecture a shim was built for, as build-shim.sh names it,
+# read from the shim's ELF header. This shell cannot tell it: a Rosetta shell
+# on Apple Silicon says x86_64. e_machine is the half-word at offset 18, read
+# little-endian, as both guest architectures are. Prints arm64 or amd64, or
+# what the header holds instead and exits non-zero.
+guest_arch_of() {
+  python3 -I - "$1" <<'PY'
+import sys
+ELF_MAGIC = b"\x7fELF"
+EI_DATA = 5
+ELFDATA2LSB = 1
+E_MACHINE = 18
+HEADER_BYTES = E_MACHINE + 2
+GUEST_ARCHES = {0xB7: "arm64", 0x3E: "amd64"}  # EM_AARCH64, EM_X86_64
+try:
+    with open(sys.argv[1], "rb") as shim:
+        header = shim.read(HEADER_BYTES)
+except OSError as error:
+    print(f"unreadable: {error.strerror}")
+    sys.exit(1)
+if len(header) < HEADER_BYTES or header[:len(ELF_MAGIC)] != ELF_MAGIC:
+    print("not an ELF file")
+    sys.exit(1)
+if header[EI_DATA] != ELFDATA2LSB:
+    print("not a little-endian ELF file")
+    sys.exit(1)
+machine = int.from_bytes(header[E_MACHINE:HEADER_BYTES], "little")
+if machine not in GUEST_ARCHES:
+    print(f"ELF machine 0x{machine:x}")
+    sys.exit(1)
+print(GUEST_ARCHES[machine])
+PY
+}
+
 # One attempt each, because the build lock is held while this waits and the
 # next explicit refresh tries again: SHA256SUMS is a few kilobytes, the shim about five
 # megabytes.
@@ -381,10 +436,9 @@ refresh_guest_shim() (
   shim="$shim_dir/masc-exec-shim"
   sidecar="$shim.sha256"
   [ -e "$shim" ] || exit 0
-  if [ ! -f "$sidecar" ]; then
-    echo "install-local-build: guest exec shim $shim has no sha256 sidecar (built by hand); left as it is"
-    exit 0
-  fi
+  # A shim without a sidecar is a source build, and checkout_guest_shim has
+  # already said what it did with it.
+  [ -f "$sidecar" ] || exit 0
   # The sidecar is the release's SHA256SUMS line for the asset that was
   # installed: "<sha256>  <asset>". The asset names the guest architecture,
   # which this shell cannot tell: a Rosetta shell on Apple Silicon says x86_64.
@@ -478,6 +532,92 @@ refresh_guest_shim() (
   staged_sidecar=""
   echo "installed the $tag guest exec shim into $shim_dir (replacing sha256 $recorded)"
 )
+
+# The source-built shim this build's server accepts, built from this checkout
+# (#53164). Before this step, every checkout install followed by masc restart
+# failed each microVM Keeper's Execute with microvm_shim_other_source until
+# somebody rebuilt the shim by hand. It runs before any binary is replaced
+# and in a subshell like refresh_guest_shim: its EXIT trap removes the build
+# directory and the staged copy on every way out, and a non-zero status ends
+# the install under set -e. One rename puts the new shim in place, so a guest
+# never finds the name missing. The server does not remember a refused shim
+# (keeper_microvm_shim_readiness.ml), so the next request boots with it.
+checkout_guest_shim() (
+  shim_dir="$workspace_root/.masc/microvm/shim"
+  shim="$shim_dir/masc-exec-shim"
+  [ -e "$shim" ] || exit 0
+  # The opposite of refresh_guest_shim's test, so each shim goes to exactly
+  # one of the two steps.
+  [ ! -f "$shim.sha256" ] || exit 0
+  if ! required_source=$(source_identity_of "$build_dir/main_eio.exe"); then
+    echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one source identity (found: $required_source), so its server refuses every guest exec shim, $shim too; nothing installed" >&2
+    exit 1
+  fi
+  if installed_source=$(source_identity_of "$shim") && [ "$installed_source" = "$required_source" ]; then
+    echo "guest exec shim in $shim_dir already declares this build's source identity $required_source"
+    exit 0
+  fi
+  guest_arch_status=0
+  guest_arch=$(guest_arch_of "$shim") || guest_arch_status=$?
+  if [ "$guest_arch_status" -eq 0 ]; then
+    arch_arg=$guest_arch
+  else
+    arch_arg="<arm64|amd64>"
+  fi
+  by_hand=$(printf 'cd %q && scripts/remote-ssh/build-shim.sh --arch %s && cp dist/remote-ssh/masc-exec-shim-linux-%s %q && chmod 755 %q' \
+    "$repo" "$arch_arg" "$arch_arg" "$shim" "$shim")
+  refuse() {
+    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand" >&2
+    exit 1
+  }
+  [ "$guest_arch_status" -eq 0 ] ||
+    refuse "Its ELF header names no guest architecture this install can build ($guest_arch)"
+  previous="$shim.previous"
+  out=""
+  staged=""
+  staged_previous=""
+  remove_staged() {
+    [ -z "$out" ] || rm -rf "$out"
+    [ -z "$staged" ] || rm -f "$staged"
+    [ -z "$staged_previous" ] || rm -f "$staged_previous"
+  }
+  trap remove_staged EXIT
+  # build-shim.sh takes --out relative to the top of the checkout it runs in.
+  # Git ignores dist/, so the build directory does not change the source
+  # identity the shim is built with.
+  if ! mkdir -p "$repo/dist/remote-ssh" ||
+     ! out=$(mktemp -d "$repo/dist/remote-ssh/install-local-build.XXXXXX"); then
+    out=""
+    refuse "No build directory could be made in $repo/dist/remote-ssh"
+  fi
+  echo "install-local-build: building the $guest_arch guest exec shim from $repo, because the one in $shim_dir declares $installed_source"
+  if ! (cd "$repo" && scripts/remote-ssh/build-shim.sh --arch "$guest_arch" --out "${out#"$repo"/}"); then
+    refuse "scripts/remote-ssh/build-shim.sh --arch $guest_arch failed (the lines above say why; it needs Docker), so no shim was built for $shim"
+  fi
+  built="$out/masc-exec-shim-linux-$guest_arch"
+  [ -f "$built" ] || refuse "scripts/remote-ssh/build-shim.sh left no $built"
+  if ! built_source=$(source_identity_of "$built") || [ "$built_source" != "$required_source" ]; then
+    refuse "The shim built from $repo declares $built_source instead: the checkout changed after $build_dir/main_eio.exe was built, or that build comes from another checkout. Build again without --skip-build"
+  fi
+  if ! staged=$(mktemp "$shim_dir/masc-exec-shim.partial.XXXXXX") ||
+     ! cp "$built" "$staged" || ! chmod 755 "$staged"; then
+    refuse "The built shim could not be staged in $shim_dir"
+  fi
+  # One copy of the shim being replaced, so installs do not pile up copies.
+  # Files that other hands left here are not this step's to remove.
+  if ! staged_previous=$(mktemp "$shim_dir/masc-exec-shim.previous.partial.XXXXXX") ||
+     ! cp -p "$shim" "$staged_previous" || ! mv "$staged_previous" "$previous"; then
+    refuse "The shim in place could not be kept as $previous"
+  fi
+  staged_previous=""
+  # A failure here leaves the shim in place and $previous holding a copy of it.
+  if ! mv "$staged" "$shim"; then
+    refuse "The built shim could not be renamed to $shim"
+  fi
+  staged=""
+  echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous)"
+)
+checkout_guest_shim
 refresh_guest_shim
 
 mkdir -p "$prefix"

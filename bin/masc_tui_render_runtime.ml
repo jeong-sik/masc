@@ -1404,7 +1404,7 @@ let usage_lines ~cols ~rows (state : state) =
                 in
                 let width = max 1 (framed_inner_width cols - 3) in
                 let heading =
-                  Theme.info () ^ Ansi.bold ^ text (Terminal_text.single_line row.kur_name)
+                  Masc_tui_ansi.Section.style ^ text (Terminal_text.single_line row.kur_name)
                   ^ Ansi.reset ^ Printf.sprintf " · %s turns · %s" (count row.kur_turn_samples) coverage
                 in
                 let metric label value reported missing bar =

@@ -715,7 +715,9 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
   let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
-  let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
+  (* A block of this page is headed like every detail section (RFC
+     tui-one-screen-grammar §5.2, §7.3). *)
+  let title text = "  " ^ Section.style ^ Section.rule_text text ^ Ansi.reset in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
   (* Why a block the server identity holds has nothing in it. Not read yet is
@@ -870,7 +872,9 @@ let age_text = Layout.span_text
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
   let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
-  let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
+  (* A block of this page is headed like every detail section (RFC
+     tui-one-screen-grammar §5.2, §7.3). *)
+  let title text = "  " ^ Section.style ^ Section.rule_text text ^ Ansi.reset in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in

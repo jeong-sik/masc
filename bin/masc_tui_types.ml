@@ -2985,7 +2985,10 @@ type schedule_row = {
   sch_reaction_projection_status:
     Schedule_contract_values.reaction_projection_status option;
   sch_reaction_latest_at_iso: string option;
-  sch_reaction_kind: string option;
+  sch_reaction_kind:
+    (Masc.Keeper_reaction_ledger_wire.reaction_kind, string) result option;
+      (** The last reaction the woken Keeper's ledger recorded. A kind this
+          build cannot read keeps the row and stays [Error] with the token. *)
   sch_reaction_keeper_name: string option;
   sch_reaction_stimulus_id: string option;
   sch_reaction_post_id: string option;

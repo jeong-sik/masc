@@ -320,6 +320,8 @@ let selected_lines ~table ~starts ~total cursor =
 
 let window ~table ~starts ~total ~height ~cursor scroll =
   let start, stop = selected_lines ~table ~starts ~total cursor in
+  (* The first binding brings the column names above it, so Home shows them. *)
+  let start = if table && cursor = 0 then 0 else start in
   let max_scroll = Int.max 0 (total - height) in
   let scroll = Int.max 0 (Int.min scroll max_scroll) in
   Int.min max_scroll (Masc_tui_scroll.ensure_span_visible ~start ~stop ~height scroll)

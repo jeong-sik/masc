@@ -86,7 +86,8 @@ val window : table:bool -> starts:int list -> total:int -> height:int -> cursor:
     smallest move that shows the binding, held inside the document. A
     selection the window already shows leaves the window where it was, so a
     step inside it moves only the mark, and the table's column names on line
-    0 stay on screen until the selection passes the first window. *)
+    0 stay on screen until the selection passes the first window. The first
+    binding brings the names back with it. *)
 
 val provider_text : row -> string
 (** What the provider column draws: the id, then the account label when the

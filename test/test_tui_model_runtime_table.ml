@@ -233,6 +233,37 @@ let test_exact_runtime_lookup () =
   check bool "missing binding stays missing" true
     (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
 
+(* QA N10: the first j scrolled the column names off and every j moved the
+   whole table under a still cursor. The window a pane of [height] lines
+   draws moves only when the selected binding leaves it, so the names on
+   line 0 stay while the selection is inside the first window and Home
+   brings them back. *)
+let test_the_window_moves_only_when_the_selection_leaves_it () =
+  let window ?(table = true) ?(starts = []) ~total ~height ~cursor scroll =
+    T.window ~table ~starts ~total ~height ~cursor scroll
+  in
+  (* A table of 30 bindings under its column names: 31 lines, 10 drawn. *)
+  let table ~cursor scroll = window ~total:31 ~height:10 ~cursor scroll in
+  List.iter
+    (fun cursor ->
+      check int (Printf.sprintf "binding %d in the first window keeps the names" cursor) 0
+        (table ~cursor 0))
+    (List.init 9 Fun.id);
+  check int "the tenth binding moves the window one line" 1 (table ~cursor:9 0);
+  check int "a step inside the window moves only the mark" 5 (table ~cursor:7 5);
+  check int "a step below the window brings its line to the bottom" 7 (table ~cursor:15 5);
+  check int "Home brings the names back" 0 (table ~cursor:0 20);
+  check int "End shows the last binding at the bottom" 21 (table ~cursor:29 0);
+  check int "a stale scroll is held inside the document" 21 (table ~cursor:29 99);
+  (* Stacked items of four lines with a blank between: a window that shows
+     any line of the selected item stands, so its body can be read. *)
+  let stacked ~cursor scroll =
+    window ~table:false ~starts:[ 0; 5; 10 ] ~total:14 ~height:3 ~cursor scroll
+  in
+  check int "an item partly shown keeps the window" 2 (stacked ~cursor:0 2);
+  check int "an item below the window shows its first line at the bottom" 3 (stacked ~cursor:1 0);
+  check int "an item above the window comes to its first line" 5 (stacked ~cursor:1 11)
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -254,5 +285,6 @@ let () =
         ; Alcotest.test_case "commented lines are not values" `Quick test_commented_lines_are_not_values
         ] )
     ; ( "render"
-      , [] )
+      , [ Alcotest.test_case "the window moves only when the selection leaves it" `Quick
+            test_the_window_moves_only_when_the_selection_leaves_it ] )
     ]

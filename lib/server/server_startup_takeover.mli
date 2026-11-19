@@ -208,8 +208,9 @@ val keep_store_facts : base_path_lease -> store_facts
 (** Say that this process holds the workspace's writer lease, so it may keep
     in memory the facts of the files only the lease holder writes
     ([Fact_cell.keep_in_this_process], [Dated_jsonl.Store.facts]).
-    The server calls this once, with the lease it runs under, and does not
-    release that lease before it exits or hands it to the image it execs. *)
+    The HTTP server and the stdio runtime each call this once, with the
+    lease they run under, and do not release that lease before they exit or
+    hand it to the image they exec. *)
 
 (** Preserve an active lease across the caller's next [exec]. POSIX record
     locks survive [exec] in the same process, but the lease descriptor is

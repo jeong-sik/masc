@@ -6307,6 +6307,26 @@
  (name runtest)
  (deps (alias runtest-test_install_local_build_guest_shim)))
 
+; A local install rebuilds the workspace's source-built guest shim from the
+; same checkout before it replaces the server (#53164). The suite borrows the
+; fixtures of test_install_local_build.py and
+; test_install_local_build_guest_shim.py, and stands a fake in for
+; scripts/remote-ssh/build-shim.sh, which needs Docker.
+(rule
+ (alias runtest-test_install_local_build_checkout_shim)
+ (deps
+  test_install_local_build_checkout_shim.py
+  test_install_local_build_guest_shim.py
+  test_install_local_build.py
+  ../scripts/install-local-build.sh
+  ../scripts/lib/install-workspace-dashboard.sh)
+ (action
+  (run python3 %{dep:test_install_local_build_checkout_shim.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_local_build_checkout_shim)))
+
 ; A local install refreshes the Pele helper its prefix already holds
 ; (#47301). The suite borrows the build fixtures of test_install_local_build.py.
 (rule

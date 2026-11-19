@@ -2073,19 +2073,38 @@ let titled_row ~cols (state : state) ~title ~position =
    same five rows, and a key handler bounding an overlay's scroll with
    [framed_content_height] must agree with what this draws, so the number has
    one owner. *)
+type chrome_frame = Chrome_screen | Chrome_overlay
+
 let surface_chrome_rows = framed_chrome_rows
 
-let surface_chrome_budget state ~terminal_rows =
+(* On [Chrome_screen], there is no outer box border: omitting the blank top
+   spacer and collapsing an empty Zone 4 notice row reclaims 2 body rows
+   (1 when a recovery notice is shown). [Chrome_overlay] keeps its full 5-row
+   rounded box chrome. *)
+let chrome_rows_for ~frame ~has_recovery =
+  match frame, has_recovery with
+  | Chrome_overlay, _ -> surface_chrome_rows
+  | Chrome_screen, true -> max 0 (surface_chrome_rows - 1)
+  | Chrome_screen, false -> max 0 (surface_chrome_rows - 2)
+
+let resolve_has_recovery ~frame ~has_recovery (state : state) =
+  match has_recovery with
+  | Some v -> v
+  | None ->
+      let _, cols = get_terminal_size () in
+      let max_cells =
+        match frame with
+        | Chrome_overlay -> framed_rule_width cols
+        | Chrome_screen -> framed_inner_width cols
+      in
+      Option.is_some (recovery_slot state ~max_cells)
+
+let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery state
+    ~terminal_rows =
+  let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
   max 1
     (Masc_tui_types.surface_body_rows state ~terminal_rows
-    - surface_chrome_rows)
-
-(* Which frame the contract draws. A surface is the terminal's whole screen and
-   its edge is already the frame, so it draws rules and no box. An overlay is
-   opened over a surface and keeps its box, which is how a reader tells the two
-   apart. The rows around the body are five either way, so the budget is the
-   same. *)
-type chrome_frame = Chrome_screen | Chrome_overlay
+    - chrome_rows_for ~frame ~has_recovery)
 
 (* What a body does with rows past its budget, said at the call rather than
    left to a default. An optional clamp cost nothing to leave out, so a body
@@ -2100,18 +2119,23 @@ type overflow =
 (* The window a [Scrolled] body gets out of [count] rows: the whole budget,
    since its position is on the title row. The key handler that bounds the
    scroll and the frame that draws it both ask this. *)
-let surface_window_height state ~terminal_rows ~count =
+let surface_window_height ?(frame = Chrome_overlay) ?has_recovery state
+    ~terminal_rows ~count =
+  let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
   Masc_tui_scroll.content_height
     ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-    ~chrome:surface_chrome_rows ~count ~preview_keep:None
+    ~chrome:(chrome_rows_for ~frame ~has_recovery) ~count ~preview_keep:None
 
 (* The window the contract cuts out of a [Scrolled] body of [count] rows,
    as its height and the scroll it draws from. The other kinds window
    themselves, or need no window. *)
-let chrome_window (state : state) ~terminal_rows ~count = function
+let chrome_window ?(frame = Chrome_overlay) ?has_recovery (state : state)
+    ~terminal_rows ~count = function
   | Fits | Paged_by_cursor | Self_scrolled _ -> None
   | Scrolled { scroll; report = _ } ->
-      let height = surface_window_height state ~terminal_rows ~count in
+      let height =
+        surface_window_height ~frame ?has_recovery state ~terminal_rows ~count
+      in
       Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
 
 (* A scrolled body's window is the contract's, so its position is too; any
@@ -2124,9 +2148,10 @@ let chrome_position ~window ~count ~handed =
 
 let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let has_recovery = resolve_has_recovery ~frame:Chrome_screen ~has_recovery:None state in
   let count = ref 0 and handed = ref None in
   let pushed () = incr count in
-  body ~budget:(max 1 (rows - surface_chrome_rows))
+  body ~budget:(max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery))
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
@@ -2135,7 +2160,7 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ; next_origin = (fun () -> (0, 0))
     ; position = (fun position -> handed := Some position) };
   chrome_position
-    ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
+    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
@@ -2176,12 +2201,15 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
      above them; the title is one row whatever it says. *)
   let body_top =
     let head = Buffer.create 256 in
-    top head cols;
+    (match frame with
+     | Chrome_screen -> ()
+     | Chrome_overlay -> top head cols);
     line head cols "";
     divider head cols;
     strip_rows + lines_ended_since head ~start:0
   in
-  let budget = max 1 (rows - surface_chrome_rows) in
+  let has_recovery = Option.is_some recovery_in_slot in
+  let budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
@@ -2208,9 +2236,11 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
-  let window = chrome_window state ~terminal_rows ~count overflow in
+  let window = chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow in
   let position = chrome_position ~window ~count ~handed:!handed in
-  top buf cols;
+  (match frame with
+   | Chrome_screen -> ()
+   | Chrome_overlay -> top buf cols);
   (* A title that already carries a position, laid out by [here_row], keeps
      it: only a position the body handed is placed here. *)
   (match position with
@@ -2262,7 +2292,9 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     empty buf cols
   done;
   (match recovery_in_slot, frame with
-   | selected, Chrome_screen -> draw_box_bottom_with_recovery buf ~cols selected
+   | None, Chrome_screen -> ()
+   | Some row, Chrome_screen ->
+       box_line_styled buf cols ~style:(Theme.warn ()) row.recovery_text
    | None, Chrome_overlay -> bottom buf cols
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
@@ -4909,6 +4941,41 @@ let help_lines ~width (state : state) =
                 lines) ]
   in
   let _, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let compact_global_legend =
+    let dim text = Theme.recede () ^ text ^ Ansi.reset in
+    let wrap_indented text =
+      Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 2)) text
+      |> List.map (fun row -> "  " ^ row)
+    in
+    let nav_heading =
+      "  " ^ Ansi.bold ^ (if ko then "전역 이동 · 상태 기호" else "Global navigation · status marks")
+      ^ Ansi.reset
+    in
+    let nav_text =
+      if ko then
+        dim "j/k 한 줄 · Enter 안으로 · Esc 밖으로 · [ ] 옆 항목 · v 보기 · Tab 화면 · / 찾기 · r 새로고침 · ? 전체"
+      else
+        dim "j/k row · Enter open · Esc back · [ ] sibling · v view · Tab screen · / find · r refresh · ? all"
+    in
+    let mark_text =
+      if ko then
+        Theme.ok () ^ "●" ^ Ansi.reset ^ dim " 정상  "
+        ^ Theme.info () ^ "◐" ^ Ansi.reset ^ dim " 하는 중  "
+        ^ dim "○ 대기  ‖ 멈춤  "
+        ^ Theme.warn () ^ "▲" ^ Ansi.reset ^ dim " 주의  "
+        ^ Theme.bad () ^ "✕" ^ Ansi.reset ^ dim " 실패  "
+        ^ Ansi.bold ^ "◆" ^ Ansi.reset ^ dim " 사람 차례"
+      else
+        Theme.ok () ^ "●" ^ Ansi.reset ^ dim " ok  "
+        ^ Theme.info () ^ "◐" ^ Ansi.reset ^ dim " active  "
+        ^ dim "○ wait  ‖ paused  "
+        ^ Theme.warn () ^ "▲" ^ Ansi.reset ^ dim " warn  "
+        ^ Theme.bad () ^ "✕" ^ Ansi.reset ^ dim " fail  "
+        ^ Ansi.bold ^ "◆" ^ Ansi.reset ^ dim " attention"
+    in
+    [ Masc_tui_help.Whole ((nav_heading :: wrap_indented nav_text) @ wrap_indented mark_text) ]
+  in
   let blocks =
     candle
     @ (match
@@ -4920,18 +4987,21 @@ let help_lines ~width (state : state) =
            if Masc_tui_help.shows_everything state.help_filter state.help_scope
            then (section first :: slash_commands) @ List.map section rest
            else
-             (* The reader's own screen and nothing behind it. The sections
-                after it are another screen's keys, and they followed the
-                first with no line between a reader could stop at. *)
+             (* Current screen's own actions first, followed by a compact
+                global navigation and status-mark legend so one [?] press
+                answers both "what works here?" and "how do I move?". *)
              let header_line, entry_rows = section_parts first in
-             Masc_tui_help.one_section ~heading:header_line entry_rows)
+             Masc_tui_help.one_section ~heading:header_line entry_rows
+             @ compact_global_legend)
   in
   match blocks with
   | _ :: _ -> blocks
   | [] ->
       [ Masc_tui_help.Whole
-          [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
-              (Terminal_text.single_line query) Ansi.reset ] ]
+          [ Printf.sprintf
+              (if ko then "%s  \"%s\" 와 일치하는 키나 명령이 없습니다.%s"
+               else "%s  No key or command matches \"%s\".%s")
+              (Theme.recede ()) (Terminal_text.single_line query) Ansi.reset ] ]
 
 
 module Context_bars = Masc_tui_context_bars

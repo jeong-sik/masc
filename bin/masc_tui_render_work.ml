@@ -864,14 +864,19 @@ let render_planning_list (state : state) =
                   let verdict = if restates_phase then None else planning_proof_detail ~ko goal in
                   (* A previous Goal reading keeps its words and loses its
                      colours; the scope line above says why. *)
+                  let sep = Theme.recede () ^ " · " ^ Ansi.reset in
                   let summary =
                     if current then
                       planning_phase_color goal.pg_phase ^ phase ^ Ansi.reset
-                      ^ Theme.warn () ^ due ^ Ansi.reset
-                      ^ open_style ^ linked ^ Ansi.reset
+                      ^ (match planning_due_clause ~ko (Planning_due.standing ~now goal) with
+                         | None -> ""
+                         | Some words -> sep ^ Theme.warn () ^ words ^ Ansi.reset)
+                      ^ (if open_note = "" then ""
+                         else sep ^ open_style ^ open_note ^ Ansi.reset)
                       ^ (match verdict with
                          | None -> ""
-                         | Some (style, detail) -> " · " ^ style ^ Terminal_text.single_line detail ^ Ansi.reset)
+                         | Some (style, detail) ->
+                             sep ^ style ^ Terminal_text.single_line detail ^ Ansi.reset)
                     else
                       Theme.recede () ^ phase ^ due ^ linked
                       ^ (match verdict with

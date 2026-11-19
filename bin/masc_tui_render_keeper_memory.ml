@@ -126,20 +126,20 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   let at rows i = Option.value (List.nth_opt rows i) ~default:"—" in
   let card ~width ~height name rows =
     let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
-                              title_style=Theme.info (); reset=Ansi.reset} in
+                              title_style=Ansi.bold; reset=Ansi.reset} in
     Card.render ~ko ~style ~width ~height
       {edge={name; key=None; status=None; count=None; focus=Card.Unfocused;
              border_accent=Some (Theme.panel_border Masc_tui_theme.Panel_memory);
              footer_keys=[]};
        body=(fun ~cells:_ -> rows)} in
   let claims = if width >= 90 && budget >= 5 then
-      let left = card ~width:half ~height:4 (text "↻ 최근 갱신" "↻ Recently recorded") [at left 0; at left 1] in
-      let right = card ~width:(width-half-2) ~height:4 (text "◇ 자주 조회" "◇ Frequently retrieved") [at right 0; at right 1] in
+      let left = card ~width:half ~height:4 (text "최근 갱신" "Recently recorded") [at left 0; at left 1] in
+      let right = card ~width:(width-half-2) ~height:4 (text "자주 조회" "Frequently retrieved") [at right 0; at right 1] in
       List.map2 (fun a b -> a ^ "  " ^ b) left right
     else if budget >= 7 && width >= Card.min_width then
-      card ~width ~height:3 (text "↻ 최근 갱신" "↻ Recently recorded") [at left 0]
-      @ card ~width ~height:3 (text "◇ 자주 조회" "◇ Frequently retrieved") [at right 0]
-    else [text "↻ 최근 · " "↻ Recent · " ^ at left 0; text "◇ 조회 · " "◇ Retrieved · " ^ at right 0] in
+      card ~width ~height:3 (text "최근 갱신" "Recently recorded") [at left 0]
+      @ card ~width ~height:3 (text "자주 조회" "Frequently retrieved") [at right 0]
+    else [text "최근 · " "Recent · " ^ at left 0; text "조회 · " "Retrieved · " ^ at right 0] in
   let changes = match events state keeper_name |> List.take 2 with
     | [] -> if Option.is_some (Fetched.value (activity_view state keeper_name))
         then [quiet (text "확인된 변경 없음" "no observed changes")] else []
@@ -193,9 +193,9 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
           ^ text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
   let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
-                            title_style=Theme.info (); reset=Ansi.reset} in
+                            title_style=Ansi.bold; reset=Ansi.reset} in
   let body = Card.render ~ko ~style ~width:(max 1 (cols - 4)) ~height
-    {edge={name=text "◇ 기억의 흐름" "◇ Memory flow"; key=None; status=None; count=None;
+    {edge={name=text "기억의 흐름" "Memory flow"; key=None; status=None; count=None;
            focus=Card.Unfocused;
            border_accent=Some (Theme.panel_border Masc_tui_theme.Panel_memory);
            footer_keys=[]}; body} in

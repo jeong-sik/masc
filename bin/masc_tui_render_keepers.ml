@@ -2286,16 +2286,15 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
       let result = keeper_plain_result state row in
       let name = Terminal_text.single_line row.keeper.Tui_decode.k_name in
       let route key label =
-        Ansi.bold ^ Theme.accent () ^ key ^ Ansi.reset
-        ^ Theme.recede () ^ ":" ^ label ^ Ansi.reset
+        key ^ Theme.recede () ^ ":" ^ label ^ Ansi.reset
       in
       let routes =
-        [ String.concat "   "
+        [ String.concat "  "
             [ route "c" (text "대화·원래 요청" "chat / original request")
             ; route "→" (text "상세" "detail")
             ; route "Enter" "Story"
             ]
-        ; String.concat "   "
+        ; String.concat "  "
             [ route "Enter→m" (text "기억" "memory")
             ; route "J" (text "일정" "schedules")
             ; route "l" (text "로그" "logs")
@@ -2330,29 +2329,30 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
            ] @ routes)
       else
         let section title content =
-          let lines = Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) content in
+          let lines = Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 2)) content in
           let lines = match lines with
             | first :: second :: _ :: _ ->
-                [first; Message_layout.fit_width (second ^ " " ^ Message_layout.cut_mark) (max 1 (width - 2))]
+                [first; Message_layout.fit_width (second ^ Message_layout.cut_mark) (max 1 (width - 2))]
             | [] | [ _ ] | [ _; _ ] -> lines
           in
           let title_cells = Message_layout.display_width title in
           let rule_cells = max 0 (width - title_cells - 1) in
           let header_line =
             if rule_cells >= 2 then
-              Ansi.bold ^ Theme.recede () ^ title ^ Ansi.reset
+              Ansi.bold ^ title ^ Ansi.reset
               ^ Theme.recede () ^ " " ^ draw_hline rule_cells ^ Ansi.reset
             else
-              Ansi.bold ^ Theme.recede () ^ fit title ^ Ansi.reset
+              Ansi.bold ^ fit title ^ Ansi.reset
           in
           header_line
           :: List.map (fun line -> "  " ^ fit_width line (max 0 (width - 2))) lines
         in
         [heading; ""]
-        @ section (text "지금 하는 일" "CURRENT WORK") current
-        @ [""] @ section (text "사람의 도움" "HUMAN WAIT") help
-        @ [""] @ section (text "최근 관측 결과" "OBSERVED RESULT")
-            (result ^ " · " ^ keeper_plain_turn_record state ~now ~keeper_name:name)
+        @ section (text "지금 하는 일" "Current work") current
+        @ [""] @ section (text "사람의 도움" "Human wait") help
+        @ [""] @ section (text "최근 관측 결과" "Observed result")
+            (result ^ Theme.recede () ^ " · " ^ Ansi.reset
+             ^ keeper_plain_turn_record state ~now ~keeper_name:name)
         @ [""] @ List.map fit routes
 
 let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_row all_rows =
@@ -2683,7 +2683,7 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
         | Keeper_list_model.Two_lines ->
             let detail = match keeper_plain_help state row with
               | Some request -> Theme.warn () ^ request ^ Ansi.reset
-              | None -> keeper_plain_work state row
+              | None -> Theme.recede () ^ keeper_plain_work state row ^ Ansi.reset
             in
             [primary; emit ("   " ^ Message_layout.fit_width detail (max 0 (width - 3)))]
   in
@@ -2697,12 +2697,12 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
   in
   if projection.kpp_list_rows = 0 then [] else
     (if projection.kpp_list_rows > 1 then
-      let lead = text "Keeper 목록" "KEEPERS" in
+      let lead = text "Keeper 목록" "Keepers" in
       let sub = text " · 현재 상태 / 일과 대기" " · current status / work and wait" in
       let lead_cells = Message_layout.display_width lead in
       let header_row =
         if width > lead_cells + 4 then
-          Ansi.bold ^ Theme.accent () ^ lead ^ Ansi.reset
+          Ansi.bold ^ lead ^ Ansi.reset
           ^ Theme.recede () ^ fit_width sub (width - lead_cells) ^ Ansi.reset
         else
           Theme.recede () ^ fit_width (lead ^ sub) width ^ Ansi.reset

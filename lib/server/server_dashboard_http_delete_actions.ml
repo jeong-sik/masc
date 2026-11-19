@@ -804,10 +804,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               Dated_jsonl.prepare_for_directory_removal
                 (Keeper_types_support.keeper_metrics_store
                    config
-                   keeper_name);
-              Keeper_status_metrics.invalidate_tool_audit_cache
-                config
-                ~keeper_name:keeper_name
+                   keeper_name)
             | Keeper_memory_journal_artifact
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact

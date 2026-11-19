@@ -32,7 +32,6 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 - 서버가 도는 동안 밖에서 파일을 고치거나 지웠다.
 - 파일 읽기가 실패하고 있다. 지금 행은 못 읽었다고 하거나 빈 값을 낸다. 옮긴 뒤에는 메모리 값을 보인다.
 - 저장소에 점으로 시작하는 `.jsonl` 파일이 있다. 지금 reader 몇은 그 파일도 읽는다. 칸은 읽지 않는다(§3.4).
-- prune 이 돈 뒤의 Turn tool audit 값. 지금 캐시는 그때 틀린 값을 낼 수 있다. 칸은 파일과 같은 값을 낸다(§3.4).
 
 고치지 않는 것: `Systhread_host` 와 풀(다른 RFC), `schedules.json` 쓰기, 서버 밖에서도 고치는 profile TOML, 승인 audit 와 quarantine 원장(§8.1), Keeper 행을 SSE 로 나르는 일(RFC-0477), serving domain.
 
@@ -261,7 +260,8 @@ val directories_removed : unit -> unit
   | 가장 새 온전한 receipt | JSON 으로 읽히는 가장 새 줄(`newest_parsed_row`) | L2d-2 |
   | 도구 호출 | 원장의 마지막 16줄(`last_rows ~count`). 깨진 줄도 `None` 으로 자리를 지킨다 | L2d-3 |
   | 결정 기록 | 마지막 object 행. `Dated_jsonl` 저장소가 아니라서 `Keeper_row_facts` 의 표에 `Fact_cell` 을 둔다 | L2d-4 |
-  | metrics | 끝 120줄, 그리고 decoder 가 받는 가장 새 줄(Turn tool audit) | L3 |
+  | metrics | decoder 가 받는 가장 새 줄(Turn tool audit, `newest_selected`) | L3a |
+  | metrics | 끝 120줄 | L3b |
 
 - decoder 가 필요한 사실은 위 층이 decoder 를 넘겨 만든다. `Dated_jsonl` 은 Keeper 타입을 모른다.
 - 칸의 값은 `{ value; newest }` 다. `newest` 는 그 값이 본 가장 새 날짜 파일이다(§3.3).
@@ -270,7 +270,7 @@ val directories_removed : unit -> unit
 - 칸은 저장소를 쓰는 process 만 든다. 칸을 고치는 것은 그 process 의 쓰기뿐이고, 다른 process 가 쓴 줄은 칸에 닿지 않는다. TUI 는 서버와 다른 process 인데 같은 함수로 TurnRecord 파일을 읽는다(`bin/masc_tui_context_state.ml` 의 `load`). 값을 들면 TUI 는 처음 읽은 줄을 끝까지 보인다.
   - 「이 process 가 혼자 쓴다」는 사실 둘로 이루어진다. 하나는 process 의 사실이다. 이 process 가 writer lease 를 쥐었는가. 다른 하나는 저장소의 사실이다. 이 저장소의 파일을 lease 를 쥔 process 만 바꾸는가. 둘 다 맞을 때만 `read_fact` 가 값을 든다.
   - process 의 사실은 process 가 말한다(`Fact_cell.keep_in_this_process`). 한 번 말하면 거두지 않는다. 저장소의 사실과 결정 기록의 행이 같은 말을 본다. 서버는 BasePath writer lease 를 잡은 직후에 말한다(`Server_startup_takeover.keep_store_facts`). 이 함수는 받은 lease 가 지금 이 process 가 쥔 lease 일 때만 말한다. 놓은 lease 로 부르면 `Lease_not_held` 를 돌려주고 아무 말도 하지 않는다.
-  - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord, execution receipt, 도구 호출 원장이다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
+  - 저장소의 사실은 저장소 목록이 말한다(`Dated_jsonl.Store.facts`). 저장소 종류마다 `Kept_by_the_lease_holder` 나 `Read_from_the_files` 를 적는다. 빠짐없이 적어야 컴파일된다. `Kept_by_the_lease_holder` 는 그 저장소에 쓰는 곳을 모두 따라가 본 뒤에만 적는다. 지금은 TurnRecord, execution receipt, 도구 호출 원장, Keeper metrics 다. cost 기록은 `masc-cost` 가 lease 없이 덧붙이므로(§1.4) `Read_from_the_files` 다. 따라가 보지 않은 저장소도 `Read_from_the_files` 다. 사실을 옮기는 층은 자기 저장소에 쓰는 곳을 따라가 보고 이 목록을 고친다.
   - 둘 중 하나라도 아니면 전처럼 매번 파일을 읽는다. 칸도 등록부 항목도 만들지 않는다.
   - `Fact_cell.keep_in_this_process` 자체는 누구나 부를 수 있다. `Fact_cell` 은 lease 를 모르고, 서버를 대신하는 시험 실행 파일도 이 함수를 부른다. lease 를 쥐지 않은 실행 파일이 부르면 #53145 의 결함이 돌아온다. 그래서 TUI 가 쓰는 진입점을 시험으로 고정한다(§5).
   - 읽는 호출처가 「든 값」과 「파일」 가운데 고르게 하지 않았다. 그러면 호출처마다 맞게 골라야 하고, 틀리면 빠르지만 틀린 값이 나온다. 지금 모양은 말하기를 잊으면 느릴 뿐이다.
@@ -294,7 +294,7 @@ val directories_removed : unit -> unit
 - 채우다 파일을 못 읽으면 값을 넣지 않는다(§3.4). 행은 그때 지금의 reader 가 내는 값을 그대로 낸다. 오류를 돌려주던 reader 는 오류를 내고(`Turn_record_read_failed` 등), 빈 값을 내던 reader 는 빈 값을 낸다. 다음 읽기가 다시 채운다.
 - receipt 칸은 가장 새 온전한 줄을 든다. 마지막 줄이 아니다. 두 reader 가 모두 깨진 줄을 건너뛰기 때문이다(§1.1). 그래서 두 reader 가 칸 하나에서 답을 얻는다. 파일로 돌아가는 길은 없다. 쓰는 쪽은 JSON 을 쓰므로, 쓴 뒤의 값은 늘 쓴 그 줄이다. 쓴 줄이 JSON 으로 다시 읽히지 않으면 칸을 비운다.
 - TurnRecord 칸은 마지막 줄을 든다. 그 reader 는 깨진 줄도 한 줄로 세고 `Undecodable_turn_record` 로 알린다(`keeper_context_observation_projection.ml:83-101`).
-- `newest` 는 채우는 쪽이 본 가장 새 날짜 파일이다. 읽는 쪽은 날짜 파일을 새것부터 읽는다(`dated_jsonl.ml:1338-1367`). 엄격한 끝 읽기는 줄마다 원본 경로를 같이 돌려준다(`dated_jsonl.mli:312-318`). 날짜는 그 경로에서 얻는다. 줄이 없으면 `newest` 도 없다. `turn_audit`·`receipt` 처럼 줄 하나를 골라내는 읽기는 그 줄을 찾은 파일을 `newest` 로 둔다. 건너뛴 줄은 그 값에 아무것도 말하지 않는다. 그래서 값의 줄이 있는 파일이나 그 뒤 파일에 쓴 줄은, 사이의 파일에 무엇이 있든 가장 새 값이다. 골라낸 줄이 없으면 `newest` 가 없고, 다음에 쓴 줄이 곧 값이다. 결정 기록은 파일이 하나라 이 값이 없다.
+- `newest` 는 채우는 쪽이 본 가장 새 날짜 파일이다. 읽는 쪽은 날짜 파일을 새것부터 읽는다(`dated_jsonl.ml:1338-1367`). 엄격한 끝 읽기는 줄마다 원본 경로를 같이 돌려준다(`dated_jsonl.mli:312-318`). 날짜는 그 경로에서 얻는다. 줄이 없으면 `newest` 도 없다. `turn_audit`·`receipt` 처럼 줄 하나를 골라내는 읽기는 그 줄을 찾은 파일을 `newest` 로 둔다. 건너뛴 줄은 그 값에 아무것도 말하지 않는다. 그래서 값의 줄이 있는 파일이나 그 뒤 파일에 쓴 줄은, 사이의 파일에 무엇이 있든 가장 새 값이다. 골라낸 줄이 없으면 `newest` 가 없고, 다음에 쓴 줄이 곧 값이다. 고르지 않는 줄을 쓰면 값은 그대로고 `newest` 만 그 줄의 파일로 옮긴다. 엄격한 찾기도 그 줄을 지나치기 때문이다. 결정 기록은 파일이 하나라 이 값이 없다.
 - 행 수(16, 120)와 결정 기록의 창(40,000바이트·20줄)은 지금 읽는 쪽이 쓰는 수다. 그 사실을 만드는 층이 읽는 쪽 상수를 사실 옆으로 옮겨 한 곳에 둔다.
 - 도구 호출은 workspace 원장의 마지막 16줄을 그대로 든다. Keeper 의 최근 호출은 그 16줄에서 찾는다. 지금 `read_latest ~keeper_name` 과 같은 뜻이다. 16줄 밖으로 밀려난 Keeper 는 지금처럼 `None` 이다.
 
@@ -318,7 +318,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 - `Dated_jsonl` 저장소(도구 호출, receipt, TurnRecord, metrics): 저장소 잠금을 잡은 뒤, 쓰기 전에 그 저장소의 칸을 읽는다. 줄을 쓴 직후에 칸을 맞춘다. 쓰는 함수 둘이 직접 한다. hook 이나 callback 은 없다. 쓰는 쪽 호출처는 바뀌지 않는다. receipt 와 TurnRecord 는 `append` 로 쓴다(`dated_jsonl.ml:872-893`). 도구 호출과 metrics 는 `append_rotating` 으로 쓴다(`:1746-1795`). 칸은 `on_committed` 를 부르기 전에 맞춘다.
 - 쓴 줄을 읽는 쪽 parser 로 해석하는 일은 잠금 밖에서 한다. 줄은 쓰기 전에 정해지고, 해석은 잠금 상태에 기대지 않는다. 도구 호출 원장은 모든 Keeper 가 한 잠금을 쓴다. 그래서 잠금 안의 일을 줄인다. 쓰는 함수는 줄을 한 번만 만들고, 쓰기와 해석이 그 글자를 같이 쓴다. 그래서 줄 쓰기에 만든 글자를 그대로 받는 `Fs_compat.append_jsonl_rows` 를 둔다. 칸이 없는 저장소의 쓰기는 줄을 해석하지 않는다.
 - 칸을 맞추는 일은 예외를 내지 않는다. `step` 이 던지면 그 저장소의 칸을 비우고 로그에 남긴다. 줄은 이미 디스크에 있어서다. 예외가 `on_committed` 앞에서 나가면 부른 쪽은 줄을 쓰지 못한 것으로 안다. 도구 호출 원장의 drain 은 그 행을 한 번 더 쓴다(`keeper_tool_call_log.ml` 의 `committed`). `Out_of_memory` 와 `Stack_overflow` 만 다시 던진다. 원장의 알림(`notify_written`)은 `on_committed` 안에 있다. 알림을 받고 읽는 쪽은 새 값을 본다.
-- 크기 회전은 쓰기 안에서 일어난다(`dated_jsonl.ml:1746-1790`). 회전해도 읽는 쪽이 보는 줄의 순서는 같으므로 새 값을 만들 수 있다. 다만 채우는 쪽은 파일 목록을 얻은 뒤 이름으로 파일을 연다(`dated_jsonl.ml:1310-1336`). 그 사이 회전이 끼면 옛 목록으로 읽는다. 쓰기가 `Unfilled` 의 세대도 올리므로 그런 채우기는 들어가지 못한다. 지금의 Turn tool audit 캐시는 훑기 전후의 행 수를 견줘 같은 일을 막는다(`keeper_status_metrics.ml:246-248`, `:259-261`).
+- 크기 회전은 쓰기 안에서 일어난다(`dated_jsonl.ml:1746-1790`). 회전해도 읽는 쪽이 보는 줄의 순서는 같으므로 새 값을 만들 수 있다. 다만 채우는 쪽은 파일 목록을 얻은 뒤 이름으로 파일을 연다(`dated_jsonl.ml:1310-1336`). 그 사이 회전이 끼면 옛 목록으로 읽는다. 쓰기가 `Unfilled` 의 세대도 올리므로 그런 채우기는 들어가지 못한다.
 - append 뒤 바이트 prune(metrics 에 `max_bytes` 를 켠 때)은 `on_committed` 다음에 파일을 지운다. `prune_to_max_bytes_unlocked` 는 지운 파일 수를 돌려준다(`dated_jsonl.ml:831-850`). 지금 부르는 쪽은 그 수를 버린다(`:865-870`). 하나라도 지웠거나 prune 이 예외로 끝나면 그 저장소의 칸을 모두 비운다.
 - 쓰기는 지금 시각의 날짜 파일로 간다(`dated_jsonl.ml:885`, `:1748`). 읽는 쪽은 날짜 파일을 새것부터 읽는다. 시계가 뒤로 가서 지난 날짜 파일에 쓰면 그 행은 읽는 쪽에게 가장 새 행이 아니다. 그래서 쓴 날짜 파일이 값이 본 가장 새 날짜 파일(`newest`)보다 앞이면 칸을 비운다. 아니면 새 값의 `newest` 를 쓴 날짜 파일로 둔다. 같은 날 크기 회전으로 닫힌 파일(`18.2.jsonl`)은 지금 쓰는 파일(`18.jsonl`)보다 앞이다.
 - 결정 기록: 돌리기에는 잠금이 없고, 쓰기의 잠금은 system thread 안의 OS mutex 다(§1.4). 이 RFC 는 잠금을 더하지 않는다. 쓰는 쪽은 돌리기 전에 칸을 읽고, 쓰기가 끝난 뒤 칸을 맞춘다. 같은 Keeper 의 결정 기록을 두 곳이 같이 쓰면 늦게 온 compare-and-set 이 실패해 칸이 비워진다. 그래도 불변식은 지켜진다.
@@ -326,7 +326,8 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
   - 읽는 쪽은 마지막 40,000바이트를 한 번에 읽는다. 창이 파일 처음보다 뒤에서 시작하면 남은 줄 가운데 첫 줄을 버린다(`keeper_memory_recall.ml` 의 `tail_lines_of_fd`). 빈 줄은 그 전에 걸러낸다. 그래서 창에 마지막 줄 앞의 내용이 없으면 마지막 줄도 버려진다. 줄이 창의 절반 이하면 앞 줄의 끝이 늘 창에 들어온다. 앞 20,000바이트가 모두 공백이면 이 말이 틀린다. 쓰는 쪽은 공백 없는 JSON 글자만 쓰므로 그런 파일을 만들지 않는다(§7).
   - 로그를 돌린 직후에는 새 파일에 쓴 줄 하나만 있다. 창이 파일 처음에서 시작하므로 첫 줄을 버리지 않고, 쓴 줄이 그대로 값이다. 읽는 쪽은 `.1` 로 옮긴 파일을 지금도 읽지 않는다.
   - object 가 아닌 줄은 건너뛰고 앞 줄을 찾는다(`keeper_runtime_trust_snapshot.ml:336-366`). 그 결과는 쓴 줄 하나로 알 수 없다.
-- metrics 쓰기는 칸 둘을 맞춘다. `metrics_recent` 에는 쓴 줄을 더하고, 120줄을 넘는 앞 줄을 뺀다. `turn_audit` 은 쓴 행이 Turn tool audit 행이면 그 행으로 바꾸고, 아니면 같은 값으로 세대만 올린다. 행이 Turn tool audit 인지는 읽는 쪽과 같은 `parse_snapshot` 으로 본다(`keeper_status_metrics.ml:205-239`). heartbeat 가 이어져도 `Filled` 인 `turn_audit` 은 비워지지 않는다.
+- metrics 쓰기는 칸 둘을 맞춘다. `metrics_recent` 에는 쓴 줄을 더하고, 120줄을 넘는 앞 줄을 뺀다(L3b). `turn_audit` 은 쓴 행이 Turn tool audit 행이면 그 행으로 바꾸고, 아니면 같은 값으로 세대만 올린다(L3a). 행이 Turn tool audit 인지는 읽는 쪽과 같은 함수로 본다(`Keeper_status_metrics.tool_audit_of_metrics_row`). `Dated_jsonl.newest_selected` 가 그 함수 하나를 받아 읽기와 `step` 을 같이 만든다. heartbeat 가 이어져도 `Filled` 인 `turn_audit` 은 비워지지 않는다.
+  - 고르는 함수는 저장소 디렉터리를 같이 받는다(`~base_dir`). 읽지 못하는 줄을 그 Keeper 의 metrics 디렉터리 이름으로 보고하려는 것이다. 보고는 파일을 훑을 때 한다. 쓴 줄은 방금 만든 JSON 이라 보고할 것이 없다.
 - 쓰기가 예외로 끝나면 그 저장소의 칸을 모두 비우고 예외를 다시 던진다. 취소도 예외로 온다.
 - system thread 에 맡긴 쓰기가 도는 동안 부른 fiber 는 깨어나지 않는다. 풀 밖 fiber 는 host 에 일을 넘기고 취소되지 않는 `await` 로 기다린다(`lib/fs_compat/systhread_host.ml:37-48`, `:193-198`). 풀 작업이거나 host 가 없으면 `Eio_unix.run_in_systhread` 로 간다(`:174-178`). Eio 의 thread pool 도 넘긴 일에 취소를 걸지 않는다(Eio `unix/thread_pool.ml` 의 `submit`). 넘기기 전에 이미 취소됐으면 쓰기는 시작하지 않고 `Cancelled` 가 온다(`lib/fs_compat/systhread_host.ml:180`). 쓰기가 일어나지 않았는데 칸을 비우는 것은 조심이 지나칠 뿐 틀리지 않는다.
 - 실패한 쓰기의 바이트는 나중에 파일에 닿지 않는다(규칙 11). 그래서 칸을 비운 뒤에 채운 값이 그 바이트 때문에 틀리는 일이 없다. 뒤늦게 들어오는 바이트는 어느 칸의 순서도 따르지 않는 변경이다. 칸으로는 막을 수 없어서 쓰는 함수가 막는다.
@@ -351,7 +352,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
   | `receipt` | `find_latest_entry_result` 로 가장 새 온전한 줄(`dated_jsonl.mli:275`) | `read_latest_receipt` 가 지금 쓰는 읽기다(`keeper_execution_receipt.ml:769-779`) |
   | `turn_record` | `read_recent_result` 로 한 줄 | TurnRecord reader 는 지금도 실패를 돌려준다(`keeper_context_observation_projection.ml:73-117`) |
   | `metrics_recent` | 같은 함수로 120줄 | 최근 활동 5줄도 이 값에서 얻는다(`operator_control_snapshot.ml:427-435`) |
-  | `turn_audit` | `find_latest_entry_result store parse_snapshot`(`keeper_status_metrics.ml:255`) | 지금 `Tool_audit_cache` 의 첫 채우기가 쓰는 읽기다 |
+  | `turn_audit` | `find_latest_entry_result` 에 `tool_audit_of_metrics_row` 를 넘긴 엄격한 찾기 | `Dated_jsonl.newest_selected` 의 읽기다 |
 
 - 엄격한 읽기는 `YYYY-MM/DD.jsonl` 모양의 일반 파일만 받는다. symlink 와 낯선 이름은 `Error` 다(`dated_jsonl.mli:267-273`). 그런 저장소의 칸은 채워지지 않고, 행은 지금 reader 로 읽는다. 보이는 값은 그대로다.
 - 도구 호출 원장이 지금 그 경우다. 디렉터리에 읽기 색인 파일이 있어서 달 목록이 `Error` 를 낸다(§1.4). 이대로면 `tool_calls` 칸은 운영에서 한 번도 채워지지 않는다. Keeper 31개가 행마다 원장을 다시 읽는다. 새로 만든 base path 에는 색인이 없어서 시험은 통과한다.
@@ -363,11 +364,10 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
   - 갈리는 reader 는 `latest_json`, `read_latest ~keeper_name`, 최근 활동 5줄이다. TurnRecord 와 tool audit 는 지금도 엄격해서 같다.
   - 이 RFC 는 엄격한 쪽을 따른다. 그 파일은 저장소가 쓴 것이 아니다. 운영 설치의 Keeper 저장소와 도구 호출 원장에는 지금 그런 파일이 없다(2026-11-18 에 `find` 로 확인). 값이 달라지는 경우로 §7 에 적는다.
 - 칸으로 만든 행 값은 지금 reader 가 파일에서 만든 값과 같아야 한다. 칸의 읽기가 `Ok` 이고 점으로 시작하는 `.jsonl` 이 없는 모든 상태에서 그렇다. 차분 시험이 이것을 본다(§5).
-- `turn_audit` 만 기준이 다르다. 지금 reader 의 답은 파일만으로 정해지지 않는다. `Tool_audit_cache` 는 행 수가 같으면 기억한 값을 주고, 늘었으면 늘어난 수만큼만 읽는다(`keeper_status_metrics.ml:263-272`). prune 이 k 줄을 지우고 그보다 많은 줄이 붙으면 그 사이의 Turn 행을 놓친다. metrics prune 은 이 캐시를 비우지 않는다(`server_runtime_startup_maintenance.ml:50-62`). 그래서 이 칸의 기준은 캐시 없는 첫 채우기 읽기다.
 - 채우는 쪽은 저장소 잠금을 잡지 않는다. 지금의 끝 읽기는 풀 밖에서 부르면 풀에 IO 작업을 내고 기다린다(§1.2). 잠금을 쥔 채 그 작업을 기다리면, 같은 잠금을 기다리는 행 계산이 풀을 다 차지했을 때 아무도 진행하지 못한다(§6.6).
 - 풀 밖에서 채울 때는 칸 읽기와 파일 읽기를 풀 작업 하나에 넣는다. 칸을 먼저 읽고 풀 자리를 기다리면, 기다리는 동안 들어온 쓰기 하나가 그 채우기를 버리게 만든다. 도구 호출 원장은 모든 Keeper 가 쓴다. 그래서 바쁠 때 그 칸이 빈 채로 남고, 행마다 파일을 읽게 된다.
 - 채우기는 칸 하나에 재시작 뒤 한 번, 비운 뒤 한 번이다. 여러 행이 같은 칸을 동시에 채울 수 있다. 그중 하나만 들어가고, 나머지는 파일을 한 번 더 읽은 셈이 된다.
-- 가장 최근 Turn tool audit 행을 채울 때는 metrics 저장소를 끝에서부터 거꾸로 훑는다(`keeper_status_metrics.ml:254-258`). 지금 `Tool_audit_cache` 의 첫 채우기와 같은 일이다. 잠금을 쥐지 않으므로 heartbeat 쓰기를 막지 않는다. 훑는 동안 그 Keeper 의 metrics 쓰기가 끼면 그 채우기는 들어가지 않고, 다음 읽기가 다시 채운다. 채워진 뒤에는 Turn 행 쓰기만 값을 바꾼다. 이 칸은 쓰기가 실패했거나 지우는 쪽이 돈 뒤에만 다시 훑는다.
+- 가장 최근 Turn tool audit 행을 채울 때는 metrics 저장소를 끝에서부터 거꾸로 훑는다. 잠금을 쥐지 않으므로 heartbeat 쓰기를 막지 않는다. 훑는 동안 그 Keeper 의 metrics 쓰기가 끼면 그 채우기는 들어가지 않고, 다음 읽기가 다시 채운다. 채워진 뒤에는 Turn 행 쓰기만 값을 바꾼다. 이 칸은 쓰기가 실패했거나 지우는 쪽이 돈 뒤에만 다시 훑는다.
 - 비우기: 지우는 쪽은 끝나는 모든 경로에서 그 저장소의 칸을 모두 비운다. 저장소 잠금은 필요 없다. 지우는 도중에 파일을 읽은 채우기는 compare-and-set 에서 실패하거나, 넣더라도 뒤따르는 비우기에 덮인다.
   - 지운 수나 결과를 보지 않는 까닭이 있다. 날짜 파일 prune 은 달마다 지우고, 다음 달을 열다가 예외로 끝날 수 있다(`dated_jsonl_retention.ml:5-22`, `retention_directory.ml:45-49`). 지금 `on_pruned` 는 그때 불리지 않는다(§1.4). 대시보드 purge 는 앞의 것을 지운 뒤 첫 `Error` 에서 멈춘다(`server_dashboard_http_delete_actions.ml:705-707`, `:744-746`).
   - 기동 때와 24시간 prune 은 같은 함수를 탄다. 저장소마다 잠금을 푼 뒤 비운다(`server_runtime_startup_maintenance.ml:50-62`, `dated_jsonl.ml:2165-2181`). 도구 호출 원장의 prune(`Root.Tool_calls`)은 그 workspace 의 칸을 비운다.
@@ -378,7 +378,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 - trust, tool audit, 최근 활동, context, blocker 와 `masc_keeper_list` 의 receipt 는 칸을 읽는다. `Dated_jsonl` 저장소는 `read_fact` 로, 결정 기록은 `Keeper_row_facts` 로 읽는다.
 - 행 하나에서 registry 와 승인 큐를 한 번씩만 읽는다. receipt 칸도 한 번만 읽고, 두 reader 가 그 값을 같이 쓴다.
 - 이 값들을 읽는 행 helper 에서는 `read_policy` 의 뜻이 없어진다. 쓰는 중이 아니면 메모리 값이 파일과 같아서다. 그 helper 의 Current/Reuse 구분을 지운다. quarantine inventory(`operator_control_snapshot.ml:674-689`), snapshot 캐시(`:789-793`), briefing, execution 의 `read_policy` 는 그대로 둔다.
-- `Tool_audit_cache` 는 briefing(`dashboard_briefing_assembly.ml:38`)과 Keeper 상세(`keeper_status_detail.ml:592`)도 쓴다. L3 에서 두 곳을 같은 칸으로 옮긴 뒤 캐시를 지운다.
+- tool audit 는 Keeper 행, briefing(`dashboard_briefing_assembly.ml`), Keeper 상세(`keeper_status_detail.ml`)가 같은 함수(`latest_tool_audit_snapshot_from_files`)로 읽는다. 셋이 같은 칸을 읽는다(L3a).
 - 10초 trust 캐시(`operator:keeper-runtime-trust:compact:v1:*`)는 승인 audit 와 workspace 대기 승인 목록 읽기도 덮는다(`keeper_runtime_trust_snapshot.ml:689-702`). 이 RFC 는 그 둘을 옮기지 않는다. 그래서 §8.1 이 정해질 때까지 캐시는 그 둘 몫으로 남긴다.
 - `dt_profile` 은 값이 들어가지 않는다(`operator_control_snapshot.ml:187`). 같이 지운다.
 
@@ -391,7 +391,9 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 | L1 | meta 를 Owner projection 에서 얻는다. 세 소비자(`keepers_json`, board address, `masc_keeper_list`)의 파일 읽기 자리만 왕복 함수로 바꾼다(§3.1). Owner 는 됐는지 모르게 끝난 meta 쓰기를 `Atomic` 으로 내놓는다 | 소비자마다 파일 meta 로 만든 결과와 Owner meta 로 만든 결과가 같다. 넣는 Keeper 는 셋이다. 설정 필드가 자리 채움 값과 다른 TOML 을 가진 Keeper, 서버가 도는 동안 TOML 에서 key 를 뺀 Keeper, 기동 뒤 Owner 가 아직 meta 를 쓰지 않은 Keeper. 왕복 전제 시험: 만든 meta 와 시험 fixture 파일에서 decoder 가 낸 값을 한 번 더 왕복해도 같다. Owner 가 없는 Keeper 는 지금과 같은 결과가 나온다. meta 쓰기가 `Error` 나 예외로 끝난 Keeper 의 행은 파일 값을 보인다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
 | W | 줄 쓰기 함수가 규칙 11 을 지킨다. 병합됐다(#52991). 그 리뷰의 후속은 #53017 이다 | `test_fs_compat_fd_cache`, `test_fs_compat_append_jsonl_atomicity` |
 | L2 | 먼저 깔 것이 셋이다. 저장소 선언의 곁 파일 이름(§3.4), file system 이 부르는 이름으로 만든 등록부 key(§3.2), 따로 만든 잠금 handle 의 읽기 전용 타입(§3.2). 그 위에 칸(`Fact_cell`)과 `Dated_jsonl` 의 사실, 값 넷(최근 TurnRecord, 가장 새 온전한 receipt, 도구 호출 16줄, 결정 기록 마지막 행)을 둔다. `Dated_jsonl` 의 쓰는 함수 둘이 등록부 항목의 칸을 맞춘다. 결정 기록 칸의 표(`Keeper_row_facts`). 결정 기록 tail 의 결과 읽기(§3.4). 지우는 쪽이 끝나는 모든 경로의 비우기. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 시험, 칸 정체 시험, 잠금을 쥔 채 채우는 시험, 파일을 지운 뒤 두 번째 읽기 시험, 취소 시험, 지우다 실패하는 시험, `step` 단위 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다. 채우기 시도 수와 들어간 수를 칸마다 적는다. 어느 칸의 들어간 수가 늘 0 이면 그 칸은 채워지지 않는 것이다 |
-| L3 | metrics 끝 120행 칸과 가장 최근 Turn tool audit 행 칸. 읽는 쪽 tool audit·최근 활동·briefing·Keeper 상세. 그 뒤 `Tool_audit_cache` 를 지운다 | 차분 시험(`max_bytes` 를 켠 회전과 prune 포함), heartbeat 시험. 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
+| L3a | 가장 최근 Turn tool audit 행 칸(`Dated_jsonl.newest_selected`). metrics 저장소를 쓰는 곳을 따라가 보고 kept 로 적는다. 읽는 쪽은 Keeper 행·briefing·Keeper 상세의 tool audit 다. `Tool_audit_cache` 를 지운다 | 차분 시험(회전과 prune 포함), heartbeat 시험 |
+| L3b | metrics 끝 120행 칸. 읽는 쪽은 최근 도구 이름, 최근 활동, 대시보드의 metrics 창이다 | 차분 시험. 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
+| L3c | `Dated_jsonl.latest_view` 를 지운다. L3a 뒤로 부르는 곳이 없다 | 지운 이름을 `rg` 로 찾으면 0 |
 | L4 | 지우기: 행 helper 의 Current/Reuse 구분, 행 몫의 audit 10초 캐시, `dt_profile`, 행 안의 중복 읽기. 그 뒤 남은 행 일(승인 audit, quarantine 원장)을 잰다 | 지운 이름을 `rg` 로 찾으면 0. 남은 행 일의 sub-op 를 로그로 센다 |
 
 L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나가 칸을 파일과 어긋나게 한다(§3.3). L1 은 W 에 기대지 않는다.
@@ -442,7 +444,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 
 **지우다 실패하는 시험.** prune 과 purge 가 파일을 몇 개 지운 뒤 실패하게 한다. 그 저장소의 칸이 비워져 있어야 한다.
 
-**heartbeat 시험.** `turn_audit` 이 `Filled` 인 동안 heartbeat 행을 계속 쓴다. 칸이 비워지지 않고 값이 그대로다. 그 사이 Turn 행을 쓰면 값이 그 행으로 바뀐다.
+**heartbeat 시험.** `turn_audit` 이 `Filled` 인 동안 heartbeat 행을 계속 쓴다. 칸이 비워지지 않고 값이 그대로다. 그 사이 Turn 행을 쓰면 값이 그 행으로 바뀐다. 저장소 층에서는 `test_dated_jsonl_kept_facts` 의 「the newest row a selection selects」 다섯이 본다. 고른 행은 값이 되고, 지나친 행은 든 값을 그대로 둔다. 날짜 파일을 몰래 지워도 답이 같으니 파일을 열지 않은 것이다. 크기 회전 뒤에도 든다. 400걸음 무작위 시험도 이 사실을 걸음마다 엄격한 찾기와 견준다. Keeper 층에서는 `test_keeper_turn_tool_audit_kept` 가 실제 쓰는 함수(`append_keeper_metrics`)로 같은 것을 본다.
 
 **`step` 단위 시험.** `step` 은 읽어 둔 값, 쓴 줄, 쓴 날짜 파일만 받는 순수 함수다. 표로 넣어 결과를 본다. 지난 날짜 파일에 쓴 줄, 창의 절반을 넘는 결정 기록 줄, Turn 이 아닌 metrics 행, 깨진 줄이 든 목록이 들어간다.
 
@@ -529,7 +531,7 @@ L2 는 W 에 기댄다. 규칙 11 없이 칸을 두면 실패한 쓰기 하나�
 - `keepers_json` 의 설정 필드는 지금처럼 자리 채움 값으로 보인다(§3.1, #53007). `masc_keeper_list` 와 board address 는 지금처럼 TOML 을 덮은 값을 보인다. 이 RFC 는 어느 쪽도 고치지 않는다.
 - 파일 읽기가 실패하는 동안 행이 보이는 값이 달라진다. 지금은 meta 를 못 읽으면 `Keeper_unread` 고, 다른 묶음은 오류나 빈 값이다. 옮긴 뒤에는 Owner 와 칸이 든 값을 보인다. 마지막으로 쓰거나 읽은 내용이다.
 - 점으로 시작하는 `.jsonl` 이 있는 저장소에서는 값이 달라진다(§3.4). 지금의 너그러운 reader 는 그 파일의 줄도 읽는다. 칸은 읽지 않는다.
-- prune 뒤의 Turn tool audit 값이 달라질 수 있다. 지금 캐시는 그때 Turn 행을 놓칠 수 있다(§3.4). 칸은 prune 이 끝날 때마다 비워지고 파일에서 다시 채워진다.
+- tool audit 의 read drop 보고(`surface=keeper_status_runtime_keeper_metrics`)는 metrics 저장소를 훑을 때 난다. 서버에서는 칸을 채울 때다.
 - 있는 디렉터리의 이름은 적은 글자마다 처음 한 번만 묻는다(§3.2). 서버가 도는 동안 그 경로의 조각을 다른 곳을 가리키는 symlink 로 바꾸거나, 디렉터리를 지우고 대소문자만 다른 이름으로 다시 만들면, 기억한 이름이 옛 자리를 가리킨다. 손으로 파일을 지우는 경우와 같은 부류다. 서버가 Keeper 를 지울 때는 칸을 비우면서 그 기억도 지운다(§3.4).
 - 도구 호출 원장 디렉터리에 선언하지 않은 곁 파일이 새로 생기면 `tool_calls` 칸이 채워지지 않는다. 행은 지금처럼 파일을 읽는다. 칸마다 세는 채우기 수가 그 상태를 보여 준다(§5).
 - 결정 기록 행은 줄바꿈까지 20,000바이트 이하일 때만 든다(§3.3). 더 긴 행을 쓴 뒤에는 다음 읽기가 파일을 읽는다.

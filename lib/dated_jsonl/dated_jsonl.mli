@@ -375,6 +375,24 @@ val newest_parsed_row : Yojson.Safe.t option fact
     it when it selects every {!Parsed} row: rows that are not JSON are passed
     over, and [None] is a store in which no row is JSON. *)
 
+val newest_selected
+  :  name:string
+  -> select:(base_dir:string -> recent_entry -> 'a option)
+  -> 'a option fact
+(** A fact: what [select] gives for the store's newest row it selects, as
+    [find_latest_entry_result t (select ~base_dir:(base_dir t))] finds it,
+    and [None] for a store in which it selects no row.
+
+    [select] is told the store's directory, for a selection that reports the
+    rows it cannot use. It runs on each row the search visits when the files
+    are read, and once on each row appended while the value is kept. What it
+    answers for a row must depend on the row alone: an appended row it passes
+    over leaves the kept value as it is.
+
+    Each call makes a fact of its own, with its own kept value in every
+    store. Make it once, where the selection is defined, and keep it. [name]
+    labels its reads in [masc_dated_jsonl_fact_reads_total]. *)
+
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 (** The fact's value for the store. When the store keeps it, no file is read
     and no system call is made for a directory that exists
@@ -705,6 +723,7 @@ module For_testing : sig
   (** Whether the registry holds an entry for the store. *)
 
   val after_row :
+    ?base_dir:string ->
     'a fact ->
     value:'a ->
     newest:(string * string) option ->
@@ -715,5 +734,7 @@ module For_testing : sig
       day file [newest], and [row] went to the end of the day file [written];
       a day file is its month directory and its file name. The result is the
       value after the row with the newest day file it saw, or [None] when the
-      append forgets the fact instead. It reads no file and no clock. *)
+      append forgets the fact instead. It reads no file and no clock.
+      [base_dir] is the store's directory as a {!newest_selected} selection
+      is told it; the current directory's name when left out. *)
 end

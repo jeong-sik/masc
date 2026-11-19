@@ -104,12 +104,12 @@ let record_completed_turn ~config =
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
 let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pending])
-    ?(agent_core_tools = []) ?(on_error = fun () -> ())
+    ?(agent_core_tools = []) ?(on_error = fun () -> ()) ?this_turn_opening
     ~sw ~net ~base_path () =
   let errors = ref [] in
   (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-      ?carried_front_seed ~initial_messages ~agent_core_tools
+      ?carried_front_seed ~initial_messages ~agent_core_tools ?this_turn_opening
       ~goal:"Report progress."
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         errors := (runtime_id, error) :: !errors;on_error ())
@@ -400,7 +400,8 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
     { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
   open_turn_log ~config (completed @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~carried_front_seed ~initial_messages ~sw ~net ~base_path () in
+    dispatch ~carried_front_seed ~initial_messages ~this_turn_opening:Keeper_turn_driver_try_provider.Opened_before_its_input
+      ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);
   let sent n = Fixture.request_bodies refused |> Fun.flip List.nth n
@@ -451,7 +452,8 @@ let test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_bega
   let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
   open_turn_log ~config (three_completed_exchanges @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~initial_messages ~sw ~net ~base_path () in
+    dispatch ~initial_messages ~this_turn_opening:Keeper_turn_driver_try_provider.Opened_before_its_input
+      ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);
   let first = sent_to refused 0 and resent = sent_to refused 1 in
@@ -464,6 +466,32 @@ let test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_bega
    | Keeper_continuity_observation.Without_snapshot -> ()
    | _ -> fail "the resend was not attributed to a start without a snapshot");
   Keeper_continuity_observation.forget ~config ~keeper_name
+;;
+
+(* RFC librarian-lifecycle §4.10, rule 8, on a resumed turn. An earlier run
+   of this turn saved "ask 3" and "answer 3" and its closing save closed
+   them, so the [Opened] this run wrote lies after them and its baseline is
+   not where the turn began ({!Keeper_run_prompt.this_turn_opening}). The
+   lane does not resend from that baseline: after the refusal it falls over
+   to the next peer, and every request still carries "ask 3", the turn's
+   own request. *)
+let test_a_resumed_turn_does_not_resend_past_its_own_request () =
+  with_dispatch_fixture ~refused_behavior:(refused_then_answered "Resent past the request.")
+  @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  record_three_completed_exchanges ~config;
+  let resumed = [ msg T.User "ask 3"; msg T.Assistant "answer 3" ] in
+  let initial_messages = three_completed_exchanges @ resumed @ [ msg T.User pending ] in
+  open_turn_log ~config (three_completed_exchanges @ resumed);
+  let (_ : (string * Agent_core.Error.t) list) =
+    dispatch ~initial_messages
+      ~this_turn_opening:
+        (Keeper_run_prompt.this_turn_opening Keeper_run_prompt.Skip_already_checkpointed_user_turn)
+      ~sw ~net ~base_path () in
+  check int "the refused peer is not asked again" 1 (Fixture.post_count refused);
+  check int "the lane falls over to the next peer" 1 (Fixture.post_count accepted);
+  check bool "the refused request carries the turn's own request" true
+    (has_content (sent_to refused 0) "ask 3");
+  check bool "and so does the next peer's" true (has_content (sent_to accepted 0) "ask 3")
 ;;
 
 (* The reader a Keeper opens a marker with. Composition demotes a result
@@ -504,7 +532,7 @@ let test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn () =
   let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
   open_turn_log ~config (three_completed_exchanges @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~initial_messages
+    dispatch ~initial_messages ~this_turn_opening:Keeper_turn_driver_try_provider.Opened_before_its_input
       ~agent_core_tools:[ artifact_reader ~base_path ] ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);
@@ -545,4 +573,6 @@ let () = run "continuity HTTP dispatch"
     test_case "a refused boundary without a snapshot resends from where this turn began" `Quick
       test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_began;
     test_case "a refused boundary demotes before it moves past the failed turn" `Quick
-      test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn]]
+      test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn;
+    test_case "a resumed turn does not resend past its own request" `Quick
+      test_a_resumed_turn_does_not_resend_past_its_own_request]]

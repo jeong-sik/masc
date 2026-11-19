@@ -419,6 +419,29 @@ let past_point_start = function
    names is bounded by the boundary even when it lies before this turn's
    start; only a front rule 8 moved to where this turn began keeps its place
    past the boundary, and is bounded by where this turn began. *)
+(* B10 of RFC librarian-lifecycle §4.10: where this turn began is read only
+   when this run wrote its [Opened] before the turn's input. A resumed
+   checkpoint already holds the input and maybe the turn's progress, so its
+   run's [Opened] names no start. *)
+let test_a_resumed_turn_names_no_start () =
+  let opening =
+    testable
+      (fun fmt (opening : Try_provider.this_turn_opening) ->
+         Format.pp_print_string fmt
+           (match opening with
+            | Try_provider.Opened_before_its_input -> "opened before its input"
+            | Try_provider.Opened_after_its_input -> "opened after its input"))
+      ( = )
+  in
+  check opening "a turn that records its input opened before it"
+    Try_provider.Opened_before_its_input
+    (Masc.Keeper_run_prompt.this_turn_opening Masc.Keeper_run_prompt.Record_user_turn);
+  check opening "a resumed checkpoint's turn opened after it"
+    Try_provider.Opened_after_its_input
+    (Masc.Keeper_run_prompt.this_turn_opening
+       Masc.Keeper_run_prompt.Skip_already_checkpointed_user_turn)
+;;
+
 let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
   let history = exchanges ~from:0 10 in
   let continuity = absorbed_at ~point:2 history in
@@ -858,7 +881,8 @@ let () =
             test_a_size_refused_boundary_keeps_the_front
         ] )
     ; ( "this turn's start"
-      , [ test_case "an accepted start is bounded by the turn boundary" `Quick
+      , [ test_case "a resumed turn names no start" `Quick test_a_resumed_turn_names_no_start
+        ; test_case "an accepted start is bounded by the turn boundary" `Quick
             test_an_accepted_start_is_bounded_by_the_turn_boundary
         ; test_case "a refused ladder resends from where this turn began" `Quick
             test_a_refused_ladder_resends_from_where_this_turn_began

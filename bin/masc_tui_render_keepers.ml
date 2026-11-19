@@ -1644,10 +1644,60 @@ let keeper_group_heading_text ~available_cells rows group count =
 (* The columns a Story window label takes: two of indent, the mark and the word. *)
 let story_label_cells = 10
 
+(* Compact btop-style live context meter for the Story window when the
+   Keeper's context window has been measured. *)
+let keeper_story_context_meter (state : state) ~ko ~inner (row : Keeper_list_model.row) =
+  let observation =
+    match row.keeper.k_identity with
+    | Error _ -> None
+    | Ok _ ->
+        (match live_context_view state row.keeper with
+         | Masc_tui_fetched.Ready obs | Masc_tui_fetched.Stale (obs, _) -> Some obs
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None)
+  in
+  match
+    Option.bind observation (fun obs ->
+      match Observation_layout.context_summary obs with
+      | Observation_layout.Context_measured { ratio; tokens; maximum; _ } ->
+          Some (ratio, tokens, maximum)
+      | Observation_layout.Context_partial _ | Observation_layout.Context_unavailable _ -> None)
+  with
+  | None -> None
+  | Some (ratio, tokens, maximum) ->
+      let value = Observation_layout.percentage_tenths ratio in
+      let max_value = Observation_layout.percentage_tenths_full in
+      let pct = Float.of_int value /. 10.0 in
+      let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
+      let suffix =
+        Printf.sprintf "%.1f%% (%s/%s)" pct
+          (Message_layout.compact_count tokens)
+          (Message_layout.compact_count maximum)
+      in
+      let label = if ko then "컨텍스트" else "ctx" in
+      let width = min 44 (max 1 (inner - story_label_cells)) in
+      Some
+        (Masc_tui_chart.meter ~width ~value ~max_value ~scale ~label ~suffix
+           ~track_style:(Theme.recede ()) ~reset:Ansi.reset ())
+
+let keeper_story_task_segment ~ko (row : Keeper_list_model.row) =
+  match row.task with
+  | None -> None
+  | Some (task : Tui_decode.task) ->
+      let title =
+        let raw = Terminal_text.single_line task.title in
+        if String.equal raw "" then Terminal_text.single_line task.id else raw
+      in
+      let style = task_state_style task.status in
+      let close = if String.equal style "" then "" else Ansi.reset in
+      let prefix = if ko then "작업 " else "task " in
+      Some (Theme.recede () ^ prefix ^ Ansi.reset ^ style ^ task_status_icon task.status ^ " " ^ title ^ close)
+
 (* The story page of the Story window (RFC-0515 section 2.5): the Keeper under
-   the cursor told as past, now and next. Every part is a cell or a sentence the
-   list rows already draw, so the window states no value a row does not. *)
+   the cursor told as past, now and next. The embedded top rule already carries
+   the Keeper's name and current activity word, so [now] leads with context,
+   task and detail telemetry rather than repeating the heading. *)
 let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list_model.row) =
+  let ko = state.ui_language = Lang_ko in
   let keeper_name = row.keeper.Tui_decode.k_name in
   let runtime =
     match row.reading.Keeper_control.liveness with
@@ -1678,7 +1728,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
     match memory with
     | Masc_tui_keeper_memory_reading.Row { lag = Masc_tui_keeper_memory_reading.Lag turns; _ }
       when turns > 0 ->
-        Some (Theme.warn () ^ Printf.sprintf "lag %d" turns ^ Ansi.reset)
+        Some
+          (Theme.warn ()
+           ^ Printf.sprintf (if ko then "밀림 %d" else "lag %d") turns
+           ^ Ansi.reset)
     | Masc_tui_keeper_memory_reading.Row
         { lag = Masc_tui_keeper_memory_reading.Lag _ | Masc_tui_keeper_memory_reading.Lag_unmeasured
         ; _ }
@@ -1693,7 +1746,8 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
             style_axis_cell
               { cell with
                 Masc_tui_keeper_axis_cell.text =
-                  Printf.sprintf "last %dh %s" Masc_tui_keeper_mark.pulse_hours cell.text
+                  Printf.sprintf (if ko then "최근 %dh %s" else "last %dh %s")
+                    Masc_tui_keeper_mark.pulse_hours cell.text
               })
           pulse_cell
       ]
@@ -1709,40 +1763,50 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
            ~max_cells:(max 0 (inner - story_label_cells))
            (Masc_tui_keeper_trail.attempts_of_runtime runtime))
   in
-  let activity = Keeper_list_model.primary_activity_of_row row in
   let age =
     match row.last_activity_at with
     | Some since ->
         Option.value (Message_layout.age_text ~now ~since) ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let detail = keeper_detail_text ~ko:(state.ui_language = Lang_ko) ~now row in
+  let detail = keeper_detail_text ~ko ~now row in
+  let telemetry_row =
+    let parts =
+      List.filter_map Fun.id
+        [ keeper_story_context_meter state ~ko ~inner row
+        ; keeper_story_task_segment ~ko row
+        ; (if String.equal detail "" then None else Some detail)
+        ]
+    in
+    match parts with [] -> None | _ -> Some (join parts)
+  in
+  let meta_row =
+    dim (Render_schedule.keeper_flags_header ^ " ")
+    ^ keeper_flag_cell runtime
+    ^ dim
+        (Printf.sprintf "   %s %s   %s" Masc_tui_keeper_mark.age_header age
+           (keeper_runtime_label runtime))
+  in
   let now_entries =
-    [ keeper_activity_style activity
-      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
-      ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
-      ^ Ansi.reset
-      ^ (if String.equal detail "" then "" else dim (" · " ^ detail))
-    ; dim (Render_schedule.keeper_flags_header ^ " ")
-      ^ keeper_flag_cell runtime
-      ^ dim
-          (Printf.sprintf "   %s %s   %s" Masc_tui_keeper_mark.age_header age
-             (keeper_runtime_label runtime))
-    ]
+    match telemetry_row with
+    | Some primary -> [ primary; meta_row ]
+    | None -> [ meta_row ]
   in
   let next_parts =
     List.filter_map Fun.id
       [ Option.map style_axis_cell
           (Masc_tui_render_keeper_story.next_run_cell state ~now ~keeper_name)
-      ; Option.map dim (keeper_next_text ~ko:(state.ui_language = Lang_ko) ~now row)
+      ; Option.map dim (keeper_next_text ~ko ~now row)
       ; lag
       ]
   in
   let next_entries =
-    match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ]
+    match next_parts with
+    | [] -> [ dim (if ko then "예정 없음" else "nothing announced") ]
+    | _ -> [ join next_parts ]
   in
   (* Source cautions in the feed precede the optional trail and flags. Keep
-     the current activity and next reading, then let the feed use its own
+     the current telemetry and next reading, then let the feed use its own
      caution-first policy before filling spare rows with older detail. *)
   let primary_now = List.take 1 now_entries in
   let feed_room =
@@ -1754,37 +1818,45 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   in
   let feed =
     if feed = [] && past_head = [] && past_tail = [] && feed_room > 0
-    then [ dim "nothing recorded" ] else feed in
+    then [ dim (if ko then "기록 없음" else "nothing recorded") ] else feed in
   let detail_room = max 0 (feed_room - List.length feed) in
   let past_tail = List.take detail_room past_tail in
   let now_entries = primary_now
     @ List.take (max 0 (detail_room - List.length past_tail)) (List.drop 1 now_entries) in
   let past_entries = past_head @ feed @ past_tail in
-  labelled_lines "◂ past" past_entries
-  @ labelled_lines "● now" now_entries
-  @ labelled_lines "▹ next" next_entries
+  labelled_lines (if ko then "◂ 과거" else "◂ past") past_entries
+  @ labelled_lines (if ko then "● 현재" else "● now") now_entries
+  @ labelled_lines (if ko then "▹ 다음" else "▹ next") next_entries
 
-(* The Keeper's name and what it is doing, at the left of the window's title. *)
+(* The Keeper's name and current activity mark + word, embedded on the left of
+   the Story window's top rule. *)
 let keeper_story_lead ~ko (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
-  "  " ^ Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
-  ^ keeper_activity_style activity ^ keeper_activity_word ~ko activity ^ Ansi.reset
+  Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
+  ^ keeper_activity_style activity
+  ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
+  ^ keeper_activity_word ~ko activity ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
+  let ko = state.ui_language = Lang_ko in
   let lead, lines =
     match page, row with
     | Masc_tui_keeper_story.World, (Some _ | None) ->
-        ("  " ^ Theme.info () ^ "world · shared workspace memory" ^ Ansi.reset,
+        (Theme.info ()
+         ^ (if ko then "월드 · 공유 워크스페이스 기억" else "world · shared workspace memory")
+         ^ Ansi.reset,
          Masc_tui_keeper_world.dock_lines ~health_error:(memory_health_error_text state)
            ~cells:inner ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows)
            state.memory_health (Masc_tui_memory_world.reading state.memory_world))
     | Masc_tui_keeper_story.(Story | Schedule | Memory), None ->
-        ( "  " ^ Theme.recede () ^ "no Keeper" ^ Ansi.reset
-        , [ Theme.recede () ^ "  no Keeper under the cursor" ^ Ansi.reset ] )
+        ( Theme.recede () ^ (if ko then "선택된 키퍼 없음" else "no Keeper") ^ Ansi.reset
+        , [ Theme.recede ()
+            ^ (if ko then "  커서 아래 키퍼가 없습니다" else "  no Keeper under the cursor")
+            ^ Ansi.reset ] )
     | Masc_tui_keeper_story.(Story | Schedule | Memory), Some row ->
         let keeper_name = row.keeper.Tui_decode.k_name in
-        ( keeper_story_lead ~ko:(state.ui_language = Lang_ko) row
+        ( keeper_story_lead ~ko row
         , (match page with
            | Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World ->
                keeper_story_lines state ~now ~inner
@@ -1795,7 +1867,7 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
                Masc_tui_render_keeper_story.memory_lines state ~cols:inner
                  ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows) ~now ~keeper_name) )
   in
-  Masc_tui_render_keeper_story.draw buf ~cols ~rows ~lead ~current:page lines
+  Masc_tui_render_keeper_story.draw buf ~ko ~cols ~rows ~lead ~current:page lines
 
 (* The matrix keeps runtime identities separate from their display labels. *)
 type runtime_matrix =

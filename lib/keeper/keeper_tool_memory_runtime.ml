@@ -1525,8 +1525,8 @@ let support_invalidation_receipt
    The receipts below write them through these names and the repeat guard's
    answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
    cannot drift apart without the compiler seeing it. Snapshot stamps
-   ([revision], [recorded_at]), counts and prose ([rows_written],
-   [what_committed]) and pending request_id/sequence are not answer keys. *)
+   ([revision], [recorded_at]) and counts and prose ([rows_written],
+   [what_committed]) are not answer keys. *)
 module Write_receipt_key = struct
   let ok = "ok"
   let error_kind = "error_kind"
@@ -1682,54 +1682,6 @@ let keeper_memory_write_with_outcome
         ~base_path:config.Workspace.base_path
     in
     (match source_path, basis, supersedes with
-     (* The Librarian admission queue only moves while the Librarian runs;
-        with the switch off (or invalid) nobody drains it, and a plain
-        observation would sit pending forever behind an ok:true receipt.
-        Those writes take the direct current-snapshot path below instead. *)
-     | None, Keeper_memory_os_types.Observed _, None
-       when Env_config.KeeperMemoryOs.librarian_config_state ()
-            = Env_config.KeeperMemoryOs.Enabled ->
-       let request_id = Random_id.prefixed ~prefix:"memory-admission-" ~bytes:16 in
-       let now = Time_compat.now () in
-       let fact : Keeper_memory_os_types.fact =
-         { claim = body; category = Keeper_memory_os_types.Fact;
-           first_seen = now; last_seen = now;
-           origin = { kind = Keeper_memory_os_types.Authored;
-             trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id };
-           basis } in
-       let saved =
-         try Keeper_memory_admission_queue.append ~keepers_dir
-             ~keeper_id:meta.name ~request_id fact with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (Keeper_memory_admission_queue.Append_failed (Printexc.to_string exn)) in
-       (match saved with
-        | Error error ->
-          let detail = Keeper_memory_admission_queue.append_error_to_string error in
-          let error_kind = match error with
-            | Capacity_exceeded _ -> Pending_admission_capacity_exceeded
-            | Append_failed _ -> Pending_admission_persistence_failed in
-          Log.Keeper.warn "pending memory admission failed keeper=%s request_id=%s: %s"
-            meta.name request_id detail;
-          respond ~ok:false ~error_kind
-            [ "request_id", `String request_id;
-              Write_receipt_key.store, `String "pending_memory_admission";
-              Write_receipt_key.detail, `String detail ]
-        | Ok candidate ->
-          (* Notification failure cannot turn the committed queue append into
-             a failed save. The signal logs recoverable failures; startup and
-             subsequent wakes can discover this same pending candidate. *)
-          Keeper_librarian_queue_signal.changed
-            ~base_path:config.Workspace.base_path ~keeper_name:meta.name;
-          respond ~ok:true ~error_kind:No_memory_write_error
-            [ Write_receipt_key.outcome, `String "persisted_pending_admission";
-              Write_receipt_key.store, `String "pending_memory_admission";
-              "request_id", `String candidate.request_id;
-              "sequence", `Int candidate.sequence;
-              "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds candidate.fact.last_seen);
-              "rows_written", `Int 1;
-              Write_receipt_key.basis, memory_write_basis_receipt candidate.fact.basis;
-              "what_committed", `String
-                "The candidate was persisted for Librarian admission. This receipt acknowledges pending input and does not confirm admission or a current Memory identity; the worker may already have processed it. This request_id is not a memory_id and cannot be a premise or supersedes target. Search current Memory for an admitted premise identity; supersedes additionally requires origin authored." ])
      | Some source_path, _, _ ->
        (match
           Result.bind

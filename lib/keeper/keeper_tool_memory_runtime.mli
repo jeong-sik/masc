@@ -50,9 +50,7 @@ val keeper_context_status_json
 
 (** Explicit memory write surface.
 
-    An observed claim without [source_path] or [supersedes] is durably queued
-    for Librarian admission; it is not current Memory yet. Derived and
-    superseding ordinary claims still write the current Memory OS snapshot.
+    Without [source_path], writes the current Memory OS snapshot.
     With [source_path], writes only the source-bound current store.
     Body is stored as [**title** content] when [title] is non-empty.
 
@@ -66,12 +64,7 @@ val keeper_context_status_json
       derived conclusion. Premises are exact ordinary Memory OS identities.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
-    - On success: [ok=true], [rows_written], [outcome], [store]. Pending
-      admission returns [request_id], [sequence] and enqueue [recorded_at], with
-      no current identity, revision or disposition. This confirms persistence
-      for admission, not its current processing status.
-      A fresh call creates a fresh request; replay across consumption is not
-      idempotent.
+    - On success: [ok=true], [rows_written], [outcome], [store].
     - On validation or persistence failure: [ok=false] with the
       corresponding explicit [error_kind]. *)
 val keeper_memory_write_with_outcome
@@ -86,11 +79,11 @@ val keeper_memory_write_with_outcome
 (** The answer of a [keeper_memory_write] receipt for the repeat guard: the
     fields that say what the write did ([memory_id], [identity_disposition],
     [outcome], the source of a source-bound write, the error of a refused one),
-    without snapshot [revision], [recorded_at], or pending [request_id] and
-    [sequence] that change on repeated calls. [None] for output that is not a receipt object. *)
+    without snapshot [revision] and [recorded_at], which change on repeated
+    calls. [None] for output that is not a receipt object. *)
 val memory_write_answer_of_output : string -> Yojson.Safe.t option
 
-(** Current fact stores. The pending admission queue is not a fact store. *)
+(** Current fact stores. *)
 type fact_store = Keeper_tool_memory_validation.fact_store =
   | Ordinary_current
   | Source_bound_current
@@ -157,10 +150,6 @@ type memory_write_error_kind = Keeper_tool_memory_validation.memory_write_error_
   | Supersedes_premise_of_successor
       (** The new claim is derived and one of its missing premises is the
           fact [supersedes] removes. *)
-  | Pending_admission_capacity_exceeded
-  | Pending_admission_persistence_failed
-      (** Queue append outcome is unknown; the receipt names its request_id.
-          Current search cannot prove absence from the pending queue. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)

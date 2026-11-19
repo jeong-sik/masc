@@ -37,6 +37,16 @@ val prepare : authority:authority -> session_dir:string -> preserve_system:bool 
     comparison accepts only an absent or valid derived session message_count;
     other context and working-context changes remain ambiguous and refused.
     The cleared payload records its new message_count before publication. *)
+(** What the planned change does to the head. *)
+type head_change =
+  | Empties_head
+  (** The head decodes. It is replaced by one whose kept messages are all
+      open, on the same trace. *)
+  | Removes_undecodable_head
+  (** The head does not decode. It is removed, and the retained input is put
+      in with its kept messages open, or nothing is. *)
+  | No_head (** There is no head: the retained input goes in, or nothing changes. *)
+val head_change : plan -> head_change
 val execute : plan -> (receipt, error) result
 (** Run only after confirmed official-session clearing. Retention and exact
     canonical installation must both be confirmed. Actual cancellation propagates,

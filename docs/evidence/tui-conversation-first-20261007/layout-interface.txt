@@ -1,3 +1,0 @@
-Command: ocaml <temporary-run-directory>/layout-interface.ml
-Exit: 0
-layout interface: PASS

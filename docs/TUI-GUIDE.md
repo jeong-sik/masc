@@ -5,13 +5,12 @@ status: runbook
 # MASC TUI Guide
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
-server is reachable, adds the surfaces that only exist over HTTP. Operations is the first screen. It opens the decisions and conversations
-that need the operator. The full Goal and Task lists are
-under Work; provider quota scopes, Keeper costs and tokens, and daily provider
-reports are under Usage (Operations `m`). Board is under Work with an explicit
-`: go Work / Board` palette destination. Activity and server logs are under System (`A` / `L`).
-Changes follows the Keeper selected on
-Keepers.
+server is reachable, adds the surfaces that only exist over HTTP. Operations is
+the first screen. It opens the decisions and conversations that need the
+operator. The full Goal and Task lists are under Work; provider quota scopes,
+Keeper costs and tokens, and daily provider reports are under Usage
+(Operations `m`). Board is under Work with an explicit `: go Work / Board`
+palette destination. Activity and server logs are under System (`A` / `L`).
 The [operator information architecture](design/tui/OPERATOR-INFORMATION-ARCHITECTURE.md)
 defines the reading order and observation boundaries.
 The [screen inventory](design/tui/SCREENS.md) lists all surfaces, subviews and overlays.
@@ -195,11 +194,8 @@ join over MCP (`/mcp/play`) or plain HTTP with the token after `#`.
 
 ## Options
 
-| Option | Default | Effect |
-|--------|---------|--------|
-| `--base-path` (`--base`) | `MASC_BASE_PATH`, then cwd | Directory holding `.masc` |
-| `--port` | `8935` | MASC server port on `127.0.0.1` |
-| `--workspace` | derived from base path | Workspace label in the header |
+`masc-tui --help` lists the options and their defaults: `--base-path`
+(`--base`), `--port`, `--workspace`, `--reasoning` and `--tool-view`.
 
 ## What the server changes
 
@@ -226,9 +222,9 @@ the base path, emptied at each start. When a server refuses to start before its
 own log exists, that file is the only place the reason is written. The TUI
 reads its last line back when the server exits before `/health` answers.
 
-The TUI session block on Metrics cuts each event at the frame width, and a
-long line is longer than most frames, so open the file for the whole line. If the server is still not answering after 30 seconds,
-the TUI says `masc server did not answer /health in time` and names the same
+The TUI session block on Metrics cuts each event at the frame width, so open
+the file to read a long line whole. If the server is still not answering
+after 30 seconds, the TUI says `masc server did not answer /health in time` and names the same
 file.
 
 ## Navigation
@@ -283,28 +279,6 @@ and an unknown one is named in the event log:
 candle = "dotted" # or "painted"
 reduce_motion = true # optional; default false
 ```
-
-A browser consent started on the Services tab keeps checking its Keeper even
-on another surface. A callback the server
-admitted just before `expires_at` can still be publishing credentials after
-the URL is gone, so wait for its result instead of starting a second login.
-
-Code's Ctrl-P finder and B return preserve the source reading while a file is
-being fetched. See [Code navigation](guides/tui-code-navigation.md) for failure,
-cancellation and reading-position behavior.
-
-The System surface shows `runtime.toml` as the server reads it; `e` opens
-it in `$EDITOR` and the server's preview validation gates the write. `a` on
-the same pane adds one more Claude Code, Codex or Antigravity account: pick a
-provider the file declares with `←`/`→`, keep or change the suggested id, and
-type where the new account signs in (`account-home` for Claude Code and
-Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
-Antigravity). The form copies that provider's command and model bindings,
-refuses a location another provider of the same client already uses, and
-saves through the same preview. It does not sign in; the rows under the
-fields name the command that does, and after the save the same command is
-in the session log. Turns reach the new account only after a lane lists it
-as a candidate.
 
 The Keeper roster starts closed. At 110 columns and wider, `Ctrl-B` pins it
 beside the current surface with the cursor marked. Narrower terminals use
@@ -374,8 +348,24 @@ For a Goal, `actual` comes only from an explicitly recorded measurement bound
 to that Goal's current criterion revision. The screen says `not recorded`,
 `not observed`, or `unavailable` when it has no valid value.
 
+In **Needs your decision**, individual request rows show their kind, recipient and reason.
+Enter opens that exact held-call, approval, question, Goal or task reader;
+it never submits a decision.
+
+Use j/k or the arrows to choose, then Enter to open. Esc from a reader opened there returns to
+Dashboard with its selection and request window retained.
+
+**Conversations** uses the last explicitly visited conversation saved as
+`[tui].last_chat_keeper`, independently of the opening preference. With no available remembered target, choose a
+Keeper. An empty, successfully read roster offers creation while any existing
+Goal or task decisions remain visible. A conversation opened through Conversations returns to Dashboard with Esc
+and keeps its draft through the existing per-Keeper draft store.
+
 Open Work → Goals for the metric,
 proof, and activity.
+
+Operations `s` or chat `/music` opens the music workbench; see the
+[alphaTex tool README](../tools/alphatex/README.md).
 
 ### Work
 
@@ -428,6 +418,12 @@ time, and is listed first. A failed read is one line,
 `account emails unread: <reason>` after the rows, and email rows this build
 cannot read are counted in one note there.
 
+On Usage, `f` searches accounts through the command palette. Choose an account
+from current inventory or recorded history; `v` switches Plan/Trend/Keepers/Calls
+(`V` goes back) and `w` changes the history window while retaining the exact
+quota scope ID. Plan and Trend show that account; `a` restores all accounts.
+Keepers usage and Calls remain workspace-wide readings.
+
 ### Activity
 
 Every keeper's actions as the runtime event feed delivers them, newest first:
@@ -435,7 +431,7 @@ tool calls and their returns, turn boundaries and turn done rows, chat rows
 landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
-`▶` a call
+Marks: `▶` a call
 started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
 (a provider call's start or end, an internal agent run's start), `■` done
 (the keeper's turn, or an internal agent run), `?` something needing
@@ -519,8 +515,7 @@ the others.
 
 Column meanings and marks are in [TUI-KEYS](guides/TUI-KEYS.md) (Keeper columns,
 Keeper marks). A Keeper whose tool gate is YOLO draws its name in red. Names,
-last-turn times and tasks stay readable while the runtime is down; a Keeper
-whose live roster row was not read shows `health unread` in `DETAIL`.
+last-turn times and tasks stay readable while the runtime is down.
 
 `Enter` opens the Story window under the list for the Keeper the cursor is on.
 The window takes rows from the list, so the list keeps scrolling to the cursor
@@ -578,6 +573,25 @@ a durable memory write — are still decided by the workspace Gate mode and that
 Keeper's own override, whatever this toggle says. The per-Keeper `yolo` / `auto`
 setting is persisted under `.masc/gate/` across server restarts.
 
+The `v` view and `o` order are stored in `tui-keepers.toml` in the resolved
+config directory and restored on the next start; a failed or unconfirmed save
+is reported.
+
+`K` opens a read-only relationship view for the selected Keeper: each arrow
+comes from the recorded Keeper sender of a request queued for that recipient.
+On a settled page, `[` and `]` choose a verified sender and Enter opens that
+Keeper's Info view. Use `<` and `>` to read earlier or later server pages,
+`r` to refresh the current page or retry a failed one, and `R` to start again
+from the first page. The cursor does not identify a Keeper's storage
+generation; restart if that Keeper was deleted and recreated. Esc closes the
+view.
+
+The attention group holds held calls, questions and confirmations. A Keeper
+whose health is failing is in the failing group unless it is waiting on a
+person, and it stays there after it starts a new turn. A Keeper whose open
+turn has a failed attempt is in the failing group too, unless it is waiting
+on a person, paused or offline.
+
 ### Lanes
 
 Lanes is the common operator inventory for exact-output services, Browser
@@ -589,10 +603,8 @@ Invalid TOML and workers with unconfirmed cleanup stay visible.
 A saved declaration and an observed worker have separate readings. Missing data
 from a partial read does not mean a Lane was removed or disabled.
 
-A
-mouse press selects the row actually drawn, and pressing the selected row opens
-it.
-Declaration documents open for inspection: `E` edits and `s` saves explicitly.
+A mouse press selects the row actually drawn, and pressing the selected row
+opens it. Declaration documents open for inspection: `E` edits and `s` saves explicitly.
 Existing drafts are retained.
 
 `o` or `A`, `/addons`, and
@@ -617,11 +629,11 @@ restarting. The notice also names pending Keeper settings and lock warnings.
 Keeper values overridden by environment
 settings remain visible as warnings even when no restart is required.
 
-Standalone Lane model settings use the same form as Config → Models. In the
+Standalone Lane model settings use the same form as System → Models. In the
 Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
 context, output and sampling fields. Runtime detail's `e` and the All runtimes
 roster's `e` open the same form.
-`o` in Config → Models opens the source reading.
+`m` in System → Models opens the source reading.
 
 ### Clients
 
@@ -666,6 +678,11 @@ The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
 `id (name unknown)` when it does not.
 
+A browser consent started on the Services tab keeps checking its Keeper even
+on another surface. A callback the server admitted just before `expires_at`
+can still be publishing credentials after the URL is gone, so wait for its
+result instead of starting a second login.
+
 The Items tab is one `]` after Info. The portrait tries the selected accessory over the
 Keeper's observed outfit; Space compares it with the current outfit. The wallet
 shows Candle and the number of purchased accessories. The selected item shows
@@ -680,7 +697,8 @@ send or save it before preparing the Item request again. Buying and equipping
 remain Keeper-owned tool actions, and the reply reports their result. Return to
 Items to read the resulting ownership and outfit.
 
-The TUI session block gets one line per binding -- removed, kept (now bound to
+After `U` `U` on the Channels tab, the TUI session block gets one line per
+binding -- removed, kept (now bound to
 another Keeper), not found (with the server's words), or FAILED with the
 server's reason, failures last -- and the footer shows the count of each and
 names the channels that failed. A transport whose binding list the server
@@ -886,16 +904,14 @@ its exact count and points to Changes for the complete view.
 
 #### Prompt presets
 
-System 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목록은 프리셋마다
-이름과 개수(프롬프트 오버라이드, 지시문을 담은 keeper, 런타임 배정, exact 레인),
-저장 시각을 보여주고, 아래 상세에는 설명과 keeper 목록이, 그 아래에는 이번
-세션의 마지막 복원 보고서가 남는다. manifest 가 읽히지 않는 디렉터리는 `!` 줄로
-따로 보인다.
+The System `presets` pane (reached with `p`) lists each preset with its counts
+(prompt overrides, Keepers with instructions, runtime assignments, exact-output
+lanes) and save time. The detail below shows its description and Keepers, then
+this session's last restore report. A directory whose manifest does not read
+gets its own `!` row.
 
-채팅 창에서도 같은 일을 할 수 있다. `/preset` lists the prompt presets the server holds under `.masc/presets`:
-one line per preset with its counts (prompt overrides, keepers with
-instructions, runtime assignments, exact-output lanes), its description, and
-when it was saved; a directory whose manifest does not read gets a `!` line.
+The chat does the same. `/preset` lists the prompt presets the server holds
+under `.masc/presets`.
 `/preset save <name> [description]` snapshots the live state under that name.
 `/preset restore <name>` saves the live state first as `_autosave`, replacing
 the one the previous restore left, then applies the preset surface by surface
@@ -1015,6 +1031,16 @@ the TUI cannot check it.
 A path that cannot be read, or a file that is empty, is refused on the
 footer.
 
+In Keeper chat, `Ctrl-O` previews the newest image or closed `mermaid` fence.
+`/images` lists the available images and diagrams. `/images N` opens an item,
+counting newest first. Generated audio and Standard
+MIDI files (`audio/midi` or `audio/x-midi`) are available through `/listen`.
+Structured Mermaid outputs use the same actions. Install Pele with
+`scripts/install-pele.sh` (Node.js 22+ and pnpm). The companion runs offline and renders charts, mindmaps, class
+diagrams and other Mermaid types as terminal images. Any key returns.
+Image-capable terminal support is required, as for other `Ctrl-O` previews.
+See the [renderer installation and request contract](../tools/pele/README.md).
+
 #### Keeper Job notifications
 
 Chat keeps the selected Keeper's scheduled Job status above the composer.
@@ -1110,19 +1136,6 @@ tablature box instead of plain code - what renders, what the fallback box
 means, and how to turn it off are in the
 [alphaTex tab guide](guides/alphatex-tab.md).
 
-Operations `s` or chat `/music` opens the music workbench; see the
-[alphaTex tool README](../tools/alphatex/README.md).
-
-In Keeper chat, `Ctrl-O` previews the newest image or closed `mermaid` fence.
-`/images` lists the available images and diagrams. `/images N` opens an item,
-counting newest first. Generated audio and Standard
-MIDI files (`audio/midi` or `audio/x-midi`) are available through `/listen`.
-Structured Mermaid outputs use the same actions. Install Pele with
-`scripts/install-pele.sh` (Node.js 22+ and pnpm). The companion runs offline and renders charts, mindmaps, class
-diagrams and other Mermaid types as terminal images. Any key returns.
-Image-capable terminal support is required, as for other `Ctrl-O` previews.
-See the [renderer installation and request contract](../tools/pele/README.md).
-
 A post's attachments are listed at the end of its body under `ATTACHMENTS`,
 each with a `[N]` number. On the read pane, pressing the number opens that
 attachment: audio plays locally (afplay or the next player on the chain),
@@ -1135,6 +1148,11 @@ Enter keeps the query for `n`/`N`, and Esc while typing cancels it. A MIDI that 
 the status line (tracks, BPM, time signature, length). What each key did,
 or why it could not, stays on the pane's bottom line until the next post
 opens.
+
+A closed post's resolution is part of its scrollable body: the closer, supplied
+close time, complete summary and recorded successor remain readable at narrow
+widths. `S` opens the successor named by that post's metadata, including posts
+outside the loaded list. Esc returns to the original post.
 
 ### Work / Goals
 
@@ -1372,6 +1390,10 @@ focused, `/` searches the file's own lines instead of the tree — typing
 moves the line cursor to the first match, Enter keeps the query for
 `n`/`N`, and the view follows the cursor.
 
+Code's Ctrl-P finder and B return preserve the source reading while a file is
+being fetched. See [Code navigation](guides/tui-code-navigation.md) for failure,
+cancellation and reading-position behavior.
+
 Which workspace is a scope the header always names: the project tree by
 default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
 or a registered repository after `Enter` on a Workspace row
@@ -1407,6 +1429,8 @@ A conflict or uncertain save keeps the candidate. In that comparison, `r`
 reads the server again without authorizing another write, and `A` explicitly
 adopts the compared revision before another `S`. The quit warning includes retained drafts;
 they are not recovered after the TUI process exits.
+
+With a file open:
 
 - `Shift-Left`/`Shift-Right` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads
@@ -1493,18 +1517,13 @@ The same servers back the Keeper's `keeper_code_query` tool, so a Keeper
 asked about a language whose server is missing falls back to reading text.
 For OCaml, `references` also needs `dune build @ocaml-index`; without it the
 answer names that command rather than returning a short list.
-Python reference queries wait for analysis of the opened file version before
-asking for locations, so a cold server does not answer using only the opened
-file and its imports. If that observation is unavailable, the query fails
-explicitly and the current file remains open. This preparation does not claim
-that every workspace diagnostic has completed.
 
 ### Tools
 
-The Tools surface hangs off Config under `t` and has five panes. Press `p` to move through the selected
-Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
-Skill usage, and the registered Tool catalog. This keeps the Skill views from
-being buried below a long Tool list.
+`t` on System opens Tools, which belongs to Features & plugins. `p` moves
+through six panes: the selected Keeper's effective Tool surface, async
+requests, Skill activations, cross-Keeper Skill usage, the registered Tool
+catalog, and storage (the host disk and the server's last storage cleanup).
 
 On the effective Tool surface, `j/k`, paging and `Home/End` select a Skill.
 `Enter` loads its retained evidence and turns those keys to the page below the
@@ -1525,10 +1544,8 @@ with those three JSON fields, so a known terminal request can also be read
 directly without browsing history. The target Keeper cannot stand in for the
 original submitter.
 
-From request detail, `t` opens the original source Task and its event history.
-
-`r`
-refreshes both; `Esc` returns to the original request.
+From request detail, `t` opens the original source Task and its event history;
+`r` refreshes both and `Esc` returns to the original request.
 
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate Triggered, Delivered, and Actions totals (호출,
@@ -1619,6 +1636,18 @@ The `runtime.toml` view keeps comments and section headings on screen, while
 `j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump
 by a visible page and land on the nearest assignment.
 
+`a` on the `runtime.toml` pane adds one more Claude Code, Codex or Antigravity
+account: pick a
+provider the file declares with `←`/`→`, keep or change the suggested id, and
+type where the new account signs in (`account-home` for Claude Code and
+Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
+Antigravity). The form copies that provider's command and model bindings,
+refuses a location another provider of the same client already uses, and
+saves through the same preview. It does not sign in; the rows under the
+fields name the command that does, and after the save the same command is
+in the session log. Turns reach the new account only after a lane lists it
+as a candidate.
+
 Models groups saved model bindings by account/provider and shows the API model,
 declared context, reasoning effort, temperature, and output cap. `e` opens the
 selected binding's settings; `c` copies it into an independently named variant
@@ -1632,7 +1661,7 @@ and any capability clamp. Add a saved copy to a Lane to use it.
 
 If the source changed, close and
 reopen the form after reload. A missing or unreadable save reply is shown as an
-unknown outcome: the draft remains and Config, Runtime and Lanes are reloaded
+unknown outcome: the draft remains and System, Runtime and Lanes are reloaded
 to inspect the result. No write is retried automatically.
 
 Context and output edits belong to the selected account/model binding.
@@ -1652,6 +1681,15 @@ body as Markdown (including fenced-code syntax highlighting), names whether it
 came from a file or an override, and keeps `PgUp`/`PgDn` paging. `e` edits the
 effective prompt through `$EDITOR`, and `x` clears only its persisted override.
 
+Workspace's repository list and System → Models offer `v` for a full, read-only
+capture of the selected object. Long paths, assignment lists, failure reasons,
+account names and owning TOML sections wrap without the preview's row limit.
+`/` searches this captured document, Enter keeps the query for `n`/`N`, and
+Esc while typing cancels the query.
+`j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
+returns to the same selection. The capture stays fixed while background reads
+or selections change. Close, refresh and reopen for updated data.
+
 ### System Logs
 
 Activity combines Events and Logs: `e` opens Events from either view, and `l` opens Logs from Events; Esc on Logs returns to Events.
@@ -1660,26 +1698,6 @@ The server's log ring, the same source the dashboard `logs` tab reads.
 
 When the load fails the previous page stays on screen under a red line saying
 so. The count above it is then stale, not a fresh reading.
-
-## Keybindings
-
-On the Keepers surface, the `v` view and `o` order
-are stored in `tui-keepers.toml` in the resolved config directory and restored
-on the next start; a failed or unconfirmed save is reported.
-`K` opens a read-only relationship view for the selected Keeper: each arrow
-comes from the recorded Keeper sender of a request queued for that recipient.
-On a settled page, `[` and `]` choose a verified sender and Enter opens that
-Keeper's Info view.
-Use `<` and `>` to read earlier or later server pages, and `r` to refresh the
-current page, or retry the failed page after an error; `R` starts again from
-the first page. The cursor does not identify a
-Keeper's storage generation; restart if that Keeper was deleted and recreated.
-Esc closes the view.
-The attention group
-holds held calls, questions and confirmations. A Keeper whose health is failing
-is in the failing group unless it is waiting on a person, and it stays there after
-it starts a new turn. A Keeper whose open turn has a failed attempt is in the
-failing group too, unless it is waiting on a person, paused or offline.
 
 ## Requirements
 
@@ -1696,33 +1714,6 @@ in. Other terminals keep the existing defaults, and each setting also accepts
 Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
 complete repaint.
-
-Every session writes one line saying why it ended to its own stderr log,
-`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
-
-```
-[masc-tui] exit: normal (quit key)
-[masc-tui] exit: normal (interrupt)
-[masc-tui] exit: normal (signal SIGTERM)
-[masc-tui] exit: abnormal (exception Failure("..."))
-```
-
-A normal end is the operator or the session's owner asking for it — the `q`
-key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
-surface leaving without being asked, such as an uncaught exception. A session
-that leaves without naming a cause reads as `abnormal (no cause was
-recorded)`, which is its own wording rather than a made-up exception.
-
-Counting a
-day's ends by cause is one command:
-
-```
-grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
-```
-
-A session killed with `SIGKILL`, or one whose machine lost power, writes
-nothing — no handler runs — so the count covers ends the process survived
-long enough to name.
 
 Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.
@@ -1750,6 +1741,32 @@ workspace; it does not narrow the processes to stop. A session that does not end
 alone — the script never escalates to `SIGKILL` and never starts a new TUI
 while a matched session remains live.
 
+**Why a TUI session ended.** Every session writes one line saying why it ended to its own stderr log,
+`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
+
+```
+[masc-tui] exit: normal (quit key)
+[masc-tui] exit: normal (interrupt)
+[masc-tui] exit: normal (signal SIGTERM)
+[masc-tui] exit: abnormal (exception Failure("..."))
+```
+
+A normal end is the operator or the session's owner asking for it — the `q`
+key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
+surface leaving without being asked, such as an uncaught exception. A session
+that leaves without naming a cause reads as `abnormal (no cause was
+recorded)`, which is its own wording rather than a made-up exception.
+
+Counting a day's ends by cause is one command:
+
+```
+grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
+```
+
+A session killed with `SIGKILL`, or one whose machine lost power, writes
+nothing — no handler runs — so the count covers ends the process survived
+long enough to name.
+
 **Header shows `HTTP refresh failed`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,
 Planning, Fusion, and messaging do not. Check the port with `--port`.
@@ -1773,45 +1790,3 @@ only after the header has stopped saying `(not loaded)`.
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
 recorded in the TUI session block on Metrics.
-
-## Dashboard: decisions and conversations
-
-Dashboard gives its body to two sections: **Needs your decision** and
-**Continue**. Individual request rows show their kind, recipient and reason.
-Enter opens that exact held-call, approval, question, Goal or task reader;
-it never submits a decision.
-
-Use j/k or the arrows to choose, then Enter to open. Esc from a Home-opened reader returns to
-Home with its selection and request window retained.
-
-Continue uses the last explicitly visited conversation saved as
-`[tui].last_chat_keeper`, independently of the opening preference. With no available remembered target, choose a
-Keeper. An empty, successfully read roster offers creation while any existing
-Goal or task decisions remain visible. A conversation opened through Continue returns to Dashboard with Esc
-and keeps its draft through the existing per-Keeper draft store.
-
-### Complete selected details
-
-Workspace's repository list and System → Models offer `v` for a full, read-only
-capture of the selected object. Long paths, assignment lists, failure reasons,
-account names and owning TOML sections wrap without the preview's row limit.
-`/` searches this captured document, Enter keeps the query for `n`/`N`, and
-Esc while typing cancels the query.
-`j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
-returns to the same selection. The capture stays fixed while background reads
-or selections change. Close, refresh and reopen for updated data.
-
-### Continuing a closed Board discussion
-
-A closed post's resolution is part of its scrollable body: the closer, supplied
-close time, complete summary and recorded successor remain readable at narrow
-widths. `S` opens the successor named by that post's metadata, including posts
-outside the loaded list. Esc returns to the original post.
-
-### Following an account through Usage
-
-On Usage, `f` searches accounts through the command palette. Choose an account
-from current inventory or recorded history; `v` switches Plan/Trend/Keepers/Calls
-(`V` goes back) and `w` changes the history window while retaining the exact
-quota scope ID. Plan and Trend show that account; `a` restores all accounts.
-Keepers usage and Calls remain workspace-wide readings.

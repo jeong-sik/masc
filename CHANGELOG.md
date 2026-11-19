@@ -10,7 +10,7 @@
 2. TUI 대화면이 btop 계열의 반응형 짜임으로 다시 짜였습니다(#53291–#53294). Metrics KPI 카드가 폭에 따라 4x1→2x2→Compact 로 접히고, 탭 스트립이 활성 탭을 화면 밖으로 잃지 않으며, Overview 가 좁은 폭에서 1열 카드로 내려가 색 카테고리 슬롯이 256/Truecolor 확장을 받고, ? 단축키 도움말이 3열 매트릭스로 바뀌었습니다.
 3. 작성된 설정 원문을 통째로 다루는 축이 늘었습니다. Keeper·Runtime TOML 과 프롬프트 오버라이드 근거를 버전 붙은 world 묶음으로 남기고(#52827), Admin 전용 HTTP API 로 그 원문을 내보내며(#52829), Keeper 선언 전체를 설정 소유자의 리비전 검사 아래에서 커밋합니다(#52874).
 4. 업그레이드 주의는 Upgrade notes 를 먼저 읽으세요. addon 최소 리비전(keeper-librarian 0.2.8 등)이 올라가고(#52778), exact 출력을 선언하는 패키지는 `[world] exact_protocol` 을 적어야 붙습니다(#52826). Fresh state required 14건도 함께 확인하세요.
-5. Known issues 절은 이번 컷에 없습니다.
+5. Known issues 절에 직전 릴리스에서 이월된 RC 빌드 인프라 2건이 있습니다(opam 색인 리비전 기록 `unknown`, `--locked`와 다른 dune 버전 설치).
 6. 컷 노트: 조각 없이 병합된 113건을 정리했습니다. 사용자 대면 4건(#52827·#52829·#52874·#53265)은 조각을 채웠고 앞 셋은 저자가 PR 에 쓴 원문 복원이며, [Unreleased] 기존 항목이 번호를 인용해 전달하는 86건과 조각 52936.md 가 전달하는 1건(#52928), 문서·시험·CI·리팩터 등 사용자 대면 변경이 없는 22건은 exempt 목록에 사유를 남겼습니다.
 
 ### Upgrade notes
@@ -1282,6 +1282,10 @@
 - `Dated_jsonl.latest_view` and `read_latest_view_result` are removed with their five tests. Their one user, the Keeper tool audit cache, went when the tool audit became a fact the metrics store keeps in memory, and nothing in `lib` or `bin` called them. (#53354)
 - `Operator_control_snapshot_tool_audit.read` takes no read policy; the cache key, the cached encoding of its outcome, `Timed_out` and `Keeper_status_metrics.Tool_audit_timed_out` are removed. The row's `dt_profile` timing, which was never assigned, is removed from the sub-op log line. (#53378)
 - The comment of `Keeper_types_support.append_jsonl_line`, the RFC and the changelog entry of #53362 name the two writers of a Keeper's JSONL files (the decision record's own, and the one the TLA trace and runtime manifests share); the entry no longer describes a feedback write nothing calls. `test_keeper_decision_row_kept` no longer turns on the Eio mutex guards for a read that takes no mutex. (#53400)
+
+### Known issues
+- RC 빌드 로그의 opam 색인 리비전 기록이 `unknown`으로 남는다(v0.73.1 이월, task-3735).
+- RC 빌드가 `--locked`와 달리 dune 3.25.0·dune-build-info 3.25.0을 설치한다(산출물 기능 검증에는 영향이 없다, v0.73.1 이월, task-3740).
 
 ## [0.73.1] - 2026-11-18
 

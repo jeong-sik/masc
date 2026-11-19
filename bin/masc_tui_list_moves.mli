@@ -11,7 +11,7 @@
     The page was decided there too, one branch per surface, and a surface
     with no branch paged by the whole body. The Memory list shares its body
     with the selected Keeper's detail, so at 80x24 it drew three rows and
-    PgDn jumped thirteen: ten Keepers were never on screen. *)
+    PgDn jumped thirteen: nine Keepers were never on screen. *)
 
 type row_list = {
   rl_count : int;  (** rows the list holds *)

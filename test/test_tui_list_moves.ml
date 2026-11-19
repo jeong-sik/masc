@@ -270,7 +270,43 @@ let test_row_lists_move_their_cursor () =
           ; 6, 3, 4, Page_up, Some 0; 6, 3, 4, To_top, Some 0; 6, 3, 4, To_end, Some 5
           ; 6, 5, 4, Line_down, Some 5; 6, 5, 10, Page_down, Some 5; 6, 5, 10, Page_up, Some 0 ])
     [ Repositories; Verification; Harness; Clients; Memory; Changes; Connectors; Runtime
-    ; System_logs; Board; Fusion; Schedules; Planning; Lanes; Code; Resources ]
+    ; System_logs; Board; Fusion; Schedules; Planning; Lanes; Code; Resources; Config; Acting ]
+
+(* QA N01: Keeper > Memory drew three rows at 80x24 and PgDn moved thirteen,
+   so nine Keepers never reached the screen. A page is the list's drawn
+   height less one (RFC §3.1): from any cursor in any window, after PgDn the
+   row that was last on screen is still on it, and after PgUp the row that
+   was first. The window follows the landing the way the dispatcher's lists
+   with a scroll follow it. *)
+let test_a_page_keeps_the_row_read_last () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Memory;
+  List.iter
+    (fun (count, height) ->
+      for cursor = 0 to count - 1 do
+        for scroll = max 0 (cursor - height + 1) to min cursor (max 0 (count - height)) do
+          List.iter
+            (fun (key, kept, name) ->
+              let window = ref scroll in
+              let rows =
+                Some
+                  { Moves.rl_count = count
+                  ; rl_cursor = cursor
+                  ; rl_place =
+                      (fun index ->
+                        window := Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll) }
+              in
+              press ~on_screen:(drawn ~height rows) state key;
+              Alcotest.(check bool)
+                (Printf.sprintf "%d rows drawn %d tall, cursor %d, window %d: %s keeps row %d"
+                   count height cursor scroll name kept)
+                true
+                (kept >= !window && kept < !window + height))
+            [ Key.Page_down, min (count - 1) (scroll + height - 1), "PgDn"
+            ; Key.Page_up, scroll, "PgUp" ]
+        done
+      done)
+    [ 34, 3; 34, 13; 34, 2; 5, 8 ]
 
 (* An overlay drawn over a surface moves its own list, even over the two
    surfaces that walk something else: the Git changes list over the Keeper
@@ -376,6 +412,8 @@ let () =
             test_row_lists_move_their_cursor
         ; Alcotest.test_case "an overlay moves its own rows" `Quick
             test_an_overlay_moves_its_own_rows
+        ; Alcotest.test_case "a page keeps the row read last" `Quick
+            test_a_page_keeps_the_row_read_last
         ] )
     ; ( "detail height"
       , [ Alcotest.test_case "a detail keeps the tallest height" `Quick

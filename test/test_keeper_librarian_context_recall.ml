@@ -537,20 +537,29 @@ let test_unreadable_board_pocket_is_left_out () =
     check string "the stored context is not changed" stored (stored_context ~keepers_dir))
     unreadable_board_payloads
 
+(* What a publication stores when it reads the two pockets of [commit_mixed]
+   while the Board source still is readable: every pocket, under the revision
+   of the snapshot. *)
+let store_whole_artifact ~base_path (mixed : Context.snapshot) =
+  let whole = Option.get (ok (Context.render {Context.empty with previous = Some mixed})) in
+  Tool_blob_store.put_durable_reuse (Tool_blob_store.create ~base_path)
+    ~bytes:whole ~mime:"text/plain"
+
+let save_whole_index ~keepers_dir (mixed : Context.snapshot) artifact =
+  Fs_compat.save_file (Recall.path ~keepers_dir ~keeper_name:"keeper")
+    (Yojson.Safe.to_string (`Assoc
+      ["generation", `String mixed.generation; "revision", `Int mixed.revision;
+       "pocket_count", `Int 2; "source_count", `Int 2;
+       "artifact", Tool_output.normalized_artifact_ref_to_json artifact]))
+
 (* Which pockets are readable can change while the revision stays. An index
    published while the Board pocket was readable names the same revision and
    points at bytes that hold its text. *)
 let test_index_holding_an_unreadable_pocket_is_rebuilt () =
   with_store @@ fun ~base_path ~keepers_dir ->
   let mixed = commit_mixed ~keepers_dir (Keeper_event_queue.Board_routing_pending board_stimulus) in
-  let whole = Option.get (ok (Context.render {Context.empty with previous = Some mixed})) in
-  let earlier = Tool_blob_store.put_durable_reuse (Tool_blob_store.create ~base_path)
-      ~bytes:whole ~mime:"text/plain" in
-  Fs_compat.save_file (Recall.path ~keepers_dir ~keeper_name:"keeper")
-    (Yojson.Safe.to_string (`Assoc
-      ["generation", `String mixed.generation; "revision", `Int mixed.revision;
-       "pocket_count", `Int 2; "source_count", `Int 2;
-       "artifact", Tool_output.normalized_artifact_ref_to_json earlier]));
+  let earlier = store_whole_artifact ~base_path mixed in
+  save_whole_index ~keepers_dir mixed earlier;
   check bool "the earlier artifact holds the Board pocket" true
     (String_util.contains_substring (artifact_body ~base_path earlier) "PRIVATE_RETAINED_CONTEXT");
   let recall = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
@@ -565,6 +574,66 @@ let test_index_holding_an_unreadable_pocket_is_rebuilt () =
   check bool "and keeps the independent pocket" true
     (String_util.contains_substring body "INDEPENDENT_CONTEXT");
   check int "the index counts what it points at" 1 (index_count ~keepers_dir "pocket_count")
+
+(* A repair publishes and then reads the index back. The Librarian publishes
+   the same revision on its own worker, and a publication that read the
+   pockets while the Board source still was readable can write its index
+   between the two. That index names the revision the repair expects and
+   points at bytes that hold the Board pocket. *)
+let test_repair_does_not_take_another_publication_of_the_revision () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let mixed = commit_mixed ~keepers_dir (Keeper_event_queue.Board_routing_pending board_stimulus) in
+  let earlier = store_whole_artifact ~base_path mixed in
+  check bool "the other publication holds the Board pocket" true
+    (String_util.contains_substring (artifact_body ~base_path earlier) "PRIVATE_RETAINED_CONTEXT");
+  let landed = ref 0 in
+  (* No index is stored, so this recall repairs. *)
+  let body = Recall.For_testing.render ~base_path ~keepers_dir ~keeper_name:"keeper"
+      ~before_retain:(fun () -> ())
+      ~after_repair_publish:(fun () ->
+        incr landed;
+        save_whole_index ~keepers_dir mixed earlier) () |> ok |> Option.get in
+  check int "the other publication landed inside the one repair" 1 !landed;
+  check bool "the recall does not name the artifact that holds the Board pocket" false
+    (String_util.contains_substring body earlier.sha256);
+  check bool "it says the working context is unavailable" true
+    (String_util.contains_substring body "working context is unavailable");
+  check bool "and names no artifact" false (String_util.contains_substring body "sha256=");
+  (* The index the other publication left is rebuilt by the next recall. *)
+  let recall = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  let rebuilt = artifact_of_index ~keepers_dir in
+  check bool "the next recall names the rebuilt artifact" true
+    (String_util.contains_substring recall rebuilt.sha256);
+  check bool "which is not the one that holds the Board pocket" false
+    (String.equal rebuilt.sha256 earlier.sha256);
+  check bool "and leaves the Board pocket out" false
+    (String_util.contains_substring (artifact_body ~base_path rebuilt) "PRIVATE_RETAINED_CONTEXT")
+
+(* The artifact body is managed guidance over the readable pockets. A prompt
+   directory that holds the unavailable notice and not that body tells the two
+   outcomes apart: the notice renders, so an unavailable notice here would be
+   the body failure answered as unavailable context storage. *)
+let test_body_guidance_that_does_not_render_is_an_explicit_error () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "published context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let index_path = Recall.path ~keepers_dir ~keeper_name:"keeper" in
+  let index = Fs_compat.load_file index_path in
+  let notices_dir = Filename.concat base_path "notice-prompts" in
+  Unix.mkdir notices_dir 0o700;
+  Fs_compat.save_file (Filename.concat notices_dir "keeper.md")
+    "---\ndescription: the unavailable notice without the working context body\n---\n\n\
+     ### context.librarian_unavailable\nCurrent organized working context is unavailable.\n";
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir notices_dir;
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.clear (); Prompt_registry.set_markdown_dir (prompts_dir ())) @@ fun () ->
+  check (result (option string) string) "the unavailable notice renders from this directory"
+    (Ok (Some "Current organized working context is unavailable."))
+    (Recall.render ~artifact_reader_available:false ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  check bool "a body that does not render is an explicit error" true
+    (Result.is_error (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ()));
+  check string "the published index stays" index (Fs_compat.load_file index_path)
 
 let test_no_readable_pocket_is_unavailable () =
   with_store @@ fun ~base_path ~keepers_dir ->
@@ -629,6 +698,10 @@ let () =
       test_unreadable_board_pocket_is_left_out;
     test_case "an index holding an unreadable pocket is rebuilt" `Quick
       test_index_holding_an_unreadable_pocket_is_rebuilt;
+    test_case "a repair does not take another publication of the revision" `Quick
+      test_repair_does_not_take_another_publication_of_the_revision;
+    test_case "body guidance that does not render is an explicit error" `Quick
+      test_body_guidance_that_does_not_render_is_an_explicit_error;
     test_case "no readable pocket is unavailable and keeps the publication" `Quick
       test_no_readable_pocket_is_unavailable;
     test_case "readership shows whole pockets of readable sources" `Quick

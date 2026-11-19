@@ -189,8 +189,7 @@ val grid_wait_glyph : string
     failure line. *)
 
 val grid_full_mark : string
-(** [█]: a filled cell of the lag bar, and a pulse half hour of failed turns
-    only. *)
+(** [▆]: a filled cell of a pulse half hour of failed turns only. *)
 
 val grid_chain_link : string
 val grid_more_mark : string

@@ -244,7 +244,12 @@ type turn_line =
 ### 5.2 누가 언제 무엇을 덧붙이나
 
 턴 기록은 턴 기록 모듈만 쓴다. 그 모듈을 부르는 곳은 턴 경로(받아들임, 끝남), 프로세스 시작 단계, Keeper 만들기, head 를 줄이는 함수, purge, session 을 지우는 정지, 쓰는 쪽을 만들 때와 운영자의 `Resume` 때 하는 저장소 시작(§8.6)이다. Memory 를 쓰는 쪽(§9)은 이 파일을 읽기만 한다.
-부르는 곳은 그 Keeper 의 owner 안이거나, Keeper 가 등록되지 않은 동안의 purge 이거나, 정지의 마무리 단계다. owner 안은 턴이거나 턴 사이의 idle maintenance 자리다. 정지의 마무리 단계가 그 Keeper 의 턴이 모두 끝난 뒤에 도는지는 확인하지 못했다(§23.2). dashboard purge 는 Keeper 가 등록되지 않았을 때만 돌고 그 Keeper 의 lifecycle key lock 을 쥔다(`server_dashboard_http_keeper_api_checkpoints.ml:618-626`). CLI purge 는 서버가 workspace 를 쥐고 있으면 적용을 거절한다(`bin/masc_checkpoint_purge.ml:322`). 그래서 저장소 시작과 정지의 마무리 단계를 빼면, 한 Keeper 의 턴 기록을 쓰는 곳은 한 번에 하나다.
+부르는 곳은 그 Keeper 의 owner 안이거나, Keeper 가 등록되지 않은 동안의 purge 이거나, 정지의 마무리 단계다. owner 안은 턴이거나 턴 사이의 idle maintenance 자리다. 정지의 마무리 단계는 그 Keeper 의 턴이 모두 끝난 뒤에만 돈다. 까닭은 문단 아래에 적었다. dashboard purge 는 Keeper 가 등록되지 않았을 때만 돌고 그 Keeper 의 lifecycle key lock 을 쥔다(`server_dashboard_http_keeper_api_checkpoints.ml:618-626`). CLI purge 는 서버가 workspace 를 쥐고 있으면 적용을 거절한다(`bin/masc_checkpoint_purge.ml:322`). 그래서 저장소 시작을 빼면, 한 Keeper 의 턴 기록을 쓰는 곳은 한 번에 하나다.
+
+- 마무리는 `Joined_idle` 과 그 뒤의 phase 에서만 돈다. 그 앞의 phase 는 `Unsupported_phase` 로 거절한다(`keeper_shutdown_finalize.ml` 의 `run`).
+- `Joined_idle` 을 쓰는 곳은 넷이다. 켜진 Keeper 의 정지는 owner 가 쉬고 lane fiber 가 끝난 뒤에 쓴다. 꺼진 Keeper 의 정지는 owner 가 쉬고 lane 이 없는 것을 본 뒤에 쓴다(`keeper_shutdown_prepare_join.ml`). 나머지 둘은 새 프로세스의 boot 복구다(`keeper_shutdown_runtime.ml`). 앞 프로세스의 턴은 이미 없다.
+- `Prepared` 부터 `Cleanup_ready` 까지 admission fence 가 서 있다(`requires_admission_fence`). 그래서 그사이 새 턴도 받아들여지지 않는다.
+
 저장소 시작만 다르다. owner 의 자리를 기다리지 않고 덧붙이는 helper 의 잠금만 잡는다. 쓰는 줄은 `Log_started` 하나이고, 파일에 완전한 줄이 없을 때만 쓴다. 턴의 덧붙임과는 아래의 끝 offset 규칙이 가른다.
 덧붙일 때마다 꼬리를 읽고, 읽은 끝 offset 에서만 덧붙인다. 끝이 달라졌으면 꼬리를 다시 읽는다. 덧붙이는 helper 는 프로세스 안의 잠금과 프로세스 사이의 경로 잠금을 같이 잡는다.
 
@@ -2187,7 +2192,6 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 모르는 것 | 틀리면 달라지는 것 | 확인하는 곳 |
 |---|---|---|
 | registry 에서 Keeper 를 빼는 곳 여섯(파일 다섯, `unregister_exact` 를 부르는 곳)이 그 lane 이 끝난 뒤에 빼는지 | 아니면 도는 턴 아래에서 dashboard purge 가 고쳐 쓴다. 지금 purge 도 같다 | purge 층(L8) |
-| session 을 지우는 정지의 마무리 단계가 그 Keeper 의 턴이 모두 끝난 뒤에 도는지 | 아니면 정지가 쓴 줄 뒤에 그 턴의 `Closed` 가 온다. 그 줄의 끝자리는 없어진 head 의 것이다 | reset 층(L3c) |
 | head 를 줄이는 함수가 `Reset` 줄부터 head 설치가 돌아올 때까지 턴의 줄을 쓰는 쪽과 같은 잠금을 쥐는지. 지우기와 dashboard purge 가 쥐는 잠금 이름만 읽었다(§5.2) | 아니면 줄과 head 변경 사이에 턴이 받아들여지고, 그 턴의 `baseline` 이 없어질 head 의 것이다 | reset 층(L3c) |
 | 같은 이름의 runtime 파일이 남아 있을 때 Keeper 만들기가 거절하는지 | 거절하면 「meta 를 치우고 다시 만든 Keeper」 경로(§5.2)가 없다 | reset 층(L3c) |
 | 끝이 결과를 기다리는 tool 요청인 열린 메시지를 닫은 뒤에, 다음 턴이 그 이력을 지금처럼 읽는지. 지금은 턴이 시작할 때 메모리에서 닫는 메시지를 덧붙인다(`keeper_agent_run.ml:229-230`). 닫는 저장은 메시지 목록을 바꾸지 않고 닫힘의 경계만 옮긴다 | 다르게 읽으면 프로세스 시작 단계가 닫는 저장을 하기 전에 그 꼬리를 먼저 고쳐야 한다 | 프로세스 시작 단계의 층(L3a3b4c) |

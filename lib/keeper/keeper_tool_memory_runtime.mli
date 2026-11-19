@@ -113,6 +113,24 @@ type derivation_rejection = Keeper_tool_memory_validation.derivation_rejection =
       ; premise_id : string
       }
 
+(** Why Memory took no write. None of them is in the arguments of the call,
+    and each is answered before a line is appended, so nothing was
+    committed. *)
+type memory_unwritable = Keeper_tool_memory_validation.memory_unwritable =
+  | Store_stopped of Librarian_store.stop
+  (** The Keeper's store is stopped. An operator resumes or adopts it. *)
+  | Keeper_not_registered
+  | No_writer_in_process
+  (** This process started no Memory writers for the workspace. The server
+      of the workspace has them. *)
+  | Refused_past_validation of Librarian_direct.refusal
+  (** The writer refused what this tool's validation lets through: a
+      turn without a trace, or a derivation it does not accept. *)
+  | Not_a_snapshot of Librarian_envelope.refusal
+  | Answer_of_another_write
+  (** The writer answered a claim as it answers a retraction, or a
+      retraction as it answers a claim. *)
+
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
@@ -143,13 +161,13 @@ type memory_write_error_kind = Keeper_tool_memory_validation.memory_write_error_
   | Supersedes_self
       (** The new claim has the exact bytes of the fact it supersedes. *)
   | Supersedes_not_current
-      (** No current fact of this keeper has the [supersedes] identity. *)
-  | Supersedes_not_authored
-      (** The [supersedes] fact is current but was not written by this
-          keeper through [keeper_memory_write]. *)
+      (** No current fact has the [supersedes] identity, and the claim is
+          not current either. *)
   | Supersedes_premise_of_successor
       (** The new claim is derived and one of its missing premises is the
           fact [supersedes] removes. *)
+  | Memory_unwritable of memory_unwritable
+      (** Memory took no write, for a reason that is not in the arguments. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)
@@ -200,6 +218,7 @@ type memory_retract_error_kind =
   | Memory_id_invalid
   | Reason_empty
   | Fact_not_found
+  | Retract_unwritable of memory_unwritable
   | Retract_persistence_failed
   | No_memory_retract_error
 

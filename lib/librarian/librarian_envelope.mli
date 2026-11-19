@@ -19,7 +19,10 @@ val empty : at:float -> turn_log:Keeper_turn_log.Log_id.t -> Current.t
 
 type next =
   | Unchanged (** The commit changes no byte of the snapshot. *)
-  | Rewritten of Current.t
+  | Rewritten of
+      { snapshot : Current.t
+      ; bytes : string (** What the snapshot file holds after the commit. *)
+      }
 
 type refusal =
   | Revision_not_next of
@@ -29,11 +32,23 @@ type refusal =
   (** The line does not carry the revision after the snapshot's. *)
   | Facts_inconsistent of string
   (** Applying the line's effects holds one fact twice. *)
+  | Not_encodable of string
+  (** The snapshot codec does not write the result: a fact said to have lost
+      its support names no premise it lacks, or names them out of order. *)
 
-(** A direct write rewrites the snapshot: its facts are
-    {!Librarian_effects.apply} of the line's effects, its revision is the
-    line's, it was updated when the line was written, and its source is the
-    write ([explicit_retract] for a retraction, [explicit_write] otherwise)
-    on the trace the line carries. An adoption leaves the bytes the operator
-    named. *)
+(** What a cause does to the snapshot, before its line exists. A direct write
+    rewrites it: the facts are {!Librarian_effects.apply} of the effects, the
+    revision is the one after [previous]'s, it was updated at [at], and its
+    source is the write ([explicit_retract] for a retraction,
+    [explicit_write] otherwise) on the trace the cause carries. An adoption
+    leaves the bytes the operator named. Never [Revision_not_next]. *)
+val next
+  :  previous:Current.t
+  -> at:float
+  -> Librarian_log.cause
+  -> Librarian_effects.t
+  -> (next, refusal) result
+
+(** {!next} of a line's time, cause and effects. A line that rewrites the
+    snapshot has to carry the revision {!next} gives. *)
 val after : previous:Current.t -> Librarian_log.commit -> (next, refusal) result

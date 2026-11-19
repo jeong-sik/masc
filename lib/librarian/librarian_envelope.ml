@@ -20,7 +20,10 @@ let empty ~at ~turn_log : Current.t =
 
 type next =
   | Unchanged
-  | Rewritten of Current.t
+  | Rewritten of
+      { snapshot : Current.t
+      ; bytes : string
+      }
 
 type refusal =
   | Revision_not_next of
@@ -28,6 +31,7 @@ type refusal =
       ; line : int
       }
   | Facts_inconsistent of string
+  | Not_encodable of string
 
 let source_of_direct ~trace (write : Librarian_direct.write) : Current.source =
   match write with
@@ -35,34 +39,42 @@ let source_of_direct ~trace (write : Librarian_direct.write) : Current.source =
   | Retract _ -> { kind = Explicit_retract; trace_id = trace }
 ;;
 
-let rewritten ~(previous : Current.t) ~(commit : Log.commit) ~source =
-  if not (Int.equal commit.revision (previous.revision + 1))
-  then Error (Revision_not_next { snapshot = previous.revision; line = commit.revision })
-  else (
-    let facts = Effects.apply ~at:commit.at previous.facts commit.effects in
-    let invalidated =
-      List.filter_map
-        (fun (fact, (removal : Effects.removal)) ->
-           match removal with
-           | Support_lost { missing } ->
-             Some { Current.fact; missing_premise_ids = missing }
-           | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> None)
-        commit.effects.removed
+let rewritten ~(previous : Current.t) ~at ~(effects : Effects.t) ~source =
+  let facts = Effects.apply ~at previous.facts effects in
+  let invalidated =
+    List.filter_map
+      (fun (fact, (removal : Effects.removal)) ->
+         match removal with
+         | Support_lost { missing } -> Some { Current.fact; missing_premise_ids = missing }
+         | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> None)
+      effects.removed
+  in
+  match
+    Keeper_memory_os_support_core.compute_change ~previous:previous.facts ~next:facts ~invalidated
+  with
+  | Error detail -> Error (Facts_inconsistent detail)
+  | Ok change ->
+    let snapshot : Current.t =
+      { revision = previous.revision + 1; updated_at = at; source; facts; change }
     in
-    match
-      Keeper_memory_os_support_core.compute_change ~previous:previous.facts ~next:facts
-        ~invalidated
-    with
-    | Error detail -> Error (Facts_inconsistent detail)
-    | Ok change ->
-      Ok
-        (Rewritten
-           { revision = commit.revision; updated_at = commit.at; source; facts; change }))
+    (* The codec raises on what it does not write. A line read back from disk
+       can ask for that, and the boot that reads it has to get an answer. *)
+    (match Keeper_memory_os_snapshot_codec.snapshot_bytes snapshot with
+     | exception Invalid_argument detail -> Error (Not_encodable detail)
+     | bytes -> Ok (Rewritten { snapshot; bytes }))
 ;;
 
-let after ~previous (commit : Log.commit) =
-  match commit.cause with
+let next ~previous ~at (cause : Log.cause) effects =
+  match cause with
   | Adopt { by = (_ : string); observed = (_ : Digest.digest) } -> Ok Unchanged
   | Direct { by = (_ : Effects.actor); trace; write } ->
-    rewritten ~previous ~commit ~source:(source_of_direct ~trace write)
+    rewritten ~previous ~at ~effects ~source:(source_of_direct ~trace write)
+;;
+
+let after ~(previous : Current.t) (commit : Log.commit) =
+  match next ~previous ~at:commit.at commit.cause commit.effects with
+  | Ok (Rewritten { snapshot; bytes = (_ : string) })
+    when not (Int.equal snapshot.revision commit.revision) ->
+    Error (Revision_not_next { snapshot = previous.revision; line = commit.revision })
+  | (Ok (Rewritten _ | Unchanged) | Error (_ : refusal)) as result -> result
 ;;

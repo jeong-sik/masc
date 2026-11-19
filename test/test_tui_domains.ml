@@ -1,7 +1,7 @@
-(* Which TUI domain collects on which minor heap, read on domains started by
-   the functions [Masc_tui.run_with_eio_context] starts them with. The UI
-   domain applies its heap first, as the TUI does, so a domain started after
-   it that took the UI's heap instead of its own would show it here. *)
+(* Which minor heap each TUI domain collects on, read inside domains started
+   by the functions [Masc_tui.run_with_eio_context] calls. The UI domain
+   applies its heap first, as the TUI does, so the IO domain started after
+   it shows the runtime's heap only if nothing passed the UI's heap on. *)
 
 let words () = (Gc.get ()).Gc.minor_heap_size
 
@@ -32,13 +32,15 @@ let test_each_domain_collects_on_its_roles_heap () =
     (Domain_pool.submit_cpu ~name:__FUNCTION__ worker words)
 ;;
 
-(* The decision itself: only the domain that draws takes the large heap. *)
-let test_only_the_drawing_domain_takes_the_large_heap () =
+(* The decision itself: the domains that allocate while the UI is in use
+   take the large heap, and the one that mostly waits on the network keeps the
+   runtime's. *)
+let test_only_the_request_domain_keeps_the_runtime_heap () =
   let tuned = function
     | Minor_heap.Tuned -> true
     | Minor_heap.Runtime_default -> false
   in
-  Alcotest.(check (list bool)) "Ui, Io, Worker" [ true; false; false ]
+  Alcotest.(check (list bool)) "Ui, Io, Worker" [ true; false; true ]
     (List.map (fun role -> tuned (Masc_tui_domains.minor_heap role))
        Masc_tui_domains.[ Ui; Io; Worker ])
 ;;
@@ -48,8 +50,8 @@ let () =
     [ ( "minor heap"
       , [ Alcotest.test_case "each domain collects on its role's heap" `Quick
             test_each_domain_collects_on_its_roles_heap
-        ; Alcotest.test_case "only the drawing domain takes the large heap" `Quick
-            test_only_the_drawing_domain_takes_the_large_heap
+        ; Alcotest.test_case "only the request domain keeps the runtime heap" `Quick
+            test_only_the_request_domain_keeps_the_runtime_heap
         ] )
     ]
 ;;

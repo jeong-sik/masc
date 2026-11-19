@@ -3,25 +3,44 @@ type t =
   | Io
   | Worker
 
-(* Ui: every frame allocates the rows it draws, and at the runtime's size a
-   held key meets a collection every few frames. On a live chat with
-   PageUp/PageDown held, the 4M-word heap cut the median key-to-output time
-   by about a quarter. Held Down/Up on Keepers and the Operations overview
-   against the frozen replay (2026-11-19, 300 presses, three rounds per
-   build) showed no difference either way within the host's load; that
-   replay has no chat, so the chat measurement stands.
+(* A minor collection stops every domain, so the process collects each time
+   any one domain fills its own heap. On a loaded host each stop also waits
+   until every domain is back on a core.
 
-   Io and Worker: they allocate in bursts (a request, a decode, a local
-   read) and wait in between. On the 4M-word heap the two of them kept
-   43-45 MB more resident after 5 minutes idle: the heaps themselves and
-   the runtime's minor tables sized from them. Their more frequent minor
-   collections also stop the UI domain, so the same held keys ran while the
-   overview re-read its local task files every 1.5 s: the median and p90
-   key-to-output were no slower. *)
+   Ui: every frame allocates the rows it draws. On a live chat with
+   PageUp/PageDown held, the 4M-word heap cut the median key-to-output time
+   by about a quarter.
+
+   Worker: a refresh of the overview parses the local task files, several
+   MB of JSON, so this domain fills a heap far faster than the other two.
+   Measured 2026-11-19 against the frozen replay: overview at 120x40,
+   Down/Up every 33 ms, r every 45 presses, key-to-output of the presses
+   within 600 ms of an r, builds interleaved round by round, ms:
+
+     worker heap         load 131-370, 6 rounds   load 295-418, 6 rounds
+                         p90    p95    p99        p90    p95    p99
+     256k (runtime)      25.7   63.8   124.4      -      -      -
+     1M                  8.8    20.6   98.6       16.3   33.6   132.1
+     4M                  9.7    19.1   87.7       17.0   32.8   85.2
+     every domain 4M     9.2    17.8   62.7       18.5   33.3   87.4
+
+   The last row is every domain on 4M words, Io included; the other rows
+   keep Io on the runtime's heap. A 1M worker also kept p99 about 1.5
+   times the last row's in 8 more rounds at load 283-418.
+
+   The worker's heap is also the memory a smaller one saves. Physical
+   footprint after 5 minutes idle at 200x60, eight to ten TUIs at once,
+   two runs per build on the overview and two on Keepers: 4M 223-243 MB,
+   every domain 4M 220-236 MB, 1M 173-200 MB, 256k 171-210 MB. The tail
+   decides. When a refresh stops parsing whole files, measure both again.
+
+   Io: it sends requests and reads answers, and leaves decoding to the
+   worker. Its heap changed neither figure beyond the spread between
+   rounds: compare the 4M row with the last. *)
 let minor_heap = function
   | Ui -> Minor_heap.Tuned
   | Io -> Minor_heap.Runtime_default
-  | Worker -> Minor_heap.Runtime_default
+  | Worker -> Minor_heap.Tuned
 ;;
 
 let use_ui_heap () = Minor_heap.apply (minor_heap Ui)

@@ -3719,22 +3719,25 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         match Observation_layout.context_summary observation with
         | Observation_layout.Context_measured observation ->
             let ratio = observation.ratio in
-            let pct = Float.of_int (Observation_layout.percentage_tenths ratio) /. 10.0 in
+            let value = Observation_layout.percentage_tenths ratio in
+            let max_value = Observation_layout.percentage_tenths_full in
+            let pct = Float.of_int value /. 10.0 in
             let bar_width = Layout.keeper_context_bar_width ~inner_width:header_width in
+            let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
             (* The context window is a declared limit: a turn past it is
-               refused, so each cell takes the colour of its place in it. *)
+               refused, so each cell takes the colour of its place in it,
+               and the readout matches the bar's tip colour (btop style). *)
             let bar =
-              Masc_tui_chart.meter_bar ~width:bar_width
-                ~value:(Observation_layout.percentage_tenths ratio)
-                ~max_value:Observation_layout.percentage_tenths_full
-                ~scale:(Masc_tui_chart.Declared_limit (Theme.paint ()))
-                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+              Masc_tui_chart.meter_bar ~width:bar_width ~value ~max_value
+                ~scale ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
             in
+            let tip_style = Masc_tui_chart.meter_tip_style scale ~value ~max_value in
+            let tip_close = if String.equal tip_style "" then "" else Ansi.reset in
             add_row context_label
               (Printf.sprintf
                  (if ko then "%s%.1f%%%s  %s  %s / %s 토큰"
                   else "%s%.1f%%%s  %s  %s / %s tokens")
-                 (ctx_color ratio) pct Ansi.reset bar
+                 tip_style pct tip_close bar
                  (Masc_tui_message_layout.compact_count observation.tokens)
                  (Masc_tui_message_layout.compact_count observation.maximum));
             add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);

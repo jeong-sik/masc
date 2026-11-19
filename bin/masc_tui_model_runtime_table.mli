@@ -89,6 +89,19 @@ val window : table:bool -> starts:int list -> total:int -> height:int -> cursor:
     0 stay on screen until the selection passes the first window. The first
     binding brings the names back with it. *)
 
+val drawn_bindings :
+  table:bool -> starts:int list -> total:int -> height:int -> first:int -> int
+(** The bindings a pane [height] lines tall draws when its window starts at
+    document line [first]: the table rows in the window, which leave out the
+    column names while line 0 is shown, or the stacked items whose first
+    line is in it. At least one. A page key moves the cursor by these less
+    the one a page keeps. *)
+
+val reads_selected : table:bool -> starts:int list -> total:int -> height:int -> int -> bool
+(** Whether binding [cursor] is taller than a pane [height] lines tall. Only
+    a stacked item can be; its page keys then read its lines rather than
+    walk the bindings, or the lines past the pane could not be reached. *)
+
 val provider_text : row -> string
 (** What the provider column draws: the id, then the account label when the
     row has one, else [#n] for a shared login. Widths are measured from this

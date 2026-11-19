@@ -13,8 +13,11 @@ val config_models_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 type models_list = {
   ml_count : int;  (** bindings *)
   ml_height : int;
-      (** table rows the pane draws under its column names, or lines of a
-          stacked document *)
+      (** the bindings the window the frame draws holds: table rows, or
+          stacked items ({!Masc_tui_model_runtime_table.drawn_bindings}) *)
+  ml_reads_selected : bool;
+      (** the selected stacked item is taller than the pane, so a page key
+          reads its lines ({!Masc_tui_model_runtime_table.reads_selected}) *)
   ml_window : cursor:int -> int -> int;
       (** the window's first line once [cursor] is selected, from a window
           that began at the given line ({!Masc_tui_model_runtime_table.window}) *)
@@ -24,9 +27,6 @@ val config_models_list :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> models_list option
 (** The bindings the move keys walk, as the pane draws them; [None] while it
     draws a form, a jump, an error or nothing read yet. *)
-
-val config_models_stacked : Masc_tui_types.state -> bool
-(** Whether the models pane draws stacked items at the current width. *)
 
 val config_content_height : Masc_tui_types.state -> int
 

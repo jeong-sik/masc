@@ -326,6 +326,15 @@ let window ~table ~starts ~total ~height ~cursor scroll =
   let scroll = Int.max 0 (Int.min scroll max_scroll) in
   Int.min max_scroll (Masc_tui_scroll.ensure_span_visible ~start ~stop ~height scroll)
 
+let drawn_bindings ~table ~starts ~total ~height ~first =
+  let firsts = if table then List.init (Int.max 0 (total - 1)) (fun index -> index + 1) else starts in
+  Int.max 1
+    (List.length (List.filter (fun line -> line >= first && line < first + height) firsts))
+
+let reads_selected ~table ~starts ~total ~height cursor =
+  let start, stop = selected_lines ~table ~starts ~total cursor in
+  (not table) && stop - start + 1 > height
+
 let render ~width ?pane rows =
   let qualifier = row_qualifier rows in
   let provider_width = provider_width_of ~qualifier rows in

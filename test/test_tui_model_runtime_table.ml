@@ -264,6 +264,32 @@ let test_the_window_moves_only_when_the_selection_leaves_it () =
   check int "an item below the window shows its first line at the bottom" 3 (stacked ~cursor:1 0);
   check int "an item above the window comes to its first line" 5 (stacked ~cursor:1 11)
 
+(* QA N10 at 80x24: the stacked items took three lines each, and PgDn walked
+   the document, which the window pulled straight back to the selected
+   item: the selection never moved. A page is the bindings the window
+   holds, and only an item taller than the pane is read line by line. *)
+let test_a_page_counts_the_bindings_the_window_holds () =
+  let drawn ?(table = true) ?(starts = []) ~total ~height first =
+    T.drawn_bindings ~table ~starts ~total ~height ~first
+  in
+  check int "the first window holds the rows under the names" 9 (drawn ~total:31 ~height:10 0);
+  check int "a window past the names holds a row per line" 10 (drawn ~total:31 ~height:10 5);
+  check int "the last window holds what is left" 4 (drawn ~total:31 ~height:10 27);
+  let starts = [ 0; 3; 6; 9; 12 ] in
+  check int "stacked items whose first line is in the window" 3
+    (drawn ~table:false ~starts ~total:14 ~height:8 0);
+  check int "an item cut at the top is not counted" 2
+    (drawn ~table:false ~starts ~total:14 ~height:6 1);
+  check int "a window inside one item still pages by one" 1
+    (drawn ~table:false ~starts:[ 0; 20 ] ~total:30 ~height:5 2);
+  let reads ?(table = false) ~starts ~total ~height cursor =
+    T.reads_selected ~table ~starts ~total ~height cursor
+  in
+  check bool "a short stacked item walks bindings" false (reads ~starts ~total:14 ~height:8 1);
+  check bool "a stacked item taller than the pane is read" true
+    (reads ~starts:[ 0; 20 ] ~total:30 ~height:5 0);
+  check bool "a table row never is" false (reads ~table:true ~starts:[] ~total:31 ~height:1 3)
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -286,5 +312,7 @@ let () =
         ] )
     ; ( "render"
       , [ Alcotest.test_case "the window moves only when the selection leaves it" `Quick
-            test_the_window_moves_only_when_the_selection_leaves_it ] )
+            test_the_window_moves_only_when_the_selection_leaves_it
+        ; Alcotest.test_case "a page counts the bindings the window holds" `Quick
+            test_a_page_counts_the_bindings_the_window_holds ] )
     ]

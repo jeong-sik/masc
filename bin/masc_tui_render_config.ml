@@ -1687,36 +1687,36 @@ let config_models_scrolled (state : state) : scrolled =
 type models_list = {
   ml_count : int;
   ml_height : int;
+  ml_reads_selected : bool;
   ml_window : cursor:int -> int -> int;
 }
 
-(* The bindings the move keys walk. A page is the table rows the pane draws
-   under its column names; stacked items are taller than a row, and their
-   page keys read the document instead. [None] while the pane draws a form,
-   a jump, an error or nothing read yet: there is no binding on screen. *)
+(* The bindings the move keys walk. A page is the bindings the window the
+   frame draws holds: table rows, or stacked items. [None] while the pane
+   draws a form, a jump, an error or nothing read yet: there is no binding
+   on screen. *)
 let config_models_list (state : state) ~terminal_rows ~cols =
   match state.runtime_model_form, state.runtime_model_jump,
         config_models_read_error state, state.runtime_config_view with
   | None, None, None, Some _ ->
       let projection = config_models_projection state ~terminal_rows ~cols in
+      let table = projection.model_table and starts = projection.model_starts in
       let total = List.length projection.model_document in
+      let height = projection.model_height in
+      let window ~cursor scroll =
+        Masc_tui_model_runtime_table.window ~table ~starts ~total ~height ~cursor scroll
+      in
       Some
         { ml_count = List.length state.config_models_rows
         ; ml_height =
-            (if projection.model_table then max 1 (projection.model_height - 1)
-             else projection.model_height)
-        ; ml_window =
-            (fun ~cursor scroll ->
-              Masc_tui_model_runtime_table.window ~table:projection.model_table
-                ~starts:projection.model_starts ~total ~height:projection.model_height
-                ~cursor scroll)
+            Masc_tui_model_runtime_table.drawn_bindings ~table ~starts ~total ~height
+              ~first:(window ~cursor:state.config_models_cursor state.config_scroll)
+        ; ml_reads_selected =
+            Masc_tui_model_runtime_table.reads_selected ~table ~starts ~total ~height
+              state.config_models_cursor
+        ; ml_window = window
         }
   | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
-
-(* Whether the pane draws stacked items at the current width. *)
-let config_models_stacked (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  not (config_models_projection state ~terminal_rows ~cols).model_table
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()

@@ -42093,12 +42093,15 @@ Use relative paths for resources already held in the package. -->
                     ~count:(List.length (filtered_theme_entries state))
                     ~delta:(direction * page) state.theme_cursor;
                 preview_theme_under_cursor state
-            (* Stacked items are taller than a page of bindings, so there the
-               page keys walk the document and the cursor stays on its
-               binding: that is how an item's body is read. *)
+            (* A stacked item taller than the pane: the page keys walk its
+               lines and the cursor stays on its binding, which is how the
+               lines past the pane are read. *)
             | Config
               when state.config_pane = Config_models
-                   && Masc_tui_render.config_models_stacked state ->
+                   && (let terminal_rows, cols = get_terminal_size () in
+                       match Masc_tui_render_config.config_models_list state ~terminal_rows ~cols with
+                       | Some list -> list.ml_reads_selected
+                       | None -> false) ->
                 (match scrolled_surface state state.view with
                  | None -> ()
                  | Some scrolled ->
@@ -42109,7 +42112,8 @@ Use relative paths for resources already held in the package. -->
                      in
                      state.config_scroll <-
                        move ~count:scrolled.sc_count ~height state.config_scroll)
-            (* The table is read by a cursor [e] acts on: its row list. *)
+            (* Otherwise the bindings are read by a cursor [e] acts on: its
+               row list. *)
             | Config when state.config_pane = Config_models -> move_list state page_key
             | Planning when Option.is_some (goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in

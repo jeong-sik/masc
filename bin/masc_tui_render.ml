@@ -654,7 +654,6 @@ let render_metrics = Masc_tui_render_runtime.render_metrics
 let render_runtime_pick = Masc_tui_render_runtime.render_runtime_pick
 
 let config_models_scrolled = Masc_tui_render_config.config_models_scrolled
-let config_models_stacked = Masc_tui_render_config.config_models_stacked
 let config_content_height = Masc_tui_render_config.config_content_height
 let prompts_detail_viewport = Masc_tui_render_config.prompts_detail_viewport
 let presets_viewport = Masc_tui_render_config.presets_viewport

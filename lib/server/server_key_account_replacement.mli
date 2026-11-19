@@ -13,7 +13,8 @@
       it. The runtime root of the person and the home of the account are
       made or looked at there too, as the store of the key does first
       ({!Runtime_key_account_files.make_home}): under a root or a home that
-      is not reached no record is written.
+      is not reached no record is written. A folder that was made there
+      stays, whatever the steps after it answer.
     + The record [key_replaced] of the next generation is written
       ({!Authz_provider_account.replace_key}).
     + The key file of that generation is written, and then every other file
@@ -34,7 +35,7 @@
 type error =
   | Refused of Authz_provider_account_state.refusal
       (** What the state said of the request before any record was written:
-          nothing was changed. *)
+          no record and no key was changed. *)
   | Account_busy  (** A call of the account runs. Nothing was changed. *)
   | Files_not_reached
       (** The runtime root of the person or the home of the account was not
@@ -42,9 +43,9 @@ type error =
           changed. A folder on the way that was not there can have been
           made. *)
   | Not_recorded of Authz_provider_account.error
-      (** The record did not go into the log. Nothing was changed, except
-          that a replacement whose intent was written and given up blocks
-          the account until the same request goes through
+      (** The record did not go into the log. No key was changed. A
+          replacement whose intent was written and given up blocks the
+          account until the same request goes through
           ({!Authz_provider_account.replace_key}). *)
   | Key_not_stored
       (** The record went in and the key of its generation was not put in

@@ -129,9 +129,10 @@ type write_error =
     ({!Runtime_key_account_files.remove_keys}): from that record on the key
     before is not read. Either removal takes every generation: neither is
     the undo of a write. The replacement asks for its removal after
-    [Generation_taken] too, where a file of the generation its record names
-    was there before the call: no replacement wrote that file, and the
-    account would read it as its key. *)
+    [Generation_taken] too. A file of the generation its record names was
+    there before the call, in place or beside the place: this call wrote
+    neither, and a file in place is what the account would read as its
+    key. *)
 val write
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t

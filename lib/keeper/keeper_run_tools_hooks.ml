@@ -1287,10 +1287,16 @@ let assemble_hooks
                    overwrites one file per keeper: the blocks are stable turn to
                    turn, so the turn that just assembled is what the next one
                    will assemble, and keeping only the last bounds the store. *)
-                (* An empty post-tool assembly is not an injection: writing it
-                   would overwrite the first-round capture — the one that says
-                   what this keeper was actually told — with nothing. *)
-                (if recorded_blocks_for_receipt <> []
+                (* Only a request that does not follow this turn's tool results
+                   writes the capture. That request carries every block. One
+                   that follows tool results carries only the System
+                   observations and the blocks
+                   [Prompt_block_id.injected_on_post_tool_round] keeps, and
+                   writing it replaced the record of what this keeper was told
+                   with the tool loop's remainder (#53551). An empty block list
+                   cannot mark that request: the System observations ride it
+                   too. *)
+                (if not post_tool_round
                  then
                    Keeper_prompt_capture.write
                      ~config

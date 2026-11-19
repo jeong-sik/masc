@@ -1049,25 +1049,39 @@ let answering_selected_target (state : state) ~lines =
     | Some line -> line.Masc_tui_answering.target
     | None -> None
 
-let queue_panel_item_identity = function
-  | Masc_tui_queue_inspection.Local_message id -> "Local message: " ^ id
-  | Server_message id -> "Queued message: " ^ id
-  | Running_message id -> "Running message: " ^ id
+let queue_panel_item_identity ~ko = function
+  | Masc_tui_queue_inspection.Local_message id ->
+    (if ko then "로컬 메시지: " else "Local message: ") ^ id
+  | Server_message id ->
+    (if ko then "대기 메시지: " else "Queued message: ") ^ id
+  | Running_message id ->
+    (if ko then "실행 중 메시지: " else "Running message: ") ^ id
   | Event (reference, revision) ->
-    Printf.sprintf "Event: %s · incarnation %Ld" reference revision
-  | Schedule (id, instance) -> "Schedule: " ^ id ^ " · instance " ^ instance
+    Printf.sprintf
+      (if ko then "이벤트: %s · 세대 %Ld" else "Event: %s · incarnation %Ld")
+      reference revision
+  | Schedule (id, instance) ->
+    if ko then "일정: " ^ id ^ " · 인스턴스 " ^ instance
+    else "Schedule: " ^ id ^ " · instance " ^ instance
 
 let queue_panel_detail_lines state (panel : queue_panel) ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let reading = queue_panel_detail_reading ~items:(queue_panel_items state panel) panel in
   let content = match reading with
     | Queue_detail_ready (id, item) ->
-      queue_panel_item_identity id ^ "\n\n" ^ item.text
-    | Queue_detail_loading -> "Queue request in progress. The current server item is unavailable until it finishes."
+      queue_panel_item_identity ~ko id ^ "\n\n" ^ item.text
+    | Queue_detail_loading ->
+      say "대기열 요청을 처리 중입니다. 완료될 때까지 서버 항목을 볼 수 없습니다."
+        "Queue request in progress. The current server item is unavailable until it finishes."
     | Queue_detail_unavailable reason ->
-      "This server item is unavailable in the current queue observation. Return to the list and refresh."
+      say "현재 대기열 관측에서 이 서버 항목을 읽을 수 없습니다. 목록으로 돌아가 새로고침하세요."
+        "This server item is unavailable in the current queue observation. Return to the list and refresh."
       ^ Option.fold ~none:"" ~some:(fun detail -> "\n\n" ^ detail) reason
-    | Queue_detail_missing -> "This item is no longer in the current queue. Return to the list and refresh."
-    | Queue_detail_none -> "No item is selected." in
+    | Queue_detail_missing ->
+      say "이 항목은 더 이상 현재 대기열에 없습니다. 목록으로 돌아가 새로고침하세요."
+        "This item is no longer in the current queue. Return to the list and refresh."
+    | Queue_detail_none -> say "선택한 항목이 없습니다." "No item is selected." in
   Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
     ~sanitize:Terminal_text.single_line content
 
@@ -1213,7 +1227,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
           let text = Terminal_text.single_line text in
           let text = if Message_layout.display_width (String.trim text) = 0 then
               Option.fold ~none:text ~some:(fun id ->
-                Terminal_text.single_line (queue_panel_item_identity id)) item.id
+                Terminal_text.single_line (queue_panel_item_identity ~ko:(state.ui_language = Lang_ko) id)) item.id
             else text in
           let row =
             if selected then marker ^ Masc_tui_theme.strip_sgr text
@@ -1560,13 +1574,14 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
     growing the terminal restores the unchanged selected surface. *)
 let render_account_login state view =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"account-login"
     ~title:(screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login"))
-    ~hints:(Masc_tui_account_login.hints view)
+    ~hints:(Masc_tui_account_login.hints ~ko view)
     ~body:(fun ~budget c ->
       let lines, position =
-        Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view in
+        Masc_tui_account_login.visible_lines ~ko ~height:budget ~width:(framed_inner_width cols) view in
       Option.iter c.position position;
       let lines = lines
         |> List.map (function
@@ -1633,13 +1648,14 @@ let render_account_server state ~version =
 
 let render_collab state view =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"collab"
     ~title:(screen_title (ui_text state ~ko:" 협업" ~en:" Collab"))
-    ~hints:(Masc_tui_collab.hints view)
+    ~hints:(Masc_tui_collab.hints ~ko view)
     ~body:(fun ~budget c ->
       Option.iter c.position (Masc_tui_collab.position view);
-      Masc_tui_collab.lines ~height:budget ~width:(framed_inner_width cols) view
+      Masc_tui_collab.lines ~ko ~height:budget ~width:(framed_inner_width cols) view
       |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =

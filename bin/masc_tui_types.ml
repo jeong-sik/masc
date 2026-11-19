@@ -3068,13 +3068,14 @@ let schedule_payload_body = function
     Live and closed are split by [Schedule_domain.is_terminal], the same rule
     the store itself uses, and a count of zero is left out -- a disposition
     nothing is in is not a fact about this Keeper. *)
-let schedule_counts_line counts =
+let schedule_counts_line ?(ko = false) counts =
   let spell statuses =
     counts
     |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
     |> List.map (fun (status, count) ->
-           Printf.sprintf "%d %s" count
-             (Schedule_domain.schedule_status_to_string status))
+           let label = Schedule_domain.schedule_status_to_string status in
+           if ko then Printf.sprintf "%s %d" label count
+           else Printf.sprintf "%d %s" count label)
   in
   let live, closed =
     List.partition
@@ -3083,7 +3084,7 @@ let schedule_counts_line counts =
   in
   let live_text =
     match spell live with
-    | [] -> "nothing live"
+    | [] -> if ko then "활성 일정 없음" else "nothing live"
     | parts -> String.concat ", " parts
   in
   let closed_total =
@@ -3094,8 +3095,12 @@ let schedule_counts_line counts =
   match spell closed with
   | [] -> live_text
   | parts ->
-      Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
-        (string_of_int closed_total) (String.concat ", " parts)
+      if ko then
+        Printf.sprintf "%s \xc2\xb7 종료 %s (%s)" live_text
+          (string_of_int closed_total) (String.concat ", " parts)
+      else
+        Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
+          (string_of_int closed_total) (String.concat ", " parts)
 
 (* Why the modify editor does not open on a row: the store refuses rows in
    that status (as last read), or this build cannot read the recurrence or the
@@ -21058,7 +21063,7 @@ let complete_goal_timeline_read (state : state) request result =
     | Ok (Tui_decode.Goal_timeline_ready events) -> Ok events
     | Ok (Tui_decode.Goal_timeline_unavailable failure) ->
       Error (Masc_tui_planning_detail.Timeline_failed
-        (Masc_tui_planning_detail.timeline_unavailability_detail failure))
+        (Masc_tui_planning_detail.timeline_unavailability_detail ~ko:(state.ui_language = Lang_ko) failure))
     | Error (Request_failed detail) -> Error (Masc_tui_planning_detail.Timeline_failed detail)
     | Error (Request_withdrawn refusal) ->
       Error (Masc_tui_planning_detail.Timeline_kept_back

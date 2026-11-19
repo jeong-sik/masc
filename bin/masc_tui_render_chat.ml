@@ -338,7 +338,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
    non-blank lines, matching what the unfolded block draws. *)
 type thinking_fold = Keep_source | Use_thinking_summary of string
 
-let folded_thinking_summary ~width ~body ~line_count ~source_height ~summary_height =
+let folded_thinking_summary ~ko ~width ~body ~line_count ~source_height ~summary_height =
   if line_count = 0 then Keep_source
   else
     let source_rows = source_height () in
@@ -346,7 +346,7 @@ let folded_thinking_summary ~width ~body ~line_count ~source_height ~summary_hei
     else
       let mark = Masc_tui_theme.Glyph.progress_waiting in
       let summary =
-        Message_layout.folded_thought_summary ~mark ~width ~line_count ~body
+        Message_layout.folded_thought_summary_localized ~ko ~mark ~width ~line_count ~body
       in
       (* Formatting syntax is not visible width, and the summary can wrap
          too. Folding is useful only when it actually saves terminal rows; if
@@ -356,7 +356,7 @@ let folded_thinking_summary ~width ~body ~line_count ~source_height ~summary_hei
       then Use_thinking_summary summary
       else
         let compact =
-          Message_layout.folded_thought_summary ~mark ~width:0 ~line_count ~body:""
+          Message_layout.folded_thought_summary_localized ~ko ~mark ~width:0 ~line_count ~body:""
         in
         if not (String.equal summary compact)
            && summary_height compact < source_rows
@@ -409,7 +409,7 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
       | Message_layout.Markdown_streaming ->
         (fun () -> chat_markdown ~context ~width entry.body |> trimmed_height), logical_lines () in
     let summary_height body = chat_markdown ~context ~width body |> trimmed_height in
-    match folded_thinking_summary ~width ~body:entry.body ~line_count ~source_height ~summary_height with
+    match folded_thinking_summary ~ko:(state.ui_language = Lang_ko) ~width ~body:entry.body ~line_count ~source_height ~summary_height with
     | Keep_source -> {entry with body_presentation=Message_layout.Source_body}
     | Use_thinking_summary body ->
         {entry with body;body_presentation=Message_layout.Thinking_summary}
@@ -1302,12 +1302,14 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 
-let tool_outcome_label_with_call outcome association =
-  if durable_call_failed association then "FAILED · CALL LOG"
+let tool_outcome_label_with_call ~ko outcome association =
+  if durable_call_failed association then
+    if ko then "실패 · 호출 기록" else "FAILED · CALL LOG"
   else match outcome, association with
   | Keeper_chat_transcript.Never_returned, Call_execution_exact call
     when Option.is_some call.kc_output ->
-      "RESULT IN CALL LOG · NOT SEEN IN TURN"
+      if ko then "호출 기록에 결과 있음 · 턴 미관측"
+      else "RESULT IN CALL LOG · NOT SEEN IN TURN"
   | (Keeper_chat_transcript.Never_returned, (Call_log_not_loaded | (Call_log_loading | (Call_execution_unrecorded | (Call_execution_missing | (Call_log_unavailable _ | Call_log_kept_back _ | (Call_execution_coverage_gap _ | Call_execution_ambiguous _)))))))
   | ((Keeper_chat_transcript.Started | (Keeper_chat_transcript.Awaiting_result | (Keeper_chat_transcript.Returned | (Keeper_chat_transcript.Native_running | (Keeper_chat_transcript.Native_ended | (Keeper_chat_transcript.Native_failed | (Keeper_chat_transcript.Failed | Keeper_chat_transcript.Outcome_unrecorded))))))), _)
   | (Never_returned, Call_execution_exact _) -> tool_outcome_label outcome
@@ -1446,7 +1448,7 @@ let keeper_message_tool_activity_details state ~keeper_name
   let fields =
     [ Some
         (said (say "상태" "state")
-           (tool_outcome_label_with_call activity.outcome association)
+           (tool_outcome_label_with_call ~ko activity.outcome association)
            (tool_outcome_tone_with_call activity.outcome association))
     ; Option.map
         (fun (label, value, tone) -> said label value tone)
@@ -1573,24 +1575,27 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           Masc_tui_keeper_chat_projection.terminal_safe_text activity.tool_name
           |> String.trim
         in
+        let ko = state.ui_language = Lang_ko in
+        let say korean english = if ko then korean else english in
         let prefix = Printf.sprintf "%s %s · %s" marker name status in
         let preview, unavailable =
           match association with
           | Call_execution_exact call ->
               Option.map (tool_result_preview activity) call.kc_output,
-              "result text not recorded"
-          | Call_log_not_loaded -> None, "result preview not loaded"
-          | Call_log_loading -> None, "loading result preview"
-          | Call_log_unavailable _ | Call_log_kept_back _ -> None, "result preview unavailable"
-          | Call_execution_unrecorded -> None, "no execution id"
-          | Call_execution_missing -> None, "no call-log row"
-          | Call_execution_coverage_gap _ -> None, "call log incomplete"
-          | Call_execution_ambiguous _ -> None, "duplicate execution id"
+              say "결과 본문 미기록" "result text not recorded"
+          | Call_log_not_loaded -> None, say "결과 미리보기 미조회" "result preview not loaded"
+          | Call_log_loading -> None, say "결과 미리보기 조회 중" "loading result preview"
+          | Call_log_unavailable _ | Call_log_kept_back _ ->
+              None, say "결과 미리보기 조회 불가" "result preview unavailable"
+          | Call_execution_unrecorded -> None, say "실행 ID 없음" "no execution id"
+          | Call_execution_missing -> None, say "호출 기록 항목 없음" "no call-log row"
+          | Call_execution_coverage_gap _ -> None, say "호출 기록 일부 누락" "call log incomplete"
+          | Call_execution_ambiguous _ -> None, say "중복 실행 ID" "duplicate execution id"
         in
         let detail =
           match preview with
           | Some value when String.trim value <> "" -> Some value
-          | Some _ -> Some "(empty result)"
+          | Some _ -> Some (say "(빈 결과)" "(empty result)")
           | None ->
               (match activity.outcome with
                | Keeper_chat_transcript.Native_ended
@@ -2498,6 +2503,7 @@ type layout_entries_memo = {
   lem_calls_error : request_failure option;
   lem_calls : keeper_calls_snapshot option;
   lem_palette_generation : int;
+  lem_language : ui_language;
   lem_visible_timeline : (msg_entry * float option) list;
   lem_visible_entries : (msg_entry * float option * turn_edge) list;
   lem_entries : Message_layout.entry list;
@@ -2656,6 +2662,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
          state.keeper_calls_error
     && memo.lem_calls == state.keeper_calls
     && memo.lem_palette_generation = palette_generation
+    && memo.lem_language = state.ui_language
   in
   (* A link preview landing changes how tall a row with a link is, and nothing
      in the entry: the card is added to the body where the row is drawn. So the
@@ -2755,6 +2762,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             lem_calls_error = state.keeper_calls_error;
             lem_calls = state.keeper_calls;
             lem_palette_generation = palette_generation;
+            lem_language = state.ui_language;
             lem_visible_timeline = visible_timeline;
             lem_visible_entries = visible_entries;
             lem_entries = entries;
@@ -2814,6 +2822,7 @@ type settled_block_memo = {
   sbm_file_changes_keeper : string option;
   sbm_file_change_index : Keeper_chat_diff.index;
   sbm_palette_generation : int;
+  sbm_language : ui_language;
   sbm_chat_cols : int;
   sbm_block : log_block;
 }
@@ -2899,15 +2908,18 @@ type chat_projection = {
    No timestamp, request rail, activity spinner or model usage is synthesized.
    skip_transcript suppresses inline task entries, but not read diagnostics. *)
 let native_entries_memo :
-    (Masc_tui_native_tasks.t * tool_visibility * int * Message_layout.entry list) option ref = ref None
+    (Masc_tui_native_tasks.t * tool_visibility * int * ui_language * Message_layout.entry list) option ref = ref None
 let native_task_entries (state : state) ~keeper_name ~role_label_column =
   match List.assoc_opt keeper_name state.msg_native_tasks with
   | None -> []
   | Some native ->
       match !native_entries_memo with
-      | Some (previous,tools,column,entries)
-        when previous == native && tools=state.msg_tool_visibility && column=role_label_column -> entries
+      | Some (previous,tools,column,lang,entries)
+        when previous == native && tools=state.msg_tool_visibility && column=role_label_column
+             && lang = state.ui_language -> entries
       | Some _ | None ->
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let module Native = Masc_tui_native_tasks in
       let module Task = Runtime_native_tasks in
       let entry ?(diagnostics=[]) style label body : Message_layout.entry =
@@ -2925,30 +2937,35 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
       let diagnostics=Native.diagnostics native in
       let entries = if tasks=[] && errors=[] && diagnostics=[] then []
       else
-        let header=entry Message_layout.Status "NATIVE TASKS"
-          (Printf.sprintf "%d observed · provider completeness unknown · liveness unknown" (List.length tasks)) in
+        let header=entry Message_layout.Status (say "네이티브 작업" "NATIVE TASKS")
+          (Printf.sprintf
+             (if ko then "%d건 관측 · 제공자 완료 여부 미확인 · 활성 여부 미확인"
+              else "%d observed · provider completeness unknown · liveness unknown")
+             (List.length tasks)) in
         let task_entries=List.filter_map (fun (task:Native.task) ->
           if task.skip_transcript=Some true then None else
           let status=match task.terminal,task.status with
-            | Some Task.Task_completed_notice,_ -> "completed notice"
-            | Some Task_failed_notice,_ -> "failed notice"
-            | Some Task_stopped_notice,_ -> "stopped notice"
-            | None,Some Task.Task_pending -> "pending reported"
-            | None,Some Task_running -> "running reported"
-            | None,Some Task_completed -> "completed reported"
-            | None,Some Task_failed -> "failed reported"
-            | None,Some Task_killed -> "killed reported"
-            | None,Some Task_paused -> "paused reported"
-            | None,None -> "status unreported" in
+            | Some Task.Task_completed_notice,_ -> say "완료 알림" "completed notice"
+            | Some Task_failed_notice,_ -> say "실패 알림" "failed notice"
+            | Some Task_stopped_notice,_ -> say "중단 알림" "stopped notice"
+            | None,Some Task.Task_pending -> say "대기 보고" "pending reported"
+            | None,Some Task_running -> say "실행 중 보고" "running reported"
+            | None,Some Task_completed -> say "완료 보고" "completed reported"
+            | None,Some Task_failed -> say "실패 보고" "failed reported"
+            | None,Some Task_killed -> say "강제 종료 보고" "killed reported"
+            | None,Some Task_paused -> say "일시정지 보고" "paused reported"
+            | None,None -> say "상태 미보고" "status unreported" in
           let boundary=match task.boundary with
-            | Task.Task_terminal_unobserved -> "terminal unobserved"
-            | Task_terminal_observed -> "terminal observed" in
+            | Task.Task_terminal_unobserved -> say "종료 미관측" "terminal unobserved"
+            | Task_terminal_observed -> say "종료 관측" "terminal observed" in
           let usage=match task.usage with None -> [] | Some usage ->
-            [Printf.sprintf "%d tokens · %d tools · %d ms reported"
-              usage.total_tokens usage.tool_uses usage.duration_ms] in
+            [Printf.sprintf
+               (if ko then "%d 토큰 · 도구 %d회 · %d ms 보고"
+                else "%d tokens · %d tools · %d ms reported")
+               usage.total_tokens usage.tool_uses usage.duration_ms] in
           let metadata=Option.to_list task.subagent_type @ [status;boundary]
-            @ (match task.ambient with Some true -> ["ambient"] | Some false | None -> [])
-            @ (match task.is_backgrounded with Some true -> ["backgrounded"] | Some false | None -> [])
+            @ (match task.ambient with Some true -> [say "상시" "ambient"] | Some false | None -> [])
+            @ (match task.is_backgrounded with Some true -> [say "백그라운드" "backgrounded"] | Some false | None -> [])
             @ usage @ Option.to_list task.last_tool_name in
           let details=match state.msg_tool_visibility with
             | Tools_compact | Tools_results -> []
@@ -2968,11 +2985,11 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
                   | Task.Operation {operation_id} -> "operation " ^ operation_id
                   | Autonomous_turn {turn_ref} -> "turn " ^ turn_ref)] in
           Some (entry ~diagnostics:details Message_layout.Tool
-            ("TASK " ^ task.origin.task_id) (String.concat " · " metadata))) tasks in
+            ((say "작업 " "TASK ") ^ task.origin.task_id) (String.concat " · " metadata))) tasks in
         header :: task_entries
-        @ List.map (fun error -> entry Message_layout.Error "NATIVE READ" (Native.error_text error)) errors
-        @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics in
-      native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,entries);
+        @ List.map (fun error -> entry Message_layout.Error (say "네이티브 읽기" "NATIVE READ") (Native.error_text error)) errors
+        @ List.map (entry Message_layout.Status (say "네이티브 상태" "NATIVE HEALTH")) diagnostics in
+      native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,state.ui_language,entries);
       entries
 
 (* A Child observation names its parent native task by its origin invocation
@@ -3027,7 +3044,8 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
         (Masc_tui_terminal_palette.snapshot ()) in
       let key = state.msg_tool_visibility, state.msg_reasoning_visibility,
         role_label_column, chat_cols, state.msg_origin_display, palette_generation,
-        state.link_previews_mode, Masc_tui_link_preview.cache_generation () in
+        state.link_previews_mode, Masc_tui_link_preview.cache_generation (),
+        state.ui_language in
       match !child_entries_memo with
       | Some (previous, previous_native, previous_key, result)
         when previous == received && previous_key = key
@@ -3036,6 +3054,7 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
             | Some before, Some now -> before == now
             | None, Some _ | Some _, None -> false) -> result
       | Some _ | None ->
+      let say korean english = if state.ui_language = Lang_ko then korean else english in
       let native_tasks = match native_opt with
         | None -> []
         | Some native -> Masc_tui_native_tasks.tasks native in
@@ -3053,9 +3072,9 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
           let child = record.observation in
           if child_omitted_by_skip_transcript native_tasks child then None else
           let visible, style, label = match child.channel with
-            | Runtime_claude_code.Text_content -> true, Message_layout.Inbound, "CHILD"
+            | Runtime_claude_code.Text_content -> true, Message_layout.Inbound, say "하위 에이전트" "CHILD"
             | Thinking_content -> state.msg_reasoning_visibility <> Reasoning_hidden,
-                Message_layout.Thinking Message_layout.Thinking_arrived, "CHILD THINKING" in
+                Message_layout.Thinking Message_layout.Thinking_arrived, say "하위 추론" "CHILD THINKING" in
           if not visible then None else
           let anchor = { child_receiver=store.receiver; child_store_id=store.store_id;
             child_observation_id=child.observation_id; child_ordinal=child.ordinal;
@@ -3080,9 +3099,9 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
             entry_index=record.seq } } in
           Some (Tagged_child anchor, fold_thinking_entry state ~chat_cols projected)) arrivals in
       let notices =
-        List.map (fun error -> entry Message_layout.Error "CHILD READ" (Consumer.error_text error))
+        List.map (fun error -> entry Message_layout.Error (say "하위 읽기" "CHILD READ") (Consumer.error_text error))
           (Consumer.errors received)
-        @ List.map (entry Message_layout.Status "CHILD HEALTH") (Consumer.diagnostics received) in
+        @ List.map (entry Message_layout.Status (say "하위 상태" "CHILD HEALTH")) (Consumer.diagnostics received) in
       let result = rows, notices in
       child_entries_memo := Some (received, native_opt, key, result);
       result
@@ -3509,6 +3528,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_file_changes_keeper = state.msg_file_changes_keeper
            && memo.sbm_file_change_index == (keeper_chat_file_changes_index state)
            && memo.sbm_palette_generation = palette_generation
+           && memo.sbm_language = state.ui_language
            && memo.sbm_chat_cols = chat_cols ->
         if memo.sbm_block.lb_insertion = insertion then memo.sbm_block
         else begin
@@ -3539,6 +3559,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_file_changes_keeper = state.msg_file_changes_keeper;
             sbm_file_change_index = (keeper_chat_file_changes_index state);
             sbm_palette_generation = palette_generation;
+            sbm_language = state.ui_language;
             sbm_chat_cols = chat_cols;
             sbm_block = block;
           };
@@ -4790,7 +4811,8 @@ let render_keeper_message (state : state) =
          ~path:[ ui_text state ~ko:"채팅" ~en:"chat" ]
          ~readings:[] ~position:None);
     box_divider buf cols;
-    box_line_styled buf cols ~style:(Theme.recede ()) "  No keeper selected.";
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (ui_text state ~ko:"  고른 키퍼가 없습니다." ~en:"  No keeper selected.");
     for _ = 1 to max 0 (rows - 6) do
       box_empty buf cols
     done;
@@ -4859,7 +4881,7 @@ let render_keeper_message (state : state) =
       let title = here_path state ~path:[ name; chat_step ] in
       let mode_suffix =
         (if state.observer_source_loss then
-           "  " ^ Theme.warn () ^ "[events lost]" ^ Ansi.reset
+           "  " ^ Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset
          else "")
         ^ (if String.equal modes "" then ""
            else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
@@ -4895,7 +4917,9 @@ let render_keeper_message (state : state) =
            ~terminal_cols:chat_cols ~status_rows:support_status_rows)
     then begin
       let notice =
-        " Keeper chat needs a larger terminal; resize to type (Esc:back)"
+        ui_text state
+          ~ko:" 키퍼 채팅을 표시하려면 창을 늘려 주세요 (Esc:뒤로)"
+          ~en:" Keeper chat needs a larger terminal; resize to type (Esc:back)"
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));

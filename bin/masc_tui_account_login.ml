@@ -823,109 +823,169 @@ let save_body t models =
   `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List model_rows]];
     "selection",`List (existing @ selected)]
     @ (match t.default_runtime_id with None -> [] | Some id -> ["default_runtime_id",`String id]))
-let hints t = match t.phase with
-  | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
-  | Documented_context _ -> "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
-  | Providers Clients -> "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
-  | Providers (Accounts _) -> "↑↓:계정  Enter:선택  n:새 계정  D:연결 삭제  Esc:공급자 목록"
-  | Providers (Account_providers _) -> "↑↓:공급자 연결  Enter/D:선택한 연결 삭제 미리보기  Esc:계정 목록"
-  | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
-  | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
-  | Models -> "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
-  | Refreshing_models -> "모델 목록 확인 중  Esc:닫기"
-  | Preparing_context _ -> "입력 한도 확인 중  Esc:닫기"
-  | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
-  | Finished {activation = (Activation_failed _ | Activation_kept_back _); _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
-  | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
-  | Saving -> "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
-  | Failed when t.recovery=Refresh_model_inventory -> "↑↓/j/k:결과 스크롤  r:모델 다시 읽기  e:재로그인  n:새 계정  Esc:닫기"
-  | Failed -> "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
-  | Loading | Removing -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+let hints ?(ko = true) t =
+  let say korean english = if ko then korean else english in
+  match t.phase with
+  | Logging ->
+      say "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
+        "Enter:send code  ↑↓/Tab:select  Ctrl-D:end input  Ctrl-C:cancel  Esc:close"
+  | Documented_context _ ->
+      say "확인한 context 한도(tokens)  Enter:선택  Esc:모델 목록"
+        "Documented context limit (tokens)  Enter:select  Esc:models"
+  | Providers Clients ->
+      say "↑↓:공급자  Enter:계정 보기  n:새 계정  Esc:닫기"
+        "↑↓:provider  Enter:accounts  n:new account  Esc:close"
+  | Providers (Accounts _) ->
+      say "↑↓:계정  Enter:선택  n:새 계정  D:연결 삭제  Esc:공급자 목록"
+        "↑↓:account  Enter:select  n:new account  D:remove link  Esc:providers"
+  | Providers (Account_providers _) ->
+      say "↑↓:공급자 연결  Enter/D:선택한 연결 삭제 미리보기  Esc:계정 목록"
+        "↑↓:provider link  Enter/D:preview removal  Esc:accounts"
+  | Removal {removal = Removable _; _} ->
+      say "Enter:지우고 저장  Esc:목록으로" "Enter:remove & save  Esc:back"
+  | Removal {removal = Unremovable _; _} ->
+      say "Esc:목록으로" "Esc:back"
+  | Models ->
+      say "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
+        "↑↓:model  Space:toggle  a:all  Enter:verify & save  r:refresh  Esc:close"
+  | Refreshing_models -> say "모델 목록 확인 중  Esc:닫기" "Checking models  Esc:close"
+  | Preparing_context _ -> say "입력 한도 확인 중  Esc:닫기" "Checking context limit  Esc:close"
+  | Finished {activation = Activating; _} ->
+      say "j/k:스크롤  런타임 활성화 중  Esc:닫기" "j/k:scroll  activating runtime  Esc:close"
+  | Finished {activation = (Activation_failed _ | Activation_kept_back _); _} ->
+      say "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기" "j/k:scroll  r/Enter:retry activation  Esc:close"
+  | Finished {activation = Active _; _} ->
+      say "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기" "j/k:scroll  r:refresh  n:new account  Esc:close"
+  | Saving ->
+      say "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
+        "Waiting for save result · Esc:close (continues in background)"
+  | Failed when t.recovery=Refresh_model_inventory ->
+      say "↑↓/j/k:결과 스크롤  r:모델 다시 읽기  e:재로그인  n:새 계정  Esc:닫기"
+        "↑↓/j/k:scroll  r:reload models  e:re-login  n:new account  Esc:close"
+  | Failed ->
+      say "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+        "↑↓/j/k:scroll  r:recheck  e:re-login  n:new account  Esc:close"
+  | Loading | Removing ->
+      say "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+        "r:recheck  e:re-login  n:new account  Esc:close"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
-let email_state t (p:provider) =
+let email_state ~ko t (p:provider) =
+  let say korean english = if ko then korean else english in
   let rows = match t.account_emails with Email_rows {rows; _} -> rows | Email_list_unrecognized -> [] in
   match List.assoc_opt p.id rows with
   | Some (Email email) -> Some email
-  | Some (Not_read Login_file_unreadable) -> Some "이메일 모름: 로그인 파일을 못 읽음"
-  | Some (Not_read Login_file_unrecognized) -> Some "이메일 모름: 로그인 파일 형식을 모름"
-  | Some (Not_read Email_not_reported) -> Some "이메일 모름: 클라이언트가 알려 주지 않음"
-  | Some (Not_read Email_not_displayable) -> Some "이메일 모름: 표시할 수 없는 값"
-  | Some (Not_read Environment_credential) -> Some "이메일 없음: 환경 변수의 인증 정보로 실행"
-  | Some Unrecognized -> Some "이메일 정보를 알아볼 수 없음"
+  | Some (Not_read Login_file_unreadable) -> Some (say "이메일 모름: 로그인 파일을 못 읽음" "Email unknown: login file unreadable")
+  | Some (Not_read Login_file_unrecognized) -> Some (say "이메일 모름: 로그인 파일 형식을 모름" "Email unknown: login file unrecognized")
+  | Some (Not_read Email_not_reported) -> Some (say "이메일 모름: 클라이언트가 알려 주지 않음" "Email unknown: not reported by client")
+  | Some (Not_read Email_not_displayable) -> Some (say "이메일 모름: 표시할 수 없는 값" "Email unknown: non-displayable value")
+  | Some (Not_read Environment_credential) -> Some (say "이메일 없음: 환경 변수의 인증 정보로 실행" "No email: using environment credential")
+  | Some Unrecognized -> Some (say "이메일 정보를 알아볼 수 없음" "Email info unrecognized")
   | None -> None
-let account_suffix t p = match email_state t p with Some state -> " · " ^ state | None -> ""
+let account_suffix ~ko t p = match email_state ~ko t p with Some state -> " · " ^ state | None -> ""
 (* The email says which account a row is, so it leads; the label says which
    provider entry holds it. *)
-let account_label t (p:provider) =
+let account_label ~ko t (p:provider) =
+  let say korean english = if ko then korean else english in
   let label = match account_group t p with
     | Some group when List.length group.provider_ids > 1 ->
-        Printf.sprintf "%s · %s · 연결 %d개 · 모델 설정 %d개"
+        Printf.sprintf
+          (if ko then "%s · %s · 연결 %d개 · 모델 설정 %d개"
+           else "%s · %s · %d links · %d models")
           (client_label p.client) (String.sub group.group_id 0 (min 8 (String.length group.group_id)))
           (List.length group.provider_ids) (List.length group.runtime_ids)
     | Some group -> p.label ^ " · " ^ String.sub group.group_id 0 (min 8 (String.length group.group_id))
     | None -> p.label in
-  let label = label ^ (if not p.enabled then " · 비활성" else if not p.setup_supported then " · 설정 미지원" else "") in
-  match email_state t p with
+  let label =
+    label
+    ^ (if not p.enabled then say " · 비활성" " · disabled"
+       else if not p.setup_supported then say " · 설정 미지원" " · setup unsupported"
+       else "")
+  in
+  match email_state ~ko t p with
   | Some state -> state ^ "  (" ^ label ^ ")"
   | None -> label
-let describe_change = function
+let describe_change ~ko = function
   | Removed_table path -> "[" ^ path ^ "]"
-  | Left_lane {lane; runtime} -> "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
-  | Left_exact_lane {lane; runtime} -> "exact-output lane " ^ lane ^ " 에서 " ^ runtime ^ " 를 뺍니다"
-  | Left_vision runtime -> "media_failover 에서 " ^ runtime ^ " 를 뺍니다"
-  | Unassigned {keeper; runtime} -> "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
-let model_rows t = List.mapi (fun i (m:model) ->
+  | Left_lane {lane; runtime} ->
+      if ko then "lane " ^ lane ^ " 후보에서 " ^ runtime ^ " 를 뺍니다"
+      else "Remove " ^ runtime ^ " from lane " ^ lane ^ " candidates"
+  | Left_exact_lane {lane; runtime} ->
+      if ko then "exact-output lane " ^ lane ^ " 에서 " ^ runtime ^ " 를 뺍니다"
+      else "Remove " ^ runtime ^ " from exact-output lane " ^ lane
+  | Left_vision runtime ->
+      if ko then "media_failover 에서 " ^ runtime ^ " 를 뺍니다"
+      else "Remove " ^ runtime ^ " from media_failover"
+  | Unassigned {keeper; runtime} ->
+      if ko then "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
+      else "Keeper " ^ keeper ^ " falls back to default instead of " ^ runtime
+let model_rows ~ko t = List.mapi (fun i (m:model) ->
+  let say korean english = if ko then korean else english in
   let connected = is_connected t m in
-  let mark = if connected then "[연결됨] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in
-  let reason = if connected then "" else if m.tools = Some false then " · 도구 호출 미지원"
-    else if Option.is_none m.context then " · context 확인 필요" else "" in
+  let mark = if connected then say "[연결됨] " "[linked] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in
+  let reason =
+    if connected then ""
+    else if m.tools = Some false then say " · 도구 호출 미지원" " · tools unsupported"
+    else if Option.is_none m.context then say " · context 확인 필요" " · context limit required"
+    else ""
+  in
   Text ((if i=t.cursor then "› " else "  ") ^ mark ^ m.label ^ reason)) t.models
 (* Everything under the notice. *)
-let body_rows t =
+let body_rows ~ko t =
+  let say korean english = if ko then korean else english in
   match t.phase with
   | Providers Clients -> List.mapi (fun i client ->
       let count = List.length (accounts t client) in
       Text ((if i=t.cursor then "› " else "  ") ^ client_label client
-            ^ (if count = 0 then "" else Printf.sprintf " · 계정 %d" count))) (clients t)
+            ^ (if count = 0 then ""
+               else Printf.sprintf (if ko then " · 계정 %d" else " · %d accounts") count))) (clients t)
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "› " else "  ")
-            ^ (match row with New_account _ -> "+ 새 계정" | Account p -> account_label t p))) (account_rows t client)
+            ^ (match row with New_account _ -> say "+ 새 계정" "+ New account" | Account p -> account_label ~ko t p))) (account_rows t client)
   | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
       Text ((if i=t.cursor then "› " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
-  | Models | Refreshing_models | Preparing_context _ -> model_rows t
-  | Failed when t.recovery=Refresh_model_inventory -> model_rows t
+  | Models | Refreshing_models | Preparing_context _ -> model_rows ~ko t
+  | Failed when t.recovery=Refresh_model_inventory -> model_rows ~ko t
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
-    @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
-  | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
-  | Removal {provider; removal; _} -> Text ("지울 공급자 연결: " ^ provider.id ^ " · " ^ provider.label ^ account_suffix t provider) ::
+    @ [ Text ((say "로그인 코드: " "Login code: ") ^ String.make (min 40 (String.length t.draft)) '*')
+      ; Text (if t.input_pending then say "입력 전달 중" "Sending input"
+              else if Option.is_none t.login_id then say "로그인 세션 준비 중" "Preparing login session"
+              else say "코드 입력 대기" "Waiting for code") ]
+  | Documented_context _ -> [Text ((say "문서 또는 설정의 context 한도(tokens): " "Documented context limit (tokens): ") ^ t.draft)]
+  | Removal {provider; removal; _} ->
+    Text ((say "지울 공급자 연결: " "Provider link to remove: ") ^ provider.id ^ " · " ^ provider.label ^ account_suffix ~ko t provider) ::
     (match removal with
-     | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
-       @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
-     | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
+     | Removable {changes; login_store} ->
+       Text (say "지우거나 고치는 것:" "Changes:") :: List.map (fun change -> Text ("  " ^ describe_change ~ko change)) changes
+       @ (match login_store with Some path -> [Text ((say "로그인 정보는 지우지 않습니다: " "Login credentials are kept: ") ^ path)] | None -> [])
+     | Unremovable reason -> [Text ((say "지울 수 없습니다: " "Cannot remove: ") ^ reason)])
   | Finished {saved; activation; refresh_failed} ->
     (match activation with
-     | Activating -> [Text "저장 완료 · 런타임 활성화 중입니다."]
+     | Activating -> [Text (say "저장 완료 · 런타임 활성화 중입니다." "Saved · activating runtime.")]
      | Activation_failed detail ->
-       [Text "저장 완료 · 런타임 활성화 미확인"; Text detail;
-        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+       [ Text (say "저장 완료 · 런타임 활성화 미확인" "Saved · runtime activation unconfirmed"); Text detail
+       ; Text (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
      (* The activation was not sent: the kept-back notice, alone. *)
      | Activation_kept_back notice ->
-       [Text "저장 완료"; Text notice;
-        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+       [ Text (say "저장 완료" "Saved"); Text notice
+       ; Text (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
      | Active {exact_output_available} ->
-       Text "저장한 설정을 런타임에 활성화했습니다." ::
-       (if exact_output_available then [] else [Text "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."]))
+       Text (say "저장한 설정을 런타임에 활성화했습니다." "Saved settings activated in runtime.") ::
+       (if exact_output_available then []
+        else [Text (say "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."
+                      "Standalone exact-output verification Lane is not available yet.")]))
     @ List.map (fun row -> Text row) (saved_rows saved)
-    @ (if refresh_failed then [Text "목록을 새로 읽지 못했습니다. r로 다시 확인하세요."] else [])
+    @ (if refresh_failed then
+         [Text (say "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." "Could not refresh inventory. Press r to check again.")]
+       else [])
   | Loading | Saving | Removing | Failed -> []
-let lines t = Text t.notice :: body_rows t
+let lines ?(ko = true) t = Text t.notice :: body_rows ~ko t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
    save's reason ends in the verification code and detail, the part that says
    what to do. *)
-let visible_lines ~height ~width t =
+let visible_lines ?(ko = true) ~height ~width t =
   if height <= 0 then [], None else
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
@@ -938,8 +998,8 @@ let visible_lines ~height ~width t =
     List.concat_map (function
       | Text text -> List.map (fun line -> Text line)
           (Masc_tui_message_layout.wrap_words ~max_cells:width text)
-      | Terminal _ as row -> [row]) (body_rows t)
-    else body_rows t in
+      | Terminal _ as row -> [row]) (body_rows ~ko t)
+    else body_rows ~ko t in
   let rows = notice @ body in
   if results then (
     let count = List.length rows in

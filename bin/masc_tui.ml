@@ -14166,13 +14166,14 @@ let msx_surface_current () =
 let render_spectator (state : Masc_tui_types.state) =
   (* Layout is pure; publish its navigation bounds only after the complete
      spectator frame is written. A hidden room has no scrollable rows. *)
+  let ko = state.ui_language = Masc_tui_types.Lang_ko in
   let next_room = ref (Option.map (fun room ->
-    fst (Masc_tui_play_room.layout room ~width:0 ~height:0)) state.play_room) in
+    fst (Masc_tui_play_room.layout ~ko room ~width:0 ~height:0)) state.play_room) in
   let room = Option.map (fun room ~width ~height ->
-    let next, lines = Masc_tui_play_room.layout room ~width ~height in
+    let next, lines = Masc_tui_play_room.layout ~ko room ~width ~height in
     next_room := Some next;
     lines) state.play_room in
-  let room_footer = Option.map Masc_tui_play_room.footer state.play_room in
+  let room_footer = Option.map (Masc_tui_play_room.footer ~ko) state.play_room in
   (match state.machine_source with
   | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
@@ -28063,23 +28064,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Play_invite_list_read refusal)
        | Ok { Tui_decode.pis_rows = []; pis_controller } ->
+           let ko = state.ui_language = Lang_ko in
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
-                ("No shared DOS play invites" :: Masc_tui_collab.controller_summary pis_controller))
+                ((if ko then "공유 DOS 플레이 초대가 없습니다" else "No shared DOS play invites")
+                 :: Masc_tui_collab.controller_summary ~ko pis_controller))
        | Ok { Tui_decode.pis_rows = invites; pis_controller } ->
+           let ko = state.ui_language = Lang_ko in
            let row invite =
              let expires_at =
                match invite.Tui_decode.pi_expires_at with
                | Some value -> value
-               | None -> "not recorded"
+               | None -> if ko then "미기록" else "not recorded"
              in
-             invite.pi_name ^ " · expires " ^ expires_at
-             ^ (if invite.pi_expired then " · expired" else "")
-             ^ Masc_tui_collab.controller_note pis_controller invite.pi_name
+             invite.pi_name
+             ^ (if ko then " · 만료 " else " · expires ") ^ expires_at
+             ^ (if invite.pi_expired then (if ko then " · 만료됨" else " · expired") else "")
+             ^ Masc_tui_collab.controller_note ~ko pis_controller invite.pi_name
            in
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
-                (("Shared DOS play invites:" :: Masc_tui_collab.controller_summary pis_controller)
+                (((if ko then "공유 DOS 플레이 초대:" else "Shared DOS play invites:")
+                  :: Masc_tui_collab.controller_summary ~ko pis_controller)
                  @ List.map row invites))));
       Drawn_changed
   | Play_msg (Play_invite_issued (request, target, result)) ->

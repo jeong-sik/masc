@@ -138,6 +138,7 @@ let render_board_compose (state : state) =
         [ words state "첫 줄은 제목, 나머지는 본문 · 게시판: "
             "First line: title · rest: body · hearth: " ^ hearth_label
         ; Board_composer.format_addressing_hint
+            ~ko:(state.ui_language = Lang_ko)
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in

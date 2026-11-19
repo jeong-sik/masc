@@ -1101,3 +1101,8 @@ val folded_thought_summary :
     ["○ Thought · N lines · <preview> · Ctrl-R"] when the preview fits within
     [width] (with at least 12 preview cells, capped at 64), stepping down to
     ["○ Thought · N lines · Ctrl-R"] on narrow panes or empty previews. *)
+
+val folded_thought_summary_localized :
+  ko:bool -> mark:string -> width:int -> line_count:int -> body:string -> string
+(** Localized variant of {!folded_thought_summary} supporting Korean and
+    English labels. *)

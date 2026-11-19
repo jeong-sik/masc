@@ -143,29 +143,42 @@ let key t key =
       (match selected t with None -> t, Stay | Some row -> t, Open_link row.pi_name)
   | Browsing, _ -> t, Stay
 
-let hints t = match t.form with
+let hints ?(ko = false) t = match t.form with
   | Browsing ->
-      "m:MSX  d:DOS  g:games  j/k:choose  r:refresh  Esc:back"
-      ^ (if Option.is_some (selected t) then "  Enter:link" else "")
+      (if ko then "m:MSX  d:DOS  g:게임  j/k:선택  r:새로고침  Esc:뒤로"
+       else "m:MSX  d:DOS  g:games  j/k:choose  r:refresh  Esc:back")
+      ^ (if Option.is_some (selected t) then (if ko then "  Enter:링크" else "  Enter:link") else "")
       ^ (match t.write_access with Writable when Option.is_none t.pending ->
-           "  n:invite" ^ (if Option.is_some (selected t) then "  x:revoke" else "")
-         | Uncertain _ -> "  u:resolve unknown" | Pending _ | Read_only _ | Writable -> "")
-  | Name _ | Hours _ -> "Enter:continue  Ctrl-U:clear  Backspace:delete  Esc:cancel"
-  | Confirm_revoke _ -> "Enter:revoke this invite  Esc:cancel"
-  | Confirm_resolution _ -> "Enter:I verified the server request finished  Esc:keep blocked"
+           (if ko then "  n:초대" else "  n:invite")
+           ^ (if Option.is_some (selected t) then (if ko then "  x:취소" else "  x:revoke") else "")
+         | Uncertain _ -> if ko then "  u:미확인 해결" else "  u:resolve unknown"
+         | Pending _ | Read_only _ | Writable -> "")
+  | Name _ | Hours _ ->
+      if ko then "Enter:다음  Ctrl-U:비우기  Backspace:지우기  Esc:취소"
+      else "Enter:continue  Ctrl-U:clear  Backspace:delete  Esc:cancel"
+  | Confirm_revoke _ ->
+      if ko then "Enter:이 초대 취소  Esc:취소"
+      else "Enter:revoke this invite  Esc:cancel"
+  | Confirm_resolution _ ->
+      if ko then "Enter:서버 요청 종료 확인  Esc:차단 유지"
+      else "Enter:I verified the server request finished  Esc:keep blocked"
 
-let controller_note controller name = match controller with
-  | Masc.Tui_decode.Play_controller_held holder when String.equal holder name -> " · controlling"
+let controller_note ?(ko = false) controller name = match controller with
+  | Masc.Tui_decode.Play_controller_held holder when String.equal holder name ->
+      if ko then " · 조작 중" else " · controlling"
   | Masc.Tui_decode.Play_controller_held _ | Masc.Tui_decode.Play_controller_free
   | Masc.Tui_decode.Play_machine_absent | Masc.Tui_decode.Play_controller_unobserved _ -> ""
 
-let controller_summary = function
+let controller_summary ?(ko = false) = function
   | Masc.Tui_decode.Play_controller_held holder ->
-      ["DOS controller: " ^ Masc.Tui_terminal_text.sanitize_terminal_text holder]
+      [(if ko then "DOS 조작자: " else "DOS controller: ")
+       ^ Masc.Tui_terminal_text.sanitize_terminal_text holder]
   | Masc.Tui_decode.Play_controller_free -> []
-  | Masc.Tui_decode.Play_machine_absent -> ["No DOS machine is loaded."]
+  | Masc.Tui_decode.Play_machine_absent ->
+      [if ko then "로드된 DOS 머신이 없습니다." else "No DOS machine is loaded."]
   | Masc.Tui_decode.Play_controller_unobserved reason ->
-      ["DOS controller unknown: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
+      [(if ko then "DOS 조작자 미확인: " else "DOS controller unknown: ")
+       ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
 
 (* Prose wraps at the overlay's width instead of being cut at the frame's edge:
    the end of a refusal, an error or a confirmation is the part that says what
@@ -178,20 +191,26 @@ let wrap ~width text =
 
 (* The three machine keys share one row while it fits and take a row each when
    it does not. *)
-let machine_keys ~width =
-  let keys = ["m  Watch MSX"; "d  Watch DOS"; "g  Choose an MSX game"] in
+let machine_keys ~ko ~width =
+  let keys =
+    if ko then ["m  MSX 보기"; "d  DOS 보기"; "g  MSX 게임 고르기"]
+    else ["m  Watch MSX"; "d  Watch DOS"; "g  Choose an MSX game"]
+  in
   let row = String.concat "     " keys in
-  if String.length row <= width then [row] else keys
+  if Masc_tui_message_layout.display_width row <= width then [row] else keys
 
 (* One invite as the rows it takes at [width]: the selection mark leads the
    first row and a longer row hangs under the name. *)
-let invite_rows ~width ~last_read t controller (row : Masc.Tui_decode.play_invite_row) =
+let invite_rows ~ko ~width ~last_read t controller (row : Masc.Tui_decode.play_invite_row) =
   let lead = "  " in
   let mark = if Some row.pi_name = t.selected then "› " else lead in
   wrap ~width:(max 1 (width - String.length lead))
-    ((if last_read then "Last read · " else "") ^ row.pi_name ^ controller_note controller row.pi_name
-     ^ (if row.pi_expired then " · expired" else "")
-     ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded"))
+    ((if last_read then (if ko then "마지막 조회 · " else "Last read · ") else "")
+     ^ row.pi_name ^ controller_note ~ko controller row.pi_name
+     ^ (if row.pi_expired then (if ko then " · 만료됨" else " · expired") else "")
+     ^ " · " ^ (match row.pi_expires_at with
+                | Some date -> date
+                | None -> if ko then "만료 시각 미기록" else "expiry not recorded"))
   |> List.mapi (fun index text -> (if index = 0 then mark else lead) ^ text)
 
 (* The invites that fit [available] rows: the selected one always, the ones
@@ -207,44 +226,68 @@ let visible_invites ~available ~selected invites =
   let below, _ = fit room [] below in
   List.concat (above @ [current] @ List.rev below)
 
-let lines ~height ~width t =
+let lines ?(ko = false) ~height ~width t =
+  let say korean english = if ko then korean else english in
   let wrap_each = List.concat_map (wrap ~width) in
   let last_read = match t.read, t.inventory with
     | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ -> true
     | Some _, (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
     | None, (Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Failed _) -> false in
-  let keys = machine_keys ~width in
-  let heading = wrap ~width "Shared machines · observation does not send game input"
-    @ keys @ [""] @ wrap ~width "DOS play links · invite a player to the shared game" in
+  let keys = machine_keys ~ko ~width in
+  let heading =
+    wrap ~width (say "공유 머신 · 관전 중에는 게임 입력을 보내지 않습니다"
+                   "Shared machines · observation does not send game input")
+    @ keys @ [""]
+    @ wrap ~width (say "DOS 플레이 링크 · 공유 게임에 참가자를 초대합니다"
+                     "DOS play links · invite a player to the shared game")
+  in
   let form = wrap_each (match t.form with
-    | Name value -> ["Player name: " ^ value ^ "▌"; "Lowercase letters and digits; start with a letter."]
-    | Hours (name, value) -> ["Player: " ^ name; "Expires in hours: " ^ value ^ "▌"]
-    | Confirm_revoke name -> ["Revoke " ^ name ^ "? Their link stops working and their controller is released."]
+    | Name value ->
+        [ say "참가자 이름: " "Player name: " ^ value ^ "▌"
+        ; say "영문 소문자와 숫자만 사용하며 문자로 시작합니다."
+            "Lowercase letters and digits; start with a letter." ]
+    | Hours (name, value) ->
+        [ say "참가자: " "Player: " ^ name
+        ; say "만료 시간(시간): " "Expires in hours: " ^ value ^ "▌" ]
+    | Confirm_revoke name ->
+        [ if ko then name ^ " 초대를 취소할까요? 링크가 중지되고 조작 권한이 해제됩니다."
+          else "Revoke " ^ name ^ "? Their link stops working and their controller is released." ]
     | Confirm_resolution request_id ->
-        ["Resolve the unknown invite change?"
-        ; "Request: " ^ Masc.Tui_terminal_text.sanitize_terminal_text request_id
-        ; "Verify the original request cannot still complete (logs/server stop)."
-        ; "Then inspect final invites. A refresh alone is not completion proof."
-        ; "Enter: I verified this. Esc: keep changes blocked."]
+        [ say "미확인 초대 변경을 해결할까요?" "Resolve the unknown invite change?"
+        ; say "요청: " "Request: " ^ Masc.Tui_terminal_text.sanitize_terminal_text request_id
+        ; say "원래 요청이 더 이상 완료될 수 없는지 확인하세요 (로그/서버 중지)."
+            "Verify the original request cannot still complete (logs/server stop)."
+        ; say "그다음 최종 초대 목록을 확인하세요. 새로고침만으로는 완료 증명이 되지 않습니다."
+            "Then inspect final invites. A refresh alone is not completion proof."
+        ; say "Enter: 확인했습니다. Esc: 변경 차단 유지."
+            "Enter: I verified this. Esc: keep changes blocked." ]
     | Browsing -> []) in
   let access = match t.write_access with Writable -> []
     | Pending text | Read_only text | Uncertain {notice=text; _} -> [text] in
   let message = wrap_each (access @ (match t.message with None -> [] | Some text -> [text])) in
-  let footer = wrap ~width ("Links issued here remain in this TUI session."
-    ^ if Option.is_some (selected t) then " Enter opens the retained QR/link." else "") in
+  let footer = wrap ~width
+    (say "여기서 발급한 링크는 이 TUI 세션에 유지됩니다." "Links issued here remain in this TUI session."
+     ^ if Option.is_some (selected t) then
+         say " Enter: 보관된 QR/링크 열기." " Enter opens the retained QR/link."
+       else "") in
   let status =
     (match t.read, t.inventory with
-     | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> ["Reading invites"]
+     | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> [say "초대 목록 읽는 중" "Reading invites"]
      | None, (Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _) -> [])
     @ (match t.inventory with
        | Fetched.Stale (_, Read_failed error) | Fetched.Failed (Read_failed error) ->
-           ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
+           [ say "초대 목록을 읽지 못했습니다: " "Could not read invites: " ^ error
+           ; say "r: 다시 읽기 · 머신 관전은 계속 사용할 수 있습니다."
+               "r retries the read; machine observation remains available." ]
        | Fetched.Stale (_, Read_kept_back notice) | Fetched.Failed (Read_kept_back notice) ->
-           [notice; "r retries the read; machine observation remains available."]
+           [ notice
+           ; say "r: 다시 읽기 · 머신 관전은 계속 사용할 수 있습니다."
+               "r retries the read; machine observation remains available." ]
        | Fetched.Absent | Fetched.Loading | Fetched.Ready _ -> [])
     @ (match t.read, t.inventory with
        | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ ->
-           ["Showing the last read invites and controller. Opening or revoking a selected invite waits for a successful refresh."]
+           [ say "마지막으로 읽은 초대와 조작자 정보를 표시 중입니다. 선택한 초대 열기/취소는 새로고침 성공 후 진행됩니다."
+               "Showing the last read invites and controller. Opening or revoking a selected invite waits for a successful refresh." ]
        | Some _, (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
        | None, (Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Failed _) -> []) in
   (* [fixed] is the body outside the invite list, [invites] the rows of each
@@ -252,12 +295,14 @@ let lines ~height ~width t =
   let fixed, invites, selected = match Fetched.value t.inventory with
     | None -> [], [], 0
     | Some {Masc.Tui_decode.pis_rows = []; pis_controller} ->
-        wrap_each (controller_summary pis_controller
-          @ [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]), [], 0
+        wrap_each (controller_summary ~ko pis_controller
+          @ [if t.write_access = Writable then
+               say "초대가 없습니다. n을 눌러 플레이 링크를 만드세요." "No invites. Press n to create a play link."
+             else say "초대가 없습니다." "No invites."]), [], 0
     | Some {Masc.Tui_decode.pis_rows = rows; pis_controller} ->
         let selected = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with
           | Some index -> index | None -> 0 in
-        wrap_each (controller_summary pis_controller), List.map (invite_rows ~width ~last_read t pis_controller) rows, selected in
+        wrap_each (controller_summary ~ko pis_controller), List.map (invite_rows ~ko ~width ~last_read t pis_controller) rows, selected in
   let details = wrap_each status @ fixed in
   let fixed = details in
   let kept = List.length form + List.length message + List.length fixed in
@@ -278,8 +323,8 @@ let lines ~height ~width t =
     let fixed, details =
       if last_read then
         let summary = wrap ~width (match t.read with
-          | Some _ -> "Refreshing · last read"
-          | None -> "Refresh failed · last read") in
+          | Some _ -> say "새로고침 중 · 마지막 조회" "Refreshing · last read"
+          | None -> say "새로고침 실패 · 마지막 조회" "Refresh failed · last read") in
         let room = height - List.length form - List.length message - current - 1 in
         (if List.length summary <= room then summary else []), details
       else fixed, [] in

@@ -2396,15 +2396,22 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
   match origin with
   | Origin_bare ->
       (* A separator belongs between entries, never after the transcript.
-         Counting and scrolling therefore see exactly the same final row. *)
+         Counting and scrolling therefore see exactly the same final row.
+         Consecutive technical rows (Tool/Thinking/Status) stay tightly grouped,
+         while returning to conversational speech gets a breathing line. *)
+      let is_speech_style = function
+        | User | Inbound | Keeper | Local -> true
+        | Status | Journal | Error | Tool | Skill _ | Thinking _ -> false
+      in
       (match previous, message_rows with
-       | Some {style = (User | Inbound | Keeper | Local); _}, _ :: _ ->
+       | Some prev, _ :: _
+         when is_speech_style prev.style || is_speech_style entry.style ->
            { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
              style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
              gutter_label_at = 0; action = Action_none } :: message_rows
-       | (Some { style = (User | Inbound | Keeper | Local);_}, [])
-       | (Some { style = (Status | (Journal | (Error | (Tool | (Skill _ | Thinking _)))));_}, _)
-       | (None, _) -> message_rows)
+       | Some _, _ :: _
+       | Some _, []
+       | None, ([] | _ :: _) -> message_rows)
   | Origin_inline | Origin_row ->
       (match timeline_break_row ~previous ~inner_width:pane_width entry with
        | None -> message_rows

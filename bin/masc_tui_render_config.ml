@@ -122,13 +122,15 @@ let render_runtime_params (state : state) =
           ~en:"  Select a row to see its contract" ]
     | Some row ->
       let open Tui_decode in
-      detail_section_lines ~first:true
+      detail_section_lines
+        ~first:(Option.is_none state.runtime_params_notice)
+        ~width:panel_cells
         (ui_text state ~ko:"현재 값" ~en:"Current value")
       @ field (ui_text state ~ko:"키" ~en:"Key") row.rpr_key
       @ field (ui_text state ~ko:"설명" ~en:"Contract") row.rpr_description
       @ value_field (ui_text state ~ko:"현재 값" ~en:"Current") row.rpr_current_json
       @ value_field (ui_text state ~ko:"기본값" ~en:"Default") row.rpr_default_json
-      @ detail_section_lines
+      @ detail_section_lines ~width:panel_cells
           (ui_text state ~ko:"타입과 허용 범위" ~en:"Type and constraints")
       @ field (ui_text state ~ko:"타입" ~en:"Type")
           (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
@@ -139,7 +141,7 @@ let render_runtime_params (state : state) =
               value_field (Printf.sprintf (if state.ui_language = Lang_ko then "선택지 %d" else "Choice %d") (index + 1))
                 (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
-      @ detail_section_lines
+      @ detail_section_lines ~width:panel_cells
           (ui_text state ~ko:"적용 상태" ~en:"Source")
       @ field (ui_text state ~ko:"적용 상태" ~en:"Source")
           (if row.rpr_has_override
@@ -500,8 +502,19 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                    ~en:"Input: Keeper instructions | current memory | bounded conversation | counterpart observations | fact byte limit")
                else []
              in
-             let has_notices = notices <> [] || moved <> [] || authoring <> [] in
-             notices @ moved @ authoring
+             let alert_blocks =
+               List.filter (fun block -> block <> []) [ notices; moved; authoring ]
+             in
+             let alert_rows =
+               let rec join = function
+                 | [] -> []
+                 | [ block ] -> block
+                 | block :: rest -> block @ ("" :: join rest)
+               in
+               join alert_blocks
+             in
+             let has_notices = alert_blocks <> [] in
+             alert_rows
              @ section ~first:(not has_notices) (ui_text state ~ko:"프롬프트 정보" ~en:"Prompt information")
              @ List.concat_map wrap
                  [field (ui_text state ~ko:"키" ~en:"Key") row.pr_key;
@@ -523,7 +536,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                     section (ui_text state ~ko:"최근 Librarian 입력" ~en:"Recent Librarian input")
                     @ List.concat_map wrap lines))
   in
-  status @ document
+  if status = [] then document else status @ ("" :: document)
 
 type prompt_detail_inputs = {
   prompt_source : (unit, Tui_decode.prompts_snapshot) Masc_tui_fetched.t;

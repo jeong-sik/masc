@@ -758,6 +758,28 @@ let test_wrap_words_avoids_orphan_separators_and_applies_kinsoku () =
   check string "opening kinsoku concatenates losslessly" "가나다라(값)"
     (String.concat "" opening)
 
+let test_origin_bare_separates_tool_block_from_following_speech () =
+  let entries =
+    [ entry Layout.Tool "tool" "" "first call"
+    ; entry Layout.Tool "tool" "" "second call"
+    ; entry Layout.Keeper "sangsu" "" "answer after tools"
+    ; entry Layout.Tool "tool" "" "follow-up call"
+    ]
+  in
+  let { Layout.rows; _ } =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_bare ~inner_width:60
+      ~height:20 ~requested:0 entries
+  in
+  let spacing_count =
+    List.fold_left
+      (fun acc (row : Layout.row) ->
+         if row.kind = Layout.Spacing then acc + 1 else acc)
+      0 rows
+  in
+  (* Tool->Tool has no gap, Tool->Keeper gets one, Keeper->Tool gets one. *)
+  check int "bare transcript inserts breathing row after tool block before speech"
+    2 spacing_count
+
 let () =
   run "tui_message_layout"
     [
@@ -820,6 +842,8 @@ let () =
             test_bare_sender_row_marks_arrived_reasoning_only
         ; test_case "folded thought summary surfaces a 1-line preview when room permits"
             `Quick test_folded_thought_summary_includes_preview_when_width_permits
+        ; test_case "Origin_bare inserts breathing row after tool block before speech"
+            `Quick test_origin_bare_separates_tool_block_from_following_speech
         ;] )
     ; ( "composer"
       , [] )

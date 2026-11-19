@@ -364,7 +364,7 @@ let verification_contract_lines state ~width (request : Masc.Tui_decode.verifica
   let say korean english = if ko then korean else english in
   [Ansi.dim, ""; Ansi.bold, say "  완료 조건" "  Completion contract"]
   @ List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_completion_contract
-  @ [Ansi.bold, say "  요구 증거" "  Required evidence"]
+  @ [Ansi.dim, ""; Ansi.bold, say "  요구 증거" "  Required evidence"]
   @ (if request.vr_required_artifacts = [] then
        wrap (say "별도 요구 목록이 없습니다." "No separate list of required evidence.")
      else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
@@ -427,7 +427,7 @@ let verification_evidence_index state request ~width observation =
     let say korean english = if ko then korean else english in
     (* The selected item carries its own number below; this row counts the
        items, it does not say which is read. *)
-    judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf
+    judgement_detail_rows ~width ([Ansi.dim, ""; Ansi.bold, Printf.sprintf
         (if ko then "  증거 %s · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
          else "  Evidence %s · e/E next/previous · i list · o open · s save")
         (Masc_tui_value.Count.grouped count)]
@@ -956,7 +956,7 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
     |> List.map (fun line -> Ansi.bold, "  " ^ line)
   in
   title
-  @ detail_section_heading (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
+  @ detail_section_heading ~width (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
   @ [ field ~style:(semantic_status_color ruling) (t "판정" "Verdict") ruling
     ; field "Gate" verdict.hv_gate
     ; field (t "평가자" "Evaluator") verdict.hv_evaluator
@@ -967,35 +967,36 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
      here to read, and it runs long. [field] is one [single_line], so it was cut at
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
-  @ (if reason = "" then [] else wrapped (t "사유" "Reason") reason)
-  @ fallback
-  @ detail_section_heading (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
+  @ (if reason = "" then [] else (Ansi.dim, "") :: wrapped (t "사유" "Reason") reason)
+  @ (if fallback = [] then [] else (Ansi.dim, "") :: fallback)
+  @ detail_section_heading ~width (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
   @ [ field (t "태스크" "Task") verdict.hv_task_id
     ; field (t "태스크 링크" "Task link") (Link.reference Task verdict.hv_task_id)
     ; field (t "에이전트" "Agent") verdict.hv_agent
     ]
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
+  let width = max 1 (framed_inner_width cols) in
   let lines =
-    reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
+    reading_notice_lines state ~width
       ~inflight:state.harness_inflight
       ~error:(Option.map (fun detail -> Last_error detail) state.harness_error)
     @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
-        ~width:(max 1 (framed_inner_width cols)) verdict
+        ~width verdict
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)
     @ (match harness_goal_lines state verdict with
        | [] -> []
        | goal_lines ->
-           detail_section_heading (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
+           detail_section_heading ~width (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
            @ goal_lines)
     @ (match harness_ledger_lines ~cols state.harness with
        | [] -> []
        | lines ->
-           detail_section_heading (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts")
+           detail_section_heading ~width (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts")
            @ List.map (fun line -> Ansi.reset, line) lines)
-    |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
+    |> judgement_detail_rows ~width
   in
   let content_height = max 1 (rows - framed_chrome_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in

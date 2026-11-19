@@ -82,6 +82,12 @@ let start_turn_log ~config messages =
   Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
     ~trace_id ~closed_messages:(List.length messages)
 
+(* This turn's [Opened] after [messages]: where this turn began, which
+   rules 7 and 8 read. *)
+let open_turn_log ~config messages =
+  Masc_test_deps.open_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+    ~trace_id ~closed_messages:(List.length messages)
+
 (* One completed turn over [covered], written to the keeper's boundary log. *)
 let record_completed_turn ~config =
   let position = match B.position_of_messages covered with
@@ -97,13 +103,13 @@ let record_completed_turn ~config =
 
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
-let dispatch ?carried_front_seed ?history_at_start ?(initial_messages = covered @ [msg T.User pending])
+let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pending])
     ?(agent_core_tools = []) ?(on_error = fun () -> ())
     ~sw ~net ~base_path () =
   let errors = ref [] in
   (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-      ?carried_front_seed ?history_at_start ~initial_messages ~agent_core_tools
+      ?carried_front_seed ~initial_messages ~agent_core_tools
       ~goal:"Report progress."
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         errors := (runtime_id, error) :: !errors;on_error ())
@@ -392,9 +398,9 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
   let carried_front_seed () =
     { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
-  let history_at_start = B.history_at_start_of_messages (completed @ failed_turn) in
+  open_turn_log ~config (completed @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~carried_front_seed ~history_at_start ~initial_messages ~sw ~net ~base_path () in
+    dispatch ~carried_front_seed ~initial_messages ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);
   let sent n = Fixture.request_bodies refused |> Fun.flip List.nth n
@@ -443,9 +449,9 @@ let test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_bega
   record_three_completed_exchanges ~config;
   let failed_turn = [ msg T.User "ask 3"; msg T.Assistant "answer 3" ] in
   let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
-  let history_at_start = B.history_at_start_of_messages (three_completed_exchanges @ failed_turn) in
+  open_turn_log ~config (three_completed_exchanges @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~history_at_start ~initial_messages ~sw ~net ~base_path () in
+    dispatch ~initial_messages ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);
   let first = sent_to refused 0 and resent = sent_to refused 1 in
@@ -496,9 +502,9 @@ let test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn () =
     ; msg T.Assistant "answer 3" ]
   in
   let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
-  let history_at_start = B.history_at_start_of_messages (three_completed_exchanges @ failed_turn) in
+  open_turn_log ~config (three_completed_exchanges @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =
-    dispatch ~history_at_start ~initial_messages
+    dispatch ~initial_messages
       ~agent_core_tools:[ artifact_reader ~base_path ] ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
   check int "the next peer is not reached" 0 (Fixture.post_count accepted);

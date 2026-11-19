@@ -19,10 +19,22 @@ val planning_missing_goal_notice : Masc_tui_types.state -> goal_id:string -> boo
 val schedule_detail_viewport : Masc_tui_types.state -> int * int
 (** Physical-row count and height of the current Schedule evidence reader. *)
 
-val schedule_status_color : string -> string
-val schedule_status_word_cells : int
+type schedule_status_reading = { word : string; tone : string; mark : string }
+(** A schedule's [sch_status] as the screen draws it: the word in the
+    screen's language, its colour and its status mark (RFC
+    tui-one-screen-grammar §7.2). A word the contract does not name is the
+    word as received, with no colour and a plain dot. *)
+
+val schedule_status_reading : ko:bool -> string -> schedule_status_reading
+
+val schedule_status_word_cells : ko:bool -> int
+(** The widest status word the screen draws in that language. *)
+
 val schedule_requested_clock_cells : int
-val schedule_outcome_word : Masc_tui_types.schedule_row -> string
+
+val schedule_outcome : ko:bool -> Masc_tui_types.schedule_row -> (string * string) option
+(** What the last occurrence came to, as the word and its colour; [None]
+    when there is no outcome to draw. *)
 val schedule_status_is_terminal : string -> bool
 
 val planning_confirmation_view :

@@ -1037,19 +1037,6 @@ let kauto_header_row ~ko ~layout =
 let kauto_row ~styles ~layout values =
   Table.row (kauto_cells ~styles ~head:no_head ~layout values)
 
-(* The mark a schedule's state draws, from the projection's own status
-   vocabulary. A word this build does not name keeps the middot: the mark
-   says "the pane did not classify this" rather than claiming a liveness the
-   pane never read, the same promise the status word makes by rendering as
-   itself. *)
-let kauto_status_mark = function
-  | "scheduled" -> "\xe2\x97\x8b" (* waiting *)
-  | "due" | "running" -> "\xe2\x97\x90" (* active *)
-  | "succeeded" -> "\xe2\x97\x8f" (* done *)
-  | "failed" -> "\xc3\x97" (* failed *)
-  | "cancelled" | "expired" -> "\xe2\x97\x8b" (* inert; the colour dims it *)
-  | _ -> "\xc2\xb7"
-
 (* The label on the rule that parts the live rows from the closed ones. The
    parts are the page's own counts, in the order the statuses first appear,
    so the label describes the rows under it rather than a store-wide tally

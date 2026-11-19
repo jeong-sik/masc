@@ -28,10 +28,10 @@ module Keeper_trail = Masc_tui_keeper_trail
 module Item_account = Masc_tui_keeper_items
 
 let format_context_tokens = Masc_tui_types.format_context_tokens
-let schedule_status_color = Masc_tui_render_work.schedule_status_color
+let schedule_status_reading = Masc_tui_render_work.schedule_status_reading
 let schedule_status_word_cells = Masc_tui_render_work.schedule_status_word_cells
 let schedule_requested_clock_cells = Masc_tui_render_work.schedule_requested_clock_cells
-let schedule_outcome_word = Masc_tui_render_work.schedule_outcome_word
+let schedule_outcome = Masc_tui_render_work.schedule_outcome
 let schedule_status_is_terminal = Masc_tui_render_work.schedule_status_is_terminal
 
 (* Healthy keepers stay quiet beside their NOW activity. A health deviation
@@ -4683,12 +4683,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ (let outcome_words =
-                 List.map
-                   (fun (row : schedule_row) ->
-                      Terminal_text.single_line (schedule_outcome_word row))
-                   rows
+            @ (let ko = state.ui_language = Lang_ko in
+               (* The word and colour of what the row's last occurrence came
+                  to, or the empty-field dash in no colour. *)
+               let outcome_of row =
+                 match schedule_outcome ~ko row with
+                 | Some (word, tone) -> Terminal_text.single_line word, tone
+                 | None -> Masc_tui_theme.Glyph.no_value, Ansi.reset
                in
+               let outcome_words = List.map (fun row -> fst (outcome_of row)) rows in
                let by_words =
                  List.map
                    (fun (row : schedule_row) ->
@@ -4708,7 +4711,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let table_inner = max 1 (inner - 2) in
                let layout =
                  Render_schedule.kauto_layout ~inner_width:table_inner
-                   ~status_width:schedule_status_word_cells
+                   ~status_width:(schedule_status_word_cells ~ko)
                    ~clock_width:schedule_requested_clock_cells
                    ~outcome_width:
                      (Render_schedule.schedule_delivery_width outcome_words)
@@ -4734,7 +4737,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  (* The mark and the state word wear one colour, the state's
                     own; the outcome wears the outcome's, so a failed wake
                     reads red beside a state still reading live. *)
-                 let status_style = schedule_status_color row.sch_status in
+                 let status = schedule_status_reading ~ko row.sch_status in
                  (* A held occurrence has no wake of its own, and the wake and
                     ledger fields on the row still describe the occurrence
                     before it (#38205): while the hold holds, the three
@@ -4748,22 +4751,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    if held then Masc_tui_theme.Glyph.no_value
                    else occurrence_clock value
                  in
-                 let outcome =
-                   if held then Masc_tui_theme.Glyph.no_value
-                   else Terminal_text.single_line (schedule_outcome_word row)
+                 let outcome, outcome_tone =
+                   if held then Masc_tui_theme.Glyph.no_value, Ansi.reset
+                   else outcome_of row
                  in
                  "  "
                  ^ Render_schedule.kauto_row ~layout
                      ~styles:
-                       ({ kstyle_mark = status_style
-                        ; kstyle_status = status_style
-                        ; kstyle_outcome = semantic_status_color outcome
+                       ({ kstyle_mark = status.tone
+                        ; kstyle_status = status.tone
+                        ; kstyle_outcome = outcome_tone
                         ; kstyle_recurrence = Ansi.dim
                         ; kstyle_by = Theme.recede ()
                         } : Render_schedule.kauto_row_styles)
-                     { Render_schedule.krow_mark =
-                         Render_schedule.kauto_status_mark row.sch_status
-                     ; krow_status = Terminal_text.single_line row.sch_status
+                     { Render_schedule.krow_mark = status.mark
+                     ; krow_status = status.word
                      ; krow_triggered =
                          occurrence_clock row.sch_last_wake_started_at_iso
                      ; krow_outcome = outcome
@@ -4805,13 +4807,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                          else first_seen (word :: acc) rest
                    in
                    let label =
-                     Render_schedule.kauto_group_label ~title:"closed"
+                     Render_schedule.kauto_group_label
+                       ~title:(if ko then "닫힘" else "closed")
                        (List.map
                           (fun word ->
-                             Printf.sprintf "%d %s"
-                               (List.length
-                                  (List.filter (String.equal word) words))
-                               (Terminal_text.single_line word))
+                             let count =
+                               Masc_tui_value.Count.grouped
+                                 (List.length (List.filter (String.equal word) words))
+                             in
+                             let shown = (schedule_status_reading ~ko word).word in
+                             if ko then Printf.sprintf "%s %s" shown count
+                             else Printf.sprintf "%s %s" count shown)
                           (first_seen [] words))
                    in
                    let lead = "  \xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in

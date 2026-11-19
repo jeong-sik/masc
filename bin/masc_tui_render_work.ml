@@ -1436,29 +1436,84 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
     | None -> row.sch_source)
 ;;
 
-let schedule_status_color status =
-  semantic_status_color status
+(* The screen's words for the schedule contract's two status variants, in
+   the screen's language. Each value has its own arm, so a status the
+   contract learns has to be given a word, a tone and a mark before this
+   builds -- the shape [planning_phase_label] has. The tone and the mark
+   follow the variant, not the drawn word, so a Korean word keeps the colour
+   the English one had (RFC tui-one-screen-grammar §7.2). *)
+let schedule_status_label ~ko = function
+  | Schedule_contract_values.Scheduled -> if ko then "예정" else "scheduled"
+  | Schedule_contract_values.Due -> if ko then "실행 대기" else "due"
+  | Schedule_contract_values.Running -> if ko then "실행 중" else "running"
+  | Schedule_contract_values.Succeeded -> if ko then "성공" else "succeeded"
+  | Schedule_contract_values.Failed -> if ko then "실패" else "failed"
+  | Schedule_contract_values.Cancelled -> if ko then "취소됨" else "cancelled"
+  | Schedule_contract_values.Expired -> if ko then "만료" else "expired"
 
-(* The wake's status is the contract's own word, so the list column is as
-   wide as the widest word the contract can send and no wider: the value
-   was a string, and the column a literal 10 that happened to fit
-   "succeeded". Measured once from the contract's list, the column and
-   the vocabulary cannot drift apart. *)
-let schedule_wake_word = Schedule_contract_values.wake_status_to_string
+let schedule_status_tone = function
+  | Schedule_contract_values.Running -> Theme.info ()
+  | Schedule_contract_values.Scheduled | Schedule_contract_values.Due -> Theme.warn ()
+  | Schedule_contract_values.Succeeded -> Theme.ok ()
+  | Schedule_contract_values.Failed -> Theme.bad ()
+  | Schedule_contract_values.Cancelled | Schedule_contract_values.Expired -> Ansi.dim
 
-let schedule_wake_word_cells =
+let schedule_status_mark status =
+  Masc_tui_value.Mark.glyph
+    (match status with
+     | Schedule_contract_values.Scheduled -> Masc_tui_value.Mark.Waiting
+     | Schedule_contract_values.Due | Schedule_contract_values.Running ->
+         Masc_tui_value.Mark.Under_way
+     | Schedule_contract_values.Succeeded -> Masc_tui_value.Mark.Settled
+     | Schedule_contract_values.Failed -> Masc_tui_value.Mark.Failed
+     | Schedule_contract_values.Cancelled | Schedule_contract_values.Expired ->
+         Masc_tui_value.Mark.Paused)
+
+(* [sch_status] arrives as a string. A word the contract names is drawn as
+   the screen's word in its tone; a word this build does not name is drawn
+   as received, with no tone and the plain dot, so it still reads as a fact
+   about the store. *)
+type schedule_status_reading = { word : string; tone : string; mark : string }
+
+let schedule_status_reading ~ko text =
+  match Schedule_domain.schedule_status_of_string text with
+  | Ok status ->
+      { word = schedule_status_label ~ko status
+      ; tone = schedule_status_tone status
+      ; mark = schedule_status_mark status }
+  | Error _ ->
+      { word = Terminal_text.single_line text; tone = Ansi.reset; mark = "\xc2\xb7" }
+
+(* The list column is as wide as the widest word this screen draws for a
+   wake in its language, and no wider: the value was a string, and the
+   column a literal 10 that happened to fit "succeeded". Measured from the
+   contract's list of statuses, the column and the vocabulary cannot drift
+   apart. *)
+let schedule_wake_word ~ko = function
+  | Schedule_contract_values.Wake_running -> if ko then "실행 중" else "running"
+  | Schedule_contract_values.Wake_succeeded -> if ko then "성공" else "succeeded"
+  | Schedule_contract_values.Wake_failed -> if ko then "실패" else "failed"
+
+let schedule_wake_tone = function
+  | Schedule_contract_values.Wake_running -> Theme.info ()
+  | Schedule_contract_values.Wake_succeeded -> Theme.ok ()
+  | Schedule_contract_values.Wake_failed -> Theme.bad ()
+
+let schedule_wake_word_cells ~ko =
   List.fold_left
-    (fun widest word -> max widest (Message_layout.display_width word))
-    0 Schedule_contract_values.wake_status_strings
+    (fun widest status ->
+      max widest (Message_layout.display_width (schedule_wake_word ~ko status)))
+    0 Schedule_contract_values.wake_statuses
 
 (* The same rule for the schedule's own status. [sch_status] arrives as a
    string rather than the contract's variant, so the cell is cut to this
    width as well: a word the contract does not name cannot push the columns
    beside it out of line. *)
-let schedule_status_word_cells =
+let schedule_status_word_cells ~ko =
   List.fold_left
-    (fun widest word -> max widest (Message_layout.display_width word))
-    0 Schedule_contract_values.schedule_status_strings
+    (fun widest status ->
+      max widest (Message_layout.display_width (schedule_status_label ~ko status)))
+    0 Schedule_contract_values.schedule_statuses
 
 
 (* The width of the request clock column: the widest column moment
@@ -1473,32 +1528,32 @@ let schedule_requested_clock_cells = Terminal_text.column_timestamp_cells
    a value the server learns has to be given a word before this builds
    (#36009). The words name what the reader sees, not the wire spelling:
    [matched_consumed_ack] is "acknowledged", [matched_pending] is "queued". *)
-let schedule_queue_word = function
-  | Schedule_contract_values.Queue_matched_pending -> "queued"
-  | Schedule_contract_values.Queue_retained_terminal_wake -> "retained"
-  | Schedule_contract_values.Queue_withdrawn_at_cancel -> "withdrawn"
-  | Schedule_contract_values.Queue_not_found -> "not in queue"
-  | Schedule_contract_values.Queue_matched_terminal_completed -> "completed"
-  | Schedule_contract_values.Queue_matched_terminal_cancelled -> "cancelled"
-  | Schedule_contract_values.Queue_terminal_projection_pending -> "settling"
-  | Schedule_contract_values.Queue_transfer_projection_pending -> "transferring"
-  | Schedule_contract_values.Queue_evidence_invalid -> "mismatched"
-  | Schedule_contract_values.Queue_read_error -> "unreadable"
-  | Schedule_contract_values.Queue_unrecognized_receipt -> "unknown receipt"
+let schedule_queue_word ~ko = function
+  | Schedule_contract_values.Queue_matched_pending -> if ko then "대기 중" else "queued"
+  | Schedule_contract_values.Queue_retained_terminal_wake -> if ko then "남겨 둠" else "retained"
+  | Schedule_contract_values.Queue_withdrawn_at_cancel -> if ko then "취소로 뺌" else "withdrawn"
+  | Schedule_contract_values.Queue_not_found -> if ko then "대기열에 없음" else "not in queue"
+  | Schedule_contract_values.Queue_matched_terminal_completed -> if ko then "끝남" else "completed"
+  | Schedule_contract_values.Queue_matched_terminal_cancelled -> if ko then "취소됨" else "cancelled"
+  | Schedule_contract_values.Queue_terminal_projection_pending -> if ko then "정리 중" else "settling"
+  | Schedule_contract_values.Queue_transfer_projection_pending -> if ko then "옮기는 중" else "transferring"
+  | Schedule_contract_values.Queue_evidence_invalid -> if ko then "기록 어긋남" else "mismatched"
+  | Schedule_contract_values.Queue_read_error -> if ko then "읽기 실패" else "unreadable"
+  | Schedule_contract_values.Queue_unrecognized_receipt -> if ko then "모르는 기록" else "unknown receipt"
 
-let schedule_reaction_word = function
-  | Schedule_contract_values.Reaction_conflicting_terminal_evidence -> "conflicting"
-  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> "cancelled"
-  | Schedule_contract_values.Reaction_matched_consumed_ack -> "acknowledged"
-  | Schedule_contract_values.Reaction_matched_turn_finished -> "turn finished"
-  | Schedule_contract_values.Reaction_matched_turn_started -> "turn started"
-  | Schedule_contract_values.Reaction_matched_stimulus -> "received"
-  | Schedule_contract_values.Reaction_not_found -> "not found"
-  | Schedule_contract_values.Reaction_quarantined -> "quarantined"
-  | Schedule_contract_values.Reaction_read_error -> "unreadable"
-  | Schedule_contract_values.Reaction_missing_stimulus_id -> "no stimulus id"
-  | Schedule_contract_values.Reaction_invalid_stimulus_id -> "bad stimulus id"
-  | Schedule_contract_values.Reaction_unrecognized_receipt -> "unknown receipt"
+let schedule_reaction_word ~ko = function
+  | Schedule_contract_values.Reaction_conflicting_terminal_evidence -> if ko then "기록 충돌" else "conflicting"
+  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> if ko then "취소됨" else "cancelled"
+  | Schedule_contract_values.Reaction_matched_consumed_ack -> if ko then "받음 확인" else "acknowledged"
+  | Schedule_contract_values.Reaction_matched_turn_finished -> if ko then "턴 끝남" else "turn finished"
+  | Schedule_contract_values.Reaction_matched_turn_started -> if ko then "턴 시작" else "turn started"
+  | Schedule_contract_values.Reaction_matched_stimulus -> if ko then "받음" else "received"
+  | Schedule_contract_values.Reaction_not_found -> if ko then "기록 없음" else "not found"
+  | Schedule_contract_values.Reaction_quarantined -> if ko then "격리됨" else "quarantined"
+  | Schedule_contract_values.Reaction_read_error -> if ko then "읽기 실패" else "unreadable"
+  | Schedule_contract_values.Reaction_missing_stimulus_id -> if ko then "자극 id 없음" else "no stimulus id"
+  | Schedule_contract_values.Reaction_invalid_stimulus_id -> if ko then "잘못된 자극 id" else "bad stimulus id"
+  | Schedule_contract_values.Reaction_unrecognized_receipt -> if ko then "모르는 기록" else "unknown receipt"
 
 let schedule_queue_color = function
   | Schedule_contract_values.Queue_matched_pending
@@ -1531,10 +1586,10 @@ let schedule_reaction_color = function
    [None] is the ledger saying nothing, and the row then shows an em dash
    rather than a delivery it does not know. That is not the same as a wake
    that failed, which [wake:] beside it already names. *)
-let schedule_delivery_word (row : schedule_row) =
+let schedule_delivery_word ~ko (row : schedule_row) =
   match row.sch_reaction_projection_status with
   | None -> Masc_tui_theme.Glyph.no_value
-  | Some status -> schedule_reaction_word status
+  | Some status -> schedule_reaction_word ~ko status
 
 (* What the last occurrence came to, for a row that has one line to say it.
 
@@ -1545,18 +1600,20 @@ let schedule_delivery_word (row : schedule_row) =
    occurrence before (a held occurrence has no wake of its own, and a
    projection between occurrences still carries the last one's reading), so
    drawing it would pair a dash in the trigger column with a word about a
-   different occurrence in this one. The word is [schedule_reaction_word]'s,
-   and the caller sanitises it the way it sanitises every other reading
-   from this projection. *)
-let schedule_outcome_word (row : schedule_row) =
+   different occurrence in this one. The word and its tone come with it, the
+   reaction's or the wake's, so a caller does not read the colour back out
+   of a word drawn in either language. [None] is no outcome. *)
+let schedule_outcome ~ko (row : schedule_row) =
   match row.sch_last_wake_status with
   | Some Schedule_contract_values.Wake_succeeded ->
-      schedule_delivery_word row
+      Option.map
+        (fun status -> schedule_reaction_word ~ko status, schedule_reaction_color status)
+        row.sch_reaction_projection_status
   | Some
       (( Schedule_contract_values.Wake_running
        | Schedule_contract_values.Wake_failed ) as other) ->
-      schedule_wake_word other
-  | None -> Masc_tui_theme.Glyph.no_value
+      Some (schedule_wake_word ~ko other, schedule_wake_tone other)
+  | None -> None
 
 (* Whether a status word names a schedule that can still act. The word is
    the projection's own; a word this build does not name stays with the live
@@ -1567,27 +1624,34 @@ let schedule_status_is_terminal word =
   | Ok status -> Schedule_domain.is_terminal status
   | Error _ -> false
 
-(* The delivery summary is a row of [key:value] wire words (status:, queue:,
-   reaction:), written in English only, so its hold tag is asked for in
-   English too. *)
-let delivery_summary_in_korean = false
+(* The delivery summary names each reading before its value: [status:],
+   [queue:] and [reaction:] on an English screen, 상태, 대기열 and 반응 on a
+   Korean one. The hold tag follows the same language. *)
+(* The length of the owner's whole queue, beside the wake's queue word. *)
+let schedule_queue_depth ~ko count =
+  let count = Masc_tui_value.Count.grouped count in
+  if ko then "쌓인 " ^ count ^ "건" else "depth=" ^ count
 
-let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
+let schedule_delivery_summary ~ko ~freshness ~runner (row : schedule_row) =
+  let label korean english = if ko then korean ^ " " else english ^ ":" in
+  let depth = schedule_queue_depth ~ko in
   let queue =
     (* [pending_count] is the length of the owner's whole queue, not a fact
        about this wake, so it is spelled as the depth beside the wake's
        word rather than as a second "pending". *)
-    match row.sch_queue_projection_status, row.sch_queue_pending_count with
-    | None, None -> "queue:\xe2\x80\x94"
-    | Some status, None -> "queue:" ^ schedule_queue_word status
-    | None, Some count -> Printf.sprintf "queue:depth=%d" count
-    | Some status, Some count ->
-        Printf.sprintf "queue:%s depth=%d" (schedule_queue_word status) count
+    label "대기열" "queue"
+    ^ (match row.sch_queue_projection_status, row.sch_queue_pending_count with
+       | None, None -> Masc_tui_theme.Glyph.no_value
+       | Some status, None -> schedule_queue_word ~ko status
+       | None, Some count -> depth count
+       | Some status, Some count ->
+           schedule_queue_word ~ko status ^ (if ko then " \xc2\xb7 " else " ") ^ depth count)
   in
   let reaction =
-    match row.sch_reaction_projection_status with
-    | None -> "reaction:\xe2\x80\x94"
-    | Some status -> "reaction:" ^ schedule_reaction_word status
+    label "반응" "reaction"
+    ^ (match row.sch_reaction_projection_status with
+       | None -> Masc_tui_theme.Glyph.no_value
+       | Some status -> schedule_reaction_word ~ko status)
   in
   (* A held occurrence has no wake of its own, so the queue and reaction
      readings on the next line still describe the previous one. The hold says
@@ -1605,14 +1669,14 @@ let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
         " \xc2\xb7 "
         ^ (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
            | Tui_decode.Hold_current ->
-               Render_schedule.schedule_hold_tag ~ko:delivery_summary_in_korean
+               Render_schedule.schedule_hold_tag ~ko
                  ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
            | Tui_decode.Hold_as_of checked ->
-               Render_schedule.schedule_hold_as_of_tag ~ko:delivery_summary_in_korean
+               Render_schedule.schedule_hold_as_of_tag ~ko
                  ~checked:(Terminal_text.short_timestamp_of_unix checked))
   in
-  ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
-      row.sch_status hold
+  ( Printf.sprintf "%s \xc2\xb7 %s%s%s" row.sch_schedule_id (label "상태" "status")
+      (schedule_status_reading ~ko row.sch_status).word hold
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
 (* Both readers draw this through [data_unreliable_row], which already opens
@@ -1838,7 +1902,7 @@ let render_schedule_list (state : state) =
                Render_schedule.schedule_minimum_target_width snapshot.scs_rows
              |> min Render_schedule.schedule_maximum_target_width
            in
-           let wake_width = schedule_wake_word_cells in
+           let wake_width = schedule_wake_word_cells ~ko in
            (* Measured, like the target beside it. The column was a literal
               12, and the words the projection sends run past it: live,
               [turn_finished] drew as [tur...finished], and
@@ -1850,7 +1914,7 @@ let render_schedule_list (state : state) =
              Render_schedule.schedule_delivery_width
                (List.map
                   (fun row ->
-                    Terminal_text.single_line (schedule_delivery_word row))
+                    Terminal_text.single_line (schedule_delivery_word ~ko row))
                   snapshot.scs_rows)
            in
            let layout =
@@ -1901,10 +1965,13 @@ let render_schedule_list (state : state) =
                   strip has stripped it since it was written; this list is
                   the surface that did not. *)
                let subject = schedule_row_subject row in
-               let status_color = schedule_status_color row.sch_status in
+               let status = schedule_status_reading ~ko row.sch_status in
                let last_wake =
-                 Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:schedule_wake_word
+                 Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:(schedule_wake_word ~ko)
                    row.sch_last_wake_status
+               in
+               let last_wake_tone =
+                 Option.fold ~none:Ansi.reset ~some:schedule_wake_tone row.sch_last_wake_status
                in
                (* The enqueue result and what became of the wake are two
                   facts, and the list carried only the first: a wake the queue
@@ -1918,16 +1985,16 @@ let render_schedule_list (state : state) =
                   the timezone lives -- read [daily 08:00:00 A~]. The fallback
                   summary can be long, so it is capped rather than trusted. *)
                let line =
-                 Render_schedule.schedule_row ~status_style:status_color
-                   ~wake_style:(schedule_status_color last_wake)
+                 Render_schedule.schedule_row ~status_style:status.tone
+                   ~wake_style:last_wake_tone
                    ~recurrence_style:Ansi.dim ~layout
                    { Render_schedule.srow_status =
-                       bracketed ~max_cells:10 row.sch_status
+                       bracketed ~max_cells:10 status.word
                    ; srow_due = due
                    ; srow_target = Terminal_text.single_line subject
                    ; srow_wake = last_wake
                    ; srow_delivery =
-                       Terminal_text.single_line (schedule_delivery_word row)
+                       Terminal_text.single_line (schedule_delivery_word ~ko row)
                    ; srow_recurrence =
                        Terminal_text.single_line row.sch_recurrence_summary
                    }
@@ -1947,7 +2014,7 @@ let render_schedule_list (state : state) =
                 c.push_empty ()
             | Some selected ->
                 let identity, delivery =
-                  schedule_delivery_summary
+                  schedule_delivery_summary ~ko
                     ~freshness:(schedule_list_freshness state)
                     ~runner:snapshot.scs_runner_status selected
                 in
@@ -2106,14 +2173,11 @@ let schedule_wake_lines ~ko
   let last_wake = Ansi.bold, t "  마지막 실행" "  LAST WAKE" in
   let last_wake_fields =
     [ (let word =
-         Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:schedule_wake_word
+         Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:(schedule_wake_word ~ko)
            row.sch_last_wake_status
        in
        field
-         ~style:
-           (if Option.is_some row.sch_last_wake_status then
-              schedule_status_color word
-            else Ansi.dim)
+         ~style:(Option.fold ~none:Ansi.dim ~some:schedule_wake_tone row.sch_last_wake_status)
          (t "상태" "Status") word)
     ; field (t "시작" "Started") (timestamp row.sch_last_wake_started_at_iso)
     ; field
@@ -2157,9 +2221,9 @@ let schedule_wake_lines ~ko
                    the times start in the column every other value on the
                    page starts in. A literal 12 here put them two cells to
                    the left of the Reaction time below. *)
-                let word = schedule_wake_word wake.swk_status in
+                let word = schedule_wake_word ~ko wake.swk_status in
                 let head =
-                  field ~style:(schedule_status_color word) word
+                  field ~style:(schedule_wake_tone wake.swk_status) word
                     (Printf.sprintf "%s \xe2\x86\x92 %s" started finished)
                 in
                 match wake.swk_error with
@@ -2198,18 +2262,18 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
     | None, None -> Masc_tui_theme.Glyph.no_value
-    | Some status, None -> schedule_queue_word status
-    | None, Some count -> Printf.sprintf "depth=%d" count
+    | Some status, None -> schedule_queue_word ~ko status
+    | None, Some count -> schedule_queue_depth ~ko count
     | Some status, Some count ->
-        Printf.sprintf "%s  depth=%d" (schedule_queue_word status) count
+        Printf.sprintf "%s  %s" (schedule_queue_word ~ko status) (schedule_queue_depth ~ko count)
   in
   let reaction =
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> Masc_tui_theme.Glyph.no_value
-    | Some status, None -> schedule_reaction_word status
+    | Some status, None -> schedule_reaction_word ~ko status
     | None, Some at -> at
     | Some status, Some at ->
-        Printf.sprintf "%s  %s" (schedule_reaction_word status) at
+        Printf.sprintf "%s  %s" (schedule_reaction_word ~ko status) at
   in
   let summary =
     Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
@@ -2255,7 +2319,8 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   in
   detail_section_heading ~first:true
     (t "1. 현재 상태 · 다음 실행 · 보류 진단" "1. Status & Delivery")
-  @ [ field ~style:(schedule_status_color row.sch_status) (t "상태" "Status") row.sch_status
+  @ [ (let status = schedule_status_reading ~ko row.sch_status in
+       field ~style:status.tone (t "상태" "Status") status.word)
     ; field (t "예정" "Due") (timestamp row.sch_due_at_iso)
     ; field (t "다음 예정" "Next due") (timestamp row.sch_next_due_at_iso)
     ; field (t "반복" "Recurrence") row.sch_recurrence_summary
@@ -2266,7 +2331,7 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
         ~style:
           (Option.fold ~none:Ansi.dim ~some:schedule_queue_color
              row.sch_queue_projection_status)
-        (t "큐" "Queue") queue
+        (t "대기열" "Queue") queue
     ; field
         ~style:
           (Option.fold ~none:Ansi.dim ~some:schedule_reaction_color
@@ -2392,9 +2457,9 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
          [ ui_text state ~ko:"일정" ~en:"schedules"
          ; ui_text state ~ko:"상세" ~en:"details" ]
        ~readings:
-         [ Printf.sprintf "%s[%s]%s"
-             (schedule_status_color row.sch_status)
-             (Terminal_text.single_line row.sch_status) Ansi.reset ]
+         [ (let status =
+              schedule_status_reading ~ko:(state.ui_language = Lang_ko) row.sch_status in
+            Printf.sprintf "%s[%s]%s" status.tone status.word Ansi.reset) ]
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
   box_divider buf cols;
   Option.iter (fun error -> box_line buf cols (data_unreliable_row ~cols error)) warning;

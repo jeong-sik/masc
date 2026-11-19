@@ -818,6 +818,12 @@
  (libraries masc_tui_card masc_tui_ansi masc_tui_theme masc_tui_message_layout))
 
 (library
+ (name masc_tui_overview_bands)
+ (wrapped false)
+ (modules masc_tui_overview_bands)
+ (libraries masc_tui_card masc_tui_ansi masc_tui_theme masc_tui_message_layout masc_tui_chart masc_tui_value))
+
+(library
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
@@ -3193,6 +3199,7 @@
   masc_tui_ask_layout
   masc_tui_card
   masc_tui_overview_cards
+  masc_tui_overview_bands
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_frame_timing

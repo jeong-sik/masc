@@ -172,7 +172,7 @@ let series_cells_walk_their_hue () =
     (List.init 10 (fun _ -> ""))
     (List.init 10 (fun index -> style Theme.No_color ~index));
   Alcotest.(check (list string)) "sixteen colours draw the hue's bright code throughout"
-    (List.init 10 (fun _ -> Theme.Sgr.bright_cyan))
+    (List.init 10 (fun _ -> Theme.Sgr.bright_blue))
     (List.init 10 (fun index -> style Theme.Colors_16 ~index));
   Alcotest.(check (list string)) "without a palette truecolor draws the same"
     (List.init 10 (fun index -> style Theme.Colors_16 ~index))
@@ -258,7 +258,7 @@ let series_ramp_falls_back_whole () =
     if Masc_tui_color.contrast_ratio colour dark_ground < 3.6 then None else truecolor colour
   in
   Alcotest.(check (list string)) "a deep step under the projection floor flattens the ramp"
-    (List.init 11 (fun _ -> Theme.Sgr.bright_cyan))
+    (List.init 11 (fun _ -> Theme.Sgr.bright_blue))
     (List.init 11 (fun step ->
        Theme.For_testing.ramp_style ~colors_enabled:true ~project
          (series_paint ?palette Theme.Colors_256) Theme.Calls
@@ -434,7 +434,7 @@ let meter_bar_opens_a_code_per_colour () =
   let glyphs count = String.concat "" (List.init count (fun _ -> "\xe2\x96\xa0")) in
   let opened code = if String.equal code "" then glyphs 10 else code ^ glyphs 10 ^ reset in
   Alcotest.(check string) "one colour opens one code"
-    (opened Theme.Sgr.bright_cyan)
+    (opened Theme.Sgr.bright_blue)
     (bar (Chart.Series { paint = series_paint Theme.Colors_16; series = Theme.Calls }));
   Alcotest.(check string) "an anomaly opens its status colour once"
     (opened (Theme.status_readable ~surface:Theme.Page None Theme.Bad))

@@ -434,7 +434,7 @@ landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
 Marks: `▶` a call
-started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
+started, `✓` a call returned, `✗` a failure, `✧` a boundary inside a turn
 (a provider call's start or end, an internal agent run's start), `■` done
 (the keeper's turn, or an internal agent run), `?` something needing
 attention. A returned
@@ -803,8 +803,9 @@ turn is starting or running, `Ctrl-G` selects the next readable Keeper and
 wraps at the end of the roster. Each Keeper keeps its own draft. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-Chat opens in a conversation layout: a small `›` marks your message, `●`
-marks the Keeper, and `◀` marks another sender. Other senders keep their name
+Chat opens in a conversation layout: a small `›` marks your message, `✦`
+marks the Keeper, `✧` marks the pane's note about a turn, and `◀` marks
+another sender. Other senders keep their name
 and origin above their message. Tool calls keep
 their own name and result mark without a second TOOLS label.
 

@@ -61,7 +61,7 @@ val retain :
 type glyph =
   | Call_started  (** [▶] *)
   | Call_returned  (** [✓] *)
-  | Turn_boundary  (** [●] *)
+  | Turn_boundary  (** [✧] *)
   | Turn_done  (** [■] *)
   | Failure  (** [✗] *)
   | Attention  (** [?] *)

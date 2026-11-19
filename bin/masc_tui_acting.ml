@@ -147,7 +147,9 @@ type glyph =
 let glyph_text = function
   | Call_started -> "\xe2\x96\xb6"
   | Call_returned -> "\xe2\x9c\x93"
-  | Turn_boundary -> "\xe2\x97\x8f"
+  (* ✧, the chat pane's note about a turn: a boundary is not the settled
+     state the filled dot names (RFC tui-one-screen-grammar 7.2). *)
+  | Turn_boundary -> "\xe2\x9c\xa7"
   | Turn_done -> "\xe2\x96\xa0"
   | Failure -> "\xe2\x9c\x97"
   | Attention -> "?"

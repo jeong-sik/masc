@@ -331,6 +331,12 @@ export const boardHearthFilter = signal('')
 /** The applied Board search text, trimmed; '' when nothing is searched. The
  *  server answers it over the whole Board, so the list holds only matches. */
 export const boardSearchText = signal('')
+/** Whether the Board list answers a sub-board, a search or an author filter.
+ *  `boardTotal` then counts that list, not the Board. */
+export const boardListNarrowed = computed(() =>
+  boardHearthFilter.value.trim() !== ''
+  || boardSearchText.value !== ''
+  || boardAuthorFilter.value.trim() !== '')
 /** Number of posts currently loaded — the offset for the next page request. */
 export const boardOffset = signal<number>(0)
 /** true when the server indicates (or we optimistically believe) more posts are available. */

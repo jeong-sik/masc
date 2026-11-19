@@ -1044,7 +1044,7 @@ let test_replacement_without_the_runtime_root =
         "under a runtime root that is not reached"
         answer
         ~status:503
-        ~code:(Some "replacement_not_recorded");
+        ~code:(Some "files_not_reached");
       says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
       unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
       Alcotest.(check bool) "the account is one to spend" true (spent alice account);
@@ -1079,7 +1079,7 @@ let test_replacement_under_a_root_that_leads_nowhere =
       "under a runtime root that leads nowhere"
       answer
       ~status:503
-      ~code:(Some "replacement_not_recorded");
+      ~code:(Some "files_not_reached");
     says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
     unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
     Alcotest.(check bool) "the account is one to spend" true (spent alice account);
@@ -1101,7 +1101,7 @@ let test_replacement_over_an_open_home =
     let home = home_of ~runtime_root account in
     Unix.chmod home 0o755;
     let answer = replace alice ~base_path account (replacement_body second_key) in
-    answered "over a home others read" answer ~status:503 ~code:(Some "replacement_not_recorded");
+    answered "over a home others read" answer ~status:503 ~code:(Some "files_not_reached");
     says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
     unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
     Unix.chmod home 0o700;

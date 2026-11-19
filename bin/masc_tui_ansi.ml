@@ -412,8 +412,10 @@ end
    side at a time, and a dim "…" stands where entries were dropped. A fitter
    that cut the strip from the right would take the current entry's mark
    first. When the current entry does not fit whole with its marks
-   ([tab_strip_min_width]) the strip draws nothing, since an entry cut inside
-   its name names nothing. Entries that fit draw exactly as before. *)
+   ([tab_strip_min_width]), the strip degrades in stages -- dropping
+   parenthetical counts, tightening gaps, and finally truncating the active
+   entry down to [tab_strip_compact_floor] -- before drawing nothing below
+   that floor. Entries that fit draw exactly as before. *)
 let tab_strip_gap = "  "
 
 (* What stands where a strip could not draw its entries, with how many it is
@@ -457,12 +459,12 @@ let current_tab entries =
   in
   find 0
 
-(* The cells this strip needs to keep its promise: the current entry whole,
-   with the cut marks its position calls for. Below this a strip that has to
-   drop entries has no room for the current one and draws nothing, rather
-   than an entry cut to "@p@" where it means "prompts". A row that draws a
-   strip asks for this before it spends the width on anything that can give
-   way. *)
+(* The cells this strip needs to draw the current entry whole with the cut
+   marks its position calls for. Below this, [tab_strip] falls back to staged
+   degradation (stripping parenthetical counts, tightening gaps, then fitting
+   the active entry down to [tab_strip_compact_floor]) before drawing nothing
+   below that floor. A row that draws a strip still asks for this before it
+   spends width on optional chrome that can give way. *)
 let tab_strip_min_width (tabs : (string * bool * 'target) list) =
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
@@ -487,6 +489,20 @@ let tab_strip_min_width (tabs : (string * bool * 'target) list) =
 (* Each entry names where a press on it leads, and [press] is how the caller
    marks drawn text as leading there. A cut mark leads to the nearest entry it
    hides, the one a step of the strip's own key would bring into the window. *)
+let tab_strip_compact_floor = 6
+
+(* Drop an optional parenthetical count suffix ("클라이언트 (3개 연결)" ->
+   "클라이언트") when a tab strip is squeezed below its full window width. *)
+let strip_tab_count label =
+  let len = String.length label in
+  if len < 4 || label.[len - 1] <> ')' then label
+  else
+    match String.rindex_opt label '(' with
+    | Some idx when idx > 1 && label.[idx - 1] = ' ' ->
+        let trimmed = String.trim (String.sub label 0 (idx - 1)) in
+        if String.equal trimmed "" then label else trimmed
+    | Some _ | None -> label
+
 let tab_strip ~width ~(press : 'target -> string -> string)
     (tabs : (string * bool * 'target) list) =
   let draw press (label, current, target) =
@@ -500,7 +516,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
-  if n = 0 then ""
+  if n = 0 || width <= 0 then ""
   else begin
     let widths =
       Array.map
@@ -546,32 +562,58 @@ let tab_strip ~width ~(press : 'target -> string -> string)
         if grew then prefer_right := not !prefer_right else growing := false
       done;
       let mark text = Theme.recede () ^ text ^ Ansi.reset in
-      let compose press =
+      let compose ~sep ~label_override press =
         let shown =
-          List.init (!hi - !lo + 1) (fun i -> draw press entries.(!lo + i))
-          |> String.concat tab_strip_gap
+          List.init (!hi - !lo + 1) (fun i ->
+            let idx = !lo + i in
+            let lbl, cur, tgt = entries.(idx) in
+            let lbl =
+              if idx = current then Option.value label_override ~default:lbl else lbl
+            in
+            draw press (lbl, cur, tgt))
+          |> String.concat sep
         in
         (if !lo > 0 then
            press (target_of entries.(!lo - 1)) (mark (hidden_before_mark !lo))
-           ^ tab_strip_gap
+           ^ sep
          else "")
         ^ shown
         ^
         if !hi < n - 1 then
-          tab_strip_gap
+          sep
           ^ press (target_of entries.(!hi + 1))
               (mark (hidden_after_mark (n - 1 - !hi)))
         else ""
       in
-      let drawn = compose press in
-      (* The window is seeded with the current entry and only grows under
-         [fits], so it is over [width] only when the current entry with its
-         marks does not fit ([tab_strip_min_width]). The strip then draws
-         nothing: cut to the width, it would end inside the entry's name
-         ("▸클라이언트…") and name nothing. Over its width the window holds
-         the current entry alone, which a press would not move, so nothing a
-         reader could press is lost. *)
-      if Masc_tui_message_layout.display_width drawn > width then "" else drawn
+      let no_press _ text = text in
+      if cells (compose ~sep:tab_strip_gap ~label_override:None no_press) <= width then
+        compose ~sep:tab_strip_gap ~label_override:None press
+      else if width < tab_strip_compact_floor then ""
+      else
+        (* Staged degradation below [tab_strip_min_width]: strip parenthetical
+           counts and tighten gaps before dropping cut marks or truncating the
+           active tab, keeping active-tab orientation down to
+           [tab_strip_compact_floor] (6 cells) instead of erasing the strip. *)
+        let cur_label, cur_flag, cur_target = entries.(current) in
+        let base_label = strip_tab_count cur_label in
+        let compact_window =
+          compose ~sep:" " ~label_override:(Some base_label) no_press
+        in
+        if cells compact_window <= width then
+          compose ~sep:" " ~label_override:(Some base_label) press
+        else
+          let active_only = draw no_press (base_label, cur_flag, cur_target) in
+          if cells active_only <= width then
+            draw press (base_label, cur_flag, cur_target)
+          else
+            let prefix_cells =
+              if cur_flag then cells Masc_tui_theme.Glyph.current_entry else 0
+            in
+            let label_room = max 1 (width - prefix_cells) in
+            let fitted =
+              Masc_tui_message_layout.truncate_end label_room base_label
+            in
+            draw press (fitted, cur_flag, cur_target)
     end
   end
 

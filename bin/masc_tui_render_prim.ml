@@ -7118,8 +7118,8 @@ let runtime_substrate_tabs (state : state)
    connection badge last. It is laid out
    by [detail_heading] like the Activity row, so the badge stays whole, the
    pieces of [after] are left out whole from the end, and the strip draws in
-   what they leave. The strip is whole or it is not drawn, and a strip that
-   draws nothing takes its separator with it. Each row used to hand the strip
+   what they leave. The strip degrades cleanly down to its compact floor, and
+   a strip that draws nothing takes its separator with it. Each row used to hand the strip
    the cells that were left after [after] and drew the row with [box_line],
    which cut the badge when [after] alone was wider than the row.
 
@@ -7140,7 +7140,8 @@ let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
          ; draw =
              (fun width ->
                let room = width - cells before in
-               if room < tab_strip_min_width tabs then title
-               else before ^ tab_strip ~width:room ~press:pressable tabs)
+               match tab_strip ~width:room ~press:pressable tabs with
+               | "" -> title
+               | strip -> before ^ strip)
          })
     ~id:"" ~after:("" :: after) ~tail:(connection_badge state)

@@ -1,10 +1,14 @@
-(** keeper_memory_write with [supersedes]: one commit removes the keeper's own
-    earlier claim and writes its successor, and every refusal writes nothing. *)
+(** keeper_memory_write with [supersedes]: one commit removes the named fact
+    and writes the claim, and every refusal writes nothing. The tool writes
+    through the Keeper's Memory writer, so what a write did is read from the
+    receipt, the snapshot and the commit log. *)
 
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Current = Masc.Keeper_memory_os_current
 module Types = Masc.Keeper_memory_os_types
-module Events = Masc.Keeper_memory_os_events
+module Log = Masc.Librarian_log
+module Log_store = Masc.Librarian_log_store
+module Effects = Masc.Librarian_effects
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -62,19 +66,6 @@ let revision ~keepers_dir ~keeper_id =
   Option.map (fun (snapshot : Current.t) -> snapshot.revision) (snapshot ~keepers_dir ~keeper_id)
 ;;
 
-let events_for ~keepers_dir ~keeper_id =
-  match Events.read ~keepers_dir ~keeper_id with
-  | Error error -> Alcotest.fail (Events.file_read_error_to_string error)
-  | Ok rows ->
-    List.map
-      (fun (index, row) ->
-         match row with
-         | Ok event -> event
-         | Error error ->
-           Alcotest.failf "event line %d: %s" index (Events.read_error_to_string error))
-      rows
-;;
-
 type env =
   { config : Masc.Workspace.config
   ; keepers_dir : string
@@ -90,18 +81,46 @@ let with_env f =
   f { config; keepers_dir }
 ;;
 
-(* Supersession tests start from an already admitted authored fact. *)
-let seed_current env (meta : Masc.Keeper_meta_contract.keeper_meta) claim =
-  let now = Unix.gettimeofday () in
-  let fact = Types.observed ~claim ~category:Types.Fact ~now
-    ~origin:{kind=Types.Authored; trace_id="fixture"} in
-  match Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir:env.keepers_dir ~keeper_id:meta.name ~now
-      ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} fact with
-  | Ok _ -> Types.memory_id fact
-  | Error _ -> Alcotest.fail "current fixture admission failed"
+let log_path env ~keeper_id =
+  Log_store.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id
 ;;
 
-let write env meta ?supersedes ?derivation content =
+(* The commit lines of the Keeper's commit log, oldest first. *)
+let commits env ~keeper_id =
+  match
+    Log_store.fold (log_path env ~keeper_id) ~init:[] ~f:(fun seen (scanned : Log_store.scanned) ->
+      match scanned.line with
+      | Ok (Committed commit) -> commit :: seen
+      | Ok (Started _) -> seen
+      | Error (_ : Log_store.undecodable) -> Alcotest.fail "a commit log line does not decode")
+  with
+  | Ok seen -> List.rev seen
+  | Error error -> Alcotest.fail (Masc.Private_jsonl_scan.error_to_string error)
+;;
+
+let last_commit env ~keeper_id : Log.commit =
+  match List.rev (commits env ~keeper_id) with
+  | commit :: _ -> commit
+  | [] -> Alcotest.fail "the commit log holds no commit"
+;;
+
+let removal_text : Effects.removal -> string = function
+  | Dropped { reason } -> "dropped: " ^ reason
+  | Merged_into successor -> "merged into " ^ successor
+  | Revised_into successor -> "revised into " ^ successor
+  | Superseded_by successor -> "superseded by " ^ successor
+  | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
+  | Retracted { by = Operator operator; reason } -> "retracted by " ^ operator ^ ": " ^ reason
+  | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
+;;
+
+let removed (commit : Log.commit) =
+  List.map
+    (fun ((fact : Types.fact), removal) -> Types.memory_id fact, removal_text removal)
+    commit.effects.removed
+;;
+
+let write env (meta : Masc.Keeper_meta_contract.keeper_meta) ?supersedes ?derivation content =
   let args =
     `Assoc
       ([ "content", `String content ]
@@ -114,6 +133,7 @@ let write env meta ?supersedes ?derivation content =
              ])
            derivation)
   in
+  Masc_test_deps.Memory_tool_case.writer ~config:env.config meta.name;
   (Runtime.keeper_memory_write_with_outcome ~config:env.config ~meta ~args)
     .Masc.Keeper_tool_execution.raw_output
   |> Yojson.Safe.from_string
@@ -128,39 +148,57 @@ let check_refused ~error_kind label response =
   Alcotest.(check string) (label ^ ": error_kind") error_kind (string_field "error_kind" response)
 ;;
 
-(* Refusals must leave the snapshot revision, its facts and the event sidecar
-   exactly as they were. *)
-let check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events label =
+let has_field key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> Alcotest.fail "expected JSON object"
+;;
+
+let string_list_field key json =
+  match json_field key json with
+  | `List values ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> Alcotest.failf "expected strings in %s" key)
+      values
+  | _ -> Alcotest.failf "expected list field: %s" key
+;;
+
+(* A claim the Keeper wrote itself, through the tool. *)
+let seed env meta claim =
+  let response = write env meta claim in
+  check_ok ("seed: " ^ claim) response;
+  string_field "memory_id" response
+;;
+
+(* What a write may not move when it writes nothing. *)
+type before =
+  { ids : string list
+  ; revision : int option
+  ; commits : int
+  }
+
+let before env ~keeper_id =
+  { ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id
+  ; revision = revision ~keepers_dir:env.keepers_dir ~keeper_id
+  ; commits = List.length (commits env ~keeper_id)
+  }
+;;
+
+let check_nothing_written env ~keeper_id (was : before) label =
   let keepers_dir = env.keepers_dir in
   Alcotest.(check (list string))
     (label ^ ": current facts unchanged")
-    before_ids
+    was.ids
     (current_ids ~keepers_dir ~keeper_id);
   Alcotest.(check (option int))
     (label ^ ": no new revision")
-    before_revision
+    was.revision
     (revision ~keepers_dir ~keeper_id);
   Alcotest.(check int)
-    (label ^ ": no event recorded")
-    before_events
-    (List.length (events_for ~keepers_dir ~keeper_id))
-;;
-
-(* Revisions are the journal's revision links, written by the commit itself
-   (#37433). *)
-let revised_links ~keepers_dir ~keeper_id =
-  match Current.read_commit_lineage ~keepers_dir ~keeper_id with
-  | Ok lineage ->
-    List.map
-      (fun (link : Types.revision) -> link.superseded, link.superseded_by)
-      lineage.Current.revisions
-  | Error detail -> Alcotest.fail ("memory lineage unreadable: " ^ detail)
-;;
-
-let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
-  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
-  | Ok rows -> rows
-  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+    (label ^ ": no commit line")
+    was.commits
+    (List.length (commits env ~keeper_id))
 ;;
 
 let test_supersede_replaces_the_earlier_claim () =
@@ -168,7 +206,8 @@ let test_supersede_replaces_the_earlier_claim () =
   @@ fun env ->
   let meta = make_meta "supersede-a" in
   let keeper_id = meta.name in
-  let first_id = seed_current env meta "position: stage 1, checkpoint 3" in
+  let first_id = seed env meta "position: stage 1, checkpoint 3" in
+  let lines_before = List.length (commits env ~keeper_id) in
   let second = write env meta ~supersedes:first_id "position: stage 2, checkpoint 1" in
   check_ok "superseding write" second;
   let second_id = string_field "memory_id" second in
@@ -180,6 +219,10 @@ let test_supersede_replaces_the_earlier_claim () =
     "the successor is a new fact"
     "inserted"
     (string_field "identity_disposition" second);
+  Alcotest.(check (list string))
+    "the receipt names what left"
+    [ first_id ]
+    (string_list_field "removed_memory_ids" second);
   Alcotest.(check (list string))
     "only the successor is current"
     [ second_id ]
@@ -195,31 +238,19 @@ let test_supersede_replaces_the_earlier_claim () =
        updated_at
        successor.last_seen
    | Some _ | None -> Alcotest.fail "expected exactly one current fact");
+  Alcotest.(check int)
+    "one commit line for the removal and the claim together"
+    (lines_before + 1)
+    (List.length (commits env ~keeper_id));
+  let commit = last_commit env ~keeper_id in
   Alcotest.(check (list (pair string string)))
-    "exactly one revision link, old id to new id"
-    [ first_id, second_id ]
-    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id);
-  match readable_journal_tail ~keepers_dir:env.keepers_dir ~keeper_id ~limit:1 with
-  | [ Ok (Current.Journal_committed { dropped = Some [ statement ]; _ }) ] ->
-    Alcotest.(check string)
-      "the journal names the removed fact"
-      first_id
-      statement.Types.memory_id
-  | _ -> Alcotest.fail "expected one committed journal line with one drop statement"
-;;
-
-(* Bytes already current under another identity are a re-observation of that
-   fact, exactly as a plain write of them would be: its first_seen and origin
-   stay, only last_seen moves. *)
-let string_list_field key json =
-  match json_field key json with
-  | `List values ->
-    List.map
-      (function
-        | `String value -> value
-        | _ -> Alcotest.failf "expected strings in %s" key)
-      values
-  | _ -> Alcotest.failf "expected list field: %s" key
+    "the line keeps the removed fact with what replaced it"
+    [ first_id, "superseded by " ^ second_id ]
+    (removed commit);
+  Alcotest.(check (list string))
+    "and the claim it added"
+    [ second_id ]
+    (List.map Types.memory_id commit.effects.added)
 ;;
 
 (* A derived fact resting only on the superseded fact loses its support in
@@ -229,7 +260,7 @@ let test_supersede_reports_the_derived_facts_it_invalidates () =
   @@ fun env ->
   let meta = make_meta "supersede-cascade" in
   let keeper_id = meta.name in
-  let premise_id = seed_current env meta "the build is green" in
+  let premise_id = seed env meta "the build is green" in
   let derived = write env meta ~derivation:("green_means_ready", [ premise_id ]) "ready to release" in
   check_ok "derived write" derived;
   let derived_id = string_field "memory_id" derived in
@@ -262,9 +293,8 @@ let test_successor_cannot_rest_on_the_fact_it_replaces () =
   @@ fun env ->
   let meta = make_meta "supersede-own-premise" in
   let keeper_id = meta.name in
-  let premise_id = seed_current env meta "stage 1 cleared" in
-  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let premise_id = seed env meta "stage 1 cleared" in
+  let was = before env ~keeper_id in
   let label = "successor rests on the target" in
   let response =
     write
@@ -280,7 +310,7 @@ let test_successor_cannot_rest_on_the_fact_it_replaces () =
     "missing premise is the superseded fact"
     [ premise_id ]
     (string_list_field "missing_premise_ids" response);
-  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label;
+  check_nothing_written env ~keeper_id was label;
   let absent = "sha256:" ^ String.make 64 'c' in
   let label = "successor rests on an absent fact" in
   let response =
@@ -296,56 +326,49 @@ let test_successor_cannot_rest_on_the_fact_it_replaces () =
     "missing premise is the absent fact"
     [ absent ]
     (string_list_field "missing_premise_ids" response);
-  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
+  check_nothing_written env ~keeper_id was label
 ;;
 
+(* Bytes already current under another identity are seen again, exactly as a
+   plain write of them would be: first_seen and origin stay, only last_seen
+   moves. The receipt carries no basis: the commit does not hold the one the
+   fact has. *)
 let test_supersede_into_an_existing_claim_reobserves_it () =
   with_env
   @@ fun env ->
   let meta = make_meta "supersede-existing" in
   let keeper_id = meta.name in
-  let authored claim first_seen : Types.fact =
-    Types.observed
-      ~claim
-      ~category:Types.Fact
-      ~now:first_seen
-      ~origin:{ kind = Types.Authored; trace_id = "seed" }
+  let old_id = seed env meta "status: blocked on review" in
+  let kept_id = seed env meta "status: merged" in
+  let kept_before =
+    match snapshot ~keepers_dir:env.keepers_dir ~keeper_id with
+    | Some { facts; _ } ->
+      (match List.find_opt (fun fact -> String.equal (Types.memory_id fact) kept_id) facts with
+       | Some fact -> fact
+       | None -> Alcotest.fail "the kept claim is not current")
+    | None -> Alcotest.fail "no snapshot after the seeds"
   in
-  let old_fact = authored "status: blocked on review" 100. in
-  let kept_fact = authored "status: merged" 200. in
-  (match
-     Current.replace
-       ~keepers_dir:env.keepers_dir
-       ~keeper_id
-       ~expected_revision:None
-       ~now:200.
-       ~source:{ Current.kind = Current.Explicit_write; trace_id = "seed" }
-       ~facts:[ old_fact; kept_fact ]
-       ()
-   with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
-  let response =
-    write env meta ~supersedes:(Types.memory_id old_fact) kept_fact.claim
-  in
+  let response = write env meta ~supersedes:old_id "status: merged" in
   check_ok "superseding into an existing claim" response;
   Alcotest.(check string)
-    "the existing claim is re-observed, not copied"
+    "the existing claim is seen again, not copied"
     "reobserved"
     (string_field "identity_disposition" response);
+  Alcotest.(check bool) "a claim seen again has no basis in the receipt" false
+    (has_field "basis" response);
   (match snapshot ~keepers_dir:env.keepers_dir ~keeper_id with
-   | Some { facts = [ kept ]; _ } ->
-     Alcotest.(check string)
-       "the existing claim is the one left"
-       (Types.memory_id kept_fact)
-       (Types.memory_id kept);
-     Alcotest.(check (float 0.)) "its first_seen is kept" 200. kept.first_seen;
-     Alcotest.(check bool) "its last_seen moves forward" true (kept.last_seen > 200.)
+   | Some { facts = [ kept ]; updated_at; _ } ->
+     Alcotest.(check string) "the existing claim is the one left" kept_id (Types.memory_id kept);
+     Alcotest.(check (float 0.)) "its first_seen is kept" kept_before.first_seen kept.first_seen;
+     Alcotest.(check (float 0.)) "its last_seen is the commit's" updated_at kept.last_seen
    | Some _ | None -> Alcotest.fail "expected exactly one current fact");
+  let commit = last_commit env ~keeper_id in
   Alcotest.(check (list (pair string string)))
-    "one revision link pointing at the existing claim"
-    [ Types.memory_id old_fact, Types.memory_id kept_fact ]
-    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id)
+    "the old claim left for the existing one"
+    [ old_id, "superseded by " ^ kept_id ]
+    (removed commit);
+  Alcotest.(check (list string)) "which the line only touches" [ kept_id ] commit.effects.touched;
+  Alcotest.(check int) "nothing is added" 0 (List.length commit.effects.added)
 ;;
 
 let test_refusals_write_nothing () =
@@ -354,19 +377,17 @@ let test_refusals_write_nothing () =
   let meta = make_meta "supersede-refusals" in
   let other = make_meta "supersede-other" in
   let keeper_id = meta.name in
-  let own_id = seed_current env meta "position: stage 1" in
-  let others_id = seed_current env other "someone else's claim" in
-  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_events = List.length (events_for ~keepers_dir:env.keepers_dir ~keeper_id) in
+  let own_id = seed env meta "position: stage 1" in
+  let others_id = seed env other "someone else's claim" in
+  let was = before env ~keeper_id in
   let refused ~error_kind label response =
     check_refused ~error_kind label response;
-    check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events label
+    check_nothing_written env ~keeper_id was label
   in
-  refused
-    ~error_kind:"supersedes_not_current"
-    "unknown id"
-    (write env meta ~supersedes:("sha256:" ^ String.make 64 'a') "position: stage 2");
+  let unknown = write env meta ~supersedes:("sha256:" ^ String.make 64 'a') "position: stage 2" in
+  refused ~error_kind:"supersedes_not_current" "unknown id" unknown;
+  Alcotest.(check string) "the refusal names the field" "supersedes"
+    (string_field "rejected_field" unknown);
   refused
     ~error_kind:"supersedes_not_current"
     "another keeper's id"
@@ -389,7 +410,10 @@ let test_refusals_write_nothing () =
     (current_ids ~keepers_dir:env.keepers_dir ~keeper_id:other.name)
 ;;
 
-let test_librarian_copy_is_not_supersedable () =
+(* Whose fact it was does not matter: one the Librarian put in Memory is
+   superseded like one the Keeper wrote. The snapshot is there before the
+   Keeper's writer first opens its store, which takes it as Memory. *)
+let test_a_librarian_fact_is_superseded_like_the_keepers_own () =
   with_env
   @@ fun env ->
   let meta = make_meta "supersede-injected" in
@@ -413,263 +437,56 @@ let test_librarian_copy_is_not_supersedable () =
    with
    | Ok _ -> ()
    | Error detail -> Alcotest.fail detail);
-  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
-  let label = "librarian copy" in
-  check_refused
-    ~error_kind:"supersedes_not_authored"
-    label
-    (write env meta ~supersedes:(Types.memory_id injected) "my own summary");
-  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
-;;
-
-let has_field key = function
-  | `Assoc fields -> List.mem_assoc key fields
-  | _ -> Alcotest.fail "expected JSON object"
-;;
-
-let int_field key json =
-  match json_field key json with
-  | `Int value -> value
-  | _ -> Alcotest.failf "expected int field: %s" key
-;;
-
-(* The Librarian drops a keeper's fact on its own pass, often minutes after
-   the write (live journals, 09-23..26: 44 of the 68 not-current refusals).
-   The keeper then asks for exactly what already holds for the old fact, so
-   the claim is written and the receipt names the drop. *)
-let test_librarian_dropped_target_still_writes_the_claim () =
-  with_env
-  @@ fun env ->
-  let meta = make_meta "supersede-dropped" in
-  let keeper_id = meta.name in
-  let first_id = seed_current env meta "position: stage 1, checkpoint 3" in
-  let reason = "transient position; the save file holds it" in
-  let dropping_revision =
-    match
-      Current.replace
-        ~dropped_statements:[ { Types.memory_id = first_id; reason } ]
-        ~keepers_dir:env.keepers_dir
-        ~keeper_id
-        ~expected_revision:(revision ~keepers_dir:env.keepers_dir ~keeper_id)
-        ~now:(Unix.gettimeofday ())
-        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-        ~facts:[]
-        ()
-    with
-    | Ok (dropped : Current.t) -> dropped.revision
-    | Error detail -> Alcotest.fail detail
-  in
-  let response = write env meta ~supersedes:first_id "position: stage 2, checkpoint 1" in
-  check_ok "the claim is written" response;
-  let second_id = string_field "memory_id" response in
+  let injected_id = Types.memory_id injected in
+  let response = write env meta ~supersedes:injected_id "my own summary of the session" in
+  check_ok "superseding the Librarian's fact" response;
+  Alcotest.(check string) "the receipt names it" injected_id
+    (string_field "superseded_memory_id" response);
   Alcotest.(check (list string))
-    "the claim is the only current fact"
-    [ second_id ]
+    "only the Keeper's claim is current"
+    [ string_field "memory_id" response ]
     (current_ids ~keepers_dir:env.keepers_dir ~keeper_id);
-  Alcotest.(check bool)
-    "no superseded_memory_id: this write removed nothing"
-    false
-    (has_field "superseded_memory_id" response);
-  let removal = json_field "supersedes_already_removed" response in
-  Alcotest.(check string) "names the target" first_id (string_field "memory_id" removal);
-  Alcotest.(check string) "the Librarian removed it" "librarian" (string_field "removed_by" removal);
-  Alcotest.(check int)
-    "in the Librarian's commit"
-    dropping_revision
-    (int_field "removed_in_revision" removal);
-  Alcotest.(check string) "with the Librarian's reason" reason (string_field "reason" removal);
   Alcotest.(check (list (pair string string)))
-    "no revision link: the Librarian's drop was not this write's revision"
-    []
-    (revised_links ~keepers_dir:env.keepers_dir ~keeper_id)
+    "the line keeps the Librarian's fact with what replaced it"
+    [ injected_id, "superseded by " ^ string_field "memory_id" response ]
+    (removed (last_commit env ~keeper_id))
 ;;
 
-(* A Librarian copy stays the Librarian's to revise after the Librarian drops
-   it: naming it is refused as not authored, exactly as while it was current,
-   and nothing is written. *)
-let test_dropped_librarian_copy_is_still_not_authored () =
-  with_env
-  @@ fun env ->
-  let meta = make_meta "supersede-dropped-copy" in
-  let keeper_id = meta.name in
-  let injected : Types.fact =
-    Types.observed
-      ~claim:"librarian summary of the session"
-      ~category:Types.Fact
-      ~now:100.
-      ~origin:{ kind = Types.Injected; trace_id = "pass" }
-  in
-  let librarian_pass ?dropped_statements ~expected_revision facts =
-    match
-      Current.replace
-        ?dropped_statements
-        ~keepers_dir:env.keepers_dir
-        ~keeper_id
-        ~expected_revision
-        ~now:(Unix.gettimeofday ())
-        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-        ~facts
-        ()
-    with
-    | Ok (committed : Current.t) -> committed.revision
-    | Error detail -> Alcotest.fail detail
-  in
-  let added = librarian_pass ~expected_revision:None [ injected ] in
-  let _dropped =
-    librarian_pass
-      ~dropped_statements:
-        [ { Types.memory_id = Types.memory_id injected; reason = "stale summary" } ]
-      ~expected_revision:(Some added)
-      []
-  in
-  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
-  let label = "dropped librarian copy" in
-  check_refused
-    ~error_kind:"supersedes_not_authored"
-    label
-    (write env meta ~supersedes:(Types.memory_id injected) "my own summary");
-  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
-;;
-
-(* A target the keeper replaced itself may already have a current successor;
-   writing again would put a second copy beside it. That stays refused, and
-   the refusal names the commit and its "superseded_by" reason. *)
-let test_own_superseded_target_is_refused_with_its_removal () =
+(* A [supersedes] that names a fact already gone is answered from what is
+   current now. The same call again finds its claim current and says so;
+   another claim finds neither and is refused. Removed facts are not looked
+   up. *)
+let test_a_target_that_already_left () =
   with_env
   @@ fun env ->
   let meta = make_meta "supersede-twice" in
   let keeper_id = meta.name in
-  let first_id = seed_current env meta "position: stage 1" in
-  let second = write env meta ~supersedes:first_id "position: stage 2" in
+  let first_id = seed env meta "deploy window: tuesday" in
+  let second = write env meta ~supersedes:first_id "deploy window: thursday" in
   check_ok "first supersession" second;
-  let second_id = string_field "memory_id" second in
-  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
-  let before_events = List.length (events_for ~keepers_dir:env.keepers_dir ~keeper_id) in
-  let label = "the already superseded id again" in
-  let response = write env meta ~supersedes:first_id "position: stage 3" in
-  check_refused ~error_kind:"supersedes_not_current" label response;
-  let removal = json_field "supersedes_removed" response in
-  Alcotest.(check string) "names the target" first_id (string_field "memory_id" removal);
-  Alcotest.(check string)
-    "this keeper's own write removed it"
-    "explicit_write"
-    (string_field "removed_by" removal);
-  Alcotest.(check string)
-    "the reason names the current successor"
-    ("superseded_by " ^ second_id)
-    (string_field "reason" removal);
-  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events label
+  let was = before env ~keeper_id in
+  let again = write env meta ~supersedes:first_id "deploy window: thursday" in
+  check_ok "the same call again" again;
+  Alcotest.(check string) "says the claim is already current in its place"
+    "already_superseded" (string_field "outcome" again);
+  Alcotest.(check string) "with the claim's identity" (string_field "memory_id" second)
+    (string_field "memory_id" again);
+  Alcotest.(check bool) "and no rows written" true (json_field "rows_written" again = `Int 0);
+  check_nothing_written env ~keeper_id was "the same call again";
+  let other = write env meta ~supersedes:first_id "deploy window: friday" in
+  check_refused ~error_kind:"supersedes_not_current" "another claim for the gone target" other;
+  Alcotest.(check bool) "the refusal carries no removal record" false
+    (has_field "supersedes_removed" other);
+  check_nothing_written env ~keeper_id was "another claim for the gone target"
 ;;
 
-let drop_authored_target env meta =
-  let memory_id = seed_current env meta "the earlier authored claim" in
-  let keeper_id = meta.name in
-  (match Current.replace
-      ~dropped_statements:[ { Types.memory_id; reason = "Librarian retired the claim" } ]
-      ~keepers_dir:env.keepers_dir ~keeper_id
-      ~expected_revision:(revision ~keepers_dir:env.keepers_dir ~keeper_id)
-      ~now:(Unix.gettimeofday ())
-      ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
-      ~facts:[] () with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.fail detail);
-  memory_id
-;;
-
-let file_bytes path = In_channel.with_open_bin path In_channel.input_all
-
-let append_raw_line path line =
-  let channel = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path in
-  Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
-    output_string channel line;
-    output_char channel '\n')
-;;
-
-let test_unreadable_newer_journal_refuses_supersedes_without_writes () =
-  List.iter (fun (label, unreadable) ->
-    with_env @@ fun env ->
-    let meta = make_meta "supersede-unreadable" in
-    let keeper_id = meta.name in
-    let memory_id = drop_authored_target env meta in
-    let journal = Current.journal_path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id in
-    append_raw_line journal unreadable;
-    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id in
-    let before_snapshot = file_bytes snapshot_path in
-    let before_journal = file_bytes journal in
-    let before_events = events_for ~keepers_dir:env.keepers_dir ~keeper_id in
-    let diagnostic =
-      match Current.find_removal ~keepers_dir:env.keepers_dir ~keeper_id memory_id with
-      | Current.Journal_unreadable detail -> detail
-      | Current.Removed _ | Current.No_removal_recorded ->
-        Alcotest.fail (label ^ ": unreadable newer evidence was bypassed")
-    in
-    let response = write env meta ~supersedes:memory_id "the proposed successor" in
-    check_refused ~error_kind:"persistence_failed" label response;
-    Alcotest.(check string) (label ^ ": exact read failure survives the tool response")
-      diagnostic (string_field "detail" response);
-    Alcotest.(check string) (label ^ ": snapshot bytes unchanged") before_snapshot (file_bytes snapshot_path);
-    Alcotest.(check string) (label ^ ": journal bytes unchanged") before_journal (file_bytes journal);
-    Alcotest.(check bool) (label ^ ": no memory event written") true
-      (before_events = events_for ~keepers_dir:env.keepers_dir ~keeper_id))
-    [ "malformed JSON", "{incomplete"
-    ; "unknown journal schema", {|{"outcome":"future_commit","revision":100}|}
-    ; "committed row with unknown fields",
-      {|{"outcome":"committed","recorded_at":1.0,"revision":100,"source":{},"change":{},"future_field":true}|}
-    ]
-;;
-
-let test_latest_explicit_retraction_overrules_an_older_librarian_drop () =
-  with_env @@ fun env ->
-  let meta = make_meta "supersede-latest-removal" in
-  let keeper_id = meta.name in
-  let memory_id = drop_authored_target env meta in
-  ignore (seed_current env meta "the earlier authored claim");
-  (match Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir:env.keepers_dir ~keeper_id
-      ~now:(Unix.gettimeofday ())
-      ~source:{ Current.kind = Current.Explicit_retract; trace_id = "operator-cleanup" }
-      ~memory_id ~reason:"operator removed the restored claim" () with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "explicit retraction fixture failed");
-  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
-  let response = write env meta ~supersedes:memory_id "the proposed successor" in
-  check_refused ~error_kind:"supersedes_not_current" "explicit removal remains authoritative" response;
-  Alcotest.(check string) "the receipt names the latest removal" "explicit_retract"
-    (string_field "removed_by" (json_field "supersedes_removed" response));
-  check_nothing_written env ~keeper_id ~before_ids:[] ~before_revision ~before_events:0
-    "explicit removal refusal"
-;;
-
-let test_readded_target_is_replaced_despite_an_older_removal_observation () =
-  with_env @@ fun env ->
-  let meta = make_meta "supersede-restored" in
-  let keeper_id = meta.name in
-  let memory_id = drop_authored_target env meta in
-  (match Current.find_removal ~keepers_dir:env.keepers_dir ~keeper_id memory_id with
-   | Current.Removed _ -> ()
-   | Current.No_removal_recorded | Current.Journal_unreadable _ ->
-     Alcotest.fail "expected a readable earlier removal");
-  ignore (seed_current env meta "the earlier authored claim");
-  let response = write env meta ~supersedes:memory_id "the proposed successor" in
-  check_ok "the current snapshot wins over the old observation" response;
-  Alcotest.(check string) "the restored target was actually superseded" memory_id
-    (string_field "superseded_memory_id" response);
-  Alcotest.(check bool) "no stale already-removed receipt" false
-    (has_field "supersedes_already_removed" response);
-  Alcotest.(check (list string)) "only the successor remains"
-    [ string_field "memory_id" response ] (current_ids ~keepers_dir:env.keepers_dir ~keeper_id)
-;;
-
-(* supersedes accepts only the keeper's own authored facts, so a search match
-   says which kind it is. *)
+(* A search match says who put the fact there. *)
 let test_search_names_each_current_match_origin () =
   with_env
   @@ fun env ->
   let meta = make_meta "supersede-origin" in
   let keeper_id = meta.name in
-  let authored_id = seed_current env meta "harbor status: authored note" in
+  let authored_id = seed env meta "harbor status: authored note" in
   let injected : Types.fact =
     Types.observed
       ~claim:"harbor status: librarian summary"
@@ -739,62 +556,29 @@ let test_supersedes_cannot_ride_a_source_bound_claim () =
 ;;
 
 let () =
+  let case name body =
+    Alcotest.test_case name `Quick (Masc_test_deps.Memory_tool_case.run body)
+  in
   Alcotest.run
     "keeper_memory_write_supersedes"
     [ ( "supersedes"
-      , [ Alcotest.test_case
-            "replaces the earlier claim in one commit"
-            `Quick
-            test_supersede_replaces_the_earlier_claim
-        ; Alcotest.test_case
+      , [ case "replaces the earlier claim in one commit" test_supersede_replaces_the_earlier_claim
+        ; case
             "into an existing claim re-observes it"
-            `Quick
             test_supersede_into_an_existing_claim_reobserves_it
-        ; Alcotest.test_case
+        ; case
             "reports the derived facts it invalidates"
-            `Quick
             test_supersede_reports_the_derived_facts_it_invalidates
-        ; Alcotest.test_case
+        ; case
             "a successor cannot rest on the fact it replaces"
-            `Quick
             test_successor_cannot_rest_on_the_fact_it_replaces
-        ; Alcotest.test_case "refusals write nothing" `Quick test_refusals_write_nothing
-        ; Alcotest.test_case
-            "a librarian copy is not supersedable"
-            `Quick
-            test_librarian_copy_is_not_supersedable
-        ; Alcotest.test_case
-            "a target the Librarian dropped still writes the claim"
-            `Quick
-            test_librarian_dropped_target_still_writes_the_claim
-        ; Alcotest.test_case
-            "a dropped librarian copy is still not authored"
-            `Quick
-            test_dropped_librarian_copy_is_still_not_authored
-        ; Alcotest.test_case
-            "an own superseded target is refused with its removal"
-            `Quick
-            test_own_superseded_target_is_refused_with_its_removal
-        ; Alcotest.test_case
-            "unreadable newer journal evidence refuses the write without mutations"
-            `Quick
-            test_unreadable_newer_journal_refuses_supersedes_without_writes
-        ; Alcotest.test_case
-            "latest explicit retraction overrules an older librarian drop"
-            `Quick
-            test_latest_explicit_retraction_overrules_an_older_librarian_drop
-        ; Alcotest.test_case
-            "a readded target is replaced despite an older removal observation"
-            `Quick
-            test_readded_target_is_replaced_despite_an_older_removal_observation
-        ; Alcotest.test_case
-            "search names each current match's origin"
-            `Quick
-            test_search_names_each_current_match_origin
-        ; Alcotest.test_case
-            "cannot ride a source-bound claim"
-            `Quick
-            test_supersedes_cannot_ride_a_source_bound_claim
+        ; case "refusals write nothing" test_refusals_write_nothing
+        ; case
+            "a fact the Librarian put there is superseded like the Keeper's own"
+            test_a_librarian_fact_is_superseded_like_the_keepers_own
+        ; case "a target that already left" test_a_target_that_already_left
+        ; case "search names each current match's origin" test_search_names_each_current_match_origin
+        ; case "cannot ride a source-bound claim" test_supersedes_cannot_ride_a_source_bound_claim
         ] )
     ]
 ;;

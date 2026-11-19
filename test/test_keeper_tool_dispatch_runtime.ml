@@ -341,6 +341,8 @@ let with_exec_fixture
       in
       create_keeper_meta_exn ~sw ~config meta;
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+      (* The Memory tools write through the Keeper's Memory writer. *)
+      Masc_test_deps.ensure_memory_writer ~sw ~config meta.name;
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)

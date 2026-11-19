@@ -933,3 +933,80 @@ let checkpoint_head_with_version path version =
 let rec waitpid_nointr pid =
   try Unix.waitpid [] pid with
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
+(** A Keeper's Memory tools write through its Memory writer
+    ({!Masc.Keeper_memory_writers}), so a test that calls one gives the
+    Keeper a writer first.
+
+    [ensure_memory_writer ~sw ~config name] starts the table of [config]'s
+    workspace on [sw] when the workspace has none, puts [name] in the Keeper
+    registry when it is not there, and starts its turn log when it has none.
+    It runs in an Eio loop. A Keeper it registered leaves the registry when
+    [sw] ends. *)
+let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
+  let base_path = config.base_path in
+  if Option.is_none (Masc.Keeper_memory_writers.find ~base_path)
+  then Masc.Keeper_memory_writers.start ~sw ~config;
+  if not (Masc.Keeper_registry.is_registered ~base_path name)
+  then (
+    match
+      meta_of_json_fixture
+        (`Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ])
+    with
+    | Error detail -> failwith ("memory writer fixture: " ^ detail)
+    | Ok meta ->
+      let (_ : Masc.Keeper_registry.registry_entry) =
+        Masc.Keeper_registry.register_offline ~base_path name meta
+      in
+      Eio.Switch.on_release sw (fun () ->
+        Masc.Keeper_registry.For_testing.unregister ~base_path name));
+  let turn_log =
+    Masc.Keeper_turn_log_store.path_for_keepers_dir
+      ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+      ~keeper_id:name
+  in
+  if not (Sys.file_exists turn_log)
+  then (
+    let mark : Masc.Keeper_turn_log.mark =
+      { trace = "trace-" ^ name
+      ; closed_messages = 0
+      ; session = ""
+      ; history_bytes = 0
+      ; internal_bytes = 0
+      ; chat_bytes = 0
+      ; external_rows = 0
+      }
+    in
+    match Masc.Keeper_turn_log.Log_id.of_string (String.make 32 'a') with
+    | None -> failwith "memory writer fixture: the turn log id is not 32 hexadecimal characters"
+    | Some id ->
+      (match
+         Masc.Keeper_turn_log_store.append
+           ~path:turn_log
+           ~at_end:0
+           (Masc.Keeper_turn_log.Log_started { id; at = 0.0; mark }, [])
+       with
+       | Ok (_ : Masc.Keeper_turn_log_store.appended) -> ()
+       | Error (_ : Masc.Keeper_turn_log_store.append_error) ->
+         failwith "memory writer fixture: the turn log was not started"))
+;;
+
+(** For a test file whose cases are plain [unit -> unit] functions outside
+    any Eio loop: {!run} gives a case its loop, and {!writer} gives a Keeper
+    its Memory writer on the running case's switch. *)
+module Memory_tool_case = struct
+  let switch : Eio.Switch.t option ref = ref None
+
+  let run case () =
+    Eio_main.run (fun (_ : Eio_unix.Stdenv.base) ->
+      Eio.Switch.run (fun sw ->
+        switch := Some sw;
+        Fun.protect ~finally:(fun () -> switch := None) case))
+  ;;
+
+  let writer ~config name =
+    match !switch with
+    | Some sw -> ensure_memory_writer ~sw ~config name
+    | None -> failwith "Memory_tool_case.writer: the case does not run in Memory_tool_case.run"
+  ;;
+end

@@ -1051,9 +1051,6 @@ let test_admission_retirement_evidence ~reobserved () =
     ~source:"retirement admission fixture" ();
   let keeper_id = "cli-lane-keeper" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-    (`Assoc ["name",`String keeper_id; "trace_id",`String "retirement-input"]) |> require in
   let policy = fact ~claim:"Production P-42 requires owner approval." in
   let unrelated = fact ~claim:"Unrelated staging R-9 uses a separate checklist." in
   ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
@@ -1062,12 +1059,18 @@ let test_admission_retirement_evidence ~reobserved () =
   let enqueue () =
     queue_observation ~keepers_dir ~keeper_id ~trace_id:"retirement-input"
       ~request_id:"memory-admission-retired-policy" policy.claim in
+  (* The retirement is made in the store this admission reads its history
+     from. The Keeper's retract tool writes through the Memory writer, whose
+     record is the commit log. *)
   let retire target reason =
-    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_retract_with_outcome
-      ~config ~meta ~args:(`Assoc ["memory_id",`String (Memory.memory_id target);
-                                 "reason",`String reason]) in
-    check bool "real retract removes current fact" true
-      Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "ok" |> to_bool) in
+    match
+      Current.retract_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_delete ~keepers_dir
+        ~keeper_id ~now:(Time_compat.now ())
+        ~source:{Current.kind=Current.Explicit_retract; trace_id="retirement-input"}
+        ~memory_id:(Memory.memory_id target) ~reason ()
+    with
+    | Ok _ -> ()
+    | Error _ -> fail "the retirement was not stored" in
   if not reobserved then enqueue ();
   let reason = "P-42 policy was withdrawn by its owner; assess later evidence separately." in
   retire policy reason;

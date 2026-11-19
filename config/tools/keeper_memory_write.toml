@@ -47,7 +47,7 @@ description = "Exact memory_id values supporting a derived conclusion. Must be p
 [[params]]
 name = "supersedes"
 type = "string"
-description = "Current memory_id of your own earlier claim that this one replaces: from a keeper_memory_write receipt or a keeper_memory_search match with origin authored. It is removed in the same commit. If the Librarian already dropped it, the claim is still written and the result says so; otherwise nothing is written unless it is one of your current claims."
+description = "Current memory_id of the claim this one replaces: from a keeper_memory_write receipt or a keeper_memory_search match. It is removed in the same commit. If no current fact has this memory_id, nothing is written unless this claim is already current."
 
 [[params]]
 name = "board_post_id"

@@ -30,6 +30,24 @@ type derivation_rejection =
       ; premise_id : string
       }
 
+(** Why Memory took no write. None of them is in the arguments of the call,
+    and each is answered before a line is appended, so nothing was
+    committed. *)
+type memory_unwritable =
+  | Store_stopped of Librarian_store.stop
+  (** The Keeper's store is stopped. An operator resumes or adopts it. *)
+  | Keeper_not_registered
+  | No_writer_in_process
+  (** This process started no Memory writers for the workspace. The server
+      of the workspace has them. *)
+  | Refused_past_validation of Librarian_direct.refusal
+  (** The writer refused what this tool's validation lets through: a
+      turn without a trace, or a derivation it does not accept. *)
+  | Not_a_snapshot of Librarian_envelope.refusal
+  | Answer_of_another_write
+  (** The writer answered a claim as it answers a retraction, or a
+      retraction as it answers a claim. *)
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -50,8 +68,8 @@ type memory_write_error_kind =
   | Supersedes_with_source_path_unsupported
   | Supersedes_self
   | Supersedes_not_current
-  | Supersedes_not_authored
   | Supersedes_premise_of_successor
+  | Memory_unwritable of memory_unwritable
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -72,6 +90,7 @@ type memory_retract_error_kind =
   | Memory_id_invalid
   | Reason_empty
   | Fact_not_found
+  | Retract_unwritable of memory_unwritable
   | Retract_persistence_failed
   | No_memory_retract_error
 
@@ -83,6 +102,10 @@ type memory_retract_validation =
   | Memory_retract_invalid of memory_retract_error_kind
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string
+
+(** Which of the reasons it was, as a token for a receipt. *)
+val memory_unwritable_to_string : memory_unwritable -> string
+
 val class_of_memory_write_error_kind : memory_write_error_kind -> Tool_result.tool_failure_class
 val memory_write_failure_effect : memory_write_error_kind -> Tool_result.failure_effect_disposition * string
 val memory_write_rejection_fields : memory_write_error_kind -> (string * Yojson.Safe.t) list

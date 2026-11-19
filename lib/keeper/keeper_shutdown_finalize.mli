@@ -96,6 +96,12 @@ module For_testing : sig
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
 
+  val remove_session_dir :
+    config:Workspace.config -> Keeper_shutdown_types.t -> (unit, string) result
+  (** The finalization step that deletes the session when the operation asks
+      for it. The Keeper's turn log gets its drop line first; a line that is
+      not written keeps the session and fails the step. *)
+
   val remove_pending_confirms_by_target :
     config:Workspace.config ->
     target_type:Operator_action_constants.target_type ->

@@ -8871,88 +8871,21 @@ let place_row_cursor state index =
    choice lives in [Masc_tui_list_moves], which a test links; this only hands
    it the surface's rows and the Tools follow, which need the frame's
    geometry. *)
-(* Where the selected Skill is drawn on the Available pane: the rows its
-   entry takes there, every row of it when it wraps ([cursor]), and the
-   lines above it that belong with it. The group heading above it is not
-   part of the entry, so the lead brings it in.
-
-   The first Skill brings everything above it, so Home shows the top of the
-   page. A Skill that opens its group brings the group heading, which the
-   renderer draws above the first Skill of each kind. *)
-let tools_skill_landing (state : state) (display : Masc_tui_render_tools.display) =
-  Option.map (fun ({ first_row = first; last_row = last } : Masc_tui_render_tools.cursor_rows) ->
-      let instruction (profile : Masc.Tui_decode_tools.effective_skill_profile) =
-        match profile.esp_io with
-        | Model_orchestrated -> true
-        | Composition_io _ -> false
-      in
-      let profiles = tools_skill_profiles state in
-      let cursor = state.tools_skill_cursor in
-      let lead =
-        if cursor <= 0 then first
-        else
-          match List.nth_opt profiles (cursor - 1), List.nth_opt profiles cursor with
-          | Some previous, Some selected
-            when not (Bool.equal (instruction previous) (instruction selected)) -> 1
-          | Some _, Some _ | Some _, None | None, Some _ | None, None -> 0
-      in
-      first, last, lead)
-    display.cursor
-
-(* Where the selected async request is drawn: the rows it adds to the list.
-   The page is drawn three times -- with no request, with the requests above
-   the selected one, and through it -- and the differences in length are the
-   rows each part takes. Only line counts are compared, so the age each row
-   shows, which moves while it is drawn, cannot shift the landing. *)
-let tools_async_landing (state : state) ~cols ~terminal_rows =
-  match state.tools_async_observation, state.tools_async_selection with
-  | Some (Tui_decode.Async_ready { summary; requests; recovery }), Some selected ->
-      Option.map (fun index ->
-        let drawn requests =
-          Masc_tui_render_tools.tools_display_lines ~cols ~terminal_rows
-            { state with
-              tools_async_observation =
-                Some (Tui_decode.Async_ready { summary; requests; recovery }) }
-        in
-        let empty = drawn [] in
-        let before = drawn (List.take index requests) in
-        let through = drawn (List.take (index + 1) requests) in
-        let same (style, text) (style', text') =
-          String.equal style style' && String.equal text text'
-        in
-        let rec shared count = function
-          | x :: rest, y :: rest' when same x y -> shared (count + 1) (rest, rest')
-          | _ :: _, _ :: _ | [], _ | _, [] -> count
-        in
-        let start = shared 0 (empty, through) in
-        let first = start + List.length before - List.length empty in
-        let last = start + List.length through - List.length empty - 1 in
-        first, last, (if index = 0 then first else 0))
-        (List.find_index (Masc.Tui_decode_async_request.equal_target selected)
-           (tools_async_targets state))
-  | Some (Tui_decode.Async_ready _), None
-  | Some (Tui_decode.Async_unavailable _), _
-  | None, _ -> None
-
-(* The window follows the selection a Tools move key landed on, the way
-   [row_list]'s [follow] does for a row cursor: the last line first, then the
-   first with its lead, so a Skill or a request that wraps is on screen whole
-   when it fits. *)
+(* The window follows the selection a Tools move key landed on
+   ([Masc_tui_render_tools.follow]). *)
 let follow_tools_list (state : state) list =
   let terminal_rows, cols = get_terminal_size () in
+  let display = Masc_tui_render_tools.tools_display ~cols ~terminal_rows state in
   let landing =
     match list with
-    | Masc_tui_list_moves.Tools_skills ->
-        tools_skill_landing state
-          (Masc_tui_render_tools.tools_display ~cols ~terminal_rows state)
-    | Tools_async_requests -> tools_async_landing state ~cols ~terminal_rows
+    | Masc_tui_list_moves.Tools_skills -> Masc_tui_render_tools.skill_landing state display
+    | Tools_async_requests -> Masc_tui_render_tools.request_landing state display
   in
   match landing, scrolled_surface state state.view with
-  | Some (first, last, lead), Some scrolled ->
-      let height = surface_body_height_at state ~cursor:first scrolled in
+  | Some landing, Some scrolled ->
+      let height = surface_body_height_at state ~cursor:landing.entry.first_row scrolled in
       tools_task_user_scroll state
-        (Masc_tui_scroll.ensure_visible_with_lead ~cursor:first ~lead ~height
-           (Masc_tui_scroll.ensure_visible ~cursor:last ~height state.tools_scroll))
+        (Masc_tui_render_tools.follow landing ~height state.tools_scroll)
   | None, _ | Some _, None -> ()
 
 (* The selection of the Tools list on screen, brought into view where the

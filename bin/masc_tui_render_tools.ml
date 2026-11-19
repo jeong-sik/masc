@@ -1230,7 +1230,7 @@ type display =
   ; cursor : cursor_rows option
   ; card : cursor_rows option
   ; row_changes : (int * float) list
-  ; entries : (paged_list * int list) option
+  ; entries : (paged_list * cursor_rows list) option
   }
 
 let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
@@ -2812,23 +2812,17 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       ++ Say.both ~ko:": 편집기에서 이어 쓰기" ~en:":resume in editor")
     (skill_create_drafts_for_current_workspace state) in
   let prefix = tools_selection_document ~cols state @ rows (drafts @ reading_lines @ error_lines) in
-  (* The rows each entry of the pane's list takes, in order, from the page
-     wrapped one piece at a time, so no row is wrapped twice. The first entry
-     takes every row of the page above it too, since the window brings the
-     top of the page in with it (Home); a page counted without them let PgUp
-     onto the first entry push the entry read first off the window. *)
-  let list_entry_rows wrapped =
-    let rows_of = function
-      | List_entry _, rows -> Some (List.length rows)
-      | (Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _), _ -> None
-    in
-    let rec from_first above = function
-      | (List_entry _, rows) :: rest -> (above + List.length rows) :: List.filter_map rows_of rest
-      | ((Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _), rows) :: rest ->
-          from_first (above + List.length rows) rest
-      | [] -> []
-    in
-    from_first 0 wrapped
+  (* Where each entry of the pane's list is in the page, in order, from the
+     page wrapped one piece at a time, so no row is wrapped twice. *)
+  let entry_spans ~above wrapped =
+    List.fold_left
+      (fun (row, spans) (piece, rows) ->
+         let next = row + List.length rows in
+         match piece with
+         | List_entry _ -> next, { first_row = row; last_row = next - 1 } :: spans
+         | Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _ -> next, spans)
+      (above, []) wrapped
+    |> snd |> List.rev
   in
   let marked, entry_rows =
     if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
@@ -2842,10 +2836,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       (* A row wraps by its own width alone, so a piece takes as many rows
          wrapped by itself as among the rows around it. *)
       let wrapped = List.map (fun piece -> piece, wrap [ piece ]) (prefix @ pane_lines) in
-      List.concat_map snd wrapped, list_entry_rows wrapped
+      List.concat_map snd wrapped, entry_spans ~above:0 wrapped
   in
   let entries =
-    let listed list = match entry_rows with [] -> None | heights -> Some (list, heights) in
+    let listed list = match entry_rows with [] -> None | spans -> Some (list, spans) in
     match state.tools_pane with
     | Tools_surface -> listed Skill_entries
     | Tools_async -> listed Async_request_entries
@@ -2894,8 +2888,68 @@ let drawn_change display window =
 let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines
 
 (* A Skill or a request can wrap, so a page counts the entries the window
-   holds whole wherever it stands, as the cursor counts entries. *)
+   holds whole wherever it stands, as the cursor counts entries. The first
+   entry takes every row of the page above it too, since the window brings
+   the top of the page in with it (Home); a page counted without them let
+   PgUp onto the first entry push the entry read first off the window. *)
 let drawn_page display ~rows =
+  let heights = function
+    | [] -> []
+    | first :: rest ->
+        (first.last_row + 1) :: List.map (fun entry -> entry.last_row - entry.first_row + 1) rest
+  in
   Option.map
-    (fun (list, heights) -> list, Masc_tui_scroll.items_always_shown ~heights ~rows)
+    (fun (list, spans) -> list, Masc_tui_scroll.items_always_shown ~heights:(heights spans) ~rows)
     display.entries
+
+type landing = { entry : cursor_rows; lead : int }
+
+(* Where the selected Skill is drawn on the Available pane: the rows its
+   entry takes there, every row of it when it wraps ([cursor]), and the
+   lines above it that belong with it. The group heading above it is not
+   part of the entry, so the lead brings it in.
+
+   The first Skill brings everything above it, so Home shows the top of the
+   page. A Skill that opens its group brings the group heading, which the
+   renderer draws above the first Skill of each kind. *)
+let skill_landing (state : state) display =
+  Option.map (fun entry ->
+      let instruction (profile : Masc.Tui_decode_tools.effective_skill_profile) =
+        match profile.esp_io with
+        | Model_orchestrated -> true
+        | Composition_io _ -> false
+      in
+      let profiles = tools_skill_profiles state in
+      let cursor = state.tools_skill_cursor in
+      let lead =
+        if cursor <= 0 then entry.first_row
+        else
+          match List.nth_opt profiles (cursor - 1), List.nth_opt profiles cursor with
+          | Some previous, Some selected
+            when not (Bool.equal (instruction previous) (instruction selected)) -> 1
+          | Some _, Some _ | Some _, None | None, Some _ | None, None -> 0
+      in
+      { entry; lead })
+    display.cursor
+
+(* Where the selected async request is drawn: the rows its entry takes in
+   the page. The first request brings everything above it, as the first
+   Skill does. *)
+let request_landing (state : state) display =
+  match display.entries, state.tools_async_selection with
+  | Some (_, spans), Some selected ->
+      Option.bind
+        (List.find_index (Masc.Tui_decode_async_request.equal_target selected)
+           (tools_async_targets state))
+        (fun index ->
+          Option.map
+            (fun entry -> { entry; lead = (if index = 0 then entry.first_row else 0) })
+            (List.nth_opt spans index))
+  | Some _, None | None, (Some _ | None) -> None
+
+(* The window over a landing, the way [row_list]'s [follow] works for a row
+   cursor: the last line first, then the first with its lead, so a Skill or
+   a request that wraps is on screen whole when it fits. *)
+let follow landing ~height scroll =
+  Masc_tui_scroll.ensure_visible_with_lead ~cursor:landing.entry.first_row ~lead:landing.lead
+    ~height (Masc_tui_scroll.ensure_visible ~cursor:landing.entry.last_row ~height scroll)

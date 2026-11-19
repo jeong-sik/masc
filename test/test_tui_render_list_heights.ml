@@ -501,16 +501,17 @@ let test_schedules_with_notices_report_the_rows_they_drew () =
    a page counts the entries a window of the frame's height holds whole
    ({!Masc_tui_render_tools.drawn_page}). The frame draws the window from
    [tools_scroll], which the dispatcher moves to the selected entry after
-   every key: [follow] does that here the way the dispatcher does
-   ([follow_tools_list]), the entry's last row first, then its first. Each
+   every key by the landing and the rule it reads
+   ({!Masc_tui_render_tools.skill_landing},
+   {!Masc_tui_render_tools.request_landing},
+   {!Masc_tui_render_tools.follow}), and these tests read the same. Each
    entry's rows are found in the page by its text, not taken from the
-   renderer's count, and hold the rows above it that the dispatcher's lead
-   brings in with it: a group heading, and above the first entry the whole
-   top of the page. *)
+   renderer's count: from its first row, a group heading when it opens one,
+   to its last. The window brings the whole top of the page in with the
+   first entry. *)
 module Tools = Masc.Tui_decode_tools
 
-(* Where an entry's rows are in the page: its first row, counting the rows
-   above it the window brings in with it, and its last. *)
+(* Where an entry's rows are in the page. *)
 type entry_rows = { er_first : int; er_last : int }
 
 (* The rows of the window the frame draws the Tools page in, as
@@ -524,11 +525,6 @@ let tools_window state lines =
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
   in
   height, max 0 (layout.sc_count - height)
-
-let follow ~height ~max_scroll (rows : entry_rows) scroll =
-  min max_scroll
-    (Key.ensure_visible ~cursor:rows.er_first ~height
-       (Key.ensure_visible ~cursor:rows.er_last ~height scroll))
 
 (* Whether a page row starts the entry [name]: a row that wraps loses its
    indent, and the selected entry's row has its mark before the name. *)
@@ -551,16 +547,12 @@ let row_where lines label starts =
   | Some row -> row
   | None -> Alcotest.failf "%s is not in the page" label
 
-(* Each entry's rows: from the row that starts it, less the [above] rows the
-   window brings with it, to the row before the next entry's, and the last
-   to the row before [below]. The window brings the top of the page in with
-   the first entry. *)
+(* Each entry's rows: from the row that starts it, less the [above] rows of
+   its own above that row, to the row before the next entry's, and the last
+   to the row before [below]. *)
 let entry_rows lines ~names ~above ~below =
   let firsts =
-    List.mapi
-      (fun index name ->
-        if index = 0 then 0 else row_where lines name (starts_entry name) - above index)
-      names
+    List.mapi (fun index name -> row_where lines name (starts_entry name) - above index) names
   in
   let after = row_where lines "the row under the list" below in
   List.mapi
@@ -573,10 +565,10 @@ let entry_rows lines ~names ~above ~below =
    following the cursor. In every page the renderer's count of each entry's
    rows is the rows the page gives it, and from every window PgDn keeps the
    last entry it held whole and PgUp the first. [rows display] are each
-   entry's rows in that page, with the rows above it the window brings in
-   with it; [prepare] lays the list out for the terminal's width, and
-   [cursor] / [place] are the selection. *)
-let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
+   entry's rows in that page; [prepare] lays the list out for the terminal's
+   width, [landing] is the dispatcher's, and [cursor] / [place] are the
+   selection. *)
+let check_tools_pages ~name ~list ~count ~prepare ~rows ~landing ~cursor ~place state =
   List.iter
     (fun size ->
       with_size size (fun () ->
@@ -587,6 +579,19 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
           let height, max_scroll = tools_window state display.lines in
           display, rows display, height, max_scroll
         in
+        let spans entries = List.map (fun entry -> entry.er_first, entry.er_last) entries in
+        (* The scroll the dispatcher keeps, from [scroll], and the window the
+           frame draws from it. *)
+        let follow display ~height scroll =
+          match landing state display with
+          | Some landing -> Masc_tui_render_tools.follow landing ~height scroll
+          | None -> Alcotest.failf "%s: the page has no landing for the selection" name
+        in
+        let window ~max_scroll scroll = max 0 (min scroll max_scroll) in
+        (* The window brings the top of the page in with the first entry. *)
+        let whole_in ~shown ~height index entry =
+          (if index = 0 then 0 else entry.er_first) >= shown && entry.er_last < shown + height
+        in
         let scroll = ref 0 in
         let visit at =
           place state at;
@@ -594,19 +599,26 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
           let label =
             Printf.sprintf "%dx%d, %s %d, window %d" (snd size) (fst size) name at !scroll
           in
-          let heights = List.map (fun entry -> entry.er_last - entry.er_first + 1) entries in
-          Alcotest.(check (option (pair bool (list int))))
+          Alcotest.(check (option (pair bool (list (pair int int)))))
             (label ^ ": each entry takes the rows the page gives it")
-            (Some (true, heights))
-            (Option.map (fun (drawn, heights) -> drawn = list, heights) display.entries);
+            (Some (true, spans entries))
+            (Option.map
+               (fun (drawn, reported) ->
+                 ( drawn = list
+                 , List.map
+                     (fun (entry : Masc_tui_render_tools.cursor_rows) ->
+                       entry.first_row, entry.last_row)
+                     reported ))
+               display.entries);
+          let heights = List.map (fun entry -> entry.er_last - entry.er_first + 1) entries in
           Alcotest.(check bool) (label ^ ": the entries take different rows") true
             (List.length (List.sort_uniq compare (List.tl heights)) > 1);
-          scroll := follow ~height ~max_scroll (List.nth entries at) !scroll;
+          scroll := follow display ~height !scroll;
+          let shown = window ~max_scroll !scroll in
           let whole =
             List.filter_map
-              (fun (index, (entry : entry_rows)) ->
-                if entry.er_first >= !scroll && entry.er_last < !scroll + height then Some index
-                else None)
+              (fun (index, entry) ->
+                if whole_in ~shown ~height index entry then Some index else None)
               (List.mapi (fun index entry -> index, entry) entries)
           in
           let reported =
@@ -624,13 +636,12 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
                | Some moves -> moves key
                | None -> Alcotest.fail "no list answered the move key");
               let landed = cursor state in
-              let _, entries, height, max_scroll = page () in
-              let window = follow ~height ~max_scroll (List.nth entries landed) !scroll in
-              let kept_rows = List.nth entries kept in
+              let display, entries, height, max_scroll = page () in
+              let shown = window ~max_scroll (follow display ~height !scroll) in
               Alcotest.(check bool)
                 (Printf.sprintf "%s: %s to %d keeps entry %d whole" label key_name landed kept)
                 true
-                (kept_rows.er_first >= window && kept_rows.er_last < window + height))
+                (whole_in ~shown ~height kept (List.nth entries kept)))
             [ Key.Page_down, List.fold_left max 0 whole, "PgDn"
             ; Key.Page_up, List.fold_left min count whole, "PgUp" ];
           place state at
@@ -705,9 +716,9 @@ let test_skills_page_by_the_entries_a_window_holds () =
                ; ets_tool_surface_sha256 = None })
       ; ts_usage = None; ts_volume_gc_report = None
       ; ts_storage = { st_host_disk = Host_disk_absent; st_keeper_cleanup = Keeper_cleanup_absent } };
-  (* A group's heading is the row above its first Skill, and the window
-     brings it in with that Skill. The selected Skill's measurement card
-     stands under the list. *)
+  (* A group's heading is the row above its first Skill and part of that
+     Skill's entry. The selected Skill's measurement card stands under the
+     list. *)
   let first_in_group index = index = 0 || index = skill_count / 2 in
   let rows (display : Masc_tui_render_tools.display) =
     entry_rows display.lines
@@ -716,7 +727,7 @@ let test_skills_page_by_the_entries_a_window_holds () =
       ~below:(String.starts_with ~prefix:"\xe2\x94\x8c")
   in
   check_tools_pages ~name:"Skill" ~list:Skill_entries ~count:skill_count
-    ~prepare:(fun ~cols:_ -> ()) ~rows
+    ~prepare:(fun ~cols:_ -> ()) ~rows ~landing:Masc_tui_render_tools.skill_landing
     ~cursor:(fun state -> state.tools_skill_cursor)
     ~place:(fun state index -> state.tools_skill_cursor <- index)
     state
@@ -773,7 +784,7 @@ let test_requests_page_by_the_entries_a_window_holds () =
       ~below:(fun text -> String.starts_with ~prefix:"startup recovery" (String.trim text))
   in
   check_tools_pages ~name:"request" ~list:Async_request_entries ~count:request_count ~prepare
-    ~rows ~cursor:selected
+    ~rows ~landing:Masc_tui_render_tools.request_landing ~cursor:selected
     ~place:(fun state index ->
       state.tools_async_selection <- Some (request_target ~cols:!width index))
     state

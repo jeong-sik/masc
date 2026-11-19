@@ -276,7 +276,7 @@ val infer_memory_step
     whole step unaccepted. Cancellation propagates. *)
 
 val fit_continuity :
-  capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
+  capacity:Keeper_lane_cli_oneshot.input_capacity ->
   source_lines:string list ->
   input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->
   Keeper_librarian_continuity.prepared ->

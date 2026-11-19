@@ -629,8 +629,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let* fitted = match !capacity with
         | Some _ when by_message -> Ok (Some prepared)
         | None -> Ok (Some prepared)
-        | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
-            ~keeper_id:keeper_name ~source_lines ~input_for:(memory_input input) prepared in
+        | Some capacity -> Runtime.fit_continuity ~capacity
+            ~source_lines ~input_for:(memory_input input) prepared in
       let selected = match fitted with
         | Some fitted -> fitted
         | None ->
@@ -772,8 +772,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            the pass and records no source mode, where the arm above, which only
            knows that something was too large, steps down once and waits. *)
         let fitted = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-          Runtime.fit_continuity ~capacity:observed ~base_path
-            ~keeper_id:keeper_name ~source_lines ~input_for:(memory_input input) selected) in
+          Runtime.fit_continuity ~capacity:observed
+            ~source_lines ~input_for:(memory_input input) selected) in
         (match fitted with
          | Error detail -> report O.Input_unavailable O.Input_build_failed detail
          | Ok None when not memory_committed ->

@@ -15,7 +15,6 @@ type keeper_change =
   | Asks
   | Tool_approval_waits
   | Tool_approval_mode
-  | Gate_settings
   | Event_queue
   | Waiting_inventory of Keeper_waiting_inventory_broadcast.source
 

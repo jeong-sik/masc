@@ -191,7 +191,6 @@ let summary = function
          | Observer.Approval_queue_changed -> "queue"
          | Observer.Approval_rules_changed -> "rules"
          | Observer.Gate_mode_changed -> "gate_mode"
-         | Observer.Gate_keeper_settings_changed { keeper } -> "keeper_settings:" ^ keeper
          | Observer.Tool_approval_waits_changed { keeper } -> "waits:" ^ keeper
          | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper
          | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
@@ -818,12 +817,6 @@ let gate_frames =
   ; {|data: {"type":"gate_external_mode_changed","mode":"hitl"}
 
 |}
-  ; {|data: {"type":"gate_keeper_mode_changed","keeper_name":"lane-smith","mode":null}
-
-|}
-  ; {|data: {"type":"keeper_exact_lane_preference_changed","keeper_name":"lane-smith","lane_id":"l","slot_id":null}
-
-|}
   ]
 
 let tool_approval_frames =
@@ -1368,8 +1361,7 @@ let test_only_a_question_change_reads_the_questions () =
 let test_only_a_gate_change_changes_the_gate_snapshot () =
   check (list string) "Gate changes decode to what changed"
     [ "approval(queue)"; "approval(queue)"; "approval(queue)"; "approval(rules)"
-    ; "approval(gate_mode)"; "approval(gate_mode)"
-    ; "approval(keeper_settings:lane-smith)"; "approval(keeper_settings:lane-smith)" ]
+    ; "approval(gate_mode)"; "approval(gate_mode)" ]
     (List.map summary (decode_all gate_frames));
   check (list string) "held call and mode changes decode with their Keeper"
     [ "approval(waits:lane-smith)"; "approval(mode:lane-smith)" ]
@@ -1402,16 +1394,8 @@ let test_only_a_gate_change_changes_the_gate_snapshot () =
   in
   check int "only the held call change reads the held calls" 1
     (count Observer.held_calls_changed (gate_frames @ tool_approval_frames));
-  (* A mode change and the two Keeper Gate setting changes. *)
-  check int "a mode or Keeper Gate setting change reads the modes" 3
-    (count Observer.tool_modes_changed (gate_frames @ tool_approval_frames));
-  check bool "a Keeper setting change without its Keeper says why it was not read" true
-    (match decode_all [ {|data: {"type":"gate_keeper_mode_changed","mode":null}
-
-|} ] with
-     | [ Observer.Undecodable reason ] ->
-         String.starts_with ~prefix:"gate_keeper_mode_changed" reason
-     | _ -> false)
+  check int "a tool approval mode change reads the modes" 1
+    (count Observer.tool_modes_changed (gate_frames @ tool_approval_frames))
 
 let test_a_fusion_status_frame_decodes_its_identity_strings () =
   check (list string) "the three identity strings survive the decode"

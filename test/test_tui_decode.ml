@@ -12307,103 +12307,6 @@ let test_decode_gate_row_missing_id_is_an_error () =
   | Ok _ -> Alcotest.fail "a row with no id decoded"
   | Error _ -> ()
 
-let keeper_gate_settings_json =
-  `Assoc
-    [ ( "modes"
-      , `List
-          [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "manual") ] ] )
-    ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-    ; ( "exact_lanes"
-      , `List
-          [ `Assoc
-              [ ("keeper_name", `String "echo")
-              ; ("lane_id", `String "hitl_auto_judge")
-              ; ("slot_id", `String "glm-coding.glm-5-turbo")
-              ; ("updated_by", `String "vincent")
-              ; ("updated_at", `String "2026-08-27T05:00:00Z")
-              ; ("offered", `Bool false)
-              ] ] )
-    ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
-    ]
-
-let test_decode_keeper_gate_settings_reads_both_lists () =
-  match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
-  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
-  | Ok (modes, exact_lanes) ->
-    Alcotest.(check bool)
-      "modes" true (modes = [ ("echo", Tui_decode.Gate_mode Keeper_gate_mode.Manual) ]);
-    Alcotest.(check (list (pair string (pair string string))))
-      "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
-      (List.map
-         (fun (first : Tui_decode.keeper_exact_lane_first) ->
-           first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
-         exact_lanes);
-    Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
-      (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
-         exact_lanes)
-
-let test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name () =
-  let json =
-    `Assoc
-      [ ( "modes"
-        , `List
-            [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "escalate_to_human") ] ] )
-      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("exact_lanes", `List [])
-      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
-      ]
-  in
-  match Tui_decode.decode_keeper_gate_settings json with
-  | Ok ([ ("echo", Tui_decode.Unrecognised_gate_mode "escalate_to_human") ], []) -> ()
-  | Ok _ -> Alcotest.fail "the unknown mode was not kept by name"
-  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
-
-(* An unreadable store answers an empty list beside state=unavailable. Read
-   as the list alone, that is "nobody singled out". *)
-let test_decode_keeper_gate_settings_refuses_an_unavailable_store () =
-  let json =
-    `Assoc
-      [ ("modes", `List [])
-      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("exact_lanes", `List [])
-      ; ( "exact_lanes_state"
-        , `Assoc [ ("state", `String "unavailable"); ("error", `String "unreadable") ] )
-      ]
-  in
-  match Tui_decode.decode_keeper_gate_settings json with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "an unreadable store read as nobody singled out"
-
-let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
-  (* Nobody singled out is a working configuration, not a missing answer. *)
-  let json =
-    `Assoc
-      [ ("modes", `List [])
-      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("exact_lanes", `List [])
-      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
-      ]
-  in
-  match Tui_decode.decode_keeper_gate_settings json with
-  | Ok ([], []) -> ()
-  | Ok _ -> Alcotest.fail "invented a setting nobody made"
-  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
-
-let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
-  (* A row that names no Keeper cannot be shown against one, and dropping it
-     silently would leave a setting in force that no detail pane mentions. *)
-  let json =
-    `Assoc
-      [ ("modes", `List [ `Assoc [ ("mode", `String "manual") ] ])
-      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("exact_lanes", `List [])
-      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
-      ]
-  in
-  match Tui_decode.decode_keeper_gate_settings json with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
-
 let runtime_params_json =
   `Assoc
     [ ( "parameters"
@@ -14737,19 +14640,6 @@ let () =
           test_decode_runtime_params_attaches_the_claiming_surface;
         Alcotest.test_case "leaves an unclaimed param unfiled, not dropped" `Quick
           test_decode_runtime_params_leaves_an_unclaimed_param_unfiled;
-      ] );
-    ( "keeper_gate_settings",
-      [
-        Alcotest.test_case "reads both lists" `Quick
-          test_decode_keeper_gate_settings_reads_both_lists;
-        Alcotest.test_case "takes an empty workspace" `Quick
-          test_decode_keeper_gate_settings_takes_an_empty_workspace;
-        Alcotest.test_case "rejects a row without a keeper" `Quick
-          test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
-        Alcotest.test_case "refuses an unavailable store" `Quick
-          test_decode_keeper_gate_settings_refuses_an_unavailable_store;
-        Alcotest.test_case "keeps an unknown mode by name" `Quick
-          test_decode_keeper_gate_settings_keeps_an_unknown_mode_by_name;
       ] );
     ( "keeper_secret_projection",
       [

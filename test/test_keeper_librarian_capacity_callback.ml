@@ -408,7 +408,7 @@ let test_prefit_real_continuity ~base_path () =
       (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
     Alcotest.(check string) "continuity leaves pending context bytes unchanged"
       context_before (Fs_compat.load_file_opt context_path |> some) in
-  let fit prepared = Runtime.fit_continuity ~source_lines:[] ~capacity ~base_path ~keeper_id
+  let fit prepared = Runtime.fit_continuity ~source_lines:[] ~capacity
       ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
   let first = fit full in
   Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);

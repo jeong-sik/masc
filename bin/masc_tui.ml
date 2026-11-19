@@ -4201,22 +4201,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Request_failed (Printexc.to_string exn))
       in
-      enqueue_async mailbox (Keeper_msg (Keeper_tool_modes_loaded (result, ticket)));
-      (* Same trip, because both answer "what did somebody set about this
-         Keeper" and a detail pane showing one fresh and one stale would be
-         two different moments beside each other. No generation guard: this
-         listing has no operator press to be superseded by. *)
-      let settings =
-        try
-          match write_authority_refusal state authority with
-          | Some refusal -> Error (Request_withdrawn refusal)
-          | None ->
-            Masc_tui_loader.load_keeper_gate_settings ~host ~port
-            |> Result.map_error (fun detail -> Request_failed detail) with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Request_failed (Printexc.to_string exn))
-      in
-      enqueue_async mailbox (Keeper_msg (Keeper_gate_settings_loaded settings))
+      enqueue_async mailbox (Keeper_msg (Keeper_tool_modes_loaded (result, ticket)))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
@@ -10404,10 +10389,9 @@ let launch_owed_asks state ~mailbox =
      && launch_asks_read state ~mailbox
   then state.asks_owed <- Masc_tui_owed_read.started read
 
-(* The Gate snapshot reads again when the queue, the standing rules, a Gate
-   mode or a Keeper's Gate settings change, on a revalidation or a resumed
-   authority, and after a failed read (RFC-0480 §3.1). Entering a surface
-   and [r] read it directly. *)
+(* The Gate snapshot reads again when the queue, the standing rules or a Gate
+   mode change, on a revalidation or a resumed authority, and after a failed
+   read (RFC-0480 §3.1). Entering a surface and [r] read it directly. *)
 let owe_gate_snapshot_read state =
   state.gate_snapshot_owed <- Masc_tui_owed_read.changed state.gate_snapshot_owed
 
@@ -19205,9 +19189,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_yolo_names <- [];
   state.keeper_tool_modes_observed <- false;
   state.keeper_tool_modes_error <- None;
-  state.keeper_gate_modes <- [];
-  state.keeper_exact_lane_firsts <- [];
-  state.keeper_gate_settings_unread <- Some "Workspace authority changed; not read yet";
   state.board_quarantine_requeue_inflight <- None;
   state.connectors <- None;
   state.connectors_error <- None;
@@ -25129,7 +25110,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _)) | Gate_msg (Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
-        | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
+        | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
         | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
         | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
@@ -26415,7 +26396,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    ( Masc_tui_observer.Approval_queue_changed
                    | Masc_tui_observer.Approval_rules_changed
                    | Masc_tui_observer.Gate_mode_changed
-                   | Masc_tui_observer.Gate_keeper_settings_changed _
                    | Masc_tui_observer.Tool_approval_waits_changed _
                    | Masc_tui_observer.Tool_approval_mode_changed _
                    | Masc_tui_observer.Keeper_asks_changed _
@@ -29945,21 +29925,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail)
        | Error (Request_withdrawn refusal) ->
            report_withdrawn state ~request:Kept_request.Gate_mode_change refusal);
-      Drawn_changed
-  | Keeper_msg (Keeper_gate_settings_loaded result) ->
-      (match result with
-       | Ok (modes, exact_lanes) ->
-           state.keeper_gate_modes <- modes;
-           state.keeper_exact_lane_firsts <- exact_lanes;
-           state.keeper_gate_settings_unread <- None
-       | Error failure ->
-           (* Keep the last known settings rather than showing every Keeper as
-              following the workspace, which is the looser reading and the one
-              an operator would act on. The pane says the read failed: before
-              the first successful read, the "last known" values are the
-              defaults. A read the guard stopped says so alone (RFC §2). *)
-           state.keeper_gate_settings_unread <- Some (request_failure_text
-             ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Gate_settings_read failure));
       Drawn_changed
   | Keeper_msg (Keeper_tool_modes_loaded (result, ticket)) ->
       (* Dropped when a press has opened since the fetch went out -- it

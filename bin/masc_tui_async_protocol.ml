@@ -398,10 +398,6 @@ type keeper_msg =
       * (Masc.Tui_decode.keeper_turns_projection, request_failure) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now. *)
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), request_failure) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, request_failure) result
       * Masc_tui_operator_projection.Listing_order.ticket
@@ -1199,8 +1195,7 @@ let rec workspace_message_is_read = function
   | Sent_image_ready _
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _)
   | Gate_msg (Gate_snapshot_loaded _)
-  | Keeper_msg (Keeper_gate_settings_loaded _
-  | Keeper_tool_modes_loaded _)
+  | Keeper_msg (Keeper_tool_modes_loaded _)
   | Goal_msg (Goal_confirmation_loaded _)
   | Schedule_msg (Schedules_loaded _
   | Schedule_wake_history_loaded _)
@@ -1384,7 +1379,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _) | Gate_msg (Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _) | Keeper_msg (Keeper_tool_approval_answered _
-  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
+  | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _)
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _ | Keeper_memory_catch_up_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
@@ -1548,7 +1543,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
     | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
-    | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+    | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
     | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
@@ -1692,7 +1687,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
   | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
-  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+  | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _

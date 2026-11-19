@@ -192,8 +192,6 @@ type approval_change =
       (** [approval:pending], [approval:resolved], [approval:summary_updated] *)
   | Approval_rules_changed  (** [approval_rules_changed] *)
   | Gate_mode_changed  (** [gate_mode_changed], [gate_external_mode_changed] *)
-  | Gate_keeper_settings_changed of { keeper : string }
-      (** [gate_keeper_mode_changed], [keeper_exact_lane_preference_changed] *)
   | Tool_approval_waits_changed of { keeper : string }
       (** [keeper_tool_approval_waits_changed] *)
   | Tool_approval_mode_changed of { keeper : string }
@@ -407,15 +405,14 @@ val tool_call_keeper : event -> string option
 
 val gate_snapshot_changed : event -> bool
 (** The Gate snapshot ([/api/v1/dashboard/gate]) may answer differently:
-    the approval queue, the standing rules, a Gate mode or a Keeper's Gate
-    settings changed. *)
+    the approval queue, the standing rules or a Gate mode changed. *)
 
 val held_calls_changed : event -> bool
 (** The tool calls a Keeper holds for an operator changed. *)
 
 val tool_modes_changed : event -> bool
-(** What [/api/v1/keepers/tool-approval-mode] and the Keeper Gate settings
-    answer changed: a tool approval mode or a Keeper's Gate setting. *)
+(** What [/api/v1/keepers/tool-approval-mode] answers changed: a tool
+    approval mode. *)
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)

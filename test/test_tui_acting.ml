@@ -757,10 +757,10 @@ let test_the_server_is_not_a_keeper_named_server () =
     ];
   check actor "a Keeper named server is that Keeper" (Acting.Actor_named "server")
     (Acting.actor_of_event ~traces:[] (heartbeat "server"));
-  check actor "and so is its own Gate settings change" (Acting.Actor_named "server")
+  check actor "and so is its own tool approval mode change" (Acting.Actor_named "server")
     (Acting.actor_of_event ~traces:[]
        (Observer.Approval_change
-          (Observer.Gate_keeper_settings_changed { keeper = "server" })))
+          (Observer.Tool_approval_mode_changed { keeper = "server" })))
 
 (* A frame that names no trace and no agent is nobody's: it is not filed as a
    keeper's turn under the no-value mark, and the Turns scope draws it as its

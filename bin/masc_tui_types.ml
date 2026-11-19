@@ -1178,10 +1178,9 @@ let tool_mode_effect ~ko mode =
 (* The chat header shows the effective stances, including their defaults. A
    blank label here is worse than repetition: this is the surface where the
    operator decides whether to send work, and AUTO/YOLO plus the Gate mode
-   change what can happen after that send. A Keeper with no override of its
-   own follows the workspace lane, so the header draws the workspace stance. *)
+   change what can happen after that send. Every Keeper follows the workspace
+   lane, so the header draws the workspace stance. *)
 let keeper_chat_mode_labels ~yolo
-    ~(keeper_gate_mode : Masc.Tui_decode.gate_mode option)
     ~(workspace_gate_mode : Masc.Tui_decode.gate_mode option) =
   let chat_mode =
     String.uppercase_ascii
@@ -1189,12 +1188,7 @@ let keeper_chat_mode_labels ~yolo
          (if yolo then Masc.Keeper_tool_approval_mode.Yolo
           else Masc.Keeper_tool_approval_mode.Auto))
   in
-  let gate_mode =
-    match keeper_gate_mode with
-    | Some _ as own -> own
-    | None -> workspace_gate_mode
-  in
-  chat_mode, Option.map gate_mode_reading_word gate_mode
+  chat_mode, Option.map gate_mode_reading_word workspace_gate_mode
 ;;
 
 type chat_turn_phase =
@@ -11027,11 +11021,6 @@ type state = {
   mutable keeper_yolo_names: string list;
   mutable keeper_tool_modes_observed: bool;
   mutable keeper_tool_modes_error: string option;
-  (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
-     somebody singled out are here, so absence means "follows the workspace"
-     rather than "unknown". Distinct from [keeper_yolo_names], which is the
-     in-memory stance a restart clears. *)
-  mutable keeper_gate_modes: (string * Masc.Tui_decode.gate_mode) list;
   (* Runtime_params registry rows, as the surface reads them: key, current,
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes
@@ -11046,11 +11035,6 @@ type state = {
   mutable runtime_params_cursor: int;
   mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: runtime_params_notice option;
-  mutable keeper_exact_lane_firsts: Tui_decode.keeper_exact_lane_first list;
-  mutable keeper_gate_settings_unread: string option;
-      (** [Some reason] until the per-Keeper Gate settings are read, and after
-          a read fails. The last known settings stay on screen beside it, so a
-          pane never passes the defaults off as a reading. *)
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* One per background listing that replaces a whole set: the held-call
      queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
@@ -21805,9 +21789,6 @@ let create_state
   runtime_params_cursor = 0;
   runtime_param_edit = None;
   runtime_params_notice = None;
-  keeper_gate_modes = [];
-  keeper_exact_lane_firsts = [];
-  keeper_gate_settings_unread = Some "not read yet";
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approvals_order = Masc_tui_operator_projection.Listing_order.initial;
   tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;

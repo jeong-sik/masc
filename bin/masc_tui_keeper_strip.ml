@@ -47,7 +47,7 @@ let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
          Today, "▆", say "하루 안" "today", Ansi.reset;
          Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
          Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
-         Unknown, unreported, say "나이 모름" "age unknown", Theme.recede ()]
+         Unknown, unreported, say "나이 보고 안 됨" "age not reported", Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
         let failed, failed_tone = status Masc_tui_value.Mark.Failed in
         let caution, caution_tone = status Masc_tui_value.Mark.Caution in

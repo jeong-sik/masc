@@ -3434,7 +3434,7 @@ let terminal_drawing (state : state) ~width =
                ~en:(Printf.sprintf "%s active"
                       (Masc_tui_value.Count.grouped snapshot.kes_active_count))
            else if snapshot.kes_closed then text ~ko:"끝남" ~en:"closed"
-           else text ~ko:"상태 알 수 없음" ~en:"state unknown")
+           else text ~ko:"상태 보고 안 됨" ~en:"state not reported")
         ; Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) observed_at ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in

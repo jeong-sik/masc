@@ -678,7 +678,7 @@ Right from the Keeper list.
 
 The Channels tab lists every transport and its channel bindings. A channel
 reads `name (id)` when the connector's name directory knows it, and
-`id (name unknown)` when it does not.
+`id (name not reported)` when it does not.
 
 A browser consent started on the Services tab keeps checking its Keeper even
 on another surface. A callback the server admitted just before `expires_at`
@@ -723,7 +723,7 @@ command, not a quoted shell line to paste.
 
 While the tab is open the TUI holds a connection to the Keeper's Execute output
 stream and keeps the newest 500 rows. The row under the output says `following`, how many commands are
-active (`closed` when none is and the last one ended, `state unknown` when none
+active (`closed` when none is and the last one ended, `state not reported` when none
 is active and the server has not recorded an end), and when the server last
 said anything on the connection. When commands
 overlap their rows interleave, and each row then starts with its stream number

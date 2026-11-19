@@ -98,3 +98,34 @@ val commit_direct
   -> Librarian_direct.write
   -> Librarian_effects.t
   -> committed
+
+type adoption_refusal =
+  | Snapshot_mismatch (** The snapshot file does not hold the bytes named. *)
+  | Snapshot_unreadable (** It holds them, and they are not a snapshot. *)
+  | Not_adopted of stop
+  (** A read or a write failed, or reading has to start over and there is no
+      turn log to name. Nothing the store holds was changed. *)
+
+(** An operator says the bytes the snapshot file holds are Memory
+    (RFC §8.7): the way out of a store stopped as [Log_diverged] or
+    [Log_unreadable]. [observed] names those bytes. The writer decides
+    whether a stopped store may be adopted; this does not look at why it
+    stopped.
+
+    The line it appends is read from the log as it is now.
+
+    - The last line decodes: a commit whose cause is the adoption, committed
+      on the snapshot that line names. Reading goes on where that line says.
+    - The last line does not decode, or there is none: a [Started] line that
+      names [observed]. The place reading had reached was in the line that is
+      lost, so the turn log is read from its first line again.
+
+    The snapshot file is not written. *)
+val adopt
+  :  memory_dir:string
+  -> turns_dir:string
+  -> keeper_id:string
+  -> at:float
+  -> by:string
+  -> observed:Digest.digest
+  -> (t, adoption_refusal) result

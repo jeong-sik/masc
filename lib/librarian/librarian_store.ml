@@ -51,6 +51,15 @@ type snapshot_file =
       ; digest : Digest.digest
       }
 
+let decoded bytes =
+  match Yojson.Safe.from_string bytes with
+  | exception Yojson.Json_error (_ : string) -> None
+  | json ->
+    (match Snapshot_codec.of_json json with
+     | Error (_ : Snapshot_codec.snapshot_rejection) -> None
+     | Ok memory -> Some memory)
+;;
+
 (* The digest is of the bytes the file holds, not of the bytes the codec
    would write for what they decode to. *)
 let read_snapshot path =
@@ -58,12 +67,9 @@ let read_snapshot path =
   | Error () -> Not_a_snapshot_file
   | Ok None -> Absent
   | Ok (Some bytes) ->
-    (match Yojson.Safe.from_string bytes with
-     | exception Yojson.Json_error (_ : string) -> Not_a_snapshot_file
-     | json ->
-       (match Snapshot_codec.of_json json with
-        | Error (_ : Snapshot_codec.snapshot_rejection) -> Not_a_snapshot_file
-        | Ok memory -> Snapshot { memory; digest = Digest.digest_of_bytes bytes }))
+    (match decoded bytes with
+     | None -> Not_a_snapshot_file
+     | Some memory -> Snapshot { memory; digest = Digest.digest_of_bytes bytes })
 ;;
 
 let write_snapshot path bytes =
@@ -77,18 +83,30 @@ let write_snapshot path bytes =
 ;;
 
 (* [Started] names the turn log, and the writer does not make that file. *)
+let turn_log_start turn_log_path =
+  match Turn_store.read_start turn_log_path with
+  | Ok (Some start) -> Ok start
+  | Ok None
+  | Error
+      (Turn_store.Read_failed _ | Row_undecodable _ | Log_start_missing | Moved_while_reading)
+    -> Error Store_unwritable
+;;
+
+(* The line that starts reading the turn log from its first line. *)
+let started ~at ~(start : Turn_store.start) ~(memory : Current.t) ~digest =
+  Log.Started
+    { at
+    ; turn_log = start.id
+    ; snapshot = digest
+    ; revision = memory.revision
+    ; turn_log_offset = 0
+    ; covered = start.mark
+    }
+;;
+
 let first_boot ~log_path ~snapshot_path ~turn_log_path ~at =
   let ( let* ) = Result.bind in
-  let* start =
-    match Turn_store.read_start turn_log_path with
-    | Ok (Some start) -> Ok start
-    | Ok None
-    | Error
-        ( Turn_store.Read_failed _
-        | Row_undecodable _
-        | Log_start_missing
-        | Moved_while_reading ) -> Error Store_unwritable
-  in
+  let* start = turn_log_start turn_log_path in
   let* memory, digest =
     match read_snapshot snapshot_path with
     | Not_a_snapshot_file -> Error Memory_unreadable
@@ -100,16 +118,7 @@ let first_boot ~log_path ~snapshot_path ~turn_log_path ~at =
        | Ok () -> Ok (memory, Digest.digest_of_bytes bytes)
        | Error () -> Error Store_unwritable)
   in
-  let line =
-    Log.Started
-      { at
-      ; turn_log = start.id
-      ; snapshot = digest
-      ; revision = memory.revision
-      ; turn_log_offset = 0
-      ; covered = start.mark
-      }
-  in
+  let line = started ~at ~start ~memory ~digest in
   match Log_store.append ~path:log_path ~at_end:0 line with
   | Ok { new_end; at = (_ : int) } ->
     Ok { log_path; snapshot_path; log_end = new_end; tail = line; memory; digest }
@@ -170,8 +179,8 @@ type committed =
 
 let first_seq = 1
 
-(* A direct write does not move what was read: its line carries the reading
-   position and the working state of the line before it. *)
+(* A line that does not move what was read carries the reading position and
+   the working state of the line before it. *)
 let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects : Log.commit =
   match tail with
   | Started { turn_log; turn_log_offset; covered; _ } ->
@@ -243,4 +252,55 @@ let commit_direct t ~at ~by ~trace write effects =
               (match write_snapshot t.snapshot_path bytes with
                | Ok () -> Committed { store = { store with memory = snapshot; digest = after }; line }
                | Error () -> Committed_without_snapshot line))))
+;;
+
+type adoption_refusal =
+  | Snapshot_mismatch
+  | Snapshot_unreadable
+  | Not_adopted of stop
+
+(* Where the adopted snapshot goes in the log is read from the log as it is
+   now. A last line that decodes still says where reading was. Without one
+   that place is not known, and reading starts over. *)
+let adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed =
+  let ( let* ) = Result.bind in
+  let log_path = Log_store.path_for_keepers_dir ~keepers_dir:memory_dir ~keeper_id in
+  let snapshot_path =
+    Keeper_memory_os_current_layout.path_for_keepers_dir ~keepers_dir:memory_dir ~keeper_id
+  in
+  let* memory =
+    match read_bytes snapshot_path with
+    | Error () | Ok None -> Error Snapshot_mismatch
+    | Ok (Some bytes) ->
+      if not (same (Digest.digest_of_bytes bytes) observed)
+      then Error Snapshot_mismatch
+      else (
+        match decoded bytes with
+        | Some memory -> Ok memory
+        | None -> Error Snapshot_unreadable)
+  in
+  let start_over ~at_end =
+    let turn_log_path = Turn_store.path_for_keepers_dir ~keepers_dir:turns_dir ~keeper_id in
+    let* start = Result.map_error (fun stop -> Not_adopted stop) (turn_log_start turn_log_path) in
+    Ok (at_end, started ~at ~start ~memory ~digest:observed)
+  in
+  let* log_end, line =
+    match Log_store.read_tail log_path with
+    | Error (Log_store.Read_failed _ | Moved_while_reading) -> Error (Not_adopted Store_unwritable)
+    | Error (Tail_undecodable { rows_end; offset = (_ : int); reason = (_ : Log_store.undecodable) })
+      -> start_over ~at_end:rows_end
+    | Ok Nothing_written -> start_over ~at_end:0
+    | Ok (Written { rows_end; last; last_at = (_ : int) }) ->
+      Ok
+        ( rows_end
+        , Log.Committed
+            (line_after last ~at ~basis:(named last) ~after:observed ~revision:memory.revision
+               ~cause:(Adopt { by; observed })
+               ~effects:Librarian_effects.empty) )
+  in
+  match Log_store.append ~path:log_path ~at_end:log_end line with
+  | Ok { new_end; at = (_ : int) } ->
+    Ok { log_path; snapshot_path; log_end = new_end; tail = line; memory; digest = observed }
+  | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
+    Error (Not_adopted Store_unwritable)
 ;;

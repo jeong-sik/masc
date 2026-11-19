@@ -307,13 +307,15 @@ head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, �
   | 바꿀 것이 없다 | 쓰지 않는다 |
 
   - 해석 못 하는 head 를 치우는 두 갈래의 줄은 session 을 지우는 정지의 줄과 같다. 줄 쓰는 쪽의 사건 하나를 셋이 쓴다.
-  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 닫힌 메시지 수만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 그 경로가 없애는 저장소의 값만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 지우기는 닫힌 메시지 수만 0 으로 바꾼다. official-client 파일 둘은 그대로 두기 때문이다(§5.6).
   - 매번 쓴다. 마지막 줄이 이미 같은 줄이어도 쓴다. 까닭은 정지와 같다(아래).
 - 끊긴 곳 뒤를 버리는 purge(recovering purge). 규칙은 `keeper_checkpoint_purge.ml:391-428` 에 있다. dashboard(`server_dashboard_http_keeper_api_checkpoints.ml:612`)와 CLI(`bin/masc_checkpoint_purge.ml:251`) 두 군데서 들어온다. `Announced Recovered` 를 쓴다. 지금은 두 진입이 head 를 다르게 넣는다. dashboard 는 compare-and-swap 이고 CLI 는 watermark 저장이다. 함수 하나를 지나게 하면서 CLI 를 compare-and-swap 으로 옮긴다.
-- session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` 를 쓴다.
+- session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after}` 를 쓴다.
+  - 그 디렉터리에는 official-client 파일 둘도 있다. 그래서 정지의 `after` 는 닫힌 메시지 수와 `history_bytes` 와 `internal_bytes` 가 모두 0 이다. chat 과 external 의 값은 `before` 그대로다.
   - 정지는 이 줄을 매번 쓴다. 위 표의 줄은 head 가 마지막 끝자리 아래일 때만 쓰인다. 정지는 head 를 없애는 쪽이라 마지막 끝자리가 이미 비어 있어도 쓴다.
   - 덧붙임이 실패하면 지우지 않는다. 정지는 그 단계가 실패했다고 알린다.
-  - 줄을 쓴 뒤에 지우지 못했거나 그사이 프로세스가 죽으면 head 가 남는다. 다음 단위는 빈 끝자리에서 시작해 그 이력을 한 번 더 싣는다.
+  - 줄을 쓴 뒤에 지우지 못했거나 그사이 프로세스가 죽으면 head 와 official-client 파일이 남는다. 다음 단위는 `after` 에서 시작해 그 이력과 그 파일의 내용을 한 번 더 싣는다.
   - 버리는 내용은 디렉터리와 함께 없어진다. 그래서 조각으로 가리키지 않는다. 읽는 쪽은 그 줄을 `Unknown_span` 으로 적는다(§5.4).
   - 다음에 줄 쓰는 쪽이 수를 보고 알아내게 두지 않는다. 마지막 끝자리가 0 이면 빈 head 가 그 아래가 아니다. `Opened` 를 못 쓴 턴이 그 뒤에 head 를 같은 수까지 다시 키울 수도 있다. 두 경우에 구멍이 기록 없이 지나간다.
 

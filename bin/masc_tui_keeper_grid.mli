@@ -76,7 +76,8 @@ val level_glyph : peak:int -> int -> string
     value of 0 or less is the lowest. A [peak] below [value] is read as
     [value], so the glyph never passes the top. *)
 
-val due_text : now:float -> localtime:(float -> Unix.tm) -> Masc_tui_keeper_next_run.t -> string
+val due_text :
+  ko:bool -> now:float -> localtime:(float -> Unix.tm) -> Masc_tui_keeper_next_run.t -> string
 (** The due column: the next run's clock time when it is due today, the span
     to it when it is due on another day, [late] for a due run that has not started, [held] for a held
     one ([held?] when the hold is known only as of an earlier reading), [>12h]

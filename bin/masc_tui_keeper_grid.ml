@@ -105,7 +105,7 @@ let past_half_day_text = ">" ^ window_label ~slots:(Masc_time_constants.day_int 
 (* Five cells hold today's clock and no date, so a run due on another day
    reads as the length until it. A clock alone read tomorrow's 20:25 as
    tonight's. *)
-let due_text ~now ~localtime = function
+let due_text ~ko ~now ~localtime = function
   | Masc_tui_keeper_next_run.No_schedule -> ""
   | Masc_tui_keeper_next_run.Scheduled_at at ->
       (match Masc_tui_value.Instant.day_of ~localtime ~now at with
@@ -113,9 +113,9 @@ let due_text ~now ~localtime = function
            Masc_tui_value.Instant.detail_text ~localtime Masc_tui_value.Instant.To_minute ~now at
        | Masc_tui_value.Instant.Same_year | Masc_tui_value.Instant.Other_year ->
            Masc_tui_value.Ongoing.Narrow.until ~now at)
-  | Masc_tui_keeper_next_run.Late_since _ -> Mark.grid_late_word
-  | Masc_tui_keeper_next_run.Held_current _ -> Mark.grid_held_word
-  | Masc_tui_keeper_next_run.Held_as_of _ -> Mark.grid_held_word ^ Mark.unknown_mark
+  | Masc_tui_keeper_next_run.Late_since _ -> Mark.grid_word ~ko Mark.Late_word
+  | Masc_tui_keeper_next_run.Held_current _ -> Mark.grid_word ~ko Mark.Held_word
+  | Masc_tui_keeper_next_run.Held_as_of _ -> Mark.grid_word ~ko Mark.Held_word ^ Mark.unknown_mark
   | Masc_tui_keeper_next_run.Not_before at ->
       if at -. now > half_day_seconds then past_half_day_text else Mark.unknown_mark
   | Masc_tui_keeper_next_run.Unknown -> Mark.unknown_mark

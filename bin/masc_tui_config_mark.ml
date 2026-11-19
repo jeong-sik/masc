@@ -13,9 +13,14 @@ module Reading = Masc.Tui_decode
    what the mark said; the words were only in the detail pane below, for the
    one row the cursor was on. Colour is the caller's. *)
 
-let held_back_glyph = "\xe2\x8a\x98" (* ⊘ saved, and not in force *)
+(* Two of the prompt marks are states, so they wear the status marks of RFC
+   tui-one-screen-grammar 7.2: an override the registry declined is 반려 and a
+   key with no file behind it fails, both [✕], told apart by their words (7.2
+   lets two domain states share a mark). The override mark is not a state, so
+   it stays a plain asterisk. *)
+let held_back_glyph = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
 let override_glyph = "*" (* the reader's text is what turns get *)
-let missing_glyph = "!" (* no file behind the key *)
+let missing_glyph = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
 
 (* The shipped file draws a blank: it is what a key reads as until someone
    overrides it, and a glyph for that would mark every ordinary row. A state
@@ -39,16 +44,17 @@ let prompt_legend =
   ; (missing_glyph, "no prompt file behind this key")
   ]
 
-let param_override_glyph = "\xe2\x97\x8f" (* ● *)
-let param_default_glyph = "\xe2\x97\x8b" (* ○ *)
+(* A param the reader set takes the prompt registry's override mark, and the
+   registered default draws a blank, as a shipped prompt file does. The two
+   were ● and ○, the settled and waiting status marks (7.2), which a value's
+   source is not. *)
+let param_override_glyph = override_glyph
+let param_default_glyph = file_glyph
 
 let param_glyph ~has_override =
   if has_override then param_override_glyph else param_default_glyph
 
-(* Both marks, because neither is the absence of the other: the params list
-   fills its column on every row, and a reader who sees only hollow circles
-   has no second mark to read them against. *)
+(* The default draws a blank, so the override row names the unmarked case,
+   the way the prompt legend does. *)
 let param_legend =
-  [ (param_override_glyph, "set by you; default shown beside it")
-  ; (param_default_glyph, "the registered default")
-  ]
+  [ (param_override_glyph, "set by you; unmarked is the registered default") ]

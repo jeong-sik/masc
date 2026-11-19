@@ -1527,7 +1527,7 @@
  (name masc_tui_config_mark)
  (wrapped false)
  (modules masc_tui_config_mark)
- (libraries masc))
+ (libraries masc masc_tui_value))
 
 (library
  (name masc_tui_planning_proof_mark)

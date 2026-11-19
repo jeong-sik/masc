@@ -983,7 +983,7 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
   | Unix.Unix_error (error, _, _) -> unusable (Unix.error_message error)
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1016,30 +1016,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
     let* stored_session =
-      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
-      | Ok session -> Ok session
-      | Error detail ->
-        Error (internal_error ("Codex session binding load failed: " ^ Keeper_official_client_session_store.read_error_to_string detail))
-    in
-    let* stored_session =
-      match stored_session with
-      | Some
-          ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
-        (match
-           Keeper_official_client_session_store.reconcile_process_restart
-             ~base_path
-             ~keeper_name
-             ~expected
-             ~current_owner_epoch:owner_epoch
-             ~required_at:(Time_compat.now ())
-         with
-         | Ok reconciled -> Ok (Some reconciled)
-         | Error error ->
-           Error
-             (Keeper_official_client_session_store.process_restart_error_to_core_error
-                error))
-      | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
-        Ok stored_session
+      Keeper_official_client_session_store.load_reconciled_for_runtime
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id
+        ~current_owner_epoch:owner_epoch
+        ~required_at:(Time_compat.now ())
     in
     let* claim_plan =
       match
@@ -1234,8 +1217,18 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         Keeper_context_submission_link.text projection,
         Host.start_held_context ~turn_observation:prepared.turn_observation
           ?composed_context prepared.messages, projection
-      | Runtime_codex_app_server.Resume _ ->
-        let delivery = Host.resume_prompt ~goal:prompt
+      | Runtime_codex_app_server.Resume { thread_id } ->
+        let goal =
+          Keeper_turn_bridge.prepend_resume_handoff
+            ~input_source
+            ~base_path
+            ~keeper_name
+            ~client_kind:Keeper_semantic_execution.Codex
+            ~runtime_id
+            ~session_id:thread_id
+            ~goal:prompt
+        in
+        let delivery = Host.resume_prompt ~goal
           ~turn_observation:prepared.turn_observation ?composed_context
           ~system_observations_in_developer:system_plan.observations_in_developer
           ~held:previously_held prepared.messages in
@@ -2015,7 +2008,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
 let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
   ()
   =
-  match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+  match Keeper_official_client_session_store.load_for_runtime ~base_path ~keeper_name ~client_kind:Codex ~runtime_id with
   | Error _ -> ()
   | Ok
       ( Some
@@ -2187,7 +2180,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation ~context_window
+        run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation ~context_window
           ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
           ~runtime_id

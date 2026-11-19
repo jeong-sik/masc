@@ -438,29 +438,46 @@ let project_history ?(tools_present = false) config messages =
    provider projection here, including images returned by tools, so replay
    retains the original typed source instead of adopting a wire format.
    https://platform.claude.com/docs/en/build-with-claude/vision *)
+let anthropic_media_source_json ~media_type = function
+  | Base64 data ->
+    `Assoc
+      [ "type", `String "base64"
+      ; "media_type", `String media_type
+      ; "data", `String data
+      ]
+  | Url url -> `Assoc [ "type", `String "url"; "url", `String url ]
+  | File_id file_id -> `Assoc [ "type", `String "file"; "file_id", `String file_id ]
+;;
+
 let rec anthropic_content_block_to_json = function
   | Image { media_type; source } ->
-    let source =
-      match source with
-      | Base64 data ->
-        [ "type", `String "base64"
-        ; "media_type", `String media_type
-        ; "data", `String data
-        ]
-      | Url url -> [ "type", `String "url"; "url", `String url ]
-      | File_id file_id -> [ "type", `String "file"; "file_id", `String file_id ]
-    in
-    `Assoc [ "type", `String "image"; "source", `Assoc source ]
+    `Assoc
+      [ "type", `String "image"
+      ; "source", anthropic_media_source_json ~media_type source
+      ]
+  | Document { media_type; source } ->
+    `Assoc
+      [ "type", `String "document"
+      ; "source", anthropic_media_source_json ~media_type source
+      ]
+  | ToolUse { id; name; input } ->
+    Api_common.content_block_to_json
+      (ToolUse { id = Tool_call_id_wire.wire_id_for_anthropic id; name; input })
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
     `Assoc
       [ "type", `String "tool_result"
-      ; "tool_use_id", `String tool_use_id
+      ; "tool_use_id", `String (Tool_call_id_wire.wire_id_for_anthropic tool_use_id)
       ; "content", `List (List.map anthropic_tool_result_content_block_to_json blocks)
       ; "is_error", `Bool (tool_result_outcome_is_error outcome)
       ]
-  | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-    | ToolUse _ | ToolResult { content_blocks = None; _ }
-    | Document _ | Audio _ ) as block -> Api_common.content_block_to_json block
+  | ToolResult { tool_use_id; content; outcome; content_blocks = None; _ } ->
+    `Assoc
+      (Api_common.tool_result_wire_fields
+         ~tool_use_id:(Tool_call_id_wire.wire_id_for_anthropic tool_use_id)
+         ~content
+         ~outcome)
+  | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | Audio _ ) as block
+    -> Api_common.content_block_to_json block
 and anthropic_tool_result_content_block_to_json = function
   | (Text _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
   | (Thinking _ | ReasoningDetails _ | RedactedThinking _
@@ -1161,4 +1178,41 @@ let transmitted_reasoning_prefix
   | Provider_config.Ollama
   | Provider_config.Gemini
   | Provider_config.Glm -> None
+;;
+
+[@@@coverage off]
+
+let%test "anthropic_content_block_to_json maps tool ids and document url/file_id cleanly" =
+  let open Yojson.Safe.Util in
+  let unsafe_id = "functions.bash:0" in
+  let tool_use_json =
+    anthropic_content_block_to_json
+      (ToolUse { id = unsafe_id; name = "bash"; input = `Assoc [] })
+  in
+  let tool_result_json =
+    anthropic_content_block_to_json
+      (ToolResult
+         { tool_use_id = unsafe_id
+         ; content = "ok"
+         ; outcome = Tool_succeeded
+         ; json = None
+         ; content_blocks = None
+         })
+  in
+  let doc_url_json =
+    anthropic_content_block_to_json
+      (Document { media_type = "application/pdf"; source = Url "https://example.test/a.pdf" })
+  in
+  let doc_file_json =
+    anthropic_content_block_to_json
+      (Document { media_type = "application/pdf"; source = File_id "file_abc" })
+  in
+  let wire_id = tool_use_json |> member "id" |> to_string in
+  let wire_result_id = tool_result_json |> member "tool_use_id" |> to_string in
+  String.equal wire_id wire_result_id
+  && String.equal wire_id (Tool_call_id_wire.wire_id_for_anthropic unsafe_id)
+  && doc_url_json |> member "source" |> member "type" |> to_string = "url"
+  && doc_url_json |> member "source" |> member "url" |> to_string = "https://example.test/a.pdf"
+  && doc_file_json |> member "source" |> member "type" |> to_string = "file"
+  && doc_file_json |> member "source" |> member "file_id" |> to_string = "file_abc"
 ;;

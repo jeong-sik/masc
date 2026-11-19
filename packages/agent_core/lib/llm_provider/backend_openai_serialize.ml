@@ -169,7 +169,7 @@ let tool_calls_to_openai_json blocks =
     | ToolUse { id; name; input } ->
       Some
         (`Assoc
-            [ "id", `String id
+            [ "id", `String (Tool_call_id_wire.wire_id_for_openai id)
             ; "type", `String "function"
             ; ( "function"
               , `Assoc
@@ -210,6 +210,62 @@ let tool_calls_to_ollama_json blocks =
     | Audio _ -> None)
 ;;
 
+type openai_audio_format =
+  | Audio_wav
+  | Audio_mp3
+  | Audio_ogg
+  | Audio_flac
+  | Audio_webm
+  | Audio_aac
+  | Audio_m4a
+  | Audio_opus
+  | Audio_pcm16
+
+let openai_audio_format_to_string = function
+  | Audio_wav -> "wav"
+  | Audio_mp3 -> "mp3"
+  | Audio_ogg -> "ogg"
+  | Audio_flac -> "flac"
+  | Audio_webm -> "webm"
+  | Audio_aac -> "aac"
+  | Audio_m4a -> "m4a"
+  | Audio_opus -> "opus"
+  | Audio_pcm16 -> "pcm16"
+;;
+
+let normalize_audio_mime_type media_type =
+  let base =
+    match String.index_opt media_type ';' with
+    | Some idx -> String.sub media_type 0 idx
+    | None -> media_type
+  in
+  base |> String.trim |> String.lowercase_ascii
+;;
+
+let openai_audio_format_of_media_type media_type =
+  match normalize_audio_mime_type media_type with
+  | "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/vnd.wave" | "wav" ->
+    Ok Audio_wav
+  | "audio/mp3" | "audio/mpeg" | "audio/x-mpeg" | "audio/mpeg3" | "mp3" ->
+    Ok Audio_mp3
+  | "audio/ogg" | "application/ogg" | "audio/x-ogg" | "ogg" -> Ok Audio_ogg
+  | "audio/flac" | "audio/x-flac" | "flac" -> Ok Audio_flac
+  | "audio/webm" | "webm" -> Ok Audio_webm
+  | "audio/aac" | "audio/x-aac" | "aac" -> Ok Audio_aac
+  | "audio/mp4" | "audio/m4a" | "audio/x-m4a" | "m4a" -> Ok Audio_m4a
+  | "audio/opus" | "opus" -> Ok Audio_opus
+  | "audio/pcm" | "audio/l16" | "pcm16" -> Ok Audio_pcm16
+  | _ -> Error media_type
+;;
+
+let openai_audio_format_wire ~backend media_type =
+  match openai_audio_format_of_media_type media_type with
+  | Ok fmt -> openai_audio_format_to_string fmt
+  | Error raw ->
+    invalid_arg
+      (Printf.sprintf "%s does not support audio media_type %S" backend raw)
+;;
+
 let openai_content_parts_of_blocks blocks =
   blocks
   |> List.filter_map (function
@@ -241,26 +297,35 @@ let openai_content_parts_of_blocks blocks =
           (`Assoc
               [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ]))
     | Document { media_type; source } ->
-      (* agent-core boundary — a document is not an image. This arm used to emit an
-         [image_url] part, so a PDF reached the model as a picture and no layer
-         reported the substitution. Chat Completions carries a document in its
-         own [file] part; the payload is the same base64 data URL the sibling
-         Responses serializer puts in [input_file.file_data], and like that
-         serializer no [filename] is sent because a [Document] block carries no
-         name. Rows that cannot carry a document are stopped earlier by
-         [Api_common.admit_document_blocks], so there is one native form here
-         and no fallback. *)
-      let file_data =
-        Api_common.base64_media_data_url
-          ~backend:"openai_chat"
-          ~block:"document"
-          ~media_type
-          source
-      in
-      Some
-        (`Assoc
-            [ "type", `String "file"; "file", `Assoc [ "file_data", `String file_data ] ])
+      (* agent-core boundary — a document is not an image. Chat Completions
+         accepts either a Files API [file_id] or an inline base64 [file_data]
+         URL inside the [file] object; URL references have no Chat Completions
+         document carrier and fail closed explicitly. *)
+      (match source with
+       | File_id file_id ->
+         Some
+           (`Assoc
+               [ "type", `String "file"; "file", `Assoc [ "file_id", `String file_id ] ])
+       | Url _ ->
+         Api_common.unsupported_media_source
+           ~backend:"openai_chat"
+           ~block:"document"
+           source
+       | Base64 _ ->
+         let file_data =
+           Api_common.base64_media_data_url
+             ~backend:"openai_chat"
+             ~block:"document"
+             ~media_type
+             source
+         in
+         Some
+           (`Assoc
+               [ "type", `String "file"
+               ; "file", `Assoc [ "file_data", `String file_data ]
+               ]))
     | Audio { media_type; source } ->
+      let format = openai_audio_format_wire ~backend:"openai_chat" media_type in
       let data =
         Api_common.base64_media_payload
           ~backend:"openai_chat"
@@ -270,7 +335,7 @@ let openai_content_parts_of_blocks blocks =
       Some
         (`Assoc
             [ "type", `String "input_audio"
-            ; "input_audio", `Assoc [ "data", `String data; "format", `String media_type ]
+            ; "input_audio", `Assoc [ "data", `String data; "format", `String format ]
             ])
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
       None)
@@ -396,7 +461,7 @@ let openai_tool_message_of_result ~tool_use_id ~content ~content_blocks =
   let content_str = tool_result_content_string ~content ~content_blocks in
   `Assoc
     [ "role", `String "tool"
-    ; "tool_call_id", `String tool_use_id
+    ; "tool_call_id", `String (Tool_call_id_wire.wire_id_for_openai tool_use_id)
     ; "content", `String content_str
     ]
 ;;
@@ -1239,4 +1304,68 @@ let conformant_tool_json tool =
       | None -> `Assoc outer)
     | _ -> `Assoc outer)
   | other -> other
+;;
+
+[@@@coverage off]
+
+let%test "openai_audio_format_of_media_type normalizes standard audio MIMEs and rejects unknown" =
+  let cases =
+    [ "audio/wav", Ok Audio_wav
+    ; "AUDIO/MPEG; charset=utf-8", Ok Audio_mp3
+    ; "audio/mp3", Ok Audio_mp3
+    ; "audio/ogg; codecs=opus", Ok Audio_ogg
+    ; "audio/flac", Ok Audio_flac
+    ; "audio/webm", Ok Audio_webm
+    ; "audio/invalid", Error "audio/invalid"
+    ]
+  in
+  List.for_all
+    (fun (mime, expected) -> openai_audio_format_of_media_type mime = expected)
+    cases
+;;
+
+let%test "openai_content_parts_of_blocks emits normalized audio format and handles document sources" =
+  let open Yojson.Safe.Util in
+  let parts =
+    openai_content_parts_of_blocks
+      [ Audio { media_type = "audio/mpeg"; source = Types.Base64 "YWJj" }
+      ; Document { media_type = "application/pdf"; source = Types.File_id "file-123" }
+      ]
+  in
+  let url_rejected =
+    match
+      openai_content_parts_of_blocks
+        [ Document { media_type = "application/pdf"; source = Types.Url "https://example.test/doc.pdf" } ]
+    with
+    | exception Invalid_argument _ -> true
+    | _ -> false
+  in
+  match parts with
+  | [ audio_part; doc_part ] ->
+    audio_part |> member "input_audio" |> member "format" |> to_string = "mp3"
+    && doc_part |> member "file" |> member "file_id" |> to_string = "file-123"
+    && url_rejected
+  | [] | [ _ ] | _ :: _ :: _ :: _ -> false
+;;
+
+let%test "openai_messages_of_message correlates remapped long tool call ids" =
+  let open Yojson.Safe.Util in
+  let long_id = "call_agent_core_0123456789abcdef0123456789abcdef_999_12" in
+  let assistant_json =
+    openai_messages_of_message
+      (Types.make_message ~role:Assistant
+         [ Types.ToolUse { id = long_id; name = "bash"; input = `Assoc [] } ])
+    |> List.hd
+  in
+  let tool_json =
+    openai_messages_of_message
+      (Types.tool_result_msg ~tool_use_id:long_id ~content:"ok" ())
+    |> List.hd
+  in
+  let wire_call_id =
+    assistant_json |> member "tool_calls" |> to_list |> List.hd |> member "id" |> to_string
+  in
+  let wire_result_id = tool_json |> member "tool_call_id" |> to_string in
+  String.length wire_call_id <= Tool_call_id_wire.openai_max_length
+  && String.equal wire_call_id wire_result_id
 ;;

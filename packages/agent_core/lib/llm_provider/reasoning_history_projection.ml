@@ -403,8 +403,16 @@ let validate_replay_continuity_for_provider_config
             ~assistant_had_tool_call:(content_has_tool_use message.content)
       in
       (* Selection is what the request replays when it can; the obligation is
-         what it may not go without. Missing caller-boundary evidence keeps the
-         whole history inside the open exchange, as for selection. *)
+         what an active turn may not go without. Closed prior turns (strictly
+         before [latest_user_message_index]) are always admissible to exclude at
+         [Provider_dispatch] under [Exclude_unselected]; missing caller-boundary
+         evidence keeps the whole history inside the open exchange, as for
+         selection. *)
+      let is_closed_prior_turn message_index =
+        match latest_user_message_index with
+        | Some idx -> message_index < idx
+        | None -> false
+      in
       let required message_index message =
         selected message_index message
         && (match Reasoning_dialect.replay_obligation target_dialect with
@@ -457,7 +465,9 @@ let validate_replay_continuity_for_provider_config
                  | Exclude_unselected ->
                    let admissible = match boundary with
                      | Checkpoint_restore -> true
-                     | Provider_dispatch _ -> not (required message_index message) in
+                     | Provider_dispatch _ ->
+                       is_closed_prior_turn message_index
+                       || not (required message_index message) in
                    if admissible then
                      check ({message_index; reason=Incompatible_reasoning_source stored}
                        :: exclusions) rest
@@ -963,4 +973,176 @@ let observe ~component ~stream projection =
              ; "target", target_json
              ; "removed_count", `Int (List.length indices)
              ]))
+;;
+
+[@@@coverage off]
+
+let%test "Exclude_unselected at Provider_dispatch admits closed prior turn even for Every_selected_message targets" =
+  let source_config =
+    Provider_config.make
+      ~kind:Provider_config.Anthropic
+      ~model_id:"claude-sonnet-4-5"
+      ~base_url:"https://api.anthropic.com"
+      ()
+  in
+  let target_caps =
+    { Capabilities.glm_capabilities with
+      max_context_tokens = Some 200_000
+    ; supports_tools = true
+    ; supports_reasoning = true
+    ; thinking_control_format = Capabilities.Thinking_object_only
+    ; reasoning_replay_override = Capabilities.Force_drop_without_tool_preserve_with_tool
+    }
+  in
+  let target_config =
+    Provider_config.make
+      ~kind:Provider_config.Glm
+      ~model_id:"glm-5"
+      ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+      ~model_capabilities_override:target_caps
+      ()
+  in
+  match Reasoning_dialect.reasoning_source_for_provider_config source_config with
+  | Error _ -> false
+  | Ok stored ->
+    let metadata = Types.Reasoning_source.metadata stored in
+    let history =
+      [ Types.user_msg "turn 1"
+      ; Types.make_message
+          ~metadata
+          ~role:Assistant
+          [ Types.Thinking { signature = Some "sig"; content = "prior thinking" }
+          ; Types.ToolUse { id = "call-1"; name = "bash"; input = `Assoc [] }
+          ]
+      ; Types.tool_result_msg ~tool_use_id:"call-1" ~content:"ok" ()
+      ; Types.assistant_msg "done"
+      ; Types.user_msg "turn 2"
+      ]
+    in
+    let admit_ok =
+      match
+        validate_replay_continuity_for_provider_config
+          ~source_change_policy:Exclude_unselected
+          ~boundary:(Provider_dispatch { tools_present = true })
+          target_config
+          history
+      with
+      | Ok { disposition = Source_change_admitted [ { message_index = 1; reason } ]; _ } ->
+        (match reason with
+         | Incompatible_reasoning_source _ -> true
+         | Replay_policy_excluded _ | Missing_reasoning_source | Reasoning_on_non_assistant ->
+           false)
+      | Ok
+          { disposition =
+              ( Preserve_reasoning
+              | Caller_excluded_reasoning
+              | Source_change_admitted ([] | [ _ ] | _ :: _ :: _) )
+          ; _
+          }
+      | Error _ -> false
+    in
+    let reject_err =
+      match
+        validate_replay_continuity_for_provider_config
+          ~source_change_policy:Reject_incompatible
+          ~boundary:(Provider_dispatch { tools_present = true })
+          target_config
+          history
+      with
+      | Error (Incompatible_reasoning_artifact { message_index = 1; _ }) -> true
+      | Ok _
+      | Error
+          ( Invalid_control_lowering _
+          | Invalid_reasoning_target _
+          | Invalid_reasoning_source _
+          | Reasoning_source_on_non_assistant _
+          | Invalid_response_replay _
+          | Unbound_reasoning_artifact _
+          | Incompatible_reasoning_artifact _
+          | Required_reasoning_unreadable _
+          | Invalid_reasoning_artifact_role _
+          | Unsupported_reasoning_block _ ) -> false
+    in
+    admit_ok && reject_err
+;;
+
+let%test "Exclude_unselected at Provider_dispatch keeps strictness on active open exchange and absent user boundary" =
+  let source_config =
+    Provider_config.make
+      ~kind:Provider_config.Anthropic
+      ~model_id:"claude-sonnet-4-5"
+      ~base_url:"https://api.anthropic.com"
+      ()
+  in
+  let target_caps =
+    { Capabilities.glm_capabilities with
+      max_context_tokens = Some 200_000
+    ; supports_tools = true
+    ; supports_reasoning = true
+    ; thinking_control_format = Capabilities.Thinking_object_only
+    ; reasoning_replay_override = Capabilities.Force_drop_without_tool_preserve_with_tool
+    }
+  in
+  let target_config =
+    Provider_config.make
+      ~kind:Provider_config.Glm
+      ~model_id:"glm-5"
+      ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+      ~model_capabilities_override:target_caps
+      ()
+  in
+  match Reasoning_dialect.reasoning_source_for_provider_config source_config with
+  | Error _ -> false
+  | Ok stored ->
+    let metadata = Types.Reasoning_source.metadata stored in
+    let open_exchange =
+      [ Types.user_msg "turn 2"
+      ; Types.make_message
+          ~metadata
+          ~role:Assistant
+          [ Types.Thinking { signature = Some "sig"; content = "active thinking" }
+          ; Types.ToolUse { id = "call-2"; name = "bash"; input = `Assoc [] }
+          ]
+      ; Types.tool_result_msg ~tool_use_id:"call-2" ~content:"ok" ()
+      ]
+    in
+    let no_user_boundary =
+      [ Types.make_message
+          ~metadata
+          ~role:Assistant
+          [ Types.Thinking { signature = Some "sig"; content = "orphan thinking" }
+          ; Types.ToolUse { id = "call-3"; name = "bash"; input = `Assoc [] }
+          ]
+      ; Types.tool_result_msg ~tool_use_id:"call-3" ~content:"ok" ()
+      ]
+    in
+    let is_required_unreadable expected_index = function
+      | Error (Required_reasoning_unreadable { message_index; _ }) ->
+        Int.equal message_index expected_index
+      | Ok _
+      | Error
+          ( Invalid_control_lowering _
+          | Invalid_reasoning_target _
+          | Invalid_reasoning_source _
+          | Reasoning_source_on_non_assistant _
+          | Invalid_response_replay _
+          | Unbound_reasoning_artifact _
+          | Incompatible_reasoning_artifact _
+          | Invalid_reasoning_artifact_role _
+          | Unsupported_reasoning_block _ ) -> false
+    in
+    is_required_unreadable
+      1
+      (validate_replay_continuity_for_provider_config
+         ~source_change_policy:Exclude_unselected
+         ~boundary:(Provider_dispatch { tools_present = true })
+         target_config
+         open_exchange)
+    && is_required_unreadable
+         0
+         (validate_replay_continuity_for_provider_config
+            ~source_change_policy:Exclude_unselected
+            ~boundary:(Provider_dispatch { tools_present = true })
+            target_config
+            no_user_boundary)
 ;;

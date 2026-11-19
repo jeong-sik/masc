@@ -166,15 +166,26 @@ let input_content_part_of_block = function
   | Image { media_type; source } ->
     Some (input_image_content_part ~media_type ~source)
   | Document { media_type; source } ->
-    let file_data =
-      Api_common.base64_media_data_url
-        ~backend:"openai_responses"
-        ~block:"document"
-        ~media_type
-        source
-    in
-    Some (`Assoc [ "type", `String "input_file"; "file_data", `String file_data ])
+    (match source with
+     | File_id file_id ->
+       Some (`Assoc [ "type", `String "input_file"; "file_id", `String file_id ])
+     | Url url ->
+       Some (`Assoc [ "type", `String "input_file"; "file_url", `String url ])
+     | Base64 _ ->
+       let file_data =
+         Api_common.base64_media_data_url
+           ~backend:"openai_responses"
+           ~block:"document"
+           ~media_type
+           source
+       in
+       Some (`Assoc [ "type", `String "input_file"; "file_data", `String file_data ]))
   | Audio { media_type; source } ->
+    let format =
+      Backend_openai_serialize.openai_audio_format_wire
+        ~backend:"openai_responses"
+        media_type
+    in
     let data =
       Api_common.base64_media_payload
         ~backend:"openai_responses"
@@ -184,7 +195,7 @@ let input_content_part_of_block = function
     Some
       (`Assoc
           [ "type", `String "input_audio"
-          ; "input_audio", `Assoc [ "data", `String data; "format", `String media_type ]
+          ; "input_audio", `Assoc [ "data", `String data; "format", `String format ]
           ])
   | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
     None
@@ -236,7 +247,7 @@ let assistant_output_item_of_block ?phase = function
     Some
       (`Assoc
           [ "type", `String "function_call"
-          ; "call_id", `String id
+          ; "call_id", `String (Tool_call_id_wire.wire_id_for_openai id)
           ; "name", `String name
           ; "arguments", `String (Yojson.Safe.to_string input)
           ])
@@ -259,8 +270,10 @@ let rec tool_output_parts = function
     when content_has_image blocks ->
     let identity =
       Yojson.Safe.to_string
-        (`Assoc [ "tool_use_id", `String tool_use_id
-                ; "is_error", `Bool (tool_result_outcome_is_error outcome) ])
+        (`Assoc
+            [ "tool_use_id", `String (Tool_call_id_wire.wire_id_for_openai tool_use_id)
+            ; "is_error", `Bool (tool_result_outcome_is_error outcome)
+            ])
     in
     input_text_content_part ("Begin nested tool result " ^ identity)
     :: (List.concat_map tool_output_parts blocks
@@ -281,7 +294,7 @@ let function_call_output_content ~content ~content_blocks =
 let function_call_output_item ~tool_use_id ~content ~content_blocks =
   `Assoc
     [ "type", `String "function_call_output"
-    ; "call_id", `String tool_use_id
+    ; "call_id", `String (Tool_call_id_wire.wire_id_for_openai tool_use_id)
     ; "output", function_call_output_content ~content ~content_blocks
     ]
 ;;
@@ -878,4 +891,45 @@ let parse_response_result json_str =
   with
   | Yojson.Json_error msg ->
     Error { detail = "JSON parse error: " ^ msg; lifecycle = Unreadable_json }
+;;
+
+[@@@coverage off]
+
+let%test "responses input_items_of_message maps audio MIME, document sources, and tool call_id" =
+  let open Yojson.Safe.Util in
+  let long_id = "call_agent_core_0123456789abcdef0123456789abcdef_999_13" in
+  let user_items =
+    input_items_of_message
+      (Types.make_message ~role:User
+         [ Types.Audio { media_type = "audio/wav"; source = Types.Base64 "YWJj" }
+         ; Types.Document { media_type = "application/pdf"; source = Types.File_id "file-1" }
+         ; Types.Document
+             { media_type = "application/pdf"
+             ; source = Types.Url "https://example.test/doc.pdf"
+             }
+         ])
+  in
+  let assistant_item =
+    input_items_of_message
+      (Types.make_message ~role:Assistant
+         [ Types.ToolUse { id = long_id; name = "bash"; input = `Assoc [] } ])
+    |> List.hd
+  in
+  let tool_item =
+    input_items_of_message (Types.tool_result_msg ~tool_use_id:long_id ~content:"ok" ())
+    |> List.hd
+  in
+  let wire_call_id = assistant_item |> member "call_id" |> to_string in
+  let wire_output_id = tool_item |> member "call_id" |> to_string in
+  match user_items with
+  | [ user_msg ] ->
+    (match user_msg |> member "content" |> to_list with
+     | [ audio_part; file_id_part; file_url_part ] ->
+       audio_part |> member "input_audio" |> member "format" |> to_string = "wav"
+       && file_id_part |> member "file_id" |> to_string = "file-1"
+       && file_url_part |> member "file_url" |> to_string = "https://example.test/doc.pdf"
+       && String.length wire_call_id <= Tool_call_id_wire.openai_max_length
+       && String.equal wire_call_id wire_output_id
+     | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ -> false)
+  | [] | _ :: _ :: _ -> false
 ;;

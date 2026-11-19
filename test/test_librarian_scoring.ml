@@ -126,6 +126,41 @@ let test_revise_is_not_scored_as_a_merge () =
     (revised.merge_expected, revised.merge_kept)
 ;;
 
+(* Memory holds the port already. The units also said a second thing. Only
+   the second is there to be recovered. *)
+let test_a_token_memory_already_holds () =
+  let known = held "the server listens on port 8935" in
+  let case : Scoring.case =
+    { name = "the port is known"
+    ; question
+    ; shown =
+        { memory = Some [ "m1", Types.memory_id known; "m2", Types.memory_id owner ]
+        ; units = [ "u1", 10 ]
+        }
+    ; facts = [ known; owner ]
+    ; planted = [ "8935"; "9000" ]
+    ; must_keep = []
+    }
+  in
+  let reading label text =
+    match Scoring.score case text with
+    | Read reading -> reading
+    | Thrown_away rejection ->
+      failf "%s: thrown away as %s" label (Masc.Librarian_answer.rejection_kind rejection)
+  in
+  let nothing = reading "changes nothing" changes_nothing in
+  check (pair bool int) "an answer that does nothing recovers nothing" (false, 0)
+    (nothing.changed, nothing.recovered);
+  let adds_text = answer [ add "the admin port is 9000" ] in
+  check int "what Memory did not hold is recovered" 1 (reading "adds" adds_text).recovered;
+  let tally =
+    Scoring.tally
+      (List.map (fun text -> case, Scoring.score case text) [ changes_nothing; adds_text ])
+  in
+  check (pair int int) "the token Memory held is in neither number" (2, 1)
+    (tally.planted, tally.recovered)
+;;
+
 let pinned =
   {|answers 7
 thrown away 2
@@ -161,6 +196,7 @@ let () =
     [ ( "scorer"
       , [ test_case "each kind of answer" `Quick test_each_answer
         ; test_case "a revise is not a merge" `Quick test_revise_is_not_scored_as_a_merge
+        ; test_case "a token Memory already holds" `Quick test_a_token_memory_already_holds
         ; test_case "the table of seven answers" `Quick test_table_is_pinned
         ] )
     ]

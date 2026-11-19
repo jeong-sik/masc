@@ -97,6 +97,7 @@ let lane_specs =
     ; Standalone_lane.Librarian
     ; Standalone_lane.Verifier
     ; Standalone_lane.Candle_appraiser
+    ; Standalone_lane.Librarian_memory
     ]
 ;;
 

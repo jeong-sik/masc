@@ -16,7 +16,7 @@ import { addPath, createKeyAdds } from './key-add'
 import type { KeyAddModel } from './key-add'
 import { createRemovals, removePath } from './key-remove'
 import type { RemovalsModel } from './key-remove'
-import { createReplacements } from './key-replace'
+import { createReplacements, replacePath } from './key-replace'
 import type { ReplacementsModel } from './key-replace'
 import type { View } from './console'
 import { loginPath } from './login'
@@ -448,6 +448,42 @@ describe('giving a key in the panel', () => {
     const kept = await run
     const ownedReadings = sent.filter((one) => one.path === paths.owned).length
     expect([kept, panel.adding.view.value, kind(panel), ownedReadings]).toEqual(['dropped', { kind: 'closed', stored: null }, `read for ${other}`, 2])
+  })
+})
+
+describe('giving another key for an account in the panel', () => {
+  const keyReplaced = (): Response => json(200, { provider_account_id: 'acct_key', old_keys_removed: true })
+  const replaceTokens = (sent: readonly Sent[]): Array<string | null> =>
+    sent.filter((one) => one.path === replacePath('acct_key')).map((one) => new Headers(one.init.headers).get(csrfHeader))
+  const ownedReadings = (sent: readonly Sent[]): number => sent.filter((one) => one.path === paths.owned).length
+
+  it('sends the key with the token of the newest session, and reads the subscriptions again', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+    })
+    await panel.load(sessionOf(person, 'first'))
+    await panel.load(sessionOf(person, 'second'))
+    panel.replacing.open('acct_key')
+    const kept = await panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([kept, replaceTokens(sent), ownedReadings(sent), kind(panel)]).toEqual(['dropped', ['second'], 2, `read for ${person}`])
+  })
+
+  it('forgets the replacements of one person once it shows another', async () => {
+    const call = later()
+    const { panel } = start({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [replacePath('acct_key')]: [call.answer],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    const run = panel.replacing.replace('acct_key', 'made-up-key')
+    await panel.load(sessionOf(other))
+    call.give(keyReplaced())
+    expect([await run, panel.replacing.replacing.value.size, kind(panel)]).toEqual(['dropped', 0, `read for ${other}`])
   })
 })
 
@@ -889,6 +925,34 @@ describe('the panel', () => {
     await act(async () => { await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') }) })
     expect([before, lineOf(container) === '', container.querySelectorAll('li.row').length, document.activeElement === container.querySelector('h2')])
       .toEqual(['', false, 0, true])
+  })
+
+  it('says that an account it sent a key for was not there, once its card is off the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedNothing()],
+      [replacePath('acct_key')]: [json(404, { error: 'No such account.', code: 'unknown_account' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    const before = lineOf(container)
+    panel.replacing.open('acct_key')
+    await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
+    // The page is drawn again when `act` ends, so the wait is for what the panel holds.
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
+    expect([before, lineOf(container) === '', container.querySelectorAll('li.row').length]).toEqual(['', false, 0])
+  })
+
+  it('does not say that account went while a list that has it is on the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [json(404, { error: 'No such account.', code: 'unknown_account' })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    panel.replacing.open('acct_key')
+    await act(async () => { await panel.replacing.replace('acct_key', 'made-up-key') })
+    await act(async () => { await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('gone') }) })
+    expect([lineOf(container), container.querySelectorAll('li.row').length]).toEqual(['', 1])
   })
 
   it('says an account went only once its card is off the page, however the readings overlap', async () => {

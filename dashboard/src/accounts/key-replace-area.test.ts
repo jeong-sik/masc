@@ -197,6 +197,32 @@ describe('the field of a key over the replacements of the page', () => {
     expect([opened, container.querySelector('#replace-key-acct_key'), document.activeElement === toggle]).toEqual([true, null, true])
   })
 
+  it('leaves a focus the person moved elsewhere where it is once the field closed', async () => {
+    const replacements = createReplacements({ ...idle, token: () => 'token-1' })
+    const container = card(replacements)
+    await act(() => { fireEvent.click(toggleOf(container)) })
+    const remove = the<HTMLButtonElement>(container, '#remove-acct_key')
+    remove.focus()
+    await act(() => { replacements.close('acct_key') })
+    expect([container.querySelector('#replace-key-acct_key'), document.activeElement === remove]).toEqual([null, true])
+  })
+
+  it('moves a focus that was in the field to the title of the card once the list says a removal was left on the account', async () => {
+    const replacements = createReplacements({ ...idle, token: () => 'token-1' })
+    const checks = createChecks(idle)
+    const removals = createRemovals(idle)
+    const drawn = (owned: Owned) => html`
+      <section aria-labelledby="h"><h2 id="h">구독</h2><${AccountList} integrations=${[claude]} owned=${owned}
+        checks=${checks} removals=${removals} replacements=${replacements} /></section>
+    `
+    const view = render(drawn(owning(keyAccount())))
+    await act(() => { fireEvent.click(toggleOf(view.container)) })
+    const inField = document.activeElement === fieldOf(view.container)
+    await act(() => { view.rerender(drawn(owning(keyAccount({ kind: 'removal', stage: 'key_not_removed' })))) })
+    expect([inField, view.container.querySelector('#replace-acct_key'), document.activeElement === view.container.querySelector('#row-title-acct_key')])
+      .toEqual([true, null, true])
+  })
+
   it('sends the key once, takes the field away once the server put the key in place, and puts the focus back on its button', async () => {
     const sent: Array<{ readonly path: string; readonly body: unknown }> = []
     const send: Send = (path, init) => {

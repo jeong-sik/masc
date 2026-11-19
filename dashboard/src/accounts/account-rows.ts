@@ -107,7 +107,7 @@ function keyWords(key: KeyState): string | null {
   switch (key) {
     case 'readable': return null
     case 'key_missing':
-      return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요.'
+      return '이 계정의 key 파일이 이 서버에 없어요. key 를 넣는 중이면 곧 생겨요. 계속 없으면 이 계정으로는 모델을 부를 수 없어요. 「key 바꾸기」로 key 를 다시 넣을 수 있어요.'
     case 'key_unreadable': return `이 서버가 이 계정의 key 파일에서 key 를 읽지 못했어요. 이 계정으로는 모델을 부를 수 없어요. ${operatorWords}`
     case 'not_looked_at': return `이 서버가 이 계정의 key 파일을 확인하지 못했어요. ${operatorWords}`
     case 'unrecognised': return '서버가 이 계정의 key 상태를 알려 주지 않았어요.'
@@ -143,13 +143,14 @@ function removalWords(removal: Removal, held: Held): string {
 }
 
 /** What a replacement of the key that did not go through left on the
-    server (lib/auth_preview.ml, `provider_accounts`). The key the account
-    had is the one the server holds: no record of the replacement went in. */
+    server (lib/auth_preview.ml, `provider_accounts`). No record of the
+    replacement went in: a key the server has for the account is the one
+    from before. Whether it has one is not said here. */
 function replacementWords(replacement: Replacement): string {
   const left = '이 계정으로는 아무것도 실행되지 않아요.'
   switch (replacement) {
     case 'start_given_up':
-      return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버에 있는 key 는 바꾸기 전 그대로예요. ${left} key 를 다시 보내면 풀려요. 계정을 없애도 돼요.`
+      return `이 계정의 key 를 바꾸려다 시작하지 못했어요. 서버의 key 는 바뀌지 않았어요. ${left} key 를 다시 보내면 풀려요. 계정을 없애도 돼요.`
     case 'unrecognised': return `이 계정의 key 를 바꾸는 일이 끝나지 않았어요. ${left}`
   }
 }
@@ -472,16 +473,19 @@ function AccountRow({ facts, checks, removals, replacements }: {
   const title = useRef<HTMLHeadingElement>(null)
   const left = account.left
   const canCheck = left === null && offered !== null && checkable(offered)
-  const couldCheck = useRef(canCheck)
-  // A reading after a check can find the subscription with no model to
-  // check, or its calls refused, which takes the pressed button away. The focus then
-  // goes to the title of the card, not to the body of the page; a focus the
-  // person moved elsewhere meanwhile stays.
+  const canReplace = account.held.kind === 'key' && left?.kind !== 'removal'
+  const could = useRef({ canCheck, canReplace })
+  // A reading can take a control away with the focus on it. One after a
+  // check can find the subscription with no model to check, or its calls
+  // refused, and the pressed button goes. One after a key was sent can find
+  // a removal left on the account, and the field of the key goes. The
+  // focus then goes to the title of the card, not to the body of the page;
+  // a focus the person moved elsewhere meanwhile stays.
   useEffect(() => {
-    const before = couldCheck.current
-    couldCheck.current = canCheck
-    if (before && !canCheck && fell()) title.current?.focus()
-  }, [canCheck])
+    const before = could.current
+    could.current = { canCheck, canReplace }
+    if (((before.canCheck && !canCheck) || (before.canReplace && !canReplace)) && fell()) title.current?.focus()
+  }, [canCheck, canReplace])
   const titleId = `row-title-${account.id}`
   const accountLine = `row-account-${account.id}`
   return html`
@@ -492,7 +496,7 @@ function AccountRow({ facts, checks, removals, replacements }: {
       ${left === null
         ? html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`
         : html`<p class="hint">${left.kind === 'removal' ? removalWords(left.stage, account.held) : replacementWords(left.stage)}</p>`}
-      ${account.held.kind === 'key' && left?.kind !== 'removal'
+      ${canReplace
         ? html`<${ReplaceArea} accountId=${account.id} replacements=${replacements} card=${`${titleId} ${accountLine}`} again=${left?.kind === 'replacement'} />`
         : null}
       ${account.held.kind === 'key'

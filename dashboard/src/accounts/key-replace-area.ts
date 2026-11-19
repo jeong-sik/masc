@@ -38,7 +38,7 @@ function refusedWords(code: Exclude<ReplacementStopped, 'unrecognised'>): string
     case 'internal_error': return '서버가 예상하지 못한 까닭으로 거절했어요. key 는 바뀌지 않았어요.'
     case 'replacement_not_recorded': return '서버가 바꾸기를 기록하지 못했어요. 서버에 있는 key 는 그대로예요. key 를 다시 보내 주세요.'
     case 'key_not_stored':
-      return '서버가 바꾸기를 기록했고, 새 key 파일은 놓지 못했어요. 예전 key 는 더 쓰이지 않아서 지금 이 계정에는 key 가 없어요. key 를 다시 보내 주세요.'
+      return '서버가 바꾸기를 기록했고, 새 key 파일은 놓지 못했어요. 예전 key 는 더 쓰이지 않아요. key 를 다시 보내 주세요.'
     case 'not_a_key_account': return '로그인으로 연결한 계정이라 key 를 바꿀 수 없어요.'
   }
 }
@@ -134,7 +134,7 @@ export function ReplaceArea({ accountId, replacements, card, again }: {
     if (sending || input === null || input.value === '') return
     const key = input.value
     // The key stays in the field until the server took it or may have.
-    void replacements.replace(accountId, key).then((kept) => { if (kept === 'dropped' && input.value === key) input.value = '' })
+    void replacements.replace(accountId, key).then((kept) => { if (kept === 'dropped') input.value = '' })
   }
   const id = `replace-${accountId}`
   const steps = `replace-steps-${accountId}`

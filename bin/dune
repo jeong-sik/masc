@@ -2247,7 +2247,8 @@
  (name masc_tui_list_moves)
  (wrapped false)
  (modules masc_tui_list_moves)
- (libraries masc_tui_types masc_tui_home masc_tui_scroll))
+ ; masc_tui_keys holds the words the Tools footer picks from tools_keys.
+ (libraries masc_tui_types masc_tui_home masc_tui_scroll masc_tui_keys))
 
 ; The health section an operator action names, decoded from its wire name.
 (library

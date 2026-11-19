@@ -2524,6 +2524,29 @@ let test_activity_search_lands_on_the_row_the_cursor_reads () =
   Alcotest.(check bool) "a filter that leaves no row opens no search" true
     (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting))
 
+(* The Tools footer names j/k and Esc from what they do (RFC
+   tui-one-screen-grammar §3.1). Enter on a Skill turns the same two keys to
+   its page, and a footer that said the same before and after left the reader
+   to guess which one was on screen. *)
+let test_tools_footer_says_what_j_k_and_esc_do () =
+  let module K = Masc_tui_keys in
+  let list_moves, list_back = K.tools_footer_moves_and_back K.Tools_walks_list in
+  let page_moves, page_back = K.tools_footer_moves_and_back K.Tools_reads_skill_page in
+  let pane_moves, pane_back = K.tools_footer_moves_and_back K.Tools_reads_page in
+  check str "the list and the page name the same move key" list_moves.key page_moves.key;
+  check str "the list and the page name the same back key" list_back.key page_back.key;
+  Alcotest.(check bool) "j/k on the page is another binding than on the list" false
+    (list_moves = page_moves);
+  Alcotest.(check bool) "Esc on the page is another binding than on the list" false
+    (list_back = page_back);
+  Alcotest.(check bool) "a pane with no list scrolls as the page does" true
+    (pane_moves = page_moves);
+  Alcotest.(check bool) "a pane with no list leaves as the list does" true
+    (pane_back = list_back);
+  let footer keys = K.footer_hints_tools ~lang:Lang_en ~pane:Tools_surface ~keys in
+  Alcotest.(check bool) "the footer changes when Enter turns the keys" false
+    (String.equal (footer K.Tools_walks_list) (footer K.Tools_reads_skill_page))
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2555,7 +2578,9 @@ let () =
             `Quick test_input_that_is_not_the_second_press_cancels
         ] )
     ; ( "projections"
-      , [ Alcotest.test_case "schedule display name uses the named field" `Quick
+      , [ Alcotest.test_case "the Tools footer says what j/k and Esc do" `Quick
+            test_tools_footer_says_what_j_k_and_esc_do
+        ; Alcotest.test_case "schedule display name uses the named field" `Quick
             test_schedule_who_uses_the_named_field
         ; Alcotest.test_case "a schedule row reads only its Keepers' queues" `Quick
             test_a_schedule_row_reads_only_its_keepers_queues

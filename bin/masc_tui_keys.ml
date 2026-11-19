@@ -542,6 +542,85 @@ let tools_bracket_binding ~pane =
   b ~ko Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
 
+(* What j/k and Esc do on the Tools pane on screen (RFC tui-one-screen-grammar
+   §3.1). [Masc_tui_list_moves.tools_keys] reads it from the state the
+   dispatcher reads, and the footer takes its two bindings from it. *)
+type tools_keys =
+  | Tools_walks_list
+  | Tools_reads_skill_page
+  | Tools_reads_page
+
+(* The sheet's j/k says every pane at once. A footer says the one on screen. *)
+let tools_move_or_scroll =
+  b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll"
+    ~help:"in Available, select a Skill, and after Enter or f scroll its page; \
+           in async runs, select an original request; the other sections \
+           and an open request scroll; the wheel scrolls the page in every \
+           section"
+
+let tools_move = b ~ko:"이동" Navigate "j/k" "move"
+let tools_scroll = b ~ko:"스크롤" Navigate "j/k" "scroll"
+
+let tools_back_features =
+  b ~ko:"기능" Act "Esc" "features"
+    ~help:"return from original Task to request, then request to list, \
+           and from a Skill's page to the Skill list; otherwise back to \
+           Features & plugins"
+
+let tools_back_list = b ~ko:"목록" Act "Esc" "list"
+
+let tools_footer_moves_and_back = function
+  | Tools_walks_list -> tools_move, tools_back_features
+  | Tools_reads_skill_page -> tools_scroll, tools_back_list
+  | Tools_reads_page -> tools_scroll, tools_back_features
+
+let tools_bindings ~moves ~back ~bracket =
+  [ moves
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+  ; b ~ko:"다음 탭" Navigate "p" "section"
+      ~help:"available / async runs / receipts / usage / all tools. \
+             Available shows the selected Keeper's exposed tools and Skills; \
+             ORIGIN names the tool source. Async runs shows workspace requests \
+             and recovery: active counts active ledger requests, runtime-owned \
+             means a current runtime owner, ownership-unknown is unconfirmed. \
+             Receipts keeps current-session Skill evidence: triggered=invoked, \
+             delivered/handed off=delivered, actions=later tool actions. \
+             These are separate events; no record does not prove no use. \
+             Usage aggregates recorded calls by exact Skill revision across \
+             current Keeper sessions; last use is the ledger's recorded time, \
+             and unread ledgers stay qualified. \
+             All tools lists process-wide registrations, separately from \
+             a Keeper's callable surface and observed calls. \
+             DIRECT=direct calls allowed; SURFACES=exposure paths; \
+             none=no exposure path. Use Skill receipts for usage evidence \
+             and Activity for tool input/output."
+  ; b ~ko:"조합 성능" Act "f" "Composition performance"
+      ~help:"outside async requests, select the next Composition, load its \
+             exact-revision performance charts and open its page at them; \
+             Esc returns to the Skill list on it"
+  ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph"
+      ~help:"outside async requests, preview the selected Composition Skill's \
+             declared graph with Pele; Normal Skills have none, and f selects \
+             a Composition"
+  (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
+     "\r" arm) is named on the sheet's Enter row only. The footer table
+     cannot carry Enter -- the fitter never drops it -- so advertising it
+     here squeezed the action diagnosis out of the 98-cell row and broke
+     the sheet-only contract (test_tui_keys, tools_detail_bindings). *)
+  ; bracket
+  ; b ~ko:"새 스킬" Act "c / C" "new Skill"
+      ~help:"open $EDITOR on a template for a new Skill; c starts an \
+             instruction Skill, C starts a composition Skill"
+  ; b ~ko:"스킬 편집" Act "e" "edit Skill"
+      ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
+  ; b ~ko:"스킬 삭제" Act "d" "delete Skill"
+      ~help:"remove the selected published package; press d again on the \
+             same row to confirm"
+  ; back
+  ]
+  @ [ tools_refresh; listing_next; listing_quit ]
+
 type metrics_key_scope =
   | Metrics_all
   | Metrics_usage
@@ -1350,55 +1429,8 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Tools ->
-      [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll"
-          ~help:"in Available, select a Skill, and after Enter scroll its page; \
-                 in async runs, select an original request; the other sections \
-                 and an open request scroll"
-      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
-      ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
-      ; b ~ko:"다음 탭" Navigate "p" "section"
-          ~help:"available / async runs / receipts / usage / all tools. \
-                 Available shows the selected Keeper's exposed tools and Skills; \
-                 ORIGIN names the tool source. Async runs shows workspace requests \
-                 and recovery: active counts active ledger requests, runtime-owned \
-                 means a current runtime owner, ownership-unknown is unconfirmed. \
-                 Receipts keeps current-session Skill evidence: triggered=invoked, \
-                 delivered/handed off=delivered, actions=later tool actions. \
-                 These are separate events; no record does not prove no use. \
-                 Usage aggregates recorded calls by exact Skill revision across \
-                 current Keeper sessions; last use is the ledger's recorded time, \
-                 and unread ledgers stay qualified. \
-                 All tools lists process-wide registrations, separately from \
-                 a Keeper's callable surface and observed calls. \
-                 DIRECT=direct calls allowed; SURFACES=exposure paths; \
-                 none=no exposure path. Use Skill receipts for usage evidence \
-                 and Activity for tool input/output."
-      ; b ~ko:"조합 성능" Act "f" "Composition performance"
-          ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
-      ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph"
-          ~help:"outside async requests, preview the selected Composition Skill's \
-                 declared graph with Pele; Normal Skills have none, and f selects \
-                 a Composition"
-      (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
-         "\r" arm) is named on the sheet's Enter row only. The footer table
-         cannot carry Enter -- the fitter never drops it -- so advertising it
-         here squeezed the action diagnosis out of the 98-cell row and broke
-         the sheet-only contract (test_tui_keys, tools_detail_bindings). *)
-      ; tools_bracket_binding ~pane:Tools_surface
-      ; b ~ko:"새 스킬" Act "c / C" "new Skill"
-          ~help:"open $EDITOR on a template for a new Skill; c starts an \
-                 instruction Skill, C starts a composition Skill"
-      ; b ~ko:"스킬 편집" Act "e" "edit Skill"
-          ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b ~ko:"스킬 삭제" Act "d" "delete Skill"
-          ~help:"remove the selected published package; press d again on the \
-                 same row to confirm"
-      ; b ~ko:"기능" Act "Esc" "features"
-          ~help:"return from original Task to request, then request to list, \
-                 and from a Skill's page to the Skill list; otherwise back to \
-                 Features & plugins"
-      ]
-      @ [ tools_refresh; listing_next; listing_quit ]
+      tools_bindings ~moves:tools_move_or_scroll ~back:tools_back_features
+        ~bracket:(tools_bracket_binding ~pane:Tools_surface)
   | System_logs ->
       (* [e] leads, as [e / l] leads on Events. The title row draws the
          Events / Logs strip only where its readings leave room, and at 80
@@ -1519,15 +1551,12 @@ let tools_diagnostics_bindings =
              selected Skill's whole revision"
   ]
 
-let footer_hints_tools ~lang ~pane =
-  let bracket = tools_bracket_binding ~pane in
-  let bindings =
-    List.map (fun (binding : binding) ->
-       if String.equal binding.key bracket.key then bracket else binding)
-       (for_surface Tools) in
+let footer_hints_tools ~lang ~pane ~keys =
+  let moves, back = tools_footer_moves_and_back keys in
+  let bindings = tools_bindings ~moves ~back ~bracket:(tools_bracket_binding ~pane) in
   (* What a reading with no selection takes: it scrolls and moves on. *)
   let reading =
-    [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+    [ tools_scroll
     ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
     ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
     ; b ~ko:"다음 탭" Navigate "p" "section" ]

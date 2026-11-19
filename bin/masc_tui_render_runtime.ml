@@ -1180,7 +1180,8 @@ let render_tools (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_tools ~lang:state.ui_language ~pane:state.tools_pane));
+       ~hints:(Masc_tui_keys.footer_hints_tools ~lang:state.ui_language ~pane:state.tools_pane
+                 ~keys:(Masc_tui_list_moves.tools_keys state)));
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 

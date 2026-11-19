@@ -546,6 +546,40 @@ let test_tools_readings_answer_no_list_move () =
   Alcotest.(check bool) "the source picker keeps the move keys" true
     (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
 
+(* The footer's j/k and Esc words come from [tools_keys], which reads the
+   state the keys read. A footer that said "move" on a reading or "features"
+   on a Skill's page named a key the dispatcher does not run there. *)
+let test_tools_keys_say_what_the_keys_do () =
+  let module Keys = Masc_tui_keys in
+  let keys =
+    Alcotest.testable
+      (fun ppf (value : Keys.tools_keys) ->
+        Format.pp_print_string ppf
+          (match value with
+           | Keys.Tools_walks_list -> "walks the list"
+           | Keys.Tools_reads_skill_page -> "reads the Skill's page"
+           | Keys.Tools_reads_page -> "reads the page"))
+      ( = )
+  in
+  let state = tools_surface 3 in
+  Alcotest.check keys "the Skill list" Keys.Tools_walks_list (Moves.tools_keys state);
+  Moves.read_skill_page state;
+  Alcotest.check keys "after Enter, the Skill's page" Keys.Tools_reads_skill_page
+    (Moves.tools_keys state);
+  ignore (Moves.choose_skill_again state);
+  Alcotest.check keys "after Esc, the list again" Keys.Tools_walks_list (Moves.tools_keys state);
+  Alcotest.check keys "an empty Skill list scrolls" Keys.Tools_reads_page
+    (Moves.tools_keys (tools_surface 0));
+  List.iter
+    (fun pane ->
+      state.tools_pane <- pane;
+      Alcotest.check keys "a pane with no list scrolls" Keys.Tools_reads_page (Moves.tools_keys state))
+    [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list ];
+  let async = tools_async [ "a"; "b" ] in
+  Alcotest.check keys "the request list" Keys.Tools_walks_list (Moves.tools_keys async);
+  async.tools_async_detail_open <- true;
+  Alcotest.check keys "an open request scrolls" Keys.Tools_reads_page (Moves.tools_keys async)
+
 (* The frame finds the selection where it is drawn now, so the follow runs
    after the key moved it. A follow that ran first would hold the window on
    the row the key left, and j on the window's last row would walk the
@@ -599,6 +633,8 @@ let () =
             test_tools_readings_answer_no_list_move
         ; Alcotest.test_case "the follow sees where the key landed" `Quick
             test_tools_follow_sees_where_the_key_landed
+        ; Alcotest.test_case "the footer's keys say what the keys do" `Quick
+            test_tools_keys_say_what_the_keys_do
         ] )
     ; ( "detail height"
       , [ Alcotest.test_case "a detail keeps the tallest height" `Quick

@@ -46,6 +46,18 @@ let choose_skill_again (state : state) =
   | Tools_surface, Choosing_skill
   | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> false
 
+(* What the footer says j/k and Esc do: read from [tools_list] and the focus,
+   the two facts the move keys and Esc's arm read. *)
+let tools_keys (state : state) : Masc_tui_keys.tools_keys =
+  match tools_list state with
+  | Some (Tools_skills | Tools_async_requests) -> Masc_tui_keys.Tools_walks_list
+  | None -> (
+      match state.tools_pane, state.tools_skill_focus with
+      | Tools_surface, Reading_page -> Masc_tui_keys.Tools_reads_skill_page
+      | Tools_surface, Choosing_skill
+      | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ ->
+          Masc_tui_keys.Tools_reads_page)
+
 let show_tools_pane (state : state) pane =
   state.tools_pane <- pane;
   state.tools_skill_focus <- Choosing_skill

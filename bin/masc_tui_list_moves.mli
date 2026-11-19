@@ -31,16 +31,21 @@ val tools_list : Masc_tui_types.state -> tools_list option
     with nothing in it: a page with no Skill or no request still scrolls. *)
 
 val read_skill_page : Masc_tui_types.state -> unit
-(** Enter on Available, after the selected Skill's evidence is asked for:
-    the move keys read the whole page -- the Skill's flow, its evidence, the
-    tool table -- instead of walking the list. With no Skill selected there
-    is nothing to read, and the keys stay where they were. Other panes keep
-    their own Enter. *)
+(** Enter or f on Available, after the selected Skill's evidence is asked
+    for: the move keys read the whole page -- the Skill's flow, its
+    evidence, the tool table -- instead of walking the list. With no Skill
+    selected there is nothing to read, and the keys stay where they were.
+    Other panes keep their own Enter. *)
 
 val choose_skill_again : Masc_tui_types.state -> bool
 (** Esc on Available while its page is read: the move keys walk the Skill
     list again. [true] when Esc was spent this way, so the caller brings the
     selected Skill back on screen and Esc goes no further out. *)
+
+val tools_keys : Masc_tui_types.state -> Masc_tui_keys.tools_keys
+(** What the Tools footer says j/k and Esc do, from the same state
+    {!tools_list} and {!choose_skill_again} read: a list walked, the chosen
+    Skill's page read, or a page with no list. *)
 
 val show_tools_pane : Masc_tui_types.state -> Masc_tui_types.tools_pane -> unit
 (** Change the Tools pane. A page read on Available belongs to that visit,

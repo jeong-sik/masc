@@ -17,6 +17,7 @@ import { createChecks } from './check'
 import { createConnect } from './connect'
 import { createKeyAdds } from './key-add'
 import { createRemovals } from './key-remove'
+import { createReplacements } from './key-replace'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
 import type { TalkModel, TalkView } from './talk'
 import { csrfHeader } from './wire'
@@ -447,6 +448,7 @@ const subscriptionsShowing = (panel: PanelView): SubscriptionsModel => ({
   checking: createChecks({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   adding: createKeyAdds({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   removing: createRemovals({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  replacing: createReplacements({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   stop: vi.fn(),
 })
 const readPanel = (mine: Owned = owned): PanelView => ({ kind: 'read', forUser: 'usr_first', integrations: [claude, codex], owned: mine })

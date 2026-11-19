@@ -120,9 +120,11 @@ val register
       request of a person leads to.
     - 503 [replacement_not_recorded]: the record was not written, the key
       of the account was not changed, and the zone did not stop. The person
-      sends the key again. It is the answer too when the folder of the
-      files of the person was not reached: no record was tried then. A commit that wrote its intent and
-      not its record blocks the account until then (the same RFC, 3.7).
+      sends the key again. A commit that wrote its intent and not its
+      record blocks the account until then (the same RFC, 3.7). It is the
+      answer too when the runtime root of the person or the home of the
+      account was not reached: no record was tried then, and the zone was
+      not asked.
     - 503 [key_not_stored]: the record was written and the new key was not
       put in place. The key before is not read, and the server removes the
       folder of the keys of the account, so the account has no key until

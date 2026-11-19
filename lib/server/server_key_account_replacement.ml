@@ -35,18 +35,28 @@ let held (person : Login.person) id =
   |> Result.map_error (fun refusal -> Refused refusal)
 ;;
 
-(* Before the record: the runtime root of the person, under which the
-   folder of the keys of the account is. Under a root that is not reached
-   the key of the record could not be written, and a store that failed
-   could not clear the folder. So the replacement is turned down while
-   nothing was written, and every failure after the record is one of a
-   folder this process reaches. *)
+(* Before the record: the runtime root of the person, and under it the home
+   of the account, made or looked at as the store of the key does first
+   ({!Files.make_home}). [Login.person_runtime_root] takes a name that is
+   there as the root: a link that leads nowhere is one. The home is made
+   under the real path of the root, the path the store and the removal of
+   the folder of the keys spell theirs from.
+
+   Under a root that is not reached the key of the record could not be
+   written, and a store that failed could not clear the folder of the
+   keys. So the replacement is turned down while no record is written. A
+   root that goes away between this and the store is not held. *)
 let reached (person : Login.person) ~base_path id =
   match Login.person_runtime_root person ~base_path with
-  | Ok runtime_root -> Ok runtime_root
   | Error (_ : string) ->
     logged id "it was not recorded" "the runtime root of the person was not made";
     Error Files_not_reached
+  | Ok runtime_root ->
+    (match Files.make_home ~runtime_root ~account_id:id with
+     | Ok () -> Ok runtime_root
+     | Error detail ->
+       logged id "it was not recorded" ("the home of the account was not reached: " ^ detail);
+       Error Files_not_reached)
 ;;
 
 (* The second step, and the generation the record names.

@@ -73,7 +73,7 @@ let test_labels_name_the_channel_or_say_the_name_is_unknown () =
       (Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()))
   in
   check (list string) "known name with id, unknown name said so"
-    [ "general (111)"; "333 (name unknown)"; "C9 (name unknown)" ]
+    [ "general (111)"; "333 (name not reported)"; "C9 (name not reported)" ]
     labels;
   check bool "a line break in a name does not reach the terminal" false
     (String.contains

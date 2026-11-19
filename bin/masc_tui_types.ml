@@ -24214,7 +24214,7 @@ let keeper_log_rows (state : state) ~cols =
         if reading.kes_active_count > 0 then
           Printf.sprintf "%d active" reading.kes_active_count
         else if reading.kes_closed then "closed"
-        else "state unknown" in
+        else "state not reported" in
       let status = match reading.kes_status with
         | `Null -> "" | status -> " · " ^ Yojson.Safe.to_string status in
       let header = text_rows Keeper_log_notice ("Execute output · " ^ state_text ^ status) in

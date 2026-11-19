@@ -1860,7 +1860,7 @@ let overview_lines ~width view =
         let count = List.length (List.filter (fun item -> not (retained item)) snapshot.instances) in
         let retained_count = List.length (List.filter retained snapshot.instances) in
         let configuration_summary = match snapshot.configuration with
-          | None -> "TOML unknown"
+          | None -> "TOML not reported"
           | Some config ->
               let declared = List.fold_left (fun total (declaration : declaration) ->
                 if Option.is_some declaration.desired then total + 1 else total)

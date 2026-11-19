@@ -156,7 +156,7 @@ let result_label = function
       | Awaiting_result -> "waiting"
       | Failed -> "failed"
       | Never_returned -> "not seen"
-      | Outcome_unrecorded -> "unknown"
+      | Outcome_unrecorded -> "not recorded"
       | Native_running -> "native running"
       | Native_ended -> "native ended"
       | Native_failed -> "native failed"

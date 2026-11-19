@@ -13,6 +13,8 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 }))
 
 import {
+  activeSchedulesProjection,
+  subscribeActiveSchedulesRefresh,
   subscribeScheduledAutomationRefresh,
   loadScheduledAutomation,
   scheduledAutomationProjection,
@@ -132,5 +134,84 @@ describe('scheduled automation refresh', () => {
       await vi.advanceTimersByTimeAsync(60_000)
       expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
     } finally { stop() }
+  })
+})
+
+// #52961: the calendar draws the schedules that are still going to run. That
+// is another page of the same route, with its own reader.
+describe('active schedules refresh', () => {
+  const activeOnlyOf = (call: unknown[]) =>
+    (call[0] as { activeOnly?: boolean } | undefined)?.activeOnly === true
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    confirmRuntimeTestWorkspace()
+    mocks.fetchDashboardScheduledAutomation.mockReset()
+  })
+
+  afterEach(() => {
+    acceptedExecutionWorkspace.value = null
+    vi.clearAllTimers()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('asks for the active-only page and reads it again on a schedule change', async () => {
+    mocks.fetchDashboardScheduledAutomation.mockResolvedValue(emptyProjection())
+    const stop = subscribeActiveSchedulesRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf)).toEqual([true])
+      expect(activeSchedulesProjection.value?.state).toBe('available')
+
+      publishDashboardObservationChange({ topic: 'scheduled_automation' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf)).toEqual([true, true])
+    } finally { stop() }
+  })
+
+  it('is read by its own subscribers only, and the fleet page by its own', async () => {
+    mocks.fetchDashboardScheduledAutomation.mockResolvedValue(emptyProjection())
+    const stopFleet = subscribeScheduledAutomationRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      publishDashboardObservationChange({ topic: 'scheduled_automation' })
+      await vi.advanceTimersByTimeAsync(0)
+      // Nobody has the calendar open: no active-only read.
+      expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf)).toEqual([false, false])
+
+      const stopActive = subscribeActiveSchedulesRefresh()
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf))
+          .toEqual([false, false, true])
+      } finally { stopActive() }
+
+      // The calendar closed: a change is read by the fleet page alone again.
+      publishDashboardObservationChange({ topic: 'scheduled_automation' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf))
+        .toEqual([false, false, true, false])
+    } finally { stopFleet() }
+  })
+
+  it('withdraws the page it held when the calendar opens again', async () => {
+    let finish!: (projection: DashboardScheduledAutomationProjection) => void
+    mocks.fetchDashboardScheduledAutomation.mockResolvedValueOnce(emptyProjection())
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const stopFirst = subscribeActiveSchedulesRefresh()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(activeSchedulesProjection.value?.state).toBe('available')
+    stopFirst()
+
+    const stopSecond = subscribeActiveSchedulesRefresh()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      // The page read while the calendar was last open is not drawn as now.
+      expect(activeSchedulesProjection.value).toBeNull()
+      finish(emptyProjection())
+      await vi.advanceTimersByTimeAsync(0)
+      expect(activeSchedulesProjection.value?.state).toBe('available')
+    } finally { stopSecond() }
   })
 })

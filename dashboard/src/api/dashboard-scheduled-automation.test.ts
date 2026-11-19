@@ -230,5 +230,25 @@ describe('fetchDashboardScheduledAutomation', () => {
     const requested = fetchMock.mock.calls.map(call => String(call[0]))
     expect(requested.some(url => url.includes('/api/v1/dashboard/scheduled-automation'))).toBe(true)
     expect(requested.some(url => url.includes('/api/v1/dashboard/tools'))).toBe(false)
+    // The fleet page carries no selector.
+    expect(requested.some(url => url.includes('active_only'))).toBe(false)
+  })
+
+  it('asks for the active-only page when told to (#52961)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: 'idle', request_count: 0, counts: {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardScheduledAutomation({ activeOnly: true })
+
+    const requested = fetchMock.mock.calls.map(call => String(call[0]))
+    expect(requested.some(url =>
+      url.includes('/api/v1/dashboard/scheduled-automation?active_only=true'))).toBe(true)
   })
 })

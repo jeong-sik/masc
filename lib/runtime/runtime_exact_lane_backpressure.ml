@@ -71,7 +71,9 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
       (Keeper_runtime_failure_route.usable_retry_after retry_after_s) in
     observe_slot ~resolved ~slot_id
       (Standing.Hard_quota {source=Runtime_quota_window.Payment_refused; resets_at})
-  | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started} ->
+  | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started}
+  | Exact.Provider_context_overflow
+      {error; http_status=None; dispatch=Exact.Generation_dispatch_started} ->
     Option.iter
       (fun (runtime : Registry.runtime_observation) ->
         (* NDT-OK: only the actual dispatched attempt's frozen identity owns
@@ -94,6 +96,8 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
       ; _
       }
   | Exact.Completion_failed {dispatch=Exact.No_generation_dispatch; _}
+  | Exact.Provider_context_overflow {http_status=Some _; _}
+  | Exact.Provider_context_overflow {http_status=None; dispatch=Exact.No_generation_dispatch; _}
   | Exact.Response_body_deadline_exceeded
   | Exact.Output_limit_reached
   | Exact.Window_reached _

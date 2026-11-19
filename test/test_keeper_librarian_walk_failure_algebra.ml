@@ -193,6 +193,38 @@ let test_named_causes_survive_the_receipt_codec () =
     ; EO.Window_reached {output=No_output}
     ; EO.Window_reached {output=Partial_output} ]
 
+let test_provider_context_overflow_keeps_the_stored_shape () =
+  let error =
+    Agent_core.Llm_provider.Http_client.ProviderFailure
+      { kind = Agent_core.Llm_provider.Http_client.Context_overflow { limit = Some 8192 }
+      ; message = "typed overflow"
+      }
+  in
+  let with_status =
+    EO.Provider_context_overflow
+      { error; http_status = Some 400; dispatch = EO.Generation_dispatch_started }
+  in
+  let without_status =
+    EO.Provider_context_overflow
+      { error; http_status = None; dispatch = EO.No_generation_dispatch }
+  in
+  let stored cause = Yojson.Safe.to_string (S.api_observation_to_yojson (S.api_observation cause)) in
+  Alcotest.(check string) "an observed status keeps the old provider-refusal row"
+    {|["Provider_refused",{"http_status":400,"refusal":["Context_overflow"]}]|}
+    (stored with_status);
+  Alcotest.(check string) "no status keeps the old sent-completion row without a status"
+    {|["Completion_failed",{"sent":false,"cause":["Context_overflow_failure"]}]|}
+    (stored without_status);
+  List.iter
+    (fun cause ->
+       match S.api_observation cause |> S.api_observation_to_yojson
+             |> S.api_observation_of_yojson with
+       | Ok observed ->
+         Alcotest.(check (list string)) "the stored cause names the context overflow"
+           ["context_overflow"] (refusals (S.of_api_observation observed))
+       | Error detail -> Alcotest.fail detail)
+    [with_status; without_status]
+
 let test_after_cli_fallback_drops_prior_limit () =
   let prior = S.combine (named EO.Input_capacity) (measured "cli-primary" 23 17) in
   let fallback =
@@ -229,7 +261,9 @@ let () =
       ; Alcotest.test_case "a window stop keeps one stored observation per output" `Quick
           test_window_stop_observations
       ; Alcotest.test_case "an unclassified status keeps the stored tag" `Quick
-          test_unclassified_status_keeps_the_stored_tag ]
+          test_unclassified_status_keeps_the_stored_tag
+      ; Alcotest.test_case "a typed context overflow keeps its stored shape" `Quick
+          test_provider_context_overflow_keeps_the_stored_shape ]
     ; "fallback"
     , [ Alcotest.test_case "after_cli_fallback drops the prior limit" `Quick
           test_after_cli_fallback_drops_prior_limit ] ]

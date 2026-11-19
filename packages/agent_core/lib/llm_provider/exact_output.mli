@@ -362,6 +362,15 @@ type execution_error_cause =
               hint (body takes priority). [None] for other refusals.
               Not part of flow evidence. *)
       }
+  | Provider_context_overflow of
+      { error : Http_client.http_error
+      ; http_status : int option
+      ; dispatch : generation_dispatch_fact
+      }
+      (** The provider codec typed a context overflow. It keeps that type
+          whether the receipt has an HTTP status or not; [None] never invents
+          a response status. The original typed error and dispatch fact stay
+          available to older consumers. *)
   | Output_limit_reached
       (** The normalized provider stop reason is [Types.MaxTokens]. No JSON
           output was accepted; distinct from refusal and other incomplete stops. *)

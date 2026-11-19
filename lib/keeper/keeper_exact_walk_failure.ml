@@ -162,6 +162,14 @@ let completion (error : Http_client.http_error) = match error with
 let api_observation (cause : Exact_output.execution_error_cause) = match cause with
   | Provider_response_refused {http_status;refusal;_} ->
     Provider_refused {http_status;refusal=provider_cause refusal}
+  | Provider_context_overflow {error;http_status;dispatch} ->
+    (match http_status with
+     | Some http_status -> Provider_refused {http_status;refusal=Context_overflow}
+     | None ->
+       Completion_failed
+         { sent = (match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true)
+         ; cause = completion error
+         })
   | Completion_failed {dispatch;error} ->
     Completion_failed {sent=(match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true);
       cause=completion error}

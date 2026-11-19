@@ -105,6 +105,22 @@ let test_execution_error_cause () =
     ; ( EO.Provider_response_refused
           { http_status = 429; refusal = EO.Rate_limited; retry_after_s = None }
       , "provider refused (http_status=429 refusal=rate_limited)" )
+    ; ( EO.Provider_context_overflow
+          { error =
+              Http.ProviderFailure
+                { kind = Http.Context_overflow { limit = Some 8192 }; message = "" }
+          ; http_status = None
+          ; dispatch = EO.No_generation_dispatch
+          }
+      , "provider context overflow (http_status=none, not sent)" )
+    ; ( EO.Provider_context_overflow
+          { error =
+              Http.ProviderFailure
+                { kind = Http.Context_overflow { limit = Some 8192 }; message = "" }
+          ; http_status = Some 400
+          ; dispatch = EO.Generation_dispatch_started
+          }
+      , "provider context overflow (http_status=400, sent)" )
     ; EO.Output_limit_reached, "output limit reached"
     ; ( EO.Window_reached { output = EO.No_output }
       , "context window reached (no output)" )

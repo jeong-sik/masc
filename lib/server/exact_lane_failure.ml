@@ -81,6 +81,7 @@ let completion (error : Http.http_error) =
 let execution = function
   | Exact.Provider_response_refused { refusal = provider_refusal; retry_after_s; _ } ->
     refusal ~retry_after_s provider_refusal
+  | Exact.Provider_context_overflow { error; _ } -> completion error
   | Exact.Completion_failed { error; _ } -> completion error
   | Exact.Response_body_deadline_exceeded -> Transient
   | Exact.Output_limit_reached -> Output_limit

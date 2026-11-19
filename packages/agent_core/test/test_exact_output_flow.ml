@@ -4915,7 +4915,7 @@ let test_payment_required_402_keeps_retry_after_body_header_priority () =
                (refusal = EO.Payment_required);
              check (option (float 0.0)) (label ^ " preserves the actual account reset")
                expected retry_after_s
-           | EO.Completion_failed _ | EO.Response_body_deadline_exceeded
+           | EO.Completion_failed _ | EO.Response_body_deadline_exceeded | EO.Provider_context_overflow _
            | EO.Output_limit_reached | EO.Window_reached _ | EO.Incomplete_output _
            | EO.Missing_output | EO.Ambiguous_output _ | EO.Unexpected_output_content
            | EO.Invalid_json_output ->
@@ -4954,8 +4954,8 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       ( Cohttp.Code.status_of_code 400
       , {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} )
     ~assert_cause:(function
-      | EO.Provider_response_refused
-          { http_status = 400; refusal = EO.Context_overflow; _ } -> ()
+      | EO.Provider_context_overflow
+          { http_status = Some 400; dispatch = EO.Generation_dispatch_started; _ } -> ()
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
     ()
 ;;

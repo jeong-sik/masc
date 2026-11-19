@@ -174,9 +174,11 @@ val render :
   Masc_tui_pane_selection.layout *
   Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame *
   (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t *
-  Masc_tui_types.tools_task_frame option
+  Masc_tui_types.tools_task_frame option *
+  Masc_tui_types.drawn_list list
 (** The frame without press marks, where each marked text landed in it, and
-    where each of its panes sits. Commit the zones, panes, and Activity
+    where each of its panes sits, and the lists it drew with the rows each
+    was drawn in. Commit the zones, panes, and Activity
     input authority and chat row actions only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
     reading for this synchronous Build only. Frame preparation and drawing
     may force it; neither awaits, shares it with another domain, nor mutates

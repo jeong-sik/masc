@@ -111,6 +111,16 @@ let acting_pane_reserved_cols = ref 0
 let frame_acting_pane = ref Masc_tui_acting_pane.empty_frame
 let frame_tools_task : tools_task_frame option ref = ref None
 
+(* The renderer that cuts a list's window is the only one that knows how many
+   rows it cut, so it says so here, and the key that pages the list reads
+   that and nothing else. *)
+let frame_lists : drawn_list list ref = ref []
+
+let report_drawn_list list ~height =
+  frame_lists :=
+    { dl_list = list; dl_height = height }
+    :: List.filter (fun (drawn : drawn_list) -> drawn.dl_list <> list) !frame_lists
+
 (* Context insertion changes the screen row for every Activity target below
    it. Keep focus inside the pane on its stable header when that happens. *)
 let acting_pane_context_rows = ref 0

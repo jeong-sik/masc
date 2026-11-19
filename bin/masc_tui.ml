@@ -8348,12 +8348,11 @@ type row_list = Masc_tui_list_moves.row_list = {
   rl_place : int -> unit;
 }
 
-(* The list a surface draws: its row cursor and the rows it is drawn in,
-   which is what a page key moves by (RFC tui-one-screen-grammar §3.1). The
-   height is a fourth fact about the same list and is built in the same
-   arm, so a list cannot be paged by a height it was not drawn in. *)
+(* The list a surface draws: its row cursor, and the list it is, whose
+   drawn height the frame reports and a page key moves by (RFC
+   tui-one-screen-grammar §3.1). *)
 type on_screen = Masc_tui_list_moves.on_screen = {
-  os_height : int;
+  os_page : Masc_tui_list_moves.page_height;
   os_rows : row_list option;
 }
 
@@ -8387,15 +8386,6 @@ let schedule_detail_on_screen (state : state) =
       List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows
   | Some _, None | None, _ -> None
 
-(* WORKAROUND: these lists cut their window inside the drawing, and no
-   function outside it says how many rows that window is. Their page is the
-   body less the eight rows most surfaces spend around a list, the page every
-   list took before §3.1 asked for the drawn height: on a surface that spends
-   more, PgDn still passes rows nobody saw. Root fix: the renderer names the
-   height it cuts the window at, as [Masc_tui_render_code.code_tree_list_height]
-   does, and the arm reads that; when no arm calls this, delete it. *)
-let unreported_list_height (state : state) = surface_page_rows state + 1
-
 let list_on_screen (state : state) : on_screen option =
   let terminal_rows, cols = get_terminal_size () in
   (* The window follows a named row the same way it follows a step, through
@@ -8410,19 +8400,26 @@ let list_on_screen (state : state) : on_screen option =
         let height = surface_body_height_at state ~cursor scrolled in
         set_scroll (Masc_tui_scroll.ensure_visible_with_lead ~cursor ~lead ~height scroll)
   in
-  let listed ~height rows = Some { os_height = height; os_rows = Some rows } in
+  let listed list rows = Some { os_page = Masc_tui_list_moves.Drawn list; os_rows = Some rows } in
   (* A list whose rows the drawing windows around the cursor: nothing to
      scroll, so the landing is on screen as soon as the cursor names it. *)
-  let windowed ~count ~cursor ~height place =
-    listed ~height { rl_count = count; rl_cursor = cursor; rl_place = place }
+  let windowed list ~count ~cursor place =
+    listed list { rl_count = count; rl_cursor = cursor; rl_place = place }
+  in
+  (* The Task and Goal lists: [Masc_tui_render_work] draws them and does not
+     report them as drawn lists yet, so their height is the one the
+     projection they are drawn with gives. *)
+  let projected ~height ~count ~cursor place =
+    Some
+      { os_page = Masc_tui_list_moves.Projected height
+      ; os_rows = Some { rl_count = count; rl_cursor = cursor; rl_place = place } }
   in
   (* A list with a scroll of its own, which follows the cursor. Its count is
      the one the keypress bound already uses, so a jump cannot land on a row
-     a step cannot reach, and its height is the one the follow uses, which is
-     the height the frame draws it in. *)
-  let scrolling ~cursor ~scroll ~set_cursor ~set_scroll =
+     a step cannot reach. *)
+  let scrolling list ~cursor ~scroll ~set_cursor ~set_scroll =
     Option.bind (scrolled_surface state state.view) (fun scrolled ->
-      listed ~height:(surface_body_height_at state ~cursor scrolled)
+      listed list
         { rl_count = scrolled.sc_count
         ; rl_cursor = cursor
         ; rl_place =
@@ -8445,8 +8442,8 @@ let list_on_screen (state : state) : on_screen option =
         Option.bind (Masc_tui_context_inspector.observed_input reading) (fun input ->
           let count = List.length (Masc_tui_context_inspector.exact_input_items input) in
           if count = 0 then None else
-            windowed ~count ~cursor:state.context_inspector_cursor
-              ~height:(unreported_list_height state) (fun index ->
+            windowed Context_inspector_items ~count ~cursor:state.context_inspector_cursor
+              (fun index ->
               state.context_inspector_cursor <- index;
               state.context_inspector_detail_scroll <- 0)))
     else None
@@ -8454,7 +8451,7 @@ let list_on_screen (state : state) : on_screen option =
     (match state.repository_changes_diff_path with
      | Some _ -> None
      | None ->
-         scrolling ~cursor:state.repository_changes_cursor
+         scrolling Repository_change_rows ~cursor:state.repository_changes_cursor
            ~scroll:state.repository_changes_scroll
            ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
            ~set_scroll:(fun s -> state.repository_changes_scroll <- s))
@@ -8464,27 +8461,19 @@ let list_on_screen (state : state) : on_screen option =
       (* Search chooses a Keeper row, which a folded group opens to show.
          The move keys walk the stops instead ([list_moves]), a page of the
          stops the frame drew. *)
-      let height =
-        match Masc_tui_render_keepers.keeper_plain_list_height state ~terminal_rows ~cols with
-        | Some height -> height
-        (* The grouped views and the Story window: see [unreported_list_height]. *)
-        | None -> unreported_list_height state
-      in
-      windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor ~height
+      windowed Keeper_stops ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
         (choose_keeper_row state)
   | Lanes ->
       (match state.lanes_mode with
        (* The run list keeps a scroll the drawing does not move, so a landing
           brings the window to the run, as j and k already do. *)
        | Lanes_run_list _ ->
-           scrolling ~cursor:state.lane_runs_cursor ~scroll:state.lane_runs_scroll
+           scrolling Lane_runs ~cursor:state.lane_runs_cursor ~scroll:state.lane_runs_scroll
              ~set_cursor:(fun i -> state.lane_runs_cursor <- i)
              ~set_scroll:(fun s -> state.lane_runs_scroll <- s)
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview ->
-           let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-           let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
-           listed ~height:projection.lop_list_height
+           listed Lane_inventory
              {rl_count=lanes_inventory_count state;rl_cursor=state.lanes_cursor;
               rl_place=(fun index ->
                    if index <> state.lanes_cursor then
@@ -8496,43 +8485,43 @@ let list_on_screen (state : state) : on_screen option =
                        (fun scroll -> state.lanes_scroll <- scroll))
                      (lane_inventory_visual_cursor state))})
   | Clients ->
-      scrolling ~cursor:state.clients_surface_cursor
+      scrolling Client_rows ~cursor:state.clients_surface_cursor
         ~scroll:state.clients_surface_scroll
         ~set_cursor:(fun i -> state.clients_surface_cursor <- i)
         ~set_scroll:(fun s -> state.clients_surface_scroll <- s)
   | Verification ->
-      scrolling ~cursor:state.verification_cursor
+      scrolling Verification_rows ~cursor:state.verification_cursor
         ~scroll:state.verification_scroll
         ~set_cursor:(fun i -> state.verification_cursor <- i)
         ~set_scroll:(fun s -> state.verification_scroll <- s)
   | Harness ->
-      scrolling ~cursor:state.harness_cursor
+      scrolling Harness_rows ~cursor:state.harness_cursor
         ~scroll:state.harness_scroll
         ~set_cursor:(fun i -> state.harness_cursor <- i)
         ~set_scroll:(fun s -> state.harness_scroll <- s)
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        scrolling ~cursor:state.memory_facts_cursor
+        scrolling Memory_fact_rows ~cursor:state.memory_facts_cursor
           ~scroll:state.memory_facts_scroll
           ~set_cursor:(fun i -> state.memory_facts_cursor <- i)
           ~set_scroll:(fun s -> state.memory_facts_scroll <- s)
       else
-        scrolling ~cursor:state.memory_health_cursor
+        scrolling Memory_keepers ~cursor:state.memory_health_cursor
           ~scroll:state.memory_health_scroll
           ~set_cursor:(fun i -> state.memory_health_cursor <- i)
           ~set_scroll:(fun s -> state.memory_health_scroll <- s)
   | Repositories ->
-      scrolling ~cursor:state.repositories_cursor
+      scrolling Repository_rows ~cursor:state.repositories_cursor
         ~scroll:state.repositories_scroll
         ~set_cursor:(fun i -> state.repositories_cursor <- i)
         ~set_scroll:(fun s -> state.repositories_scroll <- s)
   | Connectors ->
-      scrolling ~cursor:state.connectors_cursor
+      scrolling Connector_rows ~cursor:state.connectors_cursor
         ~scroll:state.connectors_scroll
         ~set_cursor:(fun i -> state.connectors_cursor <- i)
         ~set_scroll:(fun s -> state.connectors_scroll <- s)
   | Runtime ->
-      scrolling ~cursor:state.runtime_cursor
+      scrolling Runtime_rows ~cursor:state.runtime_cursor
         ~scroll:state.runtime_surface_scroll
         ~set_cursor:(fun i ->
           (* The lane editor's line is about the row the key acted on. *)
@@ -8541,12 +8530,12 @@ let list_on_screen (state : state) : on_screen option =
           state.runtime_cursor <- i)
         ~set_scroll:(fun s -> state.runtime_surface_scroll <- s)
   | System_logs ->
-      scrolling ~cursor:(system_logs_page state).lp_cursor
+      scrolling System_log_rows ~cursor:(system_logs_page state).lp_cursor
         ~scroll:(system_logs_page state).lp_scroll
         ~set_cursor:(fun i -> edit_system_logs_page state (fun page -> {page with lp_cursor=i}))
         ~set_scroll:(fun s -> edit_system_logs_page state (fun page -> {page with lp_scroll=s}))
   | Changes ->
-      scrolling ~cursor:state.changes_cursor
+      scrolling Change_rows ~cursor:state.changes_cursor
         ~scroll:state.changes_scroll
         ~set_cursor:(fun i -> state.changes_cursor <- i)
         ~set_scroll:(fun s -> state.changes_scroll <- s)
@@ -8560,15 +8549,15 @@ let list_on_screen (state : state) : on_screen option =
       then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
-             let height = Masc_tui_render_code.code_pane_content_height state in
-             listed ~height
+             listed Code_file_lines
                { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
                ; rl_place =
                    (fun index ->
                      state.code_file_cursor <- index;
                      state.code_file_scroll <-
-                       Masc_tui_scroll.ensure_visible ~cursor:index ~height
+                       Masc_tui_scroll.ensure_visible ~cursor:index
+                         ~height:(Masc_tui_render_code.code_pane_content_height state)
                          state.code_file_scroll)
                }
          (* Nothing to move through while the file is still being read, and
@@ -8577,16 +8566,14 @@ let list_on_screen (state : state) : on_screen option =
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
-        windowed ~count:(List.length (code_entries state)) ~cursor:state.code_cursor
-          ~height:(Masc_tui_render_code.code_tree_list_height state)
-          (fun index -> state.code_cursor <- index)
+        windowed Code_tree_entries ~count:(List.length (code_entries state))
+          ~cursor:state.code_cursor (fun index -> state.code_cursor <- index)
   | Board ->
       (match state.board_mode with
        | Board_read _ | Board_compose -> None
        | Board_list ->
-           windowed ~count:(List.length (board_posts state))
-             ~cursor:state.board_cursor ~height:(unreported_list_height state) (fun index ->
-               state.board_cursor <- index))
+           windowed Board_post_rows ~count:(List.length (board_posts state))
+             ~cursor:state.board_cursor (fun index -> state.board_cursor <- index))
   | Planning ->
       (match state.planning_mode with
        | Planning_detail _ -> None
@@ -8600,7 +8587,7 @@ let list_on_screen (state : state) : on_screen option =
                  (Masc_tui_overview_tasks.work_selected_index state.tasks
                     ~selected:(Masc_tui_overview_tasks.selection state.task_focus))
              in
-             windowed ~count:(List.length rows) ~cursor
+             projected ~count:(List.length rows) ~cursor
                ~height:(Masc_tui_render_work.work_tasks_page_rows state ~terminal_rows ~cols)
                (fun index ->
                task_list_user_focus state
@@ -8617,17 +8604,17 @@ let list_on_screen (state : state) : on_screen option =
                    (planning_visible_goals ~filter:state.planning_filter
                       ~sort:state.planning_sort snapshot.pl_goals)
            in
-           (* The Goal list's window as the last frame cut it, which that
-              frame reports ([Planning_list_page_rows]). *)
-           windowed ~count ~cursor:state.planning_cursor ~height:state.planning_list_page_rows
+           (* The Goal list's window as the last frame cut it, which
+              [Masc_tui_render_work] reports through its clamped value
+              ([Planning_list_page_rows]). *)
+           projected ~count ~cursor:state.planning_cursor ~height:state.planning_list_page_rows
              (fun index -> state.planning_cursor <- index))
   (* Three lists that carry no row search yet (#35306). Home, End and the
      page keys reach them through here, which is what makes these arms live
      rather than a landing nobody calls. *)
   | Approvals ->
-      windowed ~count:(List.length (Masc_tui_approvals_model.approval_items state))
-        ~cursor:state.approval_cursor ~height:(unreported_list_height state) (fun index ->
-          state.approval_cursor <- index)
+      windowed Approval_items ~count:(List.length (Masc_tui_approvals_model.approval_items state))
+        ~cursor:state.approval_cursor (fun index -> state.approval_cursor <- index)
   | Schedules ->
       (match schedule_detail_on_screen state with
        | Some _ -> None
@@ -8637,15 +8624,15 @@ let list_on_screen (state : state) : on_screen option =
              | None -> 0
              | Some snapshot -> List.length snapshot.scs_rows
            in
-           windowed ~count ~cursor:state.schedule_cursor ~height:(unreported_list_height state)
+           windowed Schedule_rows ~count ~cursor:state.schedule_cursor
              (fun index -> state.schedule_cursor <- index))
   | Fusion ->
       (match state.fusion_mode with
        | Fusion_detail _ | Fusion_historical_detail _ -> None
        | Fusion_list ->
-           windowed ~count:(List.length (Masc_tui_fusion_model.fusion_list_entries state))
-             ~cursor:state.fusion_cursor ~height:(unreported_list_height state) (fun index ->
-               state.fusion_cursor <- index))
+           windowed Fusion_entries
+             ~count:(List.length (Masc_tui_fusion_model.fusion_list_entries state))
+             ~cursor:state.fusion_cursor (fun index -> state.fusion_cursor <- index))
   (* The list pane draws its window around the cursor rather than holding a
      scroll of its own, so a landing is on screen the moment the cursor names
      it. With the text focused j/k scrolls the reading instead and there is no
@@ -8654,8 +8641,7 @@ let list_on_screen (state : state) : on_screen option =
       (match state.resource_focus, visible_resources state with
        | Right_pane, _ | _, None -> None
        | Left_pane, Some rows ->
-           windowed ~count:(List.length rows) ~cursor:state.resources_cursor
-             ~height:(Masc_tui_render_resources.list_page_size state ~rows:(surface_rows state))
+           windowed Resource_entries ~count:(List.length rows) ~cursor:state.resources_cursor
              (fun index -> state.resources_cursor <- index))
   (* Under the Actions and Everything filters the ring is read by a cursor,
      not by a scroll: [render_acting] recomputes the scroll from
@@ -8665,10 +8651,9 @@ let list_on_screen (state : state) : on_screen option =
   | Acting
     when Option.is_none state.acting_detail
          && state.acting_filter <> Masc_tui_acting.Turns ->
-      windowed
+      windowed Activity_events
         ~count:(List.length (acting_flat_entries state))
         ~cursor:state.acting_cursor
-        ~height:(Masc_tui_render_activity.acting_list_height state ~terminal_rows)
         (fun index ->
           state.acting_cursor <- index;
           (* Landing on the newest row means the rows above it have been seen --
@@ -8682,7 +8667,7 @@ let list_on_screen (state : state) : on_screen option =
   | Keepers Keeper_detail
     when state.detail_tab = Detail_runs && not state.context_inspector_open ->
       let runs = List.length (Masc_tui_fusion_model.selected_keeper_runs state) in
-      windowed ~count:runs ~cursor:state.keeper_run_cursor ~height:(unreported_list_height state)
+      windowed Keeper_runs ~count:runs ~cursor:state.keeper_run_cursor
         (fun index ->
         state.keeper_run_cursor <- index;
         state.detail_scroll <- index)
@@ -8694,30 +8679,22 @@ let list_on_screen (state : state) : on_screen option =
        | None -> None
        | Some (_, providers) ->
          let listing = Masc_tui_identity_input.current_listing state in
-         windowed
+         windowed Identity_services
            ~count:(List.length (Masc_tui_identity_model.identity_connectable ~listing providers))
            ~cursor:
              (Masc_tui_identity_model.identity_cursor_clamped ~listing ~providers
                 state.identity_cursor)
-           ~height:(unreported_list_height state)
            (fun index -> state.identity_cursor <- index))
   (* Overview's move keys select a destination ([Masc_tui_home.home_move])
-     rather than move a cursor, so it hands over only the rows it drew:
-     the same body the frame cuts. *)
-  | Overview ->
-      let body =
-        Masc_tui_home.home_body (Masc_tui_home.prepare state)
-          ~scroll:state.home_decision_scroll
-          ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows)
-      in
-      Some { os_height = List.length body.hb_rows; os_rows = None }
+     rather than move a cursor, so it hands over only the list it is. *)
+  | Overview -> Some { os_page = Masc_tui_list_moves.Drawn Overview_destinations; os_rows = None }
   (* The models table is read by a cursor [e] acts on. The stored scroll is
      the window the cursor settled, so a key inside the window moves only
      the mark, and the column names stay on screen until the selection
      passes the first window. *)
   | Config when state.config_pane = Config_models ->
       Option.map (fun (list : Masc_tui_render_config.models_list) ->
-        { os_height = list.ml_height
+        { os_page = Masc_tui_list_moves.Drawn Model_bindings
         ; os_rows =
             Some
               { rl_count = list.ml_count
@@ -44942,9 +44919,10 @@ Use relative paths for resources already held in the package. -->
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
            let drawn_detail_reading = ref None in
-           let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions, drawn_tools_task =
+           let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions, drawn_tools_task,
+               lists_drawn =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_value.Redraw.begin_frame ();
                  Masc_tui_message_layout.begin_frame ();
@@ -45018,6 +44996,9 @@ Use relative paths for resources already held in the package. -->
              if not (task_detail_following_end state
                      && Option.is_some (task_detail_of_reader (Some value))) then
                apply_clamped_scroll state value) clamped;
+           (* So are the lists it drew: a page key moves each by the rows
+              this frame drew it in. *)
+           state.lists_drawn <- lists_drawn;
            if Terminal_profile.dynamic_title terminal_profile then
              Terminal_title.present terminal_title ~write:Masc_tui_terminal_out.write
                ~flush:Masc_tui_terminal_out.flush

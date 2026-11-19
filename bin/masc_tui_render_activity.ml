@@ -331,6 +331,7 @@ let render_system_logs (state : state) =
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
+  report_drawn_list System_log_rows ~height:content_height;
   if total_entries = 0 then begin
     let empty =
       match
@@ -992,6 +993,7 @@ let render_acting (state : state) =
                 ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
   let content_height = acting_content_height ~rows ~notices in
+  report_drawn_list Activity_events ~height:content_height;
   let max_scroll = max 0 (shown - content_height) in
   let cursor = max 0 (min state.acting_cursor (shown - 1)) in
   let scroll =

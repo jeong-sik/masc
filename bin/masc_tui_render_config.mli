@@ -12,9 +12,6 @@ val config_models_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
 
 type models_list = {
   ml_count : int;  (** bindings *)
-  ml_height : int;
-      (** the bindings the pane always shows whole together: table rows, or
-          stacked items ({!Masc_tui_model_runtime_table.page_bindings}) *)
   ml_reads_selected : bool;
       (** the selected stacked item is taller than the pane, so a page key
           reads its lines ({!Masc_tui_model_runtime_table.reads_selected}) *)

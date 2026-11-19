@@ -1641,6 +1641,11 @@ let render_config_models (state : state) =
           key, a list that shrank -- drew its rows outside the window, and
           they came out blank. *)
        let table_window = Rows.of_list ~first:scroll ~height:table_height table in
+       (* A page is the bindings the pane always shows whole together: table
+          rows, or stacked items. *)
+       report_drawn_list Model_bindings
+         ~height:(Masc_tui_model_runtime_table.page_bindings ~table:table_mode ~starts ~total
+                    ~height:table_height);
        (* Row 0 of [table] is the header in table mode, so a cursor over the
           data rows is one lower than the line it marks. Stacked mode has no
           header: line 0 is the first binding's item. *)
@@ -1686,15 +1691,12 @@ let config_models_scrolled (state : state) : scrolled =
 
 type models_list = {
   ml_count : int;
-  ml_height : int;
   ml_reads_selected : bool;
   ml_window : cursor:int -> int -> int;
 }
 
-(* The bindings the move keys walk. A page is the bindings the pane always
-   shows whole together: table rows, or stacked items. [None] while the pane
-   draws a form, a jump, an error or nothing read yet: there is no binding
-   on screen. *)
+(* The bindings the move keys walk. [None] while the pane draws a form, a
+   jump, an error or nothing read yet: there is no binding on screen. *)
 let config_models_list (state : state) ~terminal_rows ~cols =
   match state.runtime_model_form, state.runtime_model_jump,
         config_models_read_error state, state.runtime_config_view with
@@ -1708,7 +1710,6 @@ let config_models_list (state : state) ~terminal_rows ~cols =
       in
       Some
         { ml_count = List.length state.config_models_rows
-        ; ml_height = Masc_tui_model_runtime_table.page_bindings ~table ~starts ~total ~height
         ; ml_reads_selected =
             Masc_tui_model_runtime_table.reads_selected ~table ~starts ~total ~height
               state.config_models_cursor

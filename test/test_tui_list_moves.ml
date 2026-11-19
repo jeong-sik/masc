@@ -16,8 +16,12 @@ module Key = Masc_tui_scroll
 
 let every_key = Key.[ Line_down; Line_up; Page_down; Page_up; To_top; To_end ]
 
-(* A list drawn [height] rows tall, as the dispatcher hands it over. *)
-let drawn ~height rows () = Some { Moves.os_height = height; os_rows = rows }
+(* A list the last frame drew [height] rows tall, as the frame reports it and
+   the dispatcher hands it over. The tag is one list for every surface here:
+   which list a surface names is the dispatcher's arm, not the move. *)
+let drawn state ~height rows () =
+  state.lists_drawn <- [ { dl_list = Board_post_rows; dl_height = height } ];
+  Some { Moves.os_page = Moves.Drawn Board_post_rows; os_rows = rows }
 
 (* The rows the dispatcher hands over on the Keeper list: every Keeper,
    placed by choosing it, which opens its group (what a search does). The
@@ -55,7 +59,7 @@ let keeper_list ~view names =
 
 (* A page of the drawn height less one: [height] 3 pages by 2. *)
 let press_keeper ?(height = 3) state key =
-  press ~on_screen:(drawn ~height (keeper_rows state)) state key
+  press ~on_screen:(drawn state ~height (keeper_rows state)) state key
 
 let stop_index state =
   Option.bind (keeper_list_stop state) (fun stop ->
@@ -215,7 +219,7 @@ let test_overview_answers_every_move_key () =
   let last = count - 1 in
   (* Overview has no row cursor, so the dispatcher hands over only the rows
      it drew. *)
-  let press_home ~height key = press ~on_screen:(drawn ~height None) state key in
+  let press_home ~height key = press ~on_screen:(drawn state ~height None) state key in
   let from_index index height key =
     state.home_selected <- List.nth_opt (destinations state) index;
     press_home ~height key;
@@ -247,7 +251,7 @@ let landing ?(height = 4) state ~count ~cursor key =
   let rows =
     Some { Moves.rl_count = count; rl_cursor = cursor; rl_place = (fun index -> placed := Some index) }
   in
-  press ~on_screen:(drawn ~height rows) state key;
+  press ~on_screen:(drawn state ~height rows) state key;
   !placed
 
 let test_row_lists_move_their_cursor () =
@@ -296,7 +300,7 @@ let test_a_page_keeps_the_row_read_last () =
                       (fun index ->
                         window := Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll) }
               in
-              press ~on_screen:(drawn ~height rows) state key;
+              press ~on_screen:(drawn state ~height rows) state key;
               Alcotest.(check bool)
                 (Printf.sprintf "%d rows drawn %d tall, cursor %d, window %d: %s keeps row %d"
                    count height cursor scroll name kept)
@@ -307,6 +311,40 @@ let test_a_page_keeps_the_row_read_last () =
         done
       done)
     [ 34, 3; 34, 13; 34, 2; 5, 8 ]
+
+(* The height a page moves by is the one the last frame reported for the
+   list the key walks. A frame that drew another list, or none, leaves no
+   page to move by, and the key moves one row: it cannot pass a row nobody
+   saw. A height read from the projection a list is drawn with pages by it
+   too. *)
+let test_a_page_is_the_height_the_frame_reported () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Board;
+  let landing ~reported ~page key =
+    state.lists_drawn <- reported;
+    let placed = ref None in
+    let rows =
+      Some { Moves.rl_count = 40; rl_cursor = 10; rl_place = (fun index -> placed := Some index) }
+    in
+    press ~on_screen:(fun () -> Some { Moves.os_page = page; os_rows = rows }) state key;
+    !placed
+  in
+  List.iter
+    (fun (name, reported, page, key, expected) ->
+      Alcotest.(check (option int)) name (Some expected) (landing ~reported ~page key))
+    [ ( "PgDn moves the reported height less one", [ { dl_list = Board_post_rows; dl_height = 7 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_down, 16 )
+    ; ( "PgUp moves the reported height less one", [ { dl_list = Board_post_rows; dl_height = 7 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_up, 4 )
+    ; ( "the height of the list the key walks, not another one drawn beside it"
+      , [ { dl_list = Approval_items; dl_height = 20 }; { dl_list = Board_post_rows; dl_height = 4 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_down, 13 )
+    ; ( "a list the frame did not draw pages by one row"
+      , [ { dl_list = Approval_items; dl_height = 20 } ], Moves.Drawn Board_post_rows, Key.Page_down, 11 )
+    ; ( "no list drawn at all pages by one row", [], Moves.Drawn Board_post_rows, Key.Page_up, 9 )
+    ; ( "a projected height pages by itself less one", [], Moves.Projected 5, Key.Page_down, 14 )
+    ; ( "a line key is a line whatever was drawn", [], Moves.Drawn Board_post_rows, Key.Line_down, 11 )
+    ; ( "End is the last row whatever was drawn", [], Moves.Drawn Board_post_rows, Key.To_end, 39 ) ]
 
 (* An overlay drawn over a surface moves its own list, even over the two
    surfaces that walk something else: the Git changes list over the Keeper
@@ -414,6 +452,8 @@ let () =
             test_an_overlay_moves_its_own_rows
         ; Alcotest.test_case "a page keeps the row read last" `Quick
             test_a_page_keeps_the_row_read_last
+        ; Alcotest.test_case "a page is the height the frame reported" `Quick
+            test_a_page_is_the_height_the_frame_reported
         ] )
     ; ( "detail height"
       , [ Alcotest.test_case "a detail keeps the tallest height" `Quick

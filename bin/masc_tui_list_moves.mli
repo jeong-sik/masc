@@ -23,10 +23,18 @@ type row_list = {
     window to the row needs the frame's geometry, which only the executable
     has. *)
 
+type page_height =
+  | Drawn of Masc_tui_types.paged_list
+      (** the rows the last built frame drew the list in, as its renderer
+          reported them ({!Masc_tui_types.lists_drawn}) *)
+  | Projected of int
+      (** rows the list's renderer works out from the projection it draws
+          with, read before the frame. Only the Task and Goal lists, which
+          [Masc_tui_render_work] draws without reporting them, use it. *)
+(** Where the height a page key moves by comes from. *)
+
 type on_screen = {
-  os_height : int;
-      (** the rows the list is drawn in, measured by the projection the frame
-          draws it with: a page is these less the one row it keeps *)
+  os_page : page_height;
   os_rows : row_list option;
       (** its row cursor; [None] on Overview, whose move keys select a
           destination rather than move a cursor *)
@@ -35,10 +43,15 @@ type on_screen = {
     the list rather than to the key, so a list cannot be paged by a height it
     was not drawn in. *)
 
-val cursor_move : height:int -> Masc_tui_scroll.key_move -> Masc_tui_scroll.Cursor_move.t
+val page_height : Masc_tui_types.state -> page_height -> int option
+(** The rows the list was drawn in; [None] when the last frame did not draw
+    it. *)
+
+val cursor_move : height:int option -> Masc_tui_scroll.key_move -> Masc_tui_scroll.Cursor_move.t
 (** The cursor move a key makes in a list drawn [height] rows tall. A page is
     {!Masc_tui_scroll.page_step} of the height, so after PgDn the row that was
-    last on screen is still on it, and after PgUp the row that was first. *)
+    last on screen is still on it, and after PgUp the row that was first.
+    With no height a page key moves one row. *)
 
 val moves :
   Masc_tui_types.state ->
@@ -53,4 +66,4 @@ val moves :
     ({!Masc_tui_home.home_move}); neither moves its rows, since a Keeper row
     chosen by position opens its group and Overview has no row cursor. Every
     other surface moves its rows, and only an empty list ignores the key.
-    Every page is {!cursor_move} of the list's [os_height]. *)
+    Every page is {!cursor_move} of the list's {!page_height}. *)

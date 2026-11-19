@@ -487,6 +487,7 @@ let render_code (state : state) =
     framed_divider pane_buf pane_cols;
     Option.iter (framed_line pane_buf pane_cols) (code_tree_status state);
     let list_rows_budget = code_tree_list_height state in
+    report_drawn_list Code_tree_entries ~height:list_rows_budget;
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in
@@ -918,6 +919,7 @@ let render_code (state : state) =
        | Some (open_path, Masc_tui_fetched.Ready { cfd_body = Code_text _; cfd_rows = file_rows; _ }) ->
            let scroll = file_scroll (Array.length file_rows) in
            hand ~first:scroll ~shown:content_height ~total:(Array.length file_rows);
+           report_drawn_list Code_file_lines ~height:content_height;
            let hscroll =
              max 0
                (min state.code_file_hscroll

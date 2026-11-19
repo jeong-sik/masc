@@ -2460,6 +2460,9 @@ type keeper_plain_projection =
   ; kpp_list_rows : int
   ; kpp_entry_rows : int
   ; kpp_window : keeper_display_entry list
+  ; kpp_page : int
+      (* the stops a window of [kpp_entry_rows] always holds whole, which a
+         page key moves by less one ([Masc_tui_scroll.items_always_shown]) *)
   ; kpp_scroll : int
   ; kpp_count : int
   ; kpp_density : Keeper_list_model.density
@@ -2550,21 +2553,10 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   { kpp_headers = headers; kpp_list_width = list_width; kpp_detail_width = detail_width
   ; kpp_detail_lines = detail_lines; kpp_list_rows = list_rows; kpp_entry_rows = entry_rows
   ; kpp_window = List.take count (List.drop scroll entries); kpp_scroll = scroll
+  ; kpp_page = Masc_tui_scroll.items_always_shown ~heights ~rows:entry_rows
   ; kpp_count = List.length reading.klr_rows
   ; kpp_density = density
   ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary }
-
-let keeper_plain_list_height state ~terminal_rows ~cols =
-  match state.keeper_list_view, state.keeper_story with
-  | Keeper_list_model.Plain, None ->
-      let projection = keeper_plain_projection state ~terminal_rows ~cols ~now:(Unix.gettimeofday ()) in
-      Some (List.length projection.kpp_window)
-  | (Keeper_list_model.Plain | Keeper_list_model.By_state | Keeper_list_model.By_cause
-    | Keeper_list_model.By_time | Keeper_list_model.By_memory | Keeper_list_model.By_age
-    | Keeper_list_model.By_runtime | Keeper_list_model.Day_wall), Some _
-  | (Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
-    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime
-    | Keeper_list_model.Day_wall), None -> None
 
 let keeper_plain_list_lines (state : state) ~now:_ projection =
   let width = projection.kpp_list_width in
@@ -2638,6 +2630,7 @@ let render_keeper_plain (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let now = Unix.gettimeofday () in
   let projection = keeper_plain_projection state ~terminal_rows ~cols ~now in
+  report_drawn_list Keeper_stops ~height:projection.kpp_page;
   let buf = Buffer.create 4096 in
   Buffer.add_char buf '\n';
   List.iter (box_line buf cols) projection.kpp_headers;
@@ -3121,6 +3114,8 @@ let render_keeper_axes (state : state) =
     Masc_tui_scroll.window_of_heights ~heights ~cursor:selected_entry ~rows:entry_rows
       state.keeper_list_scroll
   in
+  report_drawn_list Keeper_stops
+    ~height:(Masc_tui_scroll.items_always_shown ~heights ~rows:entry_rows);
   let entries_window = List.take window_entries (List.drop scroll_offset entries) in
   (* Strip visual SGR before adding pressable marks: those marks also end in
      [m] and must reach the frame presenter. *)
@@ -5129,6 +5124,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       if terminal_tab then max 0 (base_height - 1) else base_height
     in
     let visible_lines = min content_height total_lines in
+    (* Two tabs draw a list in this window, one line per run or service. *)
+    (match state.detail_tab with
+     | Detail_runs -> report_drawn_list Keeper_runs ~height:content_height
+     | Detail_identity ->
+         (match Lazy.force identity_drawn with
+          | Some (stamp, (drawn : Masc_tui_render_identity.drawn))
+            when String.equal stamp k.k_name ->
+              report_drawn_list Identity_services
+                ~height:(content_height - drawn.separator_rows)
+          | Some _ | None -> ())
+     | Detail_info | Detail_items | Detail_sandbox | Detail_instructions
+     | Detail_secrets | Detail_github | Detail_channels | Detail_automation
+     | Detail_terminal -> ());
     (* How far back from the bottom this window can go, and how far it is. *)
     let terminal_scroll, terminal_back =
       if terminal_tab then

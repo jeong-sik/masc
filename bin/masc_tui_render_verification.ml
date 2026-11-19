@@ -211,6 +211,7 @@ let render_verification_list (state : state) =
       ~height:content_height state.verification_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in
+  report_drawn_list Verification_rows ~height:content_height;
   if shown = 0 then begin
     let empty =
       match
@@ -819,6 +820,7 @@ let render_harness_list (state : state) =
       ~height:content_height state.harness_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
+  report_drawn_list Harness_rows ~height:content_height;
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with

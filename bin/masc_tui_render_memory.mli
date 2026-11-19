@@ -96,6 +96,7 @@ val render_memory_body :
   cols:int ->
   budget:int ->
   state ->
+  report_drawn_list:(paged_list -> height:int -> unit) ->
   hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
@@ -103,6 +104,9 @@ val render_memory_body :
   push_divider:(unit -> unit) ->
   push_empty:(unit -> unit) ->
   unit
+(** The Keeper list and the selected Keeper's detail. It reports the Keeper
+    list ([Memory_keepers]) with the rows its window was cut to, which is
+    what a page key moves by. *)
 
 val memory_fact_list_floor_rows : int
 (** How many rows the fact list keeps before the detail below it takes any.
@@ -120,6 +124,7 @@ val render_memory_facts_body :
   cols:int ->
   budget:int ->
   state ->
+  report_drawn_list:(paged_list -> height:int -> unit) ->
   hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->

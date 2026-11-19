@@ -17,14 +17,6 @@ val render_keeper_list :
     here: Plain does not refresh that source. The current result stays unknown
     and Enter opens Story's existing read path to observe it again. *)
 
-val keeper_plain_list_height :
-  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int option
-(** The stops Plain draws in its visible window, measured by the same
-    header, selected-card and variable row-height projection as the
-    renderer. A page key moves these less the one a page keeps
-    ({!Masc_tui_list_moves.cursor_move}). [None] for other views or an open
-    Story, whose windows are cut inside their drawing. *)
-
 val keeper_observation_reading :
   Masc_tui_types.state -> Masc_tui_detail_reading.t option
 (** Capture every current Keeper-list read error with its complete reason.

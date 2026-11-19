@@ -804,6 +804,7 @@ let render_lanes_overview (state : state) =
   let list_cells = max 1 (list_width - panel_padding) in
   let layout = projection.lop_scroll in
   let height = projection.lop_list_height in
+  report_drawn_list Lane_inventory ~height;
   let selected_position = lane_inventory_visual_cursor state in
   let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll in
   let scroll = match selected_position with
@@ -1191,6 +1192,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lane_runs_scroll max_scroll) in
   let runs_window = Rows.of_list ~first:scroll ~height:content_height runs in
+  report_drawn_list Lane_runs ~height:content_height;
   if shown = 0 then begin
     let empty =
       match
@@ -2350,6 +2352,7 @@ let render_clients (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
+  report_drawn_list Client_rows ~height:content_height;
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with

@@ -1479,6 +1479,7 @@ let memory_selector_line ~cols (state : state) keeper =
   ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1599,6 +1600,7 @@ let render_memory_body ~cols ~budget (state : state)
     let keepers_window =
       Rows.of_list ~first:scroll ~height:content_height keepers
     in
+    report_drawn_list Memory_keepers ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at keepers_window idx with
@@ -1704,6 +1706,7 @@ let memory_facts_content_height ~cols ~budget ~cursor state =
   height
 
 let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1835,6 +1838,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      push_styled ~style:(Theme.recede ()) empty)
   else begin
     let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
+    report_drawn_list Memory_fact_rows ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at rows_window idx with
@@ -1853,10 +1857,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
-    ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+    ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
   if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
-      ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
+      ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
@@ -1864,7 +1868,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
-      ~hand_position
+      ~report_drawn_list ~hand_position
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->

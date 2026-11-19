@@ -410,6 +410,11 @@ let toggle_history_change state =
       true
   | Some (_, Hist_commit _) | None -> false
 
+(* A directory read with no entries: the status line above the tree and the
+   file pane beside it say it in the same words. *)
+let empty_directory_text (state : state) =
+  ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)"
+
 (* The line above the file tree's rows. Each state of the listing says which
    it is. "(loading…)" stood for all three empty ones: a request in flight, a
    listing never asked for, and a directory that answered with no entries. *)
@@ -430,8 +435,7 @@ let code_tree_status (state : state) =
   | Masc_tui_fetched.Absent ->
       Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
   | Masc_tui_fetched.Ready [] ->
-      Some
-        (Ansi.dim ^ " " ^ ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)" ^ Ansi.reset)
+      Some (Ansi.dim ^ " " ^ empty_directory_text state ^ Ansi.reset)
   | Masc_tui_fetched.Ready (_ :: _) -> None
 
 (* The file tree's rows are the pane less its status line. The drawing cuts
@@ -454,7 +458,7 @@ let render_code (state : state) =
   (* What the file pane says with no file open: the listing's own reading, so
      it offers Enter only beside rows to choose and says a failure whole. *)
   let listing_idle = Masc_tui_list_idle.of_listing (code_listing_view state) in
-  let empty_directory = ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)" in
+  let empty_directory = empty_directory_text state in
   let span = lexed_span in
   let list_pane ~framed pane_buf pane_cols =
     (* Beside the file pane the box is the pane separator; alone on a narrow

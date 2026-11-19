@@ -1217,6 +1217,7 @@ let standalone_lane_rank = function
   | Standalone_lane.Board_attention -> 2
   | Standalone_lane.Verifier -> 3
   | Standalone_lane.Candle_appraiser -> 5
+  | Standalone_lane.Librarian_memory -> 6
 ;;
 
 let compare_lane_owner (a : lane_owner) (b : lane_owner) =

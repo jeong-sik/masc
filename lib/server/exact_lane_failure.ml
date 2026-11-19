@@ -43,7 +43,9 @@ let refusal ~retry_after_s = function
   | Exact.Payment_required -> account_refusal retry_after_s
   | Exact.Not_found -> Configuration_refused
   | Exact.Request_body_refused -> Input_refused Request_body
-  | Exact.Invalid_request -> Input_refused Invalid_request
+  (* A status no arm names is not a 400 or 422 refusal of the request, but
+     this lane reads it as it did before the two were apart. *)
+  | Exact.Invalid_request | Exact.Unclassified_status -> Input_refused Invalid_request
   | Exact.Context_overflow -> Input_refused Context_overflow
   | Exact.Input_capacity -> Input_refused Input_capacity
 

@@ -645,6 +645,7 @@ let%test "a refusal this stage makes before dispatch is Attempt_rejected" =
                  | Request_body_refused_by_provider _
                  | Refusal_body_not_received
                  | Unknown_invalid_request
+                 | Unclassified_status _
              ; _
              }
            | RateLimited _

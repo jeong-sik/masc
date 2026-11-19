@@ -3964,6 +3964,53 @@ let assert_typed_capacity_refusal_advances_once
   | Error _ -> fail (label ^ " typed capacity refusal did not advance")
 ;;
 
+(* A 409 is not a 400 or 422 refusal of the request: the flow names it
+   [Unclassified_status] and treats it as it treats [Invalid_request]. *)
+let test_unclassified_status_advances_under_its_own_name () =
+  let (result, advances), posts =
+    with_server ~status:`Conflict ~response:{|{"error":"conflict"}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"status-409-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"status-409-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    let advances = ref 0 in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          incr advances;
+          Ok ())
+        (start_flow (frozen_flow snapshot [ "status-409-a"; "status-409-b" ]))
+    in
+    result, !advances
+  in
+  check int "HTTP 409 dispatches twice" 2 posts;
+  check int "HTTP 409 advances once" 1 advances;
+  match result with
+  | Ok _ -> fail "HTTP 409 was answered"
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "HTTP 409 is an unclassified status, not an invalid request"
+      true
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 409; refusal = EO.Unclassified_status; retry_after_s = None });
+    check
+      bool
+      "HTTP 409 is not a binding at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
+  | Error _ -> fail "HTTP 409 did not end as an execution failure"
+;;
+
 let test_context_window_400_prose_advances_to_successor () =
   let response =
     {|{"error":"The prompt is too long: 1400014, model maximum context length: 1048576 (ref: 8519ccf3-5d45-4686-9ac1-64d159f75ec1)"}|}
@@ -6579,6 +6626,10 @@ let () =
             "context-window 400 prose advances to successor"
             `Quick
             test_context_window_400_prose_advances_to_successor
+        ; test_case
+            "a status no arm names advances under its own name"
+            `Quick
+            test_unclassified_status_advances_under_its_own_name
         ; test_case
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick

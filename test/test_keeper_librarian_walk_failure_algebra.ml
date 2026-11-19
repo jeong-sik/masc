@@ -164,6 +164,18 @@ let test_window_stop_observations () =
   Alcotest.(check (list string)) "partial output names no input refusal" []
     (refusals (S.of_cause partial))
 
+(* The old algebra gains no stored tag: a status no arm names is stored as the
+   invalid request it was stored as before, with its own status. *)
+let test_unclassified_status_keeps_the_stored_tag () =
+  let stored cause = Yojson.Safe.to_string (S.api_observation_to_yojson (S.api_observation cause)) in
+  let refused http_status refusal =
+    EO.Provider_response_refused {http_status; refusal; retry_after_s=None} in
+  Alcotest.(check string) "stored as an invalid request with its status"
+    {|["Provider_refused",{"http_status":409,"refusal":["Invalid_request"]}]|}
+    (stored (refused 409 EO.Unclassified_status));
+  Alcotest.(check bool) "read as the invalid request was" true
+    (S.of_cause (refused 409 EO.Unclassified_status) = S.of_cause (refused 409 EO.Invalid_request))
+
 let test_named_causes_survive_the_receipt_codec () =
   List.iter (fun cause ->
       let original = S.of_cause cause in
@@ -215,7 +227,9 @@ let () =
       ; Alcotest.test_case "named causes survive the receipt codec" `Quick
           test_named_causes_survive_the_receipt_codec
       ; Alcotest.test_case "a window stop keeps one stored observation per output" `Quick
-          test_window_stop_observations ]
+          test_window_stop_observations
+      ; Alcotest.test_case "an unclassified status keeps the stored tag" `Quick
+          test_unclassified_status_keeps_the_stored_tag ]
     ; "fallback"
     , [ Alcotest.test_case "after_cli_fallback drops the prior limit" `Quick
           test_after_cli_fallback_drops_prior_limit ] ]

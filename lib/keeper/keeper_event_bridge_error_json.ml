@@ -39,6 +39,7 @@ let invalid_request_reason_to_wire = function
     "request_body_refused_by_provider"
   | Agent_core.Retry.Refusal_body_not_received -> "refusal_body_not_received"
   | Agent_core.Retry.Unknown_invalid_request -> "unknown_invalid_request"
+  | Agent_core.Retry.Unclassified_status _ -> "unclassified_status"
 ;;
 
 let serving_constraint_source_kind_to_wire = function
@@ -160,8 +161,8 @@ let core_api_error_fields = function
     ; "reason", `String (invalid_request_reason_to_wire reason)
     ]
     @ (match reason with
-       | Agent_core.Retry.Request_body_refused_by_provider { status } ->
-         [ "status", `Int status ]
+       | Agent_core.Retry.Request_body_refused_by_provider { status }
+       | Agent_core.Retry.Unclassified_status { status } -> [ "status", `Int status ]
        | Agent_core.Retry.Json_parse_error
        | Agent_core.Retry.Attempt_rejected
        | Agent_core.Retry.Refusal_body_not_received

@@ -3116,6 +3116,7 @@ let is_size_refusal = function
       ( InvalidRequest
           { reason =
               ( Unknown_invalid_request
+              | Unclassified_status _
               | Json_parse_error
               | Attempt_rejected
               | Refusal_body_not_received )
@@ -3252,7 +3253,12 @@ let boundary_resend_on = function
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api
       (InvalidRequest
-         { reason = (Request_body_refused_by_provider _ | Unknown_invalid_request); _ }) ->
+         { reason =
+             ( Request_body_refused_by_provider _
+             | Unknown_invalid_request
+             | Unclassified_status _ )
+         ; _
+         }) ->
     true
   | Agent_core.Error.Api
       ( InvalidRequest

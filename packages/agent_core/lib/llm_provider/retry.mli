@@ -31,6 +31,15 @@ type invalid_request_reason =
           attempt opens a fresh window -- while a refusal whose body arrived
           ends the attempt. *)
   | Unknown_invalid_request
+      (** From {!classify_error}: an HTTP 400 or 422 whose body named nothing
+          this classifier knows. Other producers fold their own untyped
+          failures here. *)
+  | Unclassified_status of { status : int }
+      (** From {!classify_error}: a status that no other arm names (3xx, 405,
+          408, 409, ...). Not a 400 or 422 refusal of the request, so it is
+          kept apart from {!Unknown_invalid_request}; a consumer that reads a
+          refusal of the request as a defect in what it sent must not read
+          this one that way. *)
 
 type input_capacity_reason =
   | Serving_constraint_rejected of Serving_constraint.admission_error

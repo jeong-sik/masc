@@ -105,6 +105,29 @@ let publish t ~was (state : Machine.state) =
   Atomic.set t.status (status_of state)
 ;;
 
+(* The revision the snapshot file holds, when the store is open. *)
+let revision : Machine.state -> int option = function
+  | Idle store -> Some (Store.memory store).revision
+  | Stopped (_ : Store.stop) -> None
+;;
+
+(* Says that the snapshot file holds a revision this writer has not said it
+   holds: whoever follows [Keeper_memory_commit_notifications] reads Memory
+   again. [was] is the revision before the step, [None] for a store that was
+   not open. So a store that opens says its revision too: the boot or the
+   adoption that opened it can be what put that revision in the file. *)
+let announce t ~was (state : Machine.state) =
+  match revision state with
+  | Some now when not (Option.equal Int.equal was (Some now)) ->
+    Keeper_memory_commit_notifications.notify_committed
+      { keepers_dir = Unix.realpath t.place.memory_dir
+      ; keeper_id = t.place.keeper_id
+      ; store = Ordinary
+      ; revision = now
+      }
+  | Some (_ : int) | None -> ()
+;;
+
 let take_lock t ~sw =
   let path = lock_path t.place in
   let refused detail =
@@ -138,9 +161,11 @@ let live t ~sw =
       state)
   in
   let rec loop state =
+    (* The caller has its answer before anyone is told to read Memory. *)
     let settle next reply answer =
       publish t ~was:state next;
       Eio.Promise.resolve reply answer;
+      announce t ~was:(revision state) next;
       loop next
     in
     match Eio.Stream.take t.mailbox with
@@ -153,6 +178,7 @@ let live t ~sw =
       let next, answer = Machine.resume ~boot state in
       Atomic.set t.status (status_of next);
       Eio.Promise.resolve reply answer;
+      announce t ~was:(revision state) next;
       loop next
     | Adopt { by; observed; reply } ->
       let next, answer =
@@ -169,6 +195,7 @@ let live t ~sw =
   in
   let state = boot () in
   Atomic.set t.status (status_of state);
+  announce t ~was:None state;
   loop state
 ;;
 

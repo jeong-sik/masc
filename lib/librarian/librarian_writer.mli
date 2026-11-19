@@ -10,6 +10,10 @@
     A reader does not go through the mailbox. {!status} is a value the
     writer replaces after every event.
 
+    The writer says when the snapshot file holds a new revision, through
+    {!Keeper_memory_commit_notifications}: after a commit that rewrote it,
+    and when the store opens. The caller of a write has its answer first.
+
     Every function here can be called from any domain. {!run} is the
     exception: it is the fiber. *)
 

@@ -223,18 +223,33 @@ let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction
    its line breaks were escaped.
 
    The spelling is taken from [Yojson.Safe.to_string], the printer the gate
-   uses, so the two cannot drift. Not covered: a value quoted a second time
-   inside that string (a JSON body in a shell command), and an escape this
-   printer does not write (a quote as its code point). *)
+   uses, so the two cannot drift.
+
+   A spelling is an exact value like the one it spells, and it is held to the
+   size that one is. A JSON string writes a control character in six bytes, so
+   a value made of them is six times as long there. The longest exact value
+   is what an unterminated stream line keeps back, and every exact value is
+   compiled again by each copy of the snapshot, so a spelling past
+   [max_secret_file_bytes] would let one file raise both past the bound the
+   file was read under.
+
+   Not covered: a spelling longer than [max_secret_file_bytes], a value quoted
+   a second time inside that string (a JSON body in a shell command), and an
+   escape this printer does not write (a quote or a non-ASCII character as
+   its code point, a slash behind a backslash). *)
 let json_string_spelling value =
   let printed = Yojson.Safe.to_string (`String value) in
-  String.sub printed 1 (String.length printed - 2)
+  let spelling = String.sub printed 1 (String.length printed - 2) in
+  if String.equal spelling value || String.length spelling > max_secret_file_bytes
+  then None
+  else Some spelling
 
 let with_json_string_spellings values =
   List.concat_map
     (fun value ->
-       let spelling = json_string_spelling value in
-       if String.equal spelling value then [ value ] else [ value; spelling ])
+       match json_string_spelling value with
+       | None -> [ value ]
+       | Some spelling -> [ value; spelling ])
     values
 
 let dedupe values =

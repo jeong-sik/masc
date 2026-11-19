@@ -1909,7 +1909,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
            else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
            else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
        | Page_empty, filt ->
-           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s — c/C cycles)")
+           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s · c/C cycles)")
              (memory_category_filter_text ~ko filt)
      in
      push_styled ~style:(Theme.recede ()) empty)

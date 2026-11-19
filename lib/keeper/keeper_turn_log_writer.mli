@@ -50,9 +50,12 @@ type event =
   | Process_start (** After checkpoint tail recovery, before any turn. *)
 
 (** [now] is where the stores end and [covered] is the closed turns of the
-    same head. Outside a turn they are taken after the head's open messages
-    were closed. A head that does not decode counts as an empty head on its
-    trace. [new_log_id] is used only when nothing is written yet.
+    same head. Open messages are not counted: a message is named by the
+    first unit after the save that closed it. An admission leaves the head's
+    open messages to its turn. A process start whose last [Opened] is open
+    closes them before it reads. A head that does not decode counts as an
+    empty head on its trace. [new_log_id] is used only when nothing is
+    written yet.
 
     An empty list means there is nothing to append. A turn whose [Opened] is
     not the open one in the log ends without a line, and what it closed

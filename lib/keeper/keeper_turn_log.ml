@@ -15,6 +15,7 @@ module Log_id = struct
   ;;
 
   let to_string id = id
+  let fresh () = Random_id.hex ~bytes:(length / 2)
   let equal = String.equal
 end
 

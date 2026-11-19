@@ -62,6 +62,17 @@ type read_error =
     rules produced that is a few lines. *)
 val read_tail : string -> (tail, read_error) result
 
+(** The line that starts the log. It is the first line, at offset 0. *)
+type start =
+  { id : Keeper_turn_log.Log_id.t
+  ; at : float
+  ; mark : Keeper_turn_log.mark
+  }
+
+(** Reads the first line only. [None] when there is no file or no complete
+    line. A first line that is not a [Log_started] is {!Log_start_missing}. *)
+val read_start : string -> (start option, read_error) result
+
 (** Only {!End_moved} is worth reading the tail again for at once. After the
     other two the caller writes no line for this event; whoever writes next
     reads the tail afresh. *)

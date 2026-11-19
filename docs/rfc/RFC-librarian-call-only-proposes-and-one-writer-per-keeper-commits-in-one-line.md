@@ -882,6 +882,7 @@ type log_line =
 - `Add` 한 claim 을 이미 갖고 있으면 `last_seen` 만 옮긴다(`touched`). fact id 는 claim 의 sha256 이다.
   - basis 는 올리지 않는다. 지금 코드는 올린다(`merge_basis`). 글자까지 같은 claim 은 질문이 보여 준 fact 를 되읽은 것일 수 있어서 새 근거로 치지 않는다.
 - `Drop` 은 `Dropped` 로 지운다. `Merge` 는 원본들을 `Merged_into` 로 지우고 새 fact 를 더한다. `Revise` 는 옛 fact 를 `Revised_into` 로 지우고 새 fact 를 더한다.
+- `Merge` 와 `Revise` 가 더한 fact 의 `first_seen` 은 그 op 가 지운 원본 가운데 가장 이른 `first_seen` 이고, 반영 시각보다 늦지 않다. 합친 문장은 원본들이 말한 것을 말하므로 Memory 는 그것을 가장 오래된 원본 때부터 알았다. 그 밖의 새 fact 는 반영 시각에 처음 보인다. `last_seen` 은 모두 반영 시각이다.
 - 지운 fact 는 줄에 통째로 남는다. `memory_search source=dropped|absorbed` 가 반영 기록에서 찾아 준다.
 - 반영하지 않은 op 는 번호, 이유, 새 claim 을 줄에 남긴다. 멈춘 `Revise` 나 `Merge` 의 새 claim 을 `Add` 로 바꿔 넣지는 않는다. 그러면 방금 철회한 것을 되살릴 수 있다.
 - op 의 흠은 답 전체를 버리지 않는다. 지금은 흠 하나에 답 전체가 거절됐다.

@@ -4672,7 +4672,7 @@ let help_lines ~width (state : state) =
   in
   let section titled =
     let header_line, entry_rows = section_parts titled in
-    (header_line :: List.concat entry_rows) @ [ "" ]
+    Masc_tui_help.Whole (header_line :: List.concat entry_rows)
   in
   let commands =
     List.filter
@@ -4684,7 +4684,8 @@ let help_lines ~width (state : state) =
     match commands with
     | [] -> []
     | _ :: _ ->
-    ("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    [ Masc_tui_help.Whole
+    (("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -4711,8 +4712,7 @@ let help_lines ~width (state : state) =
              summary_rows
                (Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
                (2 + Message_layout.display_width (text ^ padding)))
-         commands
-    @ [ "" ]
+         commands) ]
   in
   (* After any live Candle details, the first key section is the reader's
      own surface.
@@ -4727,17 +4727,17 @@ let help_lines ~width (state : state) =
     | [] -> []
     | _ :: _ when not (String.equal query "") -> []
     | lines ->
-      ("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
-      :: (List.concat_map
-            (fun line ->
-              List.map (fun row -> "  " ^ row)
-                (Message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-                   (Terminal_text.single_line line)))
-            lines
-          @ [ "" ])
+      [ Masc_tui_help.Whole
+          (("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
+           :: List.concat_map
+                (fun line ->
+                  List.map (fun row -> "  " ^ row)
+                    (Message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+                       (Terminal_text.single_line line)))
+                lines) ]
   in
   let _, cols = get_terminal_size () in
-  let rows =
+  let blocks =
     candle
     @ (match
          Masc_tui_help.filter_sections ~query ~heading
@@ -4746,19 +4746,20 @@ let help_lines ~width (state : state) =
        | [] -> slash_commands
        | first :: rest ->
            if Masc_tui_help.shows_everything state.help_filter state.help_scope
-           then section first @ slash_commands @ List.concat_map section rest
+           then (section first :: slash_commands) @ List.map section rest
            else
              (* The reader's own screen and nothing behind it. The sections
                 after it are another screen's keys, and they followed the
                 first with no line between a reader could stop at. *)
              let header_line, entry_rows = section_parts first in
-             Masc_tui_help.one_section ~cols ~heading:header_line entry_rows)
+             Masc_tui_help.one_section ~heading:header_line entry_rows)
   in
-  match rows with
-  | _ :: _ -> rows
+  match blocks with
+  | _ :: _ -> blocks
   | [] ->
-      [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
-          (Terminal_text.single_line query) Ansi.reset ]
+      [ Masc_tui_help.Whole
+          [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
+              (Terminal_text.single_line query) Ansi.reset ] ]
 
 
 module Context_bars = Masc_tui_context_bars

@@ -25,24 +25,29 @@ val column_width : cols:int -> int
     the same columns and draws its lines at the same width, so a reader sees
     one layout on both sheets. *)
 
-val sheet : cols:int -> string list -> string list
-(** The rows drawn at this width: the lines as written, or -- once a terminal
-    is wide enough to hold two columns -- the sections between blank lines,
-    each whole, the first ones down the left column and the rest down the
-    right one, cut where the taller column is shortest, with a blank row
-    between two sections of a column. *)
+(** One run of the sheet's rows that a column holds together. *)
+type block =
+  | Whole of string list
+      (** A section with its heading, or a block such as the Candle details.
+          A column sets a blank row ahead of it when another block is above. *)
+  | Continued of string list
+      (** The keys {!one_section} cut from the section before it. It runs
+          straight on under that section in one column, and starts level with
+          that section's first key when it opens the right column. *)
 
-val one_section :
-  cols:int -> heading:string -> string list list -> string list
-(** The lines of a sheet that holds a single section, for {!sheet} at this
-    width. [entries] is each key's rows, a wrapped sentence kept with its key.
-    {!sheet} sets whole sections under its two columns, so one section alone
-    would stand in the left column beside an empty right one; here the
-    section's keys are parted at the key nearest the middle, and the second
-    part begins level with the first key of the first when nothing is set
-    above the heading. Below
-    {!two_column_minimum_cols} the lines are the heading and the rows as
-    written. *)
+val sheet : cols:int -> block list -> string list
+(** The rows drawn at this width: the blocks down one column, or -- once a
+    terminal is wide enough to hold two columns -- each block whole, the
+    first ones down the left column and the rest down the right one, cut
+    where the taller column is shortest. *)
+
+val one_section : heading:string -> string list list -> block list
+(** The blocks of a sheet that holds a single section. [entries] is each key's
+    rows, a wrapped sentence kept with its key. {!sheet} sets whole blocks
+    under its two columns, so one section alone would stand in the left
+    column beside an empty right one; here the section's keys are parted at
+    the key nearest the middle, and the second part is {!Continued}. A sheet
+    of one column draws the two parts as one section. *)
 
 val filter_sections :
   query:string ->

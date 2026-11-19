@@ -382,15 +382,16 @@ let replacement_not_recorded =
      again."
 ;;
 
-(* The folder is the server's to mend: the same request gets the same answer
-   until then, so the sentence does not say to send the key again. *)
+(* A folder that is not there for this server, or is not a private folder
+   of its user, is the server's to mend: the same request gets the same
+   answer until then. An error that passes is answered so too, so the
+   sentence leaves the next request to the person. *)
 let files_not_reached =
   refused
     R.Service_unavailable_503
     ~code:"files_not_reached"
-    "This server could not reach the folder of this account. Nothing was recorded, and the key of \
-     the account was not changed. Sending the key again gets the same answer: tell the person who \
-     runs this server."
+    "This server could not use the folder of this account. Nothing was recorded, and the key of the \
+     account was not changed. If the answer stays the same, tell the person who runs this server."
 ;;
 
 let replacement_unexpected =

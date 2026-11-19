@@ -23,6 +23,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 - 깨우는 쪽은 닫힌 합타입 `Masc_tui_wake.source` 의 생성자 하나로 종을 친다.
   깨울 시각은 `Masc_tui_wake.deadline_reason` 과 시각의 짝이다.
 - 16 ms 상한(`maximum_input_wait_seconds`)은 지운다. 키는 지금처럼 바로 읽는다.
+- 벽시계 시각이 5 초보다 멀면 5 초 뒤에 벽시계를 다시 읽는다. 기계가 잠들었다 깬 것을 알릴 길이 없어서다(§6).
 
 ## 1. 지금
 
@@ -69,8 +70,12 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 | `Resize_signal` | SIGWINCH, SIGCONT handler | `consume_resize_request` |
 | `Interrupt_signal` | SIGINT handler | `Masc_tui_exit_signals.poll` |
 | `Terminate_signal` | SIGTERM, SIGHUP, SIGQUIT handler | `Masc_tui_exit_signals.poll` |
+| `Server_start_settled` | 서버 시작 waiter `Masc_tui_server_lifecycle.await_start` | drain 의 `apply_settled_starts` |
 
 - 시작 probe 의 promise 는 지금도 기다림 안에서 겨룬다(`prepare_terminal_probe` 의 `wait`). 종이 필요 없다.
+- 서버 시작 waiter 는 화면을 직접 쓰지 않는다. 본 것(`Ready`, `Server_exited`, `Timed_out`)을 남기고 종을 친다.
+  루프가 그것을 꺼내 알림을 쓰고, 답한 서버를 읽고, 프레임을 청한다. 전에는 waiter 가 알림을 상태에 바로 썼다.
+  종도 프레임 요청도 없어서 "서버가 끝났다", "/health 에 답하지 않았다" 알림이 상관없는 깸을 기다렸다.
 - `Code_results.take_ready_*`, observer 재연결, 엔진 표본 읽기의 답은 모두 `Mailbox` 로 온다.
 
 ### 2.2 (b) 시각: 판단하는 쪽이 그 시각을 적는다
@@ -93,16 +98,19 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 | `Quit_notice_expiry` | 걸어 둔 종료 확인의 알림 시각 + `last_action_window_s` | 벽 |
 | `Emblem_step` | About 촛불의 다음 걸음 (`motion_step_ns`) | 단조 |
 | `Paste_quiet` | 끝 표지 없이 멈춘 붙여넣기의 마지막 바이트 + `paste_quiet_seconds` (`paste_is_quiet`). 지나면 "Ctrl-C 로 되살린다" 안내가 뜬다 | 단조 |
-| `Drain_budget_spent` | drain 이 바퀴 예산을 다 써서 남긴 일. 지금 바로 | 단조 |
+| `Drain_budget_spent` | drain 이 바퀴 예산을 다 써서 남긴 일. 지금 바로. 예산은 꺼낼 것을 쥔 뒤에만 묻는다(§3.6) | 단조 |
+| `Wall_clock_recheck` | 벽시계 시각을 `wall_clock_recheck_s`(5 초)보다 멀리 적을 때 그 5 초 뒤(§6) | 단조 |
 
-- 입력 decoder 의 ESC 뒤 대기(`sequence_byte_wait_seconds`)는 읽기 안의 대기다. 종이 끊지 않는다.
-  끊으면 화살표 하나가 ESC 와 두 글자로 갈라진다.
+- 입력 decoder 와 시작 probe 의 ESC 뒤 대기(`sequence_byte_wait_seconds`)는 읽기 안의 대기다. 종이 끊지 않는다.
+  끊으면 화살표 하나가 ESC 와 두 글자로 갈라진다. 대기는 터미널이 마지막 바이트를 준 때부터 센다(§3.3).
+- 시계 칸은 `Masc_tui_wake.clock_of` 가 정한다. `reached` 는 이유의 시계로 `now` 와 `at` 을 비교한다.
 
 ### 2.3 (c) 주기
 
 | 이름 | 이유 |
 |---|---|
 | `Machine_view_cadence` | MSX 게임을 보는 동안 0.3 초마다 깬다(`machine_input_timeout_s`). 기계 화면은 observer stream 으로 오고 대화창은 `Play_room_read` 로 깬다. 이 주기가 따로 지키는 것을 코드에서 찾지 못했다. 게임을 연 동안에만 돌고, 확인할 때까지 이름을 붙여 남긴다(§6). |
+| `Wall_clock_recheck` | 벽시계 시각을 5 초보다 멀리 적은 동안 5 초마다 깬다. 기계가 잠들었다 깨거나 시계가 바뀐 것을 루프가 알 길이 없어서다(§6). |
 
 ## 3. 설계
 
@@ -132,6 +140,8 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 - `Time_text`, `Quit_notice_expiry`, `Emblem_step` 은 루프 꼬리의 판단이 `reached` 로 적는다.
 - 벽시계 시각은 적을 때 단조 시각으로 바꾼다. 남은 시간만 옮기므로 벽시계가 움직여도 다음 바퀴가
   다시 적는다.
+- 남은 시간이 `wall_clock_recheck_s`(5 초)보다 길면 그 시각 대신 5 초 뒤를 `Wall_clock_recheck` 로 적는다.
+  다음 바퀴가 벽시계를 다시 읽는다(§6).
 
 ### 3.3 기다림
 
@@ -142,6 +152,18 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
   읽기 자체는 지금처럼 겨룸 밖에 둔다. 읽기를 취소하지 않는다.
 - 종이 이기면 그 읽기는 이벤트 없이 끝난다. decoder 에는 시간이 지났다고 알리지 않는다.
   ESC 접두는 원래대로 자기 대기를 채운다.
+- 다음 바이트를 얼마나 기다릴지는 reader 가 붙든 것 하나로 정한다(`next_byte_wait`).
+  시작 probe 와 decoder 가 같은 타입 `Masc_tui_input_decoder.pending` 으로 알리고, 더 센 쪽을 쓴다(`held`).
+  - `Prefix`(홀로 온 ESC, `ESC O` 등): 조용해질 때까지만 기다린다. 종도, 호출자의 시각도 끊지 않는다.
+  - `Sequence`, `Character`: 조용해질 때까지 기다린 첫 읽기는 돌아온다. 루프가 붙든 sequence 를 알리고
+    Ctrl-C 로 취소하게 하려는 것이다. 그 뒤로는 호출자의 기다림을 쓴다. 전에는 붙든 동안 50 ms 마다 깼다.
+  - 붙여넣기 중이거나 붙든 것이 없으면 호출자의 기다림이다.
+- 조용함은 터미널이 마지막 바이트를 준 때부터 센다(`last_terminal_byte_ns`).
+  그래서 probe 가 이미 기다린 ESC 는 decoder 에 가서 다시 기다리지 않는다.
+- 이 판단은 터미널 바이트를 하나 읽을 때마다 다시 한다. probe 는 한 번의 읽기 안에서 ESC 를 받고 다음 바이트를 또 묻는다.
+- 그래픽 질의에 답하지 않는 터미널(하네스 VTE, iTerm2)에서는 probe 가 세션 내내 decoder 앞에 있다.
+  decoder 만 보고 기다림을 고르던 때는 probe 가 붙든 ESC 에 상한이 없었다. 다른 깸이 올 때까지 기다렸고,
+  그 사이 누른 키가 ESC 에 붙었다. Backspace 는 Alt+Backspace 가 되고 `[`, `O`, `]` 는 뒤 키를 먹었다.
 
 ### 3.4 프레임 뒤 한 바퀴
 
@@ -154,6 +176,16 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 
 - `main loop: N ms between two iterations` 는 두 바퀴 사이 시간을 쟀다. 이제는 기다림이 길다.
   기다림이 끝난 때부터 다음 기다림 전까지, 루프가 일한 시간만 잰다.
+
+### 3.6 drain 예산
+
+- 한 바퀴의 두 drain 은 예산 4 ms 하나를 나눠 쓴다. 다 쓰면 `Drain_budget_spent` 로 다음 바퀴를 바로 부른다.
+- 예산은 꺼낼 것을 쥔 뒤에만 묻는다. 그래서 예산이 다 됐다는 답은 언제나 남은 일이 있다는 뜻이다.
+  - `Delivery_round.take` 는 줄에 선 항목을 꺼내기 전과, 모은 결과를 넘기기 전에만 묻는다.
+    줄 길이를 재는 것과 소유한 결과를 모으는 것은 항목이 아니다. 이미 정해진 것을 round 로 옮길 뿐이다.
+  - 설정 다시 읽기, 자격 증명 준비, 미뤄 둔 공유, 복사 sweep 은 준비된 것이 있는지 먼저 본다.
+- 전에는 남은 일이 없어도 물었다. 입력 앞 drain 은 앞 바퀴의 마감을 그대로 쓰므로, 4 ms 넘게 걸린 바퀴마다
+  빈 바퀴 하나가 더 돌았다.
 
 ## 4. 시험
 
@@ -168,7 +200,16 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
     `Masc_tui_engine_samples.tick`, `Masc_tui_play_room.poll` 은 아직일 때 자기 이유로 시각을 적는다.
   - 터미널 읽기는 종이 울리면 이벤트 없이 끝난다. 이미 온 바이트는 울린 종보다 먼저 읽는다.
     ESC 뒤 대기는 종이 울려도 끊기지 않아 화살표가 한 키로 남는다.
+  - 답하지 않는 probe 뒤에서 홀로 온 ESC 는 다른 깸 없이 Escape 가 된다. palette 를 묻든 묻지 않든 같다.
+  - 그 뒤에 온 Backspace, `[`, `O`, `]` 는 ESC 에 붙지 않고 제 키로 남는다.
+  - `next_byte_wait` 는 `Prefix` 에 조용해질 때까지만 주고 종을 빼며, 이미 조용하면 0 을 준다.
+    `Sequence`·`Character` 는 첫 조용한 읽기까지만 묶고 그 뒤로는 호출자의 기다림을 준다.
+  - 벽시계 이유는 `wall_reasons` 표와 같고, 한 시간 뒤 벽시계 시각은 5 초 뒤 `Wall_clock_recheck` 로 적힌다.
+    단조 이유는 한 시간 뒤를 그대로 적는다.
 - `test_tui_wake_writers` 는 `mail`, Task 전송 완료, 콘솔 쓰기가 프로세스의 종을 치는지 본다.
+  `Delivery_round.take` 는 할 일이 없으면 예산을 묻지 않고, 묻고 거절되면 일이 남는다.
+- `test_tui_server_lifecycle` 은 서버 시작 waiter 가 끝난 child 와 답하지 않는 child 의 결과를 한 번씩 남기고
+  `Server_start_settled` 를 치는지 본다.
 - 변이 확인. 아래를 하나씩 되돌리면 시험이 실패한다.
   - `mail` 에서 종 치기를 뺀다.
   - `terminal_has_bytes` 의 겨룸에서 종을 뺀다.
@@ -176,6 +217,13 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
   - `next_deadline` 에서 적힌 시각을 뺀다.
   - `terminal_has_bytes` 의 커널 먼저 묻기를 뺀다.
   - ESC 뒤 대기에 종을 넣는다.
+  - `held` 에서 probe 를 뺀다. 읽기가 붙든 것을 보지 않는다.
+  - `Prefix` 의 대기를 조용해질 때 대신 지금부터 50 ms 로 센다.
+  - `Sequence` 를 조용해진 뒤에도 50 ms 로 묶는다.
+  - 마지막 터미널 바이트 시각을 적지 않는다.
+  - `Delivery_round.take` 가 무엇보다 먼저 예산을 묻는다.
+  - 서버 시작 waiter 에서 종을 뺀다.
+  - 벽시계 시각에서 다시 읽기 상한을 뺀다. `Time_text` 를 단조 시계로 옮긴다.
 
 ## 5. 측정
 
@@ -209,8 +257,26 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 ## 6. 열린 것
 
 - `Machine_view_cadence` 가 지키는 것이 남았는지 MSX 게임을 열고 확인한다. 없으면 지운다.
-- 벽시계 시각은 적을 때의 남은 시간으로 단조 시계에 옮긴다. 기계가 잠든 사이 벽시계만 갔다면,
-  깨어난 뒤 시계·나이 글자는 그 남은 시간(대개 1 분 안)만큼 늦게 바뀐다. 다른 종이 울리면 그때 다시 적는다.
+- 벽시계 시각과 기계의 잠. 결정: 5 초 상한으로 다시 읽는다(`Wall_clock_recheck`).
+  - 문제: 벽시계 시각은 적을 때의 남은 시간으로 루프 시계에 옮긴다. 루프 시계는 Mtime 인데, macOS 에서
+    mach_absolute_time 을 쓴다(`mtime/clock/mtime_clock_stubs.c` 가 `MACOSX_VERSION_MIN_REQUIRED` 로
+    mach_continuous_time 을 고르지만 그 매크로가 정의되지 않아 `nm` 에 `_mach_absolute_time` 만 있다).
+    그 밑의 기다림은 커널 poll 의 timeout 이다. 둘 다 기계가 잠든 시간을 세지 않고, 벽시계가 바뀌어도 그대로다.
+    그래서 깨어난 뒤 시계·나이 글자는 적어 둔 시각이 루프 시계로 올 때까지, 길면 1 분 동안 틀린 채 남았다.
+    다른 종이 울리면 그때 고쳐진다.
+  - 알림으로 고치는 길: 잠에서 깬 것이나 시계가 바뀐 것을 Eio 도, OCaml runtime 도, `Unix` 도 알려 주지 않는다.
+    macOS 는 IOKit 전원 알림(CFRunLoop 이 도는 thread 가 필요하다)이나 벽시계 기준 kqueue 타이머로,
+    Linux 는 `timerfd(CLOCK_REALTIME, TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET)` 로 알 수 있다.
+    셋 다 플랫폼마다 C stub 을 새로 써야 하고, 그 fd 를 `Eio_unix.await_readable` 로 기다리게 된다.
+    이 PR 범위 밖이고, 하려면 따로 RFC 를 쓴다.
+  - 벽시계 값 그대로 두고 깰 때마다 다시 보기: 이미 그렇게 한다. 바퀴마다 모든 판단이 `Unix.gettimeofday` 로
+    다시 돈다. 문제는 깨울 것이 없을 때라서 이것만으로는 고쳐지지 않는다.
+  - 고른 것: 폴링 없이 고칠 길이 없으므로, 벽시계에서 온 기다림만 짧게 묶는다. 남은 시간이
+    `wall_clock_recheck_s`(5 초)보다 길면 5 초 뒤를 적는다. 깨어난 뒤 틀린 시계·나이 글자는 길어야 5 초 남는다.
+    시계를 바꾼 경우도 같다. 5 초는 사람이 노트북 덮개를 열고 잠금을 푸는 시간쯤이다.
+  - 비용: 벽시계 시각을 5 초보다 멀리 적은 동안에만 5 초에 한 바퀴다. 시계와 1 분 넘은 나이 글자가 있는
+    overview, keepers 에서는 늘 그렇다. 1 분 안의 나이 글자는 1 초마다 바뀌므로 상한이 바퀴를 더하지 않는다.
+    측정은 §5 다.
 - 따로 찾은 것: `Masc_tui_identity_updates.providers_loaded` 는 `Unix.gettimeofday` 를
   `Masc_tui_owed_read.failed ~now` 에 넘긴다. `due` 는 단조 시계로 묻는다. 그래서 실패한 로그인 읽기의
   재시도 시각이 단조 시계로 수십 년 뒤가 되어 다시 읽지 않는다. 이 RFC 범위 밖이다.

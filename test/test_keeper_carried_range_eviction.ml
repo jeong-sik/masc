@@ -666,11 +666,13 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
    The pair's ledger last carried a window that opened at atom 4; the last
    completed turn ended at atom 8. Under that window the second turn grew
    from 1,500 to 2,400, so the next turn is expected at 2,400 + 900. *)
-let window_ledger ~history ~first_atom counts =
+let window_ledger ?(demote_before = 0) ~history ~first_atom counts =
   let atom_count, digest_at = Window.atom_opening_index history in
   List.fold_left
     (fun ledger (turn_context, input_tokens) ->
-       let request = { (request ~digest_at ~first_atom ~atom_count) with turn_context } in
+       let request =
+         { (request ~digest_at ~first_atom ~atom_count) with turn_context; demote_before }
+       in
        Some
          (Ledger.observe ~digest_at ledger request
             (Ledger.usage_of_counts ~input_tokens ~cache_read_input_tokens:0))
@@ -770,6 +772,34 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
   check (option int) "and the window's count does not ride along" None forecast.counted_tokens
 ;;
 
+(* Markers wait for the window to move only while the size signal watches
+   it (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
+let test_markers_wait_only_while_the_size_signal_watches () =
+  let history = exchanges ~from:0 10 in
+  let held ?(opens_turn = true) ?(max_context = Some 400_000) ledger =
+    Option.map
+      (fun (held : Try_provider.held_demotion) -> held.window_opened_at, held.markers_before)
+      (Try_provider.held_demotion ~opens_turn ~max_context
+         ~history_digest_at:(Window.atom_opening_digest history) ledger)
+  in
+  let at = option (pair int int) in
+  let grown = window_ledger ~demote_before:6 ~history ~first_atom:4 grown_turns in
+  check at "the signal watches: the markers stay where the window sent them" (Some (4, 6))
+    (held grown);
+  check at "no declared max-context: a turn's first request demotes the ended turns" None
+    (held ~max_context:None grown);
+  let unmeasured =
+    window_ledger ~demote_before:6 ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]
+  in
+  check at "no turn has grown under the ledger yet: the same" None (held unmeasured);
+  check at "later in the turn they stay where its first request put them" (Some (4, 6))
+    (held ~opens_turn:false ~max_context:None unmeasured);
+  check at "no ledger holds nothing" None (held ~opens_turn:false None);
+  check at "a ledger this history does not hold holds nothing" None
+    (held ~opens_turn:false
+       (window_ledger ~history:(exchanges ~from:100 10) ~first_atom:4 grown_turns))
+;;
+
 let () =
   Eio_main.run
   @@ fun _ ->
@@ -817,6 +847,10 @@ let () =
             test_the_size_signal_reads_the_ledger_and_the_declaration
         ; test_case "it moves only a window that stays" `Quick
             test_the_size_signal_moves_only_a_window_that_stays
+        ] )
+    ; ( "held markers"
+      , [ test_case "they wait only while the size signal watches" `Quick
+            test_markers_wait_only_while_the_size_signal_watches
         ] )
     ]
 ;;

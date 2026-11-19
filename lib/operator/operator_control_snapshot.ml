@@ -125,9 +125,9 @@ let keeper_runtime_trust_observation ~read_policy ~config ~meta =
 
 (* The stored meta of a Keeper, as the snapshot reads it: from the Keeper's
    Owner when the Owner stands for the meta file, and from the file
-   otherwise. The Keeper rows and the walk that names the Keepers meant to
-   keep running both read it here, so a snapshot opens the meta file of an
-   owned Keeper for neither. *)
+   otherwise ([Keeper_stored_meta.read] says when that is). The Keeper rows
+   and the walk that names the Keepers meant to keep running both read it
+   here, so the two go by one meta within a snapshot. *)
 let stored_meta config name =
   Keeper_stored_meta.read config name ~read_file:(fun () ->
     Keeper_meta_store.read_meta config name)

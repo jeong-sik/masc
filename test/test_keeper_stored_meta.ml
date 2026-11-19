@@ -698,9 +698,9 @@ let asking_the_owners config name =
   Stored_meta.read config name ~read_file:(fun () -> Store.read_meta config name)
 ;;
 
-(* With the Owners standing for the meta files the walk opens none: its
-   answer is the same with every file unreadable. Given the file read alone,
-   as it read before, the same walk then names no Keeper. *)
+(* With the Owners standing for the meta files the walk answers from them:
+   its answer is the same with every file unreadable. Given the file read
+   alone, as it read before, the same walk then names no Keeper. *)
 let test_the_walk_of_owned_keepers_needs_no_meta_file () =
   with_three_keepers
   @@ fun config ->
@@ -722,7 +722,7 @@ let test_the_walk_of_owned_keepers_needs_no_meta_file () =
     with_the_files
     (persistent config ~read_meta:(asking_the_owners config));
   Alcotest.(check (list string))
-    "the file read alone names no Keeper, so the case above read no file"
+    "the file read alone names no Keeper: the answer above did not come from the files"
     []
     (fst (persistent config ~read_meta:(Store.read_meta config)))
 ;;

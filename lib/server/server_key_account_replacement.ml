@@ -117,8 +117,7 @@ let nothing_there = { Files.gone = 0; stayed = None }
 (* Read inside the call of the account, where a replacement of its key runs
    too: the generation of that time names the one file that stays. The
    state is one the zone can be trusted for ([Authz_zone.read]): nothing
-   commits here, and records that went back would name a generation before
-   the one on disk, whose file is the key in use.
+   commits here, so nothing else judges the zone.
 
    The runtime root is spelled and not made, so an account with no file
    gets none. An owner with no membership has no record that names the
@@ -127,8 +126,10 @@ let nothing_there = { Files.gone = 0; stayed = None }
 
    The account of a removal that began or went through is looked at too.
    The removal takes every file of it, whichever of the two runs first. Of
-   such an account whose owner has no membership nothing is said here: the
-   resume of the removal says it. *)
+   such an account whose owner has no membership nothing is said here: a
+   removal that is pending says it in its resume, and one that went through
+   took the files. Files that came back after it are those of issue
+   #53111. *)
 let remove_left_keys_of ~zone ~base_path id =
   Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
     match Authz_zone.read zone with

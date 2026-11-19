@@ -68,8 +68,9 @@ val replace
     Each account is looked at inside its call, and the generation is read
     there. An account with a call running is left: the next start looks
     again, and so do the next replacement and the removal of the account.
-    Nothing is made: an account with no file gets none. A file that stays
-    goes to the log of the server, and so does an exception of one account,
+    Nothing is made: an account with no file gets none. How many files of
+    an account went goes to the log of the server, a file that stays goes
+    there too, and so does an exception of one account,
     after which the others are looked at. Cancellation and the exceptions
     of a process that cannot go on are raised. *)
 val remove_left_keys : zone:Authz_zone.t -> base_path:string -> unit

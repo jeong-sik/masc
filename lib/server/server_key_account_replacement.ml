@@ -108,10 +108,10 @@ let remove_left_keys_of ~zone ~base_path id =
   Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
     let state = (Authz_zone.snapshot zone).Authz_zone.state in
     match Accounts.find state.Authz_state.provider_accounts id with
-    | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok ()
+    | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok 0
     | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } } ->
       (match Authz_principal_state.find_membership state.Authz_state.principals owner with
-       | None -> Ok ()
+       | None -> Ok 0
        | Some { Authz_principal_state.workspace_id = _; account_home_namespace = namespace } ->
          Files.remove_other_keys
            ~runtime_root:(Runtime_account_home_layout.person_runtime_root ~base_path ~namespace)
@@ -137,7 +137,15 @@ let remove_left_keys ~zone ~base_path =
       guarded id
       @@ fun () ->
       match remove_left_keys_of ~zone ~base_path id with
-      | Ok () -> ()
+      | Ok 0 -> ()
+      | Ok gone ->
+        (* A file that held a key went with no request of its owner, so the
+           log of the server says it. *)
+        Log.Server.info
+          "The start of the server removed %d of the files of the folder of the keys of account %s: \
+           none of them is the key its records say"
+          gone
+          (Provider_account_id.to_string id)
       | Error Call_running ->
         (* The call can be a replacement, which removes them itself. The
            next start looks again. *)

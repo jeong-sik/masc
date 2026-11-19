@@ -15282,20 +15282,27 @@ let apply_tools_async_observation_result state ~generation result =
        | Error failure -> state.tools_async_observation_error <- Some failure);
       true)
 
-let move_tools_async_selection state delta =
+(* One move key over the async request list (RFC tui-one-screen-grammar
+   §3.1): held inside the list like every other list, so k on the first
+   request stays there rather than wrapping to the last. A selection the list
+   no longer holds starts again at an edge, as Overview's does. *)
+let move_tools_async_selection state (move : Masc_tui_scroll.Cursor_move.t) =
   let targets = tools_async_targets state in
-  let current = Option.bind state.tools_async_selection (fun selected ->
-    List.find_index (Masc.Tui_decode_async_request.equal_target selected) targets) in
   let count = List.length targets in
-  if count > 0 then begin
-    let index = match current with
-      | Some index -> (index + delta + count) mod count
-      | None -> if delta < 0 then count - 1 else 0 in
-    let target = List.nth targets index in
+  let index =
+    match Option.bind state.tools_async_selection (fun selected ->
+      List.find_index (Masc.Tui_decode_async_request.equal_target selected) targets) with
+    | Some index -> Masc_tui_scroll.cursor_apply ~count move index
+    | None ->
+        (match move with
+         | To_end -> Masc_tui_scroll.cursor_last ~count
+         | Line_down | Line_up | Page_down _ | Page_up _ | To_top -> 0)
+  in
+  Option.iter (fun target ->
     if not (Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection (Some target)) then
       state.tools_async_last_logical <- None;
-    state.tools_async_selection <- Some target
-  end
+    state.tools_async_selection <- Some target)
+    (List.nth_opt targets index)
 
 (* Records one Keeper's Usage read in Keeper name order. A failed read keeps
    the Keeper's last answer beside the failure. *)

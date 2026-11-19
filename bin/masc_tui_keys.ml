@@ -1350,7 +1350,9 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Tools ->
-      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll"
+          ~help:"in Available, select a Skill; in async runs, select an original \
+                 request; the other sections and an open request scroll"
       ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
       ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
       ; b ~ko:"다음 탭" Navigate "p" "section"
@@ -1370,9 +1372,6 @@ let for_surface = function
                  DIRECT=direct calls allowed; SURFACES=exposure paths; \
                  none=no exposure path. Use Skill receipts for usage evidence \
                  and Activity for tool input/output."
-      ; b ~ko:"스킬" Navigate "J/K" "Skill"
-          ~help:"in async runs, select an original request; otherwise select \
-                 a published Skill"
       ; b ~ko:"조합 성능" Act "f" "Composition performance"
           ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
       ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph"

@@ -24,29 +24,33 @@ let of_head (history : Objects.history) =
 ;;
 
 let first covered = covered.first
-let segment_before covered = covered.before
 
-type segment_error =
+type 'error segment_error =
   | Nothing_before
+  | Not_read of 'error
   | Does_not_fit of
       { first : int
       ; segment_messages : int
       ; has_previous : bool
       }
 
-let with_segment_before (segment : Objects.segment) covered =
+let with_segment_before ~load covered =
   match covered.before with
   | None -> Error Nothing_before
-  | Some (_ : Objects.digest) ->
-    let segment_messages = messages_of segment.segment_turns in
-    let first = covered.first - segment_messages in
-    let has_previous = Option.is_some segment.previous in
-    (* A segment holds at least one message, so the history starts at this
-       segment exactly when no segment comes before it. *)
-    if first < 0 || Bool.equal (first = 0) has_previous
-    then Error (Does_not_fit { first = covered.first; segment_messages; has_previous })
-    else
-      Ok { first; turns = segment.segment_turns @ covered.turns; before = segment.previous }
+  | Some name ->
+    (match load name with
+     | Error error -> Error (Not_read error)
+     | Ok (segment : Objects.segment) ->
+       let segment_messages = messages_of segment.segment_turns in
+       let first = covered.first - segment_messages in
+       let has_previous = Option.is_some segment.previous in
+       (* A segment holds at least one message, so the history starts at this
+          segment exactly when no segment comes before it. *)
+       if first < 0 || Bool.equal (first = 0) has_previous
+       then Error (Does_not_fit { first = covered.first; segment_messages; has_previous })
+       else
+         Ok
+           { first; turns = segment.segment_turns @ covered.turns; before = segment.previous })
 ;;
 
 type range_error =

@@ -74,28 +74,37 @@ let test_slices () =
     (range_text head ~from:46 ~through:45)
 ;;
 
-let segment_error_text : Marks.segment_error -> string = function
+let segment_error_text : string Marks.segment_error -> string = function
   | Nothing_before -> "nothing before"
+  | Not_read why -> "not read: " ^ why
   | Does_not_fit { first; segment_messages; has_previous } ->
     Printf.sprintf "%d messages before, the segment holds %d and %s" first segment_messages
       (if has_previous then "names one before it" else "names none before it")
 ;;
 
-let before_text segment covered =
-  match Marks.with_segment_before segment covered with
+(* A store that holds one segment under one name. *)
+let holding name segment asked = if asked = name then Ok segment else Error "another name"
+
+(* The head's segment is named f. *)
+let with_segment ?(under = digest 'f') segment covered =
+  Marks.with_segment_before ~load:(holding under segment) covered
+;;
+
+let before_text ?under segment covered =
+  match with_segment ?under segment covered with
   | Ok covered -> Printf.sprintf "from %d" (Marks.first covered)
   | Error error -> segment_error_text error
 ;;
 
 let test_segment_before () =
-  check bool "the head says which segment comes before it" true
-    (Marks.segment_before head = Some (digest 'f'));
   let segment : Objects.segment = { previous = None; segment_turns = [ turn '1' 10; turn '2' 30 ] } in
-  (match Marks.with_segment_before segment head with
+  check string "the head asks for the segment it names and no other"
+    "not read: another name"
+    (before_text ~under:(digest 'e') segment head);
+  (match with_segment segment head with
    | Error error -> fail (segment_error_text error)
    | Ok covered ->
      check int "the segment's turns start at message 0" 0 (Marks.first covered);
-     check bool "and nothing comes before them" true (Marks.segment_before covered = None);
      check string "a run from inside the segment into the head" "1+5:5 2+0:30 a+0:2"
        (range_text covered ~from:5 ~through:42);
      check string "there is no segment to put before message 0" "nothing before"
@@ -103,12 +112,16 @@ let test_segment_before () =
   let earlier : Objects.segment =
     { previous = Some (digest '9'); segment_turns = [ turn '3' 25 ] }
   in
-  (match Marks.with_segment_before earlier head with
+  (match with_segment earlier head with
    | Error error -> fail (segment_error_text error)
    | Ok covered ->
      check int "a segment in the middle" 15 (Marks.first covered);
-     check bool "it names the one before it" true
-       (Marks.segment_before covered = Some (digest '9')));
+     check string "it asks next for the one that segment names" "from 0"
+       (before_text ~under:(digest '9')
+          { previous = None; segment_turns = [ turn '8' 15 ] }
+          covered);
+     check string "and not again for the head's" "not read: another name"
+       (before_text { previous = None; segment_turns = [ turn '8' 15 ] } covered));
   (* Another segment than the one just before is refused, not sliced. *)
   check string "longer than what is before" "40 messages before, the segment holds 50 and names none before it"
     (before_text { previous = None; segment_turns = [ turn '4' 50 ] } head);

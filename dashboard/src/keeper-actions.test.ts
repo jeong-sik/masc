@@ -2316,6 +2316,40 @@ describe('sendKeeperThreadMessage operation stream', () => {
       expect(keeperActionErrors.value.echo ?? null).toBeNull()
     })
 
+    it('lets the stored turn take the rows of a closed send that the server accepted after all', async () => {
+      // The closed send read no history before it left. Its rows carry the
+      // operation it named, so the next history read that holds that
+      // operation's turn replaces them.
+      const stream = holdUnacceptedStream()
+      const thrown = sendKeeperThreadMessage('echo', 'hi').then(() => null, error => error)
+      await Promise.resolve()
+      await cancelActiveKeeperThreadMessage('echo')
+      expect(closeKeeperSendWithHeldStop('echo')).toBe(true)
+      await thrown
+      expect(replyRow()?.error).toContain('중지는 서버에 보내지 않았습니다')
+
+      const storedRow = (id: string, role: 'user' | 'assistant', content: string, slot: string, ts: number) => ({
+        id,
+        role,
+        content,
+        ts,
+        delivery_provenance: {
+          delivery_key: { kind: 'operation', operation_id: stream.operationId() },
+          transcript_slot: { kind: slot },
+        },
+        delivery_provenance_status: 'valid',
+      })
+      fetchKeeperChatHistory.mockResolvedValue([
+        storedRow('stored-user', 'user', 'hi', 'accepted_user', 1_780_000_000),
+        storedRow('stored-reply', 'assistant', 'hello there', 'terminal_result', 1_780_000_001),
+      ])
+      await hydrateKeeperChatHistory('echo')
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.map(entry => entry.role)).toEqual(['user', 'assistant'])
+      expect(replyRow()).toMatchObject({ text: 'hello there', delivery: 'history', error: null })
+    })
+
     it('closes only the send that a stop is held for', async () => {
       const stream = holdUnacceptedStreams()
       fetchKeeperChatHistory.mockResolvedValue([])

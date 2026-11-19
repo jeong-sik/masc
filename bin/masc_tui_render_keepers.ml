@@ -1486,11 +1486,16 @@ let keeper_operations_fields (state : state) ~keeper_name =
   | None ->
       (match error with
        | Some detail ->
-           [ execution, Theme.warn () ^ t "읽지 못함 · " "unavailable · "
+           [ execution, Theme.bad () ^ t "읽기 실패 · " "read failed · "
              ^ Terminal_text.single_line detail ^ Ansi.reset ]
        | None ->
+           (* Not read yet is a mark where the value goes, not a word
+              (RFC tui-one-screen-grammar §6.4). *)
            if reading_now then []
-           else [ execution, Theme.recede () ^ t "미관측" "not observed" ^ Ansi.reset ])
+           else
+             [ execution
+             , Theme.recede () ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
+               ^ Ansi.reset ])
   in
   let fields = match reading, error with
     | Some _, Some detail ->
@@ -3820,7 +3825,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 (match runtime.kr_runtime_blocker_signature with
                 | Some signature -> wrap ~tone:Ansi.dim signature
                 | None -> ())
-            | None -> wrap ~tone:Ansi.dim (t "없음" "none"))
+            | None -> wrap ~tone:Ansi.dim (t "현재 장애 없음" "no current failure"))
         | Keeper_control.Unobserved | Keeper_control.Absent ->
             wrap ~tone:Ansi.dim (Keeper_control.health_label ~ko (keeper_reading state k))
         | Keeper_control.Invalid detail ->

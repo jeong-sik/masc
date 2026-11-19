@@ -59,13 +59,18 @@ let refusal_text ~request refusal =
    which rows the selected Skill's measurement card takes. A [Cursor] handed
    to a [Laid_out] block is drawn but not counted, and a [Timed] row there
    is drawn without its instant; the Skill list and the Async request list
-   are in none. *)
+   are in none. A [List_entry] is the pieces of one entry of the list the
+   move keys walk -- a Skill with its group heading and the rows that say
+   why it was loaded, or one async request -- drawn as those pieces are:
+   {!tools_display} counts the rows each entry takes, so the frame can page
+   by the entries its window holds whole. *)
 type piece =
   | Row of string * Say.t
   | Cursor of string * Say.t
   | Timed of string * Say.t * float
   | Laid_out of (Say.language -> (string * string) list)
   | Measurement_card of (Say.language -> (string * string) list)
+  | List_entry of piece list
 
 (* Which of {!tools_display}'s runs a drawn row belongs to: none, the
    [Cursor]'s entry, the measurement card, or a [Timed] text with when it
@@ -84,14 +89,15 @@ let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
 let written_elsewhere lines = Laid_out (fun _ -> lines)
 
 (* Each drawn row, paired with the run it belongs to. *)
-let draw_marked language pieces =
+let rec draw_marked language pieces =
   List.concat_map
     (function
       | Row (style, text) -> [ (style, Say.render language text), Unmarked ]
       | Cursor (style, text) -> [ (style, Say.render language text), Entry ]
       | Timed (style, text, at) -> [ (style, Say.render language text), Changes_at at ]
       | Laid_out lay -> List.map (fun row -> row, Unmarked) (lay language)
-      | Measurement_card lay -> List.map (fun row -> row, Card) (lay language))
+      | Measurement_card lay -> List.map (fun row -> row, Card) (lay language)
+      | List_entry pieces -> draw_marked language pieces)
     pieces
 
 let draw language pieces = List.map fst (draw_marked language pieces)
@@ -344,9 +350,10 @@ let async_request_inventory_lines (state : state) =
                Say.as_received (Terminal_text.single_line request.ar_keeper_name);
                status; elapsed; ownership ]
       in
-      match changes_at with
-      | Some at -> Timed (tone, text, at)
-      | None -> Row (tone, text)) requests
+      List_entry
+        [ (match changes_at with
+           | Some at -> Timed (tone, text, at)
+           | None -> Row (tone, text)) ]) requests
     in
     let recovery_lines = match recovery with
       | None ->
@@ -1223,6 +1230,7 @@ type display =
   ; cursor : cursor_rows option
   ; card : cursor_rows option
   ; row_changes : (int * float) list
+  ; entries : (paged_list * int list) option
   }
 
 let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
@@ -1243,7 +1251,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
     ; cursor = None
     ; card = None
-    ; row_changes = [] }
+    ; row_changes = []
+    ; entries = None }
   | None ->
   let registered_tools =
     match state.tools_inventory with
@@ -1438,21 +1447,21 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  if selected then List.map (fun (style, text) -> Cursor (style, text)) lines
                  else rows lines
                in
-               rows heading
-               @ [ (if selected then Cursor (Theme.selection_style (), skill_row)
-                    else Row (Ansi.dim, skill_row)) ]
-               @ entry_rows (match profile.esp_load_reasons, chosen with
-                   | [], _ ->
-                       [ ( Theme.warn ()
-                         , Say.both ~ko:"     불러온 이유: 알 수 없음" ~en:"     why loaded: unattributed" ) ]
-                   | _, [] -> []
-                   | _, chosen ->
-                       [ ( Ansi.dim
-                         , Say.both ~ko:"     불러온 이유: " ~en:"     why loaded: "
-                           ++ Say.concat ~sep:(Say.code " + ") chosen )
-                       ]))
+               List_entry
+                 (rows heading
+                  @ [ (if selected then Cursor (Theme.selection_style (), skill_row)
+                       else Row (Ansi.dim, skill_row)) ]
+                  @ entry_rows (match profile.esp_load_reasons, chosen with
+                      | [], _ ->
+                          [ ( Theme.warn ()
+                            , Say.both ~ko:"     불러온 이유: 알 수 없음" ~en:"     why loaded: unattributed" ) ]
+                      | _, [] -> []
+                      | _, chosen ->
+                          [ ( Ansi.dim
+                            , Say.both ~ko:"     불러온 이유: " ~en:"     why loaded: "
+                              ++ Say.concat ~sep:(Say.code " + ") chosen )
+                          ])))
             ets_skill_profiles
-          |> List.concat
         in
         let selected_skill_flow_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
@@ -2813,6 +2822,35 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       wrap prefix @ draw_marked language pane_lines
     else wrap (prefix @ pane_lines)
   in
+  (* The rows each entry of the pane's list takes once wrapped. A row wraps
+     by its own width alone, so an entry takes as many rows wrapped by itself
+     as it does among the rows around it. The first entry takes every row of
+     the page above it too, since the window brings the top of the page in
+     with it (Home); a page counted without them let PgUp onto the first
+     entry push the entry read first off the window. A pane with a list
+     draws [prefix] and then its pane lines. *)
+  let entry_rows =
+    let rec from_first above = function
+      | List_entry pieces :: rest ->
+          (List.length (wrap (List.rev above)) + List.length (wrap pieces))
+          :: List.filter_map
+               (function
+                 | List_entry pieces -> Some (List.length (wrap pieces))
+                 | Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _ -> None)
+               rest
+      | (Row _ | Cursor _ | Timed _ | Laid_out _ | Measurement_card _) as piece :: rest ->
+          from_first (piece :: above) rest
+      | [] -> []
+    in
+    from_first (List.rev prefix) pane_lines
+  in
+  let entries =
+    let listed list = match entry_rows with [] -> None | heights -> Some (list, heights) in
+    match state.tools_pane with
+    | Tools_surface -> listed Skill_entries
+    | Tools_async -> listed Async_request_entries
+    | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _ -> None
+  in
   (* The first and the last row [in_run] picks. The [Cursor] pieces are the
      adjacent rows of one Skill and the card is one piece, so each run is
      whole. *)
@@ -2840,6 +2878,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
              | Changes_at at -> [ (index, at) ]
              | Unmarked | Entry | Card -> [])
            marked)
+  ; entries
   }
 ;;
 
@@ -2853,3 +2892,10 @@ let drawn_change display window =
     None display.row_changes
 
 let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines
+
+(* A Skill or a request can wrap, so a page counts the entries the window
+   holds whole wherever it stands, as the cursor counts entries. *)
+let drawn_page display ~rows =
+  Option.map
+    (fun (list, heights) -> list, Masc_tui_scroll.items_always_shown ~heights ~rows)
+    display.entries

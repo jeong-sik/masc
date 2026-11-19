@@ -8346,7 +8346,7 @@ type row_list = Masc_tui_list_moves.row_list = {
    drawn height the frame reports and a page key moves by (RFC
    tui-one-screen-grammar §3.1). *)
 type on_screen = Masc_tui_list_moves.on_screen = {
-  os_page : Masc_tui_list_moves.page_height;
+  os_list : paged_list;
   os_rows : row_list option;
 }
 
@@ -8394,7 +8394,7 @@ let list_on_screen (state : state) : on_screen option =
         let height = surface_body_height_at state ~cursor scrolled in
         set_scroll (Masc_tui_scroll.ensure_visible_with_lead ~cursor ~lead ~height scroll)
   in
-  let listed list rows = Some { os_page = Masc_tui_list_moves.Drawn list; os_rows = Some rows } in
+  let listed list rows = Some { os_list = list; os_rows = Some rows } in
   (* A list whose rows the drawing windows around the cursor: nothing to
      scroll, so the landing is on screen as soon as the cursor names it. *)
   let windowed list ~count ~cursor place =
@@ -8669,14 +8669,14 @@ let list_on_screen (state : state) : on_screen option =
            (fun index -> state.identity_cursor <- index))
   (* Overview's move keys select a destination ([Masc_tui_home.home_move])
      rather than move a cursor, so it hands over only the list it is. *)
-  | Overview -> Some { os_page = Masc_tui_list_moves.Drawn Overview_destinations; os_rows = None }
+  | Overview -> Some { os_list = Overview_destinations; os_rows = None }
   (* The models table is read by a cursor [e] acts on. The stored scroll is
      the window the cursor settled, so a key inside the window moves only
      the mark, and the column names stay on screen until the selection
      passes the first window. *)
   | Config when state.config_pane = Config_models ->
       Option.map (fun (list : Masc_tui_render_config.models_list) ->
-        { os_page = Masc_tui_list_moves.Drawn Model_bindings
+        { os_list = Model_bindings
         ; os_rows =
             Some
               { rl_count = list.ml_count
@@ -8691,14 +8691,9 @@ let list_on_screen (state : state) : on_screen option =
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
      reading. *)
-  (* The Skill list and the async request list, while the move keys walk
-     one ([Masc_tui_list_moves.tools_list]). [Masc_tui_render_tools] does not
-     report them as drawn lists, and an entry can wrap, so a page is the
-     Tools window's rows counted in entries, as before. The keys walk the
-     selection themselves ([Masc_tui_list_moves.moves]). *)
-  | Tools when Option.is_some (Masc_tui_list_moves.tools_list state) ->
-      let _, height = tools_scroll_viewport state in
-      Some { os_page = Masc_tui_list_moves.Projected height; os_rows = None }
+  (* The Skill list and the async request list walk their selection rather
+     than a row, and read their page where they walk it
+     ([Masc_tui_list_moves.moves]). *)
   | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Config | Tools ->

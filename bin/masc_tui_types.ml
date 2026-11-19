@@ -5856,9 +5856,8 @@ type scrolled = {
    the selected Keeper's detail, and the handler's guess paged thirteen rows
    while three were on screen. A list whose entries take more than one row
    reports the entries it drew, because its cursor counts entries: the Task
-   and Goal lists draw two rows an entry. [Masc_tui_render_tools] reports
-   neither of its lists yet: the Skill and async request lists page by the
-   Tools window's rows ([Masc_tui_list_moves.Projected]). *)
+   and Goal lists draw two rows an entry, and a Skill or an async request
+   wraps over as many rows as its words need. *)
 type paged_list =
   | Context_inspector_items
   | Repository_change_rows
@@ -5882,6 +5881,8 @@ type paged_list =
   | Task_entries
   | Goal_entries
   | Schedule_rows
+  | Skill_entries
+  | Async_request_entries
   | Fusion_entries
   | Resource_entries
   | Activity_events

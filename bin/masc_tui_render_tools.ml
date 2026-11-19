@@ -36,13 +36,18 @@ let refusal_text ~request refusal =
   Say.of_ko_flag (fun ~ko -> workspace_refusal_text ~ko ~request refusal)
 
 (* What a section of this screen hands the frame. A [Row] holds its words in
-   both languages. A [Laid_out] block is rows fitted to a width by a step that
-   has to see the words first -- a boxed card wraps its rows, a table keeps
-   its columns only if its header fits, a chart sizes its bars beside its
-   names -- so how many rows it takes depends on the language, and it gets the
-   language when the frame draws ({!draw}). *)
+   both languages. A [Cursor] is the row of the entry the list keys act on: it
+   draws as a [Row], and {!tools_display} says which physical row it starts
+   on, so the key handler brings it into view by that number rather than by
+   looking for its colour. A [Laid_out] block is rows fitted to a width by a
+   step that has to see the words first -- a boxed card wraps its rows, a
+   table keeps its columns only if its header fits, a chart sizes its bars
+   beside its names -- so how many rows it takes depends on the language, and
+   it gets the language when the frame draws ({!draw}). A [Cursor] handed to
+   a [Laid_out] block is drawn but not counted; the Skill list is in none. *)
 type piece =
   | Row of string * Say.t
+  | Cursor of string * Say.t
   | Laid_out of (Say.language -> (string * string) list)
 
 let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
@@ -52,12 +57,16 @@ let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
    layer; until then the frame takes its rows as they are. *)
 let written_elsewhere lines = Laid_out (fun _ -> lines)
 
-let draw language pieces =
+(* Each drawn row, paired with whether it is the [Cursor]'s. *)
+let draw_marked language pieces =
   List.concat_map
     (function
-      | Row (style, text) -> [ style, Say.render language text ]
-      | Laid_out lay -> lay language)
+      | Row (style, text) -> [ (style, Say.render language text), false ]
+      | Cursor (style, text) -> [ (style, Say.render language text), true ]
+      | Laid_out lay -> List.map (fun row -> row, false) (lay language))
     pieces
+
+let draw language pieces = List.map fst (draw_marked language pieces)
 
 let skill_async_evidence_lines evidence =
   let view = Masc.Tui_skill_async_evidence.project evidence in
@@ -1162,19 +1171,25 @@ let pad_cells cells text =
 
 let surface_title = Say.both ~ko:" Keeper 호출 범위" ~en:" Effective Keeper Surface"
 
-let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
+type display = { lines : (string * string) list; cursor_row : int option }
+
+let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let language = say_language state in
   match state.tools_skill_source_picker with
   | Some picker ->
     let terminal_rows = match terminal_rows with Some rows -> rows | None -> fst (get_terminal_size ()) in
     let view = Masc_tui_pick_list.view ~page:(skill_source_picker_page state ~terminal_rows)
       ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id picker.ssp_sources picker.ssp_list in
-    draw language (rows
-      (skill_source_picker_prefix (Say.of_ko_flag (fun ~ko -> Masc_tui_pick_list.summary ~ko view))
-       @ (if view.rows = [] then [Theme.warn (), Say.both ~ko:" 맞는 출처 없음" ~en:" No matching source"] else
-           List.mapi (fun index source ->
-             (if view.selected_row = Some index then Theme.selection else Ansi.dim),
-             Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
+    (* The picker pages its own window to its cursor, so no Skill row is
+       reported for the frame to scroll to. *)
+    { lines =
+        draw language (rows
+          (skill_source_picker_prefix (Say.of_ko_flag (fun ~ko -> Masc_tui_pick_list.summary ~ko view))
+           @ (if view.rows = [] then [Theme.warn (), Say.both ~ko:" 맞는 출처 없음" ~en:" No matching source"] else
+               List.mapi (fun index source ->
+                 (if view.selected_row = Some index then Theme.selection else Ansi.dim),
+                 Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
+    ; cursor_row = None }
   | None ->
   let registered_tools =
     match state.tools_inventory with
@@ -1346,17 +1361,20 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                             ~en:"Composition Skills · executable plans")
                     ++ Say.code (Printf.sprintf " (%d)"
                          (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles)))] in
-               heading @ [ ( (if index = state.tools_skill_cursor
-                  then Theme.selection
-                  else Ansi.dim)
-               , Say.code (Printf.sprintf " %s "
-                   (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " "))
+               let selected = index = state.tools_skill_cursor in
+               let skill_row =
+                 Say.code (Printf.sprintf " %s "
+                   (if selected then Masc_tui_theme.Glyph.current_entry else " "))
                  ++ Say.as_received (Masc_tui_message_layout.fit_middle skill_name_cells
                       (Terminal_text.single_line profile.esp_name))
                  ++ Say.code " " ++ Say.map (pad_cells 11) execution
                  ++ Say.code (Printf.sprintf "%s discovery=%dB body=%dB"
-                      flow profile.esp_discovery_bytes profile.esp_body_bytes) ) ]
-               @ (match profile.esp_load_reasons, chosen with
+                      flow profile.esp_discovery_bytes profile.esp_body_bytes)
+               in
+               rows heading
+               @ [ (if selected then Cursor (Theme.selection, skill_row)
+                    else Row (Ansi.dim, skill_row)) ]
+               @ rows (match profile.esp_load_reasons, chosen with
                    | [], _ ->
                        [ ( Theme.warn ()
                          , Say.both ~ko:"     불러온 이유: 알 수 없음" ~en:"     why loaded: unattributed" ) ]
@@ -1682,10 +1700,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             let card_body = match profile.esp_io with
               | Masc.Tui_decode_tools.Model_orchestrated ->
                   rows
+                    (* f and the keys that walk the list are in section 5
+                       of the frame, so the card names no key of its own. *)
                     [ Ansi.dim, Say.both ~ko:"지침 Skill · 지침 텍스트에는 executor 실행 시간이 없습니다"
-                        ~en:"Normal Skill · instructions have no executor run time"
-                    ; Theme.info (), Say.both ~ko:"f: Composition 선택 + 실측 불러오기 · J/K: Skill 선택"
-                        ~en:"f: pick a Composition and load its measurements · J/K: pick a Skill" ]
+                        ~en:"Normal Skill · instructions have no executor run time" ]
               | Composition_io _ -> selected_skill_statistics_lines in
             let pending = match state.tools_evidence_reference, state.tools_evidence_request with
               | Some reference, Some _ when Skill_reference.equal reference profile.esp_reference ->
@@ -1709,12 +1727,13 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             ++ Say.code ")" ]
         @ performance_card
         @ rows
-          ([ delivery_tone, Say.both ~ko:"   Runtime 도구 전달: " ~en:"   Runtime tool delivery: " ++ delivery ]
-          @ diagnostics_lines
-          (* The keys that move through this list are in section 5 of the
-             frame, so the list carries no hint row of its own. *)
-          @ skill_profile_lines
-          @ (match selected_tools_skill_profile state with
+            ([ delivery_tone, Say.both ~ko:"   Runtime 도구 전달: " ~en:"   Runtime tool delivery: " ++ delivery ]
+             @ diagnostics_lines)
+        (* The keys that move through this list are in section 5 of the
+           frame, so the list carries no hint row of its own. *)
+        @ skill_profile_lines
+        @ rows
+          ((match selected_tools_skill_profile state with
              | None -> [] | Some profile -> skill_io_lines ~cols profile.esp_io)
           @ selected_skill_flow_lines
           @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
@@ -2677,13 +2696,15 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   (* The one place this screen's rows take a language. *)
-  let wrap pieces = List.concat_map (fun (style, text) ->
+  let wrap pieces = List.concat_map (fun ((style, text), cursor) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as
-          Markdown or shorten its identities to fit the frame. *)
-       if Masc_tui_message_layout.display_width text <= width then [style, text]
+          Markdown or shorten its identities to fit the frame. A cursor row
+          that wraps is found by its first row. *)
+       if Masc_tui_message_layout.display_width text <= width then [ (style, text), cursor ]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
-            |> List.map (fun line -> style, line)) (draw language pieces) in
+            |> List.mapi (fun row line -> (style, line), cursor && row = 0))
+       (draw_marked language pieces) in
   let drafts = List.map (fun draft ->
       Theme.warn (),
       Say.both ~ko:" 게시 안 한 " ~en:" Unpublished "
@@ -2694,12 +2715,17 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
       ++ Say.both ~ko:": 편집기에서 이어 쓰기" ~en:":resume in editor")
     (skill_create_drafts_for_current_workspace state) in
   let prefix = tools_selection_document ~cols state @ rows (drafts @ reading_lines @ error_lines) in
-  if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
-    wrap (pane_lines @ rows (reading_lines @ error_lines))
-  else if state.tools_pane = Tools_storage then
-    (* No Skill is selected here, so the Skill heading stays out. *)
-    wrap (rows (reading_lines @ error_lines) @ pane_lines)
-  else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
-    wrap prefix @ draw language pane_lines
-  else wrap (prefix @ pane_lines)
+  let marked =
+    if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
+      wrap (pane_lines @ rows (reading_lines @ error_lines))
+    else if state.tools_pane = Tools_storage then
+      (* No Skill is selected here, so the Skill heading stays out. *)
+      wrap (rows (reading_lines @ error_lines) @ pane_lines)
+    else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
+      wrap prefix @ draw_marked language pane_lines
+    else wrap (prefix @ pane_lines)
+  in
+  { lines = List.map fst marked; cursor_row = List.find_index snd marked }
 ;;
+
+let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines

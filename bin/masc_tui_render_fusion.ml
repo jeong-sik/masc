@@ -916,8 +916,23 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
     | Some routes ->
         List.concat_map
           (fun line ->
-            Message_layout.split_cells ~max_cells:(max 1 (width - 2)) line
-            |> List.map (fun line -> Ansi.reset, "  " ^ line))
+            let len = String.length line in
+            let rec count_indent i =
+              if i < len && Char.equal line.[i] ' ' then count_indent (i + 1) else i
+            in
+            let indent_len = count_indent 0 in
+            let avail = max 1 (width - 2) in
+            let wrapped =
+              if indent_len = len then [ "" ]
+              else if indent_len = 0 || indent_len >= avail then
+                Message_layout.wrap_words ~max_cells:avail line
+              else
+                let prefix = String.sub line 0 indent_len in
+                let body = String.sub line indent_len (len - indent_len) in
+                Message_layout.wrap_words ~max_cells:(max 1 (avail - indent_len)) body
+                |> List.map (fun row -> prefix ^ row)
+            in
+            List.map (fun row -> Ansi.reset, "  " ^ row) wrapped)
           (Masc_tui_fusion_seat_routes.lines routes)
   in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]

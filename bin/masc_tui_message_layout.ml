@@ -542,11 +542,23 @@ let compact_count n =
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 
+let trim_trailing_ascii_spaces text =
+  let rec last_non_space i =
+    if i < 0 then 0
+    else if Char.equal text.[i] ' ' then last_non_space (i - 1)
+    else i + 1
+  in
+  let keep = last_non_space (String.length text - 1) in
+  if keep = 0 || keep = String.length text then text else String.sub text 0 keep
+
 let fitted_source_bytes text width =
   if width <= 0 then 0
   else if display_width text <= width then String.length text
   else
-    let prefix, _, _ = cell_prefix text (Int.max 0 (width - cut_mark_cells)) in
+    let prefix, _, saw_ansi =
+      cell_prefix text (Int.max 0 (width - cut_mark_cells))
+    in
+    let prefix = if saw_ansi then prefix else trim_trailing_ascii_spaces prefix in
     String.length prefix
 
 let truncate_end max_cells text =
@@ -570,7 +582,9 @@ let fit_width text width =
            display cells agree even at the cut. Styled or Unicode rows still
            need grapheme pieces and the style reset below. *)
         let room = Int.max 0 (width - cut_mark_cells) in
-        String_util.utf8_prefix ~max_bytes:room text ^ cut_mark
+        let raw = String_util.utf8_prefix ~max_bytes:room text in
+        let trimmed = trim_trailing_ascii_spaces raw in
+        trimmed ^ cut_mark ^ String.make (Int.max 0 (room - String.length trimmed)) ' '
     | Some _ | None ->
         let pieces = display_pieces text in
         let cells = pieces_width pieces in
@@ -579,8 +593,14 @@ let fit_width text width =
           let prefix, prefix_cells, saw_ansi =
             cell_prefix_of_pieces text pieces room
           in
+          let prefix, prefix_cells =
+            if saw_ansi then prefix, prefix_cells
+            else
+              let trimmed = trim_trailing_ascii_spaces prefix in
+              trimmed, prefix_cells - (String.length prefix - String.length trimmed)
+          in
           let reset = if saw_ansi then "\x1B[0m" else "" in
-          prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
+          prefix ^ reset ^ cut_mark ^ String.make (Int.max 0 (room - prefix_cells)) ' '
         else text ^ String.make (width - cells) ' '
 
 let join_fitting ~sep ~cells items =
@@ -1311,7 +1331,35 @@ let split_styled_cells ~max_cells text =
       then "" else "\027[0m"))
 
 (* The characters a word wider than a row may break after. *)
-let word_separators = "_:/.-"
+let word_separators = "_:/.-,;"
+
+let unicode_word_separators =
+  [ "\xC2\xB7" (* · middle dot *)
+  ; "\xE2\x80\x94" (* — em dash *)
+  ; "\xE2\x80\x93" (* – en dash *)
+  ; "\xE3\x80\x81" (* 、 ideographic comma *)
+  ; "\xE3\x80\x82" (* 。 ideographic full stop *)
+  ; "\xEF\xBC\x8C" (* ， fullwidth comma *)
+  ; "\xEF\xBC\x9B" (* ； fullwidth semicolon *)
+  ; "\xEF\xBC\x9A" (* ： fullwidth colon *)
+  ; "\xE3\x80\x80" (* 　 ideographic space *)
+  ]
+
+(* Characters that should not dangle at the start of a wrapped continuation row
+   (행두 금칙 / kinsoku), or open a group at the end of a row (행말 금칙). *)
+let line_start_forbidden =
+  [ ","; ";"; ")"; "]"; "}"; "!"
+  ; "\xE3\x80\x82"; "\xE3\x80\x81"; "\xEF\xBC\x8C"
+  ; "\xE3\x80\x8D"; "\xE3\x80\x8F"; "\xE3\x80\x91"; "\xE3\x80\x8B"
+  ; "\xE2\x80\x9D"; "\xE2\x80\x99"
+  ; "\xC2\xB7"; "\xE2\x80\x94"; "\xE2\x80\x93"
+  ]
+
+let line_end_forbidden =
+  [ "("; "["; "{"
+  ; "\xE3\x80\x8C"; "\xE3\x80\x8E"; "\xE3\x80\x90"; "\xE3\x80\x8A"
+  ; "\xE2\x80\x9C"; "\xE2\x80\x98"
+  ]
 
 (* A break that leaves a row under half full spends a row to save little: [a:]
    before a hash of a hundred characters. The row is cut at the width instead. *)
@@ -1322,26 +1370,90 @@ let least_fill_divisor = 2
    piece by piece, a piece being what the terminal draws in one place: a mark
    that follows a separator is part of its piece, so the row ends after both,
    and the bytes of an escape are not text. None when no piece opens with a
-   separator, or when ending after the last one leaves [row] under half of
-   [max_cells]. *)
+   separator, when the only separator is at the very end of [row], or when
+   ending after the last one leaves [row] under half of [max_cells]. *)
 let separator_cut ~max_cells row =
   let cells = ref 0 and cut = ref None in
-  let is_separator offset = String.contains word_separators row.[offset] in
-  let piece start_offset end_offset cell_width _ =
+  let is_ascii_separator offset = String.contains word_separators row.[offset] in
+  let is_separator offset =
+    is_ascii_separator offset
+    || List.exists (prefix_at row offset) unicode_word_separators
+  in
+  let piece start_offset end_offset cell_width is_ansi =
     cells := !cells + cell_width;
-    if is_separator start_offset then cut := Some (end_offset, !cells)
+    if not is_ansi && is_separator start_offset then
+      cut := Some (end_offset, !cells)
   in
   let ascii start_offset end_offset =
     for offset = start_offset to end_offset - 1 do
       incr cells;
-      if is_separator offset then cut := Some (offset + 1, !cells)
+      if is_ascii_separator offset then cut := Some (offset + 1, !cells)
     done
   in
   iter_display_pieces row ~piece ~ascii;
   match !cut with
-  | Some (stop, cells_at_stop) when cells_at_stop * least_fill_divisor >= max_cells ->
+  | Some (stop, cells_at_stop)
+    when stop < String.length row
+         && cells_at_stop * least_fill_divisor >= max_cells ->
       Some stop
   | Some _ | None -> None
+
+let first_visible_offset text =
+  let exception Found of int in
+  let piece start_offset _ cell_width is_ansi =
+    if not is_ansi && cell_width > 0 then raise_notrace (Found start_offset)
+  in
+  let ascii start_offset _ = raise_notrace (Found start_offset) in
+  try
+    iter_display_pieces text ~piece ~ascii;
+    None
+  with Found offset -> Some offset
+
+(* Kinsoku pull-back when no separator split [row]: pull the last visible piece
+   of [row] onto the next line if [rest] opens with a closing/trailing mark, or
+   if [row] ends with an opening bracket. Always preserves at least half-width
+   fill and non-empty progress so [drain] terminates in linear passes. *)
+let kinsoku_cut ~max_cells row rest =
+  let rest_starts_forbidden =
+    match first_visible_offset rest with
+    | None -> false
+    | Some offset ->
+        List.exists (prefix_at rest offset) line_start_forbidden
+  in
+  let cells = ref 0 in
+  let prev_end = ref None in
+  let last_piece = ref None in
+  let record_visible start_offset end_offset cell_width =
+    prev_end := Some (start_offset, !cells);
+    cells := !cells + cell_width;
+    last_piece := Some (start_offset, end_offset)
+  in
+  let piece start_offset end_offset cell_width is_ansi =
+    if not is_ansi && cell_width > 0 then
+      record_visible start_offset end_offset cell_width
+  in
+  let ascii start_offset end_offset =
+    for offset = start_offset to end_offset - 1 do
+      record_visible offset (offset + 1) 1
+    done
+  in
+  iter_display_pieces row ~piece ~ascii;
+  let row_ends_forbidden =
+    match !last_piece with
+    | None -> false
+    | Some (start_offset, _) ->
+        List.exists (prefix_at row start_offset) line_end_forbidden
+  in
+  if not (rest_starts_forbidden || row_ends_forbidden) then None
+  else
+    match !prev_end with
+    | Some (stop, cells_before)
+      when stop > 0
+           && stop < String.length row
+           && cells_before > 0
+           && cells_before * least_fill_divisor >= max_cells ->
+        Some stop
+    | Some _ | None -> None
 
 (* The rows a word wider than [max_cells] takes. A name still has parts, and a
    row that stops after one reads as the start of the same name:
@@ -1349,11 +1461,12 @@ let separator_cut ~max_cells row =
    leaves [keeper_identity_drift:configured_keeper_without_] and
    [runtime_meta], where a cut at the width leaves [...without_runtim] and
    [e_meta]. Each row ends after the last separator that fits, and a stretch
-   with none is cut at the width as {!split_cells} does. The separators are
-   those of the text: an escape's own bytes are skipped. A word that is not
-   valid UTF-8 is cut at the width: {!split_cells} measures its bytes scalar by
-   scalar, and a valid stretch of it by grapheme, so rows cut from the two
-   readings would disagree about their width. The rows concatenate to [word]. *)
+   with none is cut at the width (with kinsoku pull-back for closing marks and
+   opening brackets). The separators are those of the text: an escape's own
+   bytes are skipped. A word that is not valid UTF-8 is cut at the width:
+   {!split_cells} measures its bytes scalar by scalar, and a valid stretch of
+   it by grapheme, so rows cut from the two readings would disagree about
+   their width. The rows concatenate to [word]. *)
 let split_word ~max_cells word =
   if not (String.is_valid_utf_8 word) then split_cells ~max_cells word
   else begin
@@ -1369,7 +1482,12 @@ let split_word ~max_cells word =
               String.sub buffer (String.length row)
                 (String.length buffer - String.length row)
             in
-            (match separator_cut ~max_cells row with
+            let cut =
+              match separator_cut ~max_cells row with
+              | Some _ as hit -> hit
+              | None -> kinsoku_cut ~max_cells row rest
+            in
+            (match cut with
              | Some stop ->
                  drain (String.sub row 0 stop :: rows)
                    (String.sub row stop (String.length row - stop) ^ rest)
@@ -1413,6 +1531,10 @@ let wrap_words_internal ?on_row ?first_cells ~max_cells text =
     current_holds_escape := false;
     row
   in
+  let rec count_empty_run count = function
+    | "" :: rest -> count_empty_run (count + 1) rest
+    | ([] | _ :: _) as rest -> count, rest
+  in
   let rec loop rows = function
     | [] ->
         let rows =
@@ -1425,6 +1547,31 @@ let wrap_words_internal ?on_row ?first_cells ~max_cells text =
           | [] -> first_cells
           | _ :: _ -> max_cells
         in
+        let wrap_before_spaces =
+          if Buffer.length current > 0 && String.equal word "" then
+            let empty_count, after = count_empty_run 1 rest in
+            match after with
+            | next :: _ ->
+                let needed_cells =
+                  if !current_holds_escape then
+                    display_width
+                      (Buffer.contents current
+                       ^ String.make (1 + empty_count) ' ' ^ next)
+                  else !current_cells + 1 + empty_count + display_width next
+                in
+                if needed_cells > room then Some (empty_count, after) else None
+            | [] -> None
+          else None
+        in
+        match wrap_before_spaces with
+        | Some (empty_count, after) ->
+            (* Do not flush trailing spaces from multi-space separators
+               (["  "]) right before wrapping onto the next row. Applied
+               uniformly whether [on_row] is present or not so source-mapped
+               rows match plain wrapped rows verbatim. *)
+            source_byte := !source_byte + empty_count;
+            loop (take_row () :: rows) after
+        | None ->
         let addition = if Buffer.length current = 0 then word else " " ^ word in
         let candidate_cells =
           if !current_holds_escape then
@@ -2191,10 +2338,25 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       })
   in
   let diagnostic_rows =
+    let wrap_diagnostic_line line =
+      let len = String.length line in
+      let rec count_indent i =
+        if i < len && Char.equal line.[i] ' ' then count_indent (i + 1) else i
+      in
+      let indent_len = count_indent 0 in
+      if indent_len = len then [ "" ]
+      else if indent_len = 0 || indent_len >= body_width then
+        wrap_words ~max_cells:body_width line
+      else
+        let prefix = String.sub line 0 indent_len in
+        let body = String.sub line indent_len (len - indent_len) in
+        wrap_words ~max_cells:(Int.max 1 (body_width - indent_len)) body
+        |> List.map (fun row -> prefix ^ row)
+    in
     let chunks = entry.diagnostics
       |> List.concat_map (fun text ->
            text |> String.split_on_char '\n'
-           |> List.concat_map (split_cells ~max_cells:body_width)) in
+           |> List.concat_map wrap_diagnostic_line) in
     let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
     let blank = fit_width "" (display_width margin) in
     List.mapi (fun index text ->

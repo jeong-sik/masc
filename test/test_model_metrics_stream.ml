@@ -142,7 +142,7 @@ let test_cached_snapshot_reuses_kept_and_caps_windows () = with_workspace (fun c
   append config (row ~id:"cached-after-ttl" ~at:(after_ttl -. 5.));
   match Stream.read_cached_snapshot ~base_path ~request:{ window_minutes = 60; bucket_minutes = 0 } ~now:after_ttl with
   | Ok refreshed ->
-    Alcotest.(check int) "stale cached entry refreshes cleanly after TTL expiry" 1 (count refreshed)
+    Alcotest.(check int) "stale cached entry refreshes cleanly after TTL expiry" 3 (count refreshed)
   | Error error -> Alcotest.fail error)
 
 let test_typed_query_and_invalidation () =

@@ -167,15 +167,21 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
 
 type wake_style = Keeper_wakes | Wake_counts
 
+let unreported_mark = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+
 let window_label ~cells full narrow =
   Theme.recede ()
   ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
   ^ Ansi.reset
 
-(* One label in place of a half-hour band that has nothing read to draw, in the
-   band's width; [?] when the label does not fit. *)
-let history_unknown_label ~ko ~cells =
-  window_label ~cells (if ko then "기록 미확인" else "history unknown") "?"
+(* A band with no cell to draw holds one mark at its left, as a graph that was
+   never read does (RFC tui-one-screen-grammar 5.6, 6.4): [?] when nothing in
+   the band was reported, [—] when the band is read and holds no run. Why it
+   was not reported is the selected row's detail. *)
+let unreported_band ~cells = window_label ~cells unreported_mark unreported_mark
+let empty_band ~cells = window_label ~cells Masc_tui_theme.Glyph.no_value Masc_tui_theme.Glyph.no_value
+
+let history_unknown_label ~cells = unreported_band ~cells
 
 let wake_summary ~ko slots =
   let cells = List.length slots in
@@ -183,29 +189,30 @@ let wake_summary ~ko slots =
     | Next.Wakes count -> known + max 0 count, unknown
     | Next.Wakes_with_unknown count -> known + max 0 count, true
     | Next.Wakes_unknown -> known, true) (0, false) slots in
-  let full, narrow = match known, unknown with
-    | 0, true -> (if ko then "일정 미확인" else "schedule unknown"), "?"
-    | 0, false -> (if ko then "구간 내 예약 없음" else "no runs in window"), "-"
-    | count, true ->
-        (if ko then Printf.sprintf "%d회 확인 · 일부 미확인" count
-         else Printf.sprintf "%d known · partial" count), Printf.sprintf "? %d+" count
-    | count, false ->
-        (if ko then Printf.sprintf "%d회 예약 확인" count
-         else Printf.sprintf "%d known wakes" count), string_of_int count in
-  if cells = 0 then "" else window_label ~cells full narrow
+  if cells = 0 then "" else
+  match known, unknown with
+  | 0, true -> unreported_band ~cells
+  | 0, false -> empty_band ~cells
+  | count, true ->
+      window_label ~cells
+        (if ko then Printf.sprintf "%d회 이상 예약" count else Printf.sprintf "%d+ wakes" count)
+        (Printf.sprintf "%d+" count)
+  | count, false ->
+      window_label ~cells
+        (if ko then Printf.sprintf "%d회 예약" count else Printf.sprintf "%d wakes" count)
+        (string_of_int count)
 
-let wake_strip ~ko ~style slots =
+let wake_strip ~style slots =
   let cells = List.length slots in
-  let label = window_label ~cells in
   if cells = 0 then ""
   else if List.for_all (function
     | Next.Wakes_unknown -> true
     | Next.Wakes _ | Next.Wakes_with_unknown _ -> false) slots then
-    label (if ko then "일정 미확인" else "schedule unknown") "?"
+    unreported_band ~cells
   else if List.for_all (function
     | Next.Wakes n -> n <= 0
     | Next.Wakes_with_unknown _ | Next.Wakes_unknown -> false) slots then
-    label (if ko then "구간 내 예약 없음" else "no runs in window") "-"
+    empty_band ~cells
   else
     let peak = List.fold_left (fun peak -> function
       | Next.Wakes count -> max peak count
@@ -252,7 +259,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let counts = List.init grid.side_cells (failed_count readings) in
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
   let pulse =
-    if Pulse.nothing_read readings then history_unknown_label ~ko ~cells:grid.side_cells
+    if Pulse.nothing_read readings then history_unknown_label ~cells:grid.side_cells
     else String.concat "" (List.map (fun (n, unknown) ->
       if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
       else if unknown then "?" else "·") counts) in
@@ -267,7 +274,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
     | Next.Wakes n -> max p n
     | Next.Wakes_with_unknown n -> max p n
     | Next.Wakes_unknown -> p) 0 future in
-  let strip = wake_strip ~ko ~style:Wake_counts future in
+  let strip = wake_strip ~style:Wake_counts future in
   let pulse_max = if peak = 0 && List.exists snd counts then "?" else string_of_int peak in
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true

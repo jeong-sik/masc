@@ -68,9 +68,11 @@ export function isKeeperChatHistoryPending(keeperName: string): boolean {
 export const keeperSending = signal<Record<string, boolean>>({})
 // keeperName -> true while a stop is held for the Keeper's first active
 // operation. The stream records hold that fact and are not reactive. This is
-// what the screen reads of it, written wherever a record's wait or the first
-// record changes. The reply row cannot carry it: stored history takes that
-// row's place while the stream is still open.
+// what the screen reads of it, written where a record's wait changes and where
+// a record is removed. Adding a record changes nothing here: it is the first
+// only when the list was empty, and a new record holds no stop. The reply row
+// cannot carry it: stored history takes that row's place while the stream is
+// still open.
 export const keeperStopHeld = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})

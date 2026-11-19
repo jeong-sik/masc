@@ -325,9 +325,11 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
 }
 
 /** The way out of a held stop. The operator does not wait for the acceptance
- *  any longer: the send is closed, the stop is sent nowhere, and the reply row
- *  says so. It is its own action, not a second press of stop, so that pressing
- *  stop twice does not give the wait up. */
+ *  any longer: the send is closed and the stop is sent nowhere. The reply row
+ *  says so while the send still has one. A row that stored history put in its
+ *  place is the server's and is left as it is. It is its own action, not a
+ *  second press of stop, so that pressing stop twice does not give the wait
+ *  up. */
 export function closeKeeperSendWithHeldStop(name: string): void {
   const keeperName = name.trim()
   if (keeperName) closeSendWithHeldStop(keeperName)

@@ -428,7 +428,7 @@ let overlay ~ko ~now ~localtime ~cols t =
                two_column
                  ~cols
                  (Printf.sprintf
-                    (if ko then "%s \xc2\xb7 확인 대기" else "%s \xe2\x80\x94 awaiting confirmation")
+                    (if ko then "%s \xc2\xb7 확인 대기" else "%s \xc2\xb7 awaiting confirmation")
                     row.title)
                  (updated ~ko ~now row.since_iso)
            })

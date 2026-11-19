@@ -127,7 +127,7 @@ let history_status_lines ~ko ~width
     | Masc_tui_fetched.Failed (History_kept_back notice) -> Masc_tui_text_block.rows ~max_cells:width
         ("    " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ (text "    기록 미조회" "    history not requested") ]
-    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading...") ]
+    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading") ]
   in
   let pending =
     if not in_flight then []

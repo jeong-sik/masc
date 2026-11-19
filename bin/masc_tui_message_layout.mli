@@ -1098,6 +1098,6 @@ val thought_preview : max_cells:int -> string -> string
 val folded_thought_summary :
   mark:string -> width:int -> line_count:int -> body:string -> string
 (** Antigravity-style 1-line summary for a folded reasoning block:
-    ["○ Thought · N lines — <preview> · Ctrl-R"] when the preview fits within
+    ["○ Thought · N lines · <preview> · Ctrl-R"] when the preview fits within
     [width] (with at least 12 preview cells, capped at 64), stepping down to
     ["○ Thought · N lines · Ctrl-R"] on narrow panes or empty previews. *)

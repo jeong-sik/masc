@@ -1235,7 +1235,7 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
     [ "coding"; "zai.glm" ] rows;
   Alcotest.(check (option string)) "the first match is under the cursor" (Some "coding") selected;
   Alcotest.(check string) "the header names the filter"
-    "filter: gl\xe2\x96\x8f 2 of 6 \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+    "filter: gl\xe2\x96\x8f 2 of 6 \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
     (keeper_runtime_picker_summary ~ko:false view);
   (* The badge is drawn, so it is filtered on: "lane" keeps the lanes. *)
   state.runtime_pick_list <- keeper_pick_after state [ "\127"; "\127"; "l"; "a"; "n"; "e" ];

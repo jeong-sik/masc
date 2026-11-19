@@ -736,10 +736,10 @@ let action_description_raw ~ko = function
             location.ll_path location.ll_line
       else
         if ko then
-          Printf.sprintf "워크스페이스 외부 위치(%s:%d)입니다 — Code에서 직접 열리지 않습니다"
+          Printf.sprintf "워크스페이스 외부 위치(%s:%d)입니다 · Code에서 직접 열리지 않습니다"
             location.ll_path location.ll_line
         else
-          Printf.sprintf "Outside workspace (%s:%d) — cannot open directly in Code"
+          Printf.sprintf "Outside workspace (%s:%d) · cannot open directly in Code"
             location.ll_path location.ll_line
   | Palette_code_branch branch ->
       let open Masc.Tui_decode in

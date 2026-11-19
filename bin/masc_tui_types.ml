@@ -677,8 +677,8 @@ type connection_status =
 let connection_status_label = function
   | Connected -> "connected"
   | Degraded -> "degraded"
-  | Connecting -> "connecting..."
-  | Booting -> "server booting..."
+  | Connecting -> "connecting"
+  | Booting -> "server booting"
   | Account_server _ -> "account server"
   | Disconnected -> "disconnected"
 ;;
@@ -14884,7 +14884,7 @@ let connectors_read_notice state =
                  else "Reading connectors; recheck queued"
            in
            Some (activity ^ (match state.connectors with
-             | None -> "…"
+             | None -> ""
              | Some _ -> if ko then " · 마지막 관측" else " · last observation")))
   | Waiting_after_write ->
       Some (if server_authority_ready state
@@ -18583,7 +18583,7 @@ let pending_seconds_floor = 2.
 let loading_notice ?elapsed what =
   match elapsed with
   | Some seconds when seconds >= pending_seconds_floor ->
-      Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
+      Printf.sprintf "(%s %s)" what
         (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) seconds)
   | Some seconds ->
       (* The seconds appear when the read reaches the floor, with no new
@@ -18591,8 +18591,8 @@ let loading_notice ?elapsed what =
          tui-one-screen-grammar §8). *)
       Masc_tui_value.Redraw.note_change_at
         (Unix.gettimeofday () +. (pending_seconds_floor -. seconds));
-      Printf.sprintf "(%s\xe2\x80\xa6)" what
-  | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+      Printf.sprintf "(%s)" what
+  | None -> Printf.sprintf "(%s)" what
 
 (* The /about candle steps once this often. It is the one thing on a masc
    screen that moves without new data, and it arrives at a still final frame,
@@ -20638,7 +20638,7 @@ let begin_keeper_peer_reading (state : state) ~keeper_name =
   let token = ref () in
   let reading =
     (Masc_tui_detail_reading.create_observation ~title:("Keeper relationships · " ^ keeper_name)
-      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]) in
+      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests" }]) in
   open_detail_reading state reading;
   state.keeper_peer_reading <- Some {
     kpr_keeper = keeper_name; kpr_authority = state.workspace_read_authority;
@@ -22316,14 +22316,14 @@ let visible_system_log_entries (state : state) = System_logs_view.visible (syste
    reader on the others learned there was nothing to learn. *)
 let page_unread_note ~ko =
   if ko then "  (미조회 · r:다시 읽기)"
-  else "  (not loaded yet \xe2\x80\x94 press r)"
+  else "  (not loaded yet \xc2\xb7 press r)"
 
 (* The same row once the first read has been asked and has not answered. [r]
    asks for what is already being asked, so the row stops sending the reader
    to it. Each surface keeps its own record of a read on the wire, so the
    caller passes that fact. *)
 let page_reading_note ~ko =
-  if ko then "  (조회 중)" else "  (reading\xe2\x80\xa6)"
+  if ko then "  (조회 중)" else "  (reading)"
 
 let page_unread_note_while ~ko ~reading =
   if reading then page_reading_note ~ko else page_unread_note ~ko
@@ -22367,8 +22367,8 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
   | Some (_ :: _), _ -> None
   | (None | Some []), Loading _ ->
       Some
-        (if ko then "  활성 연결을 기다리는 중\xe2\x80\xa6"
-         else "  Waiting for active connections\xe2\x80\xa6")
+        (if ko then "  활성 연결을 기다리는 중"
+         else "  Waiting for active connections")
   | Some [], (Idle | No_browser | Failed _) ->
       Some
         (if ko then "  활성 native browser 연결 없음"
@@ -24175,7 +24175,7 @@ let keeper_log_diagnostics state =
     state.keeper_log_read in
   match keeper_logs_view state with
   | Masc_tui_fetched.Absent -> [Keeper_log_notice, "Keeper metrics have not been read."]
-  | Loading -> [Keeper_log_notice, "Reading Keeper metrics…"]
+  | Loading -> [Keeper_log_notice, "Reading Keeper metrics"]
   | Failed detail ->
       let tone = match state.workspace_identity with
         | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
@@ -24235,7 +24235,7 @@ let keeper_log_rows (state : state) ~cols =
           line.kel_seq id stream task line.kel_text)) lines in
     match keeper_execute_view state with
     | Masc_tui_fetched.Absent -> text_rows Keeper_log_notice "Execute output has not been read."
-    | Loading -> text_rows Keeper_log_notice "Reading Execute output…"
+    | Loading -> text_rows Keeper_log_notice "Reading Execute output"
     | Failed detail -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ keeper_execute_failure_detail detail)
     | Ready (reading, at) -> render_reading reading at
     | Stale ((reading, at), detail) ->
@@ -26678,8 +26678,8 @@ let keeper_runtime_picker_summary ~ko view =
   | Some _ ->
       Masc_tui_pick_list.summary ~ko view
       ^ (if ko then
-           " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 이동, Enter 선택, Esc 필터 지우기"
-         else " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter")
+           " \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 이동, Enter 선택, Esc 필터 지우기"
+         else " \xc2\xb7 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter")
 
 (* The row in place of the column header when there are no rows; [None]
    while there are. An unread catalogue is waited for and an empty match is
@@ -26690,7 +26690,7 @@ let keeper_runtime_picker_empty_note ~ko ~reading view =
     Some (match reading with
       | Runtime_catalog_read -> say "  (런타임 목록이 비어 있음)" "  (runtime catalogue is empty)"
       | Runtime_catalog_unread -> say "  (런타임 목록 미조회)" "  (runtime catalogue not read yet)"
-      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중…)" "  (reading runtime catalogue…)"
+      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중)" "  (reading runtime catalogue)"
       | Runtime_catalog_refreshing _ ->
           say "  (비어 있던 이전 런타임 목록을 다시 조회 중)"
             "  (refreshing the last empty runtime catalogue)"
@@ -26922,8 +26922,8 @@ let runtime_default_route_lines ~cols state =
              Printf.sprintf (if ko then "[runtime].default  %s · f:변경" else "[runtime].default  %s · f replaces") route
          | Some route, Some runtime_id ->
              Printf.sprintf (if ko then "[runtime].default  %s (시작 %s) · f:변경" else "[runtime].default  %s (enters %s) · f replaces") route runtime_id
-         | None, None -> if ko then "[runtime].default  없음 — 키퍼마다 배정 필요 · f:선택"
-             else "[runtime].default  none — every keeper needs an assignment · f chooses"
+         | None, None -> if ko then "[runtime].default  없음 · 키퍼마다 배정 필요 · f:선택"
+             else "[runtime].default  none · every keeper needs an assignment · f chooses"
          | Some _, None | None, Some _ -> if ko then "[runtime].default  관측 불일치"
              else "[runtime].default  inconsistent reading")
   in
@@ -28251,7 +28251,7 @@ let keeper_message_inflight_rows (state : state) ~now =
     (keeper_message_inflight_drawn state)
   @ if keeper_message_history_loading state then
       [ false
-      , ui_text state ~ko:"  대화 기록 조회 중…" ~en:"  Loading conversation history…" ]
+      , ui_text state ~ko:"  대화 기록 조회 중" ~en:"  Loading conversation history" ]
     else []
 
 (* One drawn row of the chat's schedule block: what leads it and the facts it

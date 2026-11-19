@@ -297,22 +297,18 @@ let decode_effective_skill_load_reason json =
 (* The server writes a Skill's surface as two strings, [kind] and
    [execution], from one Keeper_skill_observability.surface through its
    kind_label and execution_label. Reading them back through the same labels
-   keeps one spelling. The list is every surface there is. *)
+   over Keeper_skill_observability.surfaces keeps one spelling, and a mode the
+   catalog adds to its execution modes is read here without a list of our
+   own. *)
 let decode_skill_surface json =
   let* kind = required_string_field json "kind" in
   let* execution = required_string_field json "execution" in
-  let surfaces =
-    [ Keeper_skill_observability.Instruction_skill
-    ; Keeper_skill_observability.Composition_skill Keeper_tool_composition_catalog.Inline
-    ; Keeper_skill_observability.Composition_skill Keeper_tool_composition_catalog.Async
-    ]
-  in
   match
     List.find_opt
       (fun surface ->
         String.equal (Keeper_skill_observability.kind_label surface) kind
         && String.equal (Keeper_skill_observability.execution_label surface) execution)
-      surfaces
+      Keeper_skill_observability.surfaces
   with
   | Some surface -> Ok surface
   | None ->

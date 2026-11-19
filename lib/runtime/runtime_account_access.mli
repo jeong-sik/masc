@@ -249,11 +249,12 @@ type refusal =
       }
       (** An account the person asked for as their own and does not spend now
           ({!Authz_provider_account.availability}): the log links it to
-          another person, its purge began, or the start of its purge was
-          given up. A turn on an account whose purge began is a
-          [Turn_refused] with [Provider_account_unavailable] of the same
-          defect, and one on an account whose start was given up is a
-          [Turn_refused] with [Revocation_pending]. It comes after the check
+          another person, its purge began, or the start of its purge or of
+          a replacement of its key was given up. A turn on an account whose
+          purge began is a [Turn_refused] with
+          [Provider_account_unavailable] of the same defect, and one on an
+          account a given-up start blocks is a [Turn_refused] with
+          [Revocation_pending]. It comes after the check
           of the home, so it says nothing of an account captured from
           another home. *)
   | Host_account of host_client

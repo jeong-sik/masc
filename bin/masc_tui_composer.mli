@@ -62,14 +62,6 @@ type t = {
           leaves with the message. *)
 }
 
-val rows_for : terminal_rows:int -> int
-(** Terminal rows the composer occupies in this viewport. Every surface lays
-    its frame out against this many rows fewer than the terminal has.
-
-    Zero on a viewport that has no row to spare. A surface pushed under the
-    fixed-chrome budget shows a resize gate instead of itself, so a convenience
-    row that costs the surface is worse than no row: the composer yields. *)
-
 val focus_key : string
 (** The key that moves focus into the composer from any surface. *)
 

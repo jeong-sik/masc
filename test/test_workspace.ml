@@ -1347,7 +1347,7 @@ let test_reset_preserves_link_targets_and_recreates_nested_writers () =
     Unix.symlink (Filename.concat outside "missing")
       (Filename.concat masc_root "dangling-link");
     let nested = Filename.concat masc_root "audit/reset-scenario" in
-    Fs_compat.mkdir_p_memoized nested;
+    Fs_compat.mkdir_p nested;
     let journal = Filename.concat nested "events.jsonl" in
     Fs_compat.save_file journal "before\n";
     ignore (Workspace.reset config);
@@ -1355,7 +1355,7 @@ let test_reset_preserves_link_targets_and_recreates_nested_writers () =
     Alcotest.(check string) "external data survives reset" "outside workspace"
       (Fs_compat.load_file marker);
     ignore (Workspace.init config ~agent_name:None);
-    Fs_compat.mkdir_p_memoized nested;
+    Fs_compat.mkdir_p nested;
     Fs_compat.save_file journal "after\n";
     Alcotest.(check string) "nested writer resumes after reinitialization" "after\n"
       (Fs_compat.load_file journal))

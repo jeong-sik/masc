@@ -312,10 +312,14 @@ let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
    file is exactly as long as this call alone would have left it, and
    says so when it removed nothing.
    With [~start:At_line_start] the content does not join onto a line an
-   earlier writer left unfinished (#52974). *)
+   earlier writer left unfinished (#52974).
+   The path is resolved once, and that one text is the lock's key and the
+   cached writer's name. [Unix.realpath] keeps the runtime lock for the whole
+   call on OCaml 5.5.2, so a second resolution held every other thread of
+   this domain for as long again. *)
 let append_file_unix_with_io ~io ~start (path : string) (content : string) : unit =
-  let canonical = canonical_append_mutex_path path in
-  with_append_path_mutex canonical (fun () ->
+  let canonical = capture_append_path_mutex_key path in
+  with_captured_append_path_mutex canonical (fun () ->
     Fd_cache.with_writer canonical (fun target ->
       match Fd_append_whole.run ~io ~start target content with
       | Ok () -> ()

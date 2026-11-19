@@ -510,7 +510,9 @@ let owner_of_issuer = function
    no turn spends the account while it is blocked, and its owner closes the
    block by asking for the purge again. The log has no start of that purge, so
    a start of the server finds none to end, and the key of the account stays
-   on disk until its owner asks again. *)
+   on disk until its owner asks again. Nor the block of one whose key
+   replacement was given up (the same RFC, 3.7): its owner closes it by
+   asking for the replacement again, or removes the account. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map

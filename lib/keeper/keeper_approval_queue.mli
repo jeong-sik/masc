@@ -20,8 +20,13 @@ open Keeper_approval_queue_result
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted.
+    Before that, every delivery whose [Resolved] audit row is not yet
+    confirmed is retried: the row is appended only when its day file does not
+    already hold it, and the delivery is then stored as recorded. A retry that
+    fails is listed in [ledger_retry_failures] and keeps the delivery.
     A spent delivery is removed from the store; the count is
-    [retired_deliveries]. A delivery is spent when its wake was delivered and
+    [retired_deliveries]. Only a delivery whose [Resolved] row is confirmed on
+    the audit ledger can be spent. Such a delivery is spent when its wake was delivered and
     is no longer in its Keeper's event queue, no unsettled execution of that
     Keeper names the approval, and an approval's grant is consumed; or when its
     Keeper's meta file is gone: deleting a Keeper drops its approvals and

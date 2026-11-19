@@ -91,10 +91,11 @@ let compare_places left right =
 ;;
 
 (* A row an append put at the end of a day file: the row as the strict reads
-   decode it, and the file. *)
+   decode it, the file, and the store's directory. *)
 type written =
   { row : recent_entry Lazy.t
   ; place : place
+  ; store_dir : string
   }
 
 (* A fact's value, and the newest day file the value saw a row in. A row
@@ -991,6 +992,7 @@ let settle_kept entry before written =
 let written_row ~(dated : Store.dated_path) parsed =
   { row = lazy (recent_entry_of_parsed ~path:dated.path (Lazy.force parsed))
   ; place = { month_dir = dated.month_dir; day_file = dated.day_file }
+  ; store_dir = dated.base_dir
   }
 
 (* The row's text, rendered once: what goes to disk, and what the facts are
@@ -1719,7 +1721,6 @@ let close t =
 let prepare_for_directory_removal t =
   let dated = Store.dated_path_now t.location in
   close t;
-  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     Hashtbl.remove file_count_cache dated.path)
 ;;
@@ -2574,29 +2575,41 @@ let last_rows ~name ~count : Yojson.Safe.t option list fact =
         Some (drop (List.length rows - count) rows))
   }
 
-(* The newest row that is JSON. A row the fact passes over tells it nothing,
-   so [newest] is the day file of the value's own row: a row appended to that
-   file or a later one is the newest JSON row, whatever the files in between
-   hold. An append writes JSON; were a row not to read back as JSON, the
+(* What [select] gives for the newest row it selects. The strict search goes
+   from the newest row back and stops at the first one selected, so the rows
+   it passed over are newer than the value's own row and none of them was
+   selected.
+
+   An appended row that is selected is the value. One that is passed over
+   leaves the value as it is: the search would pass over it too. After
+   either, the newest day file the value has seen a row in is the appended
+   row's. An append writes JSON; were a row not to read back as JSON, the
    files would be asked again. *)
-let newest_parsed_row : Yojson.Safe.t option fact =
+let newest_selected ~name ~select : 'a option fact =
   { id = Type.Id.make ()
-  ; name = "newest_parsed_row"
+  ; name
   ; read =
       (fun t ->
-        find_latest_entry_with_its_file_result t (function
-          | Parsed json -> Some json
-          | Malformed_json _ -> None)
+        find_latest_entry_with_its_file_result t (select ~base_dir:t.base_dir)
         |> Result.map (function
           | None -> { value = None; newest = None }
-          | Some (json, path) ->
-            { value = Some json; newest = Some (place_of_day_file_path path) }))
+          | Some (value, path) ->
+            { value = Some value; newest = Some (place_of_day_file_path path) }))
   ; step =
-      (fun _ written ->
+      (fun held written ->
         match Lazy.force written.row with
-        | Parsed json -> Some (Some json)
-        | Malformed_json _ -> None)
+        | Malformed_json _ -> None
+        | Parsed _ as row ->
+          (match select ~base_dir:written.store_dir row with
+           | Some value -> Some (Some value)
+           | None -> Some held))
   }
+
+(* The newest row that is JSON: every row that is JSON is selected. *)
+let newest_parsed_row : Yojson.Safe.t option fact =
+  newest_selected ~name:"newest_parsed_row" ~select:(fun ~base_dir:_ -> function
+    | Parsed json -> Some json
+    | Malformed_json _ -> None)
 
 (* The lease holder is the one writer of some stores and not of others
    ([Store.facts]): being the lease holder is a fact about the process
@@ -2661,11 +2674,11 @@ module For_testing = struct
   let in_registry location =
     File_system_named.has_entry registry (Store.absolute_dir location)
 
-  let after_row fact ~value ~newest ~row ~written =
+  let after_row ?(base_dir = Filename.current_dir_name) fact ~value ~newest ~row ~written =
     let place (month_dir, day_file) = { month_dir; day_file } in
     after_row
       fact
-      { row = Lazy.from_val row; place = place written }
+      { row = Lazy.from_val row; place = place written; store_dir = base_dir }
       { value; newest = Option.map place newest }
     |> Option.map (fun held ->
       held.value, Option.map (fun place -> place.month_dir, place.day_file) held.newest)

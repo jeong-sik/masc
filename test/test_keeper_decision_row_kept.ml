@@ -17,8 +17,12 @@
     3. A row a read is not sure to answer with (not an object, or longer than
        half the reader's window) is not kept: the next reader reads the file.
     4. An append that fails, and a file that cannot be read, keep nothing.
-    5. Two spellings of one record reach one kept row.
-    6. Over 300 random steps the kept row is the row the file gives. *)
+    5. Two spellings of one record reach one kept row. A record that comes
+       to exist under another name than the one its cell was chosen by, and
+       a name remembered across a rotation or a failed write, are not held
+       against the file.
+    6. A writer that another writer overtook leaves nothing kept.
+    7. Over 300 random steps the kept row is the row the file gives. *)
 
 open Alcotest
 open Masc
@@ -191,46 +195,227 @@ let test_a_record_that_cannot_be_read_keeps_nothing () =
     check string "nothing is kept" "nothing kept" (kept config))
 ;;
 
+(* --- a record written and read by hand ----------------------------------
+   [Keeper_row_facts] around plain file calls, on paths of the test's own. *)
+
+let with_directory f =
+  let directory = Filename.temp_dir "keeper_decision_paths_" "" in
+  let rec remove path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      Unix.unlink path
+  in
+  Fun.protect ~finally:(fun () -> remove directory) (fun () -> f directory)
+;;
+
+let write_line path text =
+  Out_channel.with_open_gen
+    [ Open_wronly; Open_append; Open_creat; Open_binary ]
+    0o644
+    path
+    (fun channel -> output_string channel text)
+;;
+
+(* The writer of [turn]'s row. [write] is given the call that puts the row in
+   the file and says what the append was. *)
+let appending path turn write =
+  let row = Yojson.Safe.to_string (row turn) in
+  Keeper_row_facts.appending_decision ~path ~row (fun () ->
+    write (fun () -> write_line path (row ^ "\n")))
+;;
+
+let append_at path turn =
+  appending path turn (fun write_the_row ->
+    write_the_row ();
+    Keeper_row_facts.To_the_file_there)
+;;
+
+(* A reader that found [found] in the file. *)
+let fill_at path found =
+  match Keeper_row_facts.newest_decision ~path ~read:(fun () -> Ok found) with
+  | Fact_cell.Held _ | Fact_cell.Read_and_kept _ -> ()
+  | Fact_cell.Read_not_kept _ -> fail "the cell changed during a read with no writer"
+  | Fact_cell.Read_failed (_ : unit) -> fail "the read failed"
+;;
+
+let record_in directory = Filename.concat directory "alpha.decisions.jsonl"
+
+(* The record's path with a piece that is ".": another spelling of it. *)
+let through_a_dot path =
+  Filename.concat (Filename.concat (Filename.dirname path) ".") (Filename.basename path)
+;;
+
 (* [link] is a symbolic link to the directory that holds the record. A row
    appended through one spelling moves the row kept through the other. *)
 let test_two_spellings_of_a_record_are_one_kept_row () =
-  let directory = Filename.temp_dir "keeper_decision_spellings_" "" in
-  let real = Filename.concat directory "real" in
-  let link = Filename.concat directory "link" in
-  Unix.mkdir real 0o755;
-  Unix.symlink real link;
-  let spelled = Filename.concat real "alpha.decisions.jsonl" in
-  let through_link = Filename.concat link "alpha.decisions.jsonl" in
-  let append path turn =
-    let row = Yojson.Safe.to_string (row turn) in
-    Keeper_row_facts.appending_decision ~path ~row (fun () ->
-      Out_channel.with_open_gen
-        [ Open_wronly; Open_append; Open_creat; Open_binary ]
-        0o644
-        path
-        (fun channel -> output_string channel (row ^ "\n"));
-      Keeper_row_facts.To_the_file_there)
-  in
-  let fill path turn =
-    match Keeper_row_facts.newest_decision ~path ~read:(fun () -> Ok (Some (row turn))) with
-    | Fact_cell.Held _ | Fact_cell.Read_and_kept _ -> ()
-    | Fact_cell.Read_not_kept _ -> fail "the cell changed during a read with no writer"
-    | Fact_cell.Read_failed (_ : unit) -> fail "the read failed"
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      List.iter (fun path -> if Sys.file_exists path then Sys.remove path) [ spelled ];
-      Unix.unlink link;
-      Unix.rmdir real;
-      Unix.rmdir directory)
-    (fun () ->
-      append spelled 1;
-      fill through_link 1;
-      check string "kept through the link" "kept: turn 1" (kept_at through_link);
-      check string "and through the other spelling" "kept: turn 1" (kept_at spelled);
-      append spelled 2;
-      check string "a row through one spelling" "kept: turn 2" (kept_at spelled);
-      check string "moves the row of the other" "kept: turn 2" (kept_at through_link))
+  with_directory (fun directory ->
+    let real = Filename.concat directory "real" in
+    let link = Filename.concat directory "link" in
+    Unix.mkdir real 0o755;
+    Unix.symlink real link;
+    let spelled = record_in real in
+    let through_link = record_in link in
+    append_at spelled 1;
+    fill_at through_link (Some (row 1));
+    check string "kept through the link" "kept: turn 1" (kept_at through_link);
+    check string "and through the other spelling" "kept: turn 1" (kept_at spelled);
+    append_at spelled 2;
+    check string "a row through one spelling" "kept: turn 2" (kept_at spelled);
+    check string "moves the row of the other" "kept: turn 2" (kept_at through_link))
+;;
+
+(* The spellings a record can be reached by, each asked after a row went in
+   through the plain one: a piece that is ".", a doubled "/", a path relative
+   to the working directory, a link to the directory, and another letter
+   case. A spelling that is the record (the same device and inode) reaches
+   its kept row, and no other spelling does. The letter case follows the file
+   system. Then a row written through one spelling is read through another. *)
+let test_every_spelling_of_a_record_reaches_its_kept_row () =
+  with_directory (fun directory ->
+    let real = Filename.concat directory "real" in
+    let link = Filename.concat directory "link" in
+    Unix.mkdir real 0o755;
+    Unix.symlink real link;
+    let record = record_in real in
+    let relative =
+      let pieces =
+        String.split_on_char '/' (Sys.getcwd ()) |> List.filter (fun piece -> piece <> "")
+      in
+      String.concat "/" (List.map (fun _ -> "..") pieces) ^ record
+    in
+    let spellings =
+      [ "a piece that is \".\"", through_a_dot record
+      ; "a doubled \"/\"", real ^ "//" ^ Filename.basename record
+      ; "relative to the working directory", relative
+      ; "a link to the directory", record_in link
+      ; "another letter case", Filename.concat real "ALPHA.decisions.jsonl"
+      ]
+    in
+    append_at record 1;
+    fill_at record (Some (row 1));
+    let identity path =
+      match Unix.stat path with
+      | stats -> Some (stats.Unix.st_dev, stats.Unix.st_ino)
+      | exception Unix.Unix_error (_, _, _) -> None
+    in
+    let is_the_record path = Option.is_some (identity path) && identity path = identity record in
+    List.iter
+      (fun (label, spelling) ->
+         check
+           string
+           label
+           (if is_the_record spelling then "kept: turn 1" else "nothing kept")
+           (kept_at spelling))
+      spellings;
+    check bool "the relative spelling is relative" true (Filename.is_relative relative);
+    check bool "and it is the record" true (is_the_record relative);
+    append_at (through_a_dot record) 2;
+    check string "a row through another spelling" "kept: turn 2" (kept_at record))
+;;
+
+(* The record's path is a link to a file that is not there yet. A reader
+   that spells the link's target keeps "no row" in the cell of that name. The
+   writer spells the record's path, which the file system names by the link
+   itself while the target is missing: another cell. The write makes the
+   target, so the row went by the reader's cell unseen, and what both cells
+   keep is forgotten. *)
+let test_a_record_made_through_a_link_to_a_missing_file () =
+  with_directory (fun directory ->
+    let record = record_in directory in
+    let target = Filename.concat directory "target.jsonl" in
+    Unix.symlink target record;
+    fill_at target None;
+    check string "no row is kept under the target's name" "kept: no row" (kept_at target);
+    append_at record 1;
+    check bool "the write made the target" true (Sys.file_exists target);
+    check string "the target's kept answer is forgotten" "nothing kept" (kept_at target);
+    check string "and nothing is kept by the record's spelling" "nothing kept" (kept_at record))
+;;
+
+(* The record's path is a link to a file. The rotation renames the link away
+   and the row after it makes a regular file at the record's path: the path
+   is another file now, under another name. The names remembered go with the
+   rotation, so the writer's spelling is asked about again and its next row
+   moves the row kept by a spelling first asked after the rotation.
+
+   The writer is the real one, which says whether it rotated. *)
+let test_a_rotation_forgets_the_names_remembered () =
+  with_workspace (fun config ->
+    let record = path config in
+    let target = Filename.concat (Filename.dirname record) "target.jsonl" in
+    Fs_compat.mkdir_p (Filename.dirname record);
+    write_line target (Yojson.Safe.to_string (row 0) ^ "\n");
+    Unix.symlink target record;
+    check string "the row of the link's target" "turn 0" (shown config);
+    with_max_bytes "1" (fun () -> append config (row 1));
+    check
+      bool
+      "the rotation moved the link away"
+      true
+      (match (Unix.lstat (record ^ ".1")).Unix.st_kind with
+       | Unix.S_LNK -> true
+       | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+         false);
+    let asked_after = through_a_dot record in
+    (match
+       Keeper_row_facts.newest_decision ~path:asked_after ~read:(fun () ->
+         Trust.latest_decision_result ~config ~keeper_name)
+     with
+     | Fact_cell.Read_and_kept found ->
+       check string "a spelling first asked after the rotation" "turn 1" (turn_of found)
+     | Fact_cell.Held _ | Fact_cell.Read_not_kept _ | Fact_cell.Read_failed _ ->
+       fail "the spelling asked after the rotation did not read the file");
+    append config (row 2);
+    check string "the next row moves that spelling's kept row" "kept: turn 2" (kept_at asked_after);
+    check string "and it is what the file says" "turn 2" (in_the_file config))
+;;
+
+(* The writer renames the record's link away and then fails. Whether a failed
+   append rotated is not known, so the names remembered go as they do after
+   a rotation. The record is then made again as a regular file, and a row
+   written through the writer's spelling moves the row kept by another
+   spelling of it. *)
+let test_a_write_that_fails_after_its_rotation () =
+  with_directory (fun directory ->
+    let record = record_in directory in
+    let target = Filename.concat directory "target.jsonl" in
+    let asked_after = through_a_dot record in
+    write_line target (Yojson.Safe.to_string (row 0) ^ "\n");
+    Unix.symlink target record;
+    fill_at record (Some (row 0));
+    (match
+       appending record 1 (fun (_ : unit -> unit) ->
+         Unix.rename record (record ^ ".1");
+         raise (Sys_error "the write failed"))
+     with
+     | () -> fail "the append did not fail"
+     | exception Sys_error _ -> ());
+    check string "nothing is kept after the failure" "nothing kept" (kept_at record);
+    append_at record 1;
+    fill_at asked_after (Some (row 1));
+    append_at record 2;
+    check string "the next row moves the other spelling's kept row" "kept: turn 2" (kept_at asked_after))
+;;
+
+(* Two writers of one record. The first has looked at the kept row and put
+   its row in the file when the second writes a row after it and moves the
+   kept row. The first then finds the kept row is no longer the one it
+   looked at, and what is kept is forgotten: its own row is not the file's
+   last. *)
+let test_a_writer_that_another_writer_overtook () =
+  with_directory (fun directory ->
+    let record = record_in directory in
+    append_at record 1;
+    fill_at record (Some (row 1));
+    appending record 2 (fun write_the_row ->
+      write_the_row ();
+      append_at record 3;
+      check string "the second writer's row is kept" "kept: turn 3" (kept_at record);
+      Keeper_row_facts.To_the_file_there);
+    check string "the first writer leaves nothing kept" "nothing kept" (kept_at record))
 ;;
 
 let steps = 300
@@ -313,6 +498,26 @@ let () =
             "two spellings of a record are one kept row"
             `Quick
             test_two_spellings_of_a_record_are_one_kept_row
+        ; test_case
+            "every spelling of a record reaches its kept row"
+            `Quick
+            test_every_spelling_of_a_record_reaches_its_kept_row
+        ; test_case
+            "a record made through a link to a missing file"
+            `Quick
+            test_a_record_made_through_a_link_to_a_missing_file
+        ; test_case
+            "a rotation forgets the names remembered"
+            `Quick
+            test_a_rotation_forgets_the_names_remembered
+        ; test_case
+            "a write that fails after its rotation"
+            `Quick
+            test_a_write_that_fails_after_its_rotation
+        ; test_case
+            "a writer that another writer overtook"
+            `Quick
+            test_a_writer_that_another_writer_overtook
         ; test_case
             "the kept row is the file's over random steps"
             `Quick

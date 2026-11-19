@@ -8,7 +8,11 @@
     maps and mark the store unavailable. [install_persistence_internal] takes
     a hook that runs after the load and one that runs after the pending map is
     published.
-    The install then retires the deliveries that no reader needs any more and
+    The install then retries the [Resolved] audit row of every delivery not
+    yet confirmed on the ledger, appending it only when the row's day file
+    does not already hold it, and lists the failures in
+    [ledger_retry_failures]. An unconfirmed delivery is never spent.
+    It then retires the deliveries that no reader needs any more and
     sends the wake again, as [Boot_replay], for every delivery whose wake was
     not observed and whose grant is not consumed. It counts both and lists the
     deliveries that failed.

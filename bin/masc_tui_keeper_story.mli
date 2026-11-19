@@ -17,6 +17,10 @@ val pages : page list
 val tab_label : page -> string
 (** The name drawn on the page's tab, with the key that jumps to it. *)
 
+val tab_parts : ko:bool -> page -> string option * string
+(** [(hotkey, label)] for the page's tab in the screen language, so the
+    renderer can accent the shortcut letter beside the label (btop style). *)
+
 type selection = Keeper_selected | World_selected | No_selection
 
 type memory_destination = Memory_recent | Memory_frequent | Memory_changes | Memory_storage

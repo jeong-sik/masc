@@ -586,7 +586,8 @@ let test_resolution_order_wire_refuses_unproven_order () =
     in
     { entry; resolution_sequence; decision = Rule_types.Decision.Approve
     ; source = Rule_types.Human_operator; remember_rule = true; rule_expires_at = Some 2000.0
-    ; created_by = Some "operator"; grant_consumed = false; replay_outcome = None }
+    ; created_by = Some "operator"; grant_consumed = false; replay_outcome = None
+    ; resolved_at = 1.0; ledger = Queue_codec.Ledger_recorded }
   in
   let snapshot ~next_sequence deliveries =
     let module SMap = Set_util.StringMap in
@@ -679,7 +680,8 @@ let test_origin_dedup_and_retained_delivery_wire () =
   let delivery : Queue_codec.persisted_delivery =
     { entry; resolution_sequence = 2; decision = Rule_types.Decision.Approve
     ; source = Rule_types.Human_operator; remember_rule = false; rule_expires_at = None
-    ; created_by = None; grant_consumed = false; replay_outcome = None } in
+    ; created_by = None; grant_consumed = false; replay_outcome = None
+    ; resolved_at = 1.0; ledger = Queue_codec.Ledger_append_pending } in
   let encoded = Queue_codec.persisted_delivery_to_yojson delivery in
   let entry_json = Yojson.Safe.Util.member "entry" encoded in
   check bool "resolved delivery omits private request context" true
@@ -690,6 +692,19 @@ let test_origin_dedup_and_retained_delivery_wire () =
     | Ok {row = Queue_codec.Delivery_upsert value;_} -> value
     | Ok {row = (Queue_codec.Pending_upsert _ | Queue_codec.Pending_remove _ | Queue_codec.Delivery_remove _);_} -> fail "wrong log row"
     | Error reason -> fail reason in
+  (* #38541: the ledger state survives the wire; a delivery without it is
+     refused, not read as recorded. *)
+  check bool "unconfirmed ledger state round-trips" true
+    (restored.ledger = Queue_codec.Ledger_append_pending && Float.equal restored.resolved_at 1.0);
+  let without_ledger = match encoded with
+    | `Assoc fields -> `Assoc (List.remove_assoc "ledger" fields)
+    | _ -> fail "delivery must be an object" in
+  let unledgered_log = match log with
+    | `Assoc row -> `Assoc (("delivery", without_ledger) :: List.remove_assoc "delivery" row)
+    | _ -> fail "log row must be an object" in
+  (match Queue_codec.log_row_of_yojson ~base_path unledgered_log with
+   | Error _ -> ()
+   | Ok _ -> fail "a delivery without its ledger state was accepted");
   check (testable Yojson.Safe.pp Yojson.Safe.equal) "retained delivery keeps exact origin"
     (Origin.to_yojson original_origin) (Origin.to_yojson restored.entry.origin);
   let grant_lookup delivery origin =

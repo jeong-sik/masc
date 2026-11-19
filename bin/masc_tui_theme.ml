@@ -250,6 +250,15 @@ module Box = struct
   let tr_round = "\xe2\x95\xae"
   let bl_round = "\xe2\x95\xb0"
   let br_round = "\xe2\x95\xaf"
+  let h_heavy = "\xe2\x94\x81" (* U+2501 HEAVY HORIZONTAL *)
+  let v_heavy = "\xe2\x94\x83" (* U+2503 HEAVY VERTICAL *)
+  let tl_heavy = "\xe2\x94\x8f" (* U+250F HEAVY DOWN AND RIGHT *)
+  let tr_heavy = "\xe2\x94\x93" (* U+2513 HEAVY DOWN AND LEFT *)
+  let bl_heavy = "\xe2\x94\x97" (* U+2517 HEAVY UP AND RIGHT *)
+  let br_heavy = "\xe2\x94\x9b" (* U+251B HEAVY UP AND LEFT *)
+  let scroll_up = "\xe2\x86\x91" (* U+2191 UPWARDS ARROW *)
+  let scroll_down = "\xe2\x86\x93" (* U+2193 DOWNWARDS ARROW *)
+  let scroll_thumb = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
   let l = "\xe2\x94\x9c"
   let r = "\xe2\x94\xa4"
 end

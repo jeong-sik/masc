@@ -209,7 +209,11 @@ let lines ~ko ~now fetched ~keeper_name =
   | Masc_tui_fetched.Absent -> [ Dim, say "읽기 전" "not read yet" ]
   | Masc_tui_fetched.Loading -> [ Dim, say "읽는 중\xe2\x80\xa6" "reading\xe2\x80\xa6" ]
   | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
-    [ Bad, say "읽지 못함: " "could not read: " ^ Terminal_text.single_line detail ]
+    (* The detail pane's one shape for a read that failed: what was read,
+       "read failed", then the reason (RFC tui-one-screen-grammar §2). *)
+    [ Bad
+    , say "보드 격리 읽기 실패 \xc2\xb7 " "board attention read failed \xc2\xb7 "
+      ^ Terminal_text.single_line detail ]
   | Masc_tui_fetched.Ready quarantines ->
     let waiting_items = waiting quarantines in
     let unreconciled_items =

@@ -64,7 +64,47 @@ end
 
 module Viewport : sig
   val minimum_fixed_chrome_rows : int
-  val requires_compact_frame : rows:int -> bool
+  (** The most rows any surface declares for its fixed chrome. A body with
+      fewer rows holds no surface (RFC tui-one-screen-grammar §2). *)
+
+  val navigation_rows : int
+  (** The surface strip's row above every surface (zone 1). *)
+
+  val below_strip : terminal_rows:int -> int
+  (** The rows below the strip of a terminal [terminal_rows] tall, at least
+      one. Every surface and the too-small decision measure from this. *)
+
+  val body_rows : terminal_rows:int -> agenda_rows:int -> int
+  (** The rows a surface may draw in below the strip: [terminal_rows] less the
+      composer's row and the [agenda_rows] the agenda strip took. The
+      composer's row is counted at every size, because it is drawn at every
+      size. At least one. *)
+
+  type size = { cols : int; rows : int }
+  (** A terminal's size as the operator counts it: every column, and every
+      row, the strip's included. *)
+
+  type too_small =
+    | Rows_short of { have : size; need_rows : int }
+        (** The body is under {!minimum_fixed_chrome_rows}. [have] is the size
+            the decision was given and [need_rows] the terminal rows the
+            decision compares it with: it fits from [need_rows] up and
+            [have.rows < need_rows]. Columns never decide, so there is no
+            column need. *)
+    | Notice_needs_full_frame
+        (** The rows fit, but a notice is wider than the footer row and takes
+            the whole frame. The size is not why. *)
+
+  val too_small :
+    terminal_rows:int ->
+    terminal_cols:int ->
+    agenda_rows:int ->
+    notice_needs_full_frame:(unit -> bool) ->
+    too_small option
+  (** Whether the terminal holds no surface, and why. [terminal_rows] counts
+      the rows below the strip and [terminal_cols] every column. A short body
+      is the reason even when a notice is also too wide; the notice is asked
+      only when the rows fit. [None] when a surface fits. *)
 end
 
 (** {1 Keeper roster columns} *)
@@ -427,13 +467,6 @@ val kauto_row :
   kauto_row_values ->
   string
 (** One automation, on the same columns as {!kauto_header_row}. *)
-
-val kauto_status_mark : string -> string
-(** The mark a status word draws: the Fusion pipeline's vocabulary, one cell
-    -- waiting, active, done, failed. A word this build does not name keeps
-    the middot, saying the pane did not classify it; a cancelled or expired
-    schedule keeps the waiting mark, inert beside the word that names
-    it. *)
 
 val kauto_group_label : title:string -> string list -> string
 (** The label on the rule parting the live rows from the closed ones: the

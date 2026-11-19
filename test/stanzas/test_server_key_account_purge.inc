@@ -8,4 +8,4 @@
 (test
  (name test_server_key_account_purge)
  (modules test_server_key_account_purge)
- (libraries alcotest eio_main masc.auth masc.runtime masc.server unix))
+ (libraries alcotest eio eio.unix eio_main masc.auth masc.runtime masc.server unix))

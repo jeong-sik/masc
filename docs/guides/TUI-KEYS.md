@@ -44,6 +44,9 @@ The command palette is `:`.
 | `;` | held calls, questions, Goal confirmations and tasks on the operator list |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Work
 
@@ -70,6 +73,9 @@ The command palette is `:`.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `H` | in Task detail, extend the observed history with its known earlier page |
 
 ## Keepers
@@ -107,6 +113,9 @@ The command palette is `:`.
 | `Esc` | dashboard |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 Keeper settings `e` opens TOML and `E` opens JSON in the external editor.
 Both read a fresh snapshot asynchronously and use the same guarded save.
@@ -214,7 +223,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `r` | refresh |
 | `Tab` | next |
+| `q` | quit |
 
 ## Work / Board
 
@@ -245,6 +256,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `/` | jump the cursor to a matching post id, author or title |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Workspace
 
@@ -261,6 +275,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## System
 
@@ -308,6 +325,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
+| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -366,6 +384,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/` | Actions/Everything: jump the cursor to a matching event, tool or keeper, over the rows the filter leaves; Turns has no cursor to land on |
 | `n / N` | next / previous match |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -466,6 +486,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `PgUp/PgDn` | page |
 | `Home/End` | now / oldest |
 | `Left / Esc` | back |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Calls
 
@@ -474,6 +497,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `j/k` | scroll |
 | `Home/End` | top/bottom |
 | `Left / Esc` | back |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Runtime
 
@@ -506,6 +532,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `j/k` | in a lane's run list: move the run cursor |
 | `Right / Enter` | in a lane's run list: open the run's prompt and output |
 | `>` | in a lane's run list: load the next retained-run page from the server |
@@ -522,11 +551,15 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move the roster cursor |
 | `Enter` | read the client's full identity and observation |
-| `p / Esc` | back to Features & plugins |
+| `p` | back to Features & plugins |
+| `Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching attached name |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Approvals
 
@@ -552,6 +585,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Esc` | leave the answering mode; with the editor open it drops the draft first |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 When a selected question is too tall for the compact Approvals panel, it keeps
 a short preview from the original question instead of disappearing behind a
@@ -582,6 +618,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Work / Task Verdicts
 
@@ -599,6 +638,9 @@ count is drawn beyond the available space.
 | `/` | jump the cursor to a matching task id or title |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Fusion
 
@@ -616,6 +658,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `Esc` | leave detail, or return to Dashboard |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Schedules
 
@@ -633,6 +678,9 @@ count is drawn beyond the available space.
 | `x` | arm / confirm cancellation |
 | `Y` | copy the selected schedule reference |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Memory
 
@@ -651,6 +699,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `1 / 2 / 3 / 4` | in the facts browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the facts browser: move |
 | `Enter` | in the facts browser: read the whole fact in a wide overlay that owns the terminal |
@@ -713,6 +764,9 @@ count is drawn beyond the available space.
 | `Enter (history)` | a commit answers with its pull request, from its (#N) and the repository's remote |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Changes
 
@@ -730,6 +784,9 @@ count is drawn beyond the available space.
 | `o` | open in $EDITOR / $NVIM |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## System / Runtime
 
@@ -755,6 +812,9 @@ count is drawn beyond the available space.
 | `/` | jump the cursor to a matching lane id or runtime id |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Resources
 
@@ -791,6 +851,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 
@@ -808,6 +870,8 @@ count is drawn beyond the available space.
 | `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list, and from a Skill's page to the Skill list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
+| `Tab` | next |
+| `q` | quit |
 | `Ctrl-S` | in Available, unfold or fold the runtime, digest and byte-budget rows |
 | `Y` | in Available, copy the diagnostics with whole digests and the selected Skill's whole revision |
 | `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
@@ -848,6 +912,9 @@ or completion.
 | `/` | jump the cursor to a matching module, keeper, or message, over the rows the level and category filters leave |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Connectors
 
@@ -862,6 +929,9 @@ or completion.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper marks
 

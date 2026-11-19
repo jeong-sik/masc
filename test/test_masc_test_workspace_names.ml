@@ -2,11 +2,10 @@
     earlier workspace of the process had.
 
     A test removes its workspace when it ends, and the next test of the same
-    executable makes one right after. What the process remembers by path is
-    not removed with the directory: [Fs_compat.mkdir_p_memoized] still holds
-    that the store's month directory was made. Under the same name the next
-    test's first append skips making that directory and fails with "No such
-    file or directory". *)
+    executable makes one right after. What the process keeps under the
+    directory's name is not removed with the directory: the facts a store
+    keeps beside its files ([Dated_jsonl.read_fact]) stay. Under the same
+    name the next test would be answered with the earlier workspace's rows. *)
 
 open Alcotest
 

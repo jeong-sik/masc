@@ -53,6 +53,10 @@ val owner : t -> Authz_types.Provider_account_id.t -> Authz_types.User_id.t opti
 (** The accounts this person owns, in the order of their ids. *)
 val owned_by : t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list
 
+(** The key accounts of every person, in the order of their ids: those a
+    removal went through among them, since their records stay. *)
+val key_accounts : t -> Authz_types.Provider_account_id.t list
+
 (** What the records of its removal say of an account, as far as a
     replacement of its key reads them. This module holds no record of a
     removal: {!Authz_state} reads them for it. *)
@@ -86,8 +90,9 @@ type refusal =
       (** No record links the account whose key the record replaces. *)
   | Not_the_owner of Authz_types.Provider_account_id.t
       (** The account is another person's. It is compared before the kind and
-          the removal of the account, so nothing of another's account is in
-          the refusal. *)
+          the removal of the account, so the refusal says of another's
+          account only that someone holds it. A route answers it as it
+          answers {!Not_linked}. *)
   | Not_a_key_account of Authz_types.Provider_account_id.t
       (** A login account holds no key. *)
   | Account_removed of Authz_types.Provider_account_id.t  (** {!Begun}. *)
@@ -106,10 +111,10 @@ val refusal_to_string : refusal -> string
     replace now: they are active, the account is a key account of theirs, and
     its removal did not begin and did not stop. A record that replaces the
     key is taken on the same conditions ({!apply}), and names the generation
-    after this one. Nothing else of the account is read: an account a
-    reduction that was given up blocks has its key replaced all the same,
-    which is how the given-up start of a replacement is made again (design
-    8.3). *)
+    after this one. Nothing else of the account is read: an account the
+    given-up start of a replacement blocks has its key replaced all the
+    same, which is how that start is made again (design 8.3). The given-up
+    start of a removal is a removal that stopped. *)
 val key_to_replace
   :  t
   -> is_active:(Authz_types.User_id.t -> bool)

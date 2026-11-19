@@ -35,6 +35,17 @@ let owned_by t user_id =
   |> List.rev
 ;;
 
+let key_accounts t =
+  Account_map.fold
+    (fun provider_account_id { owner = _; kind } accounts ->
+      match kind with
+      | Key { integration_id = _; generation = _ } -> provider_account_id :: accounts
+      | Login -> accounts)
+    t
+    []
+  |> List.rev
+;;
+
 type removal =
   | Not_begun
   | Begun

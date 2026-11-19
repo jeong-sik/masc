@@ -1250,16 +1250,16 @@ let render_agenda (state : state) =
        to the column and a leading mark would push the right half off. *)
     if selected then Ansi.reverse ^ body ^ Ansi.reset else body
   in
-  (* A panel with nothing to open says so on its own footer rather than
-     naming a key that would do nothing. *)
-  let hints =
-    Masc_tui_keys.footer_hints_agenda ~lang:state.ui_language
-      ~openable:(Agenda.target_indexes lines <> [])
-  in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
+  (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
+     so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
+     holds the help door alone. The panel owns the keys, so the door is not
+     the default ([help_key_answers] says no under a modal); [?] here opens
+     the sheet on the agenda's own section. *)
+  surface_chrome ~overflow:Paged_by_cursor ~help_door:true state ~terminal_rows ~cols
+    ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title (ui_text state ~ko:" 일정·요청" ~en:" Agenda"))
-    ~hints
+    ~hints:""
     (* [agenda_viewport] rather than the budget it is derived from: the
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->
@@ -1280,31 +1280,26 @@ let render_agenda (state : state) =
         (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 ;;
 
-(* The hint names the rows the terminal needs and the key that leaves. The full
-   sentence is 57 columns wide. Measured on main at 8 rows, 43 columns cut the
-   count to its first digit ("at least 1…"), 40 columns cut it away, and 56
-   columns cut [q: quit] to "q: qu…". Each shorter form keeps both, down to the
-   16 columns of the shortest one that holds the count; under that only the key
-   stays. *)
-let terminal_too_small_hint ~cols ~rows =
-  let full =
-    Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit" rows
-  in
-  let shorter =
-    [ Printf.sprintf "terminal too small -- need %d rows; q: quit" rows
-    ; Printf.sprintf "too small -- need %d rows; q: quit" rows
-    ; Printf.sprintf "need %d rows; q: quit" rows
-    ; Printf.sprintf "%d rows; q: quit" rows
-    ; "q: quit"
-    ]
-  in
-  List.find_opt
-    (fun text -> Message_layout.display_width text <= cols)
-    (full :: shorter)
-  |> Option.value ~default:full
+(* The size line writes the decision's own numbers: the terminal's size now
+   and the rows it needs (RFC tui-one-screen-grammar §2). The typed form
+   choice drops words before numbers on a narrow terminal. *)
+let terminal_too_small_quit state =
+  Masc_tui_too_small_hint.quit ~ko:(state.ui_language = Lang_ko)
+
+let terminal_too_small_hint state ~cols ~have ~need_rows =
+  let ko = state.ui_language = Lang_ko in
+  Masc_tui_too_small_hint.text ~ko ~have ~need_rows
+    (Masc_tui_too_small_hint.choose ~ko ~cols ~have ~need_rows)
 ;;
 
-let render_terminal_too_small state ~recovery_notice ~rows ~cols =
+let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small)
+    ~recovery_notice ~rows ~cols =
+  (* A short terminal leads with its size. A notice that took the frame is
+     itself what the frame says, so it gets no size line. *)
+  let size_line = match reason with
+    | Render_schedule.Viewport.Rows_short { have; need_rows } ->
+        Some (terminal_too_small_hint state ~cols ~have ~need_rows)
+    | Render_schedule.Viewport.Notice_needs_full_frame -> None in
   let now = Unix.gettimeofday () in
   let rejection = Masc_tui_action_notice.rejection state.last_action
       ~now ~window:Masc_tui_types.last_action_window_s in
@@ -1337,24 +1332,15 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     | None, None -> None in
   match visible_rows with
   | Some parts ->
+      let parts = match size_line with
+        | Some line when List.length parts < rows -> line :: parts
+        | Some _ | None -> parts in
       let buf = Buffer.create 64 in
       List.iter (fun text ->
         Buffer.add_string buf (fit_width text cols);
         Buffer.add_char buf '\n') parts;
       finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols buf
   | None ->
-  (* The hint names physical terminal rows, whereas the guard receives the
-     body after navigation, agenda, and composer allocation. At the minimum
-     body size the composer can be absent; evaluate its policy at the proposed
-     surface size rather than copying the current tiny viewport's overhead. *)
-  let surface_rows =
-    Render_schedule.Viewport.minimum_fixed_chrome_rows
-    + Masc_tui_types.agenda_chrome_rows state
-  in
-  let minimum_terminal_rows =
-    navigation_rows + surface_rows
-    + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
-  in
   let recovery_notice = Option.map (fun text ->
       let short = Masc_tui_action_notice.csi_recovery_text in
       if Message_layout.display_width text > cols
@@ -1392,8 +1378,6 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     | Some text, _ -> Some (text, None)
     | None, Some notice -> Some (Masc_tui_action_notice.rejection_text notice, Some notice)
     | None, None -> Option.map (fun text -> text, None) ordinary_text in
-  let resize_hint =
-    terminal_too_small_hint ~cols ~rows:minimum_terminal_rows in
   let buf = Buffer.create 64 in
   let rendered (text, marked) =
     match marked with
@@ -1433,18 +1417,20 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     Buffer.add_char buf '\n' in
   (match extra_recovery with
    | Some text ->
-       add_row resize_hint;
+       Option.iter add_row size_line;
        Option.iter (fun ordinary -> add_row (rendered (ordinary, None))) extra_ordinary;
        add_row text;
        Option.iter add_row extra_rejection
    | None ->
-       let first = match notice with
-         | Some notice when rows <= 1 -> rendered notice
-         | Some _ | None -> resize_hint in
-       add_row first;
-       (match notice with
-        | Some notice when rows > 1 -> add_row (rendered notice)
-        | Some _ | None -> ()));
+       (match size_line, notice with
+        | Some line, Some notice ->
+            if rows <= 1 then add_row (rendered notice)
+            else begin add_row line; add_row (rendered notice) end
+        | Some line, None -> add_row line
+        | None, Some notice -> add_row (rendered notice)
+        (* The notice that took the frame does not fit even the whole of it.
+           Saying the size would be false, so only the way out stays. *)
+        | None, None -> add_row (terminal_too_small_quit state)));
   finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
     buf
 

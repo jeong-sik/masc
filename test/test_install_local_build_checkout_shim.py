@@ -213,8 +213,11 @@ class CheckoutGuestShim(unittest.TestCase):
             self.assertIn("Cannot connect to the Docker daemon", result.stderr)
             self.assertIn("build-shim.sh --arch arm64 failed", result.stderr)
             self.assertIn(f"so no shim was built for {shim}", result.stderr)
-            self.assertIn(f"{BY_HAND} arm64 && cp dist/remote-ssh/masc-exec-shim-linux-arm64",
+            self.assertIn(f"{BY_HAND} arm64 && install -m 755 dist/remote-ssh/masc-exec-shim-linux-arm64",
                           result.stderr)
+            # printf %q escapes the space in the fixture's workspace path.
+            quoted = str(shim).replace(" ", "\\ ")
+            self.assertIn(f"&& mv {quoted}.partial {quoted}", result.stderr)
 
     # The checkout changed after the server was built: its shim would be
     # refused like the old one.
@@ -264,7 +267,8 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertEqual(build_calls(repo), [])
                 self.assertIn(f"names no guest architecture this install can build ({found})",
                               result.stderr)
-                self.assertIn(f"{BY_HAND} <arm64|amd64>", result.stderr)
+                self.assertIn(f"{BY_HAND} ARCH &&", result.stderr)
+                self.assertIn("ARCH is arm64 or amd64", result.stderr)
 
     # A server without its own declaration refuses every shim, so a workspace
     # that runs microVM Keepers cannot take it.

@@ -142,6 +142,23 @@ let test_world_shortcut_is_read_only_without_a_keeper () =
       (None :: List.map Option.some (Story.World :: Story.pages)))
     [Story.Keeper_selected; Story.World_selected; Story.No_selection]
 
+let test_tab_parts_hotkeys_match_actions () =
+  List.iter
+    (fun ko ->
+       List.iter
+         (fun page ->
+            let hotkey, label = Story.tab_parts ~ko page in
+            Alcotest.check Alcotest.bool "non-empty tab label" true (String.length label > 0);
+            match hotkey with
+            | None -> ()
+            | Some key ->
+                Alcotest.check (Alcotest.option action)
+                  "tab hotkey dispatches its own page"
+                  (Some (Story.Show page))
+                  (Story.action_of_key ~selection:Story.Keeper_selected (Some Story.Story) key))
+         (Story.World :: Story.pages))
+    [ true; false ]
+
 let () =
   Alcotest.run "tui_keeper_story"
     [ ( "story window keys"
@@ -159,5 +176,7 @@ let () =
             test_closed_window_leaves_keeper_actions_to_the_list
         ; Alcotest.test_case "no Keeper under the cursor" `Quick
             test_no_keeper_under_the_cursor
+        ; Alcotest.test_case "tab parts hotkeys dispatch their own page" `Quick
+            test_tab_parts_hotkeys_match_actions
         ] )
     ]

@@ -29,7 +29,10 @@ open Keeper_approval_queue_resolve
    Keeper_gone, from one shared metadata scan per install.
    Otherwise a delivery addressed to a Keeper whose meta is gone is spent too: that is
    the rule [Hitl_recipient_absent] already applies, since nobody can read it.
-   The operator's decision and the consumption stay on the audit ledger.
+   The operator's decision and the consumption stay on the audit ledger. That
+   holds only for a delivery whose [Resolved] row is confirmed there
+   ([Ledger_recorded]); any other delivery is the decision's only durable
+   copy and is never spent (#38541).
    Without this every approval left a permanent row (2,131 consumed approvals,
    7.8 MB, on 2026-09-23).
 
@@ -116,10 +119,11 @@ let keeper_delivery_readers ~base_path ~keeper_name =
 ;;
 
 let delivery_is_spent readers delivery =
-  match readers with
-  | Keeper_readers_unknown _ -> false
-  | Keeper_gone -> true
-  | Keeper_readers { queued_wakes; gate_references } ->
+  match delivery.ledger, readers with
+  | Ledger_append_pending, (Keeper_gone | Keeper_readers _ | Keeper_readers_unknown _) -> false
+  | Ledger_recorded, Keeper_readers_unknown _ -> false
+  | Ledger_recorded, Keeper_gone -> true
+  | Ledger_recorded, Keeper_readers { queued_wakes; gate_references } ->
     let id = delivery.entry.id in
     let grant_settled =
       match delivery.decision with
@@ -256,6 +260,38 @@ let retire_spent_deliveries ~base_path candidates =
             | Ok () ->
               Atomic.set deliveries updated_deliveries;
               Ok retired))))
+;;
+
+(* A delivery still [Ledger_append_pending] was journaled but its [Resolved]
+   row was never confirmed: the append failed, or the process stopped between
+   the append and the confirmation. The retry reads the row's day file and
+   appends only when the row is missing, so the second case does not write it
+   twice. It runs after the store is published, outside its lock, and before
+   spent deliveries are chosen, so a delivery confirmed here can be retired by
+   this same install. A failed retry keeps the delivery unconfirmed. *)
+let confirm_resolution_rows loaded_deliveries =
+  let deliveries, failures =
+    List.fold_left
+      (fun (deliveries, failures) delivery ->
+         match delivery.ledger with
+         | Ledger_recorded -> delivery :: deliveries, failures
+         | Ledger_append_pending ->
+           (match retry_unconfirmed_resolution delivery with
+            | Ledger_retry_confirmed confirmed -> confirmed :: deliveries, failures
+            | Ledger_retry_delivery_absent -> deliveries, failures
+            | Ledger_retry_failed reason ->
+              Log.Keeper.warn
+                ~keeper_name:delivery.entry.keeper_name
+                "approval_queue: resolution not confirmed on the audit ledger; delivery kept approval=%s: %s"
+                delivery.entry.id
+                reason;
+              ( delivery :: deliveries
+              , ({ approval_id = delivery.entry.id; reason } : delivery_replay_failure)
+                :: failures )))
+      ([], [])
+      loaded_deliveries
+  in
+  List.rev deliveries, List.rev failures
 ;;
 
 let install_persistence_internal_with_replay_projection
@@ -398,6 +434,7 @@ let install_persistence_internal_with_replay_projection
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
+    let loaded_deliveries, ledger_retry_failures = confirm_resolution_rows loaded_deliveries in
     let candidates, preparation_error = spent_deliveries ~replay_projection ~base_path loaded_deliveries in
     let retired_deliveries, delivery_retirement_error, loaded_deliveries =
       match retire_spent_deliveries ~base_path candidates with
@@ -418,6 +455,7 @@ let install_persistence_internal_with_replay_projection
           ; replay_projection_error
           ; retired_deliveries
           ; delivery_retirement_error
+          ; ledger_retry_failures
           }
       | delivery :: rest ->
         if delivery.grant_consumed

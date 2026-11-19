@@ -556,10 +556,39 @@ let test_write_comes_back_through_recall () =
     ["reasoning_content must be replayed unmodified"] (search ())
 ;;
 
-let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
-  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
-  | Ok rows -> rows
-  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+(* The commit lines of a Keeper's commit log, oldest first. The Memory tools
+   write through the Keeper's writer, whose record of a write is that log. *)
+let commit_lines ~keepers_dir ~keeper_id : Masc.Librarian_log.commit list =
+  let module Store = Masc.Librarian_log_store in
+  match
+    Store.fold
+      (Store.path_for_keepers_dir ~keepers_dir ~keeper_id)
+      ~init:[]
+      ~f:(fun seen (scanned : Store.scanned) ->
+        match scanned.line with
+        | Ok (Committed commit) -> commit :: seen
+        | Ok (Started _) -> seen
+        | Error (_ : Store.undecodable) -> Alcotest.fail "a commit log line does not decode")
+  with
+  | Ok seen -> List.rev seen
+  | Error error -> Alcotest.fail (Masc.Private_jsonl_scan.error_to_string error)
+;;
+
+(* Each fact a commit removed, with why it left. *)
+let removed_by (commit : Masc.Librarian_log.commit) =
+  List.map
+    (fun ((fact : Masc.Keeper_memory_os_types.fact), (removal : Masc.Librarian_effects.removal)) ->
+       ( Masc.Keeper_memory_os_types.memory_id fact
+       , match removal with
+         | Retracted { by = Keeper; reason } -> "retracted by the keeper: " ^ reason
+         | Retracted { by = Operator operator; reason } ->
+           "retracted by " ^ operator ^ ": " ^ reason
+         | Support_lost { missing } -> "support lost: " ^ String.concat "," missing
+         | Superseded_by successor -> "superseded by " ^ successor
+         | Dropped { reason } -> "dropped: " ^ reason
+         | Merged_into successor -> "merged into " ^ successor
+         | Revised_into successor -> "revised into " ^ successor ))
+    commit.effects.removed
 ;;
 
 let test_retract_cascades_through_public_tool_and_journals_reason () =
@@ -643,26 +672,20 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     [ second_id ]
     (current_facts ~keepers_dir ~keeper_id:meta.name
      |> List.map Masc.Keeper_memory_os_types.memory_id);
-  let journal =
-    readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10
-  in
-  Alcotest.(check int) "four writes and one retract are journaled" 5 (List.length journal);
-  (match List.rev journal |> List.hd with
-   | Ok
-       (Current.Journal_committed
-          { source = { kind = Current.Explicit_retract; _ }
-          ; dropped = Some [ dropped ]
-          ; change
-          ; _
-          }) ->
-     Alcotest.(check string) "journal direct target" first_id dropped.memory_id;
-     Alcotest.(check string)
-       "journal durable reason"
-       "manifest now selects region B"
-       dropped.reason;
-     Alcotest.(check int) "journal cascaded support evidence" 2 (List.length change.invalidated)
-   | Ok _ -> Alcotest.fail "last journal line is not the exact retract commit"
-   | Error detail -> Alcotest.fail detail);
+  (* The two premises were in the snapshot the writer's store opened on. The
+     two derived writes and the retraction are its commit lines. *)
+  let commits = commit_lines ~keepers_dir ~keeper_id:meta.name in
+  Alcotest.(check int) "two writes and one retract are commit lines" 3 (List.length commits);
+  (match List.rev commits with
+   | retraction :: _ ->
+     Alcotest.(check (list (pair string string)))
+       "the line keeps each removed fact with why it left"
+       [ first_id, "retracted by the keeper: manifest now selects region B"
+       ; conclusion_id, "support lost: " ^ first_id
+       ; consequence_id, "support lost: " ^ conclusion_id
+       ]
+       (removed_by retraction)
+   | [] -> Alcotest.fail "no commit line");
   let revision_before_missing = int_field "revision" response in
   let missing =
     retract_tool
@@ -697,9 +720,9 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
   in
   Alcotest.(check int) "missing target does not advance revision" revision_before_missing current.revision;
   Alcotest.(check int)
-    "missing target does not append journal"
-    5
-    (List.length (readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10))
+    "missing target does not append a commit line"
+    3
+    (List.length (commit_lines ~keepers_dir ~keeper_id:meta.name))
 ;;
 
 let test_derived_write_uses_exact_premise_receipt () =
@@ -3491,8 +3514,8 @@ let test_unwritable_store_is_a_dependency_failure () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  (* A directory where the snapshot file belongs: every open for writing
-     fails regardless of the user the test runs as. *)
+  (* A directory where the snapshot file belongs: the writer's store cannot
+     read it as a snapshot, whatever user the test runs as. *)
   Fs_compat.mkdir_p (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name);
   let execution =
     write_tool
@@ -3505,17 +3528,21 @@ let test_unwritable_store_is_a_dependency_failure () =
     execution.Masc.Keeper_tool_execution.raw_output |> Yojson.Safe.from_string
   in
   Alcotest.(check string)
-    "persistence, not validation"
-    "persistence_failed"
+    "Memory did not take the write"
+    "memory_unwritable"
     (string_field "error_kind" response);
+  Alcotest.(check string)
+    "the writer's store stopped on a snapshot it cannot read"
+    "store_stopped_memory_unreadable"
+    (string_field "unwritable" response);
   Alcotest.(check bool)
-    "the commit is unknown"
+    "nothing was committed"
     true
     (execution.Masc.Keeper_tool_execution.failure_effect_disposition
-     = Tool_result.Effect_outcome_unknown);
+     = Tool_result.Proven_pre_effect);
   Alcotest.(check string)
     "the payload names the same disposition"
-    (Tool_result.failure_effect_disposition_to_string Tool_result.Effect_outcome_unknown)
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
     (string_field "effect_disposition" response)
 ;;
 
@@ -3777,7 +3804,12 @@ let test_retract_records_a_retraction () =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
-  let written_id = seed_current ~config ~meta "the deploy needs assets" in
+  let write () =
+    (write_tool ~config ~meta ~args:(make_args ~title:"" ~content:"the deploy needs assets"))
+      .Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  let written_id = string_field "memory_id" (write ()) in
   let retract id =
     retract_tool
       ~config
@@ -3788,34 +3820,34 @@ let test_retract_records_a_retraction () =
     Yojson.Safe.from_string (retract written_id).Masc.Keeper_tool_execution.raw_output
   in
   Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
+  (* Every retraction the commit log holds, as the fact and why it left. *)
   let retractions () =
-    match Current.read_commit_lineage ~keepers_dir ~keeper_id:meta.name with
-    | Ok lineage -> lineage.Current.retractions
-    | Error detail -> Alcotest.fail ("memory lineage unreadable: " ^ detail)
+    List.concat_map removed_by (commit_lines ~keepers_dir ~keeper_id:meta.name)
   in
-  Alcotest.(check (list string))
-    "the journal names the retracted id" [ written_id ] (retractions ());
+  let recorded = [ written_id, "retracted by the keeper: superseded by the runbook" ] in
+  Alcotest.(check (list (pair string string)))
+    "the commit line keeps the retracted fact with its reason" recorded (retractions ());
   Alcotest.(check int)
     "a retract writes no sidecar event" 0
     (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
   ignore (retract (memory_id 'f'));
-  Alcotest.(check (list string))
-    "a retract of an unknown id records nothing" [ written_id ] (retractions ());
+  Alcotest.(check (list (pair string string)))
+    "a retract of an unknown id records nothing" recorded (retractions ());
   Alcotest.(check int) "the retracted fact is no longer current" 0
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
-  let restored_id = seed_current ~config ~meta "the deploy needs assets" in
-  Alcotest.(check string) "restored current claim keeps content identity" written_id restored_id;
-  (match current_facts ~keepers_dir ~keeper_id:meta.name with
-   | [ current ] ->
-       let current_id = Masc.Keeper_memory_os_types.memory_id current in
-       Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
-       let history =
-         Events.summaries_for ~memory_ids:[current_id] ~revisions:[]
-           ~retractions:(retractions ())
-           (events_for ~keepers_dir ~keeper_id:meta.name) |> List.hd in
-       Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
-       Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
-   | _ -> Alcotest.fail "expected only the re-added fact")
+  let restored = write () in
+  Alcotest.(check string)
+    "the claim written again keeps its content identity" written_id
+    (string_field "memory_id" restored);
+  Alcotest.(check string)
+    "and is a new fact, not the retracted one seen again" "inserted"
+    (string_field "identity_disposition" restored);
+  Alcotest.(check (list string))
+    "it is current again" [ written_id ]
+    (current_facts ~keepers_dir ~keeper_id:meta.name
+     |> List.map Masc.Keeper_memory_os_types.memory_id);
+  Alcotest.(check (list (pair string string)))
+    "and the earlier retraction stays in the commit log" recorded (retractions ())
 ;;
 
 let test_source_snapshot_commit_notifications () =

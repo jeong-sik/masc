@@ -286,7 +286,7 @@ let runtime_routes_detail_lines state ~width =
       let routes =
         fact (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
         @ fact (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
-        @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "미확인" "unavailable"))
+        @ fact (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "보고 안 됨" "not reported"))
         @ fact (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
         @ (match runtime_fleet_summary state with
            | None -> []
@@ -306,7 +306,7 @@ let runtime_routes_detail_lines state ~width =
                   (string_of_int snapshot.rss_unassigned_probe_count))
         @ (match snapshot.rss_probe with
            | None -> fact (text "프로브" "Probe")
-               (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
+               (text "보고 안 됨" "not reported")
            | Some probe ->
                fact (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
                @ runtime_items ~tone:Page_line.Attention (text "프로브 오류" "Probe error") probe.rps_errors
@@ -716,7 +716,7 @@ let render_runtime_reading (state : state) =
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> (Theme.warn ()) ^ (if ko then "프로브 미확인" else "probe unavailable") ^ Ansi.reset
+          | None -> (Theme.warn ()) ^ (if ko then "프로브 보고 안 됨" else "probe not reported") ^ Ansi.reset
           | Some probe ->
               runtime_overall_badge ~ko probe.rps_status ^ " / "
               ^ runtime_refresh_badge ~ko probe.rps_refresh_state
@@ -1340,7 +1340,7 @@ let usage_lines ~cols ~rows (state : state) =
             ~now:(Unix.gettimeofday ()) ~width:(max 1 (framed_inner_width cols)) ~rows with
     | Some section -> section.lines
     (* [section] answers [None] only before the first read. *)
-    | None -> [ui_text state ~ko:" 계정 한도 미관측" ~en:" Plan usage · not observed"]
+    | None -> [ui_text state ~ko:" 계정 한도 미조회" ~en:" Plan usage · not read"]
   in
   let keepers () =
     match state.keeper_usage with

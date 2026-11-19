@@ -50,6 +50,10 @@ val make
   -> Runtime_api_key_file.key
   -> (unit, make_error) result
 
+(** The error in words, for the log of the server: it can name a path of the
+    server, and it holds nothing of the key. *)
+val make_error_detail : make_error -> string
+
 (** What is still there after a removal that did not go through, as the
     stages of {!Authz_purge_event.account_failed_stage}. The detail can name
     a path of the server, so it is for the log of the server. *)

@@ -90,12 +90,12 @@ let summarize_errors label errors =
 (* Every refresh read all ten meta files whole, and in a thirty-second sample
    not one of them changed. A file nothing has written to since the last read
    still decodes to what it decoded then, so the read is skipped and that value
-   reused when the size and the modification time hold. [Unix.stat] carries
-   sub-second times here, so a write cannot land inside one without moving
-   it. *)
+   reused while the file version holds: device, inode, size and modification
+   time. A writer that replaces the file with a rename gives it another inode,
+   so a replacement that keeps the size and the modification time is still
+   read. *)
 type cached_keeper_meta = {
-  cached_mtime : float;
-  cached_size : int;
+  cached_version : File_version_cache.version;
   cached_keeper : keeper;
 }
 
@@ -107,19 +107,18 @@ let stat_opt path =
 
 let cached_keeper_for path stat =
   match stat, Hashtbl.find_opt keeper_meta_cache path with
-  | Some (st : Unix.stats), Some entry
-    when st.Unix.st_mtime = entry.cached_mtime
-         && st.Unix.st_size = entry.cached_size ->
+  | Some stat, Some entry
+    when File_version_cache.same_version
+           (File_version_cache.version_of_stats stat) entry.cached_version ->
       Some entry.cached_keeper
   | (Some _ | None), (Some _ | None) -> None
 
 let remember_keeper path stat keeper =
   match stat with
   | None -> ()
-  | Some (st : Unix.stats) ->
+  | Some stat ->
       Hashtbl.replace keeper_meta_cache path
-        { cached_mtime = st.Unix.st_mtime;
-          cached_size = st.Unix.st_size;
+        { cached_version = File_version_cache.version_of_stats stat;
           cached_keeper = keeper;
         }
 

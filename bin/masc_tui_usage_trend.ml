@@ -114,6 +114,23 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
     unreadable_reports = history.puh_unreadable_reports;
     rows }
 
+let has_unmetered_credit row =
+  List.exists
+    (function
+      | Some { report = Measured (utilization, None); _ } ->
+        (match utilization with
+         | Masc.Tui_decode_usage.Utilization_credit_balance _
+         | Masc.Tui_decode_usage.Utilization_credit_unlimited
+         | Masc.Tui_decode_usage.Utilization_credit_retracted -> true
+         | Masc.Tui_decode_usage.Utilization_fraction _
+         | Masc.Tui_decode_usage.Utilization_percent _
+         | Masc.Tui_decode_usage.Utilization_usd _ -> false)
+      | Some { report = Measured (_, Some _); _ }
+      | Some { report = Reported_no_windows; _ }
+      | None -> false)
+    row.samples
+;;
+
 let latest row = List.find_map Fun.id (List.rev row.samples)
 
 let dated_samples trend row =

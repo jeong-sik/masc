@@ -233,8 +233,19 @@ let coloured_meter ~cells ~fill:bar ~around share =
   drawn_fill ^ String.concat "" track
 
 let credit_decimals = 2
+let credit_small_amount = 0.01
 
-let credit_text currency value = Printf.sprintf "%s %.*f" currency credit_decimals value
+let credit_number_text value =
+  if not (Float.is_finite value) then Printf.sprintf "%g" value
+  else if Float.compare (Float.abs value) credit_small_amount < 0 && not (Float.equal value 0.0) then "<0.01"
+  else Printf.sprintf "%.*f" credit_decimals value
+;;
+
+let credit_text currency value =
+  let amount = credit_number_text value in
+  if String.equal currency "credits" then amount ^ " credits"
+  else currency ^ " " ^ amount
+;;
 
 let credit_remaining_text currency remaining =
   "Credit " ^ credit_text currency remaining ^ " left"
@@ -294,10 +305,10 @@ type reset_words = {
 }
 
 let reset_words ~now = function
-  | None -> { reset_tone = None; reset_full = "no reset"; reset_short = "no reset" }
+  | None -> { reset_tone = None; reset_full = "reset not reported"; reset_short = "reset not reported" }
   | Some at when at <= now ->
       { reset_tone = Some (Theme.text_status Masc_tui_theme.Warn)
-      ; reset_full = "reset time passed \xc2\xb7 no newer report"
+      ; reset_full = "reset time passed"
       ; reset_short = "reset passed"
       }
   | Some at ->
@@ -657,10 +668,10 @@ let money_text = function
   | Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining } ->
       let context =
         match total with
-        | None -> ""
-        | Some total ->
+        | Some total when Float.compare total 0.0 > 0 ->
             " \xc2\xb7 used " ^ credit_text currency (total -. remaining)
             ^ "/" ^ credit_text currency total
+        | Some _ | None -> ""
       in
       Some (credit_remaining_text currency remaining ^ context)
   | Masc.Tui_decode_usage.Utilization_credit_unlimited -> Some "Credit unlimited"
@@ -754,8 +765,17 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   in
   let amount = money_text utilization in
   let detail_with reset_part notes =
+    let reset_part =
+      match utilization with
+      | Masc.Tui_decode_usage.Utilization_credit_unlimited
+      | Masc.Tui_decode_usage.Utilization_credit_retracted -> None
+      | Masc.Tui_decode_usage.Utilization_fraction _
+      | Masc.Tui_decode_usage.Utilization_percent _
+      | Masc.Tui_decode_usage.Utilization_usd _
+      | Masc.Tui_decode_usage.Utilization_credit_balance _ -> Some reset_part
+    in
     String.concat detail_separator
-      (List.filter_map Fun.id ([ amount; Some reset_part ] @ notes))
+      (List.filter_map Fun.id ([ amount; reset_part ] @ notes))
   in
   let notes = [ heard; role_tag window.puw_role ] in
   let tone = window_tone window in

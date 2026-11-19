@@ -678,6 +678,44 @@ let test_credit_balance_rows_put_remaining_first () =
        (Masc.Tui_decode_usage.Utilization_credit_balance
           { currency = "USD"; total = Some 0.0; remaining = 0.0 }))
 
+let test_credit_tui_formatting_and_reset_words () =
+  check string "small positive Credit does not become zero"
+    "Credit <0.01 credits left"
+    (Providers.utilization_text
+       (Masc.Tui_decode_usage.Utilization_credit_balance
+          { currency = "credits"; total = Some 100.0; remaining = 0.001 }));
+  check string "exact zero Credit remains zero"
+    "Credit USD 0.00 left"
+    (Providers.utilization_text
+       (Masc.Tui_decode_usage.Utilization_credit_balance
+          { currency = "USD"; total = Some 0.0; remaining = 0.0 }));;
+
+let test_credit_history_prefers_daily_values () =
+  let history = { puh_days = 1; puh_generated_at = now; puh_unreadable_reports = 0;
+    puh_points =
+      [ { puhp_scope_id = "codex-finite"; puhp_kind = "credit balance"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_credit_balance
+            { currency = "credits"; total = None; remaining = 2500.75 }
+        ; puhp_observed_at = now }
+      ; { puhp_scope_id = "codex-unlimited"; puhp_kind = "credit balance"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_credit_unlimited; puhp_observed_at = now }
+      ; { puhp_scope_id = "codex-retracted"; puhp_kind = "credit balance"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_credit_retracted; puhp_observed_at = now }
+      ; { puhp_scope_id = "uncapped-usd"; puhp_kind = "credit usage"; puhp_limit_id = None
+        ; puhp_unit = Decode.Utilization_usd { used = 12.3456; limit = None }; puhp_observed_at = now }
+      ]
+  ; puh_reported_no_windows = [] }
+  in
+  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
+  let find scope = List.find (fun (row : Masc_tui_usage_trend.row) -> row.scope_id = scope) trend.rows in
+  List.iter
+    (fun scope ->
+      check bool (scope ^ " uses daily values") true
+        (Masc_tui_usage_trend.has_unmetered_credit (find scope)))
+    [ "codex-finite"; "codex-unlimited"; "codex-retracted" ];
+  check bool "uncapped USD keeps the percentage plot" false
+    (Masc_tui_usage_trend.has_unmetered_credit (find "uncapped-usd"))
+
 (* ---- plan: sections and order, asserted on typed data ------------------ *)
 
 (* The sketch the operator approved: a priced key at its limit with no
@@ -1101,6 +1139,8 @@ let () =
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
         ; test_case "USD rows preserve amounts without a fabricated meter" `Quick test_usd_rows_do_not_invent_a_percentage
         ; test_case "Credit rows put remaining first" `Quick test_credit_balance_rows_put_remaining_first
+        ; test_case "Credit formatting and reset wording" `Quick test_credit_tui_formatting_and_reset_words
+        ; test_case "Credit history prefers daily values" `Quick test_credit_history_prefers_daily_values
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "a window that gates nothing is not an alarm" `Quick

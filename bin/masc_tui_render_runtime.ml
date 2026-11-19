@@ -1237,11 +1237,13 @@ let provider_history_lines ~cols ~rows (state : state) =
                 Printf.sprintf "$%s / $%s" (float_text used) (float_text limit)
             | Utilization_usd { used; limit = None } ->
                 Printf.sprintf "$%s (uncapped)" (float_text used)
-            | Utilization_credit_balance { currency; remaining; _ } ->
-                Printf.sprintf "Credit %s %.2f left" currency remaining
+            | Utilization_credit_balance { currency; total; remaining } ->
+                Overview_providers.utilization_text
+                  (Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining })
             | Utilization_credit_unlimited -> "Credit unlimited"
             | Utilization_credit_retracted -> "Credit retracted" in
       let chart (row : Masc_tui_usage_trend.row) =
+        let unmetered_credit = Masc_tui_usage_trend.has_unmetered_credit row in
         let account = List.find_opt (fun account ->
           String.equal (Overview_providers.scope_id account) row.scope_id) scopes in
         let email = Option.bind account (Overview_providers.account_email
@@ -1258,7 +1260,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           else wrap name
         in
         let daily =
-          if not bare && not (Masc_tui_usage_trend.compact ~width:inner row) then []
+          if not bare && not unmetered_credit && not (Masc_tui_usage_trend.compact ~width:inner row) then []
           else
             "Daily values (UTC)" ::
             List.map (fun (day, sample) ->
@@ -1268,7 +1270,7 @@ let provider_history_lines ~cols ~rows (state : state) =
         let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
           @ (match email with None -> [] | Some email -> wrap email)
           @ wrap latest
-          @ Masc_tui_usage_trend.plot ~width:inner trend row
+          @ (if unmetered_credit then [] else Masc_tui_usage_trend.plot ~width:inner trend row)
           @ daily
           @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
         let heading = Message_layout.truncate_middle inner name in

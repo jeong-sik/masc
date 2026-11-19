@@ -60,8 +60,13 @@ val assemble_request_context :
   dynamic_context_partition:Keeper_context_layers.rendered option ->
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
-(** Split uniquely renderer-attributed Active Goals and admitted request source
-    into System suffixes, in that order.
+(** Split uniquely renderer-attributed Active Goals into a System suffix. An
+    official client also reads the admitted request source as a System suffix
+    right behind them, including one that takes the turn over after an Agent
+    Core round. Agent Core leaves the source in the end context, which only
+    the turn's first request carries, so a turn that serves an admitted
+    request and one that does not send the same System
+    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2).
     Agent Core carries Goals Awaiting Proof in that same issued System;
     official clients keep it in their turn-scoped context carrier. Completion
     Authority remains a context block. Missing, stale or duplicate renderer

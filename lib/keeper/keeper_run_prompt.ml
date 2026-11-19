@@ -42,9 +42,36 @@ let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let assemble_extra_system_context = Keeper_context_assembly.assemble
 
+(* The admitted operation source an official client reads as a System
+   observation, right behind the Goal snapshot. Only a source the renderer
+   attributes to exactly one section qualifies. *)
+let official_source_observation partition =
+  match
+    List.filter
+      (fun (section : Keeper_context_layers.section) ->
+         section.section_source
+         = Keeper_context_layers.Layer Keeper_context_layers.Direct_input_source)
+      (Keeper_context_layers.sections partition)
+  with
+  | [ _ ] ->
+    let source, (_ : Keeper_context_layers.rendered) =
+      Keeper_context_layers.partition_layer Keeper_context_layers.Direct_input_source partition
+    in
+    (match Keeper_context_layers.text source with
+     | "" -> []
+     | text ->
+       [ Keeper_context_assembly.Direct_input_source (Inference_utils.sanitize_text_utf8 text) ])
+  | [] | _ :: _ :: _ -> []
+;;
+
 (* RFC-0491 §3.1: the Completion Authority layer is world state that comes and
    goes between turns, so it is a context block, not a System observation.
-   The Goal snapshot and admitted operation source are System suffixes. A later
+   The Goal snapshot is a System suffix. The admitted operation source is one
+   for an official client only. Agent Core leaves it in the end context, which
+   rides the turn's first request alone, so a turn that serves an admitted
+   request sends the System a turn that does not would: a System that changed
+   with the turn kind made the provider read the whole history again
+   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2, D3). A later
    round carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
    remains visible too, but Agent Core keeps this recurring state out of the
@@ -71,6 +98,26 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
               Option.is_none previous.proof_state
             | Keeper_context_assembly.Active_goals _
             | Keeper_context_assembly.Direct_input_source _ -> true) observations in
+        (* An official client that takes the turn over after an Agent Core
+           round reads the admitted source as its own first round would.
+           Agent Core issued none, so it is read from the turn's partition. *)
+        let observations =
+          match checkpoint_owner, dynamic_context_partition with
+          | Runtime_execution.Official_client, Some partition
+            when not (List.exists (function
+                | Keeper_context_assembly.Direct_input_source _ -> true
+                | Keeper_context_assembly.Current_norms _
+                | Keeper_context_assembly.Active_goals _
+                | Keeper_context_assembly.Goals_awaiting_proof _ -> false) observations) ->
+            let goals, rest = List.partition (function
+                | Keeper_context_assembly.Active_goals _ -> true
+                | Keeper_context_assembly.Current_norms _
+                | Keeper_context_assembly.Direct_input_source _
+                | Keeper_context_assembly.Goals_awaiting_proof _ -> false) observations in
+            goals @ official_source_observation partition @ rest
+          | Runtime_execution.Official_client, (Some _ | None)
+          | Runtime_execution.Masc_agent_core, (Some _ | None) -> observations
+        in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
             || (Option.is_none previous.proof_state
@@ -87,15 +134,19 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
                 && unique Goals_awaiting_proof && unique Completion_authority)
         then [], blocks, dynamic_context_partition, None
         else
-          let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
-          let source, remaining = Keeper_context_layers.partition_layer Direct_input_source remaining in
-          let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
-          let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
           let observation make layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [make (Inference_utils.sanitize_text_utf8 text)] in
+          let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
+          (* Agent Core keeps the source in [remaining], the end context. *)
+          let source, remaining = match checkpoint_owner with
+            | Runtime_execution.Official_client ->
+              let source, remaining = Keeper_context_layers.partition_layer Direct_input_source remaining in
+              observation (fun text -> Keeper_context_assembly.Direct_input_source text) source, remaining
+            | Runtime_execution.Masc_agent_core -> [], remaining in
+          let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
+          let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
           let observations =
-            observation (fun text -> Keeper_context_assembly.Active_goals text) goals
-            @ observation (fun text -> Keeper_context_assembly.Direct_input_source text) source in
+            observation (fun text -> Keeper_context_assembly.Active_goals text) goals @ source in
           let block id layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
           let proof_state = Keeper_context_assembly.issue_proof_state awaiting in

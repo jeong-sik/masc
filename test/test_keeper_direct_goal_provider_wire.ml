@@ -229,6 +229,74 @@ let run_case source () =
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
       | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
+(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2 (D3).
+   A turn that serves an admitted request and a turn that does not send Agent
+   Core the same System, because the provider caches the request from its
+   first byte. The source rides the first request's end context only. An
+   official client still reads it in its System, also one that takes the turn
+   over after an Agent Core round. *)
+let test_admitted_source_leaves_the_agent_core_system () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  let base_path = Filename.temp_dir "admitted-source-system-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  install_prompts base_path;
+  let partition source =
+    Direct.project_partition ~workspace_memory_access:None
+      (Direct.prepare ~direct_input_source:source
+         ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"admitted-source")
+         ~current_task:Keeper_world_observation_inputs.No_current_task
+         ~held_task_skills:[] ~task_skill_surfaces:[]
+         ~workspace_memory:Workspace_memory_ledger.Missing
+         ~wiki_contents:Keeper_wiki_contents.Off ~lane_updates:(Ok (`List []))
+         ~approval_authority_text:"" ~recent_direct_conversation_text:""
+         ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" ())
+  in
+  let system = system_of_text "Respond to the request using current observations." in
+  let assemble checkpoint_owner partition ~previous =
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner ~system
+      ~post_tool_round:(Option.is_some previous) ~previous_assembly:previous
+      ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition]
+  in
+  let effective assembly =
+    Keeper_context_assembly.effective_system_prompt ~base_text:system.text assembly in
+  let end_context (assembly : Keeper_context_assembly.t) =
+    Option.value ~default:"" assembly.extra_system_context in
+  let names_source text = contains ~needle:peer_operation text in
+  let in_official_system (assembly : Keeper_context_assembly.t) =
+    match assembly.system_prompt with
+    | None -> false
+    | Some issued ->
+      List.exists (function
+        | Keeper_context_assembly.Direct_input_source text -> names_source text
+        | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> false) issued.observations
+  in
+  let admitted = partition (Some (peer_input_source ())) in
+  let self_woken = partition None in
+  check bool "the fixture renders the admitted source" true
+    (names_source (Keeper_context_layers.text admitted));
+  let chat_first = assemble Runtime_execution.Masc_agent_core admitted ~previous:None in
+  let woken_first = assemble Runtime_execution.Masc_agent_core self_woken ~previous:None in
+  check string "a chat turn and a self-woken turn send Agent Core the same System"
+    (effective woken_first) (effective chat_first);
+  check bool "the chat turn's first end context carries the source" true
+    (names_source (end_context chat_first));
+  let chat_later = assemble Runtime_execution.Masc_agent_core admitted ~previous:(Some chat_first) in
+  check bool "a round after tool results carries no source" false
+    (names_source (effective chat_later) || names_source (end_context chat_later));
+  let official_first = assemble Runtime_execution.Official_client admitted ~previous:None in
+  check bool "an official client reads the source in its System" true
+    (in_official_system official_first);
+  check bool "and not again in its end context" false (names_source (end_context official_first));
+  check bool "an official client that takes over after an Agent Core round reads it too" true
+    (in_official_system
+       (assemble Runtime_execution.Official_client admitted ~previous:(Some chat_first)))
+
 let test_goal_survives_read_then_task_creation ~peer () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -348,9 +416,9 @@ let test_goal_survives_read_then_task_creation ~peer () =
     List.iter (fun needle -> check bool "every receiver request's System keeps the Goal and criterion" true
       (contains ~needle context)) [goal.id;goal.criterion_revision];
     List.iter (fun needle ->
-      check bool "every receiver System keeps only this operation's peer source" peer
+      check bool "no receiver System carries the peer source" false
         (contains ~needle context);
-      check bool "the peer source is never replayed as User context" false
+      check bool "only the first request's end context carries the peer source" (peer && index = 0)
         (List.exists (contains ~needle) contexts)) [peer_name; peer_operation];
     check bool "the original request remains unchanged on the wire" true
       (List.exists (fun message -> Json.member "role" message = `String "user"
@@ -396,8 +464,8 @@ let test_goal_survives_read_then_task_creation ~peer () =
     (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
   let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
     | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
-  let expected_blocks = [Prompt_block_id.Keeper_instructions; Active_goals]
-      @ (if peer then [Prompt_block_id.Direct_input_source] else []) in
+  (* The capture is the last, post-tool round's: Agent Core issued no source. *)
+  let expected_blocks = [Prompt_block_id.Keeper_instructions; Active_goals] in
   check int "capture contains exactly the issued stable producers"
     (List.length expected_blocks) (List.length capture.blocks);
   List.iter (fun id -> check int ("capture attributes " ^ Prompt_block_id.to_string id ^ " exactly once") 1
@@ -683,8 +751,10 @@ let () = run "direct Goal context on actual provider wire"
     test_case "independent work needs no synthetic Goal" `Quick (run_case Empty);
     test_case "Goal survives Read and actual Task creation without other world replay" `Quick
       (test_goal_survives_read_then_task_creation ~peer:false);
-    test_case "peer request source stays in System through Read and Task creation" `Quick
+    test_case "peer request source rides only the first end context through Read and Task creation" `Quick
       (test_goal_survives_read_then_task_creation ~peer:true);
+    test_case "an admitted source leaves the Agent Core System and stays in an official one" `Quick
+      test_admitted_source_leaves_the_agent_core_system;
     test_case "Task approval survives the following tool reply" `Quick
       (test_completion_observation_survives_tool_reply true);
     test_case "Task rejection survives the following tool reply" `Quick

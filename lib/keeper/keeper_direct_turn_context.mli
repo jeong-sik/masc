@@ -40,7 +40,8 @@ val project_partition :
   t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
 (** The same bytes as [project], with the captured Goal snapshot attributed to
     [Active_goals] and admitted operation source to [Direct_input_source], so request
-    assembly retains both through tools, each
+    assembly can place each: the Goal snapshot in the System through tools, the
+    source in an official client's System or Agent Core's first end context, each
     Goal's latest review, measurement and held-Task link to
     [Goal_observations], and the Goals in [Verifying] to
     [Goals_awaiting_proof]. *)

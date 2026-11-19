@@ -28,7 +28,7 @@
     account with no key file, and so does a request that is cancelled
     there: a cancellation is no error of the files, so nothing removes the
     account. It answers [key_missing] when it is used, the list of its
-    owner says so, and its owner removes it. *)
+    owner says so, and its owner replaces its key or removes it. *)
 
 type error =
   | Id_not_usable

@@ -399,11 +399,10 @@ type runtime_error =
 
 let key_unusable_message = function
   | Runtime_api_key_file.Key_missing ->
-    "The key of this account is not on this server. Replace the key of the account: that puts \
-     one in place."
+    "The key of this account is not on this server. Replace the key of the account."
   | Runtime_api_key_file.Key_unreadable (_ : Runtime_api_key_file.unreadable) ->
-    "This server cannot read the key of this account. Replace the key of the account: that \
-     writes a new key file."
+    "This server cannot read the key of this account. Replace the key of the account. If the \
+     answer stays the same, tell the person who runs this server."
 
 (* Why the key file gave no key names no path and nothing of the key, and the
    person is told only the code, so it goes to the server log. *)

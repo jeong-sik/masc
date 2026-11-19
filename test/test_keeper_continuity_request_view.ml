@@ -3,11 +3,11 @@ module Driver = Masc.Keeper_turn_driver_try_provider
 
 (* [Driver.For_testing.request_view] over a store that holds no media: these
    histories carry text and tool blocks only. *)
-let request_view ?continuity ?completed_arguments ?tools ~provider_config
+let request_view ?continuity ?completed_arguments ?held_window ?tools ~provider_config
     ~measure_message_bytes ~front ~accepted ~history_digest_at ~current_turn_results
     ~base_path ~turn_boundary ~materialize messages =
   match
-    Driver.For_testing.request_view ?continuity ?completed_arguments ?tools
+    Driver.For_testing.request_view ?continuity ?completed_arguments ?held_window ?tools
       ~prepare_request_media:(fun _selected -> Ok (fun messages -> Ok messages))
       ~provider_config ~measure_message_bytes
       ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config:provider_config)
@@ -49,11 +49,11 @@ let provider_config = Agent_core.Llm_provider.Provider_config.make
 let measure m = String.length (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
 let encode messages = Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages))
 
-let view ?front snapshot messages =
+let view ?front ?held_window snapshot messages =
   let _, lines = capture_source source in
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
-  request_view ~continuity ~provider_config
+  request_view ?held_window ~continuity ~provider_config
     ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
@@ -512,6 +512,37 @@ let test_the_forecast_takes_the_drivers_start () =
    Librarian point when the provider last accepted a later start. The range
    opens at that start and the working state still rides ahead of it, once;
    the atoms between the snapshot's cut and the accepted start are not sent. *)
+(* A window that stays carries the working state it carried when it
+   opened, whatever the snapshot says now, and none when it opened with none
+   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.3). A
+   window that opened anywhere else carries the snapshot's. *)
+let test_a_window_that_stays_keeps_its_working_state () =
+  let snapshot = snapshot () in
+  let messages = source @ [ text T.User "Publish it now." ] in
+  let opened_at = snapshot.Snapshot.end_atom in
+  let carried ?held_window () =
+    List.filter_map
+      (fun (m : T.message) ->
+         if m.metadata = Runtime_model_input_tail_window.working_state_metadata
+         then Some m.content
+         else None)
+      (wire (view ?held_window snapshot messages))
+  in
+  let held ~at working_state =
+    { Driver.window_opened_at = at; markers_before = 0; working_state }
+  in
+  let opened_with = "[Librarian working state: the summary the window opened with]" in
+  let current = [ [ T.Text (Driver.working_state_text snapshot) ] ] in
+  check bool "a window that stays carries the text it opened with" true
+    (carried ~held_window:(held ~at:opened_at (Some opened_with)) ()
+     = [ [ T.Text opened_with ] ]);
+  check bool "and none when it opened with none" true
+    (carried ~held_window:(held ~at:opened_at None) () = []);
+  check bool "a window that opened elsewhere carries the snapshot's" true
+    (carried ~held_window:(held ~at:(opened_at + 1) (Some opened_with)) () = current);
+  check bool "with nothing held, the snapshot's" true (carried () = current)
+;;
+
 let test_a_start_past_the_snapshot_keeps_the_working_state () =
   let skipped = text T.User "Fresh unsummarized work" in
   let accepted_atom = text T.Assistant "The accepted range opens here." in
@@ -974,7 +1005,9 @@ let () = run "continuity request projection"
         test_case "a rule-8 front is named after the continuity" `Quick
                  test_a_rule_8_front_is_named_after_the_continuity; test_case "the forecast takes the driver's start" `Quick
                  test_the_forecast_takes_the_drivers_start; test_case "a start past the snapshot keeps the working state" `Quick
-                 test_a_start_past_the_snapshot_keeps_the_working_state; test_case "an unusable snapshot starts without it" `Quick
+                 test_a_start_past_the_snapshot_keeps_the_working_state;
+                 test_case "a window that stays keeps its working state" `Quick
+                 test_a_window_that_stays_keeps_its_working_state; test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it; test_case "official lanes take the same choice" `Quick
                  test_official_lanes_take_the_same_choice; test_case "a rewriting snapshot waits for its target" `Quick
                  test_a_rewriting_snapshot_waits_for_its_target; test_case "a candidate's own rendering is what the check holds it to" `Quick

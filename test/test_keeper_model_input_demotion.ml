@@ -2231,14 +2231,14 @@ let current_batch ~id_prefix ~fill sizes =
        sizes
 ;;
 
-let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results ?held_demotion
+let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results ?held_window
       ?same_turn_result_as_pointer
       ?(measure_wire_bytes = stored_wire_bytes) ~base_path ~current_turn_results ~turn_boundary
       messages =
   Try_provider.For_testing.compose_carried_model_input
     ?completed_arguments
     ?finished_turn_results
-    ?held_demotion
+    ?held_window
     ?same_turn_result_as_pointer
     ~measure_message_bytes
     ~measure_wire_bytes
@@ -2754,9 +2754,9 @@ let a_window_that_stays_keeps_the_markers_it_sent () =
   let boundary_after prefix messages =
     Window.first_atom_at_or_after messages ~message_index:(List.length prefix)
   in
-  let compose ?held_demotion ?(current_turn_results = Try_provider.Current_turn_verbatim)
+  let compose ?held_window ?(current_turn_results = Try_provider.Current_turn_verbatim)
       ~finished_prefix messages =
-    compose_from_the_oldest_atom ?held_demotion ~finished_turn_results:as_markers ~base_path
+    compose_from_the_oldest_atom ?held_window ~finished_turn_results:as_markers ~base_path
       ~current_turn_results
       ~turn_boundary:(finished_turns_through (boundary_after finished_prefix messages))
       messages
@@ -2766,25 +2766,26 @@ let a_window_that_stays_keeps_the_markers_it_sent () =
   let held opened_at =
     { Try_provider.window_opened_at = opened_at
     ; markers_before = in_a.Try_provider.demote_before
+    ; working_state = None
     }
   in
   let messages_b = old_turn @ turn_a @ turn_b in
   let finished_prefix = old_turn @ turn_a in
-  let stays = compose ~held_demotion:(held 0) ~finished_prefix messages_b in
+  let stays = compose ~held_window:(held 0) ~finished_prefix messages_b in
   Alcotest.(check int) "the window that stays keeps turn A's boundary"
     in_a.Try_provider.demote_before stays.Try_provider.demote_before;
   Alcotest.(check int) "only the old turn's two results are planned" 2
     (List.length stays.Try_provider.planned.Demotion.pending);
   Alcotest.(check bool) "turn B's request opens with all turn A's request sent" true
     (take (List.length sent_in_a) (without_preamble (materialized ~base_path stays)) = sent_in_a);
-  let moved = compose ~held_demotion:(held 1) ~finished_prefix messages_b in
+  let moved = compose ~held_window:(held 1) ~finished_prefix messages_b in
   Alcotest.(check int) "a window that opened elsewhere demotes to the turn boundary"
     (boundary_after finished_prefix messages_b) moved.Try_provider.demote_before;
   Alcotest.(check int) "and turn A's two results go as markers too" 4
     (List.length moved.Try_provider.planned.Demotion.pending);
   let refused_atom_count = snd (Window.annotate messages_b) in
   let resend =
-    compose ~held_demotion:(held 0)
+    compose ~held_window:(held 0)
       ~current_turn_results:(Try_provider.Current_turn_demoted { refused_atom_count })
       ~finished_prefix messages_b
   in
@@ -2808,8 +2809,8 @@ let a_window_that_stays_keeps_its_arguments () =
   let first_end = after first and turn_start = after (first @ second) in
   let base_path = Filename.temp_dir "demote" "" in
   let completed_arguments = bind_arguments ~completed_before:turn_start ~seed:messages messages in
-  let references held_demotion =
-    compose_from_the_oldest_atom ?held_demotion ~completed_arguments
+  let references held_window =
+    compose_from_the_oldest_atom ?held_window ~completed_arguments
       ~finished_turn_results:as_markers ~base_path
       ~current_turn_results:Try_provider.Current_turn_verbatim
       ~turn_boundary:(finished_turns_through turn_start) messages
@@ -2822,7 +2823,11 @@ let a_window_that_stays_keeps_its_arguments () =
       | Tool_output.Invalid_normalized_artifact_ref _ -> false)
   in
   let held opened_at =
-    Some { Try_provider.window_opened_at = opened_at; markers_before = first_end }
+    Some
+      { Try_provider.window_opened_at = opened_at
+      ; markers_before = first_end
+      ; working_state = None
+      }
   in
   Alcotest.(check (list bool)) "a window that stays: the first turn's arguments alone"
     [ true; false; false ] (references (held 0));

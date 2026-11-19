@@ -45,6 +45,7 @@ let request
   ; tail_bytes
   ; turn_context
   ; demote_before
+  ; working_state = None
   }
 ;;
 

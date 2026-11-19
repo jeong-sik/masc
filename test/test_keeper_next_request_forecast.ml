@@ -1395,7 +1395,8 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     in
     let request : Ledger.request =
       { prefix_digest = "same-fixture-prefix"; first_atom = 0; atom_count; ends
-      ; tail_bytes = 0; turn_context = false; demote_before = 0 }
+      ; tail_bytes = 0; turn_context = false; demote_before = 0
+      ; working_state = None }
     in
     let usage = Option.map (fun input_tokens ->
       { Ledger.input_tokens; cache_read_input_tokens = 0 }) input_tokens in

@@ -605,8 +605,13 @@ let render_verification_detail (state : state) request =
                  replaced rounded two requests six minutes apart to the same
                  "1d12h", and spelled seconds under an hour, so an index row
                  changed while the reader was looking at it. *)
+              let label =
+                match String.trim row.Tui_decode.vr_task_title with
+                | "" -> row.Tui_decode.vr_task_id
+                | title -> title
+              in
               Render_schedule.task_history_sidebar_label
-                ~task_id:row.Tui_decode.vr_task_id
+                ~task_id:label
                 ~apart:(Some row.Tui_decode.vr_request_id))
             snapshot.Tui_decode.vs_requests
       in
@@ -710,8 +715,8 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
                    Ansi.dim Ansi.reset calibration.hcal_labeled
                else
                  Printf.sprintf
-                   (if ko then "  %s라벨%s    없음 \xe2\x80\x94 일치율·오류 집계용 정답 기준 없음"
-                    else "  %slabelled%s none \xe2\x80\x94 agreement and the error counts have no ground truth")
+                   (if ko then "  %s라벨%s    없음 · 일치율·오류 집계용 정답 기준 없음"
+                    else "  %slabelled%s none · agreement and the error counts have no ground truth")
                    Ansi.dim Ansi.reset)
             ])
 
@@ -1070,7 +1075,12 @@ let render_harness_detail (state : state) verdict =
              can name several verdicts recorded in the same second. *)
           snapshot.Tui_decode.hs_verdicts
           |> List.map (fun (row : Tui_decode.harness_verdict) ->
-               row.hv_task_id, row.hv_at)
+               let label =
+                 match String.trim row.hv_task_title with
+                 | "" -> row.hv_task_id
+                 | title -> title
+               in
+               label, row.hv_at)
           |> Render_schedule.verdict_sidebar_labels
                ~now:(Unix.gettimeofday ())
       in

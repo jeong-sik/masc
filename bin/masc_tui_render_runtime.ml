@@ -839,7 +839,7 @@ let render_runtime_reading (state : state) =
                  declared
              in
              (match declared, dropped with
-              | [], [] -> Ansi.dim ^ (if ko then "없음 — 비전 런타임 없음" else "none — no vision runtimes") ^ Ansi.reset
+              | [], [] -> Ansi.dim ^ (if ko then "없음 · 비전 런타임 없음" else "none · no vision runtimes") ^ Ansi.reset
               | declared, dropped ->
                   String.concat " → "
                     (List.map Terminal_text.single_line declared)

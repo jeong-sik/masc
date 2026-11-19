@@ -478,7 +478,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let alert_lines =
     List.map
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
-        Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
+        Printf.sprintf "[%s] %s · %s"
           ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
             then "history " else "")
            ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
@@ -1255,7 +1255,7 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
             let severity = match Masc.Tui_decode_memory_health.memory_alert_severity alert.ma_code with
               | `Warn -> if ko then "경고" else "warning"
               | `Error -> if ko then "오류" else "error" in
-            Printf.sprintf "%s · %s%s · %s — %s"
+            Printf.sprintf "%s · %s%s · %s · %s"
               (Terminal_text.single_line keeper.mkh_keeper_id) history severity
               (Terminal_text.single_line alert.ma_label) (Terminal_text.single_line alert.ma_message))
             keeper.mkh_alerts) snapshot.mhs_keepers
@@ -1648,7 +1648,7 @@ let render_memory_body ~cols ~budget (state : state)
           else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
         Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
-          else "  (no keepers matching \"%s\" — Esc clears filter)")
+          else "  (no keepers matching \"%s\" · Esc clears filter)")
           (Terminal_text.single_line query)
       | Page_empty -> if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
           else "  (no keepers with a memory config or snapshot)"
@@ -1820,7 +1820,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      this row looked only at whether facts were held. *)
   let stats_line, pills_line =
     match memory_facts_view state with
-    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts…)", "")
+    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts)", "")
     | Masc_tui_fetched.Absent -> ("  " ^ here_missing_reading state ~error:None, "")
     | Masc_tui_fetched.Failed failure ->
         ("  " ^ here_missing_reading state ~error:(Some failure), "")
@@ -1905,7 +1905,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
               a filter being typed matched nothing. *)
            let filter = memory_search_query state in
            if String.trim filter <> "" then
-             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" — Esc clears filter)")
+             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" · Esc clears filter)")
                (Terminal_text.single_line filter)
            else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
              memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then

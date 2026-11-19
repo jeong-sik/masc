@@ -313,7 +313,7 @@ let render_resources (state : state) =
          framed_line pane_buf pane_cols
            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
      | List_unread -> status_note (String.trim (page_unread_note ~ko))
-     | List_loading -> status_note (if ko then "(읽는 중\xe2\x80\xa6)" else "(loading\xe2\x80\xa6)")
+     | List_loading -> status_note (if ko then "(읽는 중)" else "(loading)")
      | List_empty None -> status_note (no_resources ~ko)
      | Rows_ready None -> ());
 

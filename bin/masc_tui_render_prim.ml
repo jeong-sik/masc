@@ -5946,7 +5946,7 @@ let context_part_view state (input : Masc_tui_context_inspector.provider_input)
 let context_part_text_or_status = function
   | Masc_tui_fetched.Ready text | Masc_tui_fetched.Stale (text, _) -> Ok text
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
-      Error (Ansi.dim ^ "Reading this part…" ^ Ansi.reset)
+      Error (Ansi.dim ^ "Reading this part" ^ Ansi.reset)
   | Masc_tui_fetched.Failed detail ->
       Error
         ((Theme.bad ()) ^ "This part could not be read: "
@@ -6937,7 +6937,7 @@ let keeper_deletions_lines (state : state) ~cols =
   let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
       state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
-    | None -> [ say "삭제 기록 조회 중…" "Loading deletion records…" ]
+    | None -> [ say "삭제 기록 조회 중" "Loading deletion records" ]
     | Some (Error (Request_failed detail)) ->
       [ say "삭제 기록 조회 실패: " "Deletion records load failed: " ^ detail ]
     (* Kept back by the workspace guard: the notice, alone (RFC §2). *)

@@ -1006,7 +1006,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                 (Ansi.dim ^ (words state "  상세 미조회" "  Board detail not read") ^ Ansi.reset) ]
         | Board_detail.Loading ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail...") ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail") ^ Ansi.reset) ]
         | Board_detail.Failed error ->
             [ Board_read_layout.Thread_note
                 ((Theme.bad ()) ^ "  "

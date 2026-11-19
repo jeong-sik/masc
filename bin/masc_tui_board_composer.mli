@@ -25,7 +25,7 @@ val is_untouched_template : draft:string -> bool
 val analyze_addressing : string -> addressing_kind
 (** Parses the draft with {!Board_addressing} and classifies the addressing disposition. *)
 
-val format_addressing_hint : max_cells:int -> addressing_kind -> string
+val format_addressing_hint : ?ko:bool -> max_cells:int -> addressing_kind -> string
 (** Formats a single-line summary with ANSI styling indicating whether keepers
     will be awakened or if the post is discoverable. *)
 

@@ -4488,7 +4488,9 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let total = List.length diff_rows in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
-      " Git diff needs a larger terminal; resize to inspect (Esc:back)"
+      (ui_text state
+         ~ko:" Git diff를 보려면 창을 늘려 주세요 (Esc:뒤로)"
+         ~en:" Git diff needs a larger terminal; resize to inspect (Esc:back)")
       (max 1 (cols - 1)));
     finish_surface state ~surface_key:ds.ds_surface_key ~rows:terminal_rows ~cols buf
   end else begin
@@ -4499,7 +4501,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let header =
     here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
-      ~readings:[ "vs HEAD" ]
+      ~readings:[ ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD" ]
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
   box_top buf cols;
@@ -4511,7 +4513,10 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       box_divider buf cols)
     geometry.dsg_context_lines;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  col %d · old / new · working tree vs HEAD" (ds.ds_hscroll + 1));
+    (Printf.sprintf
+       (if state.ui_language = Lang_ko then "  열 %d · 이전 / 현재 · 작업 트리 vs HEAD"
+        else "  col %d · old / new · working tree vs HEAD")
+       (ds.ds_hscroll + 1));
   box_divider buf cols;
   (match ds.ds_error, geometry.dsg_error_rows with
    | None, _ -> ()
@@ -4890,11 +4895,12 @@ let help_lines ~width (state : state) =
      the sheet is whole until something is typed. *)
   let query = Masc_tui_help.filter_query state.help_filter in
   let matches_query text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
+  let here_marker = Masc_tui_keys.here_marker_for state.ui_language in
   (* A section's name without the mark that says it is the reader's own. *)
   let heading title =
-    if String.ends_with ~suffix:Masc_tui_keys.here_marker title then
+    if String.ends_with ~suffix:here_marker title then
       String.sub title 0
-        (String.length title - String.length Masc_tui_keys.here_marker)
+        (String.length title - String.length here_marker)
     else title
   in
   (* A section's heading and each key's rows, a wrapped sentence kept with
@@ -4902,7 +4908,7 @@ let help_lines ~width (state : state) =
      end of its own sentence. *)
   let section_parts (title, entries) =
     let is_current =
-      String.ends_with ~suffix:Masc_tui_keys.here_marker title
+      String.ends_with ~suffix:here_marker title
     in
     (* One heading style, named as the key table names the section. The
        surface being read wears the mark the tab row gives the current tab;
@@ -4965,7 +4971,7 @@ let help_lines ~width (state : state) =
     | [] -> []
     | _ :: _ ->
     [ Masc_tui_help.Whole
-    (("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    (("  " ^ Ansi.bold ^ ui_text state ~ko:"슬래시 명령" ~en:"Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -5008,7 +5014,7 @@ let help_lines ~width (state : state) =
     | _ :: _ when not (String.equal query "") -> []
     | lines ->
       [ Masc_tui_help.Whole
-          (("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
+          (("  " ^ Ansi.bold ^ ui_text state ~ko:"Candle 상세" ~en:"Candle details" ^ Ansi.reset)
            :: List.concat_map
                 (fun line ->
                   List.map (fun row -> "  " ^ row)

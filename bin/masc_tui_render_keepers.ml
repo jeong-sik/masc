@@ -4381,20 +4381,25 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> []
         | Some started_ns ->
             [ loading_row ~started_ns
-                (match observed with None -> "loading" | Some _ -> "refreshing") ] in
+                (match observed with
+                 | None -> ui_text state ~ko:"불러오는 중" ~en:"loading"
+                 | Some _ -> ui_text state ~ko:"새로고침 중" ~en:"refreshing") ] in
       match observed with
       | Some lines ->
           let previous = match error, pending with
             | None, None -> []
             | Some _, (Some _ | None) | None, Some _ ->
-                [ Ansi.dim ^ "  Last observation:" ^ Ansi.reset ] in
+                [ Ansi.dim ^ ui_text state ~ko:"  이전 관측:" ~en:"  Last observation:" ^ Ansi.reset ] in
           failure @ progress @ previous @ lines
       | None ->
           (match error, pending with
            | None, None ->
                [ Ansi.dim ^ "  "
-                 ^ (if server_authority_ready state then "Not observed · r to read"
-                    else "Not observed · workspace confirmation required")
+                 ^ (if server_authority_ready state then
+                      ui_text state ~ko:"미관측 · r:읽기" ~en:"Not observed · r to read"
+                    else
+                      ui_text state ~ko:"미관측 · 워크스페이스 확인 필요"
+                        ~en:"Not observed · workspace confirmation required")
                  ^ Ansi.reset ]
            | Some _, (Some _ | None) | None, Some _ -> failure @ progress)
     in
@@ -4778,12 +4783,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                    ~request:Kept_request.Schedule_read refusal) ^ Ansi.reset ]
         | None -> [] in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let progress = match pending with
         | None -> []
         | Some started_ns ->
             [ loading_row ~started_ns (if observed
-                then "refreshing this Keeper's schedules · last observation"
-                else "loading this Keeper's schedules") ] in
+                then say "이 키퍼의 일정 새로고침 중 · 이전 관측"
+                       "refreshing this Keeper's schedules · last observation"
+                else say "이 키퍼의 일정 불러오는 중" "loading this Keeper's schedules") ] in
       let snapshot_lines = match state.keeper_schedules with
       | Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -4791,7 +4799,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             [ (Theme.bad ())
               ^ (match snapshot.scs_read_error with
                  | Some err -> "  " ^ Terminal_text.single_line err
-                 | None -> "  (schedule store unreadable)")
+                 | None -> say "  (일정 저장소 읽기 불가)" "  (schedule store unreadable)")
               ^ Ansi.reset ]
           else if rows = [] then
             match
@@ -4801,24 +4809,26 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 ~total:snapshot.scs_request_count
             with
             | Render_schedule.Store_has_none ->
-                [ Ansi.dim ^ "  (no schedules for this Keeper)" ^ Ansi.reset ]
+                [ Ansi.dim ^ say "  (이 키퍼에 등록된 일정 없음)" "  (no schedules for this Keeper)" ^ Ansi.reset ]
             | Render_schedule.Page_capped { shown; total } ->
                 let of_total =
                   match total with
                   | Some total ->
-                      Printf.sprintf " -- %s of %s requests"
+                      Printf.sprintf
+                        (if ko then " · 요청 %s / %s건" else " · %s of %s requests")
                         (Masc_tui_value.Count.grouped shown)
                         (Masc_tui_value.Count.grouped total)
                   | None -> ""
                 in
                 let next_step = match state.keeper_schedules_page with
                   | Some (name, { sp_previous = _ :: _; _ }) when String.equal name k.k_name ->
-                      "use < for the previous page"
-                  | Some _ | None -> "refresh to read again"
+                      say "< 로 이전 페이지 보기" "use < for the previous page"
+                  | Some _ | None -> say "r 로 다시 읽기" "refresh to read again"
                 in
                 [ Ansi.dim
                   ^ Printf.sprintf
-                      "  (none on this page%s; %s)" of_total next_step
+                      (if ko then "  (이 페이지에 없음%s · %s)" else "  (none on this page%s · %s)")
+                      of_total next_step
                   ^ Ansi.reset
                 ]
           else
@@ -4832,21 +4842,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              | Schedule_paging _, Some (name, page) when String.equal name k.k_name
                    && (snapshot.scs_truncated || Option.is_some page.sp_cursor) ->
                  [ Ansi.dim ^ Printf.sprintf
-                     "  page %d · < / > pages · pages may change between reads"
+                     (if ko then "  %d페이지 · < / > 페이지 이동 · 조회 사이에 바뀔 수 있음"
+                      else "  page %d · < / > pages · pages may change between reads")
                      (List.length page.sp_previous + 1) ^ Ansi.reset ]
              | Schedule_paging_unavailable, _ when snapshot.scs_truncated ->
-                 [ Ansi.dim ^ "  first page only · server paging unavailable" ^ Ansi.reset ]
+                 [ Ansi.dim ^ say "  첫 페이지만 표시 · 서버 페이지네이션 미지원"
+                     "  first page only · server paging unavailable" ^ Ansi.reset ]
              | (Schedule_paging_unavailable | Schedule_paging _), (Some _ | None) -> [])
             @ (match snapshot.scs_counts with
              | None -> []
              | Some counts ->
                  [ Ansi.dim ^ "  "
-                   ^ Masc_tui_types.schedule_counts_line counts
+                   ^ Masc_tui_types.schedule_counts_line ~ko counts
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ (let ko = state.ui_language = Lang_ko in
-               (* The word and colour of what the row's last occurrence came
+            @ ((* The word and colour of what the row's last occurrence came
                   to, or the empty-field dash in no colour. *)
                let outcome_of row =
                  match schedule_outcome ~ko row with
@@ -5004,7 +5015,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                @ List.map row_line closed)
       | Some _ | None ->
           (match error, pending with
-           | None, None -> [ Ansi.dim ^ "  Schedules not observed" ^ Ansi.reset ]
+           | None, None -> [ Ansi.dim ^ say "  일정 미관측" "  Schedules not observed" ^ Ansi.reset ]
            | Some _, (Some _ | None) | None, Some _ -> [])
       in
       error_lines @ progress @ snapshot_lines
@@ -5014,8 +5025,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset
       in
       let listing runs =
-        "  Fusion runs  j/k:select  Enter:open  (same IDs as Fusion)" ::
-        (if runs = [] then ["  No retained Fusion runs for this Keeper"]
+        ui_text state
+          ~ko:"  Fusion 실행  j/k:선택  Enter:열기  (Fusion 화면과 같은 ID)"
+          ~en:"  Fusion runs  j/k:select  Enter:open  (same IDs as Fusion)" ::
+        (if runs = [] then
+           [ ui_text state
+               ~ko:"  이 키퍼에 보관된 Fusion 실행 없음"
+               ~en:"  No retained Fusion runs for this Keeper" ]
          else List.mapi (fun index (run : Masc.Tui_decode_fusion.fusion_run) ->
            (* The clock the Fusion list and the run detail already draw for
               this field, rather than a second copy of its format: three
@@ -5039,7 +5055,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       match Masc_tui_fusion_model.keeper_runs_view state with
       | Masc_tui_fetched.Absent -> [ Ansi.dim ^ (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset ]
-      | Masc_tui_fetched.Loading -> [ loading_row "loading Fusion runs" ]
+      | Masc_tui_fetched.Loading ->
+          [ loading_row (ui_text state ~ko:"Fusion 실행 불러오는 중" ~en:"loading Fusion runs") ]
       | Masc_tui_fetched.Failed detail -> [ failure detail ]
       (* Rows already held stay on a failed refresh, as they do on the Fusion
          surface, with the failure above them so they read as stale. *)
@@ -5300,7 +5317,8 @@ let render_keeper_detail (state : state) =
            ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
-        c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
+        c.push_styled ~style:(Theme.recede ())
+          (ui_text state ~ko:"  고른 키퍼가 없습니다." ~en:"  No keeper selected."))
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     (* The row the Keepers list draws, through the same [footer_line]: the
@@ -5380,7 +5398,8 @@ let render_keeper_logs (state : state) =
            ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
-        c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
+        c.push_styled ~style:(Theme.recede ())
+          (ui_text state ~ko:"  고른 키퍼가 없습니다." ~en:"  No keeper selected."))
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let log_snapshot = keeper_log_snapshot state in

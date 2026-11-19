@@ -779,13 +779,16 @@ let headline ~subject ~title summary =
 (* The goal's merged event timeline, appended after [body] so it rides the
    same scroll. Loaded lazily on detail entry; every non-ready state says
    what it is instead of rendering as an empty history. *)
-let timeline_unavailability_detail = function
+let timeline_unavailability_detail ?(ko = false) = function
   | Tui_decode.Goal_source_failure (Goal_store_unavailable view) ->
-      "Cause: " ^ Tui_decode.goal_store_unavailable_view_to_string view
+      (if ko then "원인: " else "Cause: ")
+      ^ Tui_decode.goal_store_unavailable_view_to_string view
   | Tui_decode.Goal_source_failure (Goal_task_links_unavailable detail) ->
-      "Linked tasks unavailable · Cause: " ^ detail
+      (if ko then "연결된 작업 조회 불가 · 원인: " else "Linked tasks unavailable · Cause: ")
+      ^ detail
   | Tui_decode.Approval_queue_failure detail ->
-      "Approval queue unavailable · Cause: " ^ detail
+      (if ko then "승인 대기열 조회 불가 · 원인: " else "Approval queue unavailable · Cause: ")
+      ^ detail
 
 type timeline_failure =
   | Timeline_failed of string

@@ -508,7 +508,7 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   | Page { snapshot; refresh } ->
       let counts =
         match snapshot.scs_counts with
-        | Some counts -> " · " ^ Masc_tui_types.schedule_counts_line counts
+        | Some counts -> " · " ^ Masc_tui_types.schedule_counts_line ~ko counts
         | None -> ""
       in
       let entries =

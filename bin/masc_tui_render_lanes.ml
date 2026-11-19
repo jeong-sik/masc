@@ -1373,11 +1373,23 @@ let lane_run_decision_badge (detail : Tui_decode.lane_run_detail) =
   | Tui_decode.Lane_run_not_a_decision -> Theme.info (), "NOT A VERDICT"
   | Tui_decode.Lane_run_decision_unknown -> Theme.muted (), "UNKNOWN"
 
-let lane_run_tool_disposition_presentation = function
-  | Tui_decode.Lane_run_tool_completed -> Theme.ok (), "✓"
-  | Tui_decode.Lane_run_tool_deferred -> Theme.warn (), "△"
-  | Tui_decode.Lane_run_tool_failed -> Theme.bad (), "✗"
-  | Tui_decode.Lane_run_tool_disposition_other _ -> Theme.warn (), "?"
+(* The status marks of RFC tui-one-screen-grammar 7.2, in their 7.3 tones. A
+   deferred call handed its continuation to the async path and the work goes
+   on, so it is under way -- the mark a Keeper whose activity is [Deferred]
+   wears on the roster. A disposition this build was not taught keeps [?]
+   beside the word the server sent. *)
+let lane_run_tool_disposition_status = function
+  | Tui_decode.Lane_run_tool_completed -> Some Masc_tui_value.Mark.Settled
+  | Tui_decode.Lane_run_tool_deferred -> Some Masc_tui_value.Mark.Under_way
+  | Tui_decode.Lane_run_tool_failed -> Some Masc_tui_value.Mark.Failed
+  | Tui_decode.Lane_run_tool_disposition_other _ -> None
+
+let lane_run_tool_status_presentation = function
+  | Some status -> Theme.status_tone status, Masc_tui_value.Mark.glyph status
+  | None -> Theme.warn (), "?"
+
+let lane_run_tool_disposition_presentation disposition =
+  lane_run_tool_status_presentation (lane_run_tool_disposition_status disposition)
 
 let lane_run_tool_call_summary (tool : Tui_decode.lane_run_tool) =
   let style, mark =
@@ -1415,11 +1427,15 @@ let lane_run_tool_count_summary tools =
       { completed = 0; deferred = 0; failed = 0; other = 0 }
       tools
   in
-  [ Theme.bad (), "✗", counts.failed, "failed"
-  ; Theme.warn (), "△", counts.deferred, "deferred"
-  ; Theme.warn (), "?", counts.other, "other"
-  ; Theme.ok (), "✓", counts.completed, "completed"
+  let status = lane_run_tool_disposition_status in
+  [ status Tui_decode.Lane_run_tool_failed, counts.failed, "failed"
+  ; status Tui_decode.Lane_run_tool_deferred, counts.deferred, "deferred"
+  ; None, counts.other, "other"
+  ; status Tui_decode.Lane_run_tool_completed, counts.completed, "completed"
   ]
+  |> List.map (fun (status, count, label) ->
+    let style, mark = lane_run_tool_status_presentation status in
+    style, mark, count, label)
   |> List.filter_map (fun (style, mark, count, label) ->
     if count = 0 then None
     else

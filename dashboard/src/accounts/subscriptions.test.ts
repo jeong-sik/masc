@@ -164,6 +164,8 @@ describe('reading the subscriptions', () => {
     await forOther
     first.give(offered())
     await forPerson
+    // No one waits for a reading that was replaced: its answer is taken in by now.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     const view = panel.view.value
     expect([kind(panel), view.kind === 'read' ? view.owned.accounts.length : null]).toEqual([`read for ${other}`, 0])
   })
@@ -214,7 +216,17 @@ describe('reading the subscriptions', () => {
     await panel.load(sessionOf(person))
     first.give(notReady())
     await older
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(kind(panel)).toBe(`read for ${person}`)
+  })
+
+  it('lets go of whoever waits for a reading once it is stopped, though no answer came', async () => {
+    const { panel } = start({ [paths.integrations]: [offered()], [paths.owned]: [later().answer] })
+    let ended = false
+    void panel.load(sessionOf(person)).then(() => { ended = true })
+    panel.stop()
+    await vi.waitFor(() => { expect(ended).toBe(true) })
+    expect(kind(panel)).toBe('waiting')
   })
 
   it('keeps the page of a failed reading while it leaves after a retry finds no session', async () => {
@@ -469,6 +481,52 @@ describe('giving another key for an account in the panel', () => {
     const kept = await panel.replacing.replace('acct_key', 'made-up-key')
     await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
     expect([kept, replaceTokens(sent), ownedReadings(sent), kind(panel)]).toEqual(['dropped', ['second'], 2, `read for ${person}`])
+  })
+
+  it('says the key was replaced only once the list of the newest reading is on the page', async () => {
+    const second = later()
+    const third = later()
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), second.answer, third.answer],
+      [paths.owned]: [ownedKey(), ownedKey(), ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+      [addPath]: [json(200, { provider_account_id: 'acct_other', kind: 'key' })],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    const replaced = panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(2) })
+    // Another card asks for the list while the reading of the replacement is on its way.
+    panel.adding.open()
+    const added = panel.adding.add('claude_code', 'another-made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(3) })
+    second.give(offeredWithKey())
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(panel.replacing.replacing.value.get('acct_key')?.kind).toBe('sending')
+    third.give(offeredWithKey())
+    await Promise.all([replaced, added])
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+  })
+
+  it('says the key was replaced once the newest list is on the page, though the readings before it have no answer', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey(), offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedKey(), later().answer, later().answer, ownedKey()],
+      [replacePath('acct_key')]: [keyReplaced()],
+      [addPath]: ['no answer', 'no answer'],
+    })
+    await panel.load(sessionOf(person))
+    panel.replacing.open('acct_key')
+    await panel.replacing.replace('acct_key', 'made-up-key')
+    await vi.waitFor(() => { expect(ownedReadings(sent)).toBe(2) })
+    // A key whose answer did not come asks for the list again, twice. Only
+    // the last of the three readings gets an answer.
+    panel.adding.open()
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    const held = panel.replacing.replacing.value.get('acct_key')?.kind
+    await panel.adding.add('claude_code', 'another-made-up-key')
+    await vi.waitFor(() => { expect(panel.replacing.replacing.value.get('acct_key')).toEqual({ kind: 'replaced', oldKeysRemoved: true }) })
+    expect([held, ownedReadings(sent), kind(panel)]).toEqual(['sending', 4, `read for ${person}`])
   })
 
   it('forgets the replacements of one person once it shows another', async () => {
@@ -973,15 +1031,28 @@ describe('the panel', () => {
     await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
     await act(async () => {
       asked.give(ownedNothing())
-      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
     })
-    const replaced = [container.querySelectorAll('li.row').length, lineOf(container)]
+    // The card stays held: the list on the page is not the one of the newest reading.
+    const replaced = [panel.removing.removing.value.get('acct_key')?.kind, container.querySelectorAll('li.row').length, lineOf(container)]
     await act(async () => {
       newer.give(ownedNothing())
-      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
+      await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
     })
-    expect([replaced, container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
-      .toEqual([[1, ''], 0, false, true])
+    expect([replaced, listed(panel), container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
+      .toEqual([['sending', 1, ''], 0, 0, false, true])
+  })
+
+  it('does not say an account it removed went while a list that has it is on the page', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedKey(), ownedKey()],
+      [removePath('acct_key')]: [keyRemoved()],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await pressRemove(container)
+    await act(async () => { await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') }) })
+    expect([lineOf(container), container.querySelectorAll('li.row').length]).toEqual(['', 1])
   })
 
   it.each([

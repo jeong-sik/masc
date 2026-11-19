@@ -265,24 +265,33 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
   in
   Layout.truncate_end inner_width line
 
-(* The four cards share the row; [kpi_card_gaps] cells go to its lead and
-   the gaps between them. Below [minimum_card_text_cells] of text inside the
-   border and padding the row is compact summaries, not four boxes of
-   clipped labels. *)
+(* Progressive KPI card tiers: 4x1 row on wide terminals, 2x2 grid on standard
+   laptop/split terminals (80–155 cols), and compact summaries only when even a
+   2-column card cannot hold [minimum_card_text_cells] of text without clipping
+   numeric figures. *)
 let minimum_card_text_cells = 32
 let kpi_cards = 4
 let kpi_card_gaps = 10
+let kpi_card_gaps_2 = 6
 let kpi_card_min_width = 18
 
 type kpi_layout =
-  | Cards of { card_w : int; card_cells : int }
+  | Cards_4 of { card_w : int; card_cells : int }
+  | Cards_2x2 of { card_w : int; card_cells : int }
   | Compact
 
 let kpi_layout ~cols =
   let inner_width = max 20 (framed_inner_width cols) in
-  let card_w = max kpi_card_min_width ((inner_width - kpi_card_gaps) / kpi_cards) in
-  let card_cells = Masc_tui_card.content_cells ~width:card_w in
-  if card_cells >= minimum_card_text_cells then Cards { card_w; card_cells } else Compact
+  let card_w_4 = max kpi_card_min_width ((inner_width - kpi_card_gaps) / kpi_cards) in
+  let card_cells_4 = Masc_tui_card.content_cells ~width:card_w_4 in
+  if card_cells_4 >= minimum_card_text_cells then
+    Cards_4 { card_w = card_w_4; card_cells = card_cells_4 }
+  else
+    let card_w_2 = max kpi_card_min_width ((inner_width - kpi_card_gaps_2) / 2) in
+    let card_cells_2 = Masc_tui_card.content_cells ~width:card_w_2 in
+    if card_cells_2 >= minimum_card_text_cells then
+      Cards_2x2 { card_w = card_w_2; card_cells = card_cells_2 }
+    else Compact
 
 (* Telemetry's engine section: the view whose cards draw the engine graphs. *)
 let engine_view_open (state : state) =
@@ -304,7 +313,7 @@ let compact_graph_cells ~cols =
 (* How many cells each engine graph is wide. *)
 let engine_graph_cells ~cols =
   match kpi_layout ~cols with
-  | Cards { card_cells; _ } -> card_cells
+  | Cards_4 { card_cells; _ } | Cards_2x2 { card_cells; _ } -> card_cells
   | Compact -> compact_graph_cells ~cols
 
 (* Both engine graphs give their axis this many cells: the widest top either
@@ -447,7 +456,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let live = format_words gc.sgc_live_words in
       let live_line =
         match layout with
-        | Cards { card_cells; _ } when gc.sgc_heap_words > 0 ->
+        | Cards_4 { card_cells; _ } | Cards_2x2 { card_cells; _ } when gc.sgc_heap_words > 0 ->
           Chart.meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
             ~label:(say "점유" "Live") ~suffix:live
@@ -455,7 +464,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
                it are a share, not a use of a limit. *)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-        | Cards _ | Compact ->
+        | Cards_4 _ | Cards_2x2 _ | Compact ->
           Printf.sprintf (if ko then "사용 중 %s · 마이너 힙 %s" else "live %s · minor %s")
             live (format_words gc.sgc_minor_heap_size)
       in
@@ -518,14 +527,14 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
          Engine card's meter writes the live size against the heap above. *)
       let done_line =
         match layout with
-        | Cards { card_cells; _ } when total > 0 ->
+        | Cards_4 { card_cells; _ } | Cards_2x2 { card_cells; _ } when total > 0 ->
           Chart.meter ~width:card_cells ~value:count.completed
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
             ~suffix:(Count.grouped count.completed)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-        | Cards _ | Compact ->
+        | Cards_4 _ | Cards_2x2 _ | Compact ->
           Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
             (Count.grouped count.completed) (Count.grouped count.cancelled)
       in
@@ -586,6 +595,11 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       else Theme.recede (), unread (Theme.recede ()), None
   in
 
+  let rec zip2 r1 r2 =
+    match r1, r2 with
+    | a :: t1, b :: t2 -> ("  " ^ a ^ "  " ^ b) :: zip2 t1 t2
+    | [], _ | _ :: _, [] -> []
+  in
   let rec zip4 r1 r2 r3 r4 =
     match r1, r2, r3, r4 with
     | a :: t1, b :: t2, c :: t3, d :: t4 ->
@@ -595,22 +609,30 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | _ :: _, _ :: _, [], _
     | _ :: _, _ :: _, _ :: _, [] -> []
   in
-  match layout with
-  | Cards { card_w; card_cells } ->
+  let make_cards ~card_w ~card_cells =
     let render_card = render_card ~card_w in
     let graph_row ~number series ~axis =
       if graphs then [ engine_graph_row ~cells:card_cells ~axis ~number series state ] else []
     in
-    zip4
-      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE")
-         ([ c1_l1; c1_l2 ]
-          @ graph_row ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis))
-      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
-         ((c2_l1 :: c2_rest)
-          @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis
-          @ stop_reason))
-      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
-      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
+    ( render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE")
+        ([ c1_l1; c1_l2 ]
+         @ graph_row ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis)
+    , render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
+        ((c2_l1 :: c2_rest)
+         @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis
+         @ stop_reason)
+    , render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ())
+        (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ]
+    , render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone
+        (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ] )
+  in
+  match layout with
+  | Cards_4 { card_w; card_cells } ->
+    let c1, c2, c3, c4 = make_cards ~card_w ~card_cells in
+    zip4 c1 c2 c3 c4
+  | Cards_2x2 { card_w; card_cells } ->
+    let c1, c2, c3, c4 = make_cards ~card_w ~card_cells in
+    zip2 c1 c2 @ zip2 c3 c4
   | Compact ->
     let graphs_row =
       if graphs then

@@ -67,7 +67,7 @@ let day_rows (flow : Masc_tui_task_flow.t) =
 
 let read_archive path =
   match Masc_tui_loader.read_archive path with
-  | Error error -> fail error
+  | Error (Masc_tui_loader.Archive_malformed error | Archive_unreadable error) -> fail error
   | Ok reading -> reading
 
 let flow_of_archive_file path =
@@ -140,7 +140,8 @@ let test_archive_shapes () =
       (match Masc_tui_loader.read_archive path with
        | Ok reading ->
            check bool "a missing archive is empty" true (reading == Masc_tui_loader.no_archive)
-       | Error error -> fail error);
+       | Error (Masc_tui_loader.Archive_malformed error | Archive_unreadable error) ->
+           fail error);
       let refused contents =
         Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents);
         (* A fresh inode each time, so no kept value answers. *)
@@ -154,6 +155,67 @@ let test_archive_shapes () =
       check bool "a list is not an archive" true (refused "[]");
       check bool "a cut file is an error" true (refused "{\"tasks\":[");
       check bool "an empty tasks list reads" false (refused "{\"tasks\":[]}\n"))
+
+(* What the bytes of one version say is kept with it, a fault as well as a
+   reading, so an archive stuck in a shape that is not an archive is not
+   streamed again on every Work read. A file that cannot be opened now is
+   not kept. Taking the read permission away keeps the file version, so
+   which of the two answers tells whether the file was opened again. *)
+let test_a_fault_is_kept_only_when_the_bytes_said_it () =
+  if Unix.geteuid () = 0 then skip ();
+  let dir = Filename.temp_dir "masc-task-archive-fault-" "" in
+  let path = Filename.concat dir "tasks-archive.json" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod path 0o600 with Unix.Unix_error _ -> ());
+      (try Sys.remove path with Sys_error _ -> ());
+      Sys.rmdir dir)
+    (fun () ->
+      let malformed () =
+        match Masc_tui_loader.read_archive path with
+        | Error (Masc_tui_loader.Archive_malformed _) -> true
+        | Ok _ | Error (Masc_tui_loader.Archive_unreadable _) -> false
+      in
+      let unreadable () =
+        match Masc_tui_loader.read_archive path with
+        | Error (Masc_tui_loader.Archive_unreadable _) -> true
+        | Ok _ | Error (Masc_tui_loader.Archive_malformed _) -> false
+      in
+      Out_channel.with_open_bin path (fun channel ->
+        Out_channel.output_string channel "{\"tasks\":[]} trailing");
+      check bool "bytes after the object are not an archive" true (malformed ());
+      Unix.chmod path 0o000;
+      check bool "the same version answers from what its bytes said" true (malformed ());
+      Unix.chmod path 0o600;
+      let replacement = path ^ ".replacement" in
+      Out_channel.with_open_bin replacement (fun channel ->
+        Out_channel.output_string channel "{\"tasks\":[]}");
+      Unix.chmod replacement 0o000;
+      Unix.rename replacement path;
+      check bool "a file that cannot be opened is unreadable" true (unreadable ());
+      Unix.chmod path 0o600;
+      check bool "and that is not kept" true
+        (match Masc_tui_loader.read_archive path with
+         | Ok reading -> reading.undecoded = 0
+         | Error (Masc_tui_loader.Archive_malformed _ | Archive_unreadable _) -> false))
+
+(* The whole-file readers repair invalid UTF-8 before they parse; this
+   reader takes the bytes as they are. A row whose id is not UTF-8 does not
+   decode, so a task the backlog holds under the repaired id is not counted
+   a second time from the archive. *)
+let test_an_id_that_is_not_utf8_does_not_decode () =
+  let dir = Filename.temp_dir "masc-task-archive-utf8-" "" in
+  let path = Filename.concat dir "tasks-archive.json" in
+  let restored = task ~id:"restored\xff" ~created_at:"2026-09-12T01:00:00Z"
+      (done_at "2026-09-12T02:00:00Z") in
+  let live = [ { restored with id = Safe_ops.repair_utf8_text restored.id } ] in
+  Yojson.Safe.to_file path
+    (`Assoc [ ("tasks", `List [ Masc_domain.task_to_yojson restored ]) ]);
+  Fun.protect ~finally:(fun () -> Sys.remove path; Sys.rmdir dir) (fun () ->
+    let reading = read_archive path in
+    check int "the row is counted as one that does not decode" 1 reading.undecoded;
+    let flow = Masc_tui_task_flow.of_tasks ~now ~archived:reading.archived live in
+    check int "the task is completed once, as live" 1 flow.recent.completed)
 
 (* The Work read keeps the decoded backlog across refreshes and events, and
    decodes it again when the file is another version, including a
@@ -257,6 +319,10 @@ let () =
           [ test_case "kept until the file version moves" `Quick
               test_kept_until_the_file_version_moves;
             test_case "archive shapes" `Quick test_archive_shapes;
+            test_case "a fault is kept only when the bytes said it" `Quick
+              test_a_fault_is_kept_only_when_the_bytes_said_it;
+            test_case "an id that is not UTF-8 does not decode" `Quick
+              test_an_id_that_is_not_utf8_does_not_decode;
             test_case "backlog decoded again only when its version moves" `Quick
               test_backlog_decoded_again_only_when_its_version_moves;
             test_case "a Work read does not open an unchanged archive" `Quick

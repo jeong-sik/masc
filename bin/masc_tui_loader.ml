@@ -182,7 +182,19 @@ type archive_reading = {
 
 let no_archive = { archived = Masc_tui_task_flow.Archived.empty; undecoded = 0 }
 
-let archive_cache : archive_reading File_version_cache.t = File_version_cache.create ()
+(* Why a Work read has no archive. A document that is not one object with
+   one [tasks] list is what the bytes of that file version say, so it is
+   kept with the version like a reading, and an archive stuck in such a
+   shape is not streamed again on every read. A file that could not be
+   opened or read now says nothing about its bytes and is not kept. *)
+type archive_fault =
+  | Archive_malformed of string
+  | Archive_unreadable of string
+
+(* What one file version's bytes read as: a reading, or why they are not
+   an archive. *)
+let archive_cache : (archive_reading, string) result File_version_cache.t =
+  File_version_cache.create ()
 
 (* Which [tasks] lists the archive object has had so far. *)
 type archive_tasks =
@@ -192,15 +204,21 @@ type archive_tasks =
 
 (* The lexer reads the channel, and one archived task at a time is a JSON
    tree, reduced before the next one is read. Read whole, the file was a
-   string, the lexer's copy of it and a tree alive at once. *)
-let decode_archive_channel ~path channel =
+   string, the lexer's copy of it and a tree alive at once.
+
+   The whole-file readers repair invalid UTF-8 before they parse, the
+   backlog's reader included, and this lexer takes the bytes as they are.
+   An id that is not UTF-8 would then be another id here than in the
+   backlog, and a task restored there would count twice, so a row with such
+   an id is one that does not decode. *)
+let decode_archive_channel ~path channel : (archive_reading, archive_fault) result =
   let lexbuf = Lexing.from_channel channel in
   let lexer = Yojson.init_lexer ~fname:path () in
   let read_task reading lexer lexbuf =
     match Masc_domain.task_of_yojson (Yojson.Safe.read_json lexer lexbuf) with
-    | Ok task ->
+    | Ok task when String.is_valid_utf_8 task.id ->
         { reading with archived = Masc_tui_task_flow.Archived.add reading.archived task }
-    | Error _ -> { reading with undecoded = reading.undecoded + 1 }
+    | Ok _ | Error _ -> { reading with undecoded = reading.undecoded + 1 }
   in
   let read_member tasks name lexer lexbuf =
     match name, tasks with
@@ -220,30 +238,48 @@ let decode_archive_channel ~path channel =
     tasks, Yojson.Safe.read_eof lexbuf
   with
   | Tasks_list reading, true -> Ok reading
-  | No_tasks_list, true -> Error "the archive has no tasks list"
-  | Repeated_tasks_list, true -> Error "the archive has more than one tasks list"
+  | No_tasks_list, true -> Error (Archive_malformed "the archive has no tasks list")
+  | Repeated_tasks_list, true ->
+      Error (Archive_malformed "the archive has more than one tasks list")
   | (No_tasks_list | Tasks_list _ | Repeated_tasks_list), false ->
-      Error "the archive has more after its object"
-  | exception Yojson.Json_error detail -> Error detail
+      Error (Archive_malformed "the archive has more after its object")
+  | exception Yojson.Json_error detail -> Error (Archive_malformed detail)
   | exception (Yojson.End_of_array | Yojson.End_of_object | Yojson.End_of_input) ->
-      Error "the archive ends early"
-  | exception Sys_error detail -> Error detail
+      Error (Archive_malformed "the archive ends early")
+  | exception Sys_error detail -> Error (Archive_unreadable detail)
 
-let decode_archive_file path =
+let decode_archive_file path : (archive_reading, archive_fault) result =
   match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok no_archive
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | exception Unix.Unix_error (error, _, _) ->
+      Error (Archive_unreadable (Unix.error_message error))
   | descriptor ->
       let channel = Unix.in_channel_of_descr descriptor in
       Fun.protect ~finally:(fun () -> close_in_noerr channel)
         (fun () -> decode_archive_channel ~path channel)
 
 (* The decode runs on the CPU pool, as the whole-file parse did, so a GC's
-   rewrite does not hold the screen's domain for the length of the file. *)
-let read_archive path : (archive_reading, string) result =
-  File_version_cache.load archive_cache path ~decode:(fun () ->
-    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      decode_archive_file path))
+   rewrite does not hold the screen's domain for the length of the file. A
+   fault is logged where a decode met it, so a kept one is not logged again
+   on every read. *)
+let read_archive path : (archive_reading, archive_fault) result =
+  let decode () =
+    match
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        decode_archive_file path)
+    with
+    | Ok reading -> Ok (Ok reading)
+    | Error (Archive_malformed detail) ->
+        report path detail;
+        Ok (Error detail)
+    | Error (Archive_unreadable detail) ->
+        report path detail;
+        Error detail
+  in
+  match File_version_cache.load archive_cache path ~decode with
+  | Ok (Ok reading) -> Ok reading
+  | Ok (Error detail) -> Error (Archive_malformed detail)
+  | Error detail -> Error (Archive_unreadable detail)
 
 (** Load tasks from the canonical workspace backlog: the active rows for the
     Overview list, plus the full domain rows the detail view reads. Terminal
@@ -301,8 +337,7 @@ let load_active_tasks (base_path : string) :
           , Some
               (Printf.sprintf "%d archived tasks could not be read; the day bars miss them"
                  undecoded) )
-        | Error error ->
-          report (Workspace_utils_paths_backend.archive_path config) error;
+        | Error (Archive_malformed error | Archive_unreadable error) ->
           ( Masc_tui_task_flow.Archived.empty
           , Some ("task archive unavailable, the day bars miss archived tasks: " ^ error) )
       in

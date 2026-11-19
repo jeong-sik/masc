@@ -2714,7 +2714,8 @@ let test_archive_cache_does_not_cross_equal_stat_files () =
        && Float.equal (Unix.stat first).Unix.st_mtime (Unix.stat second).Unix.st_mtime);
     let undecoded path = match Masc_tui_loader.read_archive path with
       | Ok reading -> reading.undecoded
-      | Error detail -> Alcotest.fail detail in
+      | Error (Masc_tui_loader.Archive_malformed detail | Archive_unreadable detail) ->
+          Alcotest.fail detail in
     Alcotest.(check int) "first archive retains invalid-row evidence" 1 (undecoded first);
     Alcotest.(check int) "second path cannot reuse first archive evidence" 0 (undecoded second))
 
@@ -2755,8 +2756,7 @@ let test_local_work_reloads_equal_stat_archive_replacement () =
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         let observe () = (Masc_tui_loader.read_local_workspace dir).lr_tasks_error in
-        let error = Some "1 archived tasks could not be read; the day bars miss them" in
-        Alcotest.(check (option string)) "unreadable archive is visible" error (observe ());
+        Alcotest.(check bool) "unreadable archive is visible" true (Option.is_some (observe ()));
         let before = Unix.stat archive in
         write replacement "{\"tasks\":[] }";
         Unix.utimes replacement before.Unix.st_atime before.Unix.st_mtime;

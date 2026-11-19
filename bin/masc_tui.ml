@@ -297,8 +297,6 @@ let frame_interval_ns = 16_000_000L
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
 
-let maximum_input_wait_seconds = 0.016
-
 (* Point fd 2 at a file under the base path, so writing to stderr cannot land
    in the frame. Best effort by construction: a surface that cannot open its
    log is still a working surface, and refusing to start over it would trade a
@@ -31795,7 +31793,13 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
   let over_budget () =
     match deadline_ns with
     | None -> false
-    | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
+    | Some deadline ->
+      let now_ns = Mtime_clock.elapsed_ns () in
+      let spent = Int64.compare now_ns deadline >= 0 in
+      (* What the budget left waits for the next pass, which comes at once. *)
+      if spent then
+        Masc_tui_wake.Pass.note { Masc_tui_wake.reason = Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
+      spent
   in
   let chat_changed = drain_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
@@ -32686,7 +32690,12 @@ let main
     | None -> true
     | Some refusal -> report_withdrawn state ~request refusal; false
   in
-  let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* When the last wait for input ended: the pass's own work runs from here
+     to the next wait. *)
+  let pass_started_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* A frame went out this pass. Launchers that read what it drew run after
+     the next wait, so that wait ends at once (RFC tui-idle-wait §3.4). *)
+  let frame_drawn = ref false in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind (!presented).approval approval_row_reference
@@ -33074,7 +33083,6 @@ let main
   add_event state "system" "TUI started";
 
   (* Main loop *)
-  let machine_input_timeout_s = 0.3 in
   (* The wall-clock second at which the time text of the last built frame
      next reads differently, [None] when that frame drew none. *)
   let time_redraw_due = ref None in
@@ -35116,19 +35124,6 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
           ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path)
         (Code_results.saved_refresh_path state ~input_pending:code_navigation_input_pending);
-      (* Check for input *)
-      let input_timeout =
-        Render_schedule.input_timeout_seconds render_schedule
-          ~now_ns:(Mtime_clock.elapsed_ns ())
-          ~maximum:maximum_input_wait_seconds
-      in
-      let input_timeout =
-        (* Machine observation does not wake the loop to read. This timeout only
-           lets terminal animation and input continue while a game is open. *)
-        if state.msx_open && not state.msx_menu_open then
-          Float.min input_timeout machine_input_timeout_s
-        else input_timeout
-      in
       (* The load menu owns the terminal while it is up. *)
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
@@ -35144,6 +35139,21 @@ Use relative paths for resources already held in the package. -->
             render_spectator state
       end;
       poll_play_room state ~mailbox:async_messages;
+      (* Check for input. The read sleeps until a byte arrives, a writer
+         rings the loop's bell, or the earliest moment this pass's decisions
+         noted (RFC tui-idle-wait §3). *)
+      let input_wait =
+        let now_ns = Mtime_clock.elapsed_ns () in
+        let work_ns = Int64.sub now_ns !pass_started_ns in
+        if Int64.compare work_ns Masc_tui_http.slow_report_ns >= 0 then
+          Log.Transport.info "main loop: %.0f ms of work in one pass"
+            (Masc_tui_http.ms_of_ns work_ns);
+        Masc_tui_wake.until ~now_ns Masc_tui_wake.loop
+          (Masc_tui_wake.next_deadline ~now_ns
+             { frame_due_ns = Render_schedule.frame_due_ns render_schedule ~now_ns;
+               frame_drawn = !frame_drawn;
+               machine_view = state.msx_open && not state.msx_menu_open })
+      in
       let guarding_before_read =
         match paste_phase input_reader with
         | Draining_tail _ -> true
@@ -35162,10 +35172,16 @@ Use relative paths for resources already held in the package. -->
           match Queue.take_opt hangul_latin_queue with
           | Some latin_key -> Some (Key latin_key)
           | None ->
-            let input = read_input ~timeout:input_timeout input_reader () in
+            let input = read_input ~wait:input_wait input_reader () in
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      (* The wait is over: what rang before now is seen by this pass, and
+         every decision notes its moment again. *)
+      ignore (Masc_tui_wake.take Masc_tui_wake.loop);
+      Masc_tui_wake.Pass.begin_pass ();
+      frame_drawn := false;
+      pass_started_ns := Mtime_clock.elapsed_ns ();
       Masc_tui_nav_trace_log.note_input nav_trace
         (match input with
          | Some (Key name) -> Masc_tui_nav_trace_log.Key name
@@ -36859,12 +36875,6 @@ Use relative paths for resources already held in the package. -->
        | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      (let now_ns = Mtime_clock.elapsed_ns () in
-       let gap_ns = Int64.sub now_ns !last_loop_at_ns in
-       if Int64.compare gap_ns Masc_tui_http.slow_report_ns >= 0 then
-         Log.Transport.info "main loop: %.0f ms between two iterations"
-           (Masc_tui_http.ms_of_ns gap_ns);
-       last_loop_at_ns := now_ns);
       let reads_before = reads_in_flight state in
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
@@ -45356,7 +45366,9 @@ Use relative paths for resources already held in the package. -->
          is drawn on the following whole second, and a frame with no such
          text schedules none. About keeps its independent clock below. *)
       (match !time_redraw_due with
-       | Some due when Unix.gettimeofday () >= due ->
+       | Some due
+         when Masc_tui_wake.reached Masc_tui_wake.Time_text
+                ~now:(Unix.gettimeofday ()) ~at:due ->
            time_redraw_due := None;
            Render_schedule.request render_schedule Render_schedule.Background
        | Some _ | None -> ());
@@ -45366,10 +45378,8 @@ Use relative paths for resources already held in the package. -->
       (match Masc_tui_emblem_screen.drawn () with
        | Masc_tui_emblem_screen.Moving when state.about_open ->
            if
-             Int64.compare
-               (Int64.sub now_ns !emblem_last_step_ns)
-               Masc_tui_types.motion_step_ns
-             >= 0
+             Masc_tui_wake.reached_ns Masc_tui_wake.Emblem_step ~now_ns
+               ~at_ns:(Int64.add !emblem_last_step_ns Masc_tui_types.motion_step_ns)
            then begin
              emblem_last_step_ns := now_ns;
              state.emblem_frame <-
@@ -45392,6 +45402,12 @@ Use relative paths for resources already held in the package. -->
                   ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
                 ~input_pending:(input_unsettled ()
                   || Masc_tui_exit_signals.interrupt_pending exit_signals) }) state.quit_armed;
+      (* An armed quit is withdrawn when its notice leaves the screen. *)
+      Option.iter (fun arm ->
+          let _, shown_at = Masc_tui_action_notice.quit_ordinary arm.qa_confirmation in
+          ignore (Masc_tui_wake.reached Masc_tui_wake.Quit_notice_expiry
+                    ~now:(Unix.gettimeofday ()) ~at:(shown_at +. last_action_window_s)))
+        state.quit_armed;
       (match state.quit_armed with
        | Some arm when Option.is_none (current_quit_confirmation state ~now:(Unix.gettimeofday ())) ->
            let kind = Masc_tui_action_notice.quit_kind arm.qa_confirmation in
@@ -45478,7 +45494,8 @@ Use relative paths for resources already held in the package. -->
            (* The picture draws no time text. Closing it repaints in full,
               and that frame says when time next changes its text. *)
            time_redraw_due := None;
-           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
+           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal;
+           frame_drawn := true
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
@@ -45599,7 +45616,8 @@ Use relative paths for resources already held in the package. -->
               Measuring the interval from Build start made every queued key
               start another overdue frame before the reader could catch up.
               Drained input still bypasses the interval in [take]. *)
-           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ())
+           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ());
+           frame_drawn := true
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

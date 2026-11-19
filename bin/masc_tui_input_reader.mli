@@ -52,9 +52,10 @@ val input_byte_ready : input_reader -> bool
 val paste_can_recover : input_reader -> paste_clock -> bool
 val cancel_armed : paste_clock -> bool
 val arm_cancel : paste_clock -> unit
-val read_input : ?timeout:float -> input_reader -> unit -> input_event option
+val read_input : ?wait:Masc_tui_wake.wait -> input_reader -> unit -> input_event option
 (** [None] means no decoded event is ready within this read, including a
-    partial paste or sequence retained for the next read. *)
+    partial paste or sequence retained for the next read, and a read the
+    wait's bell ended. The default waits at most 0.1 s with no bell. *)
 type terminal_probe_progress = Probe_pending | Probe_installed | Probe_unchanged
 val prepare_terminal_probe :
   sw:Eio.Switch.t option -> clock:float Eio.Time.clock_ty Eio.Resource.t option ->

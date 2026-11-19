@@ -42,7 +42,7 @@ type startup_capture = {
 
 type probe_preparation = {
   result : Masc_tui_terminal_probe.decoder Eio.Promise.or_exn;
-  wait : timeout:float -> unit;
+  wait : Masc_tui_wake.wait -> unit;
 }
 
 type input_reader = {
@@ -160,30 +160,46 @@ let input_reader_has_pending_bytes reader =
 
    A wait with no time left has nothing to register: asking Eio for one would
    cancel it in the same breath, and the kernel answers that question without
-   blocking anyway. *)
-let terminal_has_bytes ~remaining =
+   blocking anyway.
+
+   The wait's bell races too (RFC tui-idle-wait §3.3): something the loop
+   reads changed elsewhere, so the read ends without a byte and the loop
+   looks. A wait with no deadline lasts until a byte or the bell. The kernel
+   is asked first: a ring already standing would otherwise win over a byte
+   already waiting, and a loop rung during every pass would never read a
+   key. *)
+let terminal_has_bytes (wait : Masc_tui_wake.wait) =
   let kernel_wait seconds =
     match Unix.select [ Unix.stdin ] [] [] seconds with
     | ready, _, _ -> ready <> []
   in
-  if remaining <= 0.0 then kernel_wait 0.0
-  else
+  kernel_wait 0.0
+  ||
+  match wait.within_s with
+  | Some remaining when remaining <= 0.0 -> false
+  | Some _ | None ->
     match (Eio_guard.is_eio_fiber (), Eio_context.get_clock_opt ()) with
     | true, Some clock ->
-        Eio.Fiber.first
-          (fun () ->
-            Eio_unix.await_readable Unix.stdin;
-            true)
-          (fun () ->
-            Eio.Time.sleep clock remaining;
-            false)
+        let deadline = match wait.within_s with
+          | None -> []
+          | Some remaining -> [ (fun () -> Eio.Time.sleep clock remaining; false) ] in
+        let bell = match wait.bell with
+          | None -> []
+          | Some bell -> [ (fun () -> Masc_tui_wake.await bell; false) ] in
+        Eio.Fiber.any
+          ((fun () -> Eio_unix.await_readable Unix.stdin; true) :: deadline @ bell)
     | true, None | false, _ ->
         (* The startup terminal probe reads through this same reader from
            inside [Eio_guard.run_in_systhread], where an Eio effect has no
            handler. The kernel wait is the right one there for the same
            reason the probe runs on a thread at all: blocking a system
-           thread does not stop the domain. *)
-        kernel_wait remaining
+           thread does not stop the domain. A bell needs that handler, so a
+           wait that carries one cannot be kept here. *)
+        (match wait.bell with
+         | Some _ -> invalid_arg "terminal_has_bytes: a bell wait needs an Eio fiber and clock"
+         | None ->
+           (* A negative timeout is select's wait without a bound. *)
+           kernel_wait (Option.value wait.within_s ~default:(-1.0)))
 
 (* A read buffer can end while the next chunk already waits in the kernel.
    Include readiness without consuming input, so a long burst is coalesced
@@ -193,15 +209,15 @@ let input_reader_has_ready_input reader =
   match reader.probe_preparation with
   | Some _ -> false
   | None -> input_reader_has_pending_bytes reader
-    || try terminal_has_bytes ~remaining:0.0 with
+    || try terminal_has_bytes (Masc_tui_wake.within 0.0) with
        | Unix.Unix_error (Unix.EINTR, _, _) -> true
 
-let refill_input_reader reader ~timeout =
-  let timeout_ns =
-    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+let refill_input_reader reader ~(wait : Masc_tui_wake.wait) =
+  let timeout_ns = Option.map (fun timeout ->
+    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)) wait.within_s
   in
-  let poll remaining =
-    match terminal_has_bytes ~remaining with
+  let poll within_s =
+    match terminal_has_bytes { wait with within_s } with
     | true -> (
         match
           Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
@@ -224,9 +240,9 @@ let refill_input_reader reader ~timeout =
       true
   | None -> false
 
-let take_terminal_buffer_byte reader ~timeout =
+let take_terminal_buffer_byte reader ~wait =
   if
-    reader.position >= reader.filled && not (refill_input_reader reader ~timeout)
+    reader.position >= reader.filled && not (refill_input_reader reader ~wait)
   then None
   else begin
     let byte = Bytes.get reader.bytes reader.position in
@@ -262,19 +278,18 @@ let observe_terminal_reply reader reply =
     publish_terminal_observation reader decoder) reader.terminal_probe
 ;;
 
-let take_input_byte reader ~timeout =
-  let timeout_ns =
-    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+let take_input_byte reader ~(wait : Masc_tui_wake.wait) =
+  let deadline_ns = Option.map (fun timeout ->
+    Int64.add (Mtime_clock.elapsed_ns ())
+      (Int64.of_float (max 0.0 timeout *. nanoseconds_per_second))) wait.within_s
   in
-  let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
   let terminal_byte () =
-    let remaining_ns =
-      Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+    let within_s = Option.map (fun deadline_ns ->
+      let remaining_ns = Int64.sub deadline_ns (Mtime_clock.elapsed_ns ()) in
+      if Int64.compare remaining_ns 0L <= 0 then 0.0
+      else Int64.to_float remaining_ns /. nanoseconds_per_second) deadline_ns
     in
-    take_terminal_buffer_byte reader
-      ~timeout:
-        (if Int64.compare remaining_ns 0L <= 0 then 0.0
-         else Int64.to_float remaining_ns /. nanoseconds_per_second)
+    take_terminal_buffer_byte reader ~wait:{ wait with within_s }
   in
   match reader.terminal_probe with
   | None ->
@@ -357,9 +372,8 @@ let paste_quiet_ns =
   Int64.of_float (paste_quiet_seconds *. nanoseconds_per_second)
 
 let paste_is_quiet last_byte_ns =
-  Int64.compare
-    (Int64.sub (Mtime_clock.elapsed_ns ()) last_byte_ns)
-    paste_quiet_ns >= 0
+  Masc_tui_wake.reached_ns Masc_tui_wake.Paste_quiet
+    ~now_ns:(Mtime_clock.elapsed_ns ()) ~at_ns:(Int64.add last_byte_ns paste_quiet_ns)
 
 (* Check every input source without consuming its next byte. A terminal read
    can already be buffered, and the startup probe can still have replay; a
@@ -368,7 +382,7 @@ let input_byte_ready reader =
   match reader.probe_preparation with
   | Some _ -> false
   | None ->
-    match take_input_byte reader ~timeout:0.0 with
+    match take_input_byte reader ~wait:(Masc_tui_wake.within 0.0) with
     | None -> false
     | Some _ -> return_input_byte reader; true
 
@@ -446,7 +460,7 @@ let in_paste reader =
   | No_paste -> false
 
 (** Read one key, one paste, or one thing the terminal said back. *)
-let read_available_input ~timeout reader () : input_event option =
+let read_available_input ~(wait : Masc_tui_wake.wait) reader () : input_event option =
   (* The reader belongs to this fiber. Keeping it here lets readiness use
      [await_readable] and the Eio timer; moving the whole decoder to a system
      thread also moves buffered keys and every frame-deadline poll there.
@@ -477,16 +491,20 @@ let read_available_input ~timeout reader () : input_event option =
       and read () =
         let wait =
           match Masc_tui_input_decoder.pending reader.decoder with
-          (* Not bounded by [timeout]: a frame due now passes 0, and a prefix
-             given no time ends as Escape, splitting an arrow into three keys. *)
-          | Some Masc_tui_input_decoder.Prefix -> sequence_byte_wait_seconds
+          (* Not bounded by [wait]: a frame due now passes 0, and a prefix
+             given no time ends as Escape, splitting an arrow into three keys.
+             For the same reason the bell does not cut it short. *)
+          | Some Masc_tui_input_decoder.Prefix ->
+              Masc_tui_wake.within sequence_byte_wait_seconds
           | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character) ->
-              Float.min timeout sequence_byte_wait_seconds
+              { wait with within_s = Some (match wait.within_s with
+                  | None -> sequence_byte_wait_seconds
+                  | Some timeout -> Float.min timeout sequence_byte_wait_seconds) }
           | Some (Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining)
           | None ->
-              timeout
+              wait
         in
-        match take_input_byte reader ~timeout:wait with
+        match take_input_byte reader ~wait with
         | None ->
             enqueue (Masc_tui_input_decoder.idle reader.decoder);
             drain ()
@@ -521,10 +539,10 @@ let read_available_input ~timeout reader () : input_event option =
         (fun kind -> observe_installed reader (Startup.First_input_decoded kind)) (input_kind event)) event;
       event)
 
-let read_input ?(timeout = 0.1) reader () : input_event option =
+let read_input ?(wait = Masc_tui_wake.within 0.1) reader () : input_event option =
   match reader.probe_preparation with
-  | Some preparation -> preparation.wait ~timeout; None
-  | None -> read_available_input ~timeout reader ()
+  | Some preparation -> preparation.wait wait; None
+  | None -> read_available_input ~wait reader ()
 
 (* How long to wait for the combined palette and graphics answers. A terminal
    replies as soon as it has parsed a supported query; an unsupported query
@@ -570,7 +588,7 @@ let terminal_probe_collector reader ~palette_requested =
         else
           match
             take_terminal_buffer_byte reader
-              ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
+              ~wait:(Masc_tui_wake.within (Int64.to_float remaining_ns /. nanoseconds_per_second))
           with
           | None -> Startup.Read_returned_no_byte
           | Some byte ->
@@ -628,10 +646,18 @@ let prepare_terminal_probe ~sw ~clock reader ~palette_requested =
     Printexc.raise_with_backtrace error backtrace in
   match scheduled with
   | Some (result,clock) ->
-    let wait ~timeout =
-      if timeout > 0. then Eio.Fiber.first
-        (fun () -> ignore (Eio.Promise.await_exn result))
-        (fun () -> Eio.Time.sleep clock timeout) in
+    let wait (wait : Masc_tui_wake.wait) =
+      match wait.within_s with
+      | Some timeout when timeout <= 0. -> ()
+      | Some _ | None ->
+        let deadline = match wait.within_s with
+          | None -> []
+          | Some timeout -> [ (fun () -> Eio.Time.sleep clock timeout) ] in
+        let bell = match wait.bell with
+          | None -> []
+          | Some bell -> [ (fun () -> Masc_tui_wake.await bell) ] in
+        Eio.Fiber.any
+          ((fun () -> ignore (Eio.Promise.await_exn result)) :: deadline @ bell) in
     reader.probe_preparation <- Some {result;wait}
   | None ->
     let decoder=collect () in

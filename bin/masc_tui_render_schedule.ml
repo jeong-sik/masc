@@ -65,18 +65,14 @@ let take ~input_pending schedule ~now_ns =
 let completed schedule ~now_ns =
   schedule.last_completed_at_ns <- Some now_ns
 
-let input_timeout_seconds schedule ~now_ns ~maximum =
-  let maximum = max 0.0 maximum in
+let frame_due_ns schedule ~now_ns =
   match schedule.pending with
-  | None -> maximum
-  | Some (Force | Input) -> 0.0
+  | None -> None
+  | Some (Force | Input) -> Some now_ns
   | Some Background ->
     (match deadline ~after_work:false schedule with
-     | None -> 0.0
-     | Some due ->
-       let remaining_ns = Int64.sub due now_ns in
-       if Int64.compare remaining_ns 0L <= 0 then 0.0
-       else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
+     | None -> Some now_ns
+     | Some due -> Some (if Int64.compare due now_ns < 0 then now_ns else due))
 
 (* The shared clamp, not a second copy of it. This was written out here --
    the floor on both inputs, the maximum, the clamp -- and read the same as
@@ -122,20 +118,23 @@ module Input_wait = struct
   let nanoseconds_per_second = 1_000_000_000.0
 
   let await ~now_ns ~timeout_ns ~poll =
-    if Int64.compare timeout_ns 0L < 0 then
-      invalid_arg "input wait must be non-negative";
-    let deadline_ns = Int64.add (now_ns ()) timeout_ns in
+    Option.iter (fun timeout_ns ->
+      if Int64.compare timeout_ns 0L < 0 then
+        invalid_arg "input wait must be non-negative") timeout_ns;
+    let deadline_ns = Option.map (Int64.add (now_ns ())) timeout_ns in
     let rec loop () =
-      let remaining_ns = Int64.sub deadline_ns (now_ns ()) in
-      let remaining_seconds =
+      let remaining_seconds = Option.map (fun deadline_ns ->
+        let remaining_ns = Int64.sub deadline_ns (now_ns ()) in
         if Int64.compare remaining_ns 0L <= 0 then 0.0
-        else Int64.to_float remaining_ns /. nanoseconds_per_second
+        else Int64.to_float remaining_ns /. nanoseconds_per_second) deadline_ns
       in
       match poll remaining_seconds with
       | Ready value -> Some value
       | Timed_out -> None
       | Interrupted ->
-          if Int64.compare (now_ns ()) deadline_ns >= 0 then None else loop ()
+          (match deadline_ns with
+           | Some deadline_ns when Int64.compare (now_ns ()) deadline_ns >= 0 -> None
+           | Some _ | None -> loop ())
     in
     loop ()
 end

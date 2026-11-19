@@ -264,7 +264,7 @@ let wait_on_eio_stdin_for ~clock ~stdin ~buffer =
    answers 0 for a pending Force or Input, and for a Background whose 16 ms
    window has already passed, which is every pass once a frame costs more
    than the window. A zero wait asks the kernel without blocking
-   ([Masc_tui_input_reader.terminal_has_bytes ~remaining:0.0]), so the only
+   ([Masc_tui_input_reader.terminal_has_bytes] with no time left), so the only
    scheduling point left in the pass is the yield. This is the shape RFC-0429
    §3.0 left open: "while the render schedule keeps asking for frames the
    wait is zero ... one step per pass again". *)

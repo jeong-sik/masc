@@ -3767,6 +3767,7 @@
   masc_tui_terminal_palette
   masc_tui_render_schedule
   masc_tui_paste
+  masc_tui_wake
   eio
   eio.unix
   unix

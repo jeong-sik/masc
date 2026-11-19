@@ -559,8 +559,8 @@ class WaitingEventTest(unittest.TestCase):
                         marker in output[collision_output_start:]
                         for marker in (
                             b"fleet waiting observation unavailable",
-                            "일부 관측 미확인".encode(),
-                            b"some observations unknown",
+                            "일부 관측".encode(),
+                            b"partial reading",
                         )
                     ),
                     "the partial poll was not shown",

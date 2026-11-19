@@ -121,6 +121,8 @@ let write ?(trace = "turn") state ~at w =
   Machine.write state ~at ~by:Effects.Keeper ~trace w
 ;;
 
+let resume place state ~at = Machine.resume ~boot:(fun () -> Machine.boot place ~at) state
+
 let port = "the port is 8935"
 let owner = "the owner is the release team"
 
@@ -201,17 +203,17 @@ let test_write_when_stopped () =
 let test_resume () =
   let place, idle = holding_port () in
   let held = file_bytes (snapshot_path place) in
-  let same, answer = Machine.resume place idle ~at:300.0 in
+  let same, answer = resume place idle ~at:300.0 in
   check string "a store that is open" "nothing to resume" (act_text answer);
   check string "stays as it was" (state_text idle) (state_text same);
   let other = Snapshot_codec.snapshot_bytes (Envelope.empty ~at:999.0 ~turn_log) in
   write_file (snapshot_path place) other;
   let stopped, (_ : Machine.write_answer) = write idle ~at:202.0 (remember owner) in
-  let still, answer = Machine.resume place stopped ~at:300.0 in
+  let still, answer = resume place stopped ~at:300.0 in
   check string "the boot ran" "done" (act_text answer);
   check string "and stopped the same way" (state_text stopped) (state_text still);
   write_file (snapshot_path place) held;
-  let opened, answer = Machine.resume place still ~at:301.0 in
+  let opened, answer = resume place still ~at:301.0 in
   check string "the boot ran again" "done" (act_text answer);
   check string "with the snapshot back, the store opens" ("idle, holding: " ^ port)
     (state_text opened)
@@ -256,7 +258,7 @@ let test_retired () =
   check string "a write" "the keeper is retired" (write_text answer);
   check string "leaves it retired" "retired" (state_text state);
   check string "a resume" "the keeper is retired"
-    (act_text (snd (Machine.resume place retired ~at:300.0)));
+    (act_text (snd (resume place retired ~at:300.0)));
   check string "an adoption" "the keeper is retired"
     (act_text
        (snd

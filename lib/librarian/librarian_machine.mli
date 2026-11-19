@@ -73,10 +73,12 @@ type act_answer =
   | Done
   | Not_done of act_refusal
 
-(** An operator starts a stopped store again: the boot, once more. [Done]
-    says the boot ran; the state says how it ended. A store that is not
-    stopped is [Not_done Nothing_to_resume]. *)
-val resume : place -> state -> at:float -> state * act_answer
+(** An operator starts a stopped store again: [boot], once more. The writer
+    passes the boot it ran when it started, which takes its lock before it
+    opens the store. [Done] says the boot ran; the state says how it ended.
+    A store that is not stopped is [Not_done Nothing_to_resume], and [boot]
+    is not called. *)
+val resume : boot:(unit -> state) -> state -> state * act_answer
 
 (** An operator adopts the snapshot file of a store stopped as
     [Log_diverged] or [Log_unreadable] (§8.7). A store stopped for another

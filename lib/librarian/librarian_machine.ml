@@ -63,11 +63,11 @@ type act_answer =
   | Done
   | Not_done of act_refusal
 
-let resume place state ~at =
+let resume ~boot state =
   match state with
   | Retired -> state, Not_done (Act_unavailable Keeper_retired)
   | Idle (_ : Store.t) -> state, Not_done Nothing_to_resume
-  | Stopped (_ : Store.stop) -> boot place ~at, Done
+  | Stopped (_ : Store.stop) -> boot (), Done
 ;;
 
 let adopt { memory_dir; turns_dir; keeper_id } state ~at ~by ~observed =

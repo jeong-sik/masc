@@ -45,7 +45,7 @@ let historical_baseline_request scenario request =
     |> replace_field "questions" questions
     |> replace_field "questions_sha256" (`String (sha (Yojson.Safe.to_string questions)))
 
-let author ~scenario ~config ~meta ~keepers_dir ~keeper_id ~trace_id =
+let author ~scenario ~keepers_dir ~keeper_id ~trace_id =
   let now=Time_compat.now () in
   let fact claim=Memory.observed ~claim ~category:Memory.Fact ~now ~origin:{kind=Memory.Authored;trace_id} in
   let authored=rows "facts" scenario in
@@ -53,11 +53,10 @@ let author ~scenario ~config ~meta ~keepers_dir ~keeper_id ~trace_id =
   let final=List.map (fun row -> fact (jstring "claim" row)) authored in
   let old=fact (jstring "old_a" scenario) and renamed=fact (jstring "renamed_a" scenario) in
   let initial=old :: List.tl final in
-  List.iter (fun (target:Memory.fact) ->
-    let result=Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-      ~config ~meta ~args:(`Assoc ["content",`String target.claim]) in
-    check string "real producer queues admission" "persisted_pending_admission"
-      (jstring "outcome" (Yojson.Safe.from_string result.raw_output))) initial;
+  List.iteri (fun index (target:Memory.fact) ->
+    ignore (Queue.append ~keepers_dir ~keeper_id
+      ~request_id:(Printf.sprintf "memory-admission-%d" index) target
+      |> Result.map_error Queue.append_error_to_string |> require : Queue.candidate)) initial;
   let batch=match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "pending input missing" in
   let ids=Queue.candidate_ids batch and candidates=Queue.candidates batch in
@@ -111,7 +110,7 @@ let capture () =
     "trace_id",`String trace_id;"instructions",`String instructions]) |> require in
   let expected=Masc_test_deps.with_typesafeai_policy
     {Runtime_schema.default_typesafeai with lane_enabled=false;absorb_gate=false}
-    (fun () -> author ~scenario:original ~config ~meta ~keepers_dir ~keeper_id ~trace_id) in
+    (fun () -> author ~scenario:original ~keepers_dir ~keeper_id ~trace_id) in
   let stores=List.map (fun (name,path) -> name,path,Fs_compat.load_file_opt path)
     ["current_snapshot",Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
      "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;

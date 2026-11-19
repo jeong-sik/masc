@@ -378,6 +378,125 @@ let test_purge_ends_the_memory_writer_first () =
   check bool "the commit log is removed" false (Sys.file_exists (commit_log_path a))
 ;;
 
+module Act = Server_dashboard_http_keeper_memory_act
+module Digest = Agent_core.Checkpoint_objects
+
+let hex (digest : Digest.digest) = (digest :> string)
+
+let stop_text : Masc.Librarian_store.stop -> string = function
+  | Log_diverged { expected; observed } ->
+    Printf.sprintf "the log names %s and the file is %s" (hex expected) (hex observed)
+  | Memory_unreadable -> "memory unreadable"
+  | Log_unreadable -> "log unreadable"
+  | Store_unwritable -> "store unwritable"
+;;
+
+let act_text : Act.answer -> string = function
+  | Acted Open -> "open"
+  | Acted Booting -> "booting"
+  | Acted No_writer -> "no writer"
+  | Acted (Stopped stop) -> "stopped: " ^ stop_text stop
+  | Refused Nothing_to_resume -> "refused: nothing to resume"
+  | Refused Not_stopped -> "refused: not stopped"
+  | Refused Snapshot_mismatch -> "refused: snapshot mismatch"
+  | Refused Snapshot_unreadable -> "refused: snapshot unreadable"
+  | Refused (Act_unavailable (Store_stopped stop)) -> "refused: stopped: " ^ stop_text stop
+  | Refused (Act_unavailable Keeper_retired) -> "refused: keeper not registered"
+  | No_writers -> "no writers"
+;;
+
+let test_act_route_and_requests () =
+  check (option string) "the route names its Keeper" (Some "fixture-keeper")
+    (Act.route "/api/v1/keepers/fixture-keeper/memory/act");
+  check (option string) "a longer path is another route" None
+    (Act.route "/api/v1/keepers/fixture-keeper/memory/act/now");
+  check bool "an operator needs Admin" true (Act.permission = Masc_domain.CanAdmin);
+  let digest = Digest.digest_of_bytes "a snapshot" in
+  let parsed body =
+    match Act.parse body with
+    | Ok Resume -> "resume"
+    | Ok (Adopt { observed }) -> "adopt " ^ hex observed
+    | Error (_ : string) -> "refused"
+  in
+  check string "resume" "resume" (parsed {|{"action":"resume"}|});
+  check string "adopt names the snapshot" ("adopt " ^ hex digest)
+    (parsed (Printf.sprintf {|{"action":"adopt","observed":"%s"}|} (hex digest)));
+  check string "adopt without a snapshot" "refused" (parsed {|{"action":"adopt"}|});
+  check string "a snapshot that is not a digest" "refused"
+    (parsed {|{"action":"adopt","observed":"abc"}|});
+  check string "resume with another field" "refused"
+    (parsed (Printf.sprintf {|{"action":"resume","observed":"%s"}|} (hex digest)));
+  check string "another action" "refused" (parsed {|{"action":"skip"}|});
+  check string "not JSON" "refused" (parsed "resume")
+;;
+
+(* The snapshot is replaced from outside by one the commit log does not
+   name. The next write stops the store, resume finds it stopped again, and
+   an adoption of the file's bytes opens it. *)
+let test_operator_resumes_and_adopts () =
+  with_workspace @@ fun a ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.ensure_memory_writer ~sw ~config:a keeper_name;
+  let snapshot_path =
+    Masc.Keeper_memory_os_current_layout.path_for_keepers_dir
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path)
+      ~keeper_id:keeper_name
+  in
+  let snapshot_bytes () = In_channel.with_open_bin snapshot_path In_channel.input_all in
+  let act action = Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" action in
+  keeper_remembers a port;
+  let first = snapshot_bytes () in
+  keeper_remembers a owner;
+  keeper_remembers a "the probe runs every minute";
+  let last = snapshot_bytes () in
+  check string "an open store has nothing to resume" "refused: nothing to resume"
+    (act_text (act Resume));
+  check string "and is not adopted" "refused: not stopped"
+    (act_text (act (Adopt { observed = Digest.digest_of_bytes last })));
+  Out_channel.with_open_bin snapshot_path (fun channel -> Out_channel.output_string channel first);
+  (match
+     Writers.write (writers a) keeper_name ~by:Masc.Librarian_effects.Keeper ~trace:"turn-2"
+       (Retract { id = memory_id_of owner; reason = "moved" })
+   with
+   | Unavailable (Store_stopped (Log_diverged _)) -> ()
+   | Written _ | Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _
+   | Unavailable (Store_stopped (Memory_unreadable | Log_unreadable | Store_unwritable))
+   | Unavailable Keeper_retired ->
+     fail "a write on a snapshot the log does not name did not stop the store");
+  let diverged =
+    "stopped: "
+    ^ stop_text
+        (Log_diverged
+           { expected = Digest.digest_of_bytes last; observed = Digest.digest_of_bytes first })
+  in
+  check string "resume boots again and finds the same snapshot" diverged (act_text (act Resume));
+  check string "bytes the file does not hold are not adopted" "refused: snapshot mismatch"
+    (act_text (act (Adopt { observed = Digest.digest_of_bytes last })));
+  let before = List.length (commits a) in
+  check string "the file's bytes are adopted" "open"
+    (act_text (act (Adopt { observed = Digest.digest_of_bytes first })));
+  (match List.rev (commits a) with
+   | last_line :: _ ->
+     (match last_line.cause with
+      | Adopt { by; observed } ->
+        check (pair string string) "the line names the operator and the snapshot"
+          ("operator-1", hex (Digest.digest_of_bytes first))
+          (by, hex observed)
+      | Direct _ -> fail "the last commit line is not the adoption")
+   | [] -> fail "nothing was committed");
+  check int "one line was appended" (before + 1) (List.length (commits a));
+  keeper_remembers a owner;
+  check string "a Keeper out of the registry is refused" "refused: keeper not registered"
+    (act_text
+       (Act.act ~base_path:a.base_path ~keeper:"another-keeper" ~actor:"operator-1" Resume))
+;;
+
+let test_act_without_writers () =
+  with_workspace @@ fun a ->
+  check string "a process that started no writers" "no writers"
+    (act_text (Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" Resume))
+;;
+
 let test_reads_do_not_create_runtime_directories () =
   with_workspace @@ fun a ->
   let root = Workspace.keepers_runtime_dir a in
@@ -405,6 +524,11 @@ let () =
             test_operator_retractions_without_writers
         ; test_case "purge ends the Memory writer first" `Quick
             test_purge_ends_the_memory_writer_first
+        ; test_case "the operator's act route and its requests" `Quick test_act_route_and_requests
+        ; test_case "an operator resumes and adopts a stopped store" `Quick
+            test_operator_resumes_and_adopts
+        ; test_case "an operator's action in a process without writers" `Quick
+            test_act_without_writers
         ; test_case "reading absent stores creates no directories" `Quick
             test_reads_do_not_create_runtime_directories
         ]

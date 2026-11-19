@@ -10,7 +10,7 @@ import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
 import type { RemovalRefusal, RemovalsModel, Removing } from './key-remove'
-import { Callout, ProblemNote, fell, idTail, noModelWords, operatorWords, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
 
@@ -111,11 +111,6 @@ function removalWords(removal: Removal): string {
     case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요. ${unused}`
   }
 }
-
-/** What a removal does not do, said before the second press: the server
-    takes its own copy of the key away, and the vendor still takes the key
-    (RFC, 3.8). */
-const keyStaysValidWords = '여기서 없애도 key 는 발급한 곳에서 계속 유효해요. 못 쓰게 하려면 그곳에서 폐기해 주세요.'
 
 /** What the line under the remove button says: what a second press does
     once the first one asked, else what the removal is doing. A removal that

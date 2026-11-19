@@ -12,6 +12,8 @@ import { checkPath, createChecks } from './check'
 import type { ChecksModel } from './check'
 import { createConnect } from './connect'
 import type { ConnectModel } from './connect'
+import { addPath, createKeyAdds } from './key-add'
+import type { KeyAddModel } from './key-add'
 import { createRemovals, removePath } from './key-remove'
 import type { RemovalsModel } from './key-remove'
 import type { View } from './console'
@@ -66,6 +68,9 @@ const idleConnect = (): ConnectModel =>
 const idleChecks = (): ChecksModel =>
   createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 
+/** A giving of a key no test here drives: the panel only needs one to be there. */
+const idleAdds = (): KeyAddModel =>
+  createKeyAdds({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 /** Removals no test here drives: the panel only needs them to be there. */
 const idleRemovals = (): RemovalsModel =>
   createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
@@ -83,6 +88,9 @@ const linking = (): Response => new Response(
 const claude = { integration_id: 'claude_code', display_name: 'Claude Code', connect: ['login'], models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
 const codex = { integration_id: 'codex', display_name: 'Codex', connect: ['login'], models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
 const offered = (): Response => json(200, { integrations: [claude, codex] })
+/** The same subscriptions, the first of which takes an API key too. */
+const offeredWithKey = (): Response => json(200, { integrations: [{ ...claude, connect: ['login', 'key'] }, codex] })
+const keyStored = (): Response => json(200, { provider_account_id: 'acct_key', kind: 'key' })
 const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
 const ownedOne = (): Response => json(200, {
   provider_accounts: [{ provider_account_id: 'acct_1', kind: 'login', integration_id: 'claude_code' }],
@@ -268,7 +276,7 @@ describe('following the console', () => {
       view: signal<PanelView>({ kind: 'waiting' }),
       load: vi.fn((_session: Session) => Promise.resolve()),
       retry: vi.fn(() => Promise.resolve()),
-      connecting: idleConnect(), checking: idleChecks(), removing: idleRemovals(),
+      connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(),
       stop: vi.fn(),
     } satisfies SubscriptionsModel
     const stop = follow(frame, panel)
@@ -396,6 +404,46 @@ describe('checking a model from the panel', () => {
     await run
     const ownedReadings = sent.filter((one) => one.path === paths.owned).length
     expect([panel.checking.checks.value.size, kind(panel), ownedReadings]).toEqual([0, `read for ${other}`, 2])
+  })
+})
+
+describe('giving a key in the panel', () => {
+  const addTokens = (sent: readonly Sent[]): Array<string | null> =>
+    sent.filter((one) => one.path === addPath).map((one) => new Headers(one.init.headers).get(csrfHeader))
+  const heldBy = (panel: SubscriptionsModel): readonly unknown[] => {
+    const view = panel.view.value
+    return view.kind === 'read' ? view.owned.accounts.map((account) => [account.id, account.held.kind]) : [view.kind]
+  }
+
+  it('sends a key with the token of the newest session, and reads the subscriptions again once it was stored', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedNothing(), ownedKey()],
+      [addPath]: [keyStored()],
+    })
+    await panel.load(sessionOf(person, 'first'))
+    await panel.load(sessionOf(person, 'second'))
+    panel.adding.open()
+    const kept = await panel.adding.add('claude_code', 'made-up-key')
+    expect([kept, addTokens(sent), heldBy(panel), panel.adding.view.value])
+      .toEqual(['dropped', ['second'], [['acct_key', 'key']], { kind: 'closed', stored: 'acct_key' }])
+  })
+
+  it('forgets the add of one person once it shows another', async () => {
+    const call = later()
+    const { panel, sent } = start({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedNothing(), ownedNothing()],
+      [addPath]: [call.answer],
+    })
+    await panel.load(sessionOf(person))
+    panel.adding.open()
+    const run = panel.adding.add('claude_code', 'made-up-key')
+    await panel.load(sessionOf(other))
+    call.give(keyStored())
+    const kept = await run
+    const ownedReadings = sent.filter((one) => one.path === paths.owned).length
+    expect([kept, panel.adding.view.value, kind(panel), ownedReadings]).toEqual(['dropped', { kind: 'closed', stored: null }, `read for ${other}`, 2])
   })
 })
 
@@ -542,11 +590,11 @@ describe('what the panel knows of each account', () => {
 
 describe('the panel', () => {
   const refused = { kind: 'refused', status: 503, reason: 'the files are being read again' } as const
-  const read = (owned: Extract<PanelView, { kind: 'read' }>['owned']): PanelView => ({
+  const read = (owned: Extract<PanelView, { kind: 'read' }>['owned'], takesKey = false): PanelView => ({
     kind: 'read',
     forUser: person,
     integrations: [
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey },
       { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
     ],
     owned,
@@ -578,13 +626,14 @@ describe('the panel', () => {
       ],
     })],
     // The first holds a key the server did not find, and the second has a removal left on it.
+    // Their subscription takes a key.
     ['key accounts', read({
       accounts: [
         { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, removal: null },
         { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, removal: 'key_not_removed' },
       ],
       runtimes: [],
-    })],
+    }, true)],
   ]
   const named = (...names: string[]) => views.map(([name]) => [name, names.includes(name) ? 1 : 0])
   /** The states with a subscription to connect. */
@@ -593,7 +642,7 @@ describe('the panel', () => {
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
     const model = {
-      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), removing: idleRemovals(), stop: vi.fn(),
+      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), stop: vi.fn(),
     } satisfies SubscriptionsModel
     return { container: render(html`<${SubscriptionsPanel} model=${model} />`).container, model }
   }
@@ -603,9 +652,10 @@ describe('the panel', () => {
     expect(await axe(drawn(view).container)).toHaveNoViolations()
   })
 
-  it('has one line a screen reader reads out in each state, and one more for connecting a subscription', () => {
+  it('has one line a screen reader reads out in each state, and one more for each way to connect a subscription', () => {
     expect(count('section > [role=status]')).toEqual(named(...views.map(([name]) => name)))
-    expect(count('.connect [role=status]')).toEqual(named(...connectable))
+    expect(count('#connect-steps > [role=status]')).toEqual(named(...connectable))
+    expect(count('#key-steps > [role=status]')).toEqual(named('key accounts'))
   })
 
   it('says a problem where a screen reader announces it only when a reading failed', () => {
@@ -619,8 +669,8 @@ describe('the panel', () => {
 
   it('offers to connect a subscription only once it read some the server offers', () => {
     expect(count('button[aria-controls=connect-steps]')).toEqual(named(...connectable))
-    // The card of an account has buttons of its own, counted below: the check, and the removal of a key account.
-    const own = count('.check button, .row .actions button')
+    // The other buttons are counted below: the check and the removal in the card of an account, and the one that opens the form of a key.
+    const own = count('.check button, .row .actions button, button[aria-controls=key-steps]')
     expect(count('button').map(([name, all], at) => [name, Number(all) - Number(own[at]?.[1])])).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session', ...connectable))
   })
 
@@ -634,6 +684,10 @@ describe('the panel', () => {
     if (view === undefined) throw new Error('no view of the key accounts')
     const rows = [...drawn(view).container.querySelectorAll('li.row')]
     expect(rows.map((row) => [row.querySelectorAll('.check button').length, row.querySelectorAll('.models, .check').length > 0])).toEqual([[1, true], [0, false]])
+  })
+
+  it('offers to give a key only while a subscription of the server takes one', () => {
+    expect(count('button[aria-controls=key-steps]')).toEqual(named('key accounts'))
   })
 
   it('offers the removal on each key account, with or without a removal left on it', () => {
@@ -713,6 +767,41 @@ describe('the panel', () => {
     })
     expect([panel.checking.checks.value.get('acct_1')?.kind, container.querySelector('.check button') === button, document.activeElement === button])
       .toEqual(['passed', true, true])
+  })
+
+  it('lists, in the form of a key, only the subscriptions that take one', async () => {
+    const { panel, container } = live({ [paths.integrations]: [offeredWithKey()], [paths.owned]: [ownedNothing()] })
+    await act(() => panel.load(sessionOf(person)))
+    await act(() => { panel.adding.open() })
+    const offeredToLogin = [...container.querySelectorAll('#connect-steps input[type=radio]')].length
+    await act(() => { panel.connecting.open() })
+    const radios = (steps: string): string[] => [...container.querySelectorAll<HTMLInputElement>(`#${steps} input[type=radio]`)].map((radio) => radio.value)
+    expect([offeredToLogin, radios('connect-steps'), radios('key-steps')]).toEqual([0, ['claude_code', 'codex'], ['claude_code']])
+  })
+
+  it('shows the card of the account a key was stored for, with the focus on the button that opened the form', async () => {
+    const { panel, container } = live({
+      [paths.integrations]: [offeredWithKey(), offeredWithKey()],
+      [paths.owned]: [ownedNothing(), ownedKey()],
+      [addPath]: [keyStored()],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    await act(() => { panel.adding.open() })
+    const field = container.querySelector<HTMLInputElement>('#key-value')
+    const form = container.querySelector('#key-steps form')
+    const submit = container.querySelector<HTMLButtonElement>('#key-steps button[type=submit]')
+    if (field === null || form === null || submit === null) throw new Error('no form of a key')
+    field.value = 'made-up-key'
+    submit.focus()
+    const before = panel.view.value
+    await act(async () => {
+      fireEvent.submit(form)
+      await vi.waitFor(() => { expect(panel.view.value).not.toBe(before) })
+    })
+    expect([
+      container.querySelectorAll('li.row').length, container.querySelector('#key-value'), container.innerHTML.includes('made-up-key'),
+      document.activeElement === container.querySelector('button[aria-controls=key-steps]'),
+    ]).toEqual([1, null, false, true])
   })
 
   /** Presses the remove button of the key account twice: it asks once more before it removes. */

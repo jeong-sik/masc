@@ -1861,7 +1861,9 @@ let test_turn () =
         in
         let restored = [ restore conversation; restore followed ] in
         let left = Filename.concat alice_records stopped :: restored in
-        let resume () = Server_keeper_conversation_purge.resume ~env ~zone ~base_path in
+        (* Through the one function a start calls, so a start that drops the
+           deletions of conversations fails here. *)
+        let resume () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
         let asked_before = purged () in
         (match
            Login.one_call_of

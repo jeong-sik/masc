@@ -417,8 +417,8 @@ let replacement_error : Replacement.error -> R.answer = function
     refused
       R.Service_unavailable_503
       ~code:"key_not_stored"
-      "The replacement was recorded, and the new key could not be stored on this server. The account \
-       has no key now. Send the key again."
+      "The replacement was recorded, and the new key could not be stored on this server. The key the \
+       account had is not used any more. Send the key again."
 ;;
 
 let replace ~person ~base_path ~provider_account_id ~body =

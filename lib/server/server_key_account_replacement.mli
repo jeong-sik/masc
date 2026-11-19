@@ -40,9 +40,12 @@ type error =
           ({!Authz_provider_account.replace_key}). *)
   | Key_not_stored
       (** The record went in and the key of its generation was not put in
-          place, or is not known to stay there. The account reads
-          [key_missing] until a later replacement goes through: the key
-          before is not read again. *)
+          place, or is not known to stay there. The folder of the keys of
+          the account was then removed, with the key before in it, so the
+          account reads [key_missing] until a later replacement goes
+          through. A folder that did not go is in the log of the server,
+          and what the account reads then is what a list of the accounts
+          says of its key. *)
 
 type replaced =
   { old_keys_removed : bool

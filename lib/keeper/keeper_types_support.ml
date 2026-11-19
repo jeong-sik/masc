@@ -245,17 +245,23 @@ let metrics_backup_number ~basename name =
     | Some _ | None -> None
   else None
 
+(* Whether a rotation renamed the file away or removed it. *)
+type rotation =
+  | Rotated
+  | Not_rotated
+
 (** Enforce retention when rotating. Work follows existing backup entries,
     rather than iterating through every possible configured backup slot. *)
-let maybe_rotate_file path =
+let rotate_file_when_full path =
   let max_bytes = (Env_config.KeeperMetrics.max_file_bytes ()) in
   let max_rotated = (Env_config.KeeperMetrics.max_rotated_files ()) in
-  if max_bytes <= 0 then ()
+  if max_bytes <= 0 then Not_rotated
   else
     match Fs_compat.file_size path with
-    | None -> ()
+    | None -> Not_rotated
     | Some size ->
-        if size >= max_bytes then begin
+        if size < max_bytes then Not_rotated
+        else begin
           let backups =
             Fs_compat.read_dir (Filename.dirname path)
             |> List.filter_map (metrics_backup_number ~basename:(Filename.basename path))
@@ -279,17 +285,33 @@ let maybe_rotate_file path =
               ignore (Fs_compat.rename_if_exists ~src
                 ~dst:(Printf.sprintf "%s.%d" path (number + 1)))) backups;
           if max_rotated = 0 then ignore (Fs_compat.unlink_if_exists path)
-          else ignore (Fs_compat.rename_if_exists ~src:path ~dst:(path ^ ".1"))
+          else ignore (Fs_compat.rename_if_exists ~src:path ~dst:(path ^ ".1"));
+          Rotated
         end
+
+let maybe_rotate_file path =
+  match rotate_file_when_full path with
+  | Rotated | Not_rotated -> ()
+
+(* The text of a JSONL row as it goes to disk, without its newline. *)
+let jsonl_row (json : Yojson.Safe.t) = utf8_repair_string (Yojson.Safe.to_string json)
 
 let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
-  let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
-  Fs_compat.append_lines path line
+  Fs_compat.append_lines path (jsonl_row json ^ "\n")
 
-(* The runtime history reads every Keeper's decision log, so a row written
-   moves it. *)
+(* The newest row of a Keeper's decision record is kept in memory
+   ([Keeper_row_facts]), and this is the record's one writer: it moves the
+   kept row over the row it wrote. The runtime history reads every Keeper's
+   decision log too, so a row written moves it. *)
 let append_decision_record config name json =
-  append_jsonl_line (keeper_decision_log_path config name) json;
+  let path = keeper_decision_log_path config name in
+  let row = jsonl_row json in
+  Keeper_row_facts.appending_decision ~path ~row (fun () ->
+    let rotation = rotate_file_when_full path in
+    Fs_compat.append_lines path (row ^ "\n");
+    match rotation with
+    | Rotated -> Keeper_row_facts.After_a_rotation
+    | Not_rotated -> Keeper_row_facts.To_the_file_there);
   Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
     Workspace_dataset_event.Runtime_metrics

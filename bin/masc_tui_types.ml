@@ -932,7 +932,7 @@ let workspace_input_identity_of_server = function
 ;;
 
 type event = {
-  timestamp: string;
+  at: float;  (** When the TUI noted it; drawn by [Masc_tui_value.Instant]. *)
   event_type: string;
   content: string;
 }
@@ -1268,7 +1268,6 @@ type msg_entry = {
   me_skill_block: Masc_tui_keeper_chat_transcript.skill_activity list;
       (** One turn's Skill invocations, for the pane to count on the row and
           unfold under the tool toggle. Empty on every other row. *)
-  me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
   me_execution_source: Masc_tui_keeper_chat_log.journal_source option;
@@ -3351,16 +3350,6 @@ type chat_schedule_proximity =
 
 let chat_schedule_soon_band_s = 3600.
 
-(* The local midnight that starts the day [at] falls on. [Unix.mktime] reads
-   the zone's own day, so a day that gains or loses an hour still starts at
-   its midnight. A breakdown it cannot turn back into an instant has no start
-   to give. *)
-let local_day_start at =
-  let day = Unix.localtime at in
-  match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
-  | start, _ -> Some start
-  | exception Unix.Unix_error _ -> None
-
 (* A row moves to the next band as the clock runs, with no new data: Later
    becomes Today at the start of the due day, both become Soon an hour before
    the due moment, and Soon becomes Elapsed at it. Each band notes the instant
@@ -3374,10 +3363,10 @@ let chat_schedule_proximity ~now = function
       if due -. now <= chat_schedule_soon_band_s then Schedule_soon
       else begin
         Masc_tui_value.Redraw.note_change_at (due -. chat_schedule_soon_band_s);
-        let today = Unix.localtime now and day = Unix.localtime due in
-        if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
-        else begin
-          (match local_day_start due with
+        match Masc_tui_value.Instant.day_of ~now due with
+        | Masc_tui_value.Instant.Same_day -> Schedule_today
+        | Masc_tui_value.Instant.Same_year | Masc_tui_value.Instant.Other_year -> begin
+          (match Masc_tui_value.Instant.day_start due with
            | Some start when start > now -> Masc_tui_value.Redraw.note_change_at start
            | Some _ | None -> ());
           Schedule_later
@@ -23800,8 +23789,7 @@ let keeper_log_rows (state : state) ~cols =
         (Masc.Tui_terminal_text.sanitize_terminal_text text)
       |> List.map (fun line -> tone, "  " ^ line) in
     let render_reading reading read_at =
-      let time = Unix.localtime read_at in
-      let stamp = Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.tm_min time.tm_sec in
+      let stamp = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) read_at in
       let refresh = if Masc_tui_fetched.in_flight state.keeper_execute_output
         then " · refreshing" else "" in
       let observed = text_rows Keeper_log_notice ("Execute output · observed " ^ stamp ^ refresh) in
@@ -23854,7 +23842,13 @@ let keeper_log_rows (state : state) ~cols =
     List.rev (keeper_log_snapshot state).entries
     |> List.concat_map (fun (entry : Tui_decode.log_entry) ->
       Masc_tui_observation_layout.log_entry_rows ~width
-        ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
+        ~time:(match Time_codec.parse_rfc3339_opt entry.le_ts with
+          | Some at ->
+              Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second
+                ~now:(Unix.gettimeofday ()) at
+          | None ->
+              Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime
+                entry.le_ts)
         entry
       |> List.map (fun line -> Keeper_log_fact, line)) in
   execute_rows @ diagnostics @ entries
@@ -26004,21 +25998,20 @@ let runtime_quota_cause_label ?(ko = false) = function
   | Runtime_quota_window.Usage_read ->
       if ko then "한도 소진 (사용량 조회)" else "quota spent (usage read)"
 
-(* A reset can be days ahead, so the day is part of the time. *)
-let runtime_quota_time at =
-  let tm = Unix.localtime at in
-  Printf.sprintf "%02d-%02d %02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min
+(* A moment on a runtime row, read against the wall clock when the row is
+   drawn: a reset days ahead carries its date, one today the clock alone. *)
+let runtime_moment_text at =
+  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) at
 
 (* When the rest ends. A stated reset is the provider's; without one the
    time is when this server calls the scope again. *)
 let runtime_quota_end_label ?(ko = false) = function
   | Runtime_quota_window.Reset_stated at ->
-      Printf.sprintf (if ko then "%s 초기화" else "resets %s") (runtime_quota_time at)
+      Printf.sprintf (if ko then "%s 초기화" else "resets %s") (runtime_moment_text at)
   | Runtime_quota_window.Observed_until at ->
       Printf.sprintf
         (if ko then "초기화 시각 없음, %s 다시 호출" else "no reset stated, called again %s")
-        (runtime_quota_time at)
+        (runtime_moment_text at)
 
 let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   Option.map
@@ -26032,17 +26025,16 @@ let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
    carries when it was seen instead of when it resets. *)
 let runtime_credential_refused_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   Option.map (fun at ->
-    let tm = Unix.localtime at in
-    Printf.sprintf (if ko then "인증 거절 (%02d-%02d %02d:%02d 관측)" else "credential refused (seen %02d-%02d %02d:%02d)")
-      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min)
+    Printf.sprintf (if ko then "인증 거절 (%s 관측)" else "credential refused (seen %s)")
+      (runtime_moment_text at))
     runtime.ro_credential_refused_at
 
 let runtime_rate_limit_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_rate_limited then None
   else Some (match runtime.ro_rate_limit_resets_at with
-    | Some at -> let tm = Unix.localtime at in
-        Printf.sprintf (if ko then "호출 제한 (%02d:%02d 재시도)" else "rate limited (retry %02d:%02d)")
-          tm.Unix.tm_hour tm.Unix.tm_min
+    | Some at ->
+        Printf.sprintf (if ko then "호출 제한 (%s 재시도)" else "rate limited (retry %s)")
+          (runtime_moment_text at)
     | None -> if ko then "호출 제한" else "rate limited")
 
 (* What the last failed attempt was, in the words the failure route uses. *)
@@ -26060,12 +26052,11 @@ let runtime_attempt_failure_word = function
    on its next cycle, every other Keeper tries it after the candidates that
    answered, and only an answer clears it. *)
 let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
-  let tm = Unix.localtime attempt.rfa_noted_at in
   Printf.sprintf
-    "%s at %02d:%02d, seen by %s; other Keepers try it after the ones that \
+    "%s at %s, seen by %s; other Keepers try it after the ones that \
      answered, until it answers"
     (runtime_attempt_failure_word attempt.rfa_failure)
-    tm.Unix.tm_hour tm.Unix.tm_min attempt.rfa_recorded_by
+    (runtime_moment_text attempt.rfa_noted_at) attempt.rfa_recorded_by
 
 let runtime_usage_label state runtime =
   let ko = state.ui_language = Lang_ko in
@@ -27873,9 +27864,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
              that does not parse is shown as the server wrote it. *)
           let local_minute iso = match Time_codec.parse_rfc3339_opt iso with
             | None -> plain iso
-            | Some at ->
-                let tm = Unix.localtime at in
-                Printf.sprintf "%02d-%02d %02d:%02d" (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+            | Some at -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
           let observed = local_minute snapshot.scs_observed_at_iso in
           let freshness =
             if kept
@@ -27887,10 +27876,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
               | None -> "시각 미확인"
-              | Some due ->
-                  let tm = Unix.localtime due in
-                  Printf.sprintf "%02d-%02d %02d:%02d 예정"
-                    (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+              | Some due -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now due ^ " 예정" in
             let reason label = function
               | None -> [label]
               | Some reason -> [label ^ ": " ^ plain reason] in
@@ -27935,9 +27921,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                       ~freshness ~runner:snapshot.scs_runner_status hold with
                     | Hold_current -> ""
                     | Hold_as_of checked ->
-                        let tm = Unix.localtime checked in
-                        Printf.sprintf " (%02d-%02d %02d:%02d 관측)"
-                          (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+                        Printf.sprintf " (%s 관측)" (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now checked) in
                   [fact ~label:"다음 회차 보류: " (Facts.Reading Schedule_pending) (wording ^ as_of)] in
             let title = match row.sch_payload_summary with
               | Some value -> value | None -> row.sch_schedule_id in

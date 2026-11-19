@@ -189,9 +189,6 @@ val section_cards :
 val cards_fit : width:int -> bool
 (** Whether {!section_cards} draws cards at [width]. *)
 
-val clock_text : now:float -> float -> string
-(** A time of day in the terminal's zone; a time on another day than [now]
-    carries its month and day. *)
 
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
 (** The value as a whole percent or a USD credit amount. A percent is

@@ -525,8 +525,8 @@ let serve_preview ~base_path ~store ~port github =
            stopped preview left end beside the routes, one after the other in
            one fiber, as at the start of the account server. *)
         Eio.Fiber.fork ~sw (fun () ->
-          Server_keeper_conversation_purge.resume ~env ~zone ~base_path;
-          Server_key_account_purge.resume ~zone ~base_path);
+          Server_key_account_purge.resume ~zone ~base_path;
+          Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
         Server_bootstrap_http.serve
           ~sw
           ~clock

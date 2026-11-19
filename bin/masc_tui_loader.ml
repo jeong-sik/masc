@@ -320,10 +320,7 @@ let load_goals_to_confirm (base_path : string) :
 
 (** Add an event to the TUI session log, which Metrics draws. *)
 let add_event (state : state) event_type content =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let ev = { timestamp; event_type; content } in
+  let ev = { at = Unix.gettimeofday (); event_type; content } in
   state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
 
 let record_observer_opened (state : state) ~session_id ~at =

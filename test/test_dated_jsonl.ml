@@ -2207,8 +2207,8 @@ let test_compare_month_entries () =
 
 (* ── facts in a process that does not write the stores ──── *)
 
-(* This executable never says [keep_facts_in_this_process]: it stands for a
-   process that reads stores another process appends to, as the TUI does.
+(* This executable never says [Fact_cell.keep_in_this_process]: it stands
+   for a process that reads stores another process appends to, as the TUI does.
    Each [read_fact] is the strict read, so a row that reached the file
    without this process's [append] is the next answer. *)
 let test_a_process_that_does_not_write_the_stores_keeps_no_fact () =

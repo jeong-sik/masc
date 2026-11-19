@@ -16,7 +16,7 @@ val select : event_id:string -> Masc.Keeper_memory_activity.t -> t option
 val kind_label : ko:bool -> Masc.Keeper_memory_activity.kind -> string
 (** Shared change word and icon for the table and chart. *)
 
-val transition_svg : ko:bool -> palette:Masc_tui_terminal_palette.t -> t -> string
+val transition_svg : ko:bool -> now:float -> palette:Masc_tui_terminal_palette.t -> t -> string
 (** Focus on the selected recorded transition: every prior fact, the change,
     and every successor, rendered with full wrapped claims, fact identifiers,
     optional transition reason, and deduplicated observation notes. Unknown
@@ -25,6 +25,7 @@ val transition_svg : ko:bool -> palette:Masc_tui_terminal_palette.t -> t -> stri
 
 val lineage_graph :
   ko:bool ->
+  now:float ->
   ?palette:Masc_tui_terminal_palette.t ->
   keeper_name:string ->
   t ->
@@ -33,10 +34,10 @@ val lineage_graph :
     component with full wrapped claims, fact retention statuses, transition
     reasons, and deduplicated observation notes. *)
 
-val mermaid : ko:bool -> t -> string
+val mermaid : ko:bool -> now:float -> t -> string
 (** Styled Mermaid fallback covering the connected lineage neighbourhood with
     full wrapped claims, deduplicated notes, and unknown-relation dashes. *)
 
-val transition_mermaid : ko:bool -> t -> string
+val transition_mermaid : ko:bool -> now:float -> t -> string
 (** Palette-independent fallback with the same selected-transition scope as
     [transition_svg]. Never expands the default view to connected history. *)

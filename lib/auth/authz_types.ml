@@ -47,6 +47,8 @@ module Key_generation = struct
   type t = int
 
   let first = 1
+  let next t = t + 1
+  let of_int value = if value >= first then Some value else None
   let to_int t = t
   let equal = Int.equal
 end

@@ -75,15 +75,12 @@ let ago ~now at =
 ;;
 
 let status_cells = 9
-let clock_cells = 11
+let clock_cells = Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
 let relative_cells = 12
 
-let clock_text = function
+let clock_text ~now = function
   | None -> Masc_tui_theme.Glyph.no_value
-  | Some at ->
-      let tm = Unix.localtime at in
-      Printf.sprintf "%02d-%02d %02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-        tm.Unix.tm_hour tm.Unix.tm_min
+  | Some at -> Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now at
 ;;
 
 (* A schedule that has not run reads [in 5m], or [late 5m] once its time has
@@ -150,7 +147,7 @@ let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
     ; Message_layout.fit_width status status_cells
     ; Ansi.reset
     ; " "
-    ; Message_layout.fit_width (clock_text due) clock_cells
+    ; Message_layout.fit_width (clock_text ~now due) clock_cells
     ; " "
     ; Message_layout.fit_width (relative_text ~now row due) relative_cells
     ; " "

@@ -282,7 +282,9 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     runs. A turn it lets through and a record then takes back does take the
     call: {!authorize} refuses it inside. By then a server has read the key
     file of a key account to make its runtime; no client is started with
-    the key.
+    the key. That order is the server's, not this module's:
+    lib/server/server_preview_keeper_turn.ml, [run], and the RFC of the key
+    accounts, 3.5, say it where it is decided.
     It gives nothing a client starts on: {!authorize} judges the request
     again inside the call, on the state of that time, with the account.
 

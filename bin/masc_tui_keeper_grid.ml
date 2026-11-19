@@ -99,20 +99,20 @@ let level_glyph ~peak value =
     levels.(max 0 (min (steps - 1) index))
 ;;
 
-let day_seconds = Masc_time_constants.day
-let half_day_seconds = day_seconds /. 2.
+let half_day_seconds = Masc_time_constants.day /. 2.
 let past_half_day_text = ">" ^ window_label ~slots:(Masc_time_constants.day_int / 2 / Pulse.slot_seconds)
 
-let clock_text ~localtime at =
-  let tm = localtime at in
-  Printf.sprintf "%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
-;;
-
+(* Five cells hold today's clock and no date, so a run due on another day
+   reads as the length until it. A clock alone read tomorrow's 20:25 as
+   tonight's. *)
 let due_text ~now ~localtime = function
   | Masc_tui_keeper_next_run.No_schedule -> ""
   | Masc_tui_keeper_next_run.Scheduled_at at ->
-      if at -. now < day_seconds then clock_text ~localtime at
-      else Masc_tui_value.Ongoing.Narrow.until ~now at
+      (match Masc_tui_value.Instant.day_of ~localtime ~now at with
+       | Masc_tui_value.Instant.Same_day ->
+           Masc_tui_value.Instant.detail_text ~localtime Masc_tui_value.Instant.To_minute ~now at
+       | Masc_tui_value.Instant.Same_year | Masc_tui_value.Instant.Other_year ->
+           Masc_tui_value.Ongoing.Narrow.until ~now at)
   | Masc_tui_keeper_next_run.Late_since _ -> Mark.grid_late_word
   | Masc_tui_keeper_next_run.Held_current _ -> Mark.grid_held_word
   | Masc_tui_keeper_next_run.Held_as_of _ -> Mark.grid_held_word ^ Mark.unknown_mark
@@ -169,13 +169,6 @@ let short_span seconds =
   else
     Printf.sprintf "%dd"
       (int_of_float (Float.round (float_of_int hours /. float_of_int hours_per_day)))
-;;
-
-let dated_clock_text ~now ~localtime at =
-  if now -. at < half_day_seconds then clock_text ~localtime at
-  else
-    let tm = localtime at in
-    Printf.sprintf "%02d-%02d %s" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday (clock_text ~localtime at)
 ;;
 
 let chain_attempts = 4

@@ -210,9 +210,10 @@ let peer_lines ~page_number { snapshot; next_sequence } =
     | None -> "No requests after this cursor in this read" in
   scope :: coverage @ (("< previous · " ^ next ^ " · r refresh/retry · R start over. Pages are separate observations; running and completed requests are not listed.") :: lines)
 
-let clock_text at =
-  let time = Unix.localtime at in
-  Printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+(* The row's moment is a column moment (RFC tui-one-screen-grammar §6.1):
+   the date joins the clock once the day differs, so the column is as wide as
+   the widest of those. *)
+let clock_cells = Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute
 
 module Inventory = Masc.Server_keeper_waiting_inventory
 
@@ -287,12 +288,15 @@ let describe_row ~now row =
     | Observation_unavailable -> Ok 1 in
   let* phase = row_phase ~now source row detail in
   let* since = optional_timestamp "since" row in
-  let clock = match since with Some at -> clock_text at ^ "  " | None -> "       " in
+  let clock = match since with
+    | Some at -> Printf.sprintf "%-*s  " clock_cells (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now at)
+    | None -> String.make (clock_cells + 2) ' ' in
   let* first_due = optional_timestamp "group_first_due_unix" detail in
   let* last_due = optional_timestamp "group_last_due_unix" detail in
   let span = match first_due, last_due with
     | Some first, Some last when count > 1 ->
-      Printf.sprintf " · due %s \xe2\x86\x92 %s" (clock_text first) (clock_text last)
+      Printf.sprintf " · due %s \xe2\x86\x92 %s"
+        (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now first) (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now last)
     | Some _, Some _ | None, None | Some _, None | None, Some _ -> "" in
   let timing = match phase with
     | Pending when source = Inventory.Event_queue_pending ->

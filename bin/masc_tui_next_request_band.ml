@@ -47,11 +47,11 @@ let rec origin_sentence ~safe_detail = function
         end_atom
 ;;
 
-(* A Unix epoch as a UTC clock reading, the day dropped: the band compares
-   moments within a session, not dates. *)
+(* A moment in the operator's zone, the date added once the day differs:
+   the band used to draw a UTC clock with the day dropped, so a rest ending
+   tomorrow read as one ending today. *)
 let clock epoch =
-  let seconds = int_of_float epoch mod 86_400 in
-  Printf.sprintf "%02d:%02d:%02dZ" (seconds / 3600) (seconds mod 3600 / 60) (seconds mod 60)
+  Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second ~now:(Unix.gettimeofday ()) epoch
 ;;
 
 let ordinal = function

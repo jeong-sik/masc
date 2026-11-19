@@ -664,17 +664,21 @@ let test_the_engine_graphs_sample_only_on_the_engine_view () =
    first, then the cause, then what to do. *)
 let session_width = 40
 
+(* A fixed instant, so every event is the same day as [session_now] in any
+   zone the test runs in and the clock beside it keeps one width. *)
+let session_now = 1_700_000_000.
+
 let session_log =
-  let event clock content =
-    { Types.timestamp = clock; event_type = "observer"; content } in
-  [ event "11:06:00"
+  let event minutes_ago content =
+    { Types.at = session_now -. (60. *. minutes_ago); event_type = "observer"; content } in
+  [ event 0.
       ("runtime event feed closed: the server refused the subscription because \
         the operator token expired; run masc login for this workspace and \
         press r to open the feed again")
-  ; event "11:05:00" "keeper alpha started"
-  ; event "11:04:00" "keeper beta paused by the operator"
-  ; event "11:03:00" "workspace declaration saved"
-  ; event "11:02:00" "approval queue read"
+  ; event 1. "keeper alpha started"
+  ; event 2. "keeper beta paused by the operator"
+  ; event 3. "workspace declaration saved"
+  ; event 4. "approval queue read"
   ]
 
 let rows_of (entry : Render_metrics.session_entry) = List.length entry.rows
@@ -693,9 +697,9 @@ let rec drop count list =
    take, and they and the count fit the room, unless the newest alone is
    taller. No older event would have fit as well. *)
 let check_session_room room =
-  let whole = Render_metrics.session_block ~width:session_width session_log in
+  let whole = Render_metrics.session_block ~now:session_now ~width:session_width session_log in
   let block =
-    Render_metrics.session_block ~width:session_width ~room session_log in
+    Render_metrics.session_block ~now:session_now ~width:session_width ~room session_log in
   let total = List.length whole.kept in
   check int "unbounded, nothing is left out" 0 whole.earlier;
   check int "every folded event is kept or counted" total
@@ -712,7 +716,7 @@ let check_session_room room =
       (rows_used block + rows_of (List.nth whole.kept (block.earlier - 1)) > room)
 
 let test_a_long_session_event_takes_the_rows_its_sentence_needs () =
-  let block = Render_metrics.session_block ~width:session_width session_log in
+  let block = Render_metrics.session_block ~now:session_now ~width:session_width session_log in
   let newest = List.nth block.kept (List.length block.kept - 1) in
   List.iter
     (fun row ->
@@ -727,7 +731,7 @@ let test_the_session_room_is_spent_in_rows_on_whole_events () =
 
 let test_the_newest_session_event_is_kept_when_taller_than_the_room () =
   let block =
-    Render_metrics.session_block ~width:session_width ~room:3 session_log in
+    Render_metrics.session_block ~now:session_now ~width:session_width ~room:3 session_log in
   check int "the earlier events are counted" 4 block.earlier;
   check bool "the newest is drawn whole past the room" true
     (match block.kept with

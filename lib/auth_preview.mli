@@ -125,9 +125,13 @@ val keeper_conversation_reader
       of the key is in the answer. An account whose removal did not go
       through has ["removal"]: [key_not_removed] or [home_not_removed], the
       stage that stayed, or [start_given_up]. Nothing spends such an
-      account, and its owner asks for the removal again.
+      account, and its owner asks for the removal again. An account whose
+      key was to be replaced, where the start of the replacement wrote its
+      intent and no record, has ["replacement"]: [start_given_up]. Nothing
+      spends it either, and its owner asks for the replacement again or
+      removes the account. An account with both has ["removal"] only.
     - The Runtimes they own ({!Authz_runtime.owned}) on the accounts shown
-      with no removal left on them, as
+      with neither on them, as
       [{"runtime_id":...,"provider_account_id":...,"model":...}]: the model
       of the binding of the account's template that makes the Runtime id
       ({!Runtime_account_runtime.binding_of}), the binding a turn of the

@@ -2795,7 +2795,8 @@ content. Read/refresh failures and progress continue to reflect the current
 reading; a prepared display does not make that reading fresh or complete.
 
 The Skill Usage pane opens with a summary box: observed catalog entries,
-distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
+distinct Keepers, and separate Triggered, Delivered, and Actions totals (호출,
+전달, 동작 on the Korean screen; table headers follow the screen language).
 These are observations from current Keeper sessions at exact Skill revisions,
 not lifetime totals or success rates. Each Keeper's usage is its own read.
 Missing ledgers make the totals partial and are called out beside the summary.

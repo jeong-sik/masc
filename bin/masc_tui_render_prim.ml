@@ -4742,6 +4742,11 @@ let config_pane_title_head ~room ~name ~reading =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
+let quiet_connection_tail (state : state) =
+  match reading_connection_notice state with
+  | None -> ""
+  | Some badge -> "  " ^ badge
+
 let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
   let name = here_path state ~path in
   let keys = config_pane_keys state in
@@ -4749,7 +4754,7 @@ let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : s
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  let tail = "  " ^ connection_badge state in
+  let tail = quiet_connection_tail state in
   (* The note is the one part of this row whose width a workspace chooses: it
      is the path of the file the pane is reading. Everything else either
      cannot give way or knows how to. The badge says whether the screen is a
@@ -4784,8 +4789,13 @@ let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : s
                |> List.filter_map (fun (label, active, _) ->
                       if active then Some label else None))
     in
-    let badge = surface_connection_badge state
-        ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
+    let badge =
+      match reading_connection_notice state with
+      | None -> ""
+      | Some _ ->
+          surface_connection_badge state
+            ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  "))
+    in
     detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
       ~after:[piece reading; piece keys; piece note] ~tail:badge
   else
@@ -7329,4 +7339,5 @@ let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
                | "" -> title
                | strip -> before ^ strip)
          })
-    ~id:"" ~after:("" :: after) ~tail:(connection_badge state)
+    ~id:"" ~after:("" :: after)
+    ~tail:(Option.value ~default:"" (reading_connection_notice state))

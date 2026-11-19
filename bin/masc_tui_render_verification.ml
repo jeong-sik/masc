@@ -140,7 +140,8 @@ let render_verification_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
+          (if reading_note = "" then "" else "  " ^ reading_note)
+          ^ quiet_connection_tail state
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
@@ -164,10 +165,9 @@ let render_verification_list (state : state) =
               (if state.ui_language = Lang_ko then " (전체 %s 중 0)" else " (0 of %s)")
               (Masc_tui_value.Count.grouped total)
         in
-        Printf.sprintf "%s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
-             ~after:("  " ^ connection_badge state))
-          (connection_badge state)
+        let badge = quiet_connection_tail state in
+        planning_workspace_title state ~cols ~tab:Planning_task_review ~window ~after:badge
+        ^ badge
   in
   (* The selected row, and how much of the server's list is loaded when the
      page holds less than all of it. *)
@@ -524,20 +524,8 @@ let verification_detail_pane (state : state) ~rows ~cols
       ~in_flight ~workspace_confirmed:(server_authority_ready state) ~width ~content_height
       ~display:(Masc_tui_portrait_view.current_display ())
   in
-  let after =
-    ((match armed_note with None -> [] | Some note -> [Theme.warn (), note])
-     @ (match state.verification_verdict_error with
-        | None -> []
-        | Some (Request_failed detail) ->
-          [Theme.bad (), say "  판정 실패: " "  Verdict action failed: " ^ Terminal_text.single_line detail]
-        | Some (Request_withdrawn _ as failure) ->
-          (* Not sent: the kept-back notice alone, without the failure
-             prefix (RFC §2). *)
-          [Theme.bad (), "  " ^ Terminal_text.single_line (verdict_failure_text state failure)]))
-    |> judgement_detail_rows ~width
-  in
   let evidence_first = List.length before in
-  let lines = before @ evidence @ verification_contract_lines state ~width request @ after in
+  let lines = before @ evidence @ verification_contract_lines state ~width request in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let pane_start = Buffer.length buf in
@@ -753,7 +741,8 @@ let render_harness_list (state : state) =
           | Some _ -> ""
         in
         let after =
-          Printf.sprintf "  %s  %s" reading_note (connection_badge state)
+          (if reading_note = "" then "" else "  " ^ reading_note)
+          ^ quiet_connection_tail state
         in
         Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
@@ -777,12 +766,11 @@ let render_harness_list (state : state) =
               fallbacks
           else ""
         in
-        Printf.sprintf "%s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_verdicts
-             ~window:
-               (Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
-             ~after:("  " ^ connection_badge state))
-          (connection_badge state)
+        let badge = quiet_connection_tail state in
+        planning_workspace_title state ~cols ~tab:Planning_verdicts
+          ~window:(Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
+          ~after:badge
+        ^ badge
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:header
@@ -1045,7 +1033,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        ~title:
          (harness_detail_heading state
             ~task_id:verdict.Masc.Tui_decode.hv_task_id
-            ~tail:(connection_badge state))
+            ~tail:(Option.value ~default:"" (reading_connection_notice state)))
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
             ~total:(List.length lines)));

@@ -1,7 +1,7 @@
 // Keeper Workspace — lane state section (#23507 PR-L1/L2, #29473 PR-3).
 // Consume-only surface over the keeper-scoped `keeper_waiting_inventory`
 // read model: per-keeper lane state (idle/busy/waiting/deferred) plus the
-// waiting rows behind it, in the shape of `prototypes/keeper-v2/lanes.jsx`:
+// waiting rows behind it:
 //
 // - sources grouped into the stage pipeline they enter the keeper through
 //   (external → schedule → queue → operator → keeper);

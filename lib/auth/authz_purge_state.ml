@@ -167,6 +167,6 @@ let apply t ~(author : Author.t) ~is_active ~account_owner (event : E.t) =
     end_account t account (Account_failed { failed_stage })
   | Author.System_maintenance, E.Purge_pending { target } ->
     Error (Started_by_the_maintenance target)
-  | ( (Author.Local_operator | Author.System_cron | Author.System_migration)
+  | ( (Author.Local_operator | Author.System_cron)
     , (E.Purge_pending _ | E.Purged _ | E.Purge_failed _) ) -> Error (Not_a_purge_author author)
 ;;

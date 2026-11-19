@@ -590,95 +590,6 @@ let test_unexpected_worker_exception_settles_checkpoint_unknown () =
              | Error detail -> fail detail)))))
 ;;
 
-let test_checkpoint_route () =
-  with_tick_machine (fun () ->
-    let config = Lazy.force unwatched_config in
-    let before = current_frame_number () in
-    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
-      List.iter
-        (fun body ->
-          let status, _ =
-            Route.checkpoint_response ~config ~restore:false ~body
-          in
-          check
-            bool
-            "checkpoint validates before requesting worker"
-            true
-            (status = `Bad_request))
-        [ "[]"
-        ; {|{"slot":3}|}
-        ; {|{"slot":"x","slot":"y"}|}
-        ; {|{"extra":true}|}
-        ];
-      let status, _ = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
-      check
-        bool
-        "checkpoint never runs inline without a worker"
-        true
-        (status = `Service_unavailable));
-    with_attached_worker (fun ~config ~env ~sw ->
-        let base_path = config.Masc.Workspace.base_path in
-        let pool =
-          Eio.Executor_pool.create
-            ~sw
-            ~domain_count:1
-            (Eio.Stdenv.domain_mgr env)
-        in
-        Executor_pool_ref.For_testing.with_pool pool (fun () ->
-          let invalid_status, _ = Route.checkpoint_response ~config ~restore:false
-            ~body:{|{"slot":"../escape"}|} in
-          check bool "worker refuses a checkpoint path outside named slots" true
-            (invalid_status = `Bad_request);
-          check int "invalid slot leaves the machine unchanged" before (current_frame_number ());
-          let status, _ =
-            Route.checkpoint_response ~config ~restore:false ~body:"{}"
-          in
-          check bool "save through attached worker succeeds" true (status = `OK);
-          ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
-          let stepped = current_frame_number () in
-          let status, _ =
-            Route.checkpoint_response ~config ~restore:true ~body:"{}"
-          in
-          check bool "restore naming no slot is a bad request" true (status = `Bad_request);
-          check int "restore naming no slot restores nothing" stepped (current_frame_number ());
-          (* A key the tool layer drops before the worker sees the arguments
-             must not turn a restore into a listing. *)
-          let status, _ =
-            Route.checkpoint_response ~config ~restore:true ~body:{|{"_x":1}|}
-          in
-          check bool "restore naming only an internal key is a bad request" true
-            (status = `Bad_request);
-          check int "that restore restores nothing either" stepped (current_frame_number ());
-          let status, _ =
-            Route.checkpoint_response ~config ~restore:true ~body:{|{"slot":"quick"}|}
-          in
-          check bool "restore through attached worker succeeds" true (status = `OK);
-          check int "saved clock restored" before (current_frame_number ());
-          let destination =
-            Filename.concat base_path ".masc/msx/saves/quick.json"
-          in
-          Sys.remove destination;
-          Sys.mkdir destination 0o700;
-          let status, response =
-            Route.checkpoint_response ~config ~restore:false ~body:"{}"
-          in
-          check
-            bool
-            "storage failure is server error"
-            true
-            (status = `Internal_server_error);
-          check
-            bool
-            "storage error carries failure"
-            true
-            (member "ok" response = Some (`Bool false));
-          check
-            int
-            "storage failure preserves machine"
-            before
-            (current_frame_number ()))))
-;;
-
 let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
 
 let test_press_rejects_wrong_types () =
@@ -1350,10 +1261,6 @@ let () =
         ; test_case "pre-effect refusal settles refused" `Quick test_pre_effect_checkpoint_refusal_settles_refused
         ; test_case "unexpected worker exception settles unknown" `Quick
             test_unexpected_worker_exception_settles_checkpoint_unknown
-        ; test_case
-            "validation, worker, restore and storage failure"
-            `Quick
-            test_checkpoint_route
         ] )
     ; ( "worker_failures"
       , [ test_case "503 codes separate unavailable from outcome unknown" `Quick

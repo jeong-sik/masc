@@ -464,9 +464,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              (Workspace.add_task_error_to_string err)))
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
-   over [Task_goal_assignment.set_task_goal] — the single validated backend
-   shared with the dashboard HTTP route, so neither surface re-implements the
-   precondition checks. All caller-input violations are [Workflow_rejection]. *)
+   over [Task_goal_assignment.set_task_goal], which holds the precondition
+   checks. All caller-input violations are [Workflow_rejection]. *)
 let handle_set_goal ~tool_name ~start_time ctx args =
   match Workspace.validate_expected_workspace ~config:ctx.config args with
   | Error error ->

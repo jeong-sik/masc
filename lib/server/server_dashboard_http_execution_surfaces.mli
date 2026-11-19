@@ -262,7 +262,7 @@ val dashboard_execution_cached_http_response :
     default snapshot. Unchanged observations retain its prepared payload;
     changed observations return their fresh JSON directly, without discarding
     it and repeating the reads in the fallback path. Neither case serializes
-    or compresses here. [None] means actor, fixture, full, force, initializing,
+    or compresses here. [None] means actor, full, force, initializing,
     stale/error, or publication changed during observation. Source identity
     and publication validity are checked again after the yielding observation. *)
 
@@ -285,7 +285,7 @@ val dashboard_execution_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 (** Implements the dashboard execution HTTP route.
-    Reads through the per-request actor / fixture /
+    Reads through the per-request actor /
     light-mode / force query params, then routes via
     [Dashboard_cache.get_or_compute_with_timeout] with
     a 120 s TTL.  Default light [force=true] bypasses the

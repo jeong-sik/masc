@@ -337,10 +337,6 @@ let add_routes ~sw ~clock router =
             Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
             |> Server_lane_inventory.to_json
             |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
-  |> Server_route.get (Server_route.Token_permission exact_lane_run_permission) "/api/v1/dashboard/exact-lane-run-retention" (fun _state _agent_name req reqd ->
-            Exact_lane_run_registry.startup_observation (Exact_lane_run_registry.global ())
-            |> Server_exact_lane_retention_observation.to_json
-            |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
   (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response
@@ -754,12 +750,6 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_routes_http_routes_keeper_gate.add_routes
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/proof" (fun state req reqd ->
-         let json =
-           dashboard_proof_http_json ~config:(Mcp_server.workspace_config state) req
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       )
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/schedule/prune" (fun state operator_name request reqd ->
            let config = Mcp_server.workspace_config state in
            match dashboard_schedule_prune_http_json ~config ~operator_name with
@@ -932,32 +922,6 @@ let add_routes ~sw ~clock router =
            | Ok (Candle_hold_release.Superseded { goal_id }) ->
              respond_json_value_with_cors ~status:`Conflict req reqd
                (`Assoc ["ok", `Bool false; "outcome", `String "superseded"; "goal_id", `String goal_id])))
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/measurements" (fun state actor req reqd ->
-           Http.Request.read_body_async reqd (fun body ->
-             let answer =
-               try
-                 let json = Yojson.Safe.from_string body in
-                 let config = Mcp_server.workspace_config state in
-                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                   Goal_measurement.record_json config ~actor json)
-               with Yojson.Json_error detail ->
-                 Error (Goal_measurement.Invalid_request ("invalid JSON: " ^ detail))
-             in
-             match answer with
-             | Error error ->
-                 let status =
-                   match error with
-                   | Goal_measurement.Invalid_request _ -> `Bad_request
-                   | Goal_measurement.Conflict _ -> `Conflict
-                   | Goal_measurement.Store_error _ -> `Service_unavailable
-                 in
-                 respond_json_value_with_cors ~status req reqd
-                   (Keeper_api_types.error_json ~ok:false
-                      (Goal_measurement.error_to_string error))
-             | Ok receipt ->
-                 respond_json_value_with_cors req reqd
-                   (`Assoc (("ok", `Bool true)
-                            :: Goal_measurement.receipt_fields receipt))))
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/goals/detail" (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
          match Server_auth.validate_read_workspace_precondition ~config req with
@@ -1270,64 +1234,6 @@ let add_routes ~sw ~clock router =
                  ~labeler:agent_name label;
                Http.Response.json_value ~request:req
                  (`Assoc [ "ok", `Bool true ]) reqd))
-  (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/eval-feed" (fun state req reqd ->
-         let config = Mcp_server.workspace_config state in
-         let base_path = config.base_path in
-         let agent_name = Server_utils.query_param req "agent_name" |> Option.map String.trim in
-         let limit =
-           Server_utils.int_query_param req "limit" ~default:10
-           |> max 1 |> min 100
-         in
-         (* Keep identity beside the selected read: the fleet always reads
-            one snapshot per agent, while an exact agent uses [limit]. *)
-         let scope, compute =
-           match agent_name with
-           | Some name when name <> "" ->
-             (`List [`String "agent"; `String name; `Int limit], fun () ->
-               let snapshots =
-                 Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
-               in
-               `Assoc [
-                 ("generated_at", `String (Masc_domain.now_iso ()));
-                 ("agent_name", `String name);
-                 ("count", `Int (List.length snapshots));
-                 ("snapshots", `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
-               ])
-           | Some _ | None ->
-             (`List [`String "all"], fun () ->
-               let agents = Dashboard_eval_feed.list_agents ~base_path in
-               let per_agent =
-                 List.map (fun name ->
-                   let snapshots =
-                     Dashboard_eval_feed.read_latest ~base_path
-                       ~agent_name:name ~limit:1
-                   in
-                   let latest =
-                     match snapshots with
-                     | s :: _ -> Dashboard_eval_feed.snapshot_to_json s
-                     | [] -> `Null
-                   in
-                   `Assoc [
-                     ("agent_name", `String name);
-                     ("latest", latest);
-                   ]
-                 ) agents
-               in
-               `Assoc [
-                 ("generated_at", `String (Masc_domain.now_iso ()));
-                 ("agent_count", `Int (List.length agents));
-                 ("agents", `List per_agent);
-               ])
-         in
-         let cache_key =
-           Server_dashboard_http_core_cache.dashboard_cache_key config
-             "eval_feed" (Yojson.Safe.to_string scope)
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ compute)
-       )
-
   (* ── Telemetry unified view ── *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry" handle_telemetry
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry/summary" (fun state req reqd ->
@@ -1342,18 +1248,6 @@ let add_routes ~sw ~clock router =
              ~timing (Mcp_server.workspace_config state)
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
-       )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/agent_core/telemetry/recent" (fun _state req reqd ->
-         let provider = agent_core_telemetry_provider_param req in
-         let limit = agent_core_telemetry_limit_param req in
-         let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/agent_core/telemetry/summary" (fun _state req reqd ->
-         let provider = agent_core_telemetry_provider_param req in
-         let limit = agent_core_telemetry_limit_param req in
-         let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
-         Http.Response.json_value ~compress:true ~request:req json reqd
        )
 
   (* ── Dashboard delete actions (extracted) ── *)

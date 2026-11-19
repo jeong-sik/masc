@@ -74,9 +74,6 @@ val dashboard_scheduled_automation_query_http_json :
     it delegates to {!dashboard_scheduled_automation_http_json}; an exact lookup
     reads the schedule store without populating a client-controlled cache key. *)
 
-val dashboard_proof_http_json :
-  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
-
 val dashboard_gate_resolve_http_json :
   ?workspace_config:Workspace.config ->
   base_path:string ->

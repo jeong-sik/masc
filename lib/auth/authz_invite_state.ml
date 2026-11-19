@@ -155,6 +155,6 @@ let apply t ~(author : Author.t) ~is_admin (event : E.t) =
     revoke t ~invite_id
   | Author.Authenticated ((Principal.Human _ | Principal.Service _) as principal), (E.Issued _ | E.Revoked _)
     -> Error (Author_is_not_an_admin principal)
-  | ( (Author.System_cron | Author.System_maintenance | Author.System_migration)
+  | ( (Author.System_cron | Author.System_maintenance)
     , (E.Issued _ | E.Revoked _) ) -> Error (Not_an_invite_author author)
 ;;

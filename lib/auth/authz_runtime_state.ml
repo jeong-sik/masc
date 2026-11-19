@@ -123,7 +123,6 @@ let apply t ~(author : Author.t) ~is_active ~account_owner (event : E.t) =
     Error (Not_a_human principal)
   | ( ( Author.Local_operator
       | Author.System_cron
-      | Author.System_maintenance
-      | Author.System_migration )
+      | Author.System_maintenance )
     , E.Made _ ) -> Error (Not_a_runtime_author author)
 ;;

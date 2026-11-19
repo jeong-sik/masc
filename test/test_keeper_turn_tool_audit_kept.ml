@@ -13,7 +13,9 @@
     2. A heartbeat row leaves it as it is, still without a file. A read of
        the files would find no turn row.
     3. The next turn row replaces it.
-    4. A removal that is told is read from the files again. *)
+    4. A removal that is told is read from the files again.
+    5. A held audit is answered without the fiber giving up its turn: the
+       read makes no call that waits, to the file system or anything else. *)
 
 open Alcotest
 open Masc
@@ -112,6 +114,46 @@ let test_a_removal_that_is_told_is_read_again () =
   check answer "a heartbeat is not a turn" (Ok None) (tools config)
 ;;
 
+(* How many turns a fiber that is ready to run gets while [read] is called
+   fifty times. Fibers of one domain take turns only where one of them
+   waits, so a read that never waits gives the fiber beside it none. A read
+   that asks the file system through Eio waits for a worker thread, and the
+   fiber beside it runs. *)
+let turns_of_a_fiber_beside read =
+  Eio.Switch.run
+  @@ fun sw ->
+  let turns = ref 0 in
+  let stop = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+    while not !stop do
+      incr turns;
+      Eio.Fiber.yield ()
+    done);
+  Eio.Fiber.yield ();
+  let before = !turns in
+  for _ = 1 to 50 do
+    read ()
+  done;
+  let during = !turns - before in
+  stop := true;
+  during
+;;
+
+(* Opening the store used to look whether the keepers directory was there,
+   through Eio, on every read. *)
+let test_a_held_audit_is_answered_without_waiting () =
+  with_workspace
+  @@ fun config ->
+  append config (turn "first_tool");
+  check answer "read and kept" (Ok (Some [ "first_tool" ])) (tools config);
+  check
+    int
+    "the fiber beside got no turn"
+    0
+    (turns_of_a_fiber_beside (fun () ->
+       check answer "held" (Ok (Some [ "first_tool" ])) (tools config)))
+;;
+
 (* The rows are appended in the server, the process that writes the store and
    keeps its facts in memory. *)
 let () =
@@ -124,6 +166,10 @@ let () =
             "a removal that is told is read again"
             `Quick
             test_a_removal_that_is_told_is_read_again
+        ; test_case
+            "a held audit is answered without waiting"
+            `Quick
+            test_a_held_audit_is_answered_without_waiting
         ] )
     ]
 ;;

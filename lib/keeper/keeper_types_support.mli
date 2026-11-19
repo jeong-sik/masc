@@ -27,8 +27,9 @@ val keeper_metrics_dir : Workspace.config -> string -> string
 
 val keeper_store_location :
   Workspace.config -> string -> Dated_jsonl.Store.Keeper.t -> Dated_jsonl.Store.location
-(** Where one of a keeper's date-split stores lives. Makes the keepers
-    directory when it is missing. *)
+(** Where one of a keeper's date-split stores lives. A path: the file system
+    is not looked at and nothing is made. The store's append makes its
+    directories. *)
 
 val execution_receipts_dirname : string
 (** Runtime subdirectory under each keeper directory for date-split execution

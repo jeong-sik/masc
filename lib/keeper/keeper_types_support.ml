@@ -20,10 +20,15 @@ let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir c
 let metrics_store_cache : (string, Keeper_metrics_storage.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
-(* Where one of a keeper's date-split stores lives. The keepers directory is
-   made first, as every store accessor here has always done. *)
+(* Where one of a keeper's date-split stores lives: a path, with no look at
+   the file system. A store's append makes its directories, and a read of a
+   store that is not there reads no row.
+
+   This made the keepers directory first, with an existence check each time.
+   In a fiber that check is an Eio [stat], which a worker thread answers
+   while the fiber waits for its next turn. Every read of a fact a store
+   keeps in memory ([Dated_jsonl.read_fact]) paid it to open the store. *)
 let keeper_store_location config name store =
-  ignore (keeper_dir_ config : string);
   Dated_jsonl.Store.keeper (Workspace.dated_store_root config) ~keeper:name store
 
 let keeper_metrics_storage config name =

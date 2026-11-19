@@ -3068,6 +3068,8 @@
   masc_tui_keeper_grid
   masc_tui_keeper_strip
   masc_tui_keeper_verdict
+  ; render_keepers' Terminal tab says its words in the screen's language.
+  masc_tui_say
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

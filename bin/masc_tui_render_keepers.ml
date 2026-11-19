@@ -3242,6 +3242,15 @@ type terminal_drawing = { terminal_rows : string list; terminal_status : string 
 
 let terminal_drawing (state : state) ~width =
   let module Execute_terminal = Masc_tui_execute_terminal in
+  let module Say = Masc_tui_say in
+  (* The tab's own words take the screen's language here, once. *)
+  let say =
+    Say.render
+      (match state.ui_language with
+       | Lang_ko -> Say.Ko
+       | Lang_en -> Say.En)
+  in
+  let text ~ko ~en = say (Say.both ~ko ~en) in
   let hold = Masc_tui_types.keeper_terminal_hold state in
   let live = keeper_execute_view state in
   let observation = match hold with
@@ -3262,7 +3271,10 @@ let terminal_drawing (state : state) ~width =
         List.map terminal_line_of_execute_line snapshot.kes_lines in
   let drawn_rows (reading : keeper_execute_reading) =
     match reading with
-    | Keeper_execute_none -> note "No Execute output observed in this server process."
+    | Keeper_execute_none ->
+        note
+          (text ~ko:"이 서버 프로세스에서 본 Execute 출력 없음"
+             ~en:"No Execute output observed in this server process.")
     | Keeper_execute_snapshot snapshot ->
         let rows = Execute_terminal.rows (lines_of reading) in
         let tagged = Execute_terminal.tagged rows in
@@ -3300,15 +3312,19 @@ let terminal_drawing (state : state) ~width =
             | Outcome (phase, outcome) ->
                 let what = match phase with
                   | Execute_terminal.Command -> ""
-                  | Gate_observation -> "gate observation " in
+                  | Gate_observation -> text ~ko:"Gate 관측 " ~en:"gate observation " in
                 (match outcome with
-                 | Execute_terminal.Result_unknown -> Theme.warn (), what ^ "result unknown"
-                 | Request_not_sent -> Theme.warn (), what ^ "request not sent"
-                 | Observation_ended -> Theme.recede (), what ^ "ended")
+                 | Execute_terminal.Result_unknown ->
+                     Theme.warn (), what ^ text ~ko:"결과 알 수 없음" ~en:"result unknown"
+                 | Request_not_sent ->
+                     Theme.warn (), what ^ text ~ko:"요청 보내지 않음" ~en:"request not sent"
+                 | Observation_ended -> Theme.recede (), what ^ text ~ko:"끝남" ~en:"ended")
             | Rejected { why; reason } ->
                 Theme.bad (),
-                "rejected: " ^ why ^ (match reason with Some r -> " (" ^ r ^ ")" | None -> "")
-            | Unrecognized text -> Theme.recede (), "status " ^ text in
+                text ~ko:"거절: " ~en:"rejected: " ^ why
+                ^ (match reason with Some r -> " (" ^ r ^ ")" | None -> "")
+            | Unrecognized status_text ->
+                Theme.recede (), text ~ko:"상태 " ~en:"status " ^ status_text in
           wrapped (tag row ^ tone ^ "\xc2\xb7 " ^ sanitize label) in
         let drawn (row : Execute_terminal.row) =
           match row.kind with
@@ -3330,21 +3346,32 @@ let terminal_drawing (state : state) ~width =
         let running = List.filter (fun (stream : keeper_execute_stream) ->
           not (List.mem stream.kes_id started)) snapshot.kes_active in
         (if snapshot.kes_first_seq > 1 then
-           note (Printf.sprintf "Earlier output is no longer kept (before sequence %d)."
-                   snapshot.kes_first_seq)
+           note
+             (text
+                ~ko:(Printf.sprintf "앞선 출력은 보관하지 않음 (순번 %s 이전)"
+                       (Masc_tui_value.Count.grouped snapshot.kes_first_seq))
+                ~en:(Printf.sprintf "Earlier output is no longer kept (before sequence %s)."
+                       (Masc_tui_value.Count.grouped snapshot.kes_first_seq)))
          else [])
         @ (if snapshot.kes_lines_omitted > 0 then
-             note (Printf.sprintf "%d older rows are not in this view." snapshot.kes_lines_omitted)
+             note
+               (text
+                  ~ko:(Printf.sprintf "이전 %s줄은 이 보기에 없음"
+                         (Masc_tui_value.Count.grouped snapshot.kes_lines_omitted))
+                  ~en:(Printf.sprintf "%s older rows are not in this view."
+                         (Masc_tui_value.Count.grouped snapshot.kes_lines_omitted)))
            else [])
         @ List.concat_map (fun (stream : keeper_execute_stream) ->
-            note ("running: " ^ stream.kes_command)) running
+            note (text ~ko:"실행 중: " ~en:"running: " ^ stream.kes_command)) running
         @ List.concat_map drawn rows in
   let rows = match observation with
-    | Masc_tui_fetched.Absent -> note "Execute output has not been read."
-    | Loading -> note "Reading Execute output\xe2\x80\xa6"
+    | Masc_tui_fetched.Absent ->
+        note (text ~ko:"Execute 출력을 아직 읽지 않음" ~en:"Execute output has not been read.")
+    | Loading -> note (text ~ko:"Execute 출력 읽는 중\xe2\x80\xa6" ~en:"Reading Execute output\xe2\x80\xa6")
     | Failed detail ->
         wrapped (Theme.bad () ^ sanitize
-          ("Execute output unavailable: " ^ keeper_execute_failure_detail detail))
+          (text ~ko:"Execute 출력 없음: " ~en:"Execute output unavailable: "
+           ^ keeper_execute_failure_detail detail))
     | Ready (reading, _) | Stale ((reading, _), _) -> drawn_rows reading in
   (* The live stream can stop while a historical view is held. Put recovery
      in the fixed status row, leaving the output and its scroll math alone. *)
@@ -3361,14 +3388,24 @@ let terminal_drawing (state : state) ~width =
         Execute_terminal.unseen ~seen:(lines_of frozen.ktf_reading) ~latest:(lines_of live_reading)
     | (Execute_terminal.Paused _ | Execute_terminal.Following), (Some _ | None) -> 0 in
   let mode, mode_facts = match hold with
-    | Execute_terminal.Following -> "following", []
+    | Execute_terminal.Following -> text ~ko:"따라가는 중" ~en:"following", []
     | Paused _ ->
-        "paused", [ Message_layout.count_noun newer "newer row"; "End:follow" ] in
+        text ~ko:"멈춰 둠" ~en:"paused",
+        [ text
+            ~ko:(Printf.sprintf "새 줄 %s개" (Masc_tui_value.Count.grouped newer))
+            ~en:(Message_layout.count_noun newer "newer row")
+        ; text ~ko:"End:따라가기" ~en:"End:follow" ] in
   let facts = match observation with
     | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
     | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
-        [ (if snapshot.kes_active_count > 0 then Printf.sprintf "%d active" snapshot.kes_active_count
-           else if snapshot.kes_closed then "closed" else "state unknown")
+        [ (if snapshot.kes_active_count > 0 then
+             text
+               ~ko:(Printf.sprintf "실행 중 %s개"
+                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
+               ~en:(Printf.sprintf "%s active"
+                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
+           else if snapshot.kes_closed then text ~ko:"끝남" ~en:"closed"
+           else text ~ko:"상태 알 수 없음" ~en:"state unknown")
         ; Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) observed_at ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in
@@ -3377,25 +3414,46 @@ let terminal_drawing (state : state) ~width =
     | Masc_tui_fetched.Stale (_, Execute_stream_stopped _) when Option.is_some stopped -> []
     | Masc_tui_fetched.Stale
         (_, ((Execute_stream_stopped _ | Execute_read_failed _ | Execute_stream_retrying _) as detail)) ->
-        [ Theme.bad () ^ "stale: " ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
+        [ Theme.bad () ^ text ~ko:"오래된 화면: " ~en:"stale: "
+          ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
     | Ready _ | Absent | Loading | Failed _ -> [] in
-  let status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset
+  (* A stopped stream has nothing to follow, so "following" beside "stream
+     stopped" would say two opposite things. A held view keeps its word: it
+     still shows what was read before the stop. *)
+  let shown = match stopped, hold with
+    | Some _, Execute_terminal.Following -> facts
+    | Some _, Execute_terminal.Paused _ | None, (Execute_terminal.Following | Paused _) ->
+        mode :: facts in
+  let status = Theme.recede () ^ String.concat " \xc2\xb7 " shown ^ Ansi.reset
     ^ String.concat "" (List.map (fun part -> " \xc2\xb7 " ^ part) stale) in
   let status = match stopped with
     | None -> status
     | Some (reason, detail) ->
       let cause = match reason with
         | Masc_tui_execute_stream_job.Http_status status -> Printf.sprintf "HTTP %d" status
-        | Unattested_response _ -> "unattested"
-        | Invalid_stream_response _ -> "invalid stream"
-        | Unexpected_error -> "error" in
-      let prefix = "Retry[] " ^ cause in
+        | Unattested_response _ -> text ~ko:"확인 안 된 응답" ~en:"unattested"
+        | Invalid_stream_response _ -> text ~ko:"잘못된 스트림" ~en:"invalid stream"
+        | Unexpected_error -> text ~ko:"오류" ~en:"error" in
+      (* A stopped stream stays stopped while the tab is open: the stream plan
+         keeps it for the same key. Leaving the tab ends it and coming back
+         opens a new one, so the row says that instead of naming a retry key
+         there is none of. *)
+      let prefix = text ~ko:"연결 멈춤: " ~en:"stream stopped: " ^ cause in
+      let reopen = text ~ko:"탭을 다시 열면 다시 연결" ~en:"reopen the tab to reconnect" in
       let lead = Theme.bad () ^ prefix ^ Ansi.reset in
       (* A truncation mark consumes a cell. At exactly the prefix width,
          leave the prefix whole instead of cutting its last character. *)
       if width <= Message_layout.display_width prefix then lead
-      else lead ^ " \xc2\xb7 " ^ status
-        ^ " \xc2\xb7 " ^ Theme.bad () ^ sanitize detail ^ Ansi.reset in
+      else
+        (* With no reading the body's first row already carries the detail. *)
+        let detail_part = match observation with
+          | Masc_tui_fetched.Failed _ -> []
+          | Absent | Loading | Ready _ | Stale _ ->
+              [ Theme.bad () ^ sanitize detail ^ Ansi.reset ] in
+        String.concat " \xc2\xb7 "
+          ([ lead; Theme.recede () ^ reopen ^ Ansi.reset ]
+           @ (if shown = [] then [] else [ status ])
+           @ detail_part) in
   { terminal_rows = rows; terminal_status = status }
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols

@@ -166,7 +166,7 @@ let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
 (* One entry for each store directory, under the name the file system gives
-   the directory ([Store.directory_name]): the mutex its writers take and the
+   the directory ([File_system_named]): the mutex its writers take and the
    facts kept in memory about it. A handle holds no entry: it asks for its
    store's each time it writes, prunes or reads a fact. The handles of a
    Keeper's stores are kept for the life of the process, and an entry chosen
@@ -181,108 +181,34 @@ type entry =
   ; kept : kept list Atomic.t
   }
 
-let registry : (string, entry) Hashtbl.t = Hashtbl.create 16
-let registry_mu = Stdlib.Mutex.create ()
+let registry : entry File_system_named.t =
+  File_system_named.create (fun () ->
+    { mutex = Cross_context_mutex.create (); kept = Atomic.make [] })
 
-let entry_named name =
-  Stdlib.Mutex.protect registry_mu (fun () ->
-    match Hashtbl.find_opt registry name with
-    | Some entry -> entry
-    | None ->
-      let entry = { mutex = Cross_context_mutex.create (); kept = Atomic.make [] } in
-      Hashtbl.add registry name entry;
-      entry)
-
-module Spellings = Map.Make (String)
-
-(* The entry of each spelling whose directory existed when the file system
-   was asked. A directory that exists keeps its name until it is removed, so
-   each spelling costs the system calls once and a write or a fact read makes
-   none after that. A spelling whose directory does not exist yet is asked
-   again each time: its answer changes when the directory is made.
-
-   [removals] counts the times store directories were removed by code outside
-   this module ([directories_removed]). A removal empties the map, and an
-   answer the file system gave before a removal is not remembered after it. *)
-type remembered =
-  { removals : int
-  ; of_existing : entry Spellings.t
-  }
-
-let remembered : remembered Atomic.t =
-  Atomic.make { removals = 0; of_existing = Spellings.empty }
-
-let rec remember_existing ~removals spelling entry =
-  let now = Atomic.get remembered in
-  if now.removals = removals
-     && not
-          (Atomic.compare_and_set
-             remembered
-             now
-             { now with of_existing = Spellings.add spelling entry now.of_existing })
-  then remember_existing ~removals spelling entry
-
-(* The entry of a location, and what the answer rests on: whether the
-   directory existed when it was given, and the removals counted before it. *)
-type resolved =
-  { entry : entry
-  ; existed : bool
-  ; removals : int
-  }
-
-let resolve location =
-  let spelling = Store.absolute_dir location in
-  let seen = Atomic.get remembered in
-  match Spellings.find_opt spelling seen.of_existing with
-  | Some entry -> { entry; existed = true; removals = seen.removals }
-  | None ->
-    (match Store.directory_name location with
-     | Store.Existing name ->
-       let entry = entry_named name in
-       remember_existing ~removals:seen.removals spelling entry;
-       { entry; existed = true; removals = seen.removals }
-     | Store.Not_yet name ->
-       { entry = entry_named name; existed = false; removals = seen.removals })
-
-let store_mutex t = (resolve t.location).entry.mutex
+let resolve location = File_system_named.resolve registry (Store.absolute_dir location)
+let store_mutex t = (resolve t.location).File_system_named.entry.mutex
 
 let forget_kept entry =
   List.iter (fun (Kept (_, cell)) -> Fact_cell.forget cell) (Atomic.get entry.kept)
 
 (* After a change of the store's files made under [resolved.entry]: the
-   directory may by now be another entry's. A directory that did not exist
-   when the entry was chosen was made by the change, and another spelling can
-   have made it first under another name; a directory removed since and made
-   again can have another name too. The change then went by that entry's
-   cells unseen, so they are forgotten. *)
+   directory may by now be another entry's, and the change then went by that
+   entry's cells unseen ([File_system_named.another_entry_now]). *)
 let forget_kept_of_the_directory resolved location =
-  if not (resolved.existed && (Atomic.get remembered).removals = resolved.removals)
-  then begin
-    let now = resolve location in
-    if now.entry != resolved.entry
-    then begin
-      forget_kept now.entry;
-      forget_kept resolved.entry
-    end
-  end
+  match
+    File_system_named.another_entry_now registry resolved (Store.absolute_dir location)
+  with
+  | None -> ()
+  | Some now ->
+    forget_kept now;
+    forget_kept resolved.File_system_named.entry
 
 (* Store directories were removed by code outside this module. Every
    remembered name and every kept fact goes: which directories went is not
    looked at, and neither is whether the removal succeeded. *)
 let directories_removed () =
-  let rec forget_names () =
-    let now = Atomic.get remembered in
-    if not
-         (Atomic.compare_and_set
-            remembered
-            now
-            { removals = now.removals + 1; of_existing = Spellings.empty })
-    then forget_names ()
-  in
-  forget_names ();
-  Stdlib.Mutex.protect registry_mu (fun () ->
-    Hashtbl.fold (fun _ entry entries -> entry :: entries) registry [])
-  |> List.iter forget_kept
+  File_system_named.removed registry;
+  List.iter forget_kept (File_system_named.entries registry)
 
 let open_store ?max_bytes location =
   let base_dir = Store.dir location in
@@ -1090,13 +1016,13 @@ let render entry json =
    way the directory may have turned out to be another entry's. *)
 let changing_files t change =
   let resolved = resolve t.location in
-  match change resolved.entry with
+  match change resolved.File_system_named.entry with
   | result ->
     forget_kept_of_the_directory resolved t.location;
     result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    forget_kept resolved.entry;
+    forget_kept resolved.File_system_named.entry;
     forget_kept_of_the_directory resolved t.location;
     Printexc.raise_with_backtrace exn backtrace
 
@@ -2711,7 +2637,7 @@ let read_fact t fact =
       | Ok held -> Fact_cell.Read_not_kept held.value
       | Error error -> Fact_cell.Read_failed error)
     else (
-      let cell = cell_of_entry (resolve t.location).entry fact in
+      let cell = cell_of_entry (resolve t.location).File_system_named.entry fact in
       match Fact_cell.held cell with
       | Some held -> Fact_cell.Held held.value
       | None ->
@@ -2739,8 +2665,7 @@ module For_testing = struct
   let cross_context_mutex = store_mutex
 
   let in_registry location =
-    let (Store.Existing name | Store.Not_yet name) = Store.directory_name location in
-    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.mem registry name)
+    File_system_named.has_entry registry (Store.absolute_dir location)
 
   let after_row fact ~value ~newest ~row ~written =
     let place (month_dir, day_file) = { month_dir; day_file } in

@@ -91,23 +91,6 @@ val dir : location -> string
 val absolute_dir : location -> string
 (** {!dir}, joined to the working directory when it is relative. *)
 
-type directory_name =
-  | Existing of string
-      (** Something is at {!dir}. This is the name the file system gives it
-          ([realpath]): symbolic links are followed and each piece is the
-          directory entry's own name, so on a file system that folds letter
-          case [keepers/Alpha] and [keepers/alpha] get one name. Two
-          locations are one directory exactly when they get the same name. *)
-  | Not_yet of string
-      (** Nothing is at {!dir}. The nearest ancestor that exists is named by
-          the file system and the pieces below it are as spelled. The answer
-          can change once the directory is made, for example when another
-          spelling makes it first. *)
-
-val directory_name : location -> directory_name
-(** Ask the file system what it calls the store's directory. This makes
-    system calls, one for each piece of the path. *)
-
 val of_location : location -> t
 (** The store the location was made for. *)
 

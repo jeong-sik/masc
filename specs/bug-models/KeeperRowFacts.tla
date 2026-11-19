@@ -72,7 +72,7 @@
 \*                                        and nobody goes over the cells
 \*
 \* Out of model: which registry entry a spelling of a directory gets
-\* (Store.directory_name), a clock that goes back (after_row's check of the
+\* (File_system_named.name), a clock that goes back (after_row's check of the
 \* newest file, covered by test_dated_jsonl_kept_facts), and progress.
 
 EXTENDS Naturals, Sequences, FiniteSets

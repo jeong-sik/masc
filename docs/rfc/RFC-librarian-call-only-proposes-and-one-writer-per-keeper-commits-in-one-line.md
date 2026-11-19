@@ -381,6 +381,7 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 두 번 드는 것은 셋뿐이다. 지우기가 남긴 System 메시지(§5.6)가 하나다. 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이가 둘이다. 알리지 않고 줄어든 head 가 그대로 둔 앞부분이 셋이다(§5.2). 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
 
 단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 메시지가 그다음이다.
+보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, Agent-Core 메시지(slice 순서), official-client history 행, internal 행이다.
 항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
 순서는 줄이 정한다. 그래서 bundle 하나가 없어지거나 돌아와도 번호가 밀리지 않는다.
 
@@ -400,9 +401,12 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 질문을 만들다가 내용이 없는 것을 알게 되면 있는 항목만 읽고, 없는 것은 반영 줄에 적는다.
 
 ```ocaml
-type missing_part =
-  | Bundle of Sha256.t | History_bytes | Internal_bytes | Chat_bytes | External_rows
-  | Undecodable_fragment_line                    (* 각각 자기가 대신하는 항목 번호를 같이 싣는다 *)
+type range = { from : int; until : int }      (* 두 끝자리의 값: 바이트, 외부 저장소는 행 *)
+type missing_part =                             (* 줄이 부르는 대로 부른다 *)
+  | Bundle of slice | History_bytes of range | Internal_bytes of range | Chat_bytes of range
+  | External_rows of range
+  | Undecodable_history_line of { offset : int } | Undecodable_internal_line of { offset : int }
+  | Undecodable_external_row of { row : int }
 
 type input_fault =
   | Line_unreadable of { offset : int }               (* 해석되지 않는 줄이고, 그 앞에 항목이 든 단위가 없다 *)

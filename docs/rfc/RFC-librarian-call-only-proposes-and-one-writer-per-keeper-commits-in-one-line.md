@@ -673,11 +673,12 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 
 ```ocaml
 type slot_key = { id : string; target : string; window : int; reserve : int option }
-  (* lane 값이 푼 slot. reserve 는 보내기 전 세기가 쓴 출력 몫이고, 세지 않는 slot 은 None 이다. 하나라도 바뀌면 다른 key 다 *)
+  (* lane 값이 푼 slot. reserve 는 lane 이 선언한 출력 몫 R 이고, 선언이 없으면 None 이다. 하나라도 바뀌면 다른 key 다 *)
 type judged = { question : Question_id.t; facts : (slot_key * size_fact) list }
 type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞 항목의 두 질문 *)
 ```
 
+- `reserve` 는 slot 마다 다르지 않다. 보내기 전에 세는 slot 은 R 로 세고, 세지 않는 provider 도 입력과 `max_tokens` 의 합으로 창을 잰다. 그래서 R 이 바뀌면 모든 slot 의 key 가 바뀌고 크기 사실을 다시 묻는다.
 - 기억하는 것은 한 항목짜리 질문에 대한 `Refused (Sized _)` 뿐이다.
   - 한 항목보다 넓은 질문의 거절은 기억하지 않는다. 바로 폭을 줄이므로 그 질문을 다시 묻지 않는다.
   - `Unsized` 는 기억하지 않는다. 400 은 크기를 말하지 않고, provider 는 지나가는 일(다 쓴 quota)도 400 으로 알린다. 그 slot 에는 pulse 마다 다시 묻는다. 400 이면 요청 하나가 들고 생성은 없다. 모델이 내용을 거절한 stop reason 이면 생성도 하나 든다.
@@ -1058,6 +1059,7 @@ and ended = Read_ended of read_result | Room_ended of room_result
 - `Stopped` 로 가면 가던 묻기를 취소한다. 멈췄다는 줄은 쓰지 않는다. boot 가 디스크에서 다시 계산한다.
 
 **선언 변경.** lane 값은 질문 쪽(프롬프트, 답 schema, 출력 몫, thinking)과 slot 목록이다. slot 은 풀린 창까지 값에 든다.
+창을 풀 수 없는 slot 이 하나라도 있으면 lane 값이 없다(`Window_unknown {slot}`). 선언이 없는 것과 같이 다룬다(W1). 어느 slot 인지는 로드 오류가 말한다. 창은 binding 의 `max-context` 선언에서 온다(§18.1).
 
 - 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 파일이 다시 게시될 때마다 이 사건이 온다.
 - 질문 쪽이 바뀌거나 lane 이 켜지고 꺼지면 가던 묻기를 취소한다. 옛 질문으로 만든 것은 반영되지 않는다.
@@ -1831,7 +1833,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3a3b3 | 기록하기 한 번: 꼬리 읽기, head 읽기, 끝자리 잡기, `plan`, 앞 segment 읽기, 덧붙임을 잇는다. 끝이 달라졌으면 꼬리부터 다시 한다 | 실제 파일과 저장소의 저장 함수로 시험한다. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). head 가 가진 턴보다 긴 범위는 segment 를 읽어 가리킨다. 줄어든 head 는 reset 뒤에 처음부터 실린다. 수로 보이지 않는 head 교체는 옛 수까지의 메시지를 싣지 않는다(§22.4). 끊긴 덧붙임이 남긴 조각 뒤에도 다음 줄이 써진다. 읽지 못한 head 로는 줄을 쓰지 않는다 |
 | L3a3b4a | 턴이 자기 줄을 쓴다. 받아들일 때 `Opened`, 끝날 때 `Closed` 다. 두 줄을 쓰는 곳은 하나다(`Keeper_turn_log_turn.around`). 옛 경계 파일 옆에 쓴다. 닫는 저장이 한 일을 턴이 끝까지 들고 간다. 카운터 `turn_log_append_failed` | 끝나는 길마다 `Closed` 가 정확히 하나다. 길은 돌려줌, 예외, 취소다. 줄을 못 써도 턴의 답과 예외가 그대로다. 실패한 저장은 `Save_failed`, 쓰지 않은 저장은 `Stale_save` 로 실린다 |
 | L3a3b4b | 받아들임은 head 의 열린 메시지를 닫지 않는다. §5.2 와 모델(`LibrarianTurnLog`)을 그렇게 고친다. 코드는 L3a3b4a 그대로다. 턴 앞에서 head 에 열린 메시지를 두는 제품 경로가 있어서다. Keeper 만들기의 첫 저장, 멈춘 턴을 잇는 저장(gate, checkpoint, runtime), 입력을 기다린 답의 저장이다. 받아들임이 닫으면 이어 가는 턴의 메시지가 Task 없이 실린다 | 모델의 정상 설정이 모두 통과한다. 받아들임이 닫는다는 규칙에 기대던 설정과 속성이 없어진다. 열린 메시지는 그것을 닫은 저장의 단위에 든다 |
-| L3a3b4c | 프로세스 시작 단계. checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 돈다. 열린 메시지를 닫고 `Closed {Process_exited}` 나 `Log_started` 를 쓴다 | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 줄을 못 써도 프로세스 시작이 그대로 간다 |
+| L3a3b4c | 프로세스 시작 단계(`Keeper_turn_log_process_start`). checkpoint 꼬리 복구 뒤, Keeper 턴 앞에서 저장된 Keeper 마다 돈다. 마지막 `Opened` 가 열려 있으면 head 의 열린 메시지를 닫고 `Closed {Process_exited}` 를 쓴다. 턴 기록이 없으면 `Log_started` 를 쓴다. 카운터 `turn_log_open_close_failed` | 죽은 턴이 저장한 메시지가 `Process_exited` 단위에 든다. 열린 턴이 없으면 head 의 열린 메시지를 그대로 둔다. 읽지 못한 턴 기록에는 닫지도 쓰지도 않는다. 닫는 저장이 실패해도 줄을 쓰고, 줄을 못 써도 프로세스 시작이 그대로 간다 |
 | L3a3b4d | `Opened` 가 `stimuli` 를 싣는다. event queue payload 를 줄 타입으로 옮기는 전체 함수를 둔다 | payload 갈래마다 줄 타입이 하나다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |

@@ -808,6 +808,7 @@ type narrowing = { units : entry list; items : entry list }   (* 안쪽부터 *)
 type position = Before_first | Through of { line : int; within : within }
 and within = Whole | Item of int
 
+type actor = Keeper | Operator of string    (* 그 Memory 의 Keeper 자신, 또는 운영자의 이름 *)
 type removal =
   | Dropped of { reason : string } | Merged_into of Memory_id.t | Revised_into of Memory_id.t
   | Superseded_by of Memory_id.t | Retracted of { by : actor; reason : string }
@@ -925,11 +926,22 @@ type write =
 | `Remember` | 없는 claim | 더한다 |
 | `Remember` | 같은 claim, 같은 category 와 basis | `last_seen` 을 옮긴다 |
 | `Remember` | 같은 claim, 다른 category 나 basis | `Already_held`. 바꾸지 않는다 |
-| `Supersede` | `old` 가 있다 | `old` 를 `Superseded_by` 로 지우고 새 claim 을 더한다. 한 줄이다 |
+| `Supersede` | `old` 가 있고 새 claim 은 없다 | `old` 를 `Superseded_by` 로 지우고 새 claim 을 더한다. 한 줄이다 |
+| `Supersede` | `old` 도 새 claim 도 있다 | `old` 를 `Superseded_by` 로 지우고 새 claim 은 `last_seen` 만 옮긴다. 한 줄이다 |
 | `Supersede` | `old` 가 없고 새 claim 은 있다 | 이미 된 것으로 답한다 |
 | `Supersede` | 둘 다 없다 | `Refused Unknown_fact`. 더하지 않는다 |
+| `Supersede` | `old` 가 새 claim 자신이다 | `Refused Supersedes_itself` |
 | `Retract` | id 가 있다 | `Retracted` 로 지운다 |
 | `Retract` | id 가 없다 | `Already_absent`. 성공도 거절도 아니다 |
+| `Remember`, `Supersede` | 새 claim 이 파생인데 쓴 뒤에 그 근거가 Memory 에 없다 | `Refused (Premises_missing _)`. 없는 근거의 id 를 싣는다. 바꾸지 않는다 |
+| `Remember`, `Supersede` | 파생 basis 의 모양이 틀렸다 | `Refused Malformed_derivation` |
+
+- 표는 순수 함수 하나다(`Librarian_direct.plan`). 지금 Memory 와 쓰기에서 답을 낸다.
+- 쓴 뒤에 근거를 본다. 근거를 잃은 파생 fact 는 같은 줄에서 `Support_lost` 로 지운다. 철회한 fact 에 기댄 fact 가 그렇게 같이 나간다.
+- 쓰기가 말한 claim 은 그 확인 뒤에 Memory 에 있어야 한다. 없으면 쓰기를 거절한다. 없는 fact 에서 파생한 claim 이 그렇다. 자기가 대신하는 fact 에서 파생한 claim 도 그렇다. 지금과 같다.
+- 「같은 category 와 basis」는 스냅샷에 적히는 모양이 같다는 뜻이다.
+- 지금은 Librarian 이 넣은 fact 를 `Supersede` 하지 못한다. 그 거절은 없어진다. 철회와 쓰기를 따로 해도 같은 Memory 가 됐다.
+- 지금은 `old` 가 없으면 지운 기록을 찾고, Librarian 이 지운 Keeper 의 fact 였으면 새 claim 을 쓴다. 이 설계는 기록을 찾지 않는다. 표의 「둘 다 없다」 행으로 답하고, Keeper 는 `Remember` 로 쓴다.
 
 - 쓰기에 따로 붙이는 열쇠는 없다. fact 가 내용으로 이름 붙어 있어서 같은 쓰기가 두 번 와도 위 표가 답한다.
 - 같은 쓰기는 실제로 다시 온다. masc 는 답한 tool 호출의 id 를 기억하지 않고, 모델이 같은 호출을 되풀이한다. 그래서 위 표의 「이미 있다」 행이 필요하다.
@@ -1092,7 +1104,7 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 ### 9.3 표
 
 「반영」은 §8.2 의 여섯 단계다. 반영이 실패하면 어느 칸에서든 위의 반영 실패 규칙을 따른다.
-줄을 쓰지 않는 쓰기는 답만 한다. §8.5 의 표에서 `Already_held`, 「이미 된 것」, `Already_absent`, `Refused Unknown_fact` 로 답하는 쓰기다. 그때 상태는 그대로다.
+줄을 쓰지 않는 쓰기는 답만 한다. §8.5 의 표에서 `Already_held`, 「이미 된 것」, `Already_absent`, `Refused _` 로 답하는 쓰기다. 그때 상태는 그대로다.
 같은 claim 을 다시 쓰는 `Remember` 는 `last_seen` 을 옮기므로 줄을 쓴다. 표의 `Write` 행을 따른다.
 
 **`Booting`**
@@ -1847,7 +1859,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 |---|---|---|
 | L0 | 이 RFC, 연구 기록, 근거 폴더(상태 표와 검사 스크립트, 모델과 결과, 자리 재생, slot 결과 분류 표) | 독립 리뷰 판정. 상태 표와 slot 결과 표의 검사 스크립트를 돌린 결과를 근거 폴더에 적는다. 표가 OCaml 의 `match` 가 되는 L5·L6 부터는 컴파일러가 빠진 쌍을 잡는다 |
 | L1a | 답의 타입과 codec(§6.2), 질문 id 의 반쪽 둘, 스냅샷 codec 의 golden fixture | 네 op 의 왕복. 글로 고정한 wire 모양. 답 전체를 버리는 이유 넷과 op 하나의 흠. fixture 가 지금 codec 과 바이트로 같다 |
-| L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기. `removal` 은 답이 만드는 넷만 넣는다. 직접 쓰기의 둘(`Superseded_by`, `Retracted`)은 L5 가 더한다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
+| L1b | 순수 계획 `Librarian_plan.of_answer` 와 효과 타입 `Librarian_effects`(§8.1, §8.2): 이름 풀기, op 하나의 흠, 근거 잃은 fact, 거두기. `removal` 은 답이 만드는 넷만 넣는다. 직접 쓰기의 둘(`Superseded_by`, `Retracted`)은 L5a 가 더한다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
 | L1c | 채점기. 프롬프트보다 먼저 고정한다. slot 별로 센다: 버린 답(이유별), 뺀 op(이유별), Memory 를 바꾼 답, 단위가 말한 것 가운데 Memory 에 든 것, merge 가 지킨 것. case 가 기대하는 것은 case 에 token 으로 적고, 채점기는 세기만 한다 | 고정한 답 일곱의 점수표가 시험에 글로 박혀 있다(`test_librarian_scoring`). 채점기를 고치면 그 표가 바뀐다. 아무것도 바꾸지 않은 답은 회수 수가 0 이다. 처음 Memory 가 이미 가진 token 은 세지 않는다 |
 | L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다. 기존 소비처는 새 생성자를 전과 같은 분류로 받는다. 새 분류는 slot 결과를 분류하는 층(L6)이 읽는다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
 | L3a1 | 턴 기록의 줄: 줄 타입(자기 모듈 타입만, `Keeper_turn_log`), codec(`Keeper_turn_log_codec`), 줄이 단위를 어디서 끝내는가(§5.3 의 표), 받아들이는 줄 순서(§5.2 끝). 파일을 읽거나 쓰지 않는다. 턴을 깨운 것(`stimuli`)은 L3a3 이 event queue 를 바꾸는 함수와 함께 더한다 | 줄 모양마다 왕복 시험과 글로 박은 모양. 표의 세 행. 순서 규칙의 오류 다섯. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다 |
@@ -1865,7 +1877,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |
-| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L5a | 직접 쓰기의 계획(`Librarian_direct.plan`, §8.5 의 표). 순수 함수다. `removal` 에 직접 쓰기의 둘(`Superseded_by`, `Retracted`)과 쓴 이(`actor`)를 더한다. 부르는 곳은 L5 의 쓰는 쪽이다 | 표의 행마다 시험. 줄을 쓰는 답마다 효과를 적용한 Memory 에 같은 fact 가 둘 없고 근거 없는 파생 fact 가 없다. 철회가 그 fact 에 기댄 fact 를 같은 계획에서 지운다. 같은 쓰기를 두 번 하면 둘째는 줄을 쓰지 않는다 |
+| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기의 반영), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |

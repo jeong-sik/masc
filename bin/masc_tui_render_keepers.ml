@@ -1075,7 +1075,7 @@ let grid_failure_word = function
       } -> keeper_failure_cause_word cause
   | Keeper_trail.Trail_failed { last = None; _ } | Keeper_trail.Trail_sound -> ""
 
-(* In the pulse column: one ✗ per attempt of the failed turn, at most
+(* In the pulse column: one failed mark per attempt of the failed turn, at most
    [Grid.chain_attempts], then the failure word. *)
 let grid_failure_chain (grid : Grid.t) runtime trail =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in

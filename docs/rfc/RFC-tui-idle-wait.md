@@ -130,6 +130,9 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 ### 3.2 시각
 
 - 시간을 비교하는 판단은 `Masc_tui_wake.reached reason ~now ~at` 을 쓴다. 단조 ns 로 비교하면 `reached_ns` 다.
+- 단조 시각에는 타입 `Masc_tui_wake.Mono.t` 가 있다. `Mtime_clock.elapsed_ns` 의 ns 다.
+  시계에서 이 값을 읽는 함수는 `Mono.now` 하나다. 이 타입을 받는 판단에 벽시계 `float` 를 넘기면 컴파일되지 않는다(#53581).
+  `Masc_tui_owed_read` 와 이것에 시각을 넘기는 모듈이 이 타입으로 비교한다(`reached_mono`).
   `now >= at` 을 돌려주고, 아직이면 `at` 을 이번 바퀴의 시각으로 적는다. `at` 이 무한이나 nan 이면 적지 않는다.
   `Redraw.holds` 가 화면 글자에 하는 일을 루프 판단에 한다.
 - 적는 창은 기다림이 끝난 뒤부터 다음 기다림 전까지다(`Pass.begin_pass`).
@@ -139,7 +142,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
   `next_deadline` 은 이 셋과 이번 바퀴에 적힌 시각 가운데 가장 이른 하나를 고른다.
 - `Time_text`, `Quit_notice_expiry`, `Emblem_step` 은 루프 꼬리의 판단이 `reached` 로 적는다.
 - 벽시계 시각은 적을 때 단조 시각으로 바꾼다. 남은 시간만 옮기므로 벽시계가 움직여도 다음 바퀴가
-  다시 적는다.
+  다시 적는다. 바꾸는 함수는 `Mono.of_wall` 하나다.
 - 남은 시간이 `wall_clock_recheck_s`(5 초)보다 길면 그 시각 대신 5 초 뒤를 `Wall_clock_recheck` 로 적는다.
   다음 바퀴가 벽시계를 다시 읽는다(§6).
 
@@ -295,6 +298,3 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
   - 비용: 벽시계 시각을 5 초보다 멀리 적은 동안에만 5 초에 한 바퀴다. 시계와 1 분 넘은 나이 글자가 있는
     overview, keepers 에서는 늘 그렇다. 1 분 안의 나이 글자는 1 초마다 바뀌므로 상한이 바퀴를 더하지 않는다.
     측정은 §5 다.
-- 따로 찾은 것: `Masc_tui_identity_updates.providers_loaded` 는 `Unix.gettimeofday` 를
-  `Masc_tui_owed_read.failed ~now` 에 넘긴다. `due` 는 단조 시계로 묻는다. 그래서 실패한 로그인 읽기의
-  재시도 시각이 단조 시계로 수십 년 뒤가 되어 다시 읽지 않는다. 이 RFC 범위 밖이다.

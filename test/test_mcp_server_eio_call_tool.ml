@@ -14,6 +14,9 @@ let tool_call_rows ?keeper_name ?n () =
 
 module U = Yojson.Safe.Util
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
+let stateless_protocol =
+  Mcp_transport_protocol.Stateless_protocol
+    Mcp_transport_protocol.protocol_version_2026_07_28
 
 let temp_dir () =
   let dir = Filename.temp_file "test_mcp_server_eio_call_tool_" "" in
@@ -165,6 +168,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
           ~sw:_
           ~clock:_
           ~profile:_
+          ~protocol:_
           ?mcp_session_id:_
           ~bearer:_
           _state
@@ -233,7 +237,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     check int "legacy extensions still reach dispatch" 2 !handler_calls)
 ;;
 
-let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
+let call_with_result ?mcp_session_id ?observe_invocation ?protocol ?wire_result ~env ~sw state result =
   Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
     ~execute_tool_eio:
       (fun
@@ -251,8 +255,8 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
         Option.iter (fun observe -> observe invocation_ref) observe_invocation;
         result)
     ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-    ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
-    ~sw
+    ~broadcast_tools_list_changed:(fun () -> ()) ?protocol ?wire_result
+    ~bearer:Masc_test_deps.no_bearer ~sw
     ~clock:(Eio.Stdenv.clock env)
     ?mcp_session_id
     state
@@ -371,9 +375,10 @@ let test_typed_outcome_alone_controls_projection () =
         ~start_time:(Tool_timing.start ())
         json_looking_text
     in
-    let text_response = call_with_result ~env ~sw state text_success in
-    check bool "JSON-looking text has no structured content" false
-      (has_field "structuredContent" (result_fields text_response));
+    let text_response = call_with_result ~protocol:stateless_protocol ~env ~sw state text_success in
+    check yojson "modern text is also valid structured JSON"
+      (`String json_looking_text)
+      (result_fields text_response |> U.member "structuredContent");
     check string "JSON-looking text is unchanged" json_looking_text
       (result_fields text_response
        |> U.member "content"
@@ -388,9 +393,10 @@ let test_typed_outcome_alone_controls_projection () =
         ~data:(`List [ `String "producer-item" ])
         ()
     in
-    let list_response = call_with_result ~env ~sw state list_success in
-    check bool "list data is not reclassified into an invented object" false
-      (has_field "structuredContent" (result_fields list_response));
+    let list_response = call_with_result ~protocol:stateless_protocol ~env ~sw state list_success in
+    check yojson "list data remains structured content"
+      (`List [ `String "producer-item" ])
+      (result_fields list_response |> U.member "structuredContent");
     let transient =
       Tool_result.make_err
         ~tool_name:"masc_status"
@@ -401,6 +407,191 @@ let test_typed_outcome_alone_controls_projection () =
     let transient_response = call_with_result ~env ~sw state transient in
     check string "typed transient class is preserved" "dependency_unavailable"
       (call_meta transient_response |> U.member "failure_class" |> U.to_string))
+;;
+
+let test_explicit_json_values_keep_structured_content () =
+  with_call_tool_state (fun env sw state ->
+    let values =
+      [ `Assoc [ "kind", `String "object" ]
+      ; `List [ `String "array" ]
+      ; `String "explicit string"
+      ; `Bool true
+      ; `Int 7
+      ; `Float 1.25
+      ; `Null
+      ]
+    in
+    List.iteri
+      (fun index data ->
+        let result =
+          Tool_result.make_ok
+            ~tool_name:"masc_status"
+            ~start_time:(Tool_timing.start ())
+            ~data
+            ()
+        in
+        let response = call_with_result ~protocol:stateless_protocol ~env ~sw state result in
+        check yojson
+          (Printf.sprintf "explicit JSON value %d stays structured" index)
+          data
+          (result_fields response |> U.member "structuredContent"))
+      values;
+    let without_data =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        ()
+    in
+    let response = call_with_result ~protocol:stateless_protocol ~env ~sw state without_data in
+    check bool "modern null data has explicit structured content" true
+      (has_field "structuredContent" (result_fields response));
+    check yojson "modern null data stays null" `Null
+      (result_fields response |> U.member "structuredContent"))
+;;
+
+let test_modern_failure_text_and_explicit_data_stay_structured () =
+  with_call_tool_state (fun env sw state ->
+    let message = "the failure text is also explicit JSON" in
+    let explicit =
+      Tool_result.make_err
+        ~tool_name:"masc_status"
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time:(Tool_timing.start ())
+        ~data:(`String message)
+        message
+    in
+    let explicit_response = call_with_result ~protocol:stateless_protocol ~env ~sw state explicit in
+    check yojson "explicit failure string stays structured" (`String message)
+      (result_fields explicit_response |> U.member "structuredContent");
+    let message_only =
+      Tool_result.error
+        ~failure_class:Tool_result.Workflow_rejection
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        message
+    in
+    let message_response = call_with_result ~protocol:stateless_protocol ~env ~sw state message_only in
+    check bool "modern failure message has structured content" true
+      (has_field "structuredContent" (result_fields message_response));
+    check yojson "modern failure message stays structured" (`String message)
+      (result_fields message_response |> U.member "structuredContent"))
+;;
+
+let test_direct_default_keeps_legacy_projection () =
+  with_call_tool_state (fun env sw state ->
+    let result =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        ~data:(`List [ `String "legacy" ])
+        ()
+    in
+    let response = call_with_result ~env ~sw state result in
+    check bool "direct default keeps legacy array omission" false
+      (has_field "structuredContent" (result_fields response)))
+;;
+
+let test_addon_null_projection_follows_protocol () =
+  with_call_tool_state (fun env sw state ->
+    let addon_result : Mcp_protocol.Mcp_types.tool_result =
+      { content = []
+      ; is_error = Some false
+      ; structured_content = Some `Null
+      ; _meta = None
+      }
+    in
+    let result =
+      Tool_result.make_ok ~tool_name:"masc_status" ~start_time:(Tool_timing.start ()) ()
+    in
+    let call ?protocol wire =
+      call_with_result ?protocol ~wire_result:(fun () -> Some wire) ~env ~sw state result
+    in
+    let modern = call ~protocol:stateless_protocol addon_result in
+    check bool "modern add-on null is present" true
+      (has_field "structuredContent" (result_fields modern));
+    check yojson "modern add-on null is preserved" `Null
+      (result_fields modern |> U.member "structuredContent");
+    let legacy = call addon_result in
+    check bool "legacy add-on null remains omitted" false
+      (has_field "structuredContent" (result_fields legacy));
+    let legacy_array =
+      call { addon_result with structured_content = Some (`List [ `Int 1 ]) }
+    in
+    check yojson "legacy add-on arrays remain unchanged" (`List [ `Int 1 ])
+      (result_fields legacy_array |> U.member "structuredContent"))
+;;
+
+let test_admitted_protocol_selects_structured_content () =
+  with_call_tool_state (fun env sw state ->
+    Auth.disable_auth (Masc.Mcp_server.workspace_config state).base_path;
+    let handle_call_tool_eio ~sw ~clock ~profile ~protocol ?mcp_session_id ~bearer state id call =
+      Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+        ~execute_tool_eio:
+          (fun
+            ~sw:_
+            ~clock:_
+            ~workspace_scope:_
+            ?profile:_
+            ?mcp_session_id:_
+            ?invocation_ref:_
+            ~bearer:_
+            ?on_caller_resolved:_
+            _state
+            ~name
+            ~arguments:_ ->
+          Tool_result.make_ok
+            ~tool_name:name
+            ~start_time:(Tool_timing.start ())
+            ~data:(`List [ `String "row" ])
+            ())
+        ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+        ~broadcast_tools_list_changed:(fun () -> ())
+        ~protocol
+        ~sw
+        ~clock
+        ~profile
+        ?mcp_session_id
+        ~bearer
+        state
+        id
+        call
+    in
+    let call ?meta id =
+      let params =
+        `Assoc
+          ([ "name", `String "masc_status"; "arguments", `Assoc [] ]
+           @ match meta with
+             | None -> []
+             | Some value -> [ "_meta", value ])
+      in
+      Masc.Mcp_server_eio_protocol.handle_request
+        ~sender:Masc.Mcp_server_eio_types.Unadmitted
+        ~handle_call_tool_eio
+        ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+        ~clock:(Eio.Stdenv.clock env)
+        ~sw
+        state
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "jsonrpc", `String "2.0"
+             ; "id", `Int id
+             ; "method", `String "tools/call"
+             ; "params", params
+             ]))
+    in
+    let modern_meta =
+      `Assoc
+        [ Mcp_transport_protocol.protocol_version_meta_key, `String "2026-07-28"
+        ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc []
+        ]
+    in
+    let modern = call ~meta:modern_meta 1 in
+    check yojson "stateless request preserves an array"
+      (`List [ `String "row" ])
+      (result_fields modern |> U.member "structuredContent");
+    let legacy = call 2 in
+    check bool "legacy request keeps object-only projection" false
+      (has_field "structuredContent" (result_fields legacy)))
 ;;
 
 let test_handle_call_executes_transient_failure_once () =
@@ -1204,6 +1395,16 @@ let () =
             test_invalid_call_params_do_not_reach_dispatch_handler;
           test_case "typed outcome alone controls projection" `Quick
             test_typed_outcome_alone_controls_projection;
+          test_case "explicit JSON values keep structured content" `Quick
+            test_explicit_json_values_keep_structured_content;
+          test_case "modern failure text stays structured" `Quick
+            test_modern_failure_text_and_explicit_data_stay_structured;
+          test_case "direct default keeps legacy projection" `Quick
+            test_direct_default_keeps_legacy_projection;
+          test_case "add-on null projection follows protocol" `Quick
+            test_addon_null_projection_follows_protocol;
+          test_case "admitted protocol selects structured content" `Quick
+            test_admitted_protocol_selects_structured_content;
           test_case "transient failure executes once" `Quick
             test_handle_call_executes_transient_failure_once;
           test_case "captures admission scope across workspace switch" `Quick

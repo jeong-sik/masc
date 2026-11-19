@@ -307,6 +307,8 @@ module Theme = struct
         |> Masc_tui_terminal_palette.snapshot_palette
     }
 
+  let panel_border role = Masc_tui_theme.panel_border (paint ()) role
+
   (* A graph's tint: the colour a dot at a height share takes on [series]'
      ramp, on the page. The paint is read once per graph, the colours from the
      ramp's table. *)

@@ -733,6 +733,30 @@ let ramp_reader paint series =
 
 let ramp_style paint series ~position = ramp_reader paint series ~position
 
+type panel_role =
+  | Panel_neutral
+  | Panel_fleet
+  | Panel_usage
+  | Panel_memory
+  | Panel_attention
+
+let panel_border paint role =
+  let border_for series =
+    match paint.palette with
+    | None -> recede ~surface:paint.surface paint.palette
+    | Some _ -> ramp_style paint series ~position:0.0
+  in
+  match paint.depth, role with
+  | No_color, _ -> ""
+  | _, Panel_neutral -> recede ~surface:paint.surface paint.palette
+  | Colors_16, (Panel_fleet | Panel_usage | Panel_memory | Panel_attention) ->
+      recede ~surface:paint.surface paint.palette
+  | (Colors_256 | Truecolor), Panel_fleet -> border_for Completion
+  | (Colors_256 | Truecolor), Panel_usage -> border_for Usage
+  | (Colors_256 | Truecolor), Panel_memory -> border_for Memory
+  | (Colors_256 | Truecolor), Panel_attention -> border_for Latency
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb

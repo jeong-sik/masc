@@ -415,7 +415,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
      every card of the row is one row taller there. *)
   let graphs = engine_view_open state in
   let card_height = if graphs then 5 else 4 in
-  let render_card ~card_w ?status ?count ~title_style name lines =
+  let render_card ~card_w ?status ?count ?(role = Masc_tui_theme.Panel_neutral) ~title_style name lines =
     let style =
       { Masc_tui_card.border = Theme.recede ()
       ; focused_border = Theme.border_focus ()
@@ -425,7 +425,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     in
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:card_height
       { Masc_tui_card.edge =
-          { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
+          { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused
+          ; border_accent = Some (Theme.panel_border role) }
       ; body = (fun ~cells:_ -> lines) }
   in
   let gc_opt =
@@ -614,16 +615,16 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     let graph_row ~number series ~axis =
       if graphs then [ engine_graph_row ~cells:card_cells ~axis ~number series state ] else []
     in
-    ( render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE")
+    ( render_card ~role:Masc_tui_theme.Panel_memory ~title_style:(Theme.info ()) (say "엔진" "ENGINE")
         ([ c1_l1; c1_l2 ]
          @ graph_row ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis)
-    , render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
+    , render_card ~role:Masc_tui_theme.Panel_attention ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
         ((c2_l1 :: c2_rest)
          @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis
          @ stop_reason)
-    , render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ())
+    , render_card ~role:Masc_tui_theme.Panel_fleet ?status:c3_status ?count:c3_count ~title_style:(Theme.info ())
         (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ]
-    , render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone
+    , render_card ~role:Masc_tui_theme.Panel_attention ?status:c4_status ?count:c4_count ~title_style:c4_tone
         (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ] )
   in
   match layout with

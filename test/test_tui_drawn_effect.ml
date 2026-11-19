@@ -125,14 +125,23 @@ let test_fresh_body () =
   check drawn "a built inventory replaces the placeholder" T.Drawn_changed
     (T.tools_inventory_effect state)
 
-let test_skill_cursor () =
+let test_skill_selection () =
   let state = state () in
   let warming = snapshot Tools.Warming in
   answer_inventory state warming;
   draw_frame state;
   answer_inventory state warming;
   state.tools_skill_cursor <- state.tools_skill_cursor + 1;
-  check drawn "the answer moved the Skill cursor" T.Drawn_changed (T.tools_inventory_effect state)
+  check drawn "the answer moved the Skill cursor" T.Drawn_changed (T.tools_inventory_effect state);
+  state.tools_skill_focus <- T.Reading_page;
+  draw_frame state;
+  answer_inventory state warming;
+  state.tools_skill_focus <- T.Choosing_skill;
+  check drawn "the selected Skill page closed" T.Drawn_changed (T.tools_inventory_effect state);
+  draw_frame state;
+  answer_inventory state warming;
+  T.tools_task_user_scroll state (state.tools_scroll + 1);
+  check drawn "the list followed the Skill selection" T.Drawn_changed (T.tools_inventory_effect state)
 
 (* The waiting answer the loop applies when the projection is still not full:
    the same rows, no failure, nobody newly unverified. *)
@@ -335,7 +344,7 @@ let () =
           test_case "answer after drawn progress" `Quick test_answer_after_drawn_progress;
           test_case "frame built in between" `Quick test_frame_in_between;
           test_case "fresh body" `Quick test_fresh_body;
-          test_case "skill cursor" `Quick test_skill_cursor;
+          test_case "Skill selection, page and scroll" `Quick test_skill_selection;
           test_case "failure for another Keeper" `Quick test_tools_other_keeper ] );
       ( "keeper waiting",
         [ test_case "waiting answers" `Quick test_waiting;

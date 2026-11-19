@@ -9827,13 +9827,15 @@ type drawn_effect = Drawn_changed | Drawn_unchanged
    until it is compared. *)
 
 (* The Tools inventory reader: the reading and the Keeper it is for, its
-   failure, the Skill the cursor is on, and the Keeper reads in flight, which
-   a frame draws as a refresh. *)
+   failure, the Skill selection and page, the scroll offset, and the Keeper
+   reads in flight, which a frame draws as a refresh. *)
 type tools_inventory_view = {
   tiv_inventory : Masc.Tui_decode_tools.tool_snapshot option;
   tiv_keeper : string option;
   tiv_error : request_failure option;
   tiv_skill_cursor : int;
+  tiv_skill_focus : tools_skill_focus;
+  tiv_scroll : int;
   tiv_reading : tools_read_inflight option;
 }
 
@@ -14098,13 +14100,19 @@ let[@warning "+9"] equal_tools_read_inflight
    holds the same values. A fresh body with the same content compares as
    changed, which costs one frame and never hides a change. *)
 let[@warning "+9"] equal_tools_inventory_view
-    { tiv_inventory; tiv_keeper; tiv_error; tiv_skill_cursor; tiv_reading }
+    { tiv_inventory; tiv_keeper; tiv_error; tiv_skill_cursor; tiv_skill_focus;
+      tiv_scroll; tiv_reading }
     { tiv_inventory = other_inventory; tiv_keeper = other_keeper; tiv_error = other_error;
-      tiv_skill_cursor = other_skill_cursor; tiv_reading = other_reading } =
+      tiv_skill_cursor = other_skill_cursor; tiv_skill_focus = other_skill_focus;
+      tiv_scroll = other_scroll; tiv_reading = other_reading } =
   Option.equal ( == ) tiv_inventory other_inventory
   && Option.equal String.equal tiv_keeper other_keeper
   && Option.equal equal_request_failure tiv_error other_error
   && Int.equal tiv_skill_cursor other_skill_cursor
+  && (match tiv_skill_focus, other_skill_focus with
+      | Choosing_skill, Choosing_skill | Reading_page, Reading_page -> true
+      | Choosing_skill, Reading_page | Reading_page, Choosing_skill -> false)
+  && Int.equal tiv_scroll other_scroll
   && Option.equal equal_tools_read_inflight tiv_reading other_reading
 
 let equal_turn_observation_view a b =
@@ -14150,6 +14158,8 @@ let tools_inventory_view (state : state) =
   ; tiv_keeper = state.tools_inventory_keeper
   ; tiv_error = state.tools_error
   ; tiv_skill_cursor = state.tools_skill_cursor
+  ; tiv_skill_focus = state.tools_skill_focus
+  ; tiv_scroll = state.tools_scroll
   ; tiv_reading = state.tools_read_inflight }
 
 let keeper_turns_view ~age_drawn (state : state) =

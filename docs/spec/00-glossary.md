@@ -1777,8 +1777,8 @@ status: reference
   `Recorded_deferred`는 독자적인 경우로 남는다: 호출은 받아들여졌으나 효과가 아직
   일어나지 않았으므로 성공도 실패도 아니다. `Recorded_unsettled`는 `wire_outcome`이
   `unknown`이거나 disposition·wire_outcome 어느 쪽도 적지 않은 레코드 — 아직 결과가
-  없다는 뜻이며, 실패도 malformed도 아니다(bench의 `tool_outcomes.sh`가 이 경우를
-  실패 대신 '미정'으로 세는 근거, #38721). `Recorded_malformed`는 JSON 타입이
+  없다는 뜻이며, 실패도 malformed도 아니다.
+  `Recorded_malformed`는 JSON 타입이
   틀렸거나 엄격 디코더가 거절하는 철자, 또는 객체가 아닌 레코드 — 생산자와 읽는 쪽의
   스키마 불일치다. Tool Call Outcome(외부 wire 투영)·Execution Disposition(실행의
   권위 분류)과 다른 단위다: 이 둘이 호출의 실행을 말할 때, 이 분류는 그 실행이

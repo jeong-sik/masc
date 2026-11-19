@@ -70,9 +70,8 @@ Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 �
 
 | 실험 | 스크립트 | 참조 문서 |
 |------|---------|----------|
-| Keeper fleet proof | `scripts/harness/workload/agent_swarm_live.sh` | `docs/BENCHMARK-RUNBOOK.md` |
+| Benchmark | - | `docs/BENCHMARK-RUNBOOK.md` |
 | Supervised delivery | - | `docs/SUPERVISOR-MODE.md` |
-| Local runtime capacity | `scripts/llama-runtime-pool.sh` | `docs/PERFORMANCE-SLO.md` |
 
 규칙: proof artifact, report, runtime 전제, 모델 선택 근거를 함께 남긴다.
 

@@ -2,15 +2,6 @@
 
 Use the benchmark whose evidence matches the question being asked.
 
-## Keeper Fleet Runtime Evidence
-
-```bash
-./scripts/harness_integrated_benchmark.sh
-```
-
-This runs the `control` phase and writes a machine-readable `summary.json` plus
-the phase log.
-
 ## Tool-Calling Quality
 
 Aggregate the checked-in evidence fixture:
@@ -117,58 +108,25 @@ server holding `--port=8937` had to be killed to bring the workspace back.
 - Wrapper success proves only the named benchmark phase and emitted evidence.
 - Local benchmark output is not exact-head CI proof.
 - Deployment proof requires a separately identified running binary and commit.
-- A Terminal-Bench task's `skills_dir` is common benchmark input, not a MASC
-  Skill-treatment arm. The adapter snapshots it into the separate read-only
-  `terminal-bench-task` source and refuses missing, rejected, or shadowed task
-  packages before the episode. Arm b still excludes MASC seed Skills.
 
-## E0 Campaign Scoreboard
+## E0 Campaign Rounds
 
-A round is three acceptance-runner bundles on one pinned binary. One passing
-run is evidence, never a score.
+A round is three acceptance-runner bundles on one pinned binary.
 
-1. Run `keeper_multi_collaboration_acceptance.py --run` three times with the
-   same `--expected-source-sha`; keep every `bundle.json`. Fresh fleet creation
-   requires an explicit `--sandbox-profile` plus `--sandbox-image` for Docker;
-   microVM also requires `--microvm-backend`; SSH requires `--remote-endpoint`
-   instead of image/backend. Choose names configured on the campaign host.
-   The shell wrapper forwards `KEEPER_COLLAB_SANDBOX_PROFILE`,
-   `KEEPER_COLLAB_SANDBOX_IMAGE`, `KEEPER_COLLAB_MICROVM_BACKEND` and
-   `KEEPER_COLLAB_REMOTE_ENDPOINT`. A retained Keeper restart reuses its saved
-   declaration. Each run installs
-   the composition Skills it measures from
-   `scripts/fixtures/keeper-multi-collaboration/skills/` into the campaign
-   workspace's `project-masc` skill source through `/api/v1/skills/editor/*`,
-   so the campaign `runtime.toml` must declare that source `read-write`.
-   `--preflight` only reads: before the first run it lists the fixtures as
-   `pending` and passes only if that source is writable.
-2. Write `residuals.json` (`masc.keeper_campaign_residuals.v1`): one entry per
-   assertion that failed in any of the three runs, with `cause` from the closed
-   set `infra_rate_limit | harness | model_behavior | product` and the tracking
-   `issue` (`owner/repo#N`, or `null`). A failed assertion without an entry
-   leaves the round `counted=false` (`residual_unclassified`).
-3. `scripts/harness/workload/campaign_issue_states.sh states.json <previous residuals.json>`
-   records the GitHub state of every issue the previous round named.
-4. `scripts/harness/workload/campaign_scoreboard.py --catalog scripts/fixtures/keeper-multi-collaboration/missions.json --bundle r1/bundle.json --bundle r2/bundle.json --bundle r3/bundle.json --residuals residuals.json --previous-residuals <previous> --issue-states states.json --out docs/evidence/keeper-e0-campaign-scoreboard.json`
-
-Rules the scoreboard enforces:
-
-- `k_of_3_passed` counts a mission only when all three runs passed every one
-  of its assertions. Pass/fail comes from the assertions, never from the
-  mission `status` label; a bundle whose label disagrees with its assertions,
-  or that lacks a catalog assertion, is refused.
-- An uncounted round has `k_of_3_passed: null`; the number it would have
-  scored stays in `k_of_3_if_counted` so nothing is lost, but a Goal reading
-  the score sees no score.
-- Bands come from catalog `phase` values: the verification band is
-  `verification` + `delivery_proof` (RW12, RW14, RW15, RW16, RW20 today), the
-  pilot band is `claim_reproduction` (RW26).
-- A round whose previous residual issues are still `OPEN` is run and recorded
-  but not counted (`previous_issue_open`). Nothing waits on it; the next round
-  is counted once those issues close.
-- Mixed `source_sha`, duplicate `run_id`, fewer than three bundles, a cause
-  outside the set, an issue not shaped `owner/repo#N`, or a residual naming an
-  assertion the catalog does not declare are refused (exit 2), not scored.
+Run `keeper_multi_collaboration_acceptance.py --run` three times with the
+same `--expected-source-sha`; keep every `bundle.json`. Fresh fleet creation
+requires an explicit `--sandbox-profile` plus `--sandbox-image` for Docker;
+microVM also requires `--microvm-backend`; SSH requires `--remote-endpoint`
+instead of image/backend. Choose names configured on the campaign host.
+The shell wrapper forwards `KEEPER_COLLAB_SANDBOX_PROFILE`,
+`KEEPER_COLLAB_SANDBOX_IMAGE`, `KEEPER_COLLAB_MICROVM_BACKEND` and
+`KEEPER_COLLAB_REMOTE_ENDPOINT`. A retained Keeper restart reuses its saved
+declaration. Each run installs the composition Skills it measures from
+`scripts/fixtures/keeper-multi-collaboration/skills/` into the campaign
+workspace's `project-masc` skill source through `/api/v1/skills/editor/*`,
+so the campaign `runtime.toml` must declare that source `read-write`.
+`--preflight` only reads: before the first run it lists the fixtures as
+`pending` and passes only if that source is writable.
 
 ### Sizing `--turn-settle-budget`
 
@@ -193,6 +151,3 @@ Measured so far: r6 (2026-08-18, `glm-coding.glm-5-turbo`, docker) settled
 inside 150s; r8 (2026-09-02, `glm-coding.glm-5.3`, microvm) — builder exec 41-362s (n=7), coordinator/reviewer/researcher 47-82s (n=4), measured on run1 of
 2026-09-02 after the approval-stance fix (#32645), 11 settled operations at
 the time of writing; the r8 round runs with `--turn-settle-budget 600`.
-
-Goal `goal-campaign-ratchet-20260902` reads `verification_band.k_of_3_passed`
-from the scoreboard file. The first counted round is the r8 baseline.

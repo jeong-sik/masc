@@ -48,8 +48,6 @@ llama-server의 프리픽스 캐시는 요청 토큰열이 슬롯의 기존 열�
 | volatile-head (system에 타임스탬프) | 1,892 tok / 14.4s |
 | volatile-tail | 61 tok / 1.0s |
 
-재현: `python3 scripts/bench-kv-cache.py --base http://127.0.0.1:<port> --turns 4 --max-tokens 512`
-
 ## 3. MASC 등록
 
 ### 3.1 `<MASC_BASE_PATH>/.masc/config/runtime.toml`

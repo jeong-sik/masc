@@ -922,7 +922,8 @@ let preset_confirmation_rows (state : state) ~cols =
       @ [P.detail (ui_text state ~ko:"  전체 확인 후 Enter: 진행 · Esc: 취소"
            ~en:"  After reviewing all rows, Enter: continue · Esc: cancel")]
     | Some (Save_armed name) ->
-      [P.caution (ui_text state ~ko:"! 이전 저장 결과 미확인 · " ~en:"! Earlier save unconfirmed · "
+      [P.caution (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
+         ^ ui_text state ~ko:"이전 저장 결과 미확인 · " ~en:"Earlier save unconfirmed · "
          ^ Terminal_text.single_line name);
        P.caution (ui_text state ~ko:"  이전 저장은 성공했을 수 있습니다" ~en:"  The earlier save may have succeeded");
        P.caution (ui_text state ~ko:"  재저장하면 현재 설정으로 같은 이름을 덮어씁니다"
@@ -1037,8 +1038,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
     | [] -> []
     | rows ->
       [P.caution (Printf.sprintf
-         (if state.ui_language = Lang_ko then "! 읽을 수 없는 프리셋 %d개 · 상세는 아래에"
-          else "! Unreadable presets: %d · details below") (List.length rows))]
+         (if state.ui_language = Lang_ko then "%s 읽을 수 없는 프리셋 %d개 · 상세는 아래에"
+          else "%s Unreadable presets: %d · details below")
+         (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution) (List.length rows))]
   in
   let failures = match unreadable, state.presets_error with
     | [], None -> []
@@ -1051,7 +1053,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
          | Some (Request_withdrawn refusal) ->
            [P.failure (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
               ~request:Kept_request.Preset_list_read refusal)])
-      @ List.map (fun (name, reason) -> P.failure ("! " ^ name ^ " — " ^ reason)) rows
+      @ List.map (fun (name, reason) ->
+          P.failure (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+                     ^ " " ^ name ^ " — " ^ reason)) rows
   in
   let remaining =
     preset_folded_rows ~cols

@@ -170,46 +170,9 @@ let window_of_heights ~heights ~cursor ~rows scroll =
 let preview_height ~total ~keep = Int.max 0 (Int.min (total - keep) (total / 2))
 let body_height ~total ~keep = Int.max 1 (total - preview_height ~total ~keep)
 
-let content_height ~rows ~chrome ~count ~preview_keep ~overflow_takes_row =
+let content_height ~rows ~chrome ~count ~preview_keep =
   let total = Int.max 1 (rows - chrome) in
-  let total =
-    match preview_keep with
-    | None -> total
-    | Some _ when count = 0 -> total
-    | Some keep -> body_height ~total ~keep
-  in
-  if overflow_takes_row && count > total then Int.max 1 (total - 1) else total
-
-(* Where a window stands in its list, as the first and last rows it shows and
-   the count: "27-52/80". Five surfaces wrote their own. Board and the Keeper
-   call list said "rows 27-52 of 80", the lane run panes and the question
-   reader "27-52/80", and the Keeper detail pane "[1/5]" -- its scroll offset
-   over the offsets it could take, a number no row on screen carried. The call
-   list fell back to the first row over the count when the long form did not
-   fit. *)
-let window_text ~scroll ~height count =
-  if count <= 0 then "0/0"
-  else if height <= 0 then Printf.sprintf "0/%d" count
-  else
-    let first = Int.max 0 (Int.min scroll (count - 1)) in
-    Printf.sprintf "%d-%d/%d" (first + 1) (Int.min count (first + height)) count
-
-let window_reading ~noun ~scroll ~height count =
-  noun ^ " " ^ window_text ~scroll ~height count
-
-(* The reading goes first and the hint after it, both indented like a body
-   row. The overlays wrote "  [lines ...]", and the Changes diff and the tree
-   diff "[lines ...]  esc closes" flush against the frame (#38820). *)
-let position_row ~ko ~scroll ~height ?hint count =
-  let reading =
-    if count > height then
-      Some
-        (Printf.sprintf (if ko then "[줄 %s]" else "[lines %s]")
-           (window_text ~scroll ~height count))
-    else None
-  in
-  match reading, hint with
-  | None, None -> None
-  | Some reading, None -> Some ("  " ^ reading)
-  | None, Some hint -> Some ("  " ^ hint)
-  | Some reading, Some hint -> Some ("  " ^ reading ^ "  " ^ hint)
+  match preview_keep with
+  | None -> total
+  | Some _ when count = 0 -> total
+  | Some keep -> body_height ~total ~keep

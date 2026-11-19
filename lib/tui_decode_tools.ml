@@ -75,8 +75,7 @@ type skill_io =
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
-  esp_kind : string;
-  esp_execution : string;
+  esp_surface : Keeper_skill_observability.surface;
   esp_body_bytes : int;
   esp_discovery_bytes : int;
   esp_load_reasons : effective_skill_load_reason list;
@@ -295,12 +294,35 @@ let decode_effective_skill_load_reason json =
     Error (Printf.sprintf "effective Skill load reason has unknown kind %S" value)
 ;;
 
-let decode_skill_io ~kind json =
+(* The server writes a Skill's surface as two strings, [kind] and
+   [execution], from one Keeper_skill_observability.surface through its
+   kind_label and execution_label. Reading them back through the same labels
+   over Keeper_skill_observability.surfaces keeps one spelling, and a mode the
+   catalog adds to its execution modes is read here without a list of our
+   own. *)
+let decode_skill_surface json =
+  let* kind = required_string_field json "kind" in
+  let* execution = required_string_field json "execution" in
+  match
+    List.find_opt
+      (fun surface ->
+        String.equal (Keeper_skill_observability.kind_label surface) kind
+        && String.equal (Keeper_skill_observability.execution_label surface) execution)
+      Keeper_skill_observability.surfaces
+  with
+  | Some surface -> Ok surface
+  | None ->
+    Error
+      (Printf.sprintf "Skill kind %S with execution %S is not a pair the server writes"
+         kind execution)
+;;
+
+let decode_skill_io ~surface json =
   let* io = required_object_field json "io" in
   let* io_kind = required_string_field io "kind" in
-  match kind, io_kind with
-  | "instruction", "model_orchestrated" -> Ok Model_orchestrated
-  | "composition", "composition" ->
+  match surface, io_kind with
+  | Keeper_skill_observability.Instruction_skill, "model_orchestrated" -> Ok Model_orchestrated
+  | Keeper_skill_observability.Composition_skill _, "composition" ->
       let* input_schema = required_object_field io "input_schema" in
       let* routes = required_list_field io "exports" in
       let* exports = decode_list "Skill output routes" (fun route ->
@@ -309,7 +331,9 @@ let decode_skill_io ~kind json =
         let* sor_pointer = required_string_field route "pointer" in
         Ok { sor_name; sor_node_id; sor_pointer }) routes in
       Ok (Composition_io { input_schema; exports })
-  | _, _ -> Error "Skill kind and I/O contract disagree"
+  | ( Keeper_skill_observability.Instruction_skill
+    | Keeper_skill_observability.Composition_skill _ ), _ ->
+    Error "Skill kind and I/O contract disagree"
 ;;
 
 let decode_effective_skill_profile json =
@@ -320,9 +344,8 @@ let decode_effective_skill_profile json =
   in
   let* identity = required_object_field reference "identity" in
   let* esp_name = required_string_field identity "name" in
-  let* esp_kind = required_string_field json "kind" in
-  let* esp_io = decode_skill_io ~kind:esp_kind json in
-  let* esp_execution = required_string_field json "execution" in
+  let* esp_surface = decode_skill_surface json in
+  let* esp_io = decode_skill_io ~surface:esp_surface json in
   let* context = required_object_field json "context" in
   let* esp_body_bytes = required_int_field context "body_bytes" in
   let* esp_discovery_bytes = required_int_field context "discovery_bytes" in
@@ -346,8 +369,7 @@ let decode_effective_skill_profile json =
   Ok
     { esp_reference
     ; esp_name
-    ; esp_kind
-    ; esp_execution
+    ; esp_surface
     ; esp_body_bytes
     ; esp_discovery_bytes
     ; esp_load_reasons

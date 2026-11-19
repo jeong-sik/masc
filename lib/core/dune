@@ -20,6 +20,7 @@
   failure_effect
   cross_context_mutex
   fact_cell
+  file_system_named
   eio_guard
   pool_lane
   pool_wait

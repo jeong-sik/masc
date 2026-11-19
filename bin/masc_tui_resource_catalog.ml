@@ -8,11 +8,9 @@ type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report 
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side
 type presentation = Document | Source
-type day = { year : int; month : int; day : int }
+type day = Masc_tui_value.Local_day.t = { year : int; month : int; day : int }
 
-let local_day seconds =
-  let tm = Unix.localtime seconds in
-  { year = tm.tm_year + 1900; month = tm.tm_mon + 1; day = tm.tm_mday }
+let local_day = Masc_tui_value.Local_day.of_moment
 
 let on_day day = function
   | Mcp _ -> false

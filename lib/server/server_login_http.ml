@@ -371,6 +371,19 @@ let remove_key_account t ~base_path request reqd =
           (Server_key_account.remove ~person:(person_of t person) ~base_path ~provider_account_id))))
 ;;
 
+(* The replacement of the key of a key account puts a file of the person on
+   the server, so the gate of their own provider accounts judges it. The
+   body holds the key: it goes to {!Server_key_account.replace} and to
+   nothing else. *)
+let replace_key_of_account t ~base_path request reqd =
+  with_entry ~prefix:Server_key_account.entry_prefix request reqd (fun provider_account_id ->
+    as_person t request reqd (fun (_ : Authz_state.t) person ->
+      with_body reqd (fun body ->
+        respond
+          reqd
+          (Server_key_account.replace ~person:(person_of t person) ~base_path ~provider_account_id ~body))))
+;;
+
 let provider_accounts t ~base_path request reqd =
   as_person t request reqd (fun state person ->
     let config = Result.to_option (Server_runtime_setup_actions.config ~base_path) in
@@ -524,6 +537,7 @@ let add_person_routes t ~env ~base_path router =
        (delete_keeper_conversation t ~env ~base_path)
   |> Server_route.post access Server_key_account.path (register_key_account t ~base_path)
   |> Server_route.prefix_delete access Server_key_account.entry_prefix (remove_key_account t ~base_path)
+  |> Server_route.prefix_put access Server_key_account.entry_prefix (replace_key_of_account t ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
   |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)

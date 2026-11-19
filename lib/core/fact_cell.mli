@@ -17,6 +17,22 @@
     compare-and-set to a state the cell has not held before, so a party that
     lost a race sees it and gives way: a fill is not kept, a settle forgets. *)
 
+val keep_in_this_process : unit -> unit
+(** Say that this process holds the workspace's writer lease. A cell follows
+    the changes made by the process it lives in, and a row another process
+    appends moves nothing here. So facts are kept only in the process that
+    holds the lease, and there only for files that only the lease holder
+    changes; whoever keeps a cell for a kind of file answers the second part.
+
+    Said once: by the server, through
+    [Server_startup_takeover.keep_store_facts], and by a test executable that
+    stands for it. It is not taken back. *)
+
+val kept_in_this_process : unit -> bool
+(** Whether {!keep_in_this_process} was said. A reader in a process that has
+    not said it (the TUI, a command line tool) reads the file every time and
+    fills no cell. *)
+
 type 'a slot =
   | Unfilled
   | Filled of 'a

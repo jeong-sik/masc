@@ -91,10 +91,11 @@ let compare_places left right =
 ;;
 
 (* A row an append put at the end of a day file: the row as the strict reads
-   decode it, and the file. *)
+   decode it, the file, and the store's directory. *)
 type written =
   { row : recent_entry Lazy.t
   ; place : place
+  ; store_dir : string
   }
 
 (* A fact's value, and the newest day file the value saw a row in. A row
@@ -166,7 +167,7 @@ let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
 (* One entry for each store directory, under the name the file system gives
-   the directory ([Store.directory_name]): the mutex its writers take and the
+   the directory ([File_system_named]): the mutex its writers take and the
    facts kept in memory about it. A handle holds no entry: it asks for its
    store's each time it writes, prunes or reads a fact. The handles of a
    Keeper's stores are kept for the life of the process, and an entry chosen
@@ -181,108 +182,34 @@ type entry =
   ; kept : kept list Atomic.t
   }
 
-let registry : (string, entry) Hashtbl.t = Hashtbl.create 16
-let registry_mu = Stdlib.Mutex.create ()
+let registry : entry File_system_named.t =
+  File_system_named.create (fun () ->
+    { mutex = Cross_context_mutex.create (); kept = Atomic.make [] })
 
-let entry_named name =
-  Stdlib.Mutex.protect registry_mu (fun () ->
-    match Hashtbl.find_opt registry name with
-    | Some entry -> entry
-    | None ->
-      let entry = { mutex = Cross_context_mutex.create (); kept = Atomic.make [] } in
-      Hashtbl.add registry name entry;
-      entry)
-
-module Spellings = Map.Make (String)
-
-(* The entry of each spelling whose directory existed when the file system
-   was asked. A directory that exists keeps its name until it is removed, so
-   each spelling costs the system calls once and a write or a fact read makes
-   none after that. A spelling whose directory does not exist yet is asked
-   again each time: its answer changes when the directory is made.
-
-   [removals] counts the times store directories were removed by code outside
-   this module ([directories_removed]). A removal empties the map, and an
-   answer the file system gave before a removal is not remembered after it. *)
-type remembered =
-  { removals : int
-  ; of_existing : entry Spellings.t
-  }
-
-let remembered : remembered Atomic.t =
-  Atomic.make { removals = 0; of_existing = Spellings.empty }
-
-let rec remember_existing ~removals spelling entry =
-  let now = Atomic.get remembered in
-  if now.removals = removals
-     && not
-          (Atomic.compare_and_set
-             remembered
-             now
-             { now with of_existing = Spellings.add spelling entry now.of_existing })
-  then remember_existing ~removals spelling entry
-
-(* The entry of a location, and what the answer rests on: whether the
-   directory existed when it was given, and the removals counted before it. *)
-type resolved =
-  { entry : entry
-  ; existed : bool
-  ; removals : int
-  }
-
-let resolve location =
-  let spelling = Store.absolute_dir location in
-  let seen = Atomic.get remembered in
-  match Spellings.find_opt spelling seen.of_existing with
-  | Some entry -> { entry; existed = true; removals = seen.removals }
-  | None ->
-    (match Store.directory_name location with
-     | Store.Existing name ->
-       let entry = entry_named name in
-       remember_existing ~removals:seen.removals spelling entry;
-       { entry; existed = true; removals = seen.removals }
-     | Store.Not_yet name ->
-       { entry = entry_named name; existed = false; removals = seen.removals })
-
-let store_mutex t = (resolve t.location).entry.mutex
+let resolve location = File_system_named.resolve registry (Store.absolute_dir location)
+let store_mutex t = (resolve t.location).File_system_named.entry.mutex
 
 let forget_kept entry =
   List.iter (fun (Kept (_, cell)) -> Fact_cell.forget cell) (Atomic.get entry.kept)
 
 (* After a change of the store's files made under [resolved.entry]: the
-   directory may by now be another entry's. A directory that did not exist
-   when the entry was chosen was made by the change, and another spelling can
-   have made it first under another name; a directory removed since and made
-   again can have another name too. The change then went by that entry's
-   cells unseen, so they are forgotten. *)
+   directory may by now be another entry's, and the change then went by that
+   entry's cells unseen ([File_system_named.another_entry_now]). *)
 let forget_kept_of_the_directory resolved location =
-  if not (resolved.existed && (Atomic.get remembered).removals = resolved.removals)
-  then begin
-    let now = resolve location in
-    if now.entry != resolved.entry
-    then begin
-      forget_kept now.entry;
-      forget_kept resolved.entry
-    end
-  end
+  match
+    File_system_named.another_entry_now registry resolved (Store.absolute_dir location)
+  with
+  | None -> ()
+  | Some now ->
+    forget_kept now;
+    forget_kept resolved.File_system_named.entry
 
 (* Store directories were removed by code outside this module. Every
    remembered name and every kept fact goes: which directories went is not
    looked at, and neither is whether the removal succeeded. *)
 let directories_removed () =
-  let rec forget_names () =
-    let now = Atomic.get remembered in
-    if not
-         (Atomic.compare_and_set
-            remembered
-            now
-            { removals = now.removals + 1; of_existing = Spellings.empty })
-    then forget_names ()
-  in
-  forget_names ();
-  Stdlib.Mutex.protect registry_mu (fun () ->
-    Hashtbl.fold (fun _ entry entries -> entry :: entries) registry [])
-  |> List.iter forget_kept
+  File_system_named.removed registry;
+  List.iter forget_kept (File_system_named.entries registry)
 
 let open_store ?max_bytes location =
   let base_dir = Store.dir location in
@@ -1065,6 +992,7 @@ let settle_kept entry before written =
 let written_row ~(dated : Store.dated_path) parsed =
   { row = lazy (recent_entry_of_parsed ~path:dated.path (Lazy.force parsed))
   ; place = { month_dir = dated.month_dir; day_file = dated.day_file }
+  ; store_dir = dated.base_dir
   }
 
 (* The row's text, rendered once: what goes to disk, and what the facts are
@@ -1090,13 +1018,13 @@ let render entry json =
    way the directory may have turned out to be another entry's. *)
 let changing_files t change =
   let resolved = resolve t.location in
-  match change resolved.entry with
+  match change resolved.File_system_named.entry with
   | result ->
     forget_kept_of_the_directory resolved t.location;
     result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    forget_kept resolved.entry;
+    forget_kept resolved.File_system_named.entry;
     forget_kept_of_the_directory resolved t.location;
     Printexc.raise_with_backtrace exn backtrace
 
@@ -1553,18 +1481,17 @@ let read_recent_lines_result ?offset t n =
   read_recent_using_result ?offset t n ~decode:(fun ~path line -> path, line)
 ;;
 
-let find_latest_entry_result t f =
+(* The first value [f] selects, newest row first, with the day file its row
+   is in. *)
+let find_latest_entry_with_its_file_result t f =
   let open Result.Syntax in
   let rec visit_days month_path = function
     | [] -> Ok None
     | day :: rest ->
-      let* found =
-        find_latest_entry_in_file_result
-          (Filename.concat month_path day)
-          f
-      in
+      let path = Filename.concat month_path day in
+      let* found = find_latest_entry_in_file_result path f in
       (match found with
-       | Some _ -> Ok found
+       | Some value -> Ok (Some (value, path))
        | None -> visit_days month_path rest)
   in
   let rec visit_months = function
@@ -1579,6 +1506,10 @@ let find_latest_entry_result t f =
   in
   let* months = list_month_dirs_result t in
   visit_months months
+;;
+
+let find_latest_entry_result t f =
+  Result.map (Option.map fst) (find_latest_entry_with_its_file_result t f)
 ;;
 
 let read_recent_lines ?(offset=0) t n =
@@ -1790,7 +1721,6 @@ let close t =
 let prepare_for_directory_removal t =
   let dated = Store.dated_path_now t.location in
   close t;
-  Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
     Hashtbl.remove file_count_cache dated.path)
 ;;
@@ -2608,12 +2538,89 @@ let last_row : recent_entry option fact =
   ; step = (fun _ written -> Some (Some (Lazy.force written.row)))
   }
 
-(* Whether this process keeps what [read_fact] reads. A cell is moved by the
-   appends of the process it lives in and by no other, so only the one
-   process that appends to the stores may keep their facts. It says so once
-   and does not take it back. *)
-let keeping_facts = Atomic.make false
-let keep_facts_in_this_process () = Atomic.set keeping_facts true
+(* The newest [count] physical rows, oldest first. An appended row goes to
+   the end and the row before the window falls out. Each call makes a fact of
+   its own: a count is defined in one place, and the fact is made there.
+
+   A row is its JSON, or [None] when it is not JSON. The file it is in is no
+   part of the value: a size rotation renames the current day file under the
+   rows a window still holds, and a kept name would be the old one. *)
+let last_rows ~name ~count : Yojson.Safe.t option list fact =
+  if count < 1 then invalid_arg (Printf.sprintf "Dated_jsonl.last_rows: count %d" count);
+  let json_of = function
+    | Parsed json -> Some json
+    | Malformed_json _ -> None
+  in
+  let rec drop excess rows =
+    match rows with
+    | _ :: rest when excess > 0 -> drop (excess - 1) rest
+    | [] | _ :: _ -> rows
+  in
+  { id = Type.Id.make ()
+  ; name
+  ; read =
+      (fun t ->
+        read_recent_using_result t count ~decode:(fun ~path line ->
+          path, json_of (recent_entry_of_line ~path line))
+        |> Result.map (fun rows ->
+          { value = List.map snd rows
+          ; newest =
+              (match List.rev rows with
+               | [] -> None
+               | (path, _) :: _ -> Some (place_of_day_file_path path))
+          }))
+  ; step =
+      (fun held written ->
+        let rows = held @ [ json_of (Lazy.force written.row) ] in
+        Some (drop (List.length rows - count) rows))
+  }
+
+(* What [select] gives for the newest row it selects. The strict search goes
+   from the newest row back and stops at the first one selected, so the rows
+   it passed over are newer than the value's own row and none of them was
+   selected.
+
+   An appended row that is selected is the value. One that is passed over
+   leaves the value as it is: the search would pass over it too. After
+   either, the newest day file the value has seen a row in is the appended
+   row's. An append writes JSON; were a row not to read back as JSON, the
+   files would be asked again. *)
+let newest_selected ~name ~select : 'a option fact =
+  { id = Type.Id.make ()
+  ; name
+  ; read =
+      (fun t ->
+        find_latest_entry_with_its_file_result t (select ~base_dir:t.base_dir)
+        |> Result.map (function
+          | None -> { value = None; newest = None }
+          | Some (value, path) ->
+            { value = Some value; newest = Some (place_of_day_file_path path) }))
+  ; step =
+      (fun held written ->
+        match Lazy.force written.row with
+        | Malformed_json _ -> None
+        | Parsed _ as row ->
+          (match select ~base_dir:written.store_dir row with
+           | Some value -> Some (Some value)
+           | None -> Some held))
+  }
+
+(* The newest row that is JSON: every row that is JSON is selected. *)
+let newest_parsed_row : Yojson.Safe.t option fact =
+  newest_selected ~name:"newest_parsed_row" ~select:(fun ~base_dir:_ -> function
+    | Parsed json -> Some json
+    | Malformed_json _ -> None)
+
+(* The lease holder is the one writer of some stores and not of others
+   ([Store.facts]): being the lease holder is a fact about the process
+   ([Fact_cell.keep_in_this_process]), and who writes a store is a fact about
+   the store. A fact is kept where both hold. *)
+let keeps_facts_of t =
+  Fact_cell.kept_in_this_process ()
+  &&
+  match Store.facts (Store.of_location t.location) with
+  | Store.Kept_by_the_lease_holder -> true
+  | Store.Read_from_the_files -> false
 
 let fact_read_outcome = function
   | Fact_cell.Held _ -> "held"
@@ -2629,15 +2636,15 @@ let read_fact t fact =
     | Fact_cell.Read_failed _ as failed -> failed
   in
   let answer =
-    if not (Atomic.get keeping_facts)
+    if not (keeps_facts_of t)
     then (
-      (* Another process appends to this store. The files are read as they
-         were before there were facts, and no cell is made. *)
+      (* Another process appends to this store, or may. The files are read
+         as they were before there were facts, and no cell is made. *)
       match fact.read t with
       | Ok held -> Fact_cell.Read_not_kept held.value
       | Error error -> Fact_cell.Read_failed error)
     else (
-      let cell = cell_of_entry (resolve t.location).entry fact in
+      let cell = cell_of_entry (resolve t.location).File_system_named.entry fact in
       match Fact_cell.held cell with
       | Some held -> Fact_cell.Held held.value
       | None ->
@@ -2665,14 +2672,13 @@ module For_testing = struct
   let cross_context_mutex = store_mutex
 
   let in_registry location =
-    let (Store.Existing name | Store.Not_yet name) = Store.directory_name location in
-    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.mem registry name)
+    File_system_named.has_entry registry (Store.absolute_dir location)
 
-  let after_row fact ~value ~newest ~row ~written =
+  let after_row ?(base_dir = Filename.current_dir_name) fact ~value ~newest ~row ~written =
     let place (month_dir, day_file) = { month_dir; day_file } in
     after_row
       fact
-      { row = Lazy.from_val row; place = place written }
+      { row = Lazy.from_val row; place = place written; store_dir = base_dir }
       { value; newest = Option.map place newest }
     |> Option.map (fun held ->
       held.value, Option.map (fun place -> place.month_dir, place.day_file) held.newest)

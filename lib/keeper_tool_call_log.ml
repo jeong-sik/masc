@@ -1555,6 +1555,16 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
         | Some name -> keeper_matches name json))
 ;;
 
+(* A Keeper's newest call is looked for among this many of the ledger's
+   newest rows. The window of those rows is the ledger store's kept fact: in
+   the server no file is read for it once the store holds it, and each
+   logged call moves it. *)
+let newest_call_window_rows = 16
+
+let newest_call_window =
+  Dated_jsonl.last_rows ~name:"tool_call_window" ~count:newest_call_window_rows
+;;
+
 let read_latest ?keeper_name () : Yojson.Safe.t option =
   let keeper_matches name json =
     match Safe_ops.json_string_opt "keeper" json with
@@ -1564,24 +1574,30 @@ let read_latest ?keeper_name () : Yojson.Safe.t option =
   match store () with
   | None -> None
   | Some store ->
-    let scan_limit =
-      match keeper_name with
-      | None -> 1
-      | Some _ -> 16
+    (* The window's rows, newest first; [None] is a row that is not JSON. *)
+    let newest_first =
+      match Dated_jsonl.read_fact store newest_call_window with
+      | Fact_cell.Held rows | Fact_cell.Read_and_kept rows | Fact_cell.Read_not_kept rows ->
+        List.rev rows
+      | Fact_cell.Read_failed _ ->
+        (* The strict read refuses this store. This function has always read
+           such a store leniently, and its answer for one stays what it was. *)
+        Dated_jsonl.read_recent_lines store newest_call_window_rows
+        |> List.rev_map (fun line ->
+          match Yojson.Safe.from_string line with
+          | json -> Some json
+          | exception Yojson.Json_error _ -> None)
     in
-    let raw_lines = Dated_jsonl.read_recent_lines store scan_limit in
-    let rec loop = function
-      | [] -> None
-      | line :: rest ->
-        (match Yojson.Safe.from_string line with
-         | exception Yojson.Json_error _ -> loop rest
-         | json ->
-           let dominated =
-             match keeper_name with
-             | None -> true
-             | Some name -> keeper_matches name json
-           in
-           if dominated then Some json else loop rest)
-    in
-    loop (List.rev raw_lines)
+    (match keeper_name with
+     | None ->
+       (* Only the ledger's last row is looked at. *)
+       (match newest_first with
+        | Some json :: _ -> Some json
+        | None :: _ | [] -> None)
+     | Some name ->
+       List.find_map
+         (function
+           | Some json when keeper_matches name json -> Some json
+           | Some _ | None -> None)
+         newest_first)
 ;;

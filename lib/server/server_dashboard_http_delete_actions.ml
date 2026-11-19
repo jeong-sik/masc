@@ -804,10 +804,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               Dated_jsonl.prepare_for_directory_removal
                 (Keeper_types_support.keeper_metrics_store
                    config
-                   keeper_name);
-              Keeper_status_metrics.invalidate_tool_audit_cache
-                config
-                ~keeper_name:keeper_name
+                   keeper_name)
             | Keeper_memory_journal_artifact
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
@@ -914,13 +911,14 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   in
   (* The files go one by one, so a purge that stopped part way, by an error or
      an exception, has still changed the Keeper's memory health row
-     (RFC-0487) and removed files of its dated JSONL stores, whose newest
-     rows are kept in memory ([Dated_jsonl.read_fact]). Neither signal
-     raises. *)
+     (RFC-0487) and removed files of its dated JSONL stores and its decision
+     record, whose newest rows are kept in memory ([Dated_jsonl.read_fact],
+     [Keeper_row_facts.newest_decision]). None of the signals raises. *)
   match
     Fun.protect
       ~finally:(fun () ->
         Dated_jsonl.directories_removed ();
+        Keeper_row_facts.decision_records_removed ();
         Keeper_memory_health_input.written ~keepers_dir ~keeper_id:keeper_name)
       (fun () ->
         Eio_context.run_on_owner_domain (fun () ->

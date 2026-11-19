@@ -758,7 +758,14 @@ let render_lanes_overview (state : state) =
     let readings = match state.lane_inventory with
       | None -> [ here_missing_reading state ~error:state.standalone_lanes_error ]
       | Some _ -> [] in
-    here_row ~cols state ~path:[] ~readings ~position:None
+    let entries = List.length (Masc_tui_types.lane_inventory_entries state) in
+    here_row ~cols state ~path:[] ~readings
+      ~position:
+        (if entries = 0 then None
+         else
+           Some
+             (Masc_tui_value.Position.row
+                ~selected:(lane_inventory_visual_cursor state) ~total:entries))
   in
   box_top buf cols;
   box_line buf cols header;
@@ -773,15 +780,16 @@ let render_lanes_overview (state : state) =
   let observed_heading = match state.lane_inventory with
     | None -> ui_text state ~ko:"기능 상태 미관측 · r:조회" ~en:"Feature states not observed · r:read"
     | Some snapshot ->
-        let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
+        let observed =
+          Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+            ~now:(Unix.gettimeofday ()) snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.count_items ~korean
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot) snapshot.rows) in
         Message_layout.join_fitting ~sep:" · " ~cells:inner
           ((match state.standalone_lanes_error with
             | None -> ui_text state ~ko:"기능 목록 관측" ~en:"Feature inventory observed"
             | Some _ -> ui_text state ~ko:"보존한 기능 목록 관측" ~en:"Retained inventory observation")
-           :: Printf.sprintf "%02d:%02d:%02d"
-                observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+           :: observed
            :: standings) in
   if projection.lop_observation then
     box_line_styled buf cols ~style:(Theme.recede ()) observed_heading;
@@ -837,9 +845,6 @@ let render_lanes_overview (state : state) =
             ^ fit_width (Masc_tui_lane_standing.mark observed) 2 ^ Ansi.reset
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
-  let position = if projection.lop_position
-    then Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height (List.length entries) else None in
-  let listing = listing @ Option.to_list position in
   let listing = if projection.lop_boxed then
       studio_panel ~width:list_width
         ~title:(ui_text state ~ko:"기능" ~en:"Features")
@@ -1123,11 +1128,12 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
      [3/50] of a list read whole, [3/50 · of 8,347] of one read in part. The
      footer names the key for the older page while there is one. *)
   let position : Masc_tui_value.Position.t option =
-    let at = state.lane_runs_cursor + 1 in
+    let selected = Some state.lane_runs_cursor in
     match state.lane_runs_total with
     | _ when shown = 0 -> None
-    | Some total when total > shown -> Some (Partial { at; loaded = shown; total })
-    | Some _ | None -> Some (Row { at; total = shown })
+    | Some total when total > shown ->
+        Some (Masc_tui_value.Position.partial ~selected ~loaded:shown ~total)
+    | Some _ | None -> Some (Masc_tui_value.Position.row ~selected ~total:shown)
   in
   let header =
     here_row ~cols state
@@ -1181,7 +1187,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lane_runs_scroll max_scroll) in
@@ -1226,19 +1231,10 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf
-         (if state.ui_language = Lang_ko then "  [실행 %s]" else "  [runs %s]")
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints_lanes_run_list ~lang:state.ui_language
-            ~has_runs:(shown > 0)
-            ~has_older:
-              (Option.is_some state.lane_runs_next && not state.lane_runs_loading)));
+  (* Every key of the run list moves, so zone 5 names none of them: the [?]
+     sheet does ([Masc_tui_keys.lane_run_list_bindings]). *)
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"");
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
 (* The total preview includes labels, fences and notices. Complete payloads
@@ -2026,7 +2022,9 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
-  let header =
+  (* The title names where the window stands, known once the payload is
+     laid out, so it is drawn last and put first. *)
+  let header ~position =
     let text ko en = ui_text state ~ko ~en in
     let path =
       match state.lanes_mode with
@@ -2035,11 +2033,8 @@ let render_lane_run_detail (state : state) ~run_id =
       | Lanes_measurement_detail _ -> [ text "측정" "measurement"; run_id ]
       | Lanes_overview | Lanes_run_list _ | Lanes_inventory_detail _ -> [ run_id ]
     in
-    here_row ~cols state ~path ~readings:[] ~position:None
+    here_row ~cols state ~path ~readings:[] ~position
   in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
   (match state.lane_run_detail_error with
    | None -> ()
    | Some error ->
@@ -2052,9 +2047,8 @@ let render_lane_run_detail (state : state) ~run_id =
     | None, Some _ -> 2
     | (Some _ | None), None -> 0
   in
-  (* The position the footer carries: [None] where the drawing already says
-     it -- nothing to read yet, or two panes whose titles each name their
-     own window. *)
+  (* The two panes share one scroll, so one window names both: it runs over
+     the longer side. *)
   let scroll, position, content_height =
     match detail, state.lane_run_detail_error with
     | None, error ->
@@ -2117,16 +2111,8 @@ let render_lane_run_detail (state : state) ~run_id =
           let output_scroll = min scroll output_max_scroll in
           let input_title, output_title = inspection_panel_titles detail in
           lane_run_split_line buf cols ~left_width
-            ~left:
-              ( Ansi.bold
-              , Printf.sprintf "%s  %s" input_title
-                  (Masc_tui_scroll.window_text ~scroll:input_scroll
-                     ~height:content_height (List.length input_lines)) )
-            ~right:
-              ( Ansi.bold
-              , Printf.sprintf "%s  %s" output_title
-                  (Masc_tui_scroll.window_text ~scroll:output_scroll
-                     ~height:content_height (List.length output_lines)) );
+            ~left:(Ansi.bold, input_title)
+            ~right:(Ansi.bold, output_title);
             let output_lines_window = Rows.of_list ~first:output_scroll ~height:content_height output_lines in
           for index = 0 to content_height - 1 do
             let left =
@@ -2141,7 +2127,10 @@ let render_lane_run_detail (state : state) ~run_id =
             in
             lane_run_split_line buf cols ~left_width ~left ~right
           done;
-          scroll, None, content_height
+          scroll,
+          Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:(max (List.length input_lines) (List.length output_lines)),
+          content_height
         end
       end
       else begin
@@ -2163,14 +2152,19 @@ let render_lane_run_detail (state : state) ~run_id =
           | Some (style, line) -> box_line_styled buf cols ~style line
         done;
         scroll,
-        Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)),
+        Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+          ~total:(List.length lines),
         content_height
       end
   in
   box_bottom buf cols;
+  let framed = Buffer.create (Buffer.length buf + 512) in
+  boxed_head framed cols (header ~position);
+  Buffer.add_buffer framed buf;
+  let buf = framed in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ?position ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail_for
+       ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail_for
          ~lang:state.ui_language
          ~preflight:(match detail with
            | Some (Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_}) -> true
@@ -2269,7 +2263,13 @@ let render_clients (state : state) =
   let header =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients" ]
-      ~readings:[] ~position:None
+      ~readings:[]
+      ~position:
+        (if shown = 0 then None
+         else
+           Some
+             (Masc_tui_value.Position.row
+                ~selected:(Some state.clients_surface_cursor) ~total:shown))
   in
   box_top buf cols;
   box_line buf cols header;
@@ -2406,20 +2406,13 @@ let render_clients (state : state) =
           else box_line_styled buf cols ~style line
     done;
   box_bottom buf cols;
-  let position =
-    if shown > content_height then
-      Some
-        (Printf.sprintf "rows %s"
-           (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
-    else None
-  in
   (* [listing_chrome] already counts this row. Without it the keys the table
      declares for Clients went unshown, and so did an armed search's query,
      which rides the same row. *)
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ?position
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~has_rows:(shown > 0)
             Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
@@ -2435,7 +2428,11 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
   let window = Rows.of_list ~first:scroll ~height styled_lines in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  box_line buf cols (here_row ~cols state ~path ~readings:[] ~position:None);
+  box_line buf cols
+    (here_row ~cols state ~path ~readings:[]
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:height
+            ~total:(List.length styled_lines)));
   box_divider buf cols;
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
@@ -2444,9 +2441,7 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length styled_lines))
-       ~hints);
+    (footer_line state ~max_cells:cols ~hints);
   finish_surface state
     ~clamped:(Lane_run_detail_scroll { scroll; content_height = height })
     ~surface_key ~rows:terminal_rows ~cols buf

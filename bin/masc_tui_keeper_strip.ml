@@ -278,15 +278,14 @@ let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =
     | Grid.Failing _, Some runtime ->
         Some (match runtime.Decode.kr_failing_since with
           | Some at when Float.is_finite at && at <= now ->
-              "since " ^ Grid.dated_clock_text ~now ~localtime:Unix.localtime at
+              "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
           | Some _ | None -> "since ?")
     | Grid.Failing _, None -> Some "since ?"
     | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None) -> None in
   let next = match next_run with
     | Next.Scheduled_at at ->
         Some (if Float.is_finite at then
-          let time = Unix.localtime at in
-          Printf.sprintf "◷ %02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+          "◷ " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
           else "◷ ?")
     | Next.No_schedule | Next.Late_since _ | Next.Held_current _ | Next.Held_as_of _
     | Next.Not_before _ | Next.Unknown ->

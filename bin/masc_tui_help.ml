@@ -18,90 +18,120 @@ let rec zip left right =
   | [], r :: rt -> ("", r) :: zip [] rt
   | l :: lt, r :: rt -> (l, r) :: zip lt rt
 
-(* The runs of lines between blank lines: a heading and its rows. *)
-let sections lines =
-  let close current found =
-    match current with
-    | [] -> found
-    | _ :: _ -> List.rev current :: found
-  in
-  let rec gather current found = function
-    | [] -> List.rev (close current found)
-    | "" :: rest -> gather [] (close current found) rest
-    | line :: rest -> gather (line :: current) found rest
-  in
-  gather [] [] lines
+type block =
+  | Whole of string list
+  | Parted of { first : string list; rest : string list }
 
-(* One column of the folded sheet: the sections set in it, the last first, and
-   the rows they take with a blank row between two sections. *)
-type column = { sections : string list list; height : int }
+(* What the columns are cut between. A [Parted] block is two pieces, its
+   first part and the rest after it, so the fold may cut between them. The
+   rest piece is made only here, right after the piece of its own heading;
+   [right_column_rows] leans on that when a right column opens with one. *)
+type piece =
+  | Block of string list
+  | Rest of string list
 
-let empty_column = { sections = []; height = 0 }
+let pieces blocks =
+  List.concat_map
+    (function
+      | Whole rows -> [ Block rows ]
+      | Parted { first; rest } -> [ Block first; Rest rest ])
+    blocks
 
-let add_section column section =
-  let gap = match column.sections with [] -> 0 | _ :: _ -> 1 in
-  { sections = section :: column.sections;
-    height = column.height + gap + List.length section }
+(* The rows of these pieces down one column. A block after another piece
+   leaves a blank row between them; the rest of a parted section runs
+   straight on under its first part, so a section whose two parts land in one
+   column reads as it was written.
 
-let column_rows column =
+   The sheet used to take its lines as text and part its sections at blank
+   lines, so the cut part opened with a row of one space -- blank to the eye
+   and not to the parting -- that stood level with the heading. Where both
+   parts came to one column that row sat under the blank between them, and
+   the reader saw two empty rows inside one section. *)
+let column_rows pieces =
   List.concat
     (List.mapi
-       (fun index section -> if index = 0 then section else "" :: section)
-       (List.rev column.sections))
+       (fun index piece ->
+         match piece with
+         | Block rows -> if index = 0 then rows else "" :: rows
+         | Rest rows -> rows)
+       pieces)
 
-(* Each section, whole and in the order written, goes under the shorter column,
-   the left one when they are as tall. A heading stays above its own rows; a
-   column cut at a line count starts under no heading, partway through someone
-   else's keys.
+(* The row of its column where the last of these pieces begins. *)
+let last_piece_row pieces =
+  match List.rev pieces with
+  | [] | [ _ ] -> 0
+  | _ :: earlier -> List.length (column_rows (List.rev earlier)) + 1
 
-   The sections were set two to a row, left then right, so the shorter of each
-   pair stood beside blank rows. Measured at 100x30 on the Dashboard, the slash
-   commands (138 rows) stood beside the surface's own keys (20 rows), and 32%
-   of the sheet's cells were blank. *)
-let fold_sections sections =
+(* The right column's rows beside these left ones. A right column that opens
+   with the rest of a parted section has that section's first part as the
+   left column's last piece, so the rest starts its first key level with the
+   first part's first key, under the heading's row. It started level with the
+   left column's first row, so with the Candle details above the Operations
+   keys its first key sat beside the Candle rows. *)
+let right_column_rows ~left right =
+  match right with
+  | Rest _ :: _ ->
+      List.init (last_piece_row left + 1) (fun _ -> "") @ column_rows right
+  | Block _ :: _ | [] -> column_rows right
+
+(* The left column takes the first pieces and the right one the rest, cut
+   where the taller of the two is shortest; on a tie the left one takes more.
+   Each piece stays whole, and the order written runs down the left column
+   and on into the right one, so the rest of a parted section can only come
+   after its heading. A block is never parted here: one long block -- the
+   slash commands on the full sheet -- stands whole in one column, and the
+   cut balances the rest around it.
+
+   Each section used to go under whichever column was shorter. That kept the
+   columns level, but a block set before a parted section -- the live Candle
+   details on the Operations sheet -- made the left column the shorter one
+   when the second part came: at 120x40 five keys stood under the Candle rows
+   with no heading, and their heading sat in the right column beside them.
+   Before that the sections were set two to a row, and at 100x30 on the
+   Dashboard 32% of the sheet's cells were blank; the cut at the shortest
+   taller column keeps that gain where the order allows it.
+
+   Each cut's two columns are made once and kept with the cut, so the one
+   chosen is drawn from the rows it was measured by. *)
+let fold_pieces pieces =
+  let columns count =
+    let left = List.filteri (fun index _ -> index < count) pieces in
+    let right = List.filteri (fun index _ -> index >= count) pieces in
+    (column_rows left, right_column_rows ~left right)
+  in
+  let taller (left, right) = max (List.length left) (List.length right) in
+  let first = columns 0 in
   let left, right =
     List.fold_left
-      (fun (left, right) section ->
-        if right.height < left.height then (left, add_section right section)
-        else (add_section left section, right))
-      (empty_column, empty_column) sections
+      (fun best count ->
+        let candidate = columns count in
+        if taller candidate <= taller best then candidate else best)
+      first
+      (List.init (List.length pieces) (fun index -> index + 1))
   in
-  zip (column_rows left) (column_rows right)
+  zip left right
 
-let sheet ?(header = []) ~cols lines =
-  let body =
-    if cols < two_column_minimum_cols then lines
-    else begin
-      let width = column_width ~cols in
-      let row (l, r) =
-        Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
-      in
-      List.map row (fold_sections (sections lines))
-    end
-  in
-  header @ body
-
-(* Blank to the eye and not to [sections], which parts columns at an empty
-   line: it stands where the heading stands in the first column, so the two
-   columns' first keys sit on one row. *)
-let continuation_row = " "
-
-let one_section ~cols ~heading entries =
-  if cols < two_column_minimum_cols then heading :: List.concat entries
-  else begin
-    let total = List.fold_left (fun sum entry -> sum + List.length entry) 0 entries in
-    let half = (total + 1) / 2 in
-    let rec first_column taken count = function
-      | entry :: rest when count < half ->
-          first_column (entry :: taken) (count + List.length entry) rest
-      | rest -> (List.rev taken, rest)
+let sheet ~cols blocks =
+  if cols < two_column_minimum_cols then column_rows (pieces blocks)
+  else
+    let width = column_width ~cols in
+    let row (l, r) =
+      Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
     in
-    match first_column [] 0 entries with
-    | left, [] -> heading :: List.concat left
-    | left, (_ :: _ as right) ->
-        (heading :: List.concat left)
-        @ ("" :: continuation_row :: List.concat right)
-  end
+    List.map row (fold_pieces (pieces blocks))
+
+let one_section ~heading entries =
+  let total = List.fold_left (fun sum entry -> sum + List.length entry) 0 entries in
+  let half = (total + 1) / 2 in
+  let rec first_part taken count = function
+    | entry :: rest when count < half ->
+        first_part (entry :: taken) (count + List.length entry) rest
+    | rest -> (List.rev taken, rest)
+  in
+  match first_part [] 0 entries with
+  | first, [] -> [ Whole (heading :: List.concat first) ]
+  | first, (_ :: _ as rest) ->
+      [ Parted { first = heading :: List.concat first; rest = List.concat rest } ]
 
 let filter_sections ~query ~heading sections =
   if String.equal query "" then sections

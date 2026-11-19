@@ -189,9 +189,40 @@ let record_summary_updated ~now (entry : pending_approval) =
       exn
 ;;
 
+(* The decision's [Resolved] row, without any broadcast. [attempt] says
+   whether an earlier attempt may already have written it (#38541). *)
+let record_resolution_row
+      ~attempt
+      ~base_path
+      ~resolved_at
+      (entry : pending_approval)
+      ~(source : decision_source)
+      ?actor
+      (decision : decision)
+  =
+  Keeper_approval.Audit.record_resolved
+    ~base_path
+    ~attempt
+    ~resolved_at
+    ~extra_fields:(origin_json_fields entry)
+    ~id:entry.id
+    ~keeper_name:entry.keeper_name
+    ~tool_name:entry.tool_name
+    ?turn_id:entry.turn_id
+    ?task_id:entry.task_id
+    ?goal_id:entry.goal_id
+    ?actor
+    ~decision_source:source
+    ~decision
+    ~summary_status:entry.summary_status
+    ~exact_attempt:entry.exact_attempt
+    ()
+;;
+
 let resolve_entry
       ?(before_terminal_publish = fun () -> ())
       ~base_path
+      ~resolved_at
       (entry : pending_approval)
       ~(source : decision_source)
       ?actor
@@ -204,23 +235,15 @@ let resolve_entry
     entry.keeper_name
     entry.tool_name
     decision_str;
-  let audit_receipt =
-    Keeper_approval.Audit.record
+  let resolved_receipt =
+    record_resolution_row
+      ~attempt:Keeper_approval.Audit.First_resolved_append
       ~base_path
-      ~event_type:Keeper_approval.Audit.Resolved
-      ~extra_fields:(origin_json_fields entry)
-      ~id:entry.id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
+      ~resolved_at
+      entry
+      ~source
       ?actor
-      ~decision_source:source
-      ~decision
-      ~summary_status:entry.summary_status
-      ~exact_attempt:entry.exact_attempt
-      ()
+      decision
   in
   before_terminal_publish ();
   (* The queue revision that keys the cached Gate snapshot moved before the
@@ -237,7 +260,8 @@ let resolve_entry
                  ; "keeper_name", `String entry.keeper_name
                  ; "tool_name", `String entry.tool_name
                  ; "decision", `String decision_str
-                 ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+                 ; ( "audit"
+                   , Keeper_approval.Audit.resolved_receipt_to_yojson resolved_receipt )
                  ] )
            ])
    with
@@ -249,7 +273,7 @@ let resolve_entry
        ~id:entry.id
        ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
        exn);
-  audit_receipt
+  resolved_receipt
 ;;
 
 (* Every phase row after the request copies the request row's line. The

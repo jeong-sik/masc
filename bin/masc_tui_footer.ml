@@ -444,28 +444,115 @@ let ensure_help_item hints =
   in
   if already_names_help then hints else hints ^ "  " ^ help_hint_item
 
+(* Whether a key the row names answers on the screen as drawn. A key that does
+   not keeps its place, its key letter left in the row's own dim. A key that
+   came and went with the selection moved every key after it under the
+   reader's eye (RFC tui-one-screen-grammar section 2). Why it does not answer
+   is the action pane's to say, so the row carries no reason. *)
+type key_answer = Answers | Refused
+
+type key_item =
+  { item : string  (** [key:label] *)
+  ; answer : key_answer
+  }
+
+(* What a footer hands the row. [Written] is a row a footer spelled itself and
+   filtered to the keys that answer; its spacing and any styles it carries are
+   kept verbatim. [Keys] is a row projected from typed actions, one item per
+   key, each saying whether it answers. *)
+type key_row =
+  | Written of string
+  | Keys of key_item list
+
+let written_items text =
+  split_on_double_space text
+  |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+  |> List.map (fun item -> { item; answer = Answers })
+
+let row_items = function
+  | Written text -> written_items text
+  | Keys items -> items
+
+(* The keys the row offers as working, for the navigation trace: a refused
+   key is drawn, but pressing it is not a key the screen promised. *)
+let answering_text = function
+  | Written text -> text
+  | Keys items ->
+    List.filter_map
+      (fun { item; answer } ->
+        match answer with Answers -> Some item | Refused -> None)
+      items
+    |> String.concat "  "
+
+let append_answering row text =
+  match row with
+  | Written hints -> Written (hints ^ "  " ^ text)
+  | Keys items -> Keys (items @ [ { item = text; answer = Answers } ])
+
+let prepend_answering text row =
+  match row with
+  | Written hints -> Written (text ^ "  " ^ hints)
+  | Keys items -> Keys (written_items text @ items)
+
 type hint_item =
   { hint_text : string
   ; pinned : bool
   }
 
+(* [full_text] and [items] are the keys that answer: what a cut row is made
+   from and gives up from. [whole] is the row with each refused key in its
+   place too, present only when the row refuses one. It is drawn only when it
+   fits whole with everything else on the row. Whether it fits reads every key,
+   refused or not, so a row that fits is the same whatever the selection.
+
+   A refused key kept on a cut row cost the keys and notices that act.
+   Measured on the empty Fusion list at 80 to 120 cells it pushed out
+   [a:new run], the one key that acts there; at 40 to 60 cells the empty
+   Harness row lost [q:quit]; on the empty Goal list at 100 cells a refused
+   [Right / Enter] put the build mismatch notice aside. *)
 type hint_row =
   { full_text : string
   ; items : hint_item list Lazy.t
+  ; whole : string option
   }
 
-let prepare_hints full_text =
-  (* This lazy belongs to one synchronous [line] call. No fiber yields or
-     shared cache can force it concurrently. A row that fits with no conflict
-     never needs to split its hints; every narrower attempt shares the same
-     parsed items and pin decisions. Keep [full_text] verbatim for that first
-     fit, including the caller's spacing and styles. *)
-  let items = lazy (
-    split_on_double_space full_text
-    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-    |> List.map (fun hint_text ->
-        { hint_text; pinned = item_is_pinned hint_text })) in
-  { full_text; items }
+let prepare_hints row =
+  match row with
+  | Written full_text ->
+    (* This lazy belongs to one synchronous [line] call. No fiber yields or
+       shared cache can force it concurrently. A row that fits with no
+       conflict never needs to split its hints; every narrower attempt shares
+       the same parsed items and pin decisions. Keep [full_text] verbatim for
+       that first fit, including the caller's spacing and styles. *)
+    let items = lazy (
+      written_items full_text
+      |> List.map (fun { item; answer = _ } ->
+          { hint_text = item; pinned = item_is_pinned item })) in
+    { full_text; items; whole = None }
+  | Keys keys ->
+    let answering =
+      List.filter_map
+        (fun { item; answer } ->
+          match answer with
+          | Answers -> Some { hint_text = item; pinned = item_is_pinned item }
+          | Refused -> None)
+        keys
+    in
+    { full_text = answering_text row
+    ; items = Lazy.from_val answering
+    ; whole =
+        (if List.compare_lengths answering keys < 0
+         then Some (String.concat "  " (List.map (fun { item; answer = _ } -> item) keys))
+         else None)
+    }
+
+(* Whether a refused key can stand in its place on a whole row. The row's dim
+   is its only mark. With colours off the dim is nothing, so a refused key
+   would be drawn exactly like one that acts and say it acts; the row then
+   leaves every refused key out, as a cut row does. *)
+type refused_keys =
+  | Shown_dim
+  | Left_out
 
 let is_key_token key =
   let len = String.length key in
@@ -511,23 +598,41 @@ let map_double_space_items f s =
   scan 0 0;
   Buffer.contents buf
 
-let style_hint_row ~key_style ~dim ~reset hints =
-  if String.equal key_style "" || String.contains hints.full_text '\027' then hints
+(* The key letter of an answering item in a typed row leaves the row's [dim]
+   and then takes [key_style]. It leaves the dim even when [key_style] is
+   empty: the dim is what tells it from a refused key, whose letter stays in
+   the dim with its label, so the mark holds once key letters lose their
+   colour and weight (RFC tui-one-screen-grammar section 7.3). *)
+let lifted_key_item ~key_style ~dim ~reset item =
+  if String.contains item '\027' then item
   else
-    let full_text =
-      map_double_space_items
-        (stylize_hint_item ~key_style ~dim ~reset)
-        hints.full_text
-    in
-    let items =
-      lazy
-        (Lazy.force hints.items
-         |> List.map (fun item ->
-             { item with
-               hint_text = stylize_hint_item ~key_style ~dim ~reset item.hint_text
-             }))
-    in
-    { full_text; items }
+    match String.index_opt item ':' with
+    | None -> item
+    | Some i when i <= 0 -> item
+    | Some i ->
+      let key = String.sub item 0 i in
+      if not (is_key_token key) then item
+      else
+        reset ^ key_style ^ key ^ reset ^ dim
+        ^ String.sub item i (String.length item - i)
+
+(* A written row keeps its old form: [key_style] on each key, none when it is
+   empty. A typed row lifts each answering key and leaves a refused one as
+   written. Styling adds no cells, so every width reading stays the same. *)
+let styled_row ~key_style ~dim ~reset row =
+  match row with
+  | Written _ when String.equal key_style "" -> row
+  | Written text when String.contains text '\027' -> row
+  | Written text ->
+    Written (map_double_space_items (stylize_hint_item ~key_style ~dim ~reset) text)
+  | Keys items ->
+    Keys
+      (List.map
+         (fun key ->
+           match key.answer with
+           | Answers -> { key with item = lifted_key_item ~key_style ~dim ~reset key.item }
+           | Refused -> key)
+         items)
 
 (* The last key this row may give up, by index. [None] once only pinned keys
    are left. *)
@@ -656,30 +761,57 @@ let drawable_conflicts ?literal_prefix ~max_cells ~hints = function
     in
     List.filter_map in_the_longest_text_that_fits conflicts
 
-(* What fits with this conflict set kept whole: the status facts give way in
-   [omission_order], then the keys give way as whole items. [None] when even the
-   keys that cannot be dropped will not fit beside these conflicts. *)
-let rec fit_with_conflicts ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
-    ~conflicts ~hints ~omissions statuses =
+(* One row with these conflicts, these key items and these status facts, when
+   it fits whole. *)
+let whole_row ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells ~conflicts
+    keys statuses =
   let leading =
     String.concat "  "
       (List.map (fun item -> item.text) conflicts
        @ Option.to_list literal_prefix
-       @ [ with_position_and_marker ~cut_marker ~mark_omission position hints.full_text ])
+       @ [ with_position_and_marker ~cut_marker ~mark_omission position keys ])
   in
   let rendered = body leading statuses in
-  if Masc_tui_message_layout.display_width rendered <= max_cells then
-    Some rendered
-  else
+  if Masc_tui_message_layout.display_width rendered <= max_cells then Some rendered
+  else None
+
+(* The answering keys with this conflict set kept whole: the status facts give
+   way in [omission_order], then the keys give way as whole items. [None] when
+   even the keys that cannot be dropped will not fit beside these conflicts. *)
+let rec fit_answering_keys ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
+    ~conflicts ~hints ~omissions statuses =
+  match
+    whole_row ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells ~conflicts
+      hints.full_text statuses
+  with
+  | Some rendered -> Some rendered
+  | None ->
     match statuses, omissions with
     | [], _ -> drop_hint_items ?literal_prefix ?position ~cut_marker ~max_cells ~conflicts hints
     | _, retention :: rest ->
-      fit_with_conflicts ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
+      fit_answering_keys ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
         ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
     | _, [] ->
-      fit_with_conflicts ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
+      fit_answering_keys ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
         ~conflicts ~hints ~omissions:[] []
+
+(* What fits with this conflict set kept whole. A row that refuses a key is
+   tried first with every key in its place and every status fact; when that
+   does not fit, the refused keys go before anything else does and the row is
+   the answering keys' own. *)
+let fit_with_conflicts ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
+    ~conflicts ~hints ~omissions statuses =
+  let with_every_key =
+    Option.bind hints.whole (fun keys ->
+        whole_row ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells ~conflicts
+          keys statuses)
+  in
+  match with_every_key with
+  | Some rendered -> Some rendered
+  | None ->
+    fit_answering_keys ?literal_prefix ?position ~cut_marker ~mark_omission ~max_cells
+      ~conflicts ~hints ~omissions statuses
 
 (* Every notice that has a shorter text, in that text; the others stay as they
    are. *)
@@ -792,9 +924,12 @@ let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_k
          Masc_tui_message_layout.display_width rendered <= room
          && not (String.ends_with ~suffix:cut_marker rendered)
        then
-         Masc_tui_message_layout.fit_width
-           (Masc_tui_message_layout.take_cells rendered marker_room) marker_room
-         ^ cut_marker
+         (* The cut marker follows, so this head carries no mark of its own. *)
+         let head =
+           match Masc_tui_message_layout.take_cells rendered marker_room with
+           | Masc_tui_message_layout.Whole head | Masc_tui_message_layout.Cut head -> head
+         in
+         Masc_tui_message_layout.fit_width head marker_room ^ cut_marker
        else Masc_tui_message_layout.fit_width rendered room ^ styled_more_key)
 
 (** What the caller would rather the notice slot said than [action_text],
@@ -851,9 +986,12 @@ type question_place =
     [preferred_action] is the caller's choice for the notice slot once it has
     resolved priority; {!preferred_action} says what each kind does.
 
-    [ko] picks the language of the status facts. The hints arrive written. *)
+    [ko] picks the language of the status facts. The hints arrive written.
+    A [Keys] row draws a refused key in [dim] in its place when the whole row
+    fits and [refused_keys] is [Shown_dim]; a row that has to be cut, or one
+    whose dim marks nothing, leaves every refused key out. *)
 let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port
-    ?(help_key_answers = true) ?(key_style = "") ~ko ~dim ~reset
+    ?(help_key_answers = true) ?(key_style = "") ~ko ~dim ~reset ~refused_keys
     ~max_cells ~hints () =
   let max_cells = max 0 max_cells in
   let more_key = if help_key_answers then more_key else "" in
@@ -863,10 +1001,14 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
   in
   let cut_marker = styled_cut_marker ~key_style ~dim ~reset more_key in
   let raw_hints = hints in
-  let style_choices s =
-    (style_hint_row ~key_style ~dim ~reset (prepare_hints s)).full_text
+  let style row = prepare_hints (styled_row ~key_style ~dim ~reset row) in
+  let style_choices s = (style (Written s)).full_text in
+  let hints =
+    let prepared = style raw_hints in
+    match refused_keys with
+    | Shown_dim -> prepared
+    | Left_out -> { prepared with whole = None }
   in
-  let hints = style_hint_row ~key_style ~dim ~reset (prepare_hints raw_hints) in
   let statuses =
     List.filter_map (status_item_projection ~ko)
       (status @ Option.to_list (Option.map (fun port -> Port port) port))
@@ -900,9 +1042,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
       | Some _ -> hints
       | None ->
           (match preferred_action with
-           | Some (Menu_choices text) ->
-               style_hint_row ~key_style ~dim ~reset
-                 (prepare_hints (text ^ "  " ^ raw_hints))
+           | Some (Menu_choices text) -> style (prepend_answering text raw_hints)
            | Some (Outcome _ | Pending_question _) | None -> hints)
     in
     let conflicts =

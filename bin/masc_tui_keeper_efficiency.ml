@@ -87,7 +87,8 @@ let lines ~ko fetched ~keeper_name =
      | Masc_tui_fetched.Failed (Read_failed detail) ->
        [ ( Bad
          , Printf.sprintf
-             (if ko then "%s 효율: 읽지 못함: %s" else "Efficiency %s: not read: %s")
+             (if ko then "%s 효율 읽기 실패 \xc2\xb7 %s"
+              else "Efficiency %s read failed \xc2\xb7 %s")
              month (single_line detail) )
        ]
      | Masc_tui_fetched.Failed (Read_kept_back notice) -> [ Bad, single_line notice ]

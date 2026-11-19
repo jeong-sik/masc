@@ -78,7 +78,7 @@ val open_store :
 
     The writers of one store directory take one mutex, whichever spelling
     reached the directory. The process registry keeps it under the name the
-    file system gives the directory ({!Store.directory_name}). A handle asks
+    file system gives the directory ([File_system_named.name]). A handle asks
     for it on each write or prune, so a handle opened before its directory
     existed takes the directory's mutex once the directory is there. The
     file system is asked once for each spelling of a directory that exists;
@@ -99,10 +99,11 @@ val close : t -> unit
     directory remains on disk. *)
 
 val prepare_for_directory_removal : t -> unit
-(** Close the current append writer and forget its memoized month directory
-    and row count before application-owned code removes [base_dir t]. A later
-    append can then recreate the directory and observe the new file identity.
-    The removal is followed by {!directories_removed}. *)
+(** Close the current append writer and forget the row count of its day file
+    before application-owned code removes [base_dir t]. A later append makes
+    the directory again whether or not this was called; what it adds is the
+    descriptor closed before the removal and a row count that is not the
+    removed file's. The removal is followed by {!directories_removed}. *)
 
 val directories_removed : unit -> unit
 (** Tell this module that store directories, or files inside them, were
@@ -343,23 +344,55 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     other way is told with {!directories_removed}.
 
     That holds for the appends of one process. A row another process appends
-    moves nothing here, so a fact is kept only by the process that has said
-    it is the one that writes the stores ({!keep_facts_in_this_process}). *)
+    moves nothing here, so a fact is kept only where two things hold: the
+    process has said it holds the workspace's writer lease
+    ({!Fact_cell.keep_in_this_process}), and the store is one whose files
+    only the lease holder changes ({!Store.facts}). Anywhere else
+    {!read_fact} reads the files each time: in the TUI or a command line
+    tool for every store, and in the lease holder for a store such as the
+    cost log, which [masc-cost] also appends to without a lease. *)
 
 type 'a fact
-
-val keep_facts_in_this_process : unit -> unit
-(** From now on {!read_fact} keeps what it reads. Said once by the one
-    process that appends to the stores whose facts it reads: the server, when
-    it holds the BasePath writer lease. It is not taken back.
-
-    A process that has not said it (the TUI, a command line tool) reads the
-    files on every {!read_fact}, as it did before there were facts. *)
 
 val last_row : recent_entry option fact
 (** The store's newest physical row, as [read_recent_result t 1] reads it:
     [None] for a store without rows, and a row that is not JSON is
     {!Malformed_json}. *)
+
+val last_rows : name:string -> count:int -> Yojson.Safe.t option list fact
+(** A fact: the store's newest [count] physical rows, oldest first, as
+    [read_recent_result t count] reads them. A row is its JSON; a row that is
+    not JSON is [None] and keeps its place among the [count]. The value names
+    no file, so a size rotation leaves it as it is.
+
+    Each call makes a fact of its own, with its own kept value in every
+    store. Make it once, where the count is defined, and keep it. [name]
+    labels its reads in [masc_dated_jsonl_fact_reads_total].
+
+    @raise Invalid_argument when [count] is less than 1. *)
+
+val newest_parsed_row : Yojson.Safe.t option fact
+(** The store's newest row that is JSON, as {!find_latest_entry_result} finds
+    it when it selects every {!Parsed} row: rows that are not JSON are passed
+    over, and [None] is a store in which no row is JSON. *)
+
+val newest_selected
+  :  name:string
+  -> select:(base_dir:string -> recent_entry -> 'a option)
+  -> 'a option fact
+(** A fact: what [select] gives for the store's newest row it selects, as
+    [find_latest_entry_result t (select ~base_dir:(base_dir t))] finds it,
+    and [None] for a store in which it selects no row.
+
+    [select] is told the store's directory, for a selection that reports the
+    rows it cannot use. It runs on each row the search visits when the files
+    are read, and once on each row appended while the value is kept. What it
+    answers for a row must depend on the row alone: an appended row it passes
+    over leaves the kept value as it is.
+
+    Each call makes a fact of its own, with its own kept value in every
+    store. Make it once, where the selection is defined, and keep it. [name]
+    labels its reads in [masc_dated_jsonl_fact_reads_total]. *)
 
 val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
 (** The fact's value for the store. When the store keeps it, no file is read
@@ -371,7 +404,7 @@ val read_fact : t -> 'a fact -> ('a, read_error) Fact_cell.filled
     A store whose directory does not exist yet is asked about each time, as
     for a write.
 
-    In a process that has not said {!keep_facts_in_this_process} the strict
+    In a process that has not said {!Fact_cell.keep_in_this_process} the strict
     read runs on every call and nothing is kept: the answer is
     {!Fact_cell.Read_not_kept} or {!Fact_cell.Read_failed}.
 
@@ -691,6 +724,7 @@ module For_testing : sig
   (** Whether the registry holds an entry for the store. *)
 
   val after_row :
+    ?base_dir:string ->
     'a fact ->
     value:'a ->
     newest:(string * string) option ->
@@ -701,5 +735,7 @@ module For_testing : sig
       day file [newest], and [row] went to the end of the day file [written];
       a day file is its month directory and its file name. The result is the
       value after the row with the newest day file it saw, or [None] when the
-      append forgets the fact instead. It reads no file and no clock. *)
+      append forgets the fact instead. It reads no file and no clock.
+      [base_dir] is the store's directory as a {!newest_selected} selection
+      is told it; the current directory's name when left out. *)
 end

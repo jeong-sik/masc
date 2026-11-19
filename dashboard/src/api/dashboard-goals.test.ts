@@ -354,8 +354,8 @@ describe('fetchDashboardGoalsTree decoding', () => {
     // (lib/dashboard/dashboard_goals_types_timeline.ml), which emits
     // {ts, kind, lane, title, summary, severity}. The first two rows below
     // are that output verbatim for a goal_phase event and for an event type
-    // the normalizer has no title for. The third row is a ledger row as
-    // written by `emit_goal_event` (lib/workspace_goals.ml), which never
+    // the normalizer has no title for. The third row is keyed like a raw
+    // goal_events.jsonl row (event_type and payload, no kind), which never
     // reaches the wire; the decoder does not read that shape.
     getMock.mockResolvedValue({
       ...readyApprovalQueue,

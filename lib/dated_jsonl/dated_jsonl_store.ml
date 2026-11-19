@@ -110,34 +110,11 @@ let decision_audit root ~keeper_dirname =
 
 let dir location = location.dir
 
-type directory_name =
-  | Existing of string
-  | Not_yet of string
-
-(* [path] with its nearest existing ancestor named by the file system and the
-   pieces below that ancestor as spelled. *)
-let name_through_nearest_existing path =
-  let rec resolve dir below =
-    match Unix.realpath dir with
-    | real -> List.fold_left Filename.concat real below
-    | exception Unix.Unix_error _ ->
-      let parent = Filename.dirname dir in
-      if String.equal parent dir
-      then List.fold_left Filename.concat dir below
-      else resolve parent (Filename.basename dir :: below)
-  in
-  resolve path []
-
 let absolute_dir location =
   if Filename.is_relative location.dir
   then Filename.concat (Config_dir_resolver.current_working_dir ()) location.dir
   else location.dir
 
-let directory_name location =
-  let spelled = absolute_dir location in
-  match Unix.realpath spelled with
-  | name -> Existing name
-  | exception Unix.Unix_error _ -> Not_yet (name_through_nearest_existing spelled)
 let of_location location = location.store
 let keeper_store location = location.keeper_store
 
@@ -192,6 +169,67 @@ let retention = function
   | Root store -> root_retention store
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
+
+type facts =
+  | Kept_by_the_lease_holder
+  | Read_from_the_files
+
+(* Who changes a store's files. [Kept_by_the_lease_holder] says that every
+   change is made by the process that holds the workspace's writer lease, and
+   is written here once the store's writers have been gone through. A store
+   nobody has gone through is read from the files, and so is one that
+   another process is known to write. *)
+let root_facts = function
+  (* [masc-cost --log] appends to the cost log and takes no lease
+     ([bin/masc_cost.ml]). *)
+  | Root.Costs -> Read_from_the_files
+  (* One writer, [Keeper_tool_call_log], and only in a process where the
+     server's start has opened the ledger ([Server_bootstrap_maintenance]),
+     which holds the lease; anywhere else a logged call writes nothing. The
+     read index keeps its own files beside the months and changes no day
+     file. Day files go by the prune pass, in that process. *)
+  | Root.Tool_calls -> Kept_by_the_lease_holder
+  | Root.Transition_audit
+  | Root.Audit_approvals
+  | Root.Tool_events
+  | Root.Verdicts
+  | Root.Audit
+  | Root.Telemetry
+  | Root.Events
+  | Root.Activity_events
+  | Root.Tool_usage
+  | Root.Agent_core_events
+  | Root.Provider_usage_history
+  | Root.Wire_capture
+  | Root.Schedule_signals
+  | Root.Telemetry_coverage_gaps -> Read_from_the_files
+
+let keeper_facts = function
+  (* One writer, [Keeper_turn_record_writer], called from the Keeper's turn.
+     A turn runs only in a process that holds the lease. Day files go by the
+     prune pass and by the Keeper's purge, both in that process. *)
+  | Keeper.Turn_records -> Kept_by_the_lease_holder
+  (* One writer, [Keeper_execution_receipt.append], called when a Keeper's
+     run ends; a run is in a process that holds the lease. Day files go by
+     the prune pass and by the Keeper's purge, both in that process. Boot
+     reconcile does not move this store. *)
+  | Keeper.Execution_receipts -> Kept_by_the_lease_holder
+  (* One writer, [Keeper_types_support.append_keeper_metrics], with two
+     callers: the row a Keeper's turn ends with and the row of its heartbeat
+     loop. Both run only in a process that holds the lease. The append
+     rotates the day file by size and prunes to the store's byte budget
+     itself. Day files also go by the prune pass and by the Keeper's purge,
+     both in that process. No command line tool appends to this store. *)
+  | Keeper.Metrics -> Kept_by_the_lease_holder
+  | Keeper.Provider_inputs
+  | Keeper.Memory_recall_artifacts
+  | Keeper.Crash_events
+  | Keeper.Continuity_requests -> Read_from_the_files
+
+let facts = function
+  | Root store -> root_facts store
+  | Keeper store -> keeper_facts store
+  | Reaction_ledger | Decision_audit -> Read_from_the_files
 
 (* What a store's owner keeps in the store's own directory, beside the month
    directories: a file made from the day files, which no reader of the day

@@ -365,9 +365,9 @@ let require_interactive_terminal () =
    worked out from the full body while the frame draws half of it is not a
    bound, and the rows past the shortened list stop being reachable. *)
 let surface_body_height ~rows
-    { sc_count; sc_chrome; sc_overflow_takes_row; sc_preview_keep } =
+    { sc_count; sc_chrome; sc_preview_keep } =
   Masc_tui_scroll.content_height ~rows ~chrome:sc_chrome ~count:sc_count
-    ~preview_keep:sc_preview_keep ~overflow_takes_row:sc_overflow_takes_row
+    ~preview_keep:sc_preview_keep
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
@@ -2793,16 +2793,6 @@ let () =
                | Error _ -> ());
               `Stop_daemon))
 
-let current_clock_text () =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-    now.Unix.tm_sec
-
-let clock_text_of_unix at =
-  let time = Unix.localtime at in
-  Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
-    time.Unix.tm_sec
-
 let next_chat_operation_seq state request_id =
   List.fold_left
     (fun next entry ->
@@ -2856,7 +2846,6 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
              server ([msg_entry_of_history_row]). *)
           me_tool_block = None;
           me_skill_block = [];
-          me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
           me_execution_source = Some (Keeper_chat_log.Operation request.request_id);
@@ -10436,6 +10425,66 @@ let launch_owed_repositories state ~mailbox =
       launch_repositories_load state ~mailbox
   end
 
+(* The engine graphs' own [/health] read. It asks which server answers, as
+   the refresh's probe does, outside any workspace scope: [/health] reads no
+   workspace data, and the answer goes to the graphs only. *)
+let launch_engine_sample_read state ~mailbox =
+  let host = server_peer_host and port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox
+        (Engine_sample_read (Masc_tui_engine_samples.reading_of_server result)))
+    (fun () ->
+      Masc_tui_workspace_read.without_binding (fun () ->
+        Masc_tui_workspace_precondition.without (fun () ->
+          Masc_tui_loader.load_server_reading ~host ~port)))
+
+(* The engine graphs' samples (RFC tui-one-screen-grammar section 5.6). Runs
+   on every loop iteration, as the owed reads do, and sets no timer of its
+   own. Off the engine view its samples go and nothing is due. On it, a due
+   sample takes the newest [/health] answer of the last two seconds, whoever
+   asked for it, or asks [/health] itself, one read at a time. When the
+   refresh pass is backing off, times without any answer stay blank. A
+   sample changes the graphs and requests a frame (section 8).
+   The view is on screen only while the surface is the frame: the help sheet,
+   a reader, the account server's screen or the too-small notice draws over
+   the whole terminal, and the graphs under it are not sampled. *)
+let step_engine_samples state ~mailbox ~render_schedule =
+  let terminal_rows, cols = get_terminal_size () in
+  let now = monotonic_now_s () in
+  let capacity =
+    match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
+    | None -> None
+    | Some capacity ->
+      (match
+         Masc_tui_render.frame_choice state ~terminal_rows
+           ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+           ~now:(Unix.gettimeofday ())
+       with
+       | `Surface -> Some capacity
+       | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Queue _ | `Link
+       | `Client_detail _ -> None)
+  in
+  match capacity with
+  | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
+  | Some capacity ->
+    let allow_read =
+      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+    in
+    let samples, step =
+      Masc_tui_engine_samples.tick ~allow_read
+        (Masc_tui_engine_samples.shown state.engine_samples ~now ~capacity)
+        ~now ~newest:(Masc_tui_loader.health_answer ())
+    in
+    state.engine_samples <- samples;
+    (match step with
+     | Masc_tui_engine_samples.Nothing -> ()
+     | Masc_tui_engine_samples.Sampled ->
+       Render_schedule.request render_schedule Render_schedule.Background
+     | Masc_tui_engine_samples.Read -> launch_engine_sample_read state ~mailbox)
+
 let memory_health_on_screen state =
   match state.view with
   | Memory | Metrics | Keepers Keeper_list -> true
@@ -11841,14 +11890,6 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Fusion_conclusion _), _
     | Keeper_chat_history.Addressed_to_keeper _, None -> None
   in
-  let timestamp =
-    let source_at =
-      Option.value ~default:row.Keeper_chat_history.at submitted_at
-    in
-    if Float.is_finite source_at && source_at > 0.
-    then clock_text_of_unix source_at
-    else "--:--:--"
-  in
   (* Display metadata without pulling image bytes into every history page.
      The typed preview below is derived from the original text and refs. *)
   let text =
@@ -11928,7 +11969,6 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
   ; me_skill_block = skill_block
-  ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
        persisted turn_ref. Old rows and Memory journal entries carry neither,
@@ -13279,7 +13319,6 @@ let append_chat_local_message state ~keeper text =
           me_submitted_at = None;
           me_tool_block = None;
           me_skill_block = [];
-          me_timestamp = current_clock_text ();
           me_keeper_name = keeper;
           me_request_id = "";
           me_execution_source = None;
@@ -24447,10 +24486,7 @@ let handle_composer_key state ~base_path ~mailbox key =
    a terminal escape could arrive, and it arrives as spaces instead. *)
 (* A paste filename pairs the wall-clock minute with a random suffix. The
    publication step refuses to replace an existing name if that suffix collides. *)
-let spill_stamp () =
-  let time = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%04d%02d%02d-%02d%02d" (time.Unix.tm_year + 1900)
-    (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min
+let spill_stamp () = Masc_tui_value.Instant.file_stamp (Unix.gettimeofday ())
 
 let spill_nonce () =
   (* Keep the existing short filename; [write_file] refuses any collision. *)
@@ -24849,7 +24885,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
         | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _) | Lane_msg (Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _)) | Measurement_artifact_loaded (_, _, _)
-        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
+        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
         | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
@@ -30971,6 +31007,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
+  | Engine_sample_read reading ->
+      (* The drain draws a frame for every answer it applies, so a sample
+         this takes needs nothing more to be drawn. *)
+      let samples, (_ : Masc_tui_engine_samples.step), report =
+        Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
+      in
+      state.engine_samples <- samples;
+      (match report with
+       | Masc_tui_engine_samples.Quiet -> ()
+       | Masc_tui_engine_samples.Failure_began detail ->
+         add_event state "error" (Terminal_text.single_line detail))
   | Overview_loaded result ->
       state.overview_inflight <- false;
       state.overview_owed <-
@@ -36311,6 +36358,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
+      step_engine_samples state ~mailbox:async_messages ~render_schedule;
       reconcile_system_log_stream state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_ask_followup state ~mailbox:async_messages;

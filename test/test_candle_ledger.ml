@@ -115,7 +115,7 @@ let file_text base_path = In_channel.with_open_bin (Candle_ledger.path ~base_pat
 
 let append_raw base_path text =
   let path = Candle_ledger.path ~base_path in
-  Fs_compat.mkdir_p_memoized (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o600 path (fun oc ->
     Out_channel.output_string oc text)
 ;;

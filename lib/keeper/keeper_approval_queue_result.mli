@@ -214,6 +214,9 @@ type install_report =
   ; replay_projection_error : storage_error option
   ; retired_deliveries : int
   ; delivery_retirement_error : storage_error option
+  ; ledger_retry_failures : delivery_replay_failure list
+      (* Deliveries whose [Resolved] row could not be confirmed on the audit
+         ledger; each stays in the store until a later install records it. *)
   }
 
 type install_error = Install_storage_failed of storage_error

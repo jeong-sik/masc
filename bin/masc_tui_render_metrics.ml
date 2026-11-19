@@ -235,7 +235,7 @@ let pulse_line ~cols (state : state) kpis =
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
-  Layout.take_cells text inner_width ^ Ansi.reset
+  Layout.truncate_end inner_width text ^ Ansi.reset
 
 (* The three sections as a tab strip, drawn the way the surface strip above
    every screen is: a mark on the one being read, the names beside it. It was
@@ -263,20 +263,150 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
           Masc_tui_press.(pressable (Press_metrics_section section)) text)
         (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
-  if Layout.display_width line > inner_width then
-    Layout.take_cells line inner_width ^ Ansi.reset
-  else line
+  Layout.truncate_end inner_width line
+
+(* The four cards share the row; [kpi_card_gaps] cells go to its lead and
+   the gaps between them. Below [minimum_card_text_cells] of text inside the
+   border and padding the row is compact summaries, not four boxes of
+   clipped labels. *)
+let minimum_card_text_cells = 32
+let kpi_cards = 4
+let kpi_card_gaps = 10
+let kpi_card_min_width = 18
+
+type kpi_layout =
+  | Cards of { card_w : int; card_cells : int }
+  | Compact
+
+let kpi_layout ~cols =
+  let inner_width = max 20 (framed_inner_width cols) in
+  let card_w = max kpi_card_min_width ((inner_width - kpi_card_gaps) / kpi_cards) in
+  let card_cells = Masc_tui_card.content_cells ~width:card_w in
+  if card_cells >= minimum_card_text_cells then Cards { card_w; card_cells } else Compact
+
+(* Telemetry's engine section: the view whose cards draw the engine graphs. *)
+let engine_view_open (state : state) =
+  state.view = Metrics && state.usage_telemetry_open
+  && (match state.metrics_section with
+      | Section_fleet -> true
+      | Section_resources | Section_tools -> false)
+
+(* Without cards, the two graphs share one row under the summary that names
+   the engine and the scheduler, in that order, each half of what is left
+   after the row's lead and the gap between them. *)
+let compact_graph_lead = "  "
+let compact_graph_gap = "  "
+
+let compact_graph_cells ~cols =
+  let inner_width = max 20 (framed_inner_width cols) in
+  (inner_width - String.length compact_graph_lead - String.length compact_graph_gap) / 2
+
+(* How many cells each engine graph is wide. *)
+let engine_graph_cells ~cols =
+  match kpi_layout ~cols with
+  | Cards { card_cells; _ } -> card_cells
+  | Compact -> compact_graph_cells ~cols
+
+(* Both engine graphs give their axis this many cells: the widest top either
+   ladder below writes ("9.99ms", "59m59s"). The axis column then does not
+   depend on the samples, so both graphs draw the same number of times, one
+   ring keeps exactly those, and a top that changes width moves no dots (RFC
+   tui-one-screen-grammar sections 5.6 and 8). *)
+let engine_axis_cells = 6
+
+(* The ring keeps as many samples as a graph draws times: two a cell of dots
+   beside the axis column (RFC tui-one-screen-grammar section 5.6). *)
+let engine_graph_capacity ~cols (state : state) =
+  if engine_view_open state then
+    Some (Braille.graph_times ~width:(engine_graph_cells ~cols) ~axis_cells:engine_axis_cells)
+  else None
+
+(* [numerator / denominator] rounded up, for a numerator of zero or more,
+   without the overflow [numerator + denominator - 1] risks near [max_int]. *)
+let div_up numerator denominator =
+  (numerator / denominator) + if numerator mod denominator = 0 then 0 else 1
+
+(* A rung of an axis ladder holds a figure below this; a larger one moves to
+   the next rung. *)
+let rung_limit = 1000
+let bytes_per_word = 8.
+let bytes_per_kb = 1024.
+let tenths_per_minute = 600
+
+(* The top of the heap axis: the held top of the heap graph
+   (Masc_tui_engine_samples.graph), in bytes, in the smallest binary unit that
+   keeps the figure below a thousand, with tenths below ten. Rounded up, so
+   the text is never under the top the dots are scaled to. At
+   most five cells ("999KB", "9.9GB"): the largest heap a 63-bit count of
+   words can name is 32EB. *)
+let heap_axis words =
+  let bytes = Float.of_int (max 0 words) *. bytes_per_word in
+  if bytes < Float.of_int rung_limit then Printf.sprintf "%.0fB" bytes
+  else
+    let rec rung size unit larger =
+      let value = bytes /. size in
+      let tenths = Float.ceil (value *. 10.) in
+      if tenths < 100. then Printf.sprintf "%.1f%s" (tenths /. 10.) unit
+      else
+        let whole = Float.ceil value in
+        match larger with
+        | next :: rest when whole >= Float.of_int rung_limit ->
+          rung (size *. bytes_per_kb) next rest
+        | _ :: _ | [] -> Printf.sprintf "%.0f%s" whole unit
+    in
+    rung bytes_per_kb "KB" [ "MB"; "GB"; "TB"; "PB"; "EB" ]
+
+(* The top of the p95 axis: the held top of the p95 graph, in whole
+   microseconds. Hundredths of a millisecond below ten, tenths below a
+   hundred, whole milliseconds below a second, tenths of a second below a
+   minute, then the two-unit ladder of a finished span (section 6.2). Each
+   rung rounds up, so the text is never under the top. At most six cells
+   below a hundred thousand days, longer than a server runs and so than any
+   lag it measures. *)
+let p95_axis microseconds =
+  let us = max 0 microseconds in
+  let hundredths_ms = div_up us 10 in
+  if hundredths_ms < rung_limit then
+    Printf.sprintf "%d.%02dms" (hundredths_ms / 100) (hundredths_ms mod 100)
+  else
+    let tenths_ms = div_up us 100 in
+    if tenths_ms < rung_limit then Printf.sprintf "%d.%dms" (tenths_ms / 10) (tenths_ms mod 10)
+    else
+      let ms = div_up us 1_000 in
+      if ms < rung_limit then Printf.sprintf "%dms" ms
+      else
+        let tenths_s = div_up us 100_000 in
+        if tenths_s < tenths_per_minute then
+          Printf.sprintf "%d.%ds" (tenths_s / 10) (tenths_s mod 10)
+        else Layout.span_text (Float.of_int (div_up us 1_000_000))
+
+(* The quantity each engine graph draws, so it takes that quantity's ramp on
+   every screen (RFC tui-one-screen-grammar 7.3). *)
+let engine_series_tint = function
+  | Masc_tui_engine_samples.Live_heap -> Theme.series_tint Masc_tui_theme.Memory
+  | Masc_tui_engine_samples.Scheduler_p95 -> Theme.series_tint Masc_tui_theme.Latency
+
+(* A card's graph row. Before the view's first sample it is the unread mark;
+   with no room for dots, the number the card already wrote. *)
+let engine_graph_row ~cells ~axis ~number series (state : state) =
+  match
+    Masc_tui_engine_samples.graph ~tint:(engine_series_tint series) ~width:cells
+      ~axis_cells:engine_axis_cells ~axis series state.engine_samples
+  with
+  | Braille.Drawn rows -> String.concat "" rows
+  | Braille.Never_read -> Unknown.(glyph Unread)
+  | Braille.Too_narrow -> number
 
 let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
-  let card_w = max 18 ((inner_width - 10) / 4) in
-  let card_cells = Masc_tui_card.content_cells ~width:card_w in
-  (* Reserve readable text cells inside the border and padding. Below this
-     width use the compact summaries, not four boxes of clipped labels. *)
-  let minimum_card_text_cells = 32 in
-  let render_card ?status ?count ~title_style name rows =
+  let layout = kpi_layout ~cols in
+  (* The engine view draws a graph row in the Engine and scheduler cards, so
+     every card of the row is one row taller there. *)
+  let graphs = engine_view_open state in
+  let card_height = if graphs then 5 else 4 in
+  let render_card ~card_w ?status ?count ~title_style name lines =
     let style =
       { Masc_tui_card.border = Theme.recede ()
       ; focused_border = Theme.border_focus ()
@@ -284,10 +414,10 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       ; reset = Ansi.reset
       }
     in
-    Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
+    Masc_tui_card.render ~ko ~style ~width:card_w ~height:card_height
       { Masc_tui_card.edge =
           { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
-      ; body = (fun ~cells:_ -> rows) }
+      ; body = (fun ~cells:_ -> lines) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
@@ -311,12 +441,13 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
      the cut took the workers off. The compact summary is one row wide enough
      for all three. *)
   let workers = Printf.sprintf (if ko then "워커 %s" else "%s workers") domains in
-  let c1_l1, c1_l2, c1_compact = match gc_opt with
+  let c1_l1, c1_l2, c1_compact, c1_number = match gc_opt with
     | Some gc ->
       let heap = say "힙 " "Heap " ^ format_words gc.sgc_heap_words in
       let live = format_words gc.sgc_live_words in
       let live_line =
-        if card_cells >= minimum_card_text_cells && gc.sgc_heap_words > 0 then
+        match layout with
+        | Cards { card_cells; _ } when gc.sgc_heap_words > 0 ->
           Chart.meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
             ~label:(say "점유" "Live") ~suffix:live
@@ -324,44 +455,46 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
                it are a share, not a use of a limit. *)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-        else
+        | Cards _ | Compact ->
           Printf.sprintf (if ko then "사용 중 %s · 마이너 힙 %s" else "live %s · minor %s")
             live (format_words gc.sgc_minor_heap_size)
       in
       ( heap ^ " · " ^ workers
       , live_line
       , Printf.sprintf (if ko then "%s · 사용 중 %s · %s" else "%s · live %s · %s")
-          heap live workers )
+          heap live workers
+      , live )
     | None ->
       let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
-      (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
+      (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers, Unknown.glyph identity_gap)
   in
   (* The probe's state is the card's status, on its edge, so the body does
      not write the probe again. A stopped probe's reason is data, the last
-     row of the body. With no samples it has the second row to itself. With
-     samples still in the producer window it is the third, which the card
-     cuts and counts on its bottom edge; a stopped probe takes no new
-     samples, so the window empties and the reason moves up. *)
+     row of the body, after the sample summary and graph when those are
+     drawn. The card counts the reason on its bottom edge if it is cut.
+     A stopped probe takes no new samples, so the window empties and the
+     reason moves up. *)
   let stop_reason =
     Option.to_list
       (scheduler_stop_reason (Option.bind sched_opt (fun s -> s.ssch_probe)))
   in
-  let c2_l1, c2_rest, c2_tone, c2_status = match sched_opt with
+  let c2_l1, c2_rest, c2_tone, c2_status, c2_number = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
-        stop_reason,
+        [],
         Theme.recede (),
-        scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
+        scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe,
+        Unknown.(glyph Unreported) )
     | Some s ->
       let tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.recede () in
       let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
-       Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
-         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls)
-       :: stop_reason,
+       [ Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
+           (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls) ],
        tone,
-       scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
+       scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe,
+       Printf.sprintf "%.3fms" s.ssch_p95_ms)
     (* One condition -- no scheduler reading at all -- so both halves of the
        card draw the same mark. *)
     | None ->
@@ -371,7 +504,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
         Theme.recede (),
         { Masc_tui_card.symbol = Masc_tui_card.Unknown identity_gap
         ; word = ""
-        ; tone = Theme.recede () } )
+        ; tone = Theme.recede () },
+        mark )
   in
   (* With no task reading the edge has no count to write, and its mark says
      why, as the Attention card's does: a card that cannot count reads
@@ -383,14 +517,15 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
          done tasks against it and writes the done count alone, as the
          Engine card's meter writes the live size against the heap above. *)
       let done_line =
-        if card_cells >= minimum_card_text_cells && total > 0 then
+        match layout with
+        | Cards { card_cells; _ } when total > 0 ->
           Chart.meter ~width:card_cells ~value:count.completed
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
             ~suffix:(Count.grouped count.completed)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-        else
+        | Cards _ | Compact ->
           Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
             (Count.grouped count.completed) (Count.grouped count.cancelled)
       in
@@ -460,23 +595,52 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | _ :: _, _ :: _, [], _
     | _ :: _, _ :: _, _ :: _, [] -> []
   in
-  if card_cells >= minimum_card_text_cells then
+  match layout with
+  | Cards { card_w; card_cells } ->
+    let render_card = render_card ~card_w in
+    let graph_row ~number series ~axis =
+      if graphs then [ engine_graph_row ~cells:card_cells ~axis ~number series state ] else []
+    in
     zip4
-      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") [ c1_l1; c1_l2 ])
+      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE")
+         ([ c1_l1; c1_l2 ]
+          @ graph_row ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis))
       (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
-         (c2_l1 :: c2_rest))
+         ((c2_l1 :: c2_rest)
+          @ graph_row ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis
+          @ stop_reason))
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
-  else
-    [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
-        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
-        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[%s]%s %s"
-        (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
-    ; Printf.sprintf "  %s[%s]%s %s · %s"
-        c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
-    ]
-    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
+  | Compact ->
+    let graphs_row =
+      if graphs then
+        let cells = compact_graph_cells ~cols in
+        let graph ~number series ~axis =
+          Layout.fit_width (engine_graph_row ~cells ~axis ~number series state) cells
+        in
+        [ compact_graph_lead
+          ^ graph ~number:c1_number Masc_tui_engine_samples.Live_heap ~axis:heap_axis
+          ^ compact_graph_gap
+          ^ graph ~number:c2_number Masc_tui_engine_samples.Scheduler_p95 ~axis:p95_axis ]
+      else []
+    in
+    (* One card to a row. Two cards shared the first row and were cut at
+       the edge, which left "최" of 최대 and dropped the figure after it (RFC
+       tui-one-screen-grammar §6.6). Packing them by their current width
+       instead made the row count follow the figures: a latency gaining a
+       digit moved every section below by a row (§8). A card wider than the
+       row on its own wraps; nothing is cut. The engine graphs sit under the
+       two cards they draw. *)
+    let card tone title text = Printf.sprintf "%s[%s]%s %s" tone title Ansi.reset text in
+    let packed card =
+      Layout.pack_clauses ~max_cells:(inner_width - 2) [ card ]
+      |> List.map (fun row -> "  " ^ row)
+    in
+    packed (card (Theme.info ()) (say "엔진" "ENGINE") c1_compact)
+    @ packed (card c2_tone (say "지연" "SCHED") c2_l1)
+    @ graphs_row
+    @ packed (card (Theme.info ()) (say "작업" "TASKS") c3_l1)
+    @ packed (card c4_tone (say "확인" "HOLDS") (c4_l1 ^ " · " ^ c4_l2))
 
 type session_entry = { event : event; run : int; rows : string list }
 type session_block = { earlier : int; kept : session_entry list }
@@ -487,7 +651,7 @@ type session_block = { earlier : int; kept : session_entry list }
    next step after the subject -- "runtime event feed closed: " and then
    why -- so a row cut at the pane's edge loses the part that says what to
    do, at any width. *)
-let session_entry_rows ~width ((event : event), run) =
+let session_entry_rows ~now ~width ((event : event), run) =
   let mark =
     match session_event_mark event with
     | None -> ""
@@ -495,7 +659,9 @@ let session_entry_rows ~width ((event : event), run) =
       Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph Ansi.reset
   in
   let lead =
-    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ()) event.timestamp Ansi.reset mark
+    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ())
+      (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now event.at)
+      Ansi.reset mark
   in
   let lead_cells = Layout.display_width lead in
   let content = Terminal_text.single_line event.content in
@@ -516,13 +682,13 @@ let session_entry_rows ~width ((event : event), run) =
    newest event is kept even when it alone is taller than the room beside
    that count; the section scrolls, and a row pushed below the fold can be
    reached where a sentence cut at the edge cannot. *)
-let session_block ~width ?room events =
+let session_block ~now ~width ?room events =
   let entries =
     Masc_tui_render_schedule.collapse_consecutive ~key:session_event_collapse_key
       events
     |> List.rev
     |> List.map (fun ((event : event), run) ->
-           { event; run; rows = session_entry_rows ~width (event, run) })
+           { event; run; rows = session_entry_rows ~now ~width (event, run) })
   in
   let rows_of entry = List.length entry.rows in
   let all = { earlier = 0; kept = entries } in
@@ -548,7 +714,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
@@ -676,7 +842,8 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     match state.events with
     | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
     | events ->
-      let block = session_block ~width:inner_width ?room:session_rows events in
+      let block =
+        session_block ~now:(Unix.gettimeofday ()) ~width:inner_width ?room:session_rows events in
       let rows = List.concat_map (fun entry -> entry.rows) block.kept in
       if block.earlier > 0 then
         Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
@@ -702,7 +869,7 @@ let age_text = Layout.span_text
 
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
@@ -798,10 +965,7 @@ let render_section_resources ~cols (state : state) =
               [ Printf.sprintf (if ko then "    외 %s명" else "    %s more")
                   (Count.grouped omitted) ]))
   in
-  let day_label at =
-    let tm = Unix.gmtime at in
-    Printf.sprintf "%02d-%02d" (tm.Unix.tm_mon + 1) tm.tm_mday
-  in
+  let day_label at = Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment at) in
   let daily_title = match state.task_flow with
     | Some flow when flow.Task_flow.daily <> [] ->
       let first = List.hd flow.Task_flow.daily in
@@ -823,7 +987,8 @@ let render_section_resources ~cols (state : state) =
     | None -> [ no_snapshot ]
     | Some flow ->
       let rows =
-        [ say "날짜" "day", (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
+        [ say "날짜" "day", (fun (day : Task_flow.day) ->
+              Masc_tui_value.Utc_day.day_of_month (Masc_tui_value.Utc_day.of_moment day.d_start))
         ; say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
         ; say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
         ; say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]
@@ -950,11 +1115,7 @@ let render_section_resources ~cols (state : state) =
 let render_section_tools ~cols (state : state) : string list =
   (* Section 3: Memory & Gate Safety *)
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip line =
-    if Layout.display_width line > inner_width then
-      Layout.take_cells line inner_width ^ Ansi.reset
-    else line
-  in
+  let clip line = Layout.truncate_end inner_width line in
   let bar_w = min 60 (max 20 (inner_width - 8)) in
 
   let ko = state.ui_language = Lang_ko in
@@ -1126,6 +1287,7 @@ let rebase_scroll_for_cards ~scroll ~previous_cards ~current_cards =
 
 let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     ~(report_scroll : int -> int -> int -> unit)
+    ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~push_selected:_
@@ -1162,9 +1324,7 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
   in
   let section_lines = scroll_cards @ section_lines @ suffix_lines in
   let total_lines = List.length section_lines in
-  let overflowing = total_lines > room in
-  let hint_rows = if overflowing && room >= 2 then 1 else 0 in
-  let available = max 0 (room - hint_rows) in
+  let available = room in
   let max_scroll = max 0 (total_lines - available) in
   let card_rows = List.length scroll_cards in
   let scroll =
@@ -1175,6 +1335,10 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
      keypress steps from it rather than from wherever the last one left the
      stored value. *)
   report_scroll scroll available card_rows;
+  (* Where the window stands is the title row's; the keys that move it are
+     the footer's. *)
+  Option.iter hand_position
+    (Masc_tui_value.Position.window ~first:scroll ~shown:available ~total:total_lines);
   let section_lines_window =
     Rows.of_list ~first:scroll ~height:available section_lines
   in
@@ -1183,15 +1347,4 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     match Rows.at section_lines_window idx with
     | Some line -> push line
     | None -> push_empty ()
-  done;
-  if hint_rows > 0 then
-    (* Where the window stands. The keys that move it are the footer's. *)
-    match Masc_tui_scroll.position_row ~ko ~scroll ~height:available total_lines with
-    | None -> push_empty ()
-    | Some row ->
-      let inner_width = max 20 (framed_inner_width cols) in
-      let clipped =
-        if Layout.display_width row > inner_width then Layout.take_cells row inner_width
-        else row
-      in
-      push_styled ~style:(Theme.recede ()) clipped
+  done

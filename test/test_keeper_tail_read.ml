@@ -79,37 +79,41 @@ let test_blank_lines_are_passed_over_after_the_drop () =
     (tail content ~max_bytes:(String.length " \n\ntwo\n"))
 ;;
 
-(* The read goes back this many bytes at a time. *)
-let chunk_bytes = 64 * 1024
+(* A file whose last chunk of the read is [chunk] and which holds four bytes
+   before it. The read is given no byte limit (a [max_bytes] of zero) and is
+   asked for two lines. [chunk] has more than two newlines, so the read stops
+   after that one chunk. *)
+let stopped_after_one_chunk chunk = tail_lines ("zero" ^ chunk) ~max_bytes:0 ~max_lines:2
 
-(* A file whose last chunk is [chunk] and which holds four bytes before it.
-   [chunk] has five newlines, more than the two lines asked for, so the read
-   stops after that one chunk with no byte limit given (a [max_bytes] of
-   zero). *)
-let stopped_after_one_chunk chunk =
-  check int "the fixture's chunk is one chunk of the read" chunk_bytes (String.length chunk);
-  tail_lines ("zero" ^ chunk) ~max_bytes:0 ~max_lines:2
+(* One chunk of the read: [starts_with], a long line, [ends_with]. *)
+let chunk_of ~starts_with ~ends_with =
+  let long_line =
+    String.make
+      (Keeper_memory_recall.tail_chunk_bytes
+       - String.length starts_with
+       - String.length ends_with)
+      'f'
+  in
+  long_line, starts_with ^ long_line ^ ends_with
 ;;
 
 let test_a_read_that_stops_early_drops_the_piece_its_chunk_cut () =
-  let after_the_long_line = "\n\n\nlast\n" in
-  let long_line bytes = String.make bytes 'f' in
-  let at_a_newline =
-    long_line (chunk_bytes - String.length "\n" - String.length after_the_long_line)
-  in
+  (* The chunk's first piece is blank. A read that passed over blank pieces
+     before the drop would drop the long line in its place. *)
+  let long_line, chunk = chunk_of ~starts_with:"\n" ~ends_with:"\n\n\nlast\n" in
   check
     lines
     "a chunk that starts at a newline drops no line"
-    [ at_a_newline; "last" ]
-    (stopped_after_one_chunk ("\n" ^ at_a_newline ^ after_the_long_line));
-  let behind_a_cut_line =
-    long_line (chunk_bytes - String.length "o\n" - String.length after_the_long_line)
-  in
+    [ long_line; "last" ]
+    (stopped_after_one_chunk chunk);
+  (* Two pieces are not blank and two lines are asked for. A read that kept
+     the piece its chunk cut would answer with both. *)
+  let long_line, chunk = chunk_of ~starts_with:"o\n" ~ends_with:"\n\n\n" in
   check
     lines
     "a chunk that cuts a line drops what is left of it"
-    [ behind_a_cut_line; "last" ]
-    (stopped_after_one_chunk ("o\n" ^ behind_a_cut_line ^ after_the_long_line))
+    [ long_line ]
+    (stopped_after_one_chunk chunk)
 ;;
 
 let () =

@@ -384,12 +384,6 @@ let with_librarian_enabled f =
     f
 ;;
 
-let memory_lane_submitted_total () =
-  Masc.Otel_metric_store.metric_total
-    Keeper_metrics.(to_string MemoryLaneSubmitted)
-  |> int_of_float
-;;
-
 let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta) ~title =
   let created =
     match
@@ -2443,9 +2437,9 @@ let test_ordinary_crash_restarts_normally () =
        | Some _ -> ()
        | None -> fail "registry entry missing after ordinary restart"))
 
-(* I7: a Librarian unit running for a crashed Keeper does not defer its
-   restart. The restart installs a new lane at once and its durable catch-up
-   queues behind the running unit on the same lane. *)
+(* I7: a memory-lane unit running for a crashed Keeper does not defer its
+   restart. The restart installs a new lane at once and submits nothing to
+   the memory lane. *)
 let test_running_librarian_does_not_defer_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2515,8 +2509,8 @@ let test_running_librarian_does_not_defer_restart () =
        check bool "the restart installs a distinct lane while the unit runs" false
          (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane));
        check (option int)
-         "the restart's catch-up queues behind the running unit"
-         (Some 2)
+         "the restart queues nothing behind the running unit"
+         (Some 1)
          (Memory_lane.For_testing.pending ~base_path:config.base_path ~keeper_name:name);
        Eio.Promise.resolve set_release ();
        Eio.Promise.await finished)
@@ -2545,56 +2539,6 @@ let register_restart ~base_path ~name ~meta token intake_token =
     meta
 ;;
 
-let test_durable_catchup_is_submitted_before_launch () =
-  with_librarian_enabled @@ fun () ->
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  ensure_test_runtime ();
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Memory_lane.For_testing.reset ();
-      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_dir in
-       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-       Memory_lane.For_testing.reset ();
-       Memory_lane.init ~sw;
-       let name = "durable-catchup-order" in
-       let meta = make_meta name in
-       seed_durable_librarian_baseline config meta;
-       let offline = Reg.register_offline ~base_path:config.base_path name meta in
-       let submitted_before = memory_lane_submitted_total () in
-       let order = ref [] in
-       let result =
-         Launch_transaction.run
-           ~base_path:config.base_path
-           ~keeper_name:name
-           ~register:(fun _token _intake_token ->
-             order := "register" :: !order;
-             Ok offline)
-           ~rollback:Launch_transaction.Retain_registered
-           (fun _intake_token _token entry ->
-              check int "durable catch-up submitted before launch"
-                (submitted_before + 1)
-                (memory_lane_submitted_total ());
-              order := "launch" :: !order;
-              entry)
-       in
-       (match result with
-        | Ok entry ->
-          check bool "launch retains registered entry" true
-            (Lane.Id.equal (Lane.id entry.lane) (Lane.id offline.lane))
-        | Error _ -> fail "ordered catch-up launch transaction failed");
-       check (list string) "registration precedes launch" [ "register"; "launch" ]
-         (List.rev !order);
-       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name)
-;;
-
 let test_launch_callback_failure_rolls_back_restart_transaction () =
   with_librarian_enabled @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -2618,7 +2562,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
        let meta = make_meta name in
        seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
-       let submitted_before = memory_lane_submitted_total () in
        (match
           Launch_transaction.run
             ~base_path:config.base_path
@@ -2632,9 +2575,6 @@ let test_launch_callback_failure_rolls_back_restart_transaction () =
             (Launch_transaction.Launch_failed { rollback_error = None; _ }) -> ()
         | Error _ -> fail "launch exception produced the wrong transaction outcome"
         | Ok _ -> fail "launch exception unexpectedly committed");
-       check int "failed launch admitted durable catch-up"
-         (submitted_before + 1)
-         (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch exception restores exact crashed authority" true
@@ -2682,7 +2622,6 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        let meta = make_meta name in
        seed_durable_librarian_baseline config meta;
        let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
-       let submitted_before = memory_lane_submitted_total () in
        let cancel_context, resolve_cancel_context = Eio.Promise.create () in
        let launch_entered, resolve_launch_entered = Eio.Promise.create () in
        let cancelled, resolve_cancelled = Eio.Promise.create () in
@@ -2713,9 +2652,6 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        Eio.Cancel.cancel context (Failure "cancel injected launch callback");
        check bool "launch cancellation propagates after rollback" true
          (Eio.Promise.await cancelled);
-       check int "cancelled launch admitted durable catch-up"
-         (submitted_before + 1)
-         (memory_lane_submitted_total ());
        (match Reg.get ~base_path:config.base_path name with
         | Some current ->
           check bool "launch cancellation restores exact crashed authority" true
@@ -3098,8 +3034,6 @@ let () =
         test_restart_path_emits_meta_unavailable_outcome_metric;
       test_case "a running Librarian does not defer restart" `Quick
         test_running_librarian_does_not_defer_restart;
-      test_case "durable catch-up is submitted before launch" `Quick
-        test_durable_catchup_is_submitted_before_launch;
       test_case "launch callback failure rolls back restart transaction" `Quick
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick

@@ -5498,9 +5498,8 @@ let test_keeper_shutdown_release_preserves_task_handoff () =
           (Some "operator")
           handoff.updated_by)
 
-(* I7: a Librarian unit running for a Keeper does not block that Keeper's
-   launch. The launch goes through and its durable catch-up queues behind the
-   running unit on the same lane. *)
+(* I7: a memory-lane unit running for a Keeper does not block that Keeper's
+   launch. The launch goes through and submits nothing to the memory lane. *)
 let test_running_librarian_does_not_block_start_keepalive () =
   Eio_main.run @@ fun env ->
   install_test_env env;
@@ -5571,8 +5570,8 @@ let test_running_librarian_does_not_block_start_keepalive () =
         (R.is_registered ~base_path:config.base_path keeper_name);
       check
         (option int)
-        "the launch's catch-up queued behind the running unit"
-        (Some 2)
+        "the launch queued nothing behind the running unit"
+        (Some 1)
         (Memory_lane.For_testing.pending ~base_path:config.base_path ~keeper_name);
       (match Keeper_lifecycle_reservation.release token with
        | Keeper_lifecycle_reservation.Released -> ()

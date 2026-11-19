@@ -1678,7 +1678,7 @@ let read_row_window ~path ~from ~max_rows =
       path
       ~from
       ~max_rows
-      ~previous_row_wanted:row_holds_content
+      ~previous_row_wanted:(Nearest_accepted row_holds_content)
   with
   | Fs_compat.Private_file_succeeded window -> of_window window
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->

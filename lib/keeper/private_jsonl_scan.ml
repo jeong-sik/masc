@@ -10,8 +10,6 @@ let error_to_string = function
   | Moved -> "the file was cut or replaced while it was being read"
 ;;
 
-let no_row_before (_ : string) = false
-
 let fold_rows ~f acc ~from rows =
   let rec next acc start =
     match String.index_from_opt rows start '\n' with
@@ -25,7 +23,7 @@ let fold path ~rows_per_read ~init ~f =
   let rec from_offset acc from =
     match
       Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows:rows_per_read
-        ~previous_row_wanted:no_row_before
+        ~previous_row_wanted:No_previous_row
     with
     | Fs_compat.Private_file_failed error
     | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->

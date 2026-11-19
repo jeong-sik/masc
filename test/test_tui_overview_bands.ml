@@ -65,7 +65,7 @@ let sample_keepers : Bands.keeper_entry list =
     ; mark = "●"
     ; mark_tone = ""
     ; state_label = "running"
-    ; context_ratio = Some 0.42
+    ; activity_summary = "42t · 18.2k"
     ; detail = "task-101"
     ; needs_attention = false
     }
@@ -73,7 +73,7 @@ let sample_keepers : Bands.keeper_entry list =
     ; mark = "!"
     ; mark_tone = ""
     ; state_label = "paused"
-    ; context_ratio = Some 0.91
+    ; activity_summary = "9t · 4.1k"
     ; detail = "waiting for approval on a long task title"
     ; needs_attention = true
     }
@@ -81,7 +81,7 @@ let sample_keepers : Bands.keeper_entry list =
     ; mark = "·"
     ; mark_tone = ""
     ; state_label = "idle"
-    ; context_ratio = None
+    ; activity_summary = ""
     ; detail = ""
     ; needs_attention = false
     }
@@ -126,7 +126,26 @@ let test_keepers_rectangle_invariants () =
                    rows)
               [ (60, 4); (88, 5); (120, 6) ])
          [ sample_keepers; [] ])
-    [ true; false ]
+    [ true; false ];
+  let rendered =
+    Bands.render_keepers ~ko:false ~width:100 ~height:5
+      ~total_keepers:(List.length sample_keepers) sample_keepers
+    |> String.concat "\n"
+  in
+  let has_substring needle =
+    let nlen = String.length needle in
+    let hlen = String.length rendered in
+    let rec scan i =
+      if i + nlen > hlen then false
+      else if String.sub rendered i nlen = needle then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  check bool "populated activity summary reaches rendered rows" true
+    (has_substring "42t \xc2\xb7 18.2k");
+  check bool "unread activity renders no-value glyph" true
+    (has_substring "\xe2\x80\x94")
 
 let () =
   run "tui overview bands"

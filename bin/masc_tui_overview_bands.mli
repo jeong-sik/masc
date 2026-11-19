@@ -59,7 +59,9 @@ type keeper_entry = {
   mark : string;
   mark_tone : string;
   state_label : string;
-  context_ratio : float option;
+  activity_summary : string;
+      (** Overview-available activity summary (e.g. turns and tokens from the
+          keeper roster snapshot), or [""] / ["—"] when unread. *)
   detail : string;
   needs_attention : bool;
 }

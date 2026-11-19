@@ -437,28 +437,23 @@ let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_ent
             , false
             , 4 )
     in
-    let context_ratio =
-      match k.k_identity with
-      | Error _ -> None
-      | Ok _ ->
-          (match live_context_view state k with
-           | Masc_tui_fetched.Ready obs | Masc_tui_fetched.Stale (obs, _) ->
-               (match Observation_layout.context_summary obs with
-                | Observation_layout.Context_measured { ratio; _ } -> Some ratio
-                | Observation_layout.Context_partial _
-                | Observation_layout.Context_unavailable _ -> None)
-           | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-           | Masc_tui_fetched.Failed _ -> None)
+    (* Overview does not query per-keeper live_context; show real roster
+       activity (turns and tokens) that Overview already holds. *)
+    let activity_summary =
+      match k.k_activity with
+      | Some act when act.k_total_turns > 0 && act.k_total_tokens > 0 ->
+          Printf.sprintf "%dt · %s" act.k_total_turns
+            (Message_layout.compact_count act.k_total_tokens)
+      | Some act when act.k_total_turns > 0 ->
+          Printf.sprintf "%dt" act.k_total_turns
+      | Some _ | None -> Masc_tui_theme.Glyph.no_value
     in
     let detail =
       match k.k_activity with
       | Some act ->
           (match act.k_current_task_id with
            | Some tid when not (String.equal tid "") -> Terminal_text.single_line tid
-           | _ ->
-               if act.k_total_turns > 0 then
-                 Printf.sprintf (if ko then "%d턴" else "%d turns") act.k_total_turns
-               else "")
+           | Some _ | None -> "")
       | None -> ""
     in
     ( priority
@@ -466,7 +461,7 @@ let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_ent
       ; mark
       ; mark_tone
       ; state_label
-      ; context_ratio
+      ; activity_summary
       ; detail
       ; needs_attention
       } )

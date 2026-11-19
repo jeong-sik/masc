@@ -60,7 +60,7 @@ type keeper_entry = {
   mark : string;
   mark_tone : string;
   state_label : string;
-  context_ratio : float option;
+  activity_summary : string;
   detail : string;
   needs_attention : bool;
 }
@@ -180,22 +180,11 @@ let render_telemetry ~ko ~width ~height snap =
   in
   Card.render ~ko ~style:(card_style ()) ~width ~height { Card.edge; body }
 
-let format_context_chip ~ratio =
-  let safe = if Float.is_finite ratio then ratio else 0.0 in
-  let clamped = Float.max 0.0 (Float.min 1.0 safe) in
-  let tenths = int_of_float (Float.round (clamped *. 1000.0)) in
-  let pct = (tenths + 5) / 10 in
-  let bar =
-    Chart.meter_bar ~width:5 ~value:tenths ~max_value:1000
-      ~scale:(Chart.Declared_limit (Theme.paint ()))
-      ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
-  in
-  Printf.sprintf "%s %3d%%" bar pct
-
 let render_keeper_row ~cells entry =
   let mark = entry.mark_tone ^ entry.mark ^ Ansi.reset in
   let name_w = min 18 (max 10 (cells / 4)) in
   let state_w = 10 in
+  let activity_w = 12 in
   let name_cell =
     let fitted = pad_cell ~width:name_w entry.name in
     if entry.needs_attention then Ansi.bold ^ fitted ^ Ansi.reset else fitted
@@ -204,12 +193,14 @@ let render_keeper_row ~cells entry =
     let tone = if entry.needs_attention then Theme.warn () else Theme.recede () in
     tone ^ pad_cell ~width:state_w entry.state_label ^ Ansi.reset
   in
-  let ctx_cell =
-    match entry.context_ratio with
-    | Some ratio -> format_context_chip ~ratio
-    | None -> Theme.recede () ^ pad_cell ~width:10 "·····  — " ^ Ansi.reset
+  let activity_cell =
+    let text = String.trim entry.activity_summary in
+    if String.equal text "" || String.equal text Palette.Glyph.no_value then
+      Theme.recede () ^ pad_cell ~width:activity_w Palette.Glyph.no_value ^ Ansi.reset
+    else
+      pad_cell ~width:activity_w text
   in
-  let prefix = mark ^ " " ^ name_cell ^ "  " ^ state_cell ^ "  " ^ ctx_cell in
+  let prefix = mark ^ " " ^ name_cell ^ "  " ^ state_cell ^ "  " ^ activity_cell in
   let prefix_cells = Layout.display_width prefix in
   let detail_room = cells - prefix_cells - 2 in
   if detail_room <= 3 || String.equal entry.detail "" then

@@ -21,12 +21,11 @@ val failing_glyph : string
     its count in the summary, and the sentence of its last failure. *)
 
 val activity_mark : Masc_tui_keeper_list_model.activity -> Masc_tui_value.Mark.t option
-(** The status mark of what a Keeper is doing now (§7.2). A held call, a
-    question and a confirmation are the operator's turn; any turn the Keeper
-    runs, verifying included, is under way; a wait of any kind and rest are
-    waiting; a failed attempt in the open turn is failed; paused and offline
-    are paused. The word beside the mark says which. [None] is an activity
-    that was not read. *)
+(** The status mark of what a Keeper is doing now (§7.2), the mark of its
+    group in the state view ({!Masc_tui_keeper_list_model.group_of_activity}):
+    the operator's turn, failed, under way, or waiting. A pause and offline
+    are paused, and rest is waiting. The word beside the mark says which.
+    [None] is an activity that was not read. *)
 
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
 (** The compact list's activity mark: {!activity_mark}'s glyph, or the

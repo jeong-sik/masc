@@ -46,19 +46,24 @@ let glyph ~paused reading =
   | Some mark -> Status.glyph mark
   | None -> unread_glyph
 
-(* What the Keeper is doing now. The operator's turn is a held call, a
-   question or a confirmation; work under way is any turn the Keeper is
-   running, verifying included; a wait for a tool, a model, a delegate or the
-   world is waiting, and so is a Keeper at rest. [None] is an activity that
-   was not read. *)
-let activity_mark : Masc_tui_keeper_list_model.activity -> Status.t option = function
-  | Held_call | Question | Confirmation -> Some Status.Yours
-  | Attempt_failed -> Some Status.Failed
-  | Preparing | Running | Streaming | Async_working _ | Verifying -> Some Status.Under_way
-  | Deferred | Tool_waiting | Model_waiting | External_waiting | Delegate_result | Idle ->
-      Some Status.Waiting
-  | Paused | Offline -> Some Status.Paused
-  | Unknown -> None
+(* What the Keeper is doing now wears the mark of its group in the state
+   view ([Masc_tui_keeper_list_model.group_of_activity]), so a row and the
+   heading of the group it stands under agree: the operator's turn, failed,
+   under way, waiting. A pause and offline are paused; rest is waiting. [None]
+   is an activity that was not read. *)
+let activity_mark (activity : Masc_tui_keeper_list_model.activity) =
+  match activity with
+  | Masc_tui_keeper_list_model.Paused | Masc_tui_keeper_list_model.Offline -> Some Status.Paused
+  | Held_call | Question | Confirmation | Attempt_failed | Preparing | Streaming | Running
+  | Async_working _ | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying
+  | External_waiting | Idle | Unknown -> (
+      match Masc_tui_keeper_list_model.group_of_activity activity with
+      | Masc_tui_keeper_list_model.Attention -> Some Status.Yours
+      | Masc_tui_keeper_list_model.Failing -> Some Status.Failed
+      | Masc_tui_keeper_list_model.Active -> Some Status.Under_way
+      | Masc_tui_keeper_list_model.Waiting | Masc_tui_keeper_list_model.Inactive ->
+          Some Status.Waiting
+      | Masc_tui_keeper_list_model.Unobserved -> None)
 
 let activity_glyph activity =
   match activity_mark activity with

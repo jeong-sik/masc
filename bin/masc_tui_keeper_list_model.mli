@@ -86,6 +86,13 @@ type activity =
   | Offline
   | Unknown
 
+val group_of_activity : activity -> attention
+(** The state view's group of an activity: a held call, a question or a
+    confirmation is [Attention]; a failed attempt [Failing]; a turn under way,
+    a deferred one included, [Active]; a wait of any kind, verification
+    included, [Waiting]; rest, a pause and offline [Inactive]; an activity
+    not read [Unobserved]. *)
+
 type badge =
   | Badge_read_error
   | Badge_waiting_unavailable

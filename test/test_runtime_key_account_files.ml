@@ -446,9 +446,10 @@ let test_a_fifo =
 ;;
 
 (* The modes that keep a folder from being removed do not keep the superuser
-   from it, so these two cases say nothing when the superuser runs them. *)
+   from it, so the cases that rest on them are skipped when the superuser
+   runs them. *)
 let unless_superuser work ~base_path ~runtime_root =
-  if Unix.geteuid () <> 0 then work ~base_path ~runtime_root
+  if Unix.geteuid () <> 0 then work ~base_path ~runtime_root else Alcotest.skip ()
 ;;
 
 (* The key goes first. When it does not go, the stage says so, and the home

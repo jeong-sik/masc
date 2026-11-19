@@ -58,3 +58,18 @@ val replace
   -> Authz_types.Provider_account_id.t
   -> Runtime_api_key_file.key
   -> (replaced, error) result
+
+(** Removes, for every key account of the records, the files of the folder
+    of its keys that are not the key of the generation the records say (the
+    same RFC, 3.7): what a replacement that could not remove them left, and
+    what a replacement that a stopped server did not end left. The start of
+    the server runs it.
+
+    Each account is looked at inside its call, and the generation is read
+    there. An account with a call running is left: the next start looks
+    again, and so do the next replacement and the removal of the account.
+    Nothing is made: an account with no file gets none. A file that stays
+    goes to the log of the server, and so does an exception of one account,
+    after which the others are looked at. Cancellation and the exceptions
+    of a process that cannot go on are raised. *)
+val remove_left_keys : zone:Authz_zone.t -> base_path:string -> unit

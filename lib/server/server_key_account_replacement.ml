@@ -89,3 +89,61 @@ let replace ~(person : Login.person) ~base_path id key =
     let* generation = recorded person id ~held:before in
     stored person ~base_path id ~generation key)
 ;;
+
+(* ---- the start of the server ---- *)
+
+type left =
+  | Call_running
+  | Stayed of string
+
+(* Read inside the call of the account, where a replacement of its key runs
+   too: the generation of that time names the one file that stays. The
+   runtime root is spelled and not made, so an account with no file gets
+   none. An owner with no membership has no name for the folder of their
+   files: there is nothing of theirs to look at.
+
+   The account of a removal that began or went through is looked at too.
+   The removal takes every file of it, whichever of the two runs first. *)
+let remove_left_keys_of ~zone ~base_path id =
+  Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
+    let state = (Authz_zone.snapshot zone).Authz_zone.state in
+    match Accounts.find state.Authz_state.provider_accounts id with
+    | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok ()
+    | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } } ->
+      (match Authz_principal_state.find_membership state.Authz_state.principals owner with
+       | None -> Ok ()
+       | Some { Authz_principal_state.workspace_id = _; account_home_namespace = namespace } ->
+         Files.remove_other_keys
+           ~runtime_root:(Runtime_account_home_layout.person_runtime_root ~base_path ~namespace)
+           ~account_id:id
+           ~generation
+         |> Result.map_error (fun detail -> Stayed detail)))
+;;
+
+(* An exception of one account would end the switch of the server, and at
+   each start again. It goes to the log, and the accounts after it are
+   looked at. *)
+let guarded id f =
+  match f () with
+  | () -> ()
+  | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exception exn -> logged id "the files of its keys were not looked at" (Printexc.to_string exn)
+;;
+
+let remove_left_keys ~zone ~base_path =
+  List.iter
+    (fun id ->
+      guarded id
+      @@ fun () ->
+      match remove_left_keys_of ~zone ~base_path id with
+      | Ok () -> ()
+      | Error Call_running ->
+        (* The call can be a replacement, which removes them itself. The
+           next start looks again. *)
+        Log.Server.debug
+          "The files of the keys of account %s were not looked at: a call of the account runs"
+          (Provider_account_id.to_string id)
+      | Error (Stayed detail) -> logged id "a file of the folder of its keys stays" detail)
+    (Accounts.key_accounts (Authz_zone.snapshot zone).Authz_zone.state.Authz_state.provider_accounts)
+;;

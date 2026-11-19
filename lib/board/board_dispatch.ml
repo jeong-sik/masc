@@ -445,6 +445,21 @@ let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
   let author = Board.Agent_id.to_string agent_id |> String.lowercase_ascii in
   String_util.contains_substring author needle
 
+(* The Board text search: a post matches when its title, body, author id or
+   hearth contains [text], ignoring ASCII case.  [text] is lowered once, and
+   the returned predicate is applied to each post.  [search] and the
+   [text_query] of [list_posts] both ask this one predicate. *)
+let post_matches_text text =
+  let needle = String.lowercase_ascii text in
+  let contains field =
+    String_util.contains_substring (String.lowercase_ascii field) needle
+  in
+  fun (post : Board.post) ->
+    contains post.title
+    || contains post.body
+    || contains (Board.Agent_id.to_string post.author)
+    || (match post.hearth with Some hearth -> contains hearth | None -> false)
+
 module Post_id_set = Set.Make (String)
 
 let matching_post_ids_for_comment_author_filter ~needle (comments : Board.comment list) =
@@ -655,11 +670,19 @@ let find_post_by_run_id ~reader ~run_id =
   | Some _ | None -> None
 
 let list_posts ~reader ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
-    ?post_kind_filter
+    ?post_kind_filter ?text_query
     ?(sort_by = Hot) ?(exclude_system = false) ?(exclude_automation = false)
     ?(limit = 50) () =
   let author_filter = normalize_author_filter author_filter in
   let exclude_author_filter = normalize_author_filter exclude_author_filter in
+  let text_predicate =
+    String_util.option_trim text_query |> Option.map post_matches_text
+  in
+  let apply_text_filter posts =
+    match text_predicate with
+    | Some matches -> List.filter matches posts
+    | None -> posts
+  in
   let apply_visibility_and_hearth_filters posts =
     let posts =
       match visibility_filter with
@@ -684,10 +707,13 @@ let list_posts ~reader ?(visibility_filter = None) ?hearth ?author_filter ?exclu
        | None -> Stdlib.Fun.id)
   in
   let store = backend () in
+      (* A text query reads every post: the Hot window below is cut before
+         any filter runs, so a match ranked past it would be missed. *)
       let needs_full_scan =
         not (Board_access.is_operator reader)
         || Option.is_some author_filter
         || Option.is_some exclude_author_filter
+        || Option.is_some text_predicate
         ||
         match sort_by with
         | Hot -> false
@@ -708,7 +734,14 @@ let list_posts ~reader ?(visibility_filter = None) ?hearth ?author_filter ?exclu
         else
           posts
       in
-      let filtered = sorted |> List.filter (Board_access.can_read ~reader) |> apply_post_kind_filter in
+      (* The text filter runs on what the reader may read, so a match in a
+         post the reader cannot read is never counted or returned. *)
+      let filtered =
+        sorted
+        |> List.filter (Board_access.can_read ~reader)
+        |> apply_post_kind_filter
+        |> apply_text_filter
+      in
       let filtered =
         match author_filter with
         | None -> filtered
@@ -1155,16 +1188,7 @@ let delete_post ~authorization ~post_id =
 
 let search ~reader ~query ~limit =
   let store = backend () in
-      let query_lower = String.lowercase_ascii query in
-      let matches_str s =
-        String_util.contains_substring (String.lowercase_ascii s) query_lower
-      in
-      let predicate (p : Board.post) =
-        matches_str p.title
-        || matches_str p.body
-        || matches_str (Board.Agent_id.to_string p.author)
-        || (match p.hearth with Some h -> matches_str h | None -> false)
-      in
+      let predicate = post_matches_text query in
       Board.search_posts store ~predicate:(fun post -> Board_access.can_read ~reader post && predicate post) ~limit
 
 let search_unchecked ~query ~limit = search ~reader:Board_access.Operator ~query ~limit

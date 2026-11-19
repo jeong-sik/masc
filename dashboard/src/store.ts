@@ -328,6 +328,15 @@ export const boardExcludeAutomation = signal(false)
 export const boardHiddenCategories = signal<Set<string>>(new Set(['system']))
 export const boardAuthorFilter = signal('')
 export const boardHearthFilter = signal('')
+/** The applied Board search text, trimmed; '' when nothing is searched. The
+ *  server answers it over the whole Board, so the list holds only matches. */
+export const boardSearchText = signal('')
+/** Whether the Board list answers a sub-board, a search or an author filter.
+ *  `boardTotal` then counts that list, not the Board. */
+export const boardListNarrowed = computed(() =>
+  boardHearthFilter.value.trim() !== ''
+  || boardSearchText.value !== ''
+  || boardAuthorFilter.value.trim() !== '')
 /** Number of posts currently loaded — the offset for the next page request. */
 export const boardOffset = signal<number>(0)
 /** true when the server indicates (or we optimistically believe) more posts are available. */
@@ -1680,6 +1689,7 @@ function boardPageSize(): number {
     || boardExcludeSystem.value
     || boardAuthorFilter.value.trim() !== ''
     || boardHearthFilter.value.trim() !== ''
+    || boardSearchText.value !== ''
   return hasFilter ? BOARD_PAGE_SIZE_FILTERED : BOARD_PAGE_SIZE_DEFAULT
 }
 
@@ -1690,6 +1700,7 @@ interface BoardListQuery {
   readonly excludeAutomation: boolean
   readonly author: string
   readonly hearth: string
+  readonly search: string
 }
 
 function boardListQuery(): BoardListQuery {
@@ -1699,6 +1710,7 @@ function boardListQuery(): BoardListQuery {
     excludeAutomation: boardExcludeAutomation.value,
     author: boardAuthorFilter.value,
     hearth: boardHearthFilter.value,
+    search: boardSearchText.value,
   }
 }
 
@@ -1708,6 +1720,7 @@ function sameBoardListQuery(a: BoardListQuery, b: BoardListQuery): boolean {
     && a.excludeAutomation === b.excludeAutomation
     && a.author === b.author
     && a.hearth === b.hearth
+    && a.search === b.search
 }
 
 // The operator changes the sub-board, the sort and the filters while reads are
@@ -1750,6 +1763,7 @@ export async function refreshBoard(): Promise<void> {
       excludeAutomation: query.excludeAutomation,
       author: query.author || undefined,
       hearth: query.hearth || undefined,
+      search: query.search || undefined,
       limit,
       offset: 0,
     }))
@@ -1830,6 +1844,7 @@ export async function loadMoreBoardPosts(): Promise<void> {
       excludeAutomation: query.excludeAutomation,
       author: query.author || undefined,
       hearth: query.hearth || undefined,
+      search: query.search || undefined,
       limit,
       offset,
     }))

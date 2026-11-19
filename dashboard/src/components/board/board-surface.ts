@@ -62,6 +62,7 @@ import { ringFocusClasses } from '../common/ring'
 import {
   boardPosts,
   boardHearthFilter,
+  boardSearchText,
   boardHearths,
   boardFlairs,
   boardLoading,
@@ -182,33 +183,6 @@ function writeStoredBoardDetailWidth(width: number): void {
   } catch {
     // localStorage can be unavailable; keep the in-memory rail width.
   }
-}
-
-/**
- * Pure filter for board posts.
- *
- * Case-insensitive substring match on `post.title` and `post.body` so the
- * operator can locate a post by a keyword in the headline or anywhere in
- * the content. Title is checked first (cheapest, strongest signal), then
- * body. Existing server-side `boardAuthorFilter` handles the author axis,
- * so this client-side filter is intentionally scoped to textual content.
- *
- * Empty/whitespace query returns the input reference unchanged (no new
- * array allocation, preserves referential equality for memoisation).
- *
- * Input is never mutated; BoardPost is treated as readonly.
- */
-function filterBoardPosts(
-  posts: readonly BoardPost[],
-  query: string,
-): readonly BoardPost[] {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return posts
-  return posts.filter(post => {
-    if (post.title && post.title.toLowerCase().includes(needle)) return true
-    if (post.body && post.body.toLowerCase().includes(needle)) return true
-    return false
-  })
 }
 
 // ── Scroll marker (IntersectionObserver auto-load) ──────────────
@@ -570,10 +544,10 @@ function BdRail({ activeSub, onSub, onMentions }: {
   `
 }
 
-function BdFeedHead({ countLabel, contentQuery, onContentQuery, sortMode, onSort }: {
+function BdFeedHead({ countLabel, searchText, onSearchText, sortMode, onSort }: {
   countLabel: string
-  contentQuery: string
-  onContentQuery: (value: string) => void
+  searchText: string
+  onSearchText: (value: string) => void
   sortMode: BoardSortMode
   onSort: (sortMode: BoardSortMode) => void
 }) {
@@ -588,10 +562,10 @@ function BdFeedHead({ countLabel, contentQuery, onContentQuery, sortMode, onSort
       <span class="ns">${countLabel}</span>
       <${TextInput}
         type="search"
-        value=${contentQuery}
-        placeholder="제목/본문에서 검색"
-        ariaLabel="게시글 본문 필터"
-        onInput=${(e: Event) => onContentQuery((e.target as HTMLInputElement).value)}
+        value=${searchText}
+        placeholder="제목·본문·작성자·hearth 검색"
+        ariaLabel="게시판 검색"
+        onInput=${(e: Event) => onSearchText((e.target as HTMLInputElement).value)}
         class="min-w-40 max-w-64 !px-2 !py-1 !text-xs"
       />
       <${Select}
@@ -1393,23 +1367,28 @@ function UnifiedBoardFeed({
   `
 }
 
-/** The search box filters the posts already loaded. When none of them match
- *  and the server holds more, the next page is read from here: the feed's own
- *  pagination is not drawn while the feed has no rows. */
-function BdSearchMiss({ loadedCount, hiddenMatchCount }: { loadedCount: number; hiddenMatchCount: number }) {
-  if (!boardHasMore.value) {
-    return html`<div class="ov-empty">필터 결과 없음 (${loadedCount} items)</div>`
+/** How long the search box waits after the last keystroke before it asks the
+ *  server, so typing a word sends one read rather than one per letter. */
+export const BOARD_SEARCH_DEBOUNCE_MS = 300
+
+/** A search that leaves the feed without rows. The server searched the whole
+ *  Board, so `matchCount` is every match loaded so far. With none, no post
+ *  matches. Otherwise every loaded match is in a category the operator has
+ *  hidden, and a next page may still hold one that is shown. The feed's own
+ *  pagination is not drawn while the feed has no rows, so the next page is
+ *  read from here. */
+function BdSearchMiss({ matchCount }: { matchCount: number }) {
+  if (matchCount === 0) {
+    const scope = boardHearthFilter.value === '' ? '게시판 전체' : `#${boardHearthFilter.value}`
+    return html`<div class="ov-empty"><span data-testid="bd-search-miss">${scope}에 일치하는 글이 없습니다</span></div>`
   }
-  const reading = boardLoadingMore.value || boardLoading.value
-  // The feed is empty either because no loaded post matches, or because every
-  // match is in a category the operator has hidden. A next page finds a post
-  // in the first case only, so the two are not said with one sentence.
-  const searched = hiddenMatchCount > 0
-    ? `불러온 글 ${loadedCount}개 중 일치하는 ${hiddenMatchCount}개는 숨긴 분류에 있습니다`
-    : `불러온 글 ${loadedCount}개 중에는 일치하는 글이 없습니다`
+  if (!boardHasMore.value) {
+    return html`<div class="ov-empty"><span data-testid="bd-search-miss">일치하는 글 ${matchCount}개는 모두 숨긴 분류에 있습니다</span></div>`
+  }
+  const reading = boardLoadingMore.value
   return html`
     <div class="ov-empty flex flex-col items-center gap-2">
-      <span data-testid="bd-search-miss">${searched}</span>
+      <span data-testid="bd-search-miss">지금까지 찾은 일치하는 글 ${matchCount}개는 모두 숨긴 분류에 있습니다</span>
       <${ActionButton}
         variant="ghost"
         size="sm"
@@ -1425,41 +1404,52 @@ function BdSearchMiss({ loadedCount, hiddenMatchCount }: { loadedCount: number; 
 }
 
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
-  const [contentQuery, setContentQuery] = useState('')
+  // The box shows what is typed at once; the store holds the text the list
+  // answers, applied after a pause in typing.
+  const [searchDraft, setSearchDraft] = useState(boardSearchText.value)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (searchTimer.current !== null) clearTimeout(searchTimer.current)
+  }, [])
+  const changeSearch = (text: string) => {
+    setSearchDraft(text)
+    if (searchTimer.current !== null) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = null
+      const applied = text.trim()
+      if (applied === boardSearchText.value) return
+      boardSearchText.value = applied
+      feedVisibleLimit.value = PAGE_SIZE
+      void refreshBoard()
+    }, BOARD_SEARCH_DEBOUNCE_MS)
+  }
+  const searching = boardSearchText.value !== ''
   const visibleLimit = feedVisibleLimit.value
-  const filteredPosts = useMemo(
-    () => filterBoardPosts(posts, contentQuery),
-    [posts, contentQuery],
-  )
-  const isFiltering = contentQuery.trim() !== ''
   const visiblePosts = useMemo(
-    () => filteredPosts.filter(post => !boardHiddenCategories.value.has(contentCategory(post))),
-    [filteredPosts, boardHiddenCategories.value],
+    () => posts.filter(post => !boardHiddenCategories.value.has(contentCategory(post))),
+    [posts, boardHiddenCategories.value],
   )
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
   // The list the operator is on could not be read. Nothing on screen answers
   // it, so the feed says that and offers the read again; a count or "no posts
   // yet" would describe a board that was never read.
   const readFailed = boardListReadFailed.value && !boardLoading.value
+  // Under a search the server counts the matches, not the posts of the Board.
+  const totalWord = searching ? '일치' : '전체'
   const countLabel = readFailed
     ? '불러오지 못함'
-    : isFiltering
-    ? `${visiblePosts.length}개 표시`
     : boardTotal.value !== null
-      ? `전체 ${boardTotal.value}개`
+      ? `${totalWord} ${boardTotal.value}개`
       : boardHasMore.value
         ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
-        : `전체 ${visiblePosts.length}개`
+        : `${totalWord} ${visiblePosts.length}개`
 
   return html`
     <section class="bd-feed">
       <${BdFeedHead}
         countLabel=${countLabel}
-        contentQuery=${contentQuery}
-        onContentQuery=${(query: string) => {
-          setContentQuery(query)
-          feedVisibleLimit.value = PAGE_SIZE
-        }}
+        searchText=${searchDraft}
+        onSearchText=${changeSearch}
         sortMode=${boardSortMode.value}
         onSort=${(sortMode: BoardSortMode) => {
           if (boardSortMode.value === sortMode) return
@@ -1480,17 +1470,17 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
               title="게시판을 불러오지 못했습니다"
               onAction=${() => { void refreshBoard() }}
             />`
-          : isFiltering && visiblePosts.length === 0 && posts.length > 0
-          ? html`<${BdSearchMiss} loadedCount=${posts.length} hiddenMatchCount=${filteredPosts.length} />`
           : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
-            : visiblePosts.length === 0
-              ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
-              : html`<${UnifiedBoardFeed}
-                  posts=${visiblePosts}
-                  visibleLimit=${visibleLimit}
-                  onVisibleLimitChange=${(limit: number) => { feedVisibleLimit.value = limit }}
-                />`}
+            : visiblePosts.length === 0 && searching
+              ? html`<${BdSearchMiss} matchCount=${posts.length} />`
+              : visiblePosts.length === 0
+                ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
+                : html`<${UnifiedBoardFeed}
+                    posts=${visiblePosts}
+                    visibleLimit=${visibleLimit}
+                    onVisibleLimitChange=${(limit: number) => { feedVisibleLimit.value = limit }}
+                  />`}
       </div>
       <${BdComposer} />
     </section>

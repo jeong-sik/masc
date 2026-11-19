@@ -21,7 +21,7 @@ import type {
   TelemetryEntry,
   TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
+import { keepers, boardPosts, boardTotal, boardHearthFilter, boardSearchText, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
 import type { Goal } from '../../types/core'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 
@@ -1048,6 +1048,8 @@ describe('Overview board domain card', () => {
     boardPosts.value = []
     boardTotal.value = null
     lastBoardRefreshAt.value = null
+    boardHearthFilter.value = ''
+    boardSearchText.value = ''
   })
 
   function boardCardText(container: Element): string {
@@ -1095,5 +1097,25 @@ describe('Overview board domain card', () => {
 
     expect(text).toContain('전체 포스트')
     expect(text).toContain('441')
+  })
+
+  // The list in the store is the Board surface's: under a sub-board or a
+  // search its total counts that list. Three matches are not a Board of three.
+  it.each([
+    ['a search', () => { boardSearchText.value = 'needle' }],
+    ['a sub-board', () => { boardHearthFilter.value = 'lab' }],
+  ])('does not show the total of %s as the total of the Board', (_name, narrow) => {
+    boardPosts.value = [
+      { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
+    ] as unknown as typeof boardPosts.value
+    boardTotal.value = 3
+    lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
+    narrow()
+
+    const { container } = render(h(Overview, null))
+    const text = boardCardText(container)
+
+    expect(text).toContain('불러온 포스트')
+    expect(text).not.toContain('전체 포스트')
   })
 })

@@ -320,12 +320,18 @@ val list_posts : reader:Board_access.reader ->
   ?author_filter:string ->
   ?exclude_author_filter:string ->
   ?post_kind_filter:Board.post_kind ->
+  ?text_query:string ->
   ?sort_by:sort_order ->
   ?exclude_system:bool ->
   ?exclude_automation:bool ->
   ?limit:int ->
   unit ->
   Board.post list
+(** [text_query] keeps the posts whose title, body, author id or hearth
+    contains it, ignoring ASCII case, the same match as {!search}. It is
+    trimmed first, and a blank one filters nothing. A text query reads every
+    post rather than the Hot window, and it filters only posts the reader may
+    read, before [limit] cuts the list. *)
 
 val list_recent_posts_matching_author_unchecked :
   author_matches:(Board.Agent_id.t -> bool) ->

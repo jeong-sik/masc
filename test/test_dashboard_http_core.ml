@@ -6469,6 +6469,54 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
         "no_successor")
 ;;
 
+(* The Board search box asks this payload for the whole Board (#52957). [q]
+   narrows the posts, and it is part of the cache key: a payload kept for one
+   query never answers another. A blank [q] is no query. *)
+let test_dashboard_board_payload_narrows_to_the_query () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  Lib.Board.reset_global_for_test ();
+  Lib.Board_dispatch.reset_for_test ();
+  Result.get_ok (Lib.Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Lib.Board.reset_global_for_test ();
+      Lib.Board_dispatch.reset_for_test ())
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let create content =
+        match Lib.Board_dispatch.create_post
+                ~author:"board-search-test" ~content
+                ~post_kind:Lib.Board.Human_post () with
+        | Ok _ -> ()
+        | Error error -> fail (Lib.Board.Post_publication_failure.to_string error)
+      in
+      create "alpha search fixture";
+      create "beta search fixture";
+      let titles target =
+        let payload =
+          Server_dashboard_http.dashboard_memory_http_payload ~config
+            ~reader:Masc_board_handlers.Board_access.Operator ~actor:None
+            (request target)
+        in
+        Yojson.Safe.Util.(payload.Dashboard_cache.json |> member "posts" |> to_list)
+        |> List.map (fun post -> Yojson.Safe.Util.(post |> member "title" |> to_string))
+        |> List.sort String.compare
+      in
+      let path = "/api/v1/dashboard/board?sort_by=recent" in
+      let both = [ "alpha search fixture"; "beta search fixture" ] in
+      check (list string) "no query lists every post" both (titles path);
+      check (list string) "a query narrows the posts"
+        [ "alpha search fixture" ] (titles (path ^ "&q=ALPHA"));
+      check (list string) "another query has its own payload"
+        [ "beta search fixture" ] (titles (path ^ "&q=beta"));
+      check (list string) "a blank query is no query" both
+        (titles (path ^ "&q=%20%20")))
+;;
+
 (* The PAT route's hostname picks the login lane the token is written to.
    One that is written but unreadable is refused before any Keeper is read;
    falling back to the query or github.com would store the token under a host
@@ -8417,6 +8465,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "board close route rejects wrong typed decisions" `Quick
             test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "dashboard board payload narrows to the query" `Quick
+            test_dashboard_board_payload_narrows_to_the_query;
           test_case "Keeper metrics reads only the selected strict window" `Quick
             test_keeper_metrics_reads_selected_strict_window;
           test_case "Skill evidence joins activation and composition" `Quick

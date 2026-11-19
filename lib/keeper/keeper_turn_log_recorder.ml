@@ -102,6 +102,22 @@ let now place =
   Ok (mark, head.covered)
 ;;
 
+(* §9.5: whoever appends a [Closed] or a [Reset] line tells the Keeper's
+   Memory writer, in the same step. The hint carries nothing: the writer
+   reads the turn log, and a pulse finds a turn whose hint did not come. *)
+let tell_writer place lines =
+  let ends_a_unit line =
+    match Log.boundary line with
+    | Ends_unit { through = (_ : Log.mark); next = (_ : Log.mark) } -> true
+    | Starts_at (_ : Log.mark) | Moves_nothing -> false
+  in
+  if List.exists ends_a_unit lines
+  then
+    Option.iter
+      (fun writers -> Librarian_writers.turn_closed writers place.keeper_name)
+      (Keeper_memory_writers.find ~base_path:place.base_path)
+;;
+
 (* Reads the tail, plans against it, and appends at the end it read.
    [moved_at] is the end the attempt before read and could not append at. *)
 let append_planned place plan =
@@ -120,7 +136,9 @@ let append_planned place plan =
     | [] -> Ok Nothing_to_append
     | first :: rest ->
       (match Store.append ~path ~at_end (first, rest) with
-       | Ok appended -> Ok (Appended { lines; at = appended })
+       | Ok appended ->
+         tell_writer place lines;
+         Ok (Appended { lines; at = appended })
        | Error (Store.End_moved _ as error) ->
          (match moved_at with
           | Some before when Int.equal before at_end -> Error (Not_appended error)

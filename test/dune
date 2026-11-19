@@ -648,6 +648,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_writer_asks
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -1018,6 +1019,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_writer_asks
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks

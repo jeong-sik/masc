@@ -74,6 +74,8 @@ let fixture ?(without_turn_log = []) ~sw keepers =
       Writers.create ~sw ~now:(ticking ())
         ~registered:(fun keeper -> List.mem keeper !registered)
         ~place
+        ~stores:(fun keeper -> Masc_test_deps.stores_of_place (place keeper))
+        ~ask:Masc_test_deps.never_asks
   ; registered
   ; memory_dir
   ; place
@@ -244,7 +246,11 @@ let test_retire_before_the_files_go () =
     check string "out of the registry, it is" "retired" (retire ());
     check (list string) "and leaves the table" [] (statuses f);
     (* Nothing holds the files: a writer outside the table takes the lock. *)
-    let bare = Writer.create ~now:(ticking ()) ~registered:(fun () -> true) (f.place "keeper-a") in
+    let bare =
+      Writer.create ~now:(ticking ()) ~registered:(fun () -> true) ~declared:(fun () -> None)
+        ~stores:(Masc_test_deps.stores_of_place (f.place "keeper-a")) ~ask:Masc_test_deps.never_asks
+        (f.place "keeper-a")
+    in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       Writer.run bare;
       `Stop_daemon);

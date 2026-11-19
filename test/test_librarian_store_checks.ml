@@ -180,7 +180,11 @@ let test_the_blob_sweep_has_a_rule_for_each_file () =
   start_turn_log place;
   Eio_main.run (fun (_ : Eio_unix.Stdenv.base) ->
     Eio.Switch.run (fun sw ->
-      let writer = Writer.create ~now:(fun () -> 200.0) ~registered:(fun () -> true) place in
+      let writer =
+        Writer.create ~now:(fun () -> 200.0) ~registered:(fun () -> true)
+          ~declared:(fun () -> None) ~stores:(Masc_test_deps.stores_of_place place)
+          ~ask:Masc_test_deps.never_asks place
+      in
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Writer.run writer;
         `Stop_daemon);

@@ -1398,8 +1398,13 @@ let claim_and_start_keeper_persistence
   in
   (* The Memory writers of this workspace, on the server's switch: after the
      persisted Keeper stores were reconciled, and before a Keeper's turn can
-     write. *)
-  Keeper_memory_writers.start ~sw ~config:(Mcp_server.workspace_config state);
+     write. A writer's ask calls the Librarian lane with the server's network
+     and clock. *)
+  let workspace_config = Mcp_server.workspace_config state in
+  Keeper_memory_writers.start
+    ~sw
+    ~ask:(Librarian_ask.run { net; clock; base_dir = workspace_config.base_path })
+    ~config:workspace_config;
   try
     Server_bootstrap_loops.start_keeper_loops
       ~claimed_persistence

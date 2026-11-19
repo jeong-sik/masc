@@ -18,16 +18,21 @@ module Digest := Agent_core.Checkpoint_objects
 
 type t
 
-(** Writers run on [sw], in the domain that calls [create].
+(** Writers run on [sw], in the domain that calls [create], and so do their
+    asks.
 
     [registered] says whether a Keeper has a writer: it is in the Keeper
     registry and writes a turn log. [place] is where that Keeper's files
-    are. [now] stamps every line. *)
+    are, and [stores] where its turns' content is. [now] stamps every line.
+    [ask] asks one question ({!Librarian_ask.run}). A table starts with no
+    declaration, so no writer asks before {!declaration_changed}. *)
 val create
   :  sw:Eio.Switch.t
   -> now:(unit -> float)
   -> registered:(string -> bool)
   -> place:(string -> Librarian_machine.place)
+  -> stores:(string -> Librarian_unit_content.stores)
+  -> ask:(Librarian_ask.input -> Librarian_read_result.t)
   -> t
 
 (** What a Keeper's request reads (§11.1). It does not wait for the writer.
@@ -72,9 +77,17 @@ val adopt
     again and its writer goes on. *)
 val retire : t -> string -> Librarian_writer.retirement
 
+(** A [Closed] or a [Reset] line was appended to the Keeper's turn log
+    (§9.5). A registered Keeper gets its writer, and the writer the hint. *)
+val turn_closed : t -> string -> unit
+
+(** The declaration of now, for every writer of the table and every writer
+    made after it. [None]: no lane value is declared. *)
+val declaration_changed : t -> Librarian_machine.declared option -> unit
+
 (** The maintenance tick. Every Keeper of [keepers] that is registered gets
-    its writer, and the writer of every Keeper that is no longer registered
-    is retired. *)
+    its writer and a pulse, and the writer of every Keeper that is no longer
+    registered is retired. *)
 val pulse : t -> string list -> unit
 
 (** The writers this table holds, by Keeper, with what each one shows. A

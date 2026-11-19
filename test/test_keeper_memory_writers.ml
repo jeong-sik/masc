@@ -1,7 +1,8 @@
 (* The Memory writers of a workspace (RFC librarian-call-only-proposes
-   §8.6): a workspace has a table from its start to the end of the switch it
-   was started on, the Keepers that table writes for are the Keeper
-   registry's, and their files are the workspace's. *)
+   §8.6, §9.5): a workspace has a table from its start to the end of the
+   switch it was started on, the Keepers that table writes for are the
+   Keeper registry's, their files are the workspace's, and a turn that
+   closes is told to its Keeper's writer. *)
 
 open Alcotest
 module Host = Masc.Keeper_memory_writers
@@ -15,6 +16,8 @@ module Log_store = Masc.Librarian_log_store
 module Turn_log = Masc.Keeper_turn_log
 module Turn_store = Masc.Keeper_turn_log_store
 module Registry = Masc.Keeper_registry
+module Recorder = Masc.Keeper_turn_log_recorder
+module Turn_writer = Masc.Keeper_turn_log_writer
 
 let turn_log =
   match Turn_log.Log_id.of_string (String.make 32 'a') with
@@ -108,7 +111,7 @@ let test_table_lives_with_its_switch () =
     check bool "no table before the start" true
       (Option.is_none (Host.find ~base_path:config.base_path));
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~config;
+      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
       check bool "a table after the start" true
         (Option.is_some (Host.find ~base_path:config.base_path));
       check bool "another workspace has none" true
@@ -123,9 +126,9 @@ let test_a_second_start_replaces_the_table () =
     Eio.Switch.run (fun long ->
       let second =
         Eio.Switch.run (fun short ->
-          Host.start ~sw:short ~config;
+          Host.start ~sw:short ~ask:Masc_test_deps.never_asks ~config;
           let first = table config in
-          Host.start ~sw:long ~config;
+          Host.start ~sw:long ~ask:Masc_test_deps.never_asks ~config;
           let second = table config in
           check bool "the later table is the workspace's" false (second == first);
           second)
@@ -137,7 +140,7 @@ let test_a_second_start_replaces_the_table () =
 let test_writers_are_the_registry_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~config;
+      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
       start_turn_log config "keeper-a";
       check string "a Keeper that is not registered has no writer" "keeper retired"
         (write config "keeper-a" "the port is 8935");
@@ -149,7 +152,7 @@ let test_writers_are_the_registry_s () =
 let test_files_are_the_workspace_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~config;
+      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
       register config "keeper-a";
       start_turn_log config "keeper-a";
       check string "written" "written" (write config "keeper-a" "the port is 8935");
@@ -170,10 +173,52 @@ let test_files_are_the_workspace_s () =
 let test_no_turn_log_stops_the_store () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~config;
+      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
       register config "keeper-a";
       check string "a Keeper whose turns wrote no log is not written to" "store stopped"
         (write config "keeper-a" "the port is 8935")))
+;;
+
+(* §9.5: the step that appends a turn's [Closed] line tells the Keeper's
+   writer, and the table makes the writer on that hint. The [Opened] line
+   tells nothing. *)
+let test_a_closed_turn_is_told_to_the_writer () =
+  with_workspace (fun config ->
+    Eio.Switch.run (fun sw ->
+      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      register config "keeper-a";
+      let place : Recorder.place =
+        { keepers_dir = Masc.Workspace.keepers_runtime_dir config
+        ; base_path = config.base_path
+        ; keeper_name = "keeper-a"
+        ; session_dir = Filename.temp_dir "memory-writers-session" ""
+        ; session_id = "trace-1"
+        }
+      in
+      let record event =
+        let answer = Recorder.record ~at:100.0 ~new_log_id:turn_log place event in
+        (match answer with
+         | Ok (Appended _) -> ()
+         | Ok Nothing_to_append -> fail "nothing was appended"
+         | Error error -> fail (Recorder.not_recorded_to_string error));
+        answer
+      in
+      let writers () = List.map fst (Writers.statuses (table config)) in
+      let admitted =
+        record
+          (Turn_writer.Admit
+             { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+             ; runtime = "test-runtime"
+             ; task = Turn_log.No_task
+             ; stimuli = []
+             })
+      in
+      check (list string) "an opened turn makes no writer" [] (writers ());
+      let (_ : (Recorder.recorded, Recorder.not_recorded) result) =
+        record
+          (Turn_writer.Finish { admitted = Recorder.admitted admitted; ending = Turn_writer.Completed })
+      in
+      check (list string) "its closed line made the Keeper's writer" [ "keeper-a" ] (writers ())))
 ;;
 
 let () =
@@ -186,6 +231,8 @@ let () =
       , [ test_case "are the registry's" `Quick test_writers_are_the_registry_s
         ; test_case "write the workspace's files" `Quick test_files_are_the_workspace_s
         ; test_case "a Keeper without a turn log" `Quick test_no_turn_log_stops_the_store
+        ; test_case "a closed turn is told to the writer" `Quick
+            test_a_closed_turn_is_told_to_the_writer
         ] )
     ]
 ;;

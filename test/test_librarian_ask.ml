@@ -177,15 +177,10 @@ let with_fixture ?(binding = "") reply f =
     | Ok registry -> registry
     | Error (_ : Registry.publication_error) -> fail "no registry was published"
   in
-  let lane =
+  let lane, resolved =
     match Librarian_memory_lane.resolve ~prompt ~answer_schema:schema registry with
-    | Ok lane -> lane
+    | Ok declared -> declared
     | Error why -> failf "the Librarian lane: %s" (Librarian_memory_lane.show_unavailable why)
-  in
-  let resolved =
-    match Registry.resolve_lane registry ~lane_id:Librarian_memory_lane.lane_id with
-    | Ok resolved -> resolved
-    | Error (_ : Registry.lane_resolution_error) -> fail "the Librarian lane did not resolve"
   in
   let directory name =
     let path = Filename.concat root name in

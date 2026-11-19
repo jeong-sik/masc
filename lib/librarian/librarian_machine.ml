@@ -17,7 +17,7 @@ type declared =
 type asking =
   { ask : int
   ; since : float
-  ; lane : Lane.t
+  ; lane : declared
   ; removed_since : (string * int) list
   }
 
@@ -65,7 +65,7 @@ let next_ask place t ~at store =
       let ask = t.last_ask + 1 in
       { t with
         state =
-          Asking { store; asking = { ask; since = at; lane = declared.value; removed_since = [] } }
+          Asking { store; asking = { ask; since = at; lane = declared; removed_since = [] } }
       ; last_ask = ask
       })
     else idle
@@ -134,7 +134,7 @@ let no_answer place t ~at store (asking : asking) slots =
   let lane_moved =
     match t.lane with
     | None -> true
-    | Some declared -> not (Lane.equal declared.value asking.lane)
+    | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
   if List.is_empty still_declared && lane_moved
   then next_ask place t ~at store

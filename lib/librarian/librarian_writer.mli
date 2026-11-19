@@ -7,6 +7,11 @@
     nothing else: events that arrive during the boot wait in the mailbox and
     are handled in the order they came.
 
+    An ask runs in a fiber of its own, on the writer's switch, and its
+    result comes back through the mailbox. After every event the writer
+    starts or cancels that fiber as {!Librarian_machine.fiber_change} says.
+    A commit is not cancelled. A writer that ends cancels its ask.
+
     A reader does not go through the mailbox. {!status} is a value the
     writer replaces after every event.
 
@@ -47,11 +52,20 @@ type status =
 (** A writer that is [Booting] and does nothing until {!run}. What is sent
     to it before then waits in its mailbox.
 
-    [now] stamps every line. [registered] says whether the Keeper is in the
-    Keeper registry: a {!retire} that finds it there is dropped. *)
+    - [now] stamps every line.
+    - [registered] says whether the Keeper is in the Keeper registry: a
+      {!retire} that finds it there is dropped.
+    - [declared] is the declaration of now. The writer boots with none and
+      reads this as its first event, and again for every
+      {!declaration_changed}.
+    - [ask] asks one question ({!Librarian_ask.run}) about the Keeper's
+      stores [stores]. *)
 val create
   :  now:(unit -> float)
   -> registered:(unit -> bool)
+  -> declared:(unit -> Librarian_machine.declared option)
+  -> stores:Librarian_unit_content.stores
+  -> ask:(Librarian_ask.input -> Librarian_read_result.t)
   -> Librarian_machine.place
   -> t
 
@@ -64,6 +78,17 @@ val create
 val run : t -> unit
 
 val status : t -> status
+
+(** A [Closed] or a [Reset] line was appended to the Keeper's turn log. The
+    hint carries nothing: the writer reads the turn log. *)
+val turn_closed : t -> unit
+
+(** The maintenance tick. *)
+val pulse : t -> unit
+
+(** The declaration may have changed. The writer reads it when it takes
+    this. *)
+val declaration_changed : t -> unit
 
 type 'answer asked =
   | Answered of 'answer

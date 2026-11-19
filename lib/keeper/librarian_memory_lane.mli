@@ -92,13 +92,15 @@ val resolve
   :  prompt:string
   -> answer_schema:Yojson.Safe.t
   -> Runtime_exact_output_registry.t
-  -> (t, unavailable) result
-(** The lane value under one published registry. The prompt and the answer
-    schema belong to the asking layer and are passed in; the reserve, the
-    thinking setting, the slots and the HTTP windows come from the registry.
-    CLI windows and model names come from the runtime table active when this
-    is called, so a caller resolves again after every publication it acts
-    on. *)
+  -> (t * Runtime_exact_output_registry.resolved_lane, unavailable) result
+(** The lane value under one published registry, with the registry's
+    resolution of the lane it was read from: a walk and {!lane_held} read
+    that resolution, so the two come from one registry. The prompt and the
+    answer schema belong to the asking layer and are passed in; the reserve,
+    the thinking setting, the slots and the HTTP windows come from the
+    registry. CLI windows and model names come from the runtime table active
+    when this is called, so a caller resolves again after every publication
+    it acts on. *)
 
 val lane_held : now:float -> Runtime_exact_output_registry.resolved_lane -> bool
 (** Every slot of [lane] (the admitted HTTP slots and the declared CLI slots)

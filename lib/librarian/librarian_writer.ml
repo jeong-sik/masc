@@ -30,6 +30,15 @@ type 'answer asked =
   | Ended
 
 type event =
+  | Turn_closed
+  | Pulse
+  | Declaration_changed
+  (* The writer reads the declaration when it takes this: of two that come
+     close together, the one taken last carries the newer value. *)
+  | Ask_ended of
+      { ask : int
+      ; result : Machine.ended
+      }
   | Write of
       { by : Librarian_effects.actor
       ; trace : string
@@ -48,6 +57,9 @@ type t =
   { place : Machine.place
   ; now : unit -> float
   ; registered : unit -> bool
+  ; declared : unit -> Machine.declared option
+  ; stores : Librarian_unit_content.stores
+  ; ask : Librarian_ask.input -> Librarian_read_result.t
   ; mailbox : event Eio.Stream.t
   ; status : status Atomic.t
   ; gone : unit Eio.Promise.t
@@ -148,10 +160,61 @@ let take_lock t ~sw =
      | Error error -> refused (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
+(* The tail an open writer shows: what an ask reads Memory under. *)
+let tail t () =
+  match Atomic.get t.status with
+  | Open line -> Some line
+  | Booting | Stopped (_ : Store.stop) | Retired -> None
+;;
+
 (* [sw] lives as long as the writer does and owns the lock. The loop returns
    the retirement it has to answer once the lock is released. *)
 let live t ~sw =
   let locked = ref false in
+  (* Resolving it cancels the ask that is out. Only this fiber reads or sets
+     it. *)
+  let out : unit Eio.Promise.u option ref = ref None in
+  let cancel () =
+    Option.iter (fun cancel -> ignore (Eio.Promise.try_resolve cancel () : bool)) !out;
+    out := None
+  in
+  (* The ask runs in a fiber of its own and its result comes back through the
+     mailbox. A daemon, so a writer that ends does not wait for it. An ask
+     that ended before its cancel posts its result: the machine drops it as
+     late. *)
+  let start (asking : Machine.asking) =
+    let cancelled, cancelling = Eio.Promise.create () in
+    out := Some cancelling;
+    let input : Librarian_ask.input =
+      { place = t.place
+      ; stores = t.stores
+      ; tail = tail t
+      ; lane = asking.lane.value
+      ; resolved = asking.lane.resolved
+      }
+    in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      (match
+         Eio.Fiber.first
+           (fun () ->
+              Eio.Promise.await cancelled;
+              None)
+           (fun () -> Some (t.ask input))
+       with
+       | Some result ->
+         Eio.Stream.add t.mailbox (Ask_ended { ask = asking.ask; result = Read_ended result })
+       | None -> ());
+      `Stop_daemon)
+  in
+  let follow ~before ~after =
+    match Machine.fiber_change ~before ~after with
+    | Keep -> ()
+    | Start asking -> start asking
+    | Cancel -> cancel ()
+    | Cancel_then_start asking ->
+      cancel ();
+      start asking
+  in
   let boot () =
     Atomic.set t.status Booting;
     Eio.Cancel.protect (fun () ->
@@ -170,11 +233,26 @@ let live t ~sw =
     (* The caller has its answer before anyone is told to read Memory. *)
     let settle next reply answer =
       publish t ~was:state next;
+      follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
       loop next
     in
+    (* A commit and the reads before the next ask are not cancelled. *)
+    let decided (event : Machine.event) =
+      let next =
+        Eio.Cancel.protect (fun () -> Machine.decide t.place state ~at:(t.now ()) event)
+      in
+      publish t ~was:state next;
+      follow ~before:state ~after:next;
+      announce t ~was:(revision state) next;
+      loop next
+    in
     match Eio.Stream.take t.mailbox with
+    | Turn_closed -> decided Machine.Turn_closed
+    | Pulse -> decided Machine.Pulse
+    | Declaration_changed -> decided (Machine.Declaration_changed (t.declared ()))
+    | Ask_ended { ask; result } -> decided (Machine.Ask_ended { ask; result })
     | Write { by; trace; write; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () -> Machine.write state ~at:(t.now ()) ~by ~trace write)
@@ -183,6 +261,7 @@ let live t ~sw =
     | Resume reply ->
       let next, answer = Machine.resume t.place ~boot state ~at:(t.now ()) in
       Atomic.set t.status (status_of next.state);
+      follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
       loop next
@@ -199,19 +278,25 @@ let live t ~sw =
         loop state)
       else reply
   in
-  (* A writer starts with no lane value, so it does not ask. *)
+  (* A writer boots with no lane value, so the boot does not ask. The
+     declaration is the first event in its mailbox. *)
   let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
   Atomic.set t.status (status_of state.state);
   announce t ~was:None state;
   loop state
 ;;
 
-let create ~now ~registered place =
+let create ~now ~registered ~declared ~stores ~ask place =
   let gone, ended = Eio.Promise.create () in
+  let mailbox = Eio.Stream.create max_int in
+  Eio.Stream.add mailbox Declaration_changed;
   { place
   ; now
   ; registered
-  ; mailbox = Eio.Stream.create max_int
+  ; declared
+  ; stores
+  ; ask
+  ; mailbox
   ; status = Atomic.make Booting
   ; gone
   ; ended
@@ -249,6 +334,9 @@ let ask t event =
      | None -> Ended)
 ;;
 
+let turn_closed t = Eio.Stream.add t.mailbox Turn_closed
+let pulse t = Eio.Stream.add t.mailbox Pulse
+let declaration_changed t = Eio.Stream.add t.mailbox Declaration_changed
 let write t ~by ~trace write = ask t (fun reply -> Write { by; trace; write; reply })
 let resume t = ask t (fun reply -> Resume reply)
 let adopt t ~by ~observed = ask t (fun reply -> Adopt { by; observed; reply })

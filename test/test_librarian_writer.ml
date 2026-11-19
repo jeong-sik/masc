@@ -129,7 +129,10 @@ let ticking () =
 let with_switch body = Eio_main.run (fun (_ : Eio_unix.Stdenv.base) -> Eio.Switch.run body)
 
 let start ?(registered = fun () -> true) ~sw place =
-  let writer = Writer.create ~now:(ticking ()) ~registered place in
+  let writer =
+    Writer.create ~now:(ticking ()) ~registered ~declared:(fun () -> None)
+      ~stores:(Masc_test_deps.stores_of_place place) ~ask:Masc_test_deps.never_asks place
+  in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Writer.run writer;
     `Stop_daemon);

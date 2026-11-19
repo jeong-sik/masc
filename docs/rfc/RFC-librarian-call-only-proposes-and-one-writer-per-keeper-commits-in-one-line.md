@@ -1110,7 +1110,7 @@ type state =
   | Retired
 and asking =
   { ask : int; since : float; asked : ask
-  ; lane : Librarian_memory_lane.t                   (* 묻기를 시작할 때의 lane 값 *)
+  ; lane : Librarian_machine.declared                (* 묻기를 시작할 때의 lane 값과 그 registry 풀이 *)
   ; removed_since : (Memory_id.t * int) list }       (* 묻는 사이 직접 쓰기가 지운 fact 와 그 줄의 seq *)
 type store_stop =
   | Log_diverged of { expected : Sha256.t; observed : Sha256.t }

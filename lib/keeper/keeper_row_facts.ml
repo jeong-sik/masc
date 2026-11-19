@@ -2,13 +2,17 @@ let decision_window_bytes = 40_000
 let decision_window_lines = 20
 
 (* A row of at most this many bytes, newline counted, is the newest row a
-   read finds after it was appended. The reader drops the first piece of its
-   window, up to the first newline, when the window does not start at the
-   file's start. A row this short leaves at least half the window to what the
-   file held before it, so the newline that ends the line before the row is
-   in the window: the dropped piece ends there or sooner, and is never the
-   row. *)
-let decision_row_bytes_followed = decision_window_bytes / 2
+   read finds after it was appended. The reader takes the file's last
+   [decision_window_bytes] bytes and, when they do not start at the file's
+   start, drops their first piece, up to the first newline. The row is the
+   file's last line. When it is not also the first, the byte before it is
+   the newline that ends the line before. With the row one byte shorter than
+   the window, that newline is the window's first byte: the dropped piece
+   ends there and is not the row. A row as long as the window then starts at
+   the window's first byte, and the reader drops it as the piece the window
+   may have cut. A row that is the file's only line is found whatever its
+   length; the bound does not look at what the file held. *)
+let decision_row_bytes_followed = decision_window_bytes - 1
 
 type decision_line =
   | Decision_row of Yojson.Safe.t

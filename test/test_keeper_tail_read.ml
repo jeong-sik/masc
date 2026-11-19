@@ -5,7 +5,11 @@
     start at the file's first byte may have cut its first piece, so the read
     drops that piece. Blank lines are passed over after that, so the piece
     that goes is the one the window cut and not a whole line behind a blank
-    one. *)
+    one.
+
+    The read also stops before [max_bytes] once it has passed more than
+    [max_lines] newlines. What it read then starts where its last chunk
+    starts, and the piece cut there goes the same way. *)
 
 open Alcotest
 open Masc
@@ -19,16 +23,19 @@ let with_file content f =
        f path)
 ;;
 
-(* The lines the read answers with for the last [max_bytes] bytes of a file
-   that holds [content]. *)
-let tail content ~max_bytes =
+(* The lines the read answers with for a file that holds [content]. *)
+let tail_lines content ~max_bytes ~max_lines =
   with_file content
   @@ fun path ->
-  match Keeper_memory_recall.read_tail_of_file path ~max_bytes ~max_lines:100 with
+  match Keeper_memory_recall.read_tail_of_file path ~max_bytes ~max_lines with
   | Ok (Keeper_memory_recall.Tail { Keeper_memory_recall.lines; _ }) -> lines
   | Ok Keeper_memory_recall.No_file -> fail "the file was not found"
   | Error _ -> fail "the file could not be read"
 ;;
+
+(* The same for the last [max_bytes] bytes, with more lines asked for than
+   the file holds. *)
+let tail content ~max_bytes = tail_lines content ~max_bytes ~max_lines:100
 
 let lines = list string
 
@@ -72,6 +79,43 @@ let test_blank_lines_are_passed_over_after_the_drop () =
     (tail content ~max_bytes:(String.length " \n\ntwo\n"))
 ;;
 
+(* A file whose last chunk of the read is [chunk] and which holds four bytes
+   before it. The read is given no byte limit (a [max_bytes] of zero) and is
+   asked for two lines. [chunk] has more than two newlines, so the read stops
+   after that one chunk. *)
+let stopped_after_one_chunk chunk = tail_lines ("zero" ^ chunk) ~max_bytes:0 ~max_lines:2
+
+(* One chunk of the read: [starts_with], a long line, [ends_with]. *)
+let chunk_of ~starts_with ~ends_with =
+  let long_line =
+    String.make
+      (Keeper_memory_recall.tail_chunk_bytes
+       - String.length starts_with
+       - String.length ends_with)
+      'f'
+  in
+  long_line, starts_with ^ long_line ^ ends_with
+;;
+
+let test_a_read_that_stops_early_drops_the_piece_its_chunk_cut () =
+  (* The chunk's first piece is blank. A read that passed over blank pieces
+     before the drop would drop the long line in its place. *)
+  let long_line, chunk = chunk_of ~starts_with:"\n" ~ends_with:"\n\n\nlast\n" in
+  check
+    lines
+    "a chunk that starts at a newline drops no line"
+    [ long_line; "last" ]
+    (stopped_after_one_chunk chunk);
+  (* Two pieces are not blank and two lines are asked for. A read that kept
+     the piece its chunk cut would answer with both. *)
+  let long_line, chunk = chunk_of ~starts_with:"o\n" ~ends_with:"\n\n\n" in
+  check
+    lines
+    "a chunk that cuts a line drops what is left of it"
+    [ long_line ]
+    (stopped_after_one_chunk chunk)
+;;
+
 let () =
   run
     "keeper_tail_read"
@@ -81,6 +125,10 @@ let () =
             "blank lines are passed over after the drop"
             `Quick
             test_blank_lines_are_passed_over_after_the_drop
+        ; test_case
+            "a read that stops early drops the piece its chunk cut"
+            `Quick
+            test_a_read_that_stops_early_drops_the_piece_its_chunk_cut
         ] )
     ]
 ;;

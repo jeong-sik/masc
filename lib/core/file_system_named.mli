@@ -19,10 +19,13 @@ type name =
           case [keepers/Alpha] and [keepers/alpha] get one name. Two paths
           are one file exactly when they get the same name. *)
   | Not_yet of string
-      (** Nothing is at the path. The nearest ancestor that exists is named
-          by the file system and the pieces below it are as spelled. The
-          answer can change once the file is made, for example when another
-          spelling makes it first. *)
+      (** Nothing is at the path, or the file system would not name it:
+          every [realpath] error is taken this way, so a path below a
+          directory that cannot be searched and a link to itself are
+          [Not_yet] too. The nearest ancestor that the file system names is
+          named by it and the pieces below it are as spelled. The answer can
+          change once the file is made, for example when another spelling
+          makes it first. *)
 
 val name : string -> name
 (** Ask the file system what it calls an absolute path. This makes system

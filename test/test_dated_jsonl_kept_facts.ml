@@ -870,6 +870,56 @@ let test_a_row_in_an_older_file_takes_its_place_by_its_file () =
   check_the_window_is_the_files "as the strict read says" store
 ;;
 
+(* A window read from two files goes by the file of its newest row. Today's
+   file holds the window's oldest row and a later file its two newest; a row
+   appended today is then before the newest row in the order the rows are
+   read, so the window is read from the files again. A window that went by
+   its oldest row's file would take the appended row as its last. *)
+let test_a_window_over_two_files_goes_by_its_newest_rows_file () =
+  let location = temp_location "djkf_window_two_files" in
+  let store = D.open_store location in
+  D.append store (row 1);
+  ignore
+    (write_behind_the_store
+       location
+       ~ts:(now () +. (3. *. day))
+       "{\"row\":8}\n{\"row\":9}\n"
+     : string);
+  check window_answer "the rows of both files" ("read and kept", rows [ 1; 8; 9 ]) (window store);
+  D.append store (row 2);
+  check
+    window_answer
+    "today's row comes before the later file's rows"
+    ("read and kept", rows [ 2; 8; 9 ])
+    (window store);
+  check_the_window_is_the_files "as the strict read says" store
+;;
+
+(* The file ends in the middle of a line when the window is filled: the
+   unfinished bytes are the window's newest row, one that is not JSON. The
+   store's append starts at a line start, so those bytes stay a row of their
+   own and the appended row is the next one, in the file and in the window
+   that was held. *)
+let test_an_append_after_an_unfinished_line_with_the_window_held () =
+  let location = temp_location "djkf_window_unfinished" in
+  let store = D.open_store location in
+  D.append store (row 1);
+  D.append store (row 2);
+  ignore (write_behind_the_store location ~ts:(now ()) "{\"cut\": " : string);
+  check
+    window_answer
+    "the unfinished bytes are the newest row"
+    ("read and kept", rows [ 1; 2 ] @ [ None ])
+    (window store);
+  D.append store (row 3);
+  check
+    window_answer
+    "the appended row is a row of its own"
+    ("held", rows [ 2 ] @ [ None ] @ rows [ 3 ])
+    (window store);
+  check_the_window_is_the_files "as the strict read says" store
+;;
+
 (* What an append makes of a kept window, with no file and no clock. *)
 let test_what_a_row_makes_of_the_window () =
   let cut = D.Malformed_json { path = "18.jsonl"; line_number = None; detail = "cut" } in
@@ -1372,6 +1422,14 @@ let () =
             "a row in an older file takes its place by its file"
             `Quick
             test_a_row_in_an_older_file_takes_its_place_by_its_file
+        ; test_case
+            "a window over two files goes by its newest row's file"
+            `Quick
+            test_a_window_over_two_files_goes_by_its_newest_rows_file
+        ; test_case
+            "an append after an unfinished line, with the window held"
+            `Quick
+            test_an_append_after_an_unfinished_line_with_the_window_held
         ; test_case "what a row makes of it" `Quick test_what_a_row_makes_of_the_window
         ; test_case
             "each call makes a fact of its own"

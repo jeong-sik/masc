@@ -200,6 +200,52 @@ let test_backlog_decoded_again_only_when_its_version_moves () =
       check (list string) "a same-stat replacement is decoded again" [ "backlog-NEW" ]
         (List.map (fun (task : Masc_domain.task) -> task.title) (domain_rows ())))
 
+(* The Work read itself, not only [read_archive], takes the kept archive
+   while the file version holds. Taking the read permission away keeps the
+   device, inode, size and modification time, so a Work read that opened
+   the archive again would answer that it is unavailable. *)
+let test_work_read_does_not_open_an_unchanged_archive () =
+  if Unix.geteuid () = 0 then skip ();
+  let dir = Filename.temp_dir "masc-task-work-read-" "" in
+  let masc = Filename.concat dir ".masc" in
+  let tasks = Filename.concat masc "tasks" in
+  Unix.mkdir masc 0o700;
+  Unix.mkdir tasks 0o700;
+  let backlog = Filename.concat tasks "backlog.json" in
+  let archive = Filename.concat masc "tasks-archive.json" in
+  Yojson.Safe.to_file backlog
+    (`Assoc
+      [ ("tasks", `List (List.map Masc_domain.task_to_yojson live));
+        ("last_updated", `String "2026-09-12T11:00:00Z");
+        ("version", `Int 1) ]);
+  Yojson.Safe.to_file archive
+    (`Assoc [ ("tasks", `List (List.map Masc_domain.task_to_yojson archived)) ]);
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod archive 0o600 with Unix.Unix_error _ -> ());
+      List.iter (fun path -> try Sys.remove path with Sys_error _ -> ()) [ backlog; archive ];
+      List.iter (fun path -> try Unix.rmdir path with Unix.Unix_error _ -> ())
+        [ tasks; masc; dir ])
+    (fun () ->
+      let tasks_error () =
+        let _, _, error, _, _, _ = Masc_tui_loader.load_active_tasks dir in
+        error
+      in
+      let first = tasks_error () in
+      check (option string) "the archive reads" None first;
+      let before = Unix.stat archive in
+      Unix.chmod archive 0o000;
+      let after = Unix.stat archive in
+      check bool "taking the permission keeps the file version" true
+        (before.Unix.st_ino = after.Unix.st_ino
+         && before.Unix.st_size = after.Unix.st_size
+         && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+      check bool "the archive cannot be opened now" true
+        (match Unix.openfile archive [ Unix.O_RDONLY ] 0 with
+         | descriptor -> Unix.close descriptor; false
+         | exception Unix.Unix_error (Unix.EACCES, _, _) -> true);
+      check (option string) "the next Work read takes the kept archive" first (tasks_error ()))
+
 let () =
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -212,4 +258,6 @@ let () =
               test_kept_until_the_file_version_moves;
             test_case "archive shapes" `Quick test_archive_shapes;
             test_case "backlog decoded again only when its version moves" `Quick
-              test_backlog_decoded_again_only_when_its_version_moves ] ) ])
+              test_backlog_decoded_again_only_when_its_version_moves;
+            test_case "a Work read does not open an unchanged archive" `Quick
+              test_work_read_does_not_open_an_unchanged_archive ] ) ])

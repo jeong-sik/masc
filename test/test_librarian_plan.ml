@@ -284,11 +284,13 @@ let test_removed_during_flight () =
       [ Revise { ref_ = "m4"; into = stated "the token is in the vault" }
       ; Add (stated retracted.claim)
       ; Drop { ref_ = "m2"; reason = "the team changed" }
+      ; Seen { ref_ = "m4"; from_units = [ "u1" ] }
       ]
   in
   check refusals "the ops that name or restate the retracted fact are left out"
     [ 0, "removed during flight at 41", Some "the token is in the vault"
     ; 1, "removed during flight at 41", Some retracted.claim
+    ; 3, "removed during flight at 41", None
     ]
     (not_applied result);
   check (list string) "the retraction is not undone and the rest applies"

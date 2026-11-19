@@ -270,7 +270,12 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
                else touched, added, added_ids
              else (
                match stating with
-               | Seen_again ((_ : string), (_ : int list)) -> touched, added, added_ids
+               | Seen_again ((_ : string), (_ : int list)) ->
+                 (* Only a live op of this answer removes a fact here, and that
+                    op names it, so screening refused a seen of the same fact
+                    as [Ref_used_twice]. A fact removed outside since the
+                    question was refused there as [Removed_during_flight]. *)
+                 touched, added, added_ids
                | New_claim ((_ : string), fact, (_ : int list)) ->
                  if Ids.mem id added_ids
                  then touched, added, added_ids

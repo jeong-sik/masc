@@ -6538,11 +6538,6 @@
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
- (name test_workspace_memory_log_reader)
- (modules test_workspace_memory_log_reader)
- (libraries alcotest masc masc.fs_compat unix))
-
-(test
  (name test_keeper_direct_runtime_resume)
  (modules test_keeper_direct_runtime_resume)
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix  masc.agent_core.digest))
@@ -7485,7 +7480,6 @@
 (include stanzas/test_browser_addon_worker.inc)
 (include stanzas/test_repo_skills_readable.inc)
 (include stanzas/test_keeper_volume_filesystem.inc)
-(include stanzas/test_keeper_volume_ownership.inc)
 (include stanzas/test_keeper_volume_filesystem_watch.inc)
 (include stanzas/test_keeper_volume_repair.inc)
 (include stanzas/test_server_keeper_volume_maintenance.inc)
@@ -7690,9 +7684,7 @@
  (modules test_tui_here_row)
  (libraries alcotest masc_tui_render_prim masc_tui_types))
 
-(include stanzas/test_endpoint_job_protocol.inc)
 
-(include stanzas/test_endpoint_job_registry.inc)
 
 (include stanzas/test_domain_budget.inc)
 (include stanzas/test_domain_mailbox.inc)
@@ -7752,12 +7744,8 @@
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)
 
-(include stanzas/test_endpoint_process_gate.inc)
 
-(include stanzas/test_endpoint_job_launch.inc)
 
-(include stanzas/test_endpoint_job_owner.inc)
-(include stanzas/test_endpoint_job_peer.inc)
 
 (include stanzas/test_authz_jsonl_file.inc)
 

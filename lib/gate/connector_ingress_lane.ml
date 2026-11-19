@@ -18,6 +18,18 @@ type failure =
 
 type submit_error = Owner_unavailable
 
+type lane_config =
+  { max_pending_per_lane : int
+  }
+
+type bounded_submit_error =
+  | Closed
+  | Lane_full of
+      { lane : lane
+      ; pending : int
+      ; capacity : int
+      }
+
 type job =
   { event_id : event_id
   ; run : unit -> unit
@@ -38,6 +50,7 @@ type t =
   ; condition : Eio.Condition.t
   ; lanes : (lane, lane_state) Hashtbl.t
   ; ready : lane Queue.t
+  ; capacity_limit : int option
   ; on_failure : failure -> unit
   ; mutable lifecycle : [ `Open | `Closed ]
   }
@@ -56,6 +69,16 @@ let failure_reason_to_string = function
 
 let submit_error_to_string = function
   | Owner_unavailable -> "owner_unavailable"
+;;
+
+let bounded_submit_error_to_string = function
+  | Closed -> "closed"
+  | Lane_full { lane; pending; capacity } ->
+    Printf.sprintf
+      "lane_full(%s: pending=%d capacity=%d)"
+      (lane_to_string lane)
+      pending
+      capacity
 ;;
 
 let with_lock t f = Stdlib.Mutex.protect t.mutex f
@@ -109,38 +132,88 @@ let take_lane_job t lane state =
         None)
 ;;
 
-let rec run_lane t lane state =
-  match take_lane_job t lane state with
-  | None -> ()
-  | Some job ->
-    run_job t lane job;
-    Eio.Fiber.yield ();
-    run_lane t lane state
+let cleanup_lane t lane state =
+  let action =
+    with_lock t (fun () ->
+      match Hashtbl.find_opt t.lanes lane with
+      | Some current when current == state ->
+        if Queue.is_empty state.jobs
+        then (
+          Hashtbl.remove t.lanes lane;
+          `Done)
+        else if owner_available t
+        then (
+          (* Requeue leftover jobs if the worker exited abnormally while the
+             owner remained open. *)
+          state.phase <- Scheduled;
+          Queue.add lane t.ready;
+          `Reschedule)
+        else (
+          let jobs =
+            Queue.fold (fun acc job -> job :: acc) [] state.jobs |> List.rev
+          in
+          Queue.clear state.jobs;
+          Hashtbl.remove t.lanes lane;
+          `Drain jobs)
+      | Some _ | None -> `Done)
+  in
+  match action with
+  | `Done -> ()
+  | `Reschedule -> Eio.Condition.broadcast t.condition
+  | `Drain jobs ->
+    Eio.Cancel.protect (fun () ->
+      List.iter
+        (fun job ->
+           report_failure
+             t
+             { lane; event_id = job.event_id; reason = Owner_released })
+        jobs)
 ;;
 
+let run_lane t lane state =
+  let rec loop () =
+    match take_lane_job t lane state with
+    | None -> ()
+    | Some job ->
+      run_job t lane job;
+      Eio.Fiber.yield ();
+      loop ()
+  in
+  Fun.protect ~finally:(fun () -> cleanup_lane t lane state) loop
+;;
+
+(* Drain past stale or already-active entries so a non-empty ready queue can
+   never return [None] and lose a wakeup for later [Scheduled] lanes. *)
 let take_ready_lane t =
   with_lock t (fun () ->
-    if not (owner_available t)
-    then None
-    else
-      match Queue.take_opt t.ready with
-      | None -> None
-      | Some lane ->
-        (match Hashtbl.find_opt t.lanes lane with
-         | Some state ->
-           (match state.phase with
-            | Scheduled ->
-              state.phase <- Active;
-              Some (lane, state)
-            | Active -> None)
-         | None -> None))
+    let rec next () =
+      if not (owner_available t)
+      then None
+      else
+        match Queue.take_opt t.ready with
+        | None -> None
+        | Some lane ->
+          (match Hashtbl.find_opt t.lanes lane with
+           | Some state ->
+             (match state.phase with
+              | Scheduled ->
+                state.phase <- Active;
+                Some (lane, state)
+              | Active -> next ())
+           | None -> next ())
+    in
+    next ())
 ;;
 
 let rec run_dispatcher t : [ `Stop_daemon ] =
   let lane, state =
     Eio.Condition.loop_no_mutex t.condition (fun () -> take_ready_lane t)
   in
-  Eio.Fiber.fork ~sw:t.sw (fun () -> run_lane t lane state);
+  (try Eio.Fiber.fork ~sw:t.sw (fun () -> run_lane t lane state) with
+   | exn ->
+     let bt = Printexc.get_raw_backtrace () in
+     cleanup_lane t lane state;
+     Printexc.raise_with_backtrace exn bt);
   run_dispatcher t
 ;;
 
@@ -178,14 +251,26 @@ let close t =
     pending
 ;;
 
-let create ~sw ~on_failure () =
+let validate_max_pending = function
+  | None -> None
+  | Some ({ max_pending_per_lane } : lane_config) ->
+    if max_pending_per_lane <= 0
+    then
+      invalid_arg
+        "Connector_ingress_lane.create: max_pending_per_lane must be positive"
+    else Some max_pending_per_lane
+;;
+
+let create ~sw ?config ~on_failure () =
   Eio.Switch.check sw;
+  let capacity_limit = validate_max_pending config in
   let t =
     { sw
     ; mutex = Stdlib.Mutex.create ()
     ; condition = Eio.Condition.create ()
     ; lanes = Hashtbl.create 16
     ; ready = Queue.create ()
+    ; capacity_limit
     ; on_failure
     ; lifecycle = `Open
     }
@@ -195,19 +280,28 @@ let create ~sw ~on_failure () =
   t
 ;;
 
-let submit t ~lane ~event_id run =
+let create_bounded ~sw ~config ~on_failure () =
+  create ~sw ~config ~on_failure ()
+;;
+
+let submit_bounded t ~lane ~event_id run =
   let submission =
     with_lock t (fun () ->
       if not (owner_available t)
-      then Error Owner_unavailable
+      then Error Closed
       else
         let job = { event_id; run } in
         (match Hashtbl.find_opt t.lanes lane with
          | Some state ->
-           (* Scheduled lanes already have a ready key. Active lanes retain
-              their worker even when its callback has emptied the FIFO. *)
-           Queue.add job state.jobs;
-           Ok false
+           let pending = Queue.length state.jobs in
+           (match t.capacity_limit with
+            | Some capacity when pending >= capacity ->
+              Error (Lane_full { lane; pending; capacity })
+            | Some _ | None ->
+              (* Scheduled lanes already have a ready key. Active lanes retain
+                 their worker even when its callback has emptied the FIFO. *)
+              Queue.add job state.jobs;
+              Ok false)
          | None ->
            let state = { jobs = Queue.create (); phase = Scheduled } in
            Queue.add job state.jobs;
@@ -220,4 +314,27 @@ let submit t ~lane ~event_id run =
   | Ok notify ->
     if notify then Eio.Condition.broadcast t.condition;
     Ok ()
+;;
+
+let submit t ~lane ~event_id run =
+  match submit_bounded t ~lane ~event_id run with
+  | Ok () -> Ok ()
+  | Error Closed -> Error Owner_unavailable
+  | Error (Lane_full { lane; pending; capacity }) ->
+    Log.Server.warn
+      "connector ingress lane full lane=%s pending=%d capacity=%d"
+      (lane_to_string lane)
+      pending
+      capacity;
+    Error Owner_unavailable
+;;
+
+let pending_count t ~lane =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.lanes lane with
+    | Some state -> Queue.length state.jobs
+    | None -> 0)
+;;
+
+let capacity t = t.capacity_limit
 ;;

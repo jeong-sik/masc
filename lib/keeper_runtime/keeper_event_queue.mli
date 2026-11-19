@@ -486,6 +486,72 @@ val selection_urgency_rank :
 val compare_selection_urgency :
   last_non_immediate_served:urgency option -> urgency -> urgency -> int
 
+type immediate_burst_policy =
+  | Always_preempt
+      (** [Immediate] strictly preempts [Normal] and [Low]. *)
+  | Alternate_after_immediate
+      (** Serve an [Immediate] stimulus with zero extra latency when
+          [consecutive_immediate = 0], then yield one turn to the alternating
+          [Normal]/[Low] lane if non-immediate work is pending before serving
+          the next [Immediate]. *)
+  | Bounded_immediate_burst of { max_consecutive : int }
+      (** Serve up to [max_consecutive] (>= 1) consecutive [Immediate] stimuli
+          while non-immediate work is pending before yielding one turn to
+          [Normal]/[Low]. Declared explicitly by caller configuration. *)
+
+val validate_immediate_burst_policy :
+  immediate_burst_policy -> (immediate_burst_policy, string) result
+(** Validate that [Bounded_immediate_burst] carries [max_consecutive >= 1]. *)
+
+type alternation_state =
+  { last_non_immediate_served : urgency option
+  ; consecutive_immediate : int
+  }
+
+val initial_alternation_state : alternation_state
+
+val advance_alternation_state :
+  served:urgency -> alternation_state -> alternation_state
+(** Advance {!alternation_state} after dequeuing a stimulus of urgency [served]:
+    - [Immediate] increments [consecutive_immediate] while preserving
+      [last_non_immediate_served].
+    - [Normal] / [Low] updates [last_non_immediate_served] and resets
+      [consecutive_immediate] to [0]. *)
+
+val selection_urgency_rank_with_policy :
+  policy:immediate_burst_policy ->
+  state:alternation_state ->
+  urgency ->
+  int
+(** Deterministic rank under [policy] and [state]. Under an active burst yield,
+    the preferred non-immediate lane ranks [0], the other non-immediate lane
+    ranks [1], and [Immediate] ranks [2]; if no non-immediate work exists in
+    the queue, [Immediate] still wins immediately. *)
+
+val compare_selection_urgency_with_policy :
+  policy:immediate_burst_policy ->
+  state:alternation_state ->
+  urgency ->
+  urgency ->
+  int
+
+val sort_by_selection_policy :
+  policy:immediate_burst_policy ->
+  state:alternation_state ->
+  t ->
+  t
+(** Stable sort according to {!compare_selection_urgency_with_policy},
+    preserving FIFO insertion order within each urgency bucket. *)
+
+val dequeue_fair :
+  policy:immediate_burst_policy ->
+  state:alternation_state ->
+  t ->
+  (stimulus * t * alternation_state) option
+(** Dequeue the earliest stimulus with the best rank under [policy] and
+    [state], returning the selected stimulus, remaining queue (with per-lane
+    FIFO order preserved), and the advanced {!alternation_state}. *)
+
 val summary : t -> string
 (** Short human-readable description for log lines. *)
 

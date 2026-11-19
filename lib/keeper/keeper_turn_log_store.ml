@@ -46,8 +46,12 @@ let decode row =
 
 type scanned =
   { at : int
+  ; past : int
   ; line : (Log.line, undecodable) result
   }
+
+(* A row comes without its line break. *)
+let scanned ~at row = { at; past = at + String.length row + 1; line = decode row }
 
 (* How many lines one locked read takes. An append waits for one such read
    at most. *)
@@ -55,7 +59,12 @@ let scan_window_rows = 256
 
 let fold path ~init ~f =
   Private_jsonl_scan.fold path ~rows_per_read:scan_window_rows ~init ~f:(fun acc ~at row ->
-    f acc { at; line = decode row })
+    f acc (scanned ~at row))
+;;
+
+let fold_from path ~from ~init ~f =
+  Private_jsonl_scan.fold_from path ~from ~rows_per_read:scan_window_rows ~init
+    ~f:(fun acc ~at row -> f acc (scanned ~at row))
 ;;
 
 type turn_seen =

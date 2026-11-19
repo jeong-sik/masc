@@ -306,6 +306,8 @@ module Count : sig
     | File  (** One file a keeper wrote. *)
     | Task  (** One Task of the Work hub. *)
     | Open_task  (** A Task not yet done or cancelled. *)
+    | Claim  (** One claim in the workspace memory ledger. *)
+    | Conflict  (** Two claims in that ledger that disagree. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],

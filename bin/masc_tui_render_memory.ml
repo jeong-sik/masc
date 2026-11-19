@@ -585,9 +585,11 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
   in
   if server_error then Some (Theme.bad ())
   else
+    (* The colour of the mark the state wears (RFC tui-one-screen-grammar
+       7.2): a failed read wears the failure mark, so it takes the failure
+       colour with starving. It took the caution colour. *)
     match memory_state k with
-    | Memory_starving -> Some (Theme.bad ())
-    | Memory_read_error
+    | Memory_starving | Memory_read_error -> Some (Theme.bad ())
     | Memory_no_current
     | Memory_source_only
     | Memory_degraded
@@ -1435,13 +1437,23 @@ let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
     ~refused_rows:(refused_rows projection)
     ~context_rows:(List.length projection.context) state
 
+(* A row the operator picks a keeper from: the mark, the name and the state's
+   word. A reading that is off wears its colour on the mark and the word, so a
+   stopped Librarian reads as a warning from across the screen; an ordinary
+   one wears it on the mark alone. Both were the plain text colour. *)
 let memory_selector_line ~cols (state : state) keeper =
   let width = max 1 (framed_inner_width cols - 2) in
   let name_cells = max 1 (width / 2) in
   let status_cells = max 1 (width - name_cells - 3) in
-  "  " ^ memory_state_cell (memory_state keeper) ^ " "
+  let mark_style, word_style =
+    match memory_deviation_style keeper with
+    | Some style -> style, style
+    | None -> Theme.ok (), ""
+  in
+  let word = Message_layout.fit_width (memory_operator_state state keeper) status_cells in
+  "  " ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
   ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
-  ^ " " ^ Message_layout.fit_width (memory_operator_state state keeper) status_cells
+  ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
@@ -1511,7 +1523,7 @@ let render_memory_body ~cols ~budget (state : state)
   push_styled ~style:(Theme.recede ())
     (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
      else ui_text state
-       ~ko:"  Keeper · 상태"
+       ~ko:"  키퍼 · 상태"
        ~en:"  Keeper · state");
   push_divider ();
   (match memory_health_error_text state with

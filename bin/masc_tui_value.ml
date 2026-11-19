@@ -377,6 +377,8 @@ module Count = struct
     | File
     | Task
     | Open_task
+    | Claim
+    | Conflict
 
   (* Singular, plural. *)
   let english = function
@@ -391,6 +393,8 @@ module Count = struct
     | File -> "file", "files"
     | Task -> "task", "tasks"
     | Open_task -> "open task", "open tasks"
+    | Claim -> "claim", "claims"
+    | Conflict -> "conflict", "conflicts"
 
   (* The thing, then the figure with its counter. A row is counted by the
      word that names it. *)
@@ -407,6 +411,8 @@ module Count = struct
     | File -> "파일 " ^ figure ^ "개"
     | Task -> "작업 " ^ figure ^ "개"
     | Open_task -> "열린 작업 " ^ figure ^ "개"
+    | Claim -> "공유 주장 " ^ figure ^ "건"
+    | Conflict -> "충돌 " ^ figure ^ "건"
 
   let written ~ko noun count figure =
     if ko then korean noun figure

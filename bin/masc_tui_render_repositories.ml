@@ -692,7 +692,7 @@ let render_repository_changes (state : state) =
                   let line =
                     Printf.sprintf "%s%-18s %s%s"
                       (if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
-                       then "! " else "  ")
+                       then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " " else "  ")
                       (repository_change_status row)
                       (Message_layout.truncate_middle
                          (max 1 (available - Message_layout.display_width attr)) path)

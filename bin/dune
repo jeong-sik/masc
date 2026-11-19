@@ -2386,7 +2386,7 @@
  (name masc_tui_runtime_account_form)
  (wrapped false)
  (modules masc_tui_runtime_account_form)
- (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
+ (libraries masc.runtime masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_memory_lineage)
@@ -2399,14 +2399,14 @@
  (wrapped false)
  (modules masc_tui_memory_recall_form)
  (libraries masc masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
-  masc_tui_ansi masc_tui_message_layout))
+  masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_typesafeai_exclusion_form)
  (wrapped false)
  (modules masc_tui_typesafeai_exclusion_form)
  (libraries masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
-  masc_tui_ansi masc_tui_message_layout))
+  masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_activity_notice)

@@ -871,13 +871,18 @@ let antigravity_keychain_hex_value login =
          (List.of_seq (String.to_seq login)))
 
 (** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out
-    (RFC-0476 §3.2): its messages as one closed-turn bundle under
-    [session_dir]'s objects, then a head that names it. Answers the head bytes.
-    For a fixture that places a canonical, archived or retained checkpoint by
-    hand. *)
-let write_checkpoint_head ~session_dir ~path (checkpoint : Agent_core.Checkpoint.t) =
+    (RFC-0476 §3.2): its messages as one bundle under [session_dir]'s objects,
+    closed unless [boundary] is [Turn_continues], then a head that names it.
+    Answers the head bytes. For a fixture that places a canonical, archived or
+    retained checkpoint by hand. *)
+let write_checkpoint_head
+      ?(boundary = Agent_core.Checkpoint_objects.Turn_closes)
+      ~session_dir
+      ~path
+      (checkpoint : Agent_core.Checkpoint.t)
+  =
   let module Objects = Agent_core.Checkpoint_objects in
-  match Objects.plan_save (Objects.create_memo ()) Objects.Turn_closes checkpoint with
+  match Objects.plan_save (Objects.create_memo ()) boundary checkpoint with
   | Error error -> invalid_arg ("write_checkpoint_head: " ^ Agent_core.Error.to_string error)
   | Ok plan ->
     (* The store's writers need the session root to exist, as the session

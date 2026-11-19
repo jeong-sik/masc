@@ -1,6 +1,9 @@
 (** Workspace Code surface and the viewport shared with its key handlers. *)
 
 val code_pane_content_height : Masc_tui_types.state -> int
+val code_tree_list_height : Masc_tui_types.state -> int
+(** Rows the file tree's list is drawn in: the pane less the status line a
+    listing that is not a fresh reading with entries draws above it. *)
 val code_hover_viewport : Masc_tui_types.state -> int * int
 (** Full hover row count and visible budget; shared by drawing and scrolling. *)
 val code_notes_viewport : Masc_tui_types.state -> int * int

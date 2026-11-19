@@ -413,12 +413,42 @@ let toggle_history_change state =
       true
   | Some (_, Hist_commit _) | None -> false
 
+(* The line above the file tree's rows. Each state of the listing says which
+   it is. "(loading…)" stood for all three empty ones: a request in flight, a
+   listing never asked for, and a directory that answered with no entries. *)
+let code_tree_status (state : state) =
+  match code_listing_view state with
+  | Masc_tui_fetched.Stale (_, detail) ->
+      Some
+        ((Theme.bad ())
+         ^ ui_text state ~ko:" 새로 고침 실패 · 마지막으로 읽은 목록: "
+             ~en:" Refresh failed, showing the last read: "
+         ^ Terminal_text.single_line detail ^ Ansi.reset)
+  | Masc_tui_fetched.Failed detail ->
+      Some ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
+  | Masc_tui_fetched.Loading ->
+      Some
+        (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
+         ^ Ansi.reset)
+  | Masc_tui_fetched.Absent ->
+      Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
+  | Masc_tui_fetched.Ready [] ->
+      Some
+        (Ansi.dim ^ " " ^ ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)" ^ Ansi.reset)
+  | Masc_tui_fetched.Ready (_ :: _) -> None
+
+(* The file tree's rows are the pane less its status line. The drawing cuts
+   the window here and the page key reads the same. *)
+let code_tree_list_height (state : state) =
+  max 0
+    (code_pane_content_height state
+     - match code_tree_status state with Some _ -> 1 | None -> 0)
+
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
   pane_surface_header buf cols state ~path:[ ui_text state ~ko:"코드" ~en:"code" ] ~split;
-  let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
@@ -456,35 +486,8 @@ let render_code (state : state) =
        ^ workspace_entries_count_label total
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
-    (* Each state of the listing says which it is. "(loading…)" stood for all
-       three empty ones: a request in flight, a listing never asked for, and a
-       directory that answered with no entries. *)
-    let status_line text =
-      framed_line pane_buf pane_cols text;
-      1
-    in
-    let status_rows =
-      match code_listing_view state with
-      | Masc_tui_fetched.Stale (_, detail) ->
-          status_line
-            ((Theme.bad ())
-             ^ ui_text state ~ko:" 새로 고침 실패 · 마지막으로 읽은 목록: "
-                 ~en:" Refresh failed, showing the last read: "
-             ^ Terminal_text.single_line detail ^ Ansi.reset)
-      | Masc_tui_fetched.Failed detail ->
-          status_line
-            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
-      | Masc_tui_fetched.Loading ->
-          status_line
-            (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
-             ^ Ansi.reset)
-      | Masc_tui_fetched.Absent ->
-          status_line (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
-      | Masc_tui_fetched.Ready [] ->
-          status_line (Ansi.dim ^ " " ^ empty_directory ^ Ansi.reset)
-      | Masc_tui_fetched.Ready (_ :: _) -> 0
-    in
-    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
+    Option.iter (framed_line pane_buf pane_cols) (code_tree_status state);
+    let list_rows_budget = code_tree_list_height state in
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in

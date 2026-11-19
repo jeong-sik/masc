@@ -307,6 +307,23 @@ let stacked_item_starts ~pane rows =
   in
   starts [] 0 (stacked_items ~pane rows)
 
+let selected_lines ~table ~starts ~total cursor =
+  if table then (cursor + 1, cursor + 1)
+  else
+    let start = Option.value ~default:0 (List.nth_opt starts cursor) in
+    let stop =
+      match List.nth_opt starts (cursor + 1) with
+      | Some next -> next - 2
+      | None -> total - 1
+    in
+    (start, stop)
+
+let window ~table ~starts ~total ~height ~cursor scroll =
+  let start, stop = selected_lines ~table ~starts ~total cursor in
+  let max_scroll = Int.max 0 (total - height) in
+  let scroll = Int.max 0 (Int.min scroll max_scroll) in
+  Int.min max_scroll (Masc_tui_scroll.ensure_span_visible ~start ~stop ~height scroll)
+
 let render ~width ?pane rows =
   let qualifier = row_qualifier rows in
   let provider_width = provider_width_of ~qualifier rows in

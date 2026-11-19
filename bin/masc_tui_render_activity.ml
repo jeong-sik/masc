@@ -881,11 +881,14 @@ let acting_content_height ~rows ~notices =
   (* Top/title/divider, column heading, then overflow/bottom/footer. *)
   max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
 
-let acting_page_rows state ~terminal_rows =
+let acting_list_height state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
   let notices = acting_notices state ~trace_unavailable:trace_reading.unavailable in
-  Masc_tui_scroll.page_step ~height:(acting_content_height ~rows ~notices)
+  acting_content_height ~rows ~notices
+
+let acting_page_rows state ~terminal_rows =
+  Masc_tui_scroll.page_step ~height:(acting_list_height state ~terminal_rows)
 
 let render_acting (state : state) =
   match state.acting_detail with

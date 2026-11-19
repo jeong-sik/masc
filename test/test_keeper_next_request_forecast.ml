@@ -1313,7 +1313,10 @@ let test_the_json_carries_the_walk_and_each_place () =
     "the assignment names no configured lane or runtime"
     (refused |> member "walk" |> member "refusal" |> to_string)
 
-let test_observed_boundary_forecast ~samples ~expected_front () =
+let test_observed_boundary_forecast ?(max_context_tokens = 4096)
+      ?(max_output_tokens = 128) ?max_tokens
+      ?(expected_origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger)
+      ~samples ~expected_front () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -1342,12 +1345,23 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   let config = Workspace.default_config base_path in
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path
-    "[[models]]\nmodel_id = \"forecast-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 4096\nmax_output_tokens = 128\nsupports_tools = true\n";
+    (Printf.sprintf
+       "[[models]]\nmodel_id = \"forecast-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\n"
+       max_context_tokens
+       max_output_tokens);
   Llm_provider.Model_catalog.load_file catalog_path |> unwrap
   |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
+  let max_tokens_line =
+    match max_tokens with
+    | Some n -> Printf.sprintf "max-tokens = %d\n" n
+    | None -> ""
+  in
   let config_path = Filename.concat base_path "runtime.toml" in
   write config_path
-    ("[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:1/v1\"\n[models.sample]\napi-name = \"forecast-model\"\nmax-context = 4096\n[fixture.sample]\n");
+    (Printf.sprintf
+       "[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:1/v1\"\n[models.sample]\napi-name = \"forecast-model\"\nmax-context = %d\n[fixture.sample]\n%s"
+       max_context_tokens
+       max_tokens_line);
   (match Runtime.init_default_degraded_report ~config_path with
    | Ok Runtime.Initialized -> ()
    | Ok (Runtime.Initialized_degraded _) -> Alcotest.fail "fixture runtime must materialize"
@@ -1387,7 +1401,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary
   |> Result.map_error Keeper_turn_boundaries.append_error_to_string |> unwrap;
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
-  List.iter (fun (atom_count, input_tokens) ->
+  List.iter (fun (atom_count, turn_context, input_tokens) ->
     let ends = match digest_at 0, digest_at (atom_count - 1) with
       | Some front_digest, Some end_digest when atom_count > 0 ->
         Ledger.Carried_atoms { front_digest; end_digest }
@@ -1395,7 +1409,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     in
     let request : Ledger.request =
       { prefix_digest = "same-fixture-prefix"; first_atom = 0; atom_count; ends
-      ; tail_bytes = 0; turn_context = false; demote_before = 0
+      ; tail_bytes = 0; turn_context; demote_before = 0
       ; working_state = None }
     in
     let usage = Option.map (fun input_tokens ->
@@ -1412,12 +1426,15 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     (lookup () = observed);
   match forecast.candidates with
   | [ { carried = Some carried; _ } ] ->
-    Alcotest.(check (option int)) "last counted stays the actual observation"
-      observed.total_tokens carried.counted_tokens;
-    Alcotest.(check int) "forecast opens on the ledger's front, as the driver does" expected_front
+    let expected_counted =
+      if expected_front = 0 then observed.total_tokens else None
+    in
+    Alcotest.(check (option int)) "counted_tokens follows whether range stayed on ledger front"
+      expected_counted carried.counted_tokens;
+    Alcotest.(check int) "forecast opens on the expected front" expected_front
       carried.first_atom;
-    Alcotest.(check bool) "and names the ledger" true
-      (carried.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
+    Alcotest.(check bool) "and carries the expected origin" true
+      (carried.origin = expected_origin);
     Alcotest.(check int) "range includes the new wake atom" (13 - expected_front)
       carried.kept_atoms
   | _ -> Alcotest.fail "expected one applicable forecast candidate"
@@ -1428,9 +1445,35 @@ let () =
       , (* An initial prefix-only observation then three four-atom blocks,
            each counted at 400 tokens, gives total 1300. Forecasting preserves
            the complete observed ledger and its front at atom 0. *)
-        let samples = [ 0, Some 100; 4, Some 500; 8, Some 900; 12, Some 1300 ] in
+        let samples = [ 0, false, Some 100; 4, false, Some 500; 8, false, Some 900; 12, false, Some 1300 ] in
+        let peak_53504_samples =
+          [ 2, true, Some 150_000
+          ; 4, false, Some 180_000
+          ; 8, true, Some 185_000
+          ; 12, false, Some 226_390
+          ]
+        in
         [ Alcotest.test_case "the forecast preserves the observed front" `Quick
             (test_observed_boundary_forecast ~samples ~expected_front:0)
+        ; Alcotest.test_case
+            "#53504: output reservation lowers input limit and moves forecast past 272_000"
+            `Quick
+            (test_observed_boundary_forecast
+               ~max_context_tokens:400_000
+               ~max_output_tokens:128_000
+               ~max_tokens:128_000
+               ~expected_origin:
+                 (Keeper_carried_front.Carried Keeper_carried_front.Turn_start_at_max_context)
+               ~samples:peak_53504_samples
+               ~expected_front:12)
+        ; Alcotest.test_case
+            "#53504: omitting optional max_tokens keeps full 400_000 window"
+            `Quick
+            (test_observed_boundary_forecast
+               ~max_context_tokens:400_000
+               ~max_output_tokens:128_000
+               ~samples:peak_53504_samples
+               ~expected_front:0)
         ] )
     ; ( "parts"
       , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"

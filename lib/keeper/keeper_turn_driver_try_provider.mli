@@ -303,9 +303,9 @@ type start_choice =
 (** The size signal (RFC
     a-sent-request-prefix-changes-only-when-the-window-moves §4, D1): at a
     turn's first request, the window the pair's ledger last carried passes
-    the binding's max-context once the next turn grows as much as the largest
-    turn grew since the ledger started
-    ({!Keeper_model_input_ledger.next_turn_peak}). *)
+    the binding's input-token budget ({!Llm_provider.Input_budget.t}) once
+    the next turn grows as much as the largest turn grew since the ledger
+    started ({!Keeper_model_input_ledger.next_turn_peak}). *)
 type past_max_context =
   { window_first_atom : int
         (** Where the ledger's last request opened its range. *)
@@ -316,20 +316,32 @@ type past_max_context =
             atoms the move drops are in memory; else the turn boundary
             ({!Keeper_carried_front.Turn_start_at_max_context}). *)
   ; next_turn_peak : int
-  ; max_context : int
+  ; input_limit : Llm_provider.Input_budget.t
   }
 
+val input_limit_of_provider_config :
+  Llm_provider.Provider_config.t -> Llm_provider.Input_budget.t option
+(** [Some limit] when {!Llm_provider.Input_budget.of_provider_config} resolves a
+    positive input budget; [None] when it cannot be derived, keeping the
+    window-move signal off rather than guessing a limit. Pure. *)
+
+val input_limit_of_runtime :
+  Runtime_instance.t option -> Llm_provider.Input_budget.t option
+(** Derive {!Llm_provider.Input_budget.t} from an [Agent_core] runtime's
+    non-secret declaration; [None] when absent, official-client owned, or when
+    {!Llm_provider.Input_budget.of_provider_config} returns [Error _]. Pure. *)
+
 val past_max_context :
-  max_context:int option ->
+  input_limit:Llm_provider.Input_budget.t option ->
   continuity:continuity option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
   Keeper_model_input_ledger.t option ->
   past_max_context option
-(** [Some] when the ledger's next-turn peak passes [max_context], the ledger
+(** [Some] when the ledger's next-turn peak passes [input_limit], the ledger
     still holds its positions in this history, and a known [turn_boundary]
     lies past the window's first atom at an atom this history has. [None]
-    for no ledger, an unknown count, no [max_context], an unknown boundary,
+    for no ledger, an unknown count, no [input_limit], an unknown boundary,
     or a boundary at or before the window: the signal moves a window early,
     and never moves it back or by a guess. [continuity] names the Librarian
     point the move may go to. Pure. *)
@@ -348,13 +360,13 @@ type held_window =
 
 val held_window :
   opens_turn:bool ->
-  max_context:int option ->
+  input_limit:Llm_provider.Input_budget.t option ->
   history_digest_at:(int -> string option) ->
   Keeper_model_input_ledger.t option ->
   held_window option
 (** [Some] when the ledger still holds its positions in this history and,
     at a turn's first request ([opens_turn]), the size signal watches the
-    window: [max_context] is declared and the ledger knows how much one turn
+    window: [input_limit] is resolved and the ledger knows how much one turn
     grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
     a window that keeps its results whole grows until the provider refuses
     it, so that request demotes the turns that ended. Later in the turn the

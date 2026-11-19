@@ -685,9 +685,24 @@ let window_ledger ?(demote_before = 0) ~history ~first_atom counts =
 let grown_turns = [ true, 1_000; false, 1_500; true, 1_600; false, 2_400 ]
 let boundary_8 = Front.Turn_boundary { end_atom = 8 }
 
-let signal_over ?(max_context = Some 3_000) ?(turn_boundary = boundary_8) ?continuity ~history
-      ledger =
-  Try_provider.past_max_context ~max_context ~continuity
+let input_limit_of ?(kind = Llm_provider.Provider_config.OpenAI_compat) ?max_tokens
+      max_context =
+  Option.bind max_context (fun max_context ->
+    let cfg =
+      Llm_provider.Provider_config.make
+        ~kind
+        ~model_id:"eviction-test"
+        ~base_url:"https://api.example.test"
+        ~max_context
+        ?max_tokens
+        ()
+    in
+    Try_provider.input_limit_of_provider_config cfg)
+;;
+
+let signal_over ?(input_limit = input_limit_of (Some 3_000)) ?(turn_boundary = boundary_8)
+      ?continuity ~history ledger =
+  Try_provider.past_max_context ~input_limit ~continuity
     ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary ledger
 ;;
 
@@ -701,10 +716,11 @@ let test_the_size_signal_reads_the_ledger_and_the_declaration () =
      check int "the next turn's expected count" 3_300 signal.next_turn_peak;
      check string "named for the signal" "turn_start_at_max_context"
        (Front.source_to_string signal.moved_to.Front.source)
-   | None -> fail "a next turn past max-context moves the window");
+   | None -> fail "a next turn past input limit moves the window");
   let none label signal = check bool label true (Option.is_none signal) in
-  none "a next turn at max-context stays" (signal_over ~max_context:(Some 3_300) ~history ledger);
-  none "no declared max-context, no signal" (signal_over ~max_context:None ~history ledger);
+  none "a next turn at input limit stays"
+    (signal_over ~input_limit:(input_limit_of (Some 3_300)) ~history ledger);
+  none "no derived input limit, no signal" (signal_over ~input_limit:None ~history ledger);
   none "no ledger, no signal" (signal_over ~history None);
   none "an unknown boundary names nowhere to move"
     (signal_over ~turn_boundary:(Front.Turn_boundary_unknown { reason = "test" }) ~history ledger);
@@ -713,7 +729,30 @@ let test_the_size_signal_reads_the_ledger_and_the_declaration () =
   none "a window no turn has opened under yet has no growth"
     (signal_over ~history (window_ledger ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]));
   none "a ledger this history does not hold moves nothing"
-    (signal_over ~history:(exchanges ~from:100 10) ledger)
+    (signal_over ~history:(exchanges ~from:100 10) ledger);
+  (* Issue #53504: window = 400_000, reserved output = 128_000 -> input_limit = 272_000.
+     A next_turn_peak of 272_780 passes 272_000 and must move, whereas omitting
+     max_tokens leaves input_limit = 400_000 and stays. *)
+  let ledger_53504 =
+    window_ledger ~history ~first_atom:4
+      [ true, 150_000; false, 180_000; true, 185_000; false, 226_390 ]
+  in
+  let reserved_limit =
+    input_limit_of ~max_tokens:128_000 (Some 400_000)
+  in
+  (match reserved_limit with
+   | Some l -> check int "#53504 input_limit" 272_000 (l :> int)
+   | None -> fail "expected #53504 input_limit");
+  (match signal_over ~input_limit:reserved_limit ~history ledger_53504 with
+   | Some signal ->
+     check int "#53504 peak" 272_780 signal.next_turn_peak;
+     check int "#53504 signal input_limit" 272_000 (signal.input_limit :> int)
+   | None -> fail "#53504 next_turn_peak 272_780 must pass input_limit 272_000");
+  none "#53504 omitted optional reservation stays under 400_000"
+    (signal_over ~input_limit:(input_limit_of (Some 400_000)) ~history ledger_53504);
+  none "reserved >= window yields None input_limit so signal stays off"
+    (signal_over ~input_limit:(input_limit_of ~max_tokens:400_000 (Some 400_000))
+       ~history ledger_53504)
 ;;
 
 let opens = function
@@ -852,24 +891,24 @@ let test_the_size_signal_moves_to_the_librarian_point () =
    it (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
 let test_markers_wait_only_while_the_size_signal_watches () =
   let history = exchanges ~from:0 10 in
-  let held ?(opens_turn = true) ?(max_context = Some 400_000) ledger =
+  let held ?(opens_turn = true) ?(input_limit = input_limit_of (Some 400_000)) ledger =
     Option.map
       (fun (held : Try_provider.held_window) -> held.window_opened_at, held.markers_before)
-      (Try_provider.held_window ~opens_turn ~max_context
+      (Try_provider.held_window ~opens_turn ~input_limit
          ~history_digest_at:(Window.atom_opening_digest history) ledger)
   in
   let at = option (pair int int) in
   let grown = window_ledger ~demote_before:6 ~history ~first_atom:4 grown_turns in
   check at "the signal watches: the markers stay where the window sent them" (Some (4, 6))
     (held grown);
-  check at "no declared max-context: a turn's first request demotes the ended turns" None
-    (held ~max_context:None grown);
+  check at "no derived input limit: a turn's first request demotes the ended turns" None
+    (held ~input_limit:None grown);
   let unmeasured =
     window_ledger ~demote_before:6 ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]
   in
   check at "no turn has grown under the ledger yet: the same" None (held unmeasured);
   check at "later in the turn they stay where its first request put them" (Some (4, 6))
-    (held ~opens_turn:false ~max_context:None unmeasured);
+    (held ~opens_turn:false ~input_limit:None unmeasured);
   check at "no ledger holds nothing" None (held ~opens_turn:false None);
   check at "a ledger this history does not hold holds nothing" None
     (held ~opens_turn:false

@@ -468,7 +468,8 @@ let build_request_artifact
   let dialect = Reasoning_dialect.for_provider_config config in
   let output_token_receipt =
     Backend_openai_request.output_token_receipt
-      ~envelope:Types.Openai_responses_max_output_tokens
+      ~envelope:
+        (Provider_http_codec.output_token_envelope Provider_http_codec.openai_responses)
       config
   in
   let request_control =

@@ -31748,20 +31748,24 @@ let async_drain_budget_ns = 4_000_000L
 (* The pass computes one deadline from [async_drain_budget_ns] and both drains
    in the pass share it, so the two calls together apply at most one frame of
    queued work. No item starts past the deadline — not even the first — so a
-   spent pass retains its delivery round for the next pass. An item or owned
-   collection that starts in budget still runs whole; recheck the deadline
-   after collection before applying any of its results. *)
+   spent pass retains its delivery round for the next pass. An item that
+   starts in budget still runs whole. Collecting the owned results is not an
+   item: it moves what is already settled into the round, and the deadline
+   is checked again before each collected result is applied. *)
 let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share_input_pending = fun () -> false) state ~delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let progress_changed = Masc_tui_types.drain_http_progress state in
+  (* Asked only with an item in hand, after whatever says one is ready, so
+     a spent budget always leaves work behind. That work waits for the next
+     pass, which comes at once. Asked with nothing to take, a pass that ran
+     past the budget bought one more pass with nothing in it. *)
   let over_budget () =
     match deadline_ns with
     | None -> false
     | Some deadline ->
       let now_ns = Mtime_clock.elapsed_ns () in
       let spent = Int64.compare now_ns deadline >= 0 in
-      (* What the budget left waits for the next pass, which comes at once. *)
       if spent then
         Masc_tui_wake.Pass.note { Masc_tui_wake.reason = Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
       spent
@@ -31771,12 +31775,12 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
   let keeper_preferences_changed = drain_keeper_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let settings_reread_changed =
-    if over_budget () then false else
     match state.settings_reread with
     | Reread_due | Reread_settled -> false
     | Reread_running promise ->
         (match Eio.Promise.peek promise with
          | None -> false
+         | Some _ when over_budget () -> false
          | Some outcome ->
              state.settings_reread <- Reread_settled;
              (match outcome with
@@ -31805,8 +31809,11 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
              true)
   in
   let credential_changed =
-    if over_budget () then false else
     let module Preparation = Masc_tui_credential_preparation in
+    match Preparation.status state.credential_preparation with
+    | Preparation.Not_requested | Preparation.Preparing _ | Preparation.Settled -> false
+    | Preparation.Awaiting_ui _ when over_budget () -> false
+    | Preparation.Awaiting_ui _ ->
     match Preparation.take_completed state.credential_preparation with
     | None -> false
     | Some completion ->
@@ -31867,29 +31874,30 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
           (Masc_tui_workspace_result.take_ready mailbox.workspace_results)) in
     delivery_round := next;
     match ready with
-    | None when not (over_budget ()) && deferred_is_ready ()
+    | None when deferred_is_ready ()
         && (match !deferred_share_messages, !deferred_share_sweep with
             | item :: _, Some held -> item != held
-            | _ :: _, None -> true | [], _ -> false) ->
+            | _ :: _, None -> true | [], _ -> false)
+        && not (over_budget ()) ->
         (* Capture a new finite round before consuming a delayed result so
            already-queued workspace authority is applied first. *)
         deferred_share_sweep := (match !deferred_share_messages with item :: _ -> Some item | [] -> None);
         loop changed
-    | None when not (over_budget ()) && deferred_is_ready () ->
+    | None when deferred_is_ready () && not (over_budget ()) ->
         deferred_share_sweep := None;
         (match !deferred_share_messages with
          | item :: rest -> deferred_share_messages := rest; apply_item changed item
          | [] -> loop changed)
-    | None when not (over_budget ()) && not (share_input_pending ())
-        && (match state.resource_copy_ready, !resource_copy_sweep with
+    | None when (match state.resource_copy_ready, !resource_copy_sweep with
             | Some copy, Some held -> copy != held
-            | Some _, None -> true | None, _ -> false) ->
+            | Some _, None -> true | None, _ -> false)
+        && not (share_input_pending ()) && not (over_budget ()) ->
         (* A fresh finite round also precedes the clipboard side effect. *)
         resource_copy_sweep := state.resource_copy_ready; loop changed
     | None ->
-        if not (over_budget ()) && not (share_input_pending ())
-           && (match state.resource_copy_ready, !resource_copy_sweep with
-               | Some copy, Some held -> copy == held | None, _ | Some _, None -> false)
+        if (match state.resource_copy_ready, !resource_copy_sweep with
+            | Some copy, Some held -> copy == held | None, _ | Some _, None -> false)
+           && not (share_input_pending ()) && not (over_budget ())
         then copy_sweep_complete := true;
         state.keeper_creation_waits <- List.filter
           (fun wait -> not (keeper_available_for_new_message state wait.kcw_keeper))
@@ -31941,7 +31949,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     else false in
   let changed = changed || retired_image_changed in
   match state.resource_copy_ready with
-  | Some copy when !copy_sweep_complete && not (over_budget ()) && not (share_input_pending ()) ->
+  | Some copy when !copy_sweep_complete && not (share_input_pending ()) && not (over_budget ()) ->
     if not (resource_public_copy_is_current state copy) then begin
       state.resource_copy_ready <- None;
       resource_copy_sweep := None;

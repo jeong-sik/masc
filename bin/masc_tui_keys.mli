@@ -138,10 +138,53 @@ val goal_candle_refresh_key : string
 val keeper_navigation_hints : lang:Masc_tui_types.ui_language -> string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
-val footer_hints_planning_goal_list : lang:Masc_tui_types.ui_language -> has_rows:bool -> string
-(** The Goal list offers a direct route to its selected Candle record.
-    [has_rows] is whether the list on screen holds a Goal: with none, the
-    keys that read the Goal under the cursor are left out. *)
+(** Why a key zone 5 names does not answer on the screen as drawn. The action
+    pane is where this is said; zone 5 only draws the key dim, in its place. *)
+type unavailable =
+  | No_row  (** the list on screen holds no row for a [Needs_row] key *)
+  | No_reading
+      (** nothing for a [Needs_reading] key to open: no row's details and no
+          failed read *)
+
+type availability = Available | Unavailable of unavailable
+
+(** A key zone 5 names, and whether it answers on the screen as drawn. *)
+type action = { binding : binding; availability : availability }
+
+val footer_actions :
+  ?detail_open:bool ->
+  has_rows:bool ->
+  ?has_reading:bool ->
+  Masc_tui_types.surface ->
+  action list
+(** The surface's keys at one depth, in the footer's order: groups in
+    Navigate, Act, Search, Meta order. [detail_open] picks the depth, as in
+    {!footer_hints}. The set and its order do not depend on [has_rows] or
+    [has_reading]; those decide only each key's [availability]. A key that
+    needs a row is [Unavailable No_row] when the list holds none, and one that
+    opens a reading is [Unavailable No_reading] when [has_reading] is [false].
+    [has_reading] left out leaves every such key [Available]. *)
+
+val footer_row : lang:Masc_tui_types.ui_language -> action list -> Masc_tui_footer.key_row
+(** The actions as zone 5 draws them: an [Unavailable] one is a refused item,
+    drawn dim in its place when every key fits. *)
+
+val footer_row_of_surface :
+  lang:Masc_tui_types.ui_language ->
+  ?detail_open:bool ->
+  has_rows:bool ->
+  ?has_reading:bool ->
+  Masc_tui_types.surface ->
+  Masc_tui_footer.key_row
+(** {!footer_row} of {!footer_actions}: the row a list renderer draws. *)
+
+val planning_goal_list_actions : has_rows:bool -> action list
+(** The Goal list's keys: the Candle read first, then the groups. [has_rows]
+    is whether the list on screen holds a Goal. *)
+
+val footer_row_planning_goal_list :
+  lang:Masc_tui_types.ui_language -> has_rows:bool -> Masc_tui_footer.key_row
+(** {!footer_row} of {!planning_goal_list_actions}. *)
 
 val footer_hints_planning_goal_detail : lang:Masc_tui_types.ui_language -> string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
@@ -149,8 +192,6 @@ val footer_hints_planning_goal_detail : lang:Masc_tui_types.ui_language -> strin
 val footer_hints :
   lang:Masc_tui_types.ui_language ->
   ?detail_open:bool ->
-  ?has_rows:bool ->
-  ?has_reading:bool ->
   Masc_tui_types.surface ->
   string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
@@ -165,14 +206,8 @@ val footer_hints :
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch.
 
-    [has_rows] is how a list renderer says whether the list on screen holds a
-    row. [false] leaves out the keys that need one; left out, every binding
-    stands.
-
-    [has_reading] is how it says whether the screen has a reading to open: a
-    row's details, or the failure that replaced the list. [false] leaves out
-    the keys that need one, [Needs_reading] in the table. A failed read leaves
-    no row and still has this, so the two answers differ there. *)
+    A list renderer that knows whether its list holds a row draws
+    {!footer_row_of_surface} instead, so a key that needs one keeps its place. *)
 
 val footer_hints_tools :
   lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.tools_pane -> string
@@ -221,8 +256,8 @@ val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 
 val has_row_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table holds a key that needs a row, and so owes
-    [footer_hints] a [~has_rows] from its list renderer. Read by the test that
-    pins the surfaces whose empty list already leaves those keys out. *)
+    {!footer_row_of_surface} a [~has_rows] from its list renderer. Read by the
+    test that pins the surfaces whose empty list draws those keys dim. *)
 
 val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
@@ -437,11 +472,13 @@ val footer_hints_git_changes : lang:Masc_tui_types.ui_language -> string
 val footer_hints_git_diff : lang:Masc_tui_types.ui_language -> string
 (** The Git diff view for a changed file in repository changes. *)
 
-val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> string
+val footer_row_memory_facts :
+  lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> Masc_tui_footer.key_row
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. Omits
-    [d:Category pane] on narrow frames where the Category rail does not fit,
-    and the keys that act on a fact when [has_rows] is false. *)
+    [d:Category pane] on narrow frames where the Category rail does not fit.
+    The keys that act on a fact stay dim in their places when [has_rows] is
+    false. *)
 
 val footer_hints_memory_changes : lang:Masc_tui_types.ui_language -> string
 (** Shared Memory browser navigation and selected change reading. *)

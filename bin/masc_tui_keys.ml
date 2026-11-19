@@ -1436,23 +1436,24 @@ let for_surface = function
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
+(* One binding's item in the screen's language. *)
+let item_in ~lang (binding : binding) =
+  let label = match lang with
+    | Lang_ko -> binding.label_ko
+    | Lang_en -> binding.label
+  in
+  key_hint ~label binding
+
 let hints_in_order ~lang bindings =
-  bindings
-  |> List.map (fun (binding : binding) ->
-      let label = match lang with
-        | Lang_ko -> binding.label_ko
-        | Lang_en -> binding.label
-      in
-      key_hint ~label binding)
-  |> String.concat "  "
+  bindings |> List.map (item_in ~lang) |> String.concat "  "
 
 (* Sort by group, then flatten to the footer's "key:label  key:label" form.
    Both the static per-surface footer and the Fusion detail footer (which
    appends a live scroll position) render through this one projection. *)
-let hints_of_bindings ~lang bindings =
-  bindings
-  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
-  |> hints_in_order ~lang
+let by_group bindings =
+  List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) bindings
+
+let hints_of_bindings ~lang bindings = hints_in_order ~lang (by_group bindings)
 
 (* [detail_open] is how a surface that owns a detail says which of its two
    states is on screen. A surface without a detail leaves it out, and then
@@ -1461,50 +1462,88 @@ let hints_of_bindings ~lang bindings =
    forgets to pass it falls back to that same behaviour, which is the bug this
    argument exists to end; [test_tui_footer_detail_state] is what keeps a new
    surface from quietly landing there. *)
-(* Whether a binding answers in the state a footer is drawing. Its own
+(* Whether a binding belongs to the depth a footer is drawing. Its own
    function because two footers filter their surface's table by hand --
    Resources for the focused pane, Code for the open one -- and a second
    reading of this rule beside them is how a key comes back to a footer that
-   refuses it.
+   refuses it. A list and the detail under it are two depths (RFC
+   tui-one-screen-grammar section 3.1), each with its own key set, so this
+   one still leaves keys out. *)
+let answers_at_depth ?detail_open binding =
+  match detail_open, binding.detail with
+  | _, Either -> true
+  | None, (List_only | Detail_only) -> true
+  | Some open_, List_only -> not open_
+  | Some open_, Detail_only -> open_
 
-   [has_rows] is how a list renderer says whether the list on screen holds a
-   row. [Some false] leaves out the keys that need one; a renderer that does
-   not pass it keeps every binding, as before. [has_reading] is the same
-   answer for the keys that open a reading, which a failed read can leave
-   with nothing selected. *)
-let answers_in_state ?detail_open ?has_rows ?has_reading binding =
-  (match detail_open, binding.detail with
-   | _, Either -> true
-   | None, (List_only | Detail_only) -> true
-   | Some open_, List_only -> not open_
-   | Some open_, Detail_only -> open_)
-  && (match binding.rows with
-      | Rowless -> true
-      | Needs_row -> (match has_rows with Some false -> false | Some true | None -> true)
-      | Needs_reading ->
-          (match has_reading with Some false -> false | Some true | None -> true))
+type unavailable = No_row | No_reading
 
-let footer_hints ~lang ?detail_open ?has_rows ?has_reading surface =
-  hints_of_bindings ~lang
-    (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
-       (for_surface surface))
+type availability = Available | Unavailable of unavailable
+
+type action = { binding : binding; availability : availability }
+
+(* Whether a key answers on the list as drawn. A key that needs a row stays
+   on the row when there is none, drawn dim in its place: a key that came and
+   went with the list moved every key after it (RFC tui-one-screen-grammar
+   section 2). [has_reading] left out means the screen holds no key that
+   opens a reading, and every such key answers, as before the argument. *)
+let availability ~has_rows ?has_reading binding =
+  match binding.rows with
+  | Rowless -> Available
+  | Needs_row -> if has_rows then Available else Unavailable No_row
+  | Needs_reading ->
+      (match has_reading with
+       | Some true | None -> Available
+       | Some false -> Unavailable No_reading)
+
+let footer_actions ?detail_open ~has_rows ?has_reading surface =
+  for_surface surface
+  |> List.filter (answers_at_depth ?detail_open)
+  |> by_group
+  |> List.map (fun binding ->
+      { binding; availability = availability ~has_rows ?has_reading binding })
+
+let footer_row ~lang actions =
+  Masc_tui_footer.Keys
+    (List.map
+       (fun { binding; availability } ->
+         { Masc_tui_footer.item = item_in ~lang binding
+         ; answer =
+             (match availability with
+              | Available -> Masc_tui_footer.Answers
+              | Unavailable (No_row | No_reading) -> Masc_tui_footer.Refused)
+         })
+       actions)
+
+let footer_hints ~lang ?detail_open surface =
+  hints_of_bindings ~lang (List.filter (answers_at_depth ?detail_open) (for_surface surface))
+
+let footer_row_of_surface ~lang ?detail_open ~has_rows ?has_reading surface =
+  footer_row ~lang (footer_actions ?detail_open ~has_rows ?has_reading surface)
 
 (* The Candle read has its own key and leads the hints. *)
-let planning_goal_hints ~lang ~detail_open ~has_rows =
+let planning_goal_actions ~detail_open ~has_rows =
   let bindings = for_surface Planning
-    |> List.filter (answers_in_state ~detail_open ?has_rows)
+    |> List.filter (answers_at_depth ~detail_open)
     |> List.map (fun binding ->
       if detail_open && String.equal binding.key "j/k" then
         {binding with label = "scroll"; label_ko = "스크롤"}
       else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
-  hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
+  read @ by_group others
+  |> List.map (fun binding -> { binding; availability = availability ~has_rows binding })
 
-let footer_hints_planning_goal_list ~lang ~has_rows =
-  planning_goal_hints ~lang ~detail_open:false ~has_rows:(Some has_rows)
+let planning_goal_list_actions ~has_rows =
+  planning_goal_actions ~detail_open:false ~has_rows
 
+let footer_row_planning_goal_list ~lang ~has_rows =
+  footer_row ~lang (planning_goal_list_actions ~has_rows)
+
+(* An open Goal is a row, so every key of the detail answers. *)
 let footer_hints_planning_goal_detail ~lang =
-  planning_goal_hints ~lang ~detail_open:true ~has_rows:None
+  planning_goal_actions ~detail_open:true ~has_rows:true
+  |> List.map (fun action -> action.binding)
+  |> hints_in_order ~lang
 
 (* The Available section folds its diagnostics -- the runtime, the digests
    and the byte budgets -- under one heading, and draws each digest by its
@@ -1628,9 +1667,9 @@ let has_detail_scoped_keys surface =
     (for_surface surface)
 
 (* The same question for rows: whether this surface's table holds a key that
-   needs one, and so owes [footer_hints] a [~has_rows] from its list renderer.
-   [test_tui_footer_row_need] reads this rather than a list written by hand
-   beside it. *)
+   needs one, and so owes [footer_row_of_surface] a [~has_rows] from its list
+   renderer. [test_tui_footer_row_need] reads this rather than a list written
+   by hand beside it. *)
 let has_row_scoped_keys surface =
   List.exists
     (fun binding ->
@@ -2180,7 +2219,7 @@ let footer_hints_resources ~lang ~detail_focus =
   (* The focused pane is this surface's two states: [[ / ]] reads the
      adjacent resource and the dispatcher answers it only with the text
      focused. *)
-  |> List.filter (answers_in_state ~detail_open:detail_focus)
+  |> List.filter (answers_at_depth ~detail_open:detail_focus)
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            if detail_focus then
@@ -2449,15 +2488,17 @@ let bindings_memory_facts =
   @ row_list_edges @ listing_meta
 
 (* [has_rows] is whether the browser holds a fact. A keeper with none, or a
-   filter that left none, has nothing for [j/k], [Enter] and [n / N] to act on.
-   [c / C], [s], [a / A] and [/] stay: a filter that left no fact is undone
-   with them. *)
-let footer_hints_memory_facts ~lang ~cols ~has_rows =
+   filter that left none, has nothing for [j/k], [Enter] and [n / N] to act on;
+   they stay dim in their places. [c / C], [s], [a / A] and [/] answer: a
+   filter that left no fact is undone with them. *)
+let footer_row_memory_facts ~lang ~cols ~has_rows =
   let bindings =
     if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
     else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
   in
-  hints_of_bindings ~lang (List.filter (answers_in_state ~has_rows) bindings)
+  by_group bindings
+  |> List.map (fun binding -> { binding; availability = availability ~has_rows binding })
+  |> footer_row ~lang
 
 (* The reading the browser's Enter opens. One fact scrolls under the cursor
    instead of the cursor moving rows, so it owns page and edge keys the

@@ -706,8 +706,8 @@ let zone4_action_text (state : state) ~action_text ~preferred_action =
 (* [position] reaches the footer only through [Footer_hints], which the chat
    uses for its "back from newest" marker. Every other position is a value
    drawn on the title row. *)
-let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
-    (state : state) ~max_cells ~hints =
+let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
+    (state : state) ~max_cells ~keys =
   (* Hints off trades the key text for status room. "?:help" stays only
      when the current input owner lets that key open the help sheet. *)
   (* The same seam names the sheet while the keys are visible, and asks the
@@ -719,19 +719,20 @@ let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = No
   let help_hint = Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko) in
   let hints =
     if not state.hints_visible then
-      if door_answers then help_hint else ""
+      Masc_tui_footer.Written (if door_answers then help_hint else "")
     else if door_answers then
       (* Inspect the key, as the shared fitter does, rather than its label. *)
-      if List.exists (fun item ->
-           match Masc_tui_footer.item_key item with
+      if List.exists (fun (key : Masc_tui_footer.key_item) ->
+           match Masc_tui_footer.item_key key.item with
            | Some key -> List.mem "?" (Masc_tui_footer.key_atoms key)
-           | None -> false) (Masc_tui_footer.split_on_double_space hints)
-      then hints else hints ^ "  " ^ help_hint
-    else hints
+           | None -> false) (Masc_tui_footer.row_items keys)
+      then keys else Masc_tui_footer.append_answering keys help_hint
+    else keys
   in
   (* The keys this frame announces, for the navigation trace (RFC-0485). *)
   Masc_tui_nav_trace_log.announce
-    (match choices with None -> hints | Some text -> text ^ "  " ^ hints);
+    (let answering = Masc_tui_footer.answering_text hints in
+     match choices with None -> answering | Some text -> text ^ "  " ^ answering);
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in
@@ -894,6 +895,12 @@ let footer_line_with ?help_door ?(status = []) ?position ?(recovery_in_slot = No
           && not (List.mem item (keeper_action_status state))) status
       @ identity @ conflict)
     ~dim:(Theme.recede ()) ~reset:Ansi.reset ~max_cells ~hints ()
+
+(* A row a footer spelled itself and filtered to the keys that answer. *)
+let footer_line_with ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
+    ~hints =
+  footer_line_keys ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
+    ~keys:(Masc_tui_footer.Written hints)
 
 
 let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~hints =
@@ -2133,8 +2140,8 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
-let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar (state : state)
-    ~terminal_rows ~cols ~surface_key ~title ~hints
+let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
+    (state : state) ~terminal_rows ~cols ~surface_key ~title ~keys
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -2276,10 +2283,17 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
         combined
   in
   Buffer.add_string buf
-    (footer_line ?help_door ?status ~recovery_in_slot
-       state ~max_cells:full_cols ~hints);
+    (footer_line_keys ?help_door ?status ~recovery_in_slot
+       state ~max_cells:full_cols ~keys);
   Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
+
+(* A surface whose footer spelled its own row, filtered to the keys that
+   answer. *)
+let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+    ~surface_key ~title ~hints ~body =
+  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+    ~surface_key ~title ~keys:(Masc_tui_footer.Written hints) ~body
 
 
 (* What the reads under way and the reads that failed have to say, one piece

@@ -789,10 +789,10 @@ let render_planning_list (state : state) =
     || state.planning_filter <> Planning_filter_active in
   let badge = "  " ^ connection_badge state in
   let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
-  surface_chrome
+  surface_chrome_keys
     ~overflow:(Self_scrolled (fun () -> Planning_list_page_rows !list_page_rows))
     state ~terminal_rows ~cols ~surface_key:"planning-list" ~title
-    ~hints:(Masc_tui_keys.footer_hints_planning_goal_list ~lang:state.ui_language ~has_rows:(count > 0))
+    ~keys:(Masc_tui_keys.footer_row_planning_goal_list ~lang:state.ui_language ~has_rows:(count > 0))
     ~body:(fun ~budget c ->
       let used = ref 0 in
       let push line = if !used < budget then (c.push line; incr used) in
@@ -1747,9 +1747,10 @@ let render_schedule_list (state : state) =
       ~readings:[] ~position:None
   in
 
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:
-      (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
+  surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules"
+    ~title:header
+    ~keys:
+      (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
          ~has_rows:(schedule_list_has_rows state) Schedules)
     ~body:(fun ~budget c ->
   (* The refusal rows go first and take what the list's fixed rows leave;

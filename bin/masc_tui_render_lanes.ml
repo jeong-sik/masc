@@ -2414,9 +2414,9 @@ let render_clients (state : state) =
      declares for Clients went unshown, and so did an armed search's query,
      which rides the same row. *)
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~has_rows:(shown > 0)
             Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;

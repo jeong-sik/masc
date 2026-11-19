@@ -307,11 +307,13 @@ let maybe_rotate_file path =
 (* The text of a JSONL row as it goes to disk, without its newline. *)
 let jsonl_row (json : Yojson.Safe.t) = utf8_repair_string (Yojson.Safe.to_string json)
 
-(* The one writer of the JSONL files a Keeper keeps beside its dated stores
-   (decisions, feedback, the TLA trace, runtime manifests). The write makes
-   the file's directory, inside its job on a system thread, so no caller
-   makes it first: a caller that did paid an Eio [stat] on its fiber for
-   every row. *)
+(* The writer of the JSONL files a Keeper keeps beside its dated stores,
+   other than the decision record: feedback, the TLA trace, runtime
+   manifests. The decision record has its own writer below, which goes by
+   the same write. That write makes the file's directory, inside its job on
+   a system thread, so no caller makes it first: a caller that did paid an
+   Eio [stat] on its fiber for every row. The rotation before it still asks
+   for the file's size once a row. *)
 let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   Fs_compat.append_jsonl_rows path (jsonl_row json ^ "\n")

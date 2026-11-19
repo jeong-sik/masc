@@ -675,12 +675,14 @@ let test_credit_balance_values_and_meter_decisions () =
         ; "exhausted Credit retains zero", "Credit CNY 0.00 left", zero_remaining
         ; "unlimited Credit retains its state", "Credit unlimited", unlimited
         ];
-      List.iter2
-        (fun name expected value ->
+      List.iter
+        (fun (name, expected, value) ->
           check (option (float 0.0001)) name expected (Providers.share_of_full value))
-        [ "capped Credit meter"; "no-total Credit meter"; "exhausted Credit meter"; "unlimited Credit meter" ]
-        [ Some ((100.5 -. 74.75) /. 100.5); None; Some 1.0; None ]
-        units;
+        [ "capped Credit meter", Some ((100.5 -. 74.75) /. 100.5), capped
+        ; "no-total Credit meter", None, no_total
+        ; "exhausted Credit meter", Some 1.0, zero_remaining
+        ; "unlimited Credit meter", None, unlimited
+        ];
       let amounts = option (pair (float 0.0001) (float 0.0001)) in
       check amounts "a positive total has used/total context"
         (Some (25.75, 100.5)) (Providers.credit_used_total (Some 100.5) 74.75);

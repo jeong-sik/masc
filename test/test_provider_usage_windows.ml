@@ -930,7 +930,7 @@ let test_kimi_booster_wallet () =
    | { Usage.windows =
          [{ utilization =
               Usage.Fraction _ | Usage.Percent _ | Usage.Usd _
-            | Usage.Credit_unlimited | Usage.Credit_retracted
+            | Usage.Credit_unlimited | Usage.Credit_retracted | Usage.Credit_balance _
           ; _
           }]
      ; _
@@ -1516,7 +1516,8 @@ let muse_window_rows (windows : Usage.window list) =
           | Usage.Provider_label label -> label)
        , (match window.utilization with
           | Usage.Percent percent -> percent
-          | Usage.Fraction _ | Usage.Usd _ -> fail "Muse states percentages")
+          | Usage.Fraction _ | Usage.Usd _ | Usage.Credit_unlimited
+          | Usage.Credit_retracted | Usage.Credit_balance _ -> fail "Muse states percentages")
        , Option.value window.resets_at ~default:0
        , Usage.window_role_to_string window.role ))
     windows

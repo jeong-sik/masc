@@ -323,6 +323,10 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
 export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
   const name = keeperName.trim()
   if (!name) return false
+  // A stop for an operation whose acceptance the send has not read is held
+  // here and goes out at that acceptance. The Keeper interrupt below does not
+  // wait for it: it stops the turn that runs now and answers false when none
+  // does.
   await cancelActiveKeeperThreadMessage(name)
   try {
     const result = await apiInterruptKeeperTurn(name)

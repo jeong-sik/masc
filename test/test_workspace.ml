@@ -1346,18 +1346,24 @@ let test_reset_preserves_link_targets_and_recreates_nested_writers () =
     Unix.symlink marker (Filename.concat masc_root "linked-file");
     Unix.symlink (Filename.concat outside "missing")
       (Filename.concat masc_root "dangling-link");
-    let nested = Filename.concat masc_root "audit/reset-scenario" in
-    Fs_compat.mkdir_p nested;
-    let journal = Filename.concat nested "events.jsonl" in
-    Fs_compat.save_file journal "before\n";
+    (* A writer that makes its own directory and keeps a descriptor of its
+       file between writes. *)
+    let journal =
+      Filename.concat (Filename.concat masc_root "audit/reset-scenario") "events.jsonl"
+    in
+    Fs_compat.append_jsonl journal (`String "before");
+    Alcotest.(check string) "the writer's first row" "\"before\"\n"
+      (Fs_compat.load_file journal);
     ignore (Workspace.reset config);
     Alcotest.(check bool) "workspace removed" false (Sys.file_exists masc_root);
     Alcotest.(check string) "external data survives reset" "outside workspace"
       (Fs_compat.load_file marker);
     ignore (Workspace.init config ~agent_name:None);
-    Fs_compat.mkdir_p nested;
-    Fs_compat.save_file journal "after\n";
-    Alcotest.(check string) "nested writer resumes after reinitialization" "after\n"
+    (* The same writer, with nothing made for it: its directory is gone and
+       the file its descriptor was of is unlinked. *)
+    Fs_compat.append_jsonl journal (`String "after");
+    Alcotest.(check string) "the writer makes its directory and its file again"
+      "\"after\"\n"
       (Fs_compat.load_file journal))
 
 (* ============================================================ *)

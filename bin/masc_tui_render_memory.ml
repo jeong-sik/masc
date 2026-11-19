@@ -1347,6 +1347,51 @@ type memory_overview_projection =
 let refused_rows projection =
   List.length projection.refused + if projection.refused_divider then 1 else 0
 
+(* How tall one Keeper's reading is, full and compact, and whether it keeps a
+   stalled-gap row: all the detail under the list needs from the Keepers that
+   are not selected, to be as tall as the tallest of them (RFC
+   tui-one-screen-grammar §8). *)
+type memory_reading_measure = { full_rows : int; compact_rows : int; stalled : bool }
+
+(* Measuring wraps every loaded Keeper's reading, and the overview is built
+   several times a frame (its layout, its body, the position count). The
+   measures are kept for the readings they were taken from: the same health
+   snapshot, World reading and input readings, the same Keepers in the same
+   order, at the same width and in the same reading. A value that changes is
+   a new value, so any change measures again. *)
+let memory_reading_measures :
+    ((memory_health_snapshot option * Masc_tui_memory_world.t
+      * (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source
+      * memory_keeper_health list * int * bool * bool * Masc_tui_memory_usage.display_unit)
+     * memory_reading_measure list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let measured_readings (state : state) ~cols ~readings keepers =
+  let key =
+    ( state.memory_health, state.memory_world, state.memory_input, keepers, cols
+    , state.ui_language = Lang_ko, state.memory_overview_detail, state.memory_unit )
+  in
+  let same (health, world, input, seen, seen_cols, seen_ko, seen_detail, seen_unit)
+      (health', world', input', keepers', cols', ko', detail', unit') =
+    health == health' && world == world' && input == input'
+    && List.equal ( == ) seen keepers' && seen_cols = cols' && Bool.equal seen_ko ko'
+    && Bool.equal seen_detail detail' && seen_unit = unit'
+  in
+  match Domain.DLS.get memory_reading_measures with
+  | Some (seen, measures) when same seen key -> measures
+  | Some _ | None ->
+      let measures =
+        List.map
+          (fun keeper ->
+            let full, compact = readings keeper in
+            { full_rows = List.length full.rows
+            ; compact_rows = List.length compact.rows
+            ; stalled = Option.is_some full.stalled_row })
+          keepers
+      in
+      Domain.DLS.set memory_reading_measures (Some (key, measures));
+      measures
+
 let memory_overview_rows ~cols ~budget (state : state) =
   let keepers = visible_memory_keepers state in
   let ko = state.ui_language = Lang_ko in
@@ -1366,16 +1411,15 @@ let memory_overview_rows ~cols ~budget (state : state) =
       memory_axis_context state ~cols ~compact:false keeper,
       memory_axis_context state ~cols ~compact:true keeper
   in
-  (* Every loaded Keeper's, because the detail under the list is as tall as
-     the tallest of them (RFC tui-one-screen-grammar §8). Sized by the
-     selected Keeper alone, it moved the list's last row and the divider
-     under it on every j and k (QA N02). *)
-  let all_readings = List.map readings keepers in
+  (* Every loaded Keeper's is measured, because the detail under the list is
+     as tall as the tallest of them (RFC tui-one-screen-grammar §8). Sized by
+     the selected Keeper alone, it moved the list's last row and the divider
+     under it on every j and k (QA N02). Only the selected one is drawn. *)
+  let measures = measured_readings state ~cols ~readings keepers in
   let no_reading = { rows = []; primary_rows = 0; stalled_row = None } in
   let context, compact_context =
-    Option.value ~default:(no_reading, no_reading)
-      (List.nth_opt all_readings
-         (max 0 (min state.memory_health_cursor (List.length keepers - 1))))
+    Option.fold ~none:(no_reading, no_reading) ~some:readings
+      (List.nth_opt keepers (max 0 (min state.memory_health_cursor (List.length keepers - 1))))
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
@@ -1392,14 +1436,13 @@ let memory_overview_rows ~cols ~budget (state : state) =
      stalled-gap row. The rows kept for the detail are the most any loaded
      Keeper's would keep, so the header and the rejected rows above the list
      do not change with the selection either. *)
-  let reserve (context, compact) =
-    if context.rows = [] then 0
-    else if state.memory_overview_detail then
-      3 + (if Option.is_some context.stalled_row then 1 else 0)
-    else List.length compact.rows + 1
+  let reserve measure =
+    if measure.full_rows = 0 then 0
+    else if state.memory_overview_detail then 3 + (if measure.stalled then 1 else 0)
+    else measure.compact_rows + 1
   in
   let context_reserve =
-    List.fold_left (fun most reading -> max most (reserve reading)) 0 all_readings
+    List.fold_left (fun most measure -> max most (reserve measure)) 0 measures
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
   (* On a very short frame the full list and selected detail must yield before
@@ -1444,9 +1487,16 @@ let memory_overview_rows ~cols ~budget (state : state) =
         fold_memory_context_rows ~ko ~max_rows:room
           (if List.length context.rows <= room then context else compact)
       in
+      (* The rows [fold] leaves a reading: it keeps a reading that fits and
+         folds a longer one, or its compact one, into the room. *)
+      let folded measure =
+        if measure.full_rows <= room then measure.full_rows else min measure.compact_rows room
+      in
+      let tallest = List.fold_left (fun tallest measure -> max tallest (folded measure)) 0 measures in
       (* Each reading is folded into the room before it is measured, so
-         none is cut here: [fit] only pads the selected one to the tallest. *)
-      Masc_tui_detail_height.fit ~budget:room ~rows:all_readings ~detail:fold
+         none is cut here: [fit_tallest] only pads the selected one to the
+         tallest. *)
+      Masc_tui_detail_height.fit_tallest ~budget:room ~tallest
         ~too_tall:(Masc_tui_detail_height.Cut_with
                      (if ko then "  … v:전체" else "  … v:full reading"))
         ~blank:"" (fold (context, compact_context))

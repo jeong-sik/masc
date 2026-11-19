@@ -130,7 +130,7 @@ type stimulus =
       { schedule : string
       ; occurrence : string
       }
-  | Connector of { event : string }
+  | Connector of { attention : string }
   | Hitl of { approval : string }
   | Ask of { ask : string }
   | Completion_rejected of
